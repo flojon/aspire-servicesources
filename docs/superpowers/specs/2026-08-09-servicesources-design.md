@@ -18,17 +18,17 @@
 ## Architecture
 
 ### `ServiceResource`
-A thin facade class implementing `IResourceWithEndpoints` (and the minimal `IResource` surface). **It is never registered with Aspire's resource model** (no `AddResource` call) — it only ever wraps a builder for a real, already-registered Aspire resource (a `ProjectResource` in this milestone). Its `GetEndpoint(name)` delegates directly to the wrapped resource's `GetEndpoint(name)`.
+A thin facade class implementing `IResourceWithServiceDiscovery` (a pure marker interface extending `IResourceWithEndpoints`/`IResource` with no extra members — required so it can be passed directly into `WithReference()`, confirmed below). **It is never registered with Aspire's resource model** (no `AddResource` call) — it only ever wraps a builder for a real, already-registered Aspire resource (a `ProjectResource` in this milestone). Its endpoint annotations are copied/shared from the wrapped resource's own `EndpointAnnotation`, so `GetEndpoint(name)` resolves to the exact same endpoint identity as the real resource.
 
 This keeps the package entirely on Aspire's supported orchestration path: DCP and the dashboard only ever see the real `ProjectResource`, never a custom type they don't know how to run. The facade exists purely so `AddService()` has one stable C# return type today, and can keep returning that same type once a cluster/container source exists later without callers needing to change.
 
-**Open implementation risk to spike first:** this depends on being able to wrap a resource in an `IResourceBuilder<T>` without adding it to `builder.Resources` (e.g. a `CreateResourceBuilder`-style API distinct from `AddResource`). Not confirmed from source research alone — first thing to verify once the project is scaffolded against a real Aspire SDK. If it turns out no such API exists, the fallback is registering the facade normally and forwarding `With*` calls to the backing resource instead of the other way around — a larger change, flag immediately if the spike fails.
+**Confirmed via spike (2026-08-09), against Aspire.Hosting 13.4.6 on .NET 10:** `IDistributedApplicationBuilder.CreateResourceBuilder<T>(T resource)` is a real public API distinct from `AddResource<T>`, and it does **not** add the resource to `builder.Resources` — verified empirically (resource count stayed at 0 after calling it). A facade built this way was passed directly into `consumer.WithReference(facadeBuilder)` and it succeeded without throwing, and the facade never appeared in the final resource list. Copying the real resource's `EndpointAnnotation` instance onto the facade made `facade.GetEndpoint(name)` resolve to the identical endpoint. The one correction from the original design: `WithReference(IResourceBuilder<TDestination>)` requires `TDestination : IResourceWithServiceDiscovery`, not `IResourceWithEndpoints` as first assumed — trivial to satisfy since it adds no members. This was the single biggest open risk in the design and it's now fully validated; no fallback needed. Spike code lives outside the repo (throwaway), not committed.
 
 ### `IServiceSource` (internal)
 ```csharp
 internal interface IServiceSource
 {
-    IResourceBuilder<IResourceWithEndpoints> Resolve(
+    IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config);
 }
 ```
