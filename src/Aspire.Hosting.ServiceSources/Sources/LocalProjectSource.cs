@@ -10,20 +10,28 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)
     {
         var cacheDirectory = ServiceSourcesConfigCache.GetCacheDirectory(builder);
-        var projectPath = ResolveProjectPath(metadata, config, cacheDirectory, gitClient);
+        var projectPath = ResolveProjectPath(serviceName, metadata, config, cacheDirectory, builder.AppHostDirectory, gitClient);
 
         var projectBuilder = builder.AddProject(serviceName, projectPath);
         return ServiceResource.CreateFacade(builder, serviceName, projectBuilder);
     }
 
     internal static string ResolveProjectPath(
-        ServiceMetadata metadata, ServiceDeveloperConfig config, string cacheDirectory, IGitClient gitClient)
+        string serviceName,
+        ServiceMetadata metadata,
+        ServiceDeveloperConfig config,
+        string cacheDirectory,
+        string appHostDirectory,
+        IGitClient gitClient)
     {
         string repoRoot;
 
         if (config.Path is not null)
         {
-            repoRoot = config.Path;
+            // Anchor a relative `path` override to the AppHost directory (matching Aspire's own
+            // AddProject behavior), not to the process's current working directory.
+            // Path.GetFullPath is a no-op when config.Path is already absolute.
+            repoRoot = Path.GetFullPath(config.Path, appHostDirectory);
         }
         else
         {
@@ -32,12 +40,42 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
 
             if (!Directory.Exists(repoRoot))
             {
-                gitClient.Clone(metadata.Repository, repoRoot);
+                try
+                {
+                    gitClient.Clone(metadata.Repository, repoRoot);
+                }
+                catch (Exception ex)
+                {
+                    throw new ServiceSourcesConfigurationException(
+                        $"Service '{serviceName}': failed to clone repository '{metadata.Repository}' into '{repoRoot}'.", ex);
+                }
 
                 var reference = config.Ref ?? metadata.DefaultRef;
                 if (reference is not null)
                 {
-                    gitClient.Checkout(repoRoot, reference);
+                    try
+                    {
+                        gitClient.Checkout(repoRoot, reference);
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new ServiceSourcesConfigurationException(
+                            $"Service '{serviceName}': failed to checkout ref '{reference}' of repository '{metadata.Repository}' at '{repoRoot}'.", ex);
+                    }
+                }
+            }
+            else
+            {
+                // No auto-pull/update of an already-cloned repo: only read the existing clone's
+                // "origin" remote URL (no fetch/pull) to guard against a basename collision
+                // between different repositories (e.g. same repo name under different orgs/hosts).
+                var existingOrigin = gitClient.GetOriginUrl(repoRoot);
+                if (existingOrigin is not null && !RepositoryUrlsMatch(existingOrigin, metadata.Repository))
+                {
+                    throw new ServiceSourcesConfigurationException(
+                        $"Service '{serviceName}': cache directory '{repoRoot}' already contains a clone of " +
+                        $"'{existingOrigin}', which does not match the configured repository '{metadata.Repository}'. " +
+                        "Remove the cache directory or fix the configured repository URL.");
                 }
             }
         }
@@ -46,10 +84,19 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         if (!File.Exists(projectPath))
         {
             throw new ServiceSourcesConfigurationException(
-                $"Project file '{metadata.Project}' was not found under '{repoRoot}'.");
+                $"Service '{serviceName}': project file '{metadata.Project}' was not found under '{repoRoot}'.");
         }
 
         return projectPath;
+    }
+
+    private static bool RepositoryUrlsMatch(string a, string b) =>
+        string.Equals(NormalizeRepositoryUrl(a), NormalizeRepositoryUrl(b), StringComparison.Ordinal);
+
+    private static string NormalizeRepositoryUrl(string repositoryUrl)
+    {
+        var trimmed = repositoryUrl.TrimEnd('/');
+        return trimmed.EndsWith(".git", StringComparison.OrdinalIgnoreCase) ? trimmed[..^4] : trimmed;
     }
 
     private static string GetRepositoryName(string repositoryUrl)

@@ -45,4 +45,10 @@ internal sealed class LibGit2SharpGitClient : IGitClient
         throw new ServiceSourcesConfigurationException(
             $"Ref '{reference}' was not found in repository at '{repositoryPath}'.");
     }
+
+    public string? GetOriginUrl(string repositoryPath)
+    {
+        using var repo = new Repository(repositoryPath);
+        return repo.Network.Remotes["origin"]?.Url;
+    }
 }

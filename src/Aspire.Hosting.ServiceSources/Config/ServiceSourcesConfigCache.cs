@@ -30,7 +30,13 @@ internal static class ServiceSourcesConfigCache
     {
         var loaded = Cache.GetValue(builder, static b => LoadedConfig.Load(b.AppHostDirectory));
         var configured = loaded.DeveloperConfig.CacheDirectory ?? "~/.servicesources/repos";
-        return ExpandHome(configured);
+        var expanded = ExpandHome(configured);
+
+        // A `~`-expanded path is already absolute (anchored to the user's home directory) and
+        // must not be re-anchored. A genuinely relative path (no `~`) is anchored to the AppHost
+        // directory rather than the process's current working directory. Path.GetFullPath is a
+        // no-op for a path that is already absolute, so this is safe for both cases.
+        return Path.GetFullPath(expanded, builder.AppHostDirectory);
     }
 
     private static string ExpandHome(string path)
