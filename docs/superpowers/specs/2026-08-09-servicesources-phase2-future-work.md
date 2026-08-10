@@ -16,7 +16,7 @@ Open questions to resolve before designing this:
 
 ## Deferred / parallel resolution
 
-Milestone 1a resolves each service synchronously and in-order inside `AddService()`. This was a deliberate simplicity trade-off (see the design doc's Resolution Flow section for the reasoning) — the cost only shows up when multiple services need a genuinely cold clone+build simultaneously, which is mostly a first-run tax.
+Milestone 1a resolves each service synchronously and in-order inside `AddService()`. This was a deliberate simplicity trade-off (see the design doc's Resolution Flow section for the reasoning) — the cost only shows up when multiple services need a genuinely cold clone simultaneously (building is no longer this package's responsibility — see the design doc's note on Aspire 13.4.6 already solving out-of-graph builds natively), which is mostly a first-run tax.
 
 Phase 2 version: defer resolution to a `BeforeStartEvent`-subscribed hook that resolves all pending local services in parallel (`Task.WhenAll`) before DCP starts anything. Requires:
 - The `ServiceResource` facade's `GetEndpoint()` to return a lazily-resolving value provider instead of delegating directly to an already-built resource, since the backing resource won't exist yet at the point `WithReference()` is called in `Program.cs`.
