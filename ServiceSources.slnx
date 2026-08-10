@@ -1,8 +1,0 @@
-<Solution>
-  <Folder Name="/src/">
-    <Project Path="src/Aspire.Hosting.ServiceSources/Aspire.Hosting.ServiceSources.csproj" />
-  </Folder>
-  <Folder Name="/test/">
-    <Project Path="test/Aspire.Hosting.ServiceSources.Tests/Aspire.Hosting.ServiceSources.Tests.csproj" />
-  </Folder>
-</Solution>
