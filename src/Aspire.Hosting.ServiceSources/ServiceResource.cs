@@ -4,7 +4,7 @@ namespace Aspire.Hosting.ServiceSources;
 
 public sealed class ServiceResource : Resource, IResourceWithServiceDiscovery
 {
-    public ServiceResource(string name) : base(name)
+    internal ServiceResource(string name) : base(name)
     {
     }
 
