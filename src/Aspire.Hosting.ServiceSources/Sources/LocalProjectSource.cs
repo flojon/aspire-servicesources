@@ -1,10 +1,21 @@
+using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Git;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
 
-internal sealed class LocalProjectSource
+internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
 {
+    public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+        IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)
+    {
+        var cacheDirectory = ServiceSourcesConfigCache.GetCacheDirectory(builder);
+        var projectPath = ResolveProjectPath(metadata, config, cacheDirectory, gitClient);
+
+        var projectBuilder = builder.AddProject(serviceName, projectPath);
+        return ServiceResource.CreateFacade(builder, serviceName, projectBuilder);
+    }
+
     internal static string ResolveProjectPath(
         ServiceMetadata metadata, ServiceDeveloperConfig config, string cacheDirectory, IGitClient gitClient)
     {
