@@ -1,0 +1,4 @@
+services:
+  orders:
+    repository: https://github.com/example/orders
+    project: SampleService/SampleService.csproj
