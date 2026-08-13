@@ -1,6 +1,7 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Git;
+using Aspire.Hosting.ServiceSources.PortAllocation;
 using Aspire.Hosting.ServiceSources.Sources;
 
 namespace Aspire.Hosting.ServiceSources;
@@ -10,6 +11,7 @@ public static class ServiceSourcesBuilderExtensions
     private static readonly Dictionary<string, IServiceSource> Sources = new()
     {
         ["local"] = new LocalProjectSource(new LibGit2SharpGitClient()),
+        ["cluster"] = new ClusterSource(new SocketPortAllocator()),
     };
 
     /// <summary>
