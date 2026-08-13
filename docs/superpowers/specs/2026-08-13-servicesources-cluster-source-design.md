@@ -12,7 +12,7 @@ Milestone 1a only supports a `"local"` source (clone-and-build a project from so
 
 - New `ClusterSource : IServiceSource`, registered in `AddService()`'s internal source lookup under `"cluster"`, alongside `"local"`.
 - `ClusterSource.Resolve()` allocates a free local port itself, builds a `kubectl port-forward` argument list, and calls `builder.AddExecutable("<name>-portforward", "kubectl", args: [...])` — a real, already-registered Aspire resource. This mirrors how `LocalProjectSource` delegates to Aspire's own `AddProject` rather than inventing a custom resource type: DCP and the dashboard only ever see a normal `ExecutableResource`, with its process lifecycle (start/stop/restart), logs, and state managed entirely by Aspire.
-- The executable gets an `EndpointAnnotation` via `WithHttpEndpoint(port: allocatedPort, targetPort: remotePort)` — v1 assumes HTTP (see Out of Scope).
+- The executable gets an `EndpointAnnotation` via `WithHttpEndpoint(port: allocatedPort, targetPort: allocatedPort, isProxied: false)` — v1 assumes HTTP (see Out of Scope). The executable itself (kubectl) is what listens on `allocatedPort` on the local machine, so `port` and `targetPort` are the same value; `isProxied: false` tells DCP not to run its own proxy on that port, since kubectl already owns it.
 - The same `ServiceResource` facade from milestone 1a wraps this executable's builder, copying its endpoint annotation exactly as it does for `ProjectResource`. `ServiceResource.CreateFacade` is generalized from `IResourceBuilder<ProjectResource>` to a generic `IResourceBuilder<TResource> where TResource : IResource` parameter so it accepts the `IResourceBuilder<ExecutableResource>` that `AddExecutable` returns — the copy logic itself (`OfType<EndpointAnnotation>()`) is unchanged, and existing `ProjectResource` call sites are unaffected by type inference.
 - New `IPortAllocator` seam (same shape as `IGitClient`): wraps a raw-socket free-port lookup (bind `:0`, read the assigned port, close the socket) so `ClusterSource`'s argument-building and precedence logic is unit-testable via a fake, deterministic allocator.
 
@@ -64,7 +64,7 @@ Rules:
 3. Look up dev config for `name`. Require `context` (fail fast if missing). `namespace` defaults to `default`. Resolve `port` as local.json override → catalog `cluster.port`; fail fast if neither is set.
 4. Allocate a free local port via `IPortAllocator`.
 5. Build kubectl args: `port-forward svc/<service> <localPort>:<port> --context <context> --namespace <namespace>`.
-6. `builder.AddExecutable("<name>-portforward", "kubectl", args: [...])`, then `WithHttpEndpoint(port: localPort, targetPort: port)`.
+6. `builder.AddExecutable("<name>-portforward", "kubectl", args: [...])`, then `WithHttpEndpoint(port: localPort, targetPort: localPort, isProxied: false)` — kubectl itself listens on `localPort`, so `port` and `targetPort` match, and DCP's own proxy is disabled since kubectl already owns that port.
 7. Wrap the returned builder in the `ServiceResource` facade (identical mechanism to `LocalProjectSource` step 7), return it.
 
 Resolution stays synchronous within `AddService()`, consistent with milestone 1a — only the port allocation and kubectl-argument construction happen at this point; the actual port-forward process is started and managed by Aspire/DCP afterward, same as `AddProject`'s build-on-run.

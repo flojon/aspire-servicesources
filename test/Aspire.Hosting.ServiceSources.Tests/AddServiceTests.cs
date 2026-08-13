@@ -102,7 +102,7 @@ public class AddServiceTests
     }
 
     [Fact]
-    public void AddService_ClusterSource_AddsPortForwardExecutableAndReturnsFacade()
+    public async Task AddService_ClusterSource_AddsPortForwardExecutableAndReturnsFacade()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
@@ -127,6 +127,28 @@ public class AddServiceTests
 
         var endpoint = service.GetEndpoint("http");
         Assert.Equal("http", endpoint.EndpointName);
+
+        var executable = Assert.IsType<ExecutableResource>(
+            Assert.Single(builder.Resources, r => r.Name == "orders-portforward"));
+
+        Assert.Equal("kubectl", executable.Command);
+
+        var argsCallback = executable.Annotations.OfType<CommandLineArgsCallbackAnnotation>().Single();
+        var argsContext = new CommandLineArgsCallbackContext(new List<object>());
+        await argsCallback.Callback(argsContext);
+        var args = argsContext.Args.Cast<string>().ToList();
+
+        Assert.Contains("port-forward", args);
+        Assert.Contains("svc/orders-svc", args);
+        Assert.Contains("--context", args);
+        Assert.Contains("dev-west", args);
+        Assert.Contains("--namespace", args);
+        Assert.Contains("orders-ns", args);
+        Assert.Contains(args, a => System.Text.RegularExpressions.Regex.IsMatch(a, @"^\d+:8080$"));
+
+        var endpointAnnotation = executable.Annotations.OfType<EndpointAnnotation>().Single();
+        Assert.Equal(endpointAnnotation.TargetPort, endpointAnnotation.Port);
+        Assert.False(endpointAnnotation.IsProxied);
     }
 
     [Fact]

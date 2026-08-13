@@ -13,7 +13,7 @@ internal sealed class ClusterSource(IPortAllocator portAllocator) : IServiceSour
 
         var executableBuilder = builder
             .AddExecutable($"{serviceName}-portforward", "kubectl", builder.AppHostDirectory, args)
-            .WithHttpEndpoint(port: localPort, targetPort: remotePort);
+            .WithHttpEndpoint(port: localPort, targetPort: localPort, isProxied: false);
 
         return ServiceResource.CreateFacade(builder, serviceName, executableBuilder);
     }
@@ -26,13 +26,13 @@ internal sealed class ClusterSource(IPortAllocator portAllocator) : IServiceSour
         out int localPort,
         out int remotePort)
     {
-        if (metadata.Cluster is null)
+        if (metadata.Cluster is null || string.IsNullOrWhiteSpace(metadata.Cluster.Service))
         {
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}' source is 'cluster' but servicesources.yaml has no cluster.service entry.");
         }
 
-        if (config.Context is null)
+        if (string.IsNullOrWhiteSpace(config.Context))
         {
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}': source 'cluster' requires 'context' in servicesources.local.json.");

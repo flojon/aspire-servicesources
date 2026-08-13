@@ -96,6 +96,30 @@ public class ClusterSourceTests
     }
 
     [Fact]
+    public void BuildPortForwardArgs_EmptyClusterService_ThrowsNamingServiceAndClusterService()
+    {
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ClusterSource.BuildPortForwardArgs(
+                ServiceName, Metadata(clusterService: ""), DevConfig(),
+                new FakePortAllocator(1), out _, out _));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("cluster.service", ex.Message);
+    }
+
+    [Fact]
+    public void BuildPortForwardArgs_EmptyContext_ThrowsNamingServiceAndContext()
+    {
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ClusterSource.BuildPortForwardArgs(
+                ServiceName, Metadata(), DevConfig(context: ""),
+                new FakePortAllocator(1), out _, out _));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("context", ex.Message);
+    }
+
+    [Fact]
     public void BuildPortForwardArgs_PortMissingFromBothPlaces_ThrowsNamingServiceAndPort()
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
