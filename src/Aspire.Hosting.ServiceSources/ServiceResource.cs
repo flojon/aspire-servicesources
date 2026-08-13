@@ -36,8 +36,9 @@ public sealed class ServiceResource : Resource, IResourceWithServiceDiscovery
     {
     }
 
-    internal static IResourceBuilder<IResourceWithServiceDiscovery> CreateFacade(
-        IDistributedApplicationBuilder builder, string name, IResourceBuilder<ProjectResource> realResource)
+    internal static IResourceBuilder<IResourceWithServiceDiscovery> CreateFacade<TResource>(
+        IDistributedApplicationBuilder builder, string name, IResourceBuilder<TResource> realResource)
+        where TResource : IResource
     {
         var facade = builder.CreateResourceBuilder(new ServiceResource(name));
 

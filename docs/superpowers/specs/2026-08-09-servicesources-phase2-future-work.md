@@ -65,6 +65,12 @@ Interactive picker for which source each service uses, writing `servicesources.l
 
 `everything-local`, `hybrid`, `cluster-only`, `my-machine` — the brief mentions these as "potentially useful later" without detail. Would likely layer on top of `servicesources.local.json` (a profile = a named, swappable set of per-service source choices) rather than replace it. Undesigned.
 
+## Database/queue source switching
+
+Extend the same local-vs-cluster switching model beyond services to stateful dependencies (Postgres, Redis, RabbitMQ, etc.) — e.g. a `port-forward`ed cluster Postgres in place of `AddPostgres()`'s local container, using the same `servicesources.local.json` per-developer override shape. Raised during the [cluster source design](2026-08-13-servicesources-cluster-source-design.md) pass; deliberately not folded into that spec since it needs its own brainstorming pass. Open questions:
+- The cluster-side port-forward mechanism is protocol-agnostic and should carry over largely as-is (swap `WithHttpEndpoint` for `WithEndpoint` for non-HTTP protocols — already a milestone-1a-cluster-source out-of-scope item in its own right).
+- The local side is the harder part: unifying "local project", "local container" (`AddPostgres`, `AddContainer`), and "cluster" under one source abstraction needs a return type that can carry `IResourceWithConnectionString` as well as `IResourceWithServiceDiscovery`, since `WithReference()` callers need the former for databases. `IServiceSource.Resolve()`'s current return type is tuned for service-to-service references and likely needs a parallel or broadened abstraction rather than reuse as-is.
+
 ## Central service registry
 
 The brief notes service metadata "could eventually come from conventions or a central registry" instead of a local `servicesources.yaml`. Explicitly deferred in favor of the simple local/shared file for v1. No further detail to capture — genuinely open.
