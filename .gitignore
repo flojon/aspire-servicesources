@@ -1,3 +1,4 @@
 bin/
 obj/
 servicesources.local.json
+.smoketest-cache/
