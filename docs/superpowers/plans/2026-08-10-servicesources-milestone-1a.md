@@ -1729,7 +1729,9 @@ Expected: `Build succeeded. 0 Warning(s) 0 Error(s)`.
 cd samples/DemoAppHost
 aspire run
 ```
-Expected: the Aspire dashboard opens, the `orders` resource (and its `orders-rebuilder` companion) reach `Running`, and the dashboard's endpoint for `orders` serves `Hello from SampleService`. If `aspire run` isn't installed, `dotnet run` works too (per the design doc's own spike notes) as long as the `Aspire.AppHost.Sdk` import above is present — without it, DCP never starts and every resource hangs with no state.
+Expected: the Aspire dashboard opens, the `orders` resource reaches `Running`, and the dashboard's endpoint for `orders` serves `Hello from SampleService`. If `aspire run` isn't installed, `dotnet run` works too (per the design doc's own spike notes) as long as the `Aspire.AppHost.Sdk` import above is present — without it, DCP never starts and every resource hangs with no state.
+
+**Correction (verified 2026-08-13, against a real run on Aspire 13.4.6):** this expected outcome, and the design doc's spike note it's based on (`docs/superpowers/specs/2026-08-09-servicesources-design.md:15`), are wrong about `orders-rebuilder` reaching `Running`. Empirically, `orders-rebuilder` is a hidden resource (only visible with `aspire describe --include-hidden`) that stays `NotStarted` through a normal `aspire run` — including from a completely clean `bin`/`obj`. Per `Aspire.Hosting.dll`'s own doc comments, `AddRebuilderResource` "runs 'dotnet build' on demand via the rebuild command" — it's wired to the dashboard's manual "Rebuild" command, not to startup. What actually builds the out-of-graph project at startup is the `orders` resource's own process launch, which is `dotnet run --project SampleService.csproj` (visible in the AppHost CLI log) — `dotnet run` does its own implicit restore+build. So the correct pass criterion for this step is: `orders` reaches `Running` and serves the expected response. Do not expect or wait on `orders-rebuilder` to reach `Running` — `NotStarted` there is correct, not a failure.
 
 - [ ] **Step 7: Commit**
 
