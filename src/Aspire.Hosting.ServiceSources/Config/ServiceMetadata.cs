@@ -7,4 +7,6 @@ internal sealed class ServiceMetadata
     public string Project { get; set; } = "";
 
     public string? DefaultRef { get; set; }
+
+    public ClusterMetadata? Cluster { get; set; }
 }

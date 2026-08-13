@@ -44,4 +44,53 @@ public class DeveloperConfigLoaderTests
 
         Assert.Contains("/no/such/servicesources.local.json", ex.Message);
     }
+
+    [Fact]
+    public void Load_ParsesClusterFieldsFromJson()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            {
+              "services": {
+                "orders": { "source": "cluster", "context": "dev-west", "namespace": "orders", "port": 8080 }
+              }
+            }
+            """);
+
+        try
+        {
+            var config = DeveloperConfigLoader.Load(path);
+
+            Assert.Equal("cluster", config.Services["orders"].Source);
+            Assert.Equal("dev-west", config.Services["orders"].Context);
+            Assert.Equal("orders", config.Services["orders"].Namespace);
+            Assert.Equal(8080, config.Services["orders"].Port);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_ClusterFieldsOmitted_LeavesThemNull()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            { "services": { "orders": { "source": "local" } } }
+            """);
+
+        try
+        {
+            var config = DeveloperConfigLoader.Load(path);
+
+            Assert.Null(config.Services["orders"].Context);
+            Assert.Null(config.Services["orders"].Namespace);
+            Assert.Null(config.Services["orders"].Port);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

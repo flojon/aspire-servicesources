@@ -41,4 +41,56 @@ public class ServiceCatalogLoaderTests
 
         Assert.Contains("/no/such/servicesources.yaml", ex.Message);
     }
+
+    [Fact]
+    public void Load_ParsesClusterBlockFromYaml()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+                cluster:
+                  service: orders-svc
+                  port: 8080
+            """);
+
+        try
+        {
+            var catalog = ServiceCatalogLoader.Load(path);
+
+            var orders = Assert.Single(catalog.Services);
+            Assert.NotNull(orders.Value.Cluster);
+            Assert.Equal("orders-svc", orders.Value.Cluster.Service);
+            Assert.Equal(8080, orders.Value.Cluster.Port);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_NoClusterBlock_LeavesClusterNull()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+            """);
+
+        try
+        {
+            var catalog = ServiceCatalogLoader.Load(path);
+
+            Assert.Null(catalog.Services["orders"].Cluster);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

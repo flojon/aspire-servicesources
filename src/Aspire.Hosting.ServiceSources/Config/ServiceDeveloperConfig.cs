@@ -7,4 +7,10 @@ internal sealed class ServiceDeveloperConfig
     public string? Path { get; set; }
 
     public string? Ref { get; set; }
+
+    public string? Context { get; set; }
+
+    public string? Namespace { get; set; }
+
+    public int? Port { get; set; }
 }
