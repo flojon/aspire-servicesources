@@ -3,19 +3,20 @@ using Aspire.Hosting.ApplicationModel;
 namespace Aspire.Hosting.ServiceSources;
 
 /// <summary>
-/// A reference-only facade over the real project resource that <c>AddService()</c> resolved
-/// (a locally checked-out or managed-clone project added via Aspire's own
-/// <c>AddProject(name, path)</c>). This type exists so consumers get an
-/// <see cref="IResourceWithServiceDiscovery"/> handle to pass to
+/// A reference-only facade over the real resource that <c>AddService()</c> resolved — for
+/// example, a local project added via Aspire's own <c>AddProject(name, path)</c> (the
+/// <c>"local"</c> source), or a <c>kubectl port-forward</c> executable added via
+/// <c>AddExecutable(...)</c> (the <c>"cluster"</c> source). This type exists so consumers get
+/// an <see cref="IResourceWithServiceDiscovery"/> handle to pass to
 /// <c>WithReference(...)</c> and to call <c>GetEndpoint(...)</c> on, without this package
-/// needing to expose the underlying <c>ProjectResource</c> type directly.
+/// needing to expose the underlying resource type directly.
 /// </summary>
 /// <remarks>
 /// <para>
 /// The <see cref="IResourceBuilder{T}"/> returned by <c>AddService()</c> wraps this facade.
-/// It is deliberately <b>never added to <c>builder.Resources</c></b> — the real project
-/// resource added via <c>AddProject</c> is what actually participates in Aspire's resource
-/// model, gets built, and runs. The facade only carries copies of the real resource's
+/// It is deliberately <b>never added to <c>builder.Resources</c></b> — the real resource that
+/// <c>AddService()</c> resolved is what actually participates in Aspire's resource model, gets
+/// built, and runs. The facade only carries copies of the real resource's
 /// <c>EndpointAnnotation</c>s so that <c>GetEndpoint(...)</c>/<c>WithReference(...)</c>
 /// resolve identically to the real resource.
 /// </para>
@@ -36,8 +37,9 @@ public sealed class ServiceResource : Resource, IResourceWithServiceDiscovery
     {
     }
 
-    internal static IResourceBuilder<IResourceWithServiceDiscovery> CreateFacade(
-        IDistributedApplicationBuilder builder, string name, IResourceBuilder<ProjectResource> realResource)
+    internal static IResourceBuilder<IResourceWithServiceDiscovery> CreateFacade<TResource>(
+        IDistributedApplicationBuilder builder, string name, IResourceBuilder<TResource> realResource)
+        where TResource : IResource
     {
         var facade = builder.CreateResourceBuilder(new ServiceResource(name));
 

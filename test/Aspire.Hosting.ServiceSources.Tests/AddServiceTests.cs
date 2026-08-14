@@ -1,4 +1,5 @@
 using Aspire.Hosting;
+using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources;
 
 namespace Aspire.Hosting.ServiceSources.Tests;
@@ -89,6 +90,81 @@ public class AddServiceTests
                 project: Orders.csproj
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "docker" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
+
+        Assert.Contains("orders", ex.Message);
+        Assert.Contains("docker", ex.Message);
+    }
+
+    [Fact]
+    public async Task AddService_ClusterSource_AddsPortForwardExecutableAndReturnsFacade()
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+                cluster:
+                  service: orders-svc
+                  port: 8080
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "cluster", "context": "dev-west", "namespace": "orders-ns" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var service = builder.AddService("orders");
+
+        Assert.Contains(builder.Resources, r => r.Name == "orders-portforward");
+        Assert.DoesNotContain(builder.Resources, r => ReferenceEquals(r, service.Resource));
+
+        var endpoint = service.GetEndpoint("http");
+        Assert.Equal("http", endpoint.EndpointName);
+
+        var executable = Assert.IsType<ExecutableResource>(
+            Assert.Single(builder.Resources, r => r.Name == "orders-portforward"));
+
+        Assert.Equal("kubectl", executable.Command);
+
+        var argsCallback = executable.Annotations.OfType<CommandLineArgsCallbackAnnotation>().Single();
+        var argsContext = new CommandLineArgsCallbackContext(new List<object>());
+        await argsCallback.Callback(argsContext);
+        var args = argsContext.Args.Cast<string>().ToList();
+
+        Assert.Contains("port-forward", args);
+        Assert.Contains("svc/orders-svc", args);
+        Assert.Contains("--context", args);
+        Assert.Contains("dev-west", args);
+        Assert.Contains("--namespace", args);
+        Assert.Contains("orders-ns", args);
+        Assert.Contains(args, a => System.Text.RegularExpressions.Regex.IsMatch(a, @"^\d+:8080$"));
+
+        var endpointAnnotation = executable.Annotations.OfType<EndpointAnnotation>().Single();
+        Assert.Equal(endpointAnnotation.TargetPort, endpointAnnotation.Port);
+        Assert.False(endpointAnnotation.IsProxied);
+    }
+
+    [Fact]
+    public void AddService_ClusterSourceMissingContext_ThrowsNamingServiceAndContext()
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+                cluster:
+                  service: orders-svc
+                  port: 8080
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
             { "services": { "orders": { "source": "cluster" } } }
             """);
 
@@ -97,6 +173,6 @@ public class AddServiceTests
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
 
         Assert.Contains("orders", ex.Message);
-        Assert.Contains("cluster", ex.Message);
+        Assert.Contains("context", ex.Message);
     }
 }

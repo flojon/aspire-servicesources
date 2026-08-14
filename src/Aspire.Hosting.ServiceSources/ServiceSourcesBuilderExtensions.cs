@@ -1,6 +1,7 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Git;
+using Aspire.Hosting.ServiceSources.PortAllocation;
 using Aspire.Hosting.ServiceSources.Sources;
 
 namespace Aspire.Hosting.ServiceSources;
@@ -10,14 +11,19 @@ public static class ServiceSourcesBuilderExtensions
     private static readonly Dictionary<string, IServiceSource> Sources = new()
     {
         ["local"] = new LocalProjectSource(new LibGit2SharpGitClient()),
+        ["cluster"] = new ClusterSource(new SocketPortAllocator()),
     };
 
     /// <summary>
-    /// Resolves service <paramref name="name"/> to a local project — either a developer-managed
-    /// checkout (<c>path</c> in <c>servicesources.local.json</c>) or a package-managed git clone
-    /// under the configured cache directory — and adds it to <paramref name="builder"/> via
-    /// Aspire's own <c>AddProject(name, path)</c>, without ever touching this AppHost's own
-    /// <c>.csproj</c>/<c>.sln</c>.
+    /// Resolves service <paramref name="name"/> to its real resource and adds it to
+    /// <paramref name="builder"/>, according to the service's configured source: a local
+    /// project — either a developer-managed checkout (<c>path</c> in
+    /// <c>servicesources.local.json</c>) or a package-managed git clone under the configured
+    /// cache directory — added via Aspire's own <c>AddProject(name, path)</c> without ever
+    /// touching this AppHost's own <c>.csproj</c>/<c>.sln</c> (the <c>"local"</c> source); or a
+    /// <c>kubectl port-forward</c> process against an already-running service in a Kubernetes
+    /// dev cluster, added via Aspire's own <c>AddExecutable(...)</c> (the <c>"cluster"</c>
+    /// source).
     /// </summary>
     /// <returns>
     /// An <see cref="IResourceBuilder{T}"/> wrapping a <see cref="ServiceResource"/> facade —
