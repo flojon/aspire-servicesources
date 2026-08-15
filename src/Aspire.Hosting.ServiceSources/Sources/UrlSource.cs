@@ -3,18 +3,10 @@ using Aspire.Hosting.ServiceSources.Config;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
 
-// Resolves a service already reachable at a fixed, pre-known URL (e.g. behind a Kubernetes
-// ingress, or any non-Kubernetes HTTP endpoint). This deliberately does not delegate to
-// Aspire's own `AddExternalService`/`ExternalServiceResource`: that type has no
-// `EndpointAnnotation` and can't produce an `IResourceWithServiceDiscovery`, by design — see
-// https://github.com/microsoft/aspire/pull/9965#issuecomment-3026276843 for the Aspire team's
-// own rationale ("endpoints don't fit ergonomically for external addresses where nothing needs
-// to be allocated by Aspire/DCP"). That's a reasonable choice for Aspire's own external-service
-// story, but this package needs "local"/"cluster"/"url" sources to be interchangeable behind one
-// `IServiceSource` contract, so `ServiceResource.CreateFacadeForUri` builds the
-// `EndpointAnnotation` by hand instead. Also relevant: microsoft/aspire#15961 and
-// microsoft/aspire#15993 (open requests to make `ExternalServiceResource`'s internals
-// reusable / extend it with header support) — tracked in this repo's issue #5.
+// Resolves a service reachable at a fixed, pre-known URL. Doesn't delegate to Aspire's
+// `ExternalServiceResource` — it has no `EndpointAnnotation`, so it can't satisfy
+// `IResourceWithServiceDiscovery` (microsoft/aspire#9965, #15961, #15993; tracked here as #5) —
+// so `ServiceResource.CreateFacadeForUri` builds the `EndpointAnnotation` by hand instead.
 internal sealed class UrlSource : IServiceSource
 {
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
