@@ -1,3 +1,4 @@
+using System.Net.Sockets;
 using Aspire.Hosting.ApplicationModel;
 
 namespace Aspire.Hosting.ServiceSources;
@@ -47,6 +48,33 @@ public sealed class ServiceResource : Resource, IResourceWithServiceDiscovery
         {
             facade.Resource.Annotations.Add(endpoint);
         }
+
+        return facade;
+    }
+
+    /// <summary>
+    /// Creates a facade — see the remarks above — whose single endpoint resolves to a fixed,
+    /// already-known <paramref name="uri"/>. Used by the <c>"url"</c> source, which has no
+    /// underlying resource for Aspire's orchestrator (DCP) to start and allocate an endpoint
+    /// for: the address is fully known up front, so the <see cref="AllocatedEndpoint"/> is set
+    /// eagerly here rather than being populated later by DCP the way <see cref="CreateFacade"/>'s
+    /// copied annotations are.
+    /// </summary>
+    internal static IResourceBuilder<IResourceWithServiceDiscovery> CreateFacadeForUri(
+        IDistributedApplicationBuilder builder, string name, Uri uri)
+    {
+        var facade = builder.CreateResourceBuilder(new ServiceResource(name));
+
+        var endpoint = new EndpointAnnotation(
+            ProtocolType.Tcp, uriScheme: uri.Scheme, name: uri.Scheme, transport: "http", port: uri.Port, targetPort: uri.Port)
+        {
+            TargetHost = uri.Host,
+            IsProxied = false,
+        };
+        endpoint.AllocatedEndpoint = new AllocatedEndpoint(
+            endpoint, uri.Host, uri.Port, EndpointBindingMode.SingleAddress, targetPortExpression: null);
+
+        facade.Resource.Annotations.Add(endpoint);
 
         return facade;
     }

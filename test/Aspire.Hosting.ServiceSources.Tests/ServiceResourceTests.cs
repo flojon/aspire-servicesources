@@ -47,6 +47,29 @@ public class ServiceResourceTests
         Assert.Equal("http", facadeEndpointViaBuilder.EndpointName);
     }
 
+    [Fact]
+    public void CreateFacadeForUri_IsNotRegisteredInBuilderResources()
+    {
+        var builder = DistributedApplication.CreateBuilder([]);
+        var resourcesBeforeFacade = builder.Resources.Count;
+
+        ServiceResource.CreateFacadeForUri(builder, "orders", new Uri("https://orders.example.com"));
+
+        Assert.Equal(resourcesBeforeFacade, builder.Resources.Count);
+    }
+
+    [Fact]
+    public void CreateFacadeForUri_EndpointResolvesToGivenUriWithoutRunningApp()
+    {
+        var builder = DistributedApplication.CreateBuilder([]);
+
+        var facade = ServiceResource.CreateFacadeForUri(builder, "orders", new Uri("https://orders.example.com:8443/"));
+
+        var endpoint = facade.GetEndpoint("https");
+        Assert.True(endpoint.IsAllocated);
+        Assert.Equal("https://orders.example.com:8443", endpoint.Url);
+    }
+
     private static string CreateFakeCsproj()
     {
         var dir = Directory.CreateTempSubdirectory().FullName;
