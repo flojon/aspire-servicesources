@@ -12,6 +12,7 @@ public static class ServiceSourcesBuilderExtensions
     {
         ["local"] = new LocalProjectSource(new LibGit2SharpGitClient()),
         ["cluster"] = new ClusterSource(new SocketPortAllocator()),
+        ["url"] = new UrlSource(),
     };
 
     /// <summary>
@@ -23,7 +24,8 @@ public static class ServiceSourcesBuilderExtensions
     /// touching this AppHost's own <c>.csproj</c>/<c>.sln</c> (the <c>"local"</c> source); or a
     /// <c>kubectl port-forward</c> process against an already-running service in a Kubernetes
     /// dev cluster, added via Aspire's own <c>AddExecutable(...)</c> (the <c>"cluster"</c>
-    /// source).
+    /// source); or a fixed, already-known URL — e.g. a Kubernetes ingress or any other reachable
+    /// HTTP endpoint — with no underlying resource for Aspire to run (the <c>"url"</c> source).
     /// </summary>
     /// <returns>
     /// An <see cref="IResourceBuilder{T}"/> wrapping a <see cref="ServiceResource"/> facade —

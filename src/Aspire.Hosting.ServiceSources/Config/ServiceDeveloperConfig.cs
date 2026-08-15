@@ -13,4 +13,6 @@ internal sealed class ServiceDeveloperConfig
     public string? Namespace { get; set; }
 
     public int? Port { get; set; }
+
+    public string? Url { get; set; }
 }

@@ -9,4 +9,6 @@ internal sealed class ServiceMetadata
     public string? DefaultRef { get; set; }
 
     public ClusterMetadata? Cluster { get; set; }
+
+    public UrlMetadata? Url { get; set; }
 }
