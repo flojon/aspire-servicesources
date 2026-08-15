@@ -72,6 +72,23 @@ public class LocalProjectSourceTests
     }
 
     [Fact]
+    public void ResolveProjectPath_PathAndRefBothSet_ThrowsNamingServiceAndDoesNotTouchGit()
+    {
+        var repoDir = Directory.CreateTempSubdirectory().FullName;
+        var gitClient = new FakeGitClient();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            LocalProjectSource.ResolveProjectPath(
+                ServiceName, Metadata(project: "Orders.csproj"), DevConfig(path: repoDir, @ref: "feature/x"), "/unused/cache", UnusedAppHostDirectory, gitClient));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("ref", ex.Message);
+        Assert.Contains("path", ex.Message);
+        Assert.Empty(gitClient.ClonedRepos);
+        Assert.Empty(gitClient.CheckedOutRefs);
+    }
+
+    [Fact]
     public void ResolveProjectPath_RelativePathOverride_AnchorsToAppHostDirectoryNotProcessCwd()
     {
         var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
