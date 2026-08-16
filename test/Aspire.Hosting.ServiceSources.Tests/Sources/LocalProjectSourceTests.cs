@@ -1,3 +1,5 @@
+using Aspire.Hosting;
+using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Git;
@@ -241,5 +243,25 @@ public class LocalProjectSourceTests
 
         Assert.Equal(Path.Combine(repoDir, "Orders.csproj"), projectPath);
         Assert.Empty(gitClient.ClonedRepos);
+    }
+
+    [Fact]
+    public void Resolve_DoesNotCloneOrRegisterSynchronously_DefersUntilBeforeStartEvent()
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            ProjectDirectory = appHostDir,
+            Args = [],
+        });
+        var gitClient = new FakeGitClient();
+        var source = new LocalProjectSource(gitClient);
+
+        var facade = source.Resolve(builder, ServiceName, Metadata(), DevConfig());
+
+        Assert.Empty(gitClient.ClonedRepos);
+        Assert.Empty(gitClient.CheckedOutRefs);
+        Assert.Empty(facade.Resource.Annotations.OfType<EndpointAnnotation>());
+        Assert.DoesNotContain(builder.Resources, r => r.Name == ServiceName);
     }
 }
