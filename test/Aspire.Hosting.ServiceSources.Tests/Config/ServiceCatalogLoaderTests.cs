@@ -93,4 +93,58 @@ public class ServiceCatalogLoaderTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public void Load_ParsesContainerBlockFromYaml()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+                container:
+                  image: ghcr.io/company/orders
+                  port: 8080
+                  defaultTag: latest
+            """);
+
+        try
+        {
+            var catalog = ServiceCatalogLoader.Load(path);
+
+            var orders = Assert.Single(catalog.Services);
+            Assert.NotNull(orders.Value.Container);
+            Assert.Equal("ghcr.io/company/orders", orders.Value.Container.Image);
+            Assert.Equal(8080, orders.Value.Container.Port);
+            Assert.Equal("latest", orders.Value.Container.DefaultTag);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_NoContainerBlock_LeavesContainerNull()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+            """);
+
+        try
+        {
+            var catalog = ServiceCatalogLoader.Load(path);
+
+            Assert.Null(catalog.Services["orders"].Container);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

@@ -11,4 +11,6 @@ internal sealed class ServiceMetadata
     public ClusterMetadata? Cluster { get; set; }
 
     public UrlMetadata? Url { get; set; }
+
+    public ContainerMetadata? Container { get; set; }
 }

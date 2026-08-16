@@ -15,4 +15,6 @@ internal sealed class ServiceDeveloperConfig
     public int? Port { get; set; }
 
     public string? Url { get; set; }
+
+    public string? Tag { get; set; }
 }

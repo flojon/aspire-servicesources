@@ -93,4 +93,49 @@ public class DeveloperConfigLoaderTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public void Load_ParsesTagFromJson()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            {
+              "services": {
+                "orders": { "source": "container", "tag": "v1.4.2" }
+              }
+            }
+            """);
+
+        try
+        {
+            var config = DeveloperConfigLoader.Load(path);
+
+            Assert.Equal("container", config.Services["orders"].Source);
+            Assert.Equal("v1.4.2", config.Services["orders"].Tag);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_TagOmitted_LeavesItNull()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            { "services": { "orders": { "source": "local" } } }
+            """);
+
+        try
+        {
+            var config = DeveloperConfigLoader.Load(path);
+
+            Assert.Null(config.Services["orders"].Tag);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }
