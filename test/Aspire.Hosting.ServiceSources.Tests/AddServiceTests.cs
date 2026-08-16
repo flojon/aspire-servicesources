@@ -102,7 +102,7 @@ public class AddServiceTests
     }
 
     [Fact]
-    public async Task AddService_ClusterSource_AddsPortForwardExecutableAndReturnsFacade()
+    public async Task AddService_KubernetesSource_AddsPortForwardExecutableAndReturnsFacade()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
@@ -110,12 +110,12 @@ public class AddServiceTests
               orders:
                 repository: https://github.com/company/orders
                 project: Orders.csproj
-                cluster:
+                kubernetes:
                   service: orders-svc
                   port: 8080
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
-            { "services": { "orders": { "source": "cluster", "context": "dev-west", "namespace": "orders-ns" } } }
+            { "services": { "orders": { "source": "kubernetes", "context": "dev-west", "namespace": "orders-ns" } } }
             """);
 
         var builder = CreateBuilder(appHostDir);
@@ -225,7 +225,7 @@ public class AddServiceTests
     }
 
     [Fact]
-    public void AddService_ClusterSourceMissingContext_ThrowsNamingServiceAndContext()
+    public void AddService_KubernetesSourceMissingContext_ThrowsNamingServiceAndContext()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
@@ -233,12 +233,12 @@ public class AddServiceTests
               orders:
                 repository: https://github.com/company/orders
                 project: Orders.csproj
-                cluster:
+                kubernetes:
                   service: orders-svc
                   port: 8080
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
-            { "services": { "orders": { "source": "cluster" } } }
+            { "services": { "orders": { "source": "kubernetes" } } }
             """);
 
         var builder = CreateBuilder(appHostDir);

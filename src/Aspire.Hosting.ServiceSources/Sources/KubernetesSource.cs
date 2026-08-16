@@ -4,7 +4,7 @@ using IPortAllocator = Aspire.Hosting.ServiceSources.PortAllocation.IPortAllocat
 
 namespace Aspire.Hosting.ServiceSources.Sources;
 
-internal sealed class ClusterSource(IPortAllocator portAllocator) : IServiceSource
+internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceSource
 {
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)
@@ -26,21 +26,21 @@ internal sealed class ClusterSource(IPortAllocator portAllocator) : IServiceSour
         out int localPort,
         out int remotePort)
     {
-        if (metadata.Cluster is null || string.IsNullOrWhiteSpace(metadata.Cluster.Service))
+        if (metadata.Kubernetes is null || string.IsNullOrWhiteSpace(metadata.Kubernetes.Service))
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}' source is 'cluster' but servicesources.yaml has no cluster.service entry.");
+                $"Service '{serviceName}' source is 'kubernetes' but servicesources.yaml has no kubernetes.service entry.");
         }
 
         if (string.IsNullOrWhiteSpace(config.Context))
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': source 'cluster' requires 'context' in servicesources.local.json.");
+                $"Service '{serviceName}': source 'kubernetes' requires 'context' in servicesources.local.json.");
         }
 
-        remotePort = config.Port ?? metadata.Cluster.Port ?? throw new ServiceSourcesConfigurationException(
-            $"Service '{serviceName}': no 'port' configured for source 'cluster' — set it in " +
-            "servicesources.local.json or servicesources.yaml's cluster.port.");
+        remotePort = config.Port ?? metadata.Kubernetes.Port ?? throw new ServiceSourcesConfigurationException(
+            $"Service '{serviceName}': no 'port' configured for source 'kubernetes' — set it in " +
+            "servicesources.local.json or servicesources.yaml's kubernetes.port.");
 
         var @namespace = config.Namespace ?? "default";
 
@@ -49,7 +49,7 @@ internal sealed class ClusterSource(IPortAllocator portAllocator) : IServiceSour
         return
         [
             "port-forward",
-            $"svc/{metadata.Cluster.Service}",
+            $"svc/{metadata.Kubernetes.Service}",
             $"{localPort}:{remotePort}",
             "--context",
             config.Context,

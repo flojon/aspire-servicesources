@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Manual smoke test for the 'cluster' ServiceSource: spins up a kind cluster,
-# deploys a trivial echo service, points DemoAppHost's cluster source at it,
-# and verifies that ClusterSource's `kubectl port-forward` executable resource
+# Manual smoke test for the 'kubernetes' ServiceSource: spins up a kind cluster,
+# deploys a trivial echo service, points DemoAppHost's kubernetes source at it,
+# and verifies that KubernetesSource's `kubectl port-forward` executable resource
 # actually proxies traffic end-to-end. Everything is torn down on exit.
 #
 # Requires: docker, kubectl. Downloads a pinned `kind` locally if not on PATH.
 set -euo pipefail
 
 KIND_VERSION="v0.27.0"
-CLUSTER_NAME="servicesources-clustersource-smoketest"
+CLUSTER_NAME="servicesources-kubernetessource-smoketest"
 ECHO_TEXT="hello from cluster"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -118,20 +118,20 @@ spec:
 EOF
 kubectl --context "$kctx" rollout status deployment/echo --timeout=120s
 
-log "pointing DemoAppHost's cluster source at the echo service"
+log "pointing DemoAppHost's kubernetes source at the echo service"
 cat > "$apphost_dir/servicesources.yaml" <<EOF
 services:
   orders:
     repository: https://github.com/example/orders
     project: SampleService/SampleService.csproj
-    cluster:
+    kubernetes:
       service: echo
       port: 5678
 EOF
 cat > "$apphost_dir/servicesources.local.json" <<EOF
 {
   "services": {
-    "orders": { "source": "cluster", "context": "$kctx", "namespace": "default" }
+    "orders": { "source": "kubernetes", "context": "$kctx", "namespace": "default" }
   }
 }
 EOF
@@ -144,7 +144,7 @@ dotnet run --project "$apphost_dir/DemoAppHost.csproj" --no-build \
   > "$cache_dir/apphost.log" 2>&1 &
 apphost_pid=$!
 
-log "waiting for ClusterSource's kubectl port-forward to come up"
+log "waiting for KubernetesSource's kubectl port-forward to come up"
 local_port=""
 for _ in $(seq 1 60); do
   line="$(pgrep -af "kubectl port-forward svc/echo .* --context $kctx" | head -n1 || true)"
@@ -160,4 +160,4 @@ log "curling the forwarded port ($local_port)"
 response="$(curl -fsS --retry 10 --retry-delay 1 --retry-connrefused "http://127.0.0.1:$local_port/")"
 [[ "$response" == "$ECHO_TEXT" ]] || fail "unexpected response: '$response'"
 
-log "PASS: ClusterSource port-forward proxied traffic from the kind cluster correctly"
+log "PASS: KubernetesSource port-forward proxied traffic from the kind cluster correctly"

@@ -1,6 +1,6 @@
 namespace Aspire.Hosting.ServiceSources.Config;
 
-internal sealed class ClusterMetadata
+internal sealed class KubernetesMetadata
 {
     public string Service { get; set; } = "";
 
