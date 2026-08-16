@@ -32,6 +32,7 @@
 - `test/Aspire.Hosting.ServiceSources.Tests/Sources/PendingLocalResolutionsTests.cs` — new. Subscription-sharing, per-builder isolation, aggregate-failure-formatting, and orchestration-level parallelism (timing) tests, using a fake `IGitClient`.
 - `test/Aspire.Hosting.ServiceSources.Tests/Sources/LocalProjectSourceTests.cs` — modify. Add a test that `Resolve()` no longer clones/registers synchronously.
 - `test/Aspire.Hosting.ServiceSources.Tests/AddServiceIntegrationTests.cs` — modify. The existing end-to-end test must publish `BeforeStartEvent` before its assertions now hold; also assert nothing happens before that publish.
+- `test/Aspire.Hosting.ServiceSources.Tests/AddServiceTests.cs` — modify. Two existing `"local"`-source tests (`AddService_LocalSourceWithPathOverride_ReturnsFacadeWrappingRealProject`, `AddService_RelativePathOverride_ResolvesRelativeToAppHostDirectoryNotProcessCwd`) assert `builder.Resources` contains `"orders"` immediately after `AddService()` — true today, false after Task 4 defers registration to `BeforeStartEvent`. Both must publish `BeforeStartEvent` before that assertion. (The other two tests in this file — `AddService_UnknownSource_...` and the `"cluster"`-source tests — are unaffected: `ClusterSource` stays synchronous.)
 
 ---
 
@@ -218,6 +219,7 @@ using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Sources;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 
@@ -551,15 +553,18 @@ git commit -m "LocalProjectSource.Resolve() defers to PendingLocalResolutions in
 
 ---
 
-## Task 5: Update the real-repo end-to-end integration test for deferred timing
+## Task 5: Update existing tests broken by deferred timing
 
 **Files:**
 - Modify: `test/Aspire.Hosting.ServiceSources.Tests/AddServiceIntegrationTests.cs`
+- Modify: `test/Aspire.Hosting.ServiceSources.Tests/AddServiceTests.cs`
 
 **Interfaces:**
 - Consumes: `IDistributedApplicationBuilder.Eventing.PublishAsync<BeforeStartEvent>(...)`, `new BeforeStartEvent(IServiceProvider, DistributedApplicationModel)`, `new DistributedApplicationModel(IResourceCollection)` — all existing Aspire.Hosting 13.4.6 APIs (confirmed via decompilation of `Aspire.Hosting.dll`), used here to simulate the AppHost startup hook without needing a real DCP run.
 
-This is the last task — after Task 4, `AddService("orders")` for a `"local"` source no longer clones or registers a resource synchronously, so the existing test (which asserted those things immediately after `AddService`) is now failing. This task fixes it up to match the new timing, per the spec's Testing section ("extend the existing real-`AddService()`-against-a-throwaway-git-repo integration test to cover the deferred path").
+This is the last task — after Task 4, `AddService("orders")` for a `"local"` source no longer clones or registers a resource synchronously, so two existing test files (which asserted those things immediately after `AddService`) are now failing:
+- `AddServiceIntegrationTests.cs`'s real-repo end-to-end test — fixed up to match the new timing, per the spec's Testing section ("extend the existing real-`AddService()`-against-a-throwaway-git-repo integration test to cover the deferred path").
+- `AddServiceTests.cs`'s two `"local"`-source unit tests (`AddService_LocalSourceWithPathOverride_ReturnsFacadeWrappingRealProject`, `AddService_RelativePathOverride_ResolvesRelativeToAppHostDirectoryNotProcessCwd`) — both assert `builder.Resources` contains `"orders"` right after `AddService()`. Confirmed by actually running the suite against Tasks 1-4's changes: both fail with `Assert.Contains() Failure: Filter not matched in collection` (`Collection: []`) since nothing is registered until `BeforeStartEvent` fires. Fixed the same way: publish `BeforeStartEvent` before the assertion. The file's other two tests (`AddService_UnknownSource_ThrowsNamingServiceAndSource`, the `"cluster"`-source tests) are unaffected — `ClusterSource` stays synchronous — and need no change.
 
 - [ ] **Step 1: Update the test**
 
@@ -569,6 +574,7 @@ Replace the full contents of `test/Aspire.Hosting.ServiceSources.Tests/AddServic
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Aspire.Hosting.ServiceSources.Tests;
 
@@ -636,16 +642,63 @@ public class AddServiceIntegrationTests
 Run: `dotnet test test/Aspire.Hosting.ServiceSources.Tests --filter "FullyQualifiedName~AddServiceIntegrationTests"`
 Expected: PASS. (No separate red/green cycle: this is the fixup of a test that Task 4 broke, applied in one step.)
 
-- [ ] **Step 3: N/A — no production code change in this task.**
+- [ ] **Step 3: Update `AddServiceTests.cs`**
 
-- [ ] **Step 4: Run the full test suite**
+In `test/Aspire.Hosting.ServiceSources.Tests/AddServiceTests.cs`, add these two usings at the top of the file (it currently has no `Aspire.Hosting.ApplicationModel` or `Microsoft.Extensions.DependencyInjection` usings):
+
+```csharp
+using Aspire.Hosting.ApplicationModel;
+using Microsoft.Extensions.DependencyInjection;
+```
+
+Add this private helper to the `AddServiceTests` class (same shape as the one in `AddServiceIntegrationTests.cs` and `PendingLocalResolutionsTests.cs`):
+
+```csharp
+    private static Task PublishBeforeStartEventAsync(IDistributedApplicationBuilder builder) =>
+        builder.Eventing.PublishAsync(new BeforeStartEvent(
+            builder.Services.BuildServiceProvider(), new DistributedApplicationModel(builder.Resources)));
+```
+
+Change `AddService_LocalSourceWithPathOverride_ReturnsFacadeWrappingRealProject` from:
+
+```csharp
+        var service = builder.AddService("orders");
+
+        Assert.Contains(builder.Resources, r => r.Name == "orders");
+        Assert.DoesNotContain(builder.Resources, r => ReferenceEquals(r, service.Resource));
+    }
+```
+
+to:
+
+```csharp
+        var service = builder.AddService("orders");
+        await PublishBeforeStartEventAsync(builder);
+
+        Assert.Contains(builder.Resources, r => r.Name == "orders");
+        Assert.DoesNotContain(builder.Resources, r => ReferenceEquals(r, service.Resource));
+    }
+```
+
+(and change the method's signature from `public void AddService_LocalSourceWithPathOverride_ReturnsFacadeWrappingRealProject()` to `public async Task AddService_LocalSourceWithPathOverride_ReturnsFacadeWrappingRealProject()`, since it now awaits.)
+
+Apply the same two changes — add `await PublishBeforeStartEventAsync(builder);` before the `Assert.Contains` and change `void` to `async Task` — to `AddService_RelativePathOverride_ResolvesRelativeToAppHostDirectoryNotProcessCwd`.
+
+Leave `AddService_UnknownSource_ThrowsNamingServiceAndSource` and the two `"cluster"`-source tests untouched.
+
+- [ ] **Step 4: Run `AddServiceTests.cs`**
+
+Run: `dotnet test test/Aspire.Hosting.ServiceSources.Tests --filter "FullyQualifiedName~AddServiceTests"`
+Expected: PASS — all tests in the file, including the two fixed-up ones.
+
+- [ ] **Step 5: Run the full test suite**
 
 Run: `dotnet test`
 Expected: PASS — every test project builds and all tests pass, confirming Tasks 1-5 compose correctly (in particular that `ClusterSource`'s synchronous path, which still calls `ServiceResource.CreateFacade`, is unaffected by Task 1's split).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add test/Aspire.Hosting.ServiceSources.Tests/AddServiceIntegrationTests.cs
-git commit -m "Update AddService end-to-end test for deferred local-source resolution timing"
+git add test/Aspire.Hosting.ServiceSources.Tests/AddServiceIntegrationTests.cs test/Aspire.Hosting.ServiceSources.Tests/AddServiceTests.cs
+git commit -m "Update tests for deferred local-source resolution timing"
 ```
