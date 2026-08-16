@@ -17,6 +17,12 @@ public class LocalProjectSourceTests
 
         public Exception? CheckoutException { get; set; }
 
+        private int _checkoutAttempts;
+
+        public bool FailFirstCheckoutOnly { get; set; }
+
+        public Exception? FetchException { get; set; }
+
         public void Clone(string repositoryUrl, string destinationPath)
         {
             if (CloneException is not null)
@@ -31,12 +37,20 @@ public class LocalProjectSourceTests
 
         public void Checkout(string repositoryPath, string reference)
         {
+            _checkoutAttempts++;
+
             if (CheckoutException is not null)
             {
                 throw CheckoutException;
             }
 
+            if (FailFirstCheckoutOnly && _checkoutAttempts == 1)
+            {
+                throw new InvalidOperationException("ref not resolvable locally");
+            }
+
             CheckedOutRefs.Add((repositoryPath, reference));
+            CurrentlyCheckedOutRef = reference;
         }
 
         public List<string> FetchedRepos { get; } = [];
@@ -45,7 +59,15 @@ public class LocalProjectSourceTests
 
         public string? CurrentlyCheckedOutRef { get; set; }
 
-        public void Fetch(string repositoryPath) => FetchedRepos.Add(repositoryPath);
+        public void Fetch(string repositoryPath)
+        {
+            if (FetchException is not null)
+            {
+                throw FetchException;
+            }
+
+            FetchedRepos.Add(repositoryPath);
+        }
 
         public bool HasUncommittedChanges(string repositoryPath) => UncommittedChanges;
 
@@ -284,6 +306,58 @@ public class LocalProjectSourceTests
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("missing-ref", ex.Message);
         Assert.IsType<ServiceSourcesConfigurationException>(ex.InnerException);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_CacheMiss_CheckoutFailsOnce_FetchesThenRetriesSuccessfully()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var gitClient = new FakeGitClient { FailFirstCheckoutOnly = true };
+
+        LocalProjectSource.ResolveProjectPath(
+            ServiceName, Metadata(defaultRef: "feature/late"), DevConfig(), appHostDirectory, gitClient);
+
+        var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
+        Assert.Equal(new[] { repoDir }, gitClient.FetchedRepos);
+        var (_, reference) = Assert.Single(gitClient.CheckedOutRefs);
+        Assert.Equal("feature/late", reference);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_CacheMiss_RefMissingEvenAfterFetch_WrapsAsConfigurationException()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var gitClient = new FakeGitClient
+        {
+            CheckoutException = new ServiceSourcesConfigurationException(
+                "Ref 'does-not-exist' was not found in repository at '/tmp/x'."),
+        };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            LocalProjectSource.ResolveProjectPath(
+                ServiceName, Metadata(defaultRef: "does-not-exist"), DevConfig(), appHostDirectory, gitClient));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("does-not-exist", ex.Message);
+        Assert.Single(gitClient.FetchedRepos);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_CacheMiss_FetchItselfFails_WrapsAsConfigurationExceptionNamingService()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var gitClient = new FakeGitClient
+        {
+            FailFirstCheckoutOnly = true,
+            FetchException = new InvalidOperationException("network unreachable"),
+        };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            LocalProjectSource.ResolveProjectPath(
+                ServiceName, Metadata(defaultRef: "feature/late"), DevConfig(), appHostDirectory, gitClient));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.IsType<InvalidOperationException>(ex.InnerException);
     }
 
     [Fact]

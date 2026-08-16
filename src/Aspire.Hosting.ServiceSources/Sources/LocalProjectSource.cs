@@ -58,15 +58,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
 
                 if (reference is not null)
                 {
-                    try
-                    {
-                        gitClient.Checkout(repoRoot, reference);
-                    }
-                    catch (Exception ex)
-                    {
-                        throw new ServiceSourcesConfigurationException(
-                            $"Service '{serviceName}': failed to checkout ref '{reference}' of repository '{metadata.Repository}' at '{repoRoot}'.", ex);
-                    }
+                    CheckoutWithFetchRetry(serviceName, metadata, repoRoot, reference, gitClient);
                 }
             }
             else if (reference is not null)
@@ -82,15 +74,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
                 }
                 else
                 {
-                    try
-                    {
-                        gitClient.Checkout(repoRoot, reference);
-                    }
-                    catch (Exception ex)
-                    {
-                        throw new ServiceSourcesConfigurationException(
-                            $"Service '{serviceName}': failed to checkout ref '{reference}' of repository '{metadata.Repository}' at '{repoRoot}'.", ex);
-                    }
+                    CheckoutWithFetchRetry(serviceName, metadata, repoRoot, reference, gitClient);
                 }
             }
         }
@@ -103,6 +87,41 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         }
 
         return projectPath;
+    }
+
+    private static void CheckoutWithFetchRetry(
+        string serviceName, ServiceMetadata metadata, string repoRoot, string reference, IGitClient gitClient)
+    {
+        try
+        {
+            gitClient.Checkout(repoRoot, reference);
+            return;
+        }
+        catch
+        {
+            // Fall through to fetch-and-retry below.
+        }
+
+        try
+        {
+            gitClient.Fetch(repoRoot);
+        }
+        catch (Exception ex)
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': failed to fetch repository '{metadata.Repository}' at '{repoRoot}' " +
+                $"while resolving ref '{reference}'.", ex);
+        }
+
+        try
+        {
+            gitClient.Checkout(repoRoot, reference);
+        }
+        catch (Exception ex)
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': failed to checkout ref '{reference}' of repository '{metadata.Repository}' at '{repoRoot}'.", ex);
+        }
     }
 
     private static void EnsureGitignore(string appHostDirectory)
