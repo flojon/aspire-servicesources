@@ -28,6 +28,13 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
 
         if (config.Path is not null)
         {
+            if (config.Ref is not null)
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Service '{serviceName}': 'ref' cannot be combined with 'path' — 'path' points directly at " +
+                    "an existing checkout, and 'ref' only applies when this tool manages the clone.");
+            }
+
             // Anchor a relative `path` override to the AppHost directory (matching Aspire's own
             // AddProject behavior), not to the process's current working directory.
             // Path.GetFullPath is a no-op when config.Path is already absolute.
