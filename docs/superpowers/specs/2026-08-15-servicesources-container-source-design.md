@@ -2,7 +2,7 @@
 
 **Status:** Approved
 **Date:** 2026-08-15
-**Scope:** A new `IServiceSource` implementation, `ContainerSource`, that resolves `AddService()` against a published container image instead of a local checkout or a cluster port-forward. Builds on the milestone 1a architecture (see [milestone 1a design](2026-08-09-servicesources-design.md)) and the [cluster source design](2026-08-13-servicesources-cluster-source-design.md), and closes out the "Container and external-endpoint sources" item (container half) from the [phase 2 reference doc](2026-08-09-servicesources-phase2-future-work.md) and issue #5.
+**Scope:** A new `IServiceSource` implementation, `ContainerSource`, that resolves `AddService()` against a published container image instead of a local checkout or a cluster port-forward. Builds on the milestone 1a architecture (see [milestone 1a design](2026-08-09-servicesources-design.md)) and the [cluster source design](2026-08-13-servicesources-cluster-source-design.md), and addresses the container half of the "Container and external-endpoint sources" item from the [phase 2 reference doc](2026-08-09-servicesources-phase2-future-work.md) and issue #5. Issue #5 also covers `ExternalEndpointSource`, which this doc does not attempt — the issue stays open until that second part lands too.
 
 ## Problem
 
@@ -48,7 +48,7 @@ services:
 ```
 
 Rules:
-- `image` is required for a `"container"` source. It is a full image reference and may itself include a registry host (e.g. `ghcr.io/company/orders`) — Docker image references already encode the registry, so there is no separate `registry` config field.
+- `image` is required for a `"container"` source and, matching the cluster source's `Service`/`Context` checks, is validated with `string.IsNullOrWhiteSpace` (not just null) — a blank or whitespace-only value fails fast the same as a missing one. It is a full image reference and may itself include a registry host (e.g. `ghcr.io/company/orders`) — Docker image references already encode the registry, so there is no separate `registry` config field.
 - `port` (the container's internal listen port, used as `targetPort`) is required in the catalog. Unlike the cluster source's remote port, a container image's listen port is a fixed property of the image itself, not something that varies per developer or per environment, so no local-config override is offered.
 - `tag` is optional in local config. Resolution precedence: local.json `tag` → catalog `container.defaultTag` → Aspire's own `AddContainer` default (`"latest"`) when neither is set. This mirrors `ref`/`defaultRef`'s override shape from milestone 1a, letting a developer pin a specific build for reproduction or testing without editing the shared catalog.
 - Credentials/registry auth: the container runtime (Docker/Podman) uses the developer's ambient login state (`docker login`, credential helpers already configured). ServiceSources does not manage registry credentials itself — same posture as the cluster source's ambient `kubectl` config.
@@ -66,12 +66,12 @@ Resolution stays synchronous within `AddService()`, consistent with milestone 1a
 
 ## Error Handling
 
-- **Config errors** — missing `container.image` or `container.port` in the catalog — fail fast at the `AddService()` call site, naming the service and the missing field. Same philosophy as the other two sources.
+- **Config errors** — missing or whitespace-only `container.image`, or missing `container.port`, in the catalog — fail fast at the `AddService()` call site, naming the service and the missing field. Same philosophy as the other two sources.
 - **Runtime errors** — no container runtime available, image not found/not pullable, invalid tag, registry auth failure, or a container that exits immediately — are **not** `AddService()`-time exceptions. They surface through the `ContainerResource`'s own state and logs in the Aspire dashboard, exactly like the cluster source's port-forward failures and the local source's build failures. Falls out of delegating to `AddContainer` rather than managing the container ourselves.
 
 ## Testing
 
-- **Config parsing**: unit tests for the new `container` catalog block and the local-config `tag` field, covering each fail-fast path (missing `container.image`, missing `container.port`) and tag precedence (local override vs. catalog default vs. neither set).
+- **Config parsing**: unit tests for the new `container` catalog block and the local-config `tag` field, covering each fail-fast path (missing/whitespace-only `container.image`, missing `container.port`) and tag precedence (local override vs. catalog default vs. neither set).
 - **`ContainerSource` orchestration**: unit tests for image/tag resolution logic — which `AddContainer` overload gets called and with what arguments — using the same fake-builder-inspection approach as `ClusterSourceTests`. No real container runtime invocation in unit tests.
 - **No automated container/integration test in v1** — matches the existing sources' posture (no real `kubectl`, no real git clone in unit tests). Verification is a manual smoke test via the demo AppHost against a real local Docker daemon.
 
