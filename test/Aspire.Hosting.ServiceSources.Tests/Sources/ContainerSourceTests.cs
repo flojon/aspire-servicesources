@@ -49,6 +49,24 @@ public class ContainerSourceTests
     }
 
     [Fact]
+    public void ResolveContainerConfig_EmptyLocalTag_FallsBackToCatalogDefaultTag()
+    {
+        var (_, tag, _) = ContainerSource.ResolveContainerConfig(
+            ServiceName, Metadata(defaultTag: "latest"), DevConfig(tag: ""));
+
+        Assert.Equal("latest", tag);
+    }
+
+    [Fact]
+    public void ResolveContainerConfig_WhitespaceLocalTag_FallsBackToCatalogDefaultTag()
+    {
+        var (_, tag, _) = ContainerSource.ResolveContainerConfig(
+            ServiceName, Metadata(defaultTag: "latest"), DevConfig(tag: "   "));
+
+        Assert.Equal("latest", tag);
+    }
+
+    [Fact]
     public void ResolveContainerConfig_NoContainerBlock_ThrowsNamingServiceAndImage()
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
@@ -86,5 +104,25 @@ public class ContainerSourceTests
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("container.port", ex.Message);
+    }
+
+    [Fact]
+    public void ResolveContainerConfig_ZeroPort_ThrowsNamingServiceAndPort()
+    {
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ContainerSource.ResolveContainerConfig(ServiceName, Metadata(port: 0), DevConfig()));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("port", ex.Message);
+    }
+
+    [Fact]
+    public void ResolveContainerConfig_PortAboveValidRange_ThrowsNamingServiceAndPort()
+    {
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ContainerSource.ResolveContainerConfig(ServiceName, Metadata(port: 70000), DevConfig()));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("port", ex.Message);
     }
 }

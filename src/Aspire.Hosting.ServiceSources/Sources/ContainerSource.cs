@@ -31,7 +31,13 @@ internal sealed class ContainerSource : IServiceSource
         var port = metadata.Container.Port ?? throw new ServiceSourcesConfigurationException(
             $"Service '{serviceName}' source is 'container' but servicesources.yaml has no container.port entry.");
 
-        var tag = config.Tag ?? metadata.Container.DefaultTag;
+        if (port is < 1 or > 65535)
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': container.port value '{port}' is not a valid port (must be between 1 and 65535).");
+        }
+
+        var tag = string.IsNullOrWhiteSpace(config.Tag) ? metadata.Container.DefaultTag : config.Tag;
 
         return (metadata.Container.Image, tag, port);
     }
