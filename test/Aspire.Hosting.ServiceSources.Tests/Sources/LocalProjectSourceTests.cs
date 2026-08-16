@@ -44,6 +44,18 @@ public class LocalProjectSourceTests
 
         public string? GetOriginUrl(string repositoryPath) =>
             OriginUrlsByPath.GetValueOrDefault(repositoryPath);
+
+        public List<string> FetchedRepos { get; } = [];
+
+        public bool UncommittedChanges { get; set; }
+
+        public string? CurrentlyCheckedOutRef { get; set; }
+
+        public void Fetch(string repositoryPath) => FetchedRepos.Add(repositoryPath);
+
+        public bool HasUncommittedChanges(string repositoryPath) => UncommittedChanges;
+
+        public bool IsRefCheckedOut(string repositoryPath, string reference) => CurrentlyCheckedOutRef == reference;
     }
 
     private const string ServiceName = "orders";

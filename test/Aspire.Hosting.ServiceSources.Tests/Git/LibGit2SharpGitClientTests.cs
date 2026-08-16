@@ -94,4 +94,76 @@ public class LibGit2SharpGitClientTests
 
         Assert.Equal(origin, originUrl);
     }
+
+    [Fact]
+    public void Fetch_PullsRefCreatedOnOriginAfterInitialClone()
+    {
+        var origin = CreateOriginRepo();
+        var destination = Path.Combine(Directory.CreateTempSubdirectory().FullName, "clone");
+        var client = new LibGit2SharpGitClient();
+        client.Clone(origin, destination);
+
+        using (var originRepo = new Repository(origin))
+        {
+            var signature = new Signature("test", "test@test.com", DateTimeOffset.Now);
+            var lateBranch = originRepo.CreateBranch("feature/late");
+            Commands.Checkout(originRepo, lateBranch);
+            File.WriteAllText(Path.Combine(origin, "file.txt"), "late content");
+            Commands.Stage(originRepo, "file.txt");
+            originRepo.Commit("late commit", signature, signature);
+        }
+
+        client.Fetch(destination);
+        client.Checkout(destination, "feature/late");
+
+        Assert.Equal("late content", File.ReadAllText(Path.Combine(destination, "file.txt")));
+    }
+
+    [Fact]
+    public void HasUncommittedChanges_CleanCheckout_ReturnsFalse()
+    {
+        var origin = CreateOriginRepo();
+        var destination = Path.Combine(Directory.CreateTempSubdirectory().FullName, "clone");
+        var client = new LibGit2SharpGitClient();
+        client.Clone(origin, destination);
+
+        Assert.False(client.HasUncommittedChanges(destination));
+    }
+
+    [Fact]
+    public void HasUncommittedChanges_ModifiedFile_ReturnsTrue()
+    {
+        var origin = CreateOriginRepo();
+        var destination = Path.Combine(Directory.CreateTempSubdirectory().FullName, "clone");
+        var client = new LibGit2SharpGitClient();
+        client.Clone(origin, destination);
+
+        File.WriteAllText(Path.Combine(destination, "file.txt"), "locally edited");
+
+        Assert.True(client.HasUncommittedChanges(destination));
+    }
+
+    [Fact]
+    public void IsRefCheckedOut_MatchingRef_ReturnsTrue()
+    {
+        var origin = CreateOriginRepo();
+        var destination = Path.Combine(Directory.CreateTempSubdirectory().FullName, "clone");
+        var client = new LibGit2SharpGitClient();
+        client.Clone(origin, destination);
+        client.Checkout(destination, "v1.0.0");
+
+        Assert.True(client.IsRefCheckedOut(destination, "v1.0.0"));
+    }
+
+    [Fact]
+    public void IsRefCheckedOut_DifferentRef_ReturnsFalse()
+    {
+        var origin = CreateOriginRepo();
+        var destination = Path.Combine(Directory.CreateTempSubdirectory().FullName, "clone");
+        var client = new LibGit2SharpGitClient();
+        client.Clone(origin, destination);
+        client.Checkout(destination, "v1.0.0");
+
+        Assert.False(client.IsRefCheckedOut(destination, "feature/x"));
+    }
 }
