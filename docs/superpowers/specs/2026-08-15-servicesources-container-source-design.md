@@ -2,7 +2,7 @@
 
 **Status:** Approved
 **Date:** 2026-08-15
-**Scope:** A new `IServiceSource` implementation, `ContainerSource`, that resolves `AddService()` against a published container image instead of a local checkout or a cluster port-forward. Builds on the milestone 1a architecture (see [milestone 1a design](2026-08-09-servicesources-design.md)) and the [cluster source design](2026-08-13-servicesources-cluster-source-design.md), and addresses the container half of the "Container and external-endpoint sources" item from the [phase 2 reference doc](2026-08-09-servicesources-phase2-future-work.md) and issue #5. Issue #5 also covers `ExternalEndpointSource`, which this doc does not attempt — the issue stays open until that second part lands too.
+**Scope:** A new `IServiceSource` implementation, `ContainerSource`, that resolves `AddService()` against a published container image instead of a local checkout or a cluster port-forward. Builds on the milestone 1a architecture (see [milestone 1a design](2026-08-09-servicesources-design.md)) and the [cluster source design](2026-08-13-servicesources-cluster-source-design.md), and closes out the "Container and external-endpoint sources" item from the [phase 2 reference doc](2026-08-09-servicesources-phase2-future-work.md) and issue #5 — the other half, `UrlSource` (the external-endpoint case, shipped under the `"url"` discriminator rather than `ExternalEndpointSource`), already landed in #17.
 
 ## Problem
 
