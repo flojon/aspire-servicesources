@@ -179,6 +179,66 @@ public class LocalProjectSourceTests
     }
 
     [Fact]
+    public void ResolveProjectPath_CacheHit_CleanTree_ReconcilesChangedRef()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
+        Directory.CreateDirectory(repoDir);
+        File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
+        var gitClient = new FakeGitClient();
+
+        LocalProjectSource.ResolveProjectPath(
+            ServiceName, Metadata(defaultRef: "main"), DevConfig(@ref: "feature/x"), appHostDirectory, gitClient);
+
+        var (repositoryPath, reference) = Assert.Single(gitClient.CheckedOutRefs);
+        Assert.Equal(repoDir, repositoryPath);
+        Assert.Equal("feature/x", reference);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_CacheHit_DirtyTreeButAlreadyOnConfiguredRef_DoesNothing()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
+        Directory.CreateDirectory(repoDir);
+        File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
+        var gitClient = new FakeGitClient
+        {
+            UncommittedChanges = true,
+            CurrentlyCheckedOutRef = "feature/x",
+        };
+
+        var projectPath = LocalProjectSource.ResolveProjectPath(
+            ServiceName, Metadata(defaultRef: "main"), DevConfig(@ref: "feature/x"), appHostDirectory, gitClient);
+
+        Assert.Equal(Path.Combine(repoDir, "Orders.csproj"), projectPath);
+        Assert.Empty(gitClient.CheckedOutRefs);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_CacheHit_DirtyTreeAndDifferentRef_ThrowsWithoutTouchingWorkingTree()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
+        Directory.CreateDirectory(repoDir);
+        File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
+        var gitClient = new FakeGitClient
+        {
+            UncommittedChanges = true,
+            CurrentlyCheckedOutRef = "main",
+        };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            LocalProjectSource.ResolveProjectPath(
+                ServiceName, Metadata(defaultRef: "main"), DevConfig(@ref: "feature/x"), appHostDirectory, gitClient));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("feature/x", ex.Message);
+        Assert.Contains("uncommitted", ex.Message);
+        Assert.Empty(gitClient.CheckedOutRefs);
+    }
+
+    [Fact]
     public void ResolveProjectPath_ProjectFileMissing_ThrowsNamingServiceProjectAndRoot()
     {
         var repoDir = Directory.CreateTempSubdirectory().FullName;

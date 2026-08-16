@@ -71,14 +71,26 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
             }
             else if (reference is not null)
             {
-                try
+                if (gitClient.HasUncommittedChanges(repoRoot))
                 {
-                    gitClient.Checkout(repoRoot, reference);
+                    if (!gitClient.IsRefCheckedOut(repoRoot, reference))
+                    {
+                        throw new ServiceSourcesConfigurationException(
+                            $"Service '{serviceName}': checkout at '{repoRoot}' has uncommitted changes and is not " +
+                            $"on the configured ref '{reference}'. Commit or stash your changes, then re-run.");
+                    }
                 }
-                catch (Exception ex)
+                else
                 {
-                    throw new ServiceSourcesConfigurationException(
-                        $"Service '{serviceName}': failed to checkout ref '{reference}' of repository '{metadata.Repository}' at '{repoRoot}'.", ex);
+                    try
+                    {
+                        gitClient.Checkout(repoRoot, reference);
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new ServiceSourcesConfigurationException(
+                            $"Service '{serviceName}': failed to checkout ref '{reference}' of repository '{metadata.Repository}' at '{repoRoot}'.", ex);
+                    }
                 }
             }
         }
