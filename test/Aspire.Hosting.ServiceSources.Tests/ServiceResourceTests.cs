@@ -47,6 +47,42 @@ public class ServiceResourceTests
         Assert.Equal("http", facadeEndpointViaBuilder.EndpointName);
     }
 
+    [Fact]
+    public void CreateEmptyFacade_IsNotRegisteredInBuilderResources()
+    {
+        var builder = DistributedApplication.CreateBuilder([]);
+        var resourcesBeforeFacade = builder.Resources.Count;
+
+        ServiceResource.CreateEmptyFacade(builder, "orders");
+
+        Assert.Equal(resourcesBeforeFacade, builder.Resources.Count);
+    }
+
+    [Fact]
+    public void CreateEmptyFacade_HasNoEndpointAnnotations()
+    {
+        var builder = DistributedApplication.CreateBuilder([]);
+
+        var facade = ServiceResource.CreateEmptyFacade(builder, "orders");
+
+        Assert.Empty(facade.Resource.Annotations.OfType<EndpointAnnotation>());
+    }
+
+    [Fact]
+    public void CopyEndpointAnnotations_CopiesFromRealResourceOntoExistingFacade()
+    {
+        var builder = DistributedApplication.CreateBuilder([]);
+        var facade = ServiceResource.CreateEmptyFacade(builder, "orders");
+        var realProject = builder.AddProject("orders-real", CreateFakeCsproj())
+            .WithHttpEndpoint(name: "http", port: 5001);
+
+        ServiceResource.CopyEndpointAnnotations(facade, realProject);
+
+        var realEndpoint = realProject.Resource.Annotations.OfType<EndpointAnnotation>().Single(a => a.Name == "http");
+        var facadeEndpoint = facade.Resource.Annotations.OfType<EndpointAnnotation>().Single(a => a.Name == "http");
+        Assert.Same(realEndpoint, facadeEndpoint);
+    }
+
     private static string CreateFakeCsproj()
     {
         var dir = Directory.CreateTempSubdirectory().FullName;

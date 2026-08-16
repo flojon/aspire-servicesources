@@ -37,17 +37,26 @@ public sealed class ServiceResource : Resource, IResourceWithServiceDiscovery
     {
     }
 
+    internal static IResourceBuilder<IResourceWithServiceDiscovery> CreateEmptyFacade(
+        IDistributedApplicationBuilder builder, string name) =>
+        builder.CreateResourceBuilder(new ServiceResource(name));
+
     internal static IResourceBuilder<IResourceWithServiceDiscovery> CreateFacade<TResource>(
         IDistributedApplicationBuilder builder, string name, IResourceBuilder<TResource> realResource)
         where TResource : IResource
     {
-        var facade = builder.CreateResourceBuilder(new ServiceResource(name));
+        var facade = CreateEmptyFacade(builder, name);
+        CopyEndpointAnnotations(facade, realResource);
+        return facade;
+    }
 
+    internal static void CopyEndpointAnnotations<TResource>(
+        IResourceBuilder<IResourceWithServiceDiscovery> facade, IResourceBuilder<TResource> realResource)
+        where TResource : IResource
+    {
         foreach (var endpoint in realResource.Resource.Annotations.OfType<EndpointAnnotation>())
         {
             facade.Resource.Annotations.Add(endpoint);
         }
-
-        return facade;
     }
 }
