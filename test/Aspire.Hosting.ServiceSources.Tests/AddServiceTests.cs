@@ -276,10 +276,45 @@ public class AddServiceTests
 
         var container = Assert.IsType<ContainerResource>(
             Assert.Single(builder.Resources, r => r.Name == "orders"));
-        Assert.Equal("ghcr.io/company/orders", container.Annotations.OfType<ContainerImageAnnotation>().Single().Image);
+        var imageAnnotation = container.Annotations.OfType<ContainerImageAnnotation>().Single();
+        Assert.Equal("ghcr.io/company/orders", imageAnnotation.Image);
+        Assert.Equal("latest", imageAnnotation.Tag);
 
         var endpoint = service.GetEndpoint("http");
         Assert.Equal("http", endpoint.EndpointName);
+
+        var endpointAnnotation = container.Annotations.OfType<EndpointAnnotation>().Single();
+        Assert.Equal(8080, endpointAnnotation.TargetPort);
+        Assert.Null(endpointAnnotation.Port);
+        Assert.True(endpointAnnotation.IsProxied);
+    }
+
+    [Fact]
+    public void AddService_ContainerSourceLocalTagOverride_TakesPrecedenceOverCatalogDefaultTag()
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+                container:
+                  image: ghcr.io/company/orders
+                  port: 8080
+                  defaultTag: latest
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "container", "tag": "v1.4.2" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var service = builder.AddService("orders");
+
+        var container = Assert.IsType<ContainerResource>(
+            Assert.Single(builder.Resources, r => r.Name == "orders"));
+        var imageAnnotation = container.Annotations.OfType<ContainerImageAnnotation>().Single();
+        Assert.Equal("v1.4.2", imageAnnotation.Tag);
     }
 
     [Fact]
