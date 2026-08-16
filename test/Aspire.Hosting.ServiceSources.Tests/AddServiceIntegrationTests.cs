@@ -1,6 +1,7 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Aspire.Hosting.ServiceSources.Tests;
 
@@ -15,8 +16,12 @@ public class AddServiceIntegrationTests
             Args = [],
         });
 
+    private static Task PublishBeforeStartEventAsync(IDistributedApplicationBuilder builder) =>
+        builder.Eventing.PublishAsync(new BeforeStartEvent(
+            builder.Services.BuildServiceProvider(), new DistributedApplicationModel(builder.Resources)));
+
     [Fact]
-    public void AddService_ManagedClone_ClonesRealRepoAndChecksOutFeatureRef()
+    public async Task AddService_ManagedClone_ClonesRealRepoAndChecksOutFeatureRef()
     {
         var cacheDirectory = Directory.CreateTempSubdirectory().FullName;
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
@@ -39,7 +44,13 @@ public class AddServiceIntegrationTests
 
         var service = builder.AddService("orders");
 
+        // Deferred resolution: nothing is cloned or registered until BeforeStartEvent fires.
         var clonedProjectPath = Path.Combine(cacheDirectory, "sample-service", "SampleProj", "SampleProj.csproj");
+        Assert.False(File.Exists(clonedProjectPath));
+        Assert.DoesNotContain(builder.Resources, r => r.Name == "orders");
+
+        await PublishBeforeStartEventAsync(builder);
+
         Assert.True(File.Exists(clonedProjectPath));
 
         var endpoint = service.GetEndpoint("http");
