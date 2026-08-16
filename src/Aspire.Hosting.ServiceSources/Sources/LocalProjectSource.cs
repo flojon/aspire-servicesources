@@ -9,8 +9,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)
     {
-        var cacheDirectory = ServiceSourcesConfigCache.GetCacheDirectory(builder);
-        var projectPath = ResolveProjectPath(serviceName, metadata, config, cacheDirectory, builder.AppHostDirectory, gitClient);
+        var projectPath = ResolveProjectPath(serviceName, metadata, config, builder.AppHostDirectory, gitClient);
 
         var projectBuilder = builder.AddProject(serviceName, projectPath);
         return ServiceResource.CreateFacade(builder, serviceName, projectBuilder);
@@ -20,7 +19,6 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         string serviceName,
         ServiceMetadata metadata,
         ServiceDeveloperConfig config,
-        string cacheDirectory,
         string appHostDirectory,
         IGitClient gitClient)
     {
@@ -42,8 +40,9 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         }
         else
         {
-            var repoName = GetRepositoryName(metadata.Repository);
-            repoRoot = Path.Combine(cacheDirectory, repoName);
+            EnsureGitignore(appHostDirectory);
+            repoRoot = Path.Combine(appHostDirectory, ".servicesources", "checkouts", serviceName);
+            var reference = config.Ref ?? metadata.DefaultRef;
 
             if (!Directory.Exists(repoRoot))
             {
@@ -57,7 +56,6 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
                         $"Service '{serviceName}': failed to clone repository '{metadata.Repository}' into '{repoRoot}'.", ex);
                 }
 
-                var reference = config.Ref ?? metadata.DefaultRef;
                 if (reference is not null)
                 {
                     try
@@ -71,18 +69,16 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
                     }
                 }
             }
-            else
+            else if (reference is not null)
             {
-                // No auto-pull/update of an already-cloned repo: only read the existing clone's
-                // "origin" remote URL (no fetch/pull) to guard against a basename collision
-                // between different repositories (e.g. same repo name under different orgs/hosts).
-                var existingOrigin = gitClient.GetOriginUrl(repoRoot);
-                if (existingOrigin is not null && !RepositoryUrlsMatch(existingOrigin, metadata.Repository))
+                try
+                {
+                    gitClient.Checkout(repoRoot, reference);
+                }
+                catch (Exception ex)
                 {
                     throw new ServiceSourcesConfigurationException(
-                        $"Service '{serviceName}': cache directory '{repoRoot}' already contains a clone of " +
-                        $"'{existingOrigin}', which does not match the configured repository '{metadata.Repository}'. " +
-                        "Remove the cache directory or fix the configured repository URL.");
+                        $"Service '{serviceName}': failed to checkout ref '{reference}' of repository '{metadata.Repository}' at '{repoRoot}'.", ex);
                 }
             }
         }
@@ -97,19 +93,15 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         return projectPath;
     }
 
-    private static bool RepositoryUrlsMatch(string a, string b) =>
-        string.Equals(NormalizeRepositoryUrl(a), NormalizeRepositoryUrl(b), StringComparison.Ordinal);
-
-    private static string NormalizeRepositoryUrl(string repositoryUrl)
+    private static void EnsureGitignore(string appHostDirectory)
     {
-        var trimmed = repositoryUrl.TrimEnd('/');
-        return trimmed.EndsWith(".git", StringComparison.OrdinalIgnoreCase) ? trimmed[..^4] : trimmed;
-    }
+        var dir = Path.Combine(appHostDirectory, ".servicesources");
+        Directory.CreateDirectory(dir);
 
-    private static string GetRepositoryName(string repositoryUrl)
-    {
-        var trimmed = repositoryUrl.TrimEnd('/');
-        var lastSegment = trimmed[(trimmed.LastIndexOf('/') + 1)..];
-        return lastSegment.EndsWith(".git") ? lastSegment[..^4] : lastSegment;
+        var gitignorePath = Path.Combine(dir, ".gitignore");
+        if (!File.Exists(gitignorePath))
+        {
+            File.WriteAllText(gitignorePath, "*\n!.gitignore\n");
+        }
     }
 }

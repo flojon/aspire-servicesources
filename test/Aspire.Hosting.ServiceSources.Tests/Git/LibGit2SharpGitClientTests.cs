@@ -83,19 +83,6 @@ public class LibGit2SharpGitClientTests
     }
 
     [Fact]
-    public void GetOriginUrl_ReturnsOriginRemoteUrlAfterClone()
-    {
-        var origin = CreateOriginRepo();
-        var destination = Path.Combine(Directory.CreateTempSubdirectory().FullName, "clone");
-        var client = new LibGit2SharpGitClient();
-        client.Clone(origin, destination);
-
-        var originUrl = client.GetOriginUrl(destination);
-
-        Assert.Equal(origin, originUrl);
-    }
-
-    [Fact]
     public void Fetch_PullsRefCreatedOnOriginAfterInitialClone()
     {
         var origin = CreateOriginRepo();

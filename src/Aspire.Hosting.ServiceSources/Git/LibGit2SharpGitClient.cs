@@ -91,10 +91,4 @@ internal sealed class LibGit2SharpGitClient : IGitClient
         var commit = repo.Lookup<Commit>(reference);
         return commit is not null && commit.Sha == headSha;
     }
-
-    public string? GetOriginUrl(string repositoryPath)
-    {
-        using var repo = new Repository(repositoryPath);
-        return repo.Network.Remotes["origin"]?.Url;
-    }
 }
