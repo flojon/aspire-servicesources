@@ -55,7 +55,7 @@ public sealed class ServiceResource : Resource, IResourceWithServiceDiscovery
     internal static IResourceBuilder<IResourceWithServiceDiscovery> CreateFacadeForUri(
         IDistributedApplicationBuilder builder, string name, Uri uri)
     {
-        var facade = builder.CreateResourceBuilder(new ServiceResource(name));
+        var facade = CreateEmptyFacade(builder, name);
 
         var endpoint = new EndpointAnnotation(
             ProtocolType.Tcp, uriScheme: uri.Scheme, name: uri.Scheme, transport: "http", port: uri.Port, targetPort: uri.Port)

@@ -4,6 +4,7 @@ using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Sources;
+using Aspire.Hosting.ServiceSources.Tests;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Sources;
@@ -40,11 +41,7 @@ public class PendingLocalResolutionsTests
     }
 
     private static IDistributedApplicationBuilder CreateBuilder(string appHostDirectory) =>
-        DistributedApplication.CreateBuilder(new DistributedApplicationOptions
-        {
-            ProjectDirectory = appHostDirectory,
-            Args = [],
-        });
+        TestHelpers.CreateBuilder(appHostDirectory);
 
     private static string CreateAppHostDirectory()
     {
@@ -63,8 +60,7 @@ public class PendingLocalResolutionsTests
     private static ServiceDeveloperConfig DevConfig() => new() { Source = "local" };
 
     private static Task PublishBeforeStartEventAsync(IDistributedApplicationBuilder builder) =>
-        builder.Eventing.PublishAsync(new BeforeStartEvent(
-            builder.Services.BuildServiceProvider(), new DistributedApplicationModel(builder.Resources)));
+        TestHelpers.PublishBeforeStartEventAsync(builder);
 
     [Fact]
     public async Task Add_TwoCallsSameBuilder_ShareOneSubscription_BothResolveExactlyOnce()

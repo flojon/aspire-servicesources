@@ -19,6 +19,7 @@ internal sealed class PendingLocalResolutions
     private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, PendingLocalResolutions> Cache = new();
 
     private readonly List<PendingResolution> _pending = [];
+    private bool _resolutionStarted;
 
     public static PendingLocalResolutions For(IDistributedApplicationBuilder builder) =>
         Cache.GetValue(builder, static b =>
@@ -28,10 +29,23 @@ internal sealed class PendingLocalResolutions
             return store;
         });
 
-    public void Add(PendingResolution pending) => _pending.Add(pending);
+    public void Add(PendingResolution pending)
+    {
+        if (_resolutionStarted)
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Cannot register 'local'-sourced service '{pending.ServiceName}' because BeforeStartEvent has already " +
+                "fired and pending 'local' services have already been resolved. All AddService calls for 'local' sources " +
+                "must happen before the app host starts.");
+        }
+
+        _pending.Add(pending);
+    }
 
     private async Task ResolveAllAsync(IDistributedApplicationBuilder builder, CancellationToken cancellationToken)
     {
+        _resolutionStarted = true;
+
         var cacheDirectory = ServiceSourcesConfigCache.GetCacheDirectory(builder);
 
         var results = await Task.WhenAll(_pending.Select(pending =>

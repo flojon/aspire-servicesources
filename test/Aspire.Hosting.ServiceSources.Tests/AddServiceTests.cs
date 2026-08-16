@@ -8,15 +8,10 @@ namespace Aspire.Hosting.ServiceSources.Tests;
 public class AddServiceTests
 {
     private static IDistributedApplicationBuilder CreateBuilder(string appHostDirectory) =>
-        DistributedApplication.CreateBuilder(new DistributedApplicationOptions
-        {
-            ProjectDirectory = appHostDirectory,
-            Args = [],
-        });
+        TestHelpers.CreateBuilder(appHostDirectory);
 
     private static Task PublishBeforeStartEventAsync(IDistributedApplicationBuilder builder) =>
-        builder.Eventing.PublishAsync(new BeforeStartEvent(
-            builder.Services.BuildServiceProvider(), new DistributedApplicationModel(builder.Resources)));
+        TestHelpers.PublishBeforeStartEventAsync(builder);
 
     [Fact]
     public async Task AddService_LocalSourceWithPathOverride_ReturnsFacadeWrappingRealProject()
