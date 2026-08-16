@@ -13,6 +13,7 @@ public static class ServiceSourcesBuilderExtensions
         ["local"] = new LocalProjectSource(new LibGit2SharpGitClient()),
         ["kubernetes"] = new KubernetesSource(new SocketPortAllocator()),
         ["url"] = new UrlSource(),
+        ["container"] = new ContainerSource(),
     };
 
     /// <summary>
@@ -25,7 +26,10 @@ public static class ServiceSourcesBuilderExtensions
     /// <c>kubectl port-forward</c> process against an already-running service in a Kubernetes
     /// dev cluster, added via Aspire's own <c>AddExecutable(...)</c> (the <c>"kubernetes"</c>
     /// source); or a fixed, already-known URL — e.g. a Kubernetes ingress or any other reachable
-    /// HTTP endpoint — with no underlying resource for Aspire to run (the <c>"url"</c> source).
+    /// HTTP endpoint — with no underlying resource for Aspire to run (the <c>"url"</c> source);
+    /// or a published container image run locally via Aspire's own <c>AddContainer(...)</c>,
+    /// with image pull and lifecycle managed entirely by Aspire's own container-runtime
+    /// integration (the <c>"container"</c> source).
     /// </summary>
     /// <returns>
     /// An <see cref="IResourceBuilder{T}"/> wrapping a <see cref="ServiceResource"/> facade —

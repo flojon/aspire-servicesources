@@ -248,4 +248,94 @@ public class AddServiceTests
         Assert.Contains("orders", ex.Message);
         Assert.Contains("context", ex.Message);
     }
+
+    [Fact]
+    public void AddService_ContainerSource_AddsContainerAndReturnsFacade()
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+                container:
+                  image: ghcr.io/company/orders
+                  port: 8080
+                  defaultTag: latest
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "container" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var service = builder.AddService("orders");
+
+        Assert.Contains(builder.Resources, r => r.Name == "orders");
+        Assert.DoesNotContain(builder.Resources, r => ReferenceEquals(r, service.Resource));
+
+        var container = Assert.IsType<ContainerResource>(
+            Assert.Single(builder.Resources, r => r.Name == "orders"));
+        var imageAnnotation = container.Annotations.OfType<ContainerImageAnnotation>().Single();
+        Assert.Equal("ghcr.io/company/orders", imageAnnotation.Image);
+        Assert.Equal("latest", imageAnnotation.Tag);
+
+        var endpoint = service.GetEndpoint("http");
+        Assert.Equal("http", endpoint.EndpointName);
+
+        var endpointAnnotation = container.Annotations.OfType<EndpointAnnotation>().Single();
+        Assert.Equal(8080, endpointAnnotation.TargetPort);
+        Assert.Null(endpointAnnotation.Port);
+        Assert.True(endpointAnnotation.IsProxied);
+    }
+
+    [Fact]
+    public void AddService_ContainerSourceLocalTagOverride_TakesPrecedenceOverCatalogDefaultTag()
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+                container:
+                  image: ghcr.io/company/orders
+                  port: 8080
+                  defaultTag: latest
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "container", "tag": "v1.4.2" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var service = builder.AddService("orders");
+
+        var container = Assert.IsType<ContainerResource>(
+            Assert.Single(builder.Resources, r => r.Name == "orders"));
+        var imageAnnotation = container.Annotations.OfType<ContainerImageAnnotation>().Single();
+        Assert.Equal("v1.4.2", imageAnnotation.Tag);
+    }
+
+    [Fact]
+    public void AddService_ContainerSourceMissingImage_ThrowsNamingServiceAndImage()
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "container" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
+
+        Assert.Contains("orders", ex.Message);
+        Assert.Contains("container.image", ex.Message);
+    }
 }
