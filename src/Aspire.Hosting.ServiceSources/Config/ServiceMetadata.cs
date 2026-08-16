@@ -8,5 +8,7 @@ internal sealed class ServiceMetadata
 
     public string? DefaultRef { get; set; }
 
-    public ClusterMetadata? Cluster { get; set; }
+    public KubernetesMetadata? Kubernetes { get; set; }
+
+    public UrlMetadata? Url { get; set; }
 }

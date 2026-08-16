@@ -46,13 +46,13 @@ public class DeveloperConfigLoaderTests
     }
 
     [Fact]
-    public void Load_ParsesClusterFieldsFromJson()
+    public void Load_ParsesKubernetesFieldsFromJson()
     {
         var path = Path.GetTempFileName();
         File.WriteAllText(path, """
             {
               "services": {
-                "orders": { "source": "cluster", "context": "dev-west", "namespace": "orders", "port": 8080 }
+                "orders": { "source": "kubernetes", "context": "dev-west", "namespace": "orders", "port": 8080 }
               }
             }
             """);
@@ -61,7 +61,7 @@ public class DeveloperConfigLoaderTests
         {
             var config = DeveloperConfigLoader.Load(path);
 
-            Assert.Equal("cluster", config.Services["orders"].Source);
+            Assert.Equal("kubernetes", config.Services["orders"].Source);
             Assert.Equal("dev-west", config.Services["orders"].Context);
             Assert.Equal("orders", config.Services["orders"].Namespace);
             Assert.Equal(8080, config.Services["orders"].Port);
@@ -73,7 +73,7 @@ public class DeveloperConfigLoaderTests
     }
 
     [Fact]
-    public void Load_ClusterFieldsOmitted_LeavesThemNull()
+    public void Load_KubernetesFieldsOmitted_LeavesThemNull()
     {
         var path = Path.GetTempFileName();
         File.WriteAllText(path, """

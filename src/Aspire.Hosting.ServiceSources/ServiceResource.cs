@@ -1,35 +1,21 @@
+using System.Net.Sockets;
 using Aspire.Hosting.ApplicationModel;
 
 namespace Aspire.Hosting.ServiceSources;
 
 /// <summary>
-/// A reference-only facade over the real resource that <c>AddService()</c> resolved — for
-/// example, a local project added via Aspire's own <c>AddProject(name, path)</c> (the
-/// <c>"local"</c> source), or a <c>kubectl port-forward</c> executable added via
-/// <c>AddExecutable(...)</c> (the <c>"cluster"</c> source). This type exists so consumers get
-/// an <see cref="IResourceWithServiceDiscovery"/> handle to pass to
-/// <c>WithReference(...)</c> and to call <c>GetEndpoint(...)</c> on, without this package
-/// needing to expose the underlying resource type directly.
+/// A reference-only facade over the real resource that <c>AddService()</c> resolved (a local
+/// project, a <c>kubectl port-forward</c> executable, etc.). Gives consumers an
+/// <see cref="IResourceWithServiceDiscovery"/> handle for <c>WithReference(...)</c> /
+/// <c>GetEndpoint(...)</c> without exposing the underlying resource type.
 /// </summary>
 /// <remarks>
-/// <para>
-/// The <see cref="IResourceBuilder{T}"/> returned by <c>AddService()</c> wraps this facade.
-/// It is deliberately <b>never added to <c>builder.Resources</c></b> — the real resource that
-/// <c>AddService()</c> resolved is what actually participates in Aspire's resource model, gets
-/// built, and runs. The facade only carries copies of the real resource's
-/// <c>EndpointAnnotation</c>s so that <c>GetEndpoint(...)</c>/<c>WithReference(...)</c>
-/// resolve identically to the real resource.
-/// </para>
-/// <para>
-/// Because the facade is never registered, calling further Aspire builder-extension methods
-/// on the returned builder — e.g. <c>.WithEnvironment(...)</c>, <c>.WithHttpEndpoint(...)</c>,
-/// <c>.WithArgs(...)</c>, or any other resource-configuration extension — compiles
-/// successfully but <b>silently has no effect</b>: the annotation is added to a resource
-/// object that Aspire's DCP/dashboard machinery never sees. Configure the underlying project
-/// (endpoints, environment variables, command-line args, etc.) in the AppHost that owns it, or
-/// via the <c>servicesources.yaml</c>/<c>servicesources.local.json</c> configuration — not by
-/// chaining calls onto the value returned from <c>AddService()</c>.
-/// </para>
+/// Deliberately <b>never added to <c>builder.Resources</c></b> — the real resource is what
+/// Aspire actually builds and runs; the facade just carries copies of its
+/// <c>EndpointAnnotation</c>s. Because it's unregistered, further builder-extension calls on
+/// it (<c>.WithEnvironment(...)</c>, <c>.WithHttpEndpoint(...)</c>, etc.) compile but
+/// <b>silently no-op</b>. Configure the underlying resource directly, or via
+/// <c>servicesources.yaml</c>/<c>servicesources.local.json</c>.
 /// </remarks>
 public sealed class ServiceResource : Resource, IResourceWithServiceDiscovery
 {
@@ -58,5 +44,30 @@ public sealed class ServiceResource : Resource, IResourceWithServiceDiscovery
         {
             facade.Resource.Annotations.Add(endpoint);
         }
+    }
+
+    /// <summary>
+    /// Creates a facade whose single endpoint resolves to a fixed, already-known
+    /// <paramref name="uri"/>. Used by the <c>"url"</c> source, which has no underlying
+    /// resource for DCP to allocate an endpoint for, so the <see cref="AllocatedEndpoint"/> is
+    /// set eagerly here instead.
+    /// </summary>
+    internal static IResourceBuilder<IResourceWithServiceDiscovery> CreateFacadeForUri(
+        IDistributedApplicationBuilder builder, string name, Uri uri)
+    {
+        var facade = builder.CreateResourceBuilder(new ServiceResource(name));
+
+        var endpoint = new EndpointAnnotation(
+            ProtocolType.Tcp, uriScheme: uri.Scheme, name: uri.Scheme, transport: "http", port: uri.Port, targetPort: uri.Port)
+        {
+            TargetHost = uri.Host,
+            IsProxied = false,
+        };
+        endpoint.AllocatedEndpoint = new AllocatedEndpoint(
+            endpoint, uri.Host, uri.Port, EndpointBindingMode.SingleAddress, targetPortExpression: null);
+
+        facade.Resource.Annotations.Add(endpoint);
+
+        return facade;
     }
 }

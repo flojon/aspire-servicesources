@@ -5,7 +5,7 @@ using Aspire.Hosting.ServiceSources.Sources;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 
-public class ClusterSourceTests
+public class KubernetesSourceTests
 {
     private sealed class FakePortAllocator(int port) : IPortAllocator
     {
@@ -14,22 +14,22 @@ public class ClusterSourceTests
 
     private const string ServiceName = "orders";
 
-    private static ServiceMetadata Metadata(string? clusterService = "orders-svc", int? clusterPort = 8080) =>
+    private static ServiceMetadata Metadata(string? kubernetesService = "orders-svc", int? kubernetesPort = 8080) =>
         new()
         {
             Repository = "https://github.com/company/orders",
             Project = "Orders.csproj",
-            Cluster = clusterService is null ? null : new ClusterMetadata { Service = clusterService, Port = clusterPort },
+            Kubernetes = kubernetesService is null ? null : new KubernetesMetadata { Service = kubernetesService, Port = kubernetesPort },
         };
 
     private static ServiceDeveloperConfig DevConfig(string? context = "dev-west", string? @namespace = null, int? port = null) =>
-        new() { Source = "cluster", Context = context, Namespace = @namespace, Port = port };
+        new() { Source = "kubernetes", Context = context, Namespace = @namespace, Port = port };
 
     [Fact]
     public void BuildPortForwardArgs_AllFieldsSet_BuildsArgsInOrder()
     {
-        var args = ClusterSource.BuildPortForwardArgs(
-            ServiceName, Metadata(clusterService: "orders-svc", clusterPort: 8080),
+        var args = KubernetesSource.BuildPortForwardArgs(
+            ServiceName, Metadata(kubernetesService: "orders-svc", kubernetesPort: 8080),
             DevConfig(context: "dev-west", @namespace: "orders", port: null),
             new FakePortAllocator(54321), out var localPort, out var remotePort);
 
@@ -43,7 +43,7 @@ public class ClusterSourceTests
     [Fact]
     public void BuildPortForwardArgs_NamespaceOmitted_DefaultsToDefaultNamespace()
     {
-        var args = ClusterSource.BuildPortForwardArgs(
+        var args = KubernetesSource.BuildPortForwardArgs(
             ServiceName, Metadata(), DevConfig(@namespace: null),
             new FakePortAllocator(1), out _, out _);
 
@@ -54,8 +54,8 @@ public class ClusterSourceTests
     [Fact]
     public void BuildPortForwardArgs_LocalPortOverride_TakesPrecedenceOverCatalogPort()
     {
-        ClusterSource.BuildPortForwardArgs(
-            ServiceName, Metadata(clusterPort: 8080), DevConfig(port: 9090),
+        KubernetesSource.BuildPortForwardArgs(
+            ServiceName, Metadata(kubernetesPort: 8080), DevConfig(port: 9090),
             new FakePortAllocator(1), out _, out var remotePort);
 
         Assert.Equal(9090, remotePort);
@@ -64,30 +64,30 @@ public class ClusterSourceTests
     [Fact]
     public void BuildPortForwardArgs_LocalPortUnset_FallsBackToCatalogPort()
     {
-        ClusterSource.BuildPortForwardArgs(
-            ServiceName, Metadata(clusterPort: 8080), DevConfig(port: null),
+        KubernetesSource.BuildPortForwardArgs(
+            ServiceName, Metadata(kubernetesPort: 8080), DevConfig(port: null),
             new FakePortAllocator(1), out _, out var remotePort);
 
         Assert.Equal(8080, remotePort);
     }
 
     [Fact]
-    public void BuildPortForwardArgs_NoClusterBlock_ThrowsNamingServiceAndClusterService()
+    public void BuildPortForwardArgs_NoKubernetesBlock_ThrowsNamingServiceAndKubernetesService()
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            ClusterSource.BuildPortForwardArgs(
-                ServiceName, Metadata(clusterService: null), DevConfig(),
+            KubernetesSource.BuildPortForwardArgs(
+                ServiceName, Metadata(kubernetesService: null), DevConfig(),
                 new FakePortAllocator(1), out _, out _));
 
         Assert.Contains(ServiceName, ex.Message);
-        Assert.Contains("cluster.service", ex.Message);
+        Assert.Contains("kubernetes.service", ex.Message);
     }
 
     [Fact]
     public void BuildPortForwardArgs_MissingContext_ThrowsNamingServiceAndContext()
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            ClusterSource.BuildPortForwardArgs(
+            KubernetesSource.BuildPortForwardArgs(
                 ServiceName, Metadata(), DevConfig(context: null),
                 new FakePortAllocator(1), out _, out _));
 
@@ -96,22 +96,22 @@ public class ClusterSourceTests
     }
 
     [Fact]
-    public void BuildPortForwardArgs_EmptyClusterService_ThrowsNamingServiceAndClusterService()
+    public void BuildPortForwardArgs_EmptyKubernetesService_ThrowsNamingServiceAndKubernetesService()
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            ClusterSource.BuildPortForwardArgs(
-                ServiceName, Metadata(clusterService: ""), DevConfig(),
+            KubernetesSource.BuildPortForwardArgs(
+                ServiceName, Metadata(kubernetesService: ""), DevConfig(),
                 new FakePortAllocator(1), out _, out _));
 
         Assert.Contains(ServiceName, ex.Message);
-        Assert.Contains("cluster.service", ex.Message);
+        Assert.Contains("kubernetes.service", ex.Message);
     }
 
     [Fact]
     public void BuildPortForwardArgs_EmptyContext_ThrowsNamingServiceAndContext()
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            ClusterSource.BuildPortForwardArgs(
+            KubernetesSource.BuildPortForwardArgs(
                 ServiceName, Metadata(), DevConfig(context: ""),
                 new FakePortAllocator(1), out _, out _));
 
@@ -123,8 +123,8 @@ public class ClusterSourceTests
     public void BuildPortForwardArgs_PortMissingFromBothPlaces_ThrowsNamingServiceAndPort()
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            ClusterSource.BuildPortForwardArgs(
-                ServiceName, Metadata(clusterPort: null), DevConfig(port: null),
+            KubernetesSource.BuildPortForwardArgs(
+                ServiceName, Metadata(kubernetesPort: null), DevConfig(port: null),
                 new FakePortAllocator(1), out _, out _));
 
         Assert.Contains(ServiceName, ex.Message);
@@ -140,8 +140,8 @@ public class ClusterSourceTests
         var allocator = new TrackingPortAllocator(() => allocatorCalled = true, 1);
 
         Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            ClusterSource.BuildPortForwardArgs(
-                ServiceName, Metadata(clusterService: null), DevConfig(),
+            KubernetesSource.BuildPortForwardArgs(
+                ServiceName, Metadata(kubernetesService: null), DevConfig(),
                 allocator, out _, out _));
 
         Assert.False(allocatorCalled);

@@ -109,7 +109,7 @@ public class AddServiceTests
     }
 
     [Fact]
-    public async Task AddService_ClusterSource_AddsPortForwardExecutableAndReturnsFacade()
+    public async Task AddService_KubernetesSource_AddsPortForwardExecutableAndReturnsFacade()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
@@ -117,12 +117,12 @@ public class AddServiceTests
               orders:
                 repository: https://github.com/company/orders
                 project: Orders.csproj
-                cluster:
+                kubernetes:
                   service: orders-svc
                   port: 8080
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
-            { "services": { "orders": { "source": "cluster", "context": "dev-west", "namespace": "orders-ns" } } }
+            { "services": { "orders": { "source": "kubernetes", "context": "dev-west", "namespace": "orders-ns" } } }
             """);
 
         var builder = CreateBuilder(appHostDir);
@@ -159,7 +159,7 @@ public class AddServiceTests
     }
 
     [Fact]
-    public void AddService_ClusterSourceMissingContext_ThrowsNamingServiceAndContext()
+    public void AddService_UrlSource_ReturnsFacadeResolvingToConfiguredUrl()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
@@ -167,12 +167,85 @@ public class AddServiceTests
               orders:
                 repository: https://github.com/company/orders
                 project: Orders.csproj
-                cluster:
+                url:
+                  url: https://orders.example.com
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "url" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var service = builder.AddService("orders");
+
+        Assert.DoesNotContain(builder.Resources, r => ReferenceEquals(r, service.Resource));
+
+        var endpoint = service.GetEndpoint("https");
+        Assert.True(endpoint.IsAllocated);
+        Assert.Equal("https://orders.example.com:443", endpoint.Url);
+    }
+
+    [Fact]
+    public void AddService_UrlSourceLocalOverride_TakesPrecedenceOverCatalogUrl()
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+                url:
+                  url: https://orders.example.com
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "url", "url": "https://orders.dev.internal" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var service = builder.AddService("orders");
+
+        var endpoint = service.GetEndpoint("https");
+        Assert.Equal("https://orders.dev.internal:443", endpoint.Url);
+    }
+
+    [Fact]
+    public void AddService_UrlSourceMissingUrl_ThrowsNamingServiceAndUrl()
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "url" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
+
+        Assert.Contains("orders", ex.Message);
+        Assert.Contains("url", ex.Message);
+    }
+
+    [Fact]
+    public void AddService_KubernetesSourceMissingContext_ThrowsNamingServiceAndContext()
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+                kubernetes:
                   service: orders-svc
                   port: 8080
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
-            { "services": { "orders": { "source": "cluster" } } }
+            { "services": { "orders": { "source": "kubernetes" } } }
             """);
 
         var builder = CreateBuilder(appHostDir);
