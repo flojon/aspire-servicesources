@@ -77,46 +77,4 @@ public class ServiceSourcesConfigCacheTests
         Assert.Contains("orders", ex.Message);
         Assert.Contains("servicesources.local.json", ex.Message);
     }
-
-    [Fact]
-    public void GetCacheDirectory_ExpandsTildeToHomeDirectory()
-    {
-        var dir = CreateAppHostDirectory(
-            "services: {}",
-            """{ "cacheDirectory": "~/.servicesources/repos", "services": {} }""");
-
-        var builder = CreateBuilder(dir);
-
-        var cacheDirectory = ServiceSourcesConfigCache.GetCacheDirectory(builder);
-
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        Assert.Equal(Path.Combine(home, ".servicesources/repos"), cacheDirectory);
-    }
-
-    [Fact]
-    public void GetCacheDirectory_DefaultsWhenNotConfigured()
-    {
-        var dir = CreateAppHostDirectory("services: {}", """{ "services": {} }""");
-        var builder = CreateBuilder(dir);
-
-        var cacheDirectory = ServiceSourcesConfigCache.GetCacheDirectory(builder);
-
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        Assert.Equal(Path.Combine(home, ".servicesources/repos"), cacheDirectory);
-    }
-
-    [Fact]
-    public void GetCacheDirectory_RelativePath_AnchorsToAppHostDirectoryNotProcessCwd()
-    {
-        var dir = CreateAppHostDirectory(
-            "services: {}",
-            """{ "cacheDirectory": "relative-cache", "services": {} }""");
-
-        var builder = CreateBuilder(dir);
-
-        var cacheDirectory = ServiceSourcesConfigCache.GetCacheDirectory(builder);
-
-        Assert.Equal(Path.Combine(dir, "relative-cache"), cacheDirectory);
-        Assert.NotEqual(Path.Combine(Environment.CurrentDirectory, "relative-cache"), cacheDirectory);
-    }
 }

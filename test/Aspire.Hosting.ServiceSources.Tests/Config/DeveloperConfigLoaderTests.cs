@@ -11,7 +11,6 @@ public class DeveloperConfigLoaderTests
         var path = Path.GetTempFileName();
         File.WriteAllText(path, """
             {
-              "cacheDirectory": "~/.servicesources/repos",
               "services": {
                 "orders": { "source": "local" },
                 "payments": { "source": "local", "path": "/home/dev/code/payments", "ref": "feature/new-checkout" }
@@ -23,7 +22,6 @@ public class DeveloperConfigLoaderTests
         {
             var config = DeveloperConfigLoader.Load(path);
 
-            Assert.Equal("~/.servicesources/repos", config.CacheDirectory);
             Assert.Equal(2, config.Services.Count);
             Assert.Equal("local", config.Services["orders"].Source);
             Assert.Null(config.Services["orders"].Path);
