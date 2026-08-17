@@ -20,8 +20,9 @@ public static class ServiceSourcesBuilderExtensions
     /// Resolves service <paramref name="name"/> to its real resource and adds it to
     /// <paramref name="builder"/>, according to the service's configured source: a local
     /// project — either a developer-managed checkout (<c>path</c> in
-    /// <c>servicesources.local.json</c>) or a package-managed git clone under the configured
-    /// cache directory — added via Aspire's own <c>AddProject(name, path)</c> without ever
+    /// <c>servicesources.local.json</c>) or a package-managed git clone under
+    /// <c>.servicesources/checkouts/&lt;serviceName&gt;</c> beneath the AppHost directory —
+    /// added via Aspire's own <c>AddProject(name, path)</c> without ever
     /// touching this AppHost's own <c>.csproj</c>/<c>.sln</c> (the <c>"local"</c> source); or a
     /// <c>kubectl port-forward</c> process against an already-running service in a Kubernetes
     /// dev cluster, added via Aspire's own <c>AddExecutable(...)</c> (the <c>"kubernetes"</c>

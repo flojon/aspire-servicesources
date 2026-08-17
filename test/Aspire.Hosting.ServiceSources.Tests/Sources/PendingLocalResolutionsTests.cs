@@ -37,6 +37,14 @@ public class PendingLocalResolutionsTests
         {
         }
 
+        public void Fetch(string repositoryPath)
+        {
+        }
+
+        public bool HasUncommittedChanges(string repositoryPath) => false;
+
+        public bool IsRefCheckedOut(string repositoryPath, string reference) => false;
+
         public string? GetOriginUrl(string repositoryPath) => null;
     }
 
@@ -46,11 +54,8 @@ public class PendingLocalResolutionsTests
     private static string CreateAppHostDirectory()
     {
         var dir = Directory.CreateTempSubdirectory().FullName;
-        var cacheDirectory = Directory.CreateTempSubdirectory().FullName;
         File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), "services: {}");
-        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), $$"""
-            { "cacheDirectory": "{{cacheDirectory.Replace("\\", "\\\\")}}", "services": {} }
-            """);
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), """{ "services": {} }""");
         return dir;
     }
 
