@@ -46,10 +46,8 @@ internal sealed class PendingLocalResolutions
     {
         _resolutionStarted = true;
 
-        var cacheDirectory = ServiceSourcesConfigCache.GetCacheDirectory(builder);
-
         var results = await Task.WhenAll(_pending.Select(pending =>
-            Task.Run(() => ResolveOne(pending, cacheDirectory, builder.AppHostDirectory), cancellationToken)));
+            Task.Run(() => ResolveOne(pending, builder.AppHostDirectory), cancellationToken)));
 
         var failures = results.Where(r => r.Exception is not null).ToArray();
         if (failures.Length > 0)
@@ -64,12 +62,12 @@ internal sealed class PendingLocalResolutions
         }
     }
 
-    private static ResolutionResult ResolveOne(PendingResolution pending, string cacheDirectory, string appHostDirectory)
+    private static ResolutionResult ResolveOne(PendingResolution pending, string appHostDirectory)
     {
         try
         {
             var projectPath = LocalProjectSource.ResolveProjectPath(
-                pending.ServiceName, pending.Metadata, pending.Config, cacheDirectory, appHostDirectory, pending.GitClient);
+                pending.ServiceName, pending.Metadata, pending.Config, appHostDirectory, pending.GitClient);
             return new ResolutionResult(pending, projectPath, null);
         }
         catch (Exception ex)
