@@ -15,9 +15,9 @@ AppHost's `.csproj`/`.sln`.
 
 `AddService()` is the seam: the AppHost calls it once per service, and a developer-local
 config file decides how it's actually resolved — today via a managed or self-managed local
-git checkout (`"local"` source) or a `kubectl port-forward` against a dev cluster (`"cluster"`
-source) — behind one stable return type, so the AppHost code never has to change when a
-developer switches sources.
+git checkout (`"local"` source) or a `kubectl port-forward` against a dev cluster
+(`"kubernetes"` source) — behind one stable return type, so the AppHost code never has to
+change when a developer switches sources.
 
 ## Install
 
@@ -104,7 +104,7 @@ a project reference would be.
 - Set `path` to point at a checkout you manage yourself (e.g. an existing local clone). It's
   used as-is — no clone, no checkout, no fetch, ever. `ref` cannot be combined with `path`.
 
-### `"cluster"` source
+### `"kubernetes"` source
 
 Point a service at an already-running instance in a Kubernetes dev cluster via
 `kubectl port-forward`, instead of running it locally at all.
@@ -113,7 +113,7 @@ Point a service at an already-running instance in a Kubernetes dev cluster via
 ```yaml
 services:
   orders:
-    cluster:
+    kubernetes:
       service: orders-svc
       port: 8080
 ```
@@ -123,7 +123,7 @@ services:
 {
   "services": {
     "orders": {
-      "source": "cluster",
+      "source": "kubernetes",
       "context": "dev-west",
       "namespace": "orders",
       "port": 8080
@@ -141,11 +141,13 @@ via the `"local"` source with `path` — run it to see the whole flow end to end
 
 ```bash
 cd samples/DemoAppHost
+cp servicesources.local.json.example servicesources.local.json
 aspire run
 ```
 
 ## Status
 
-Early stage, evolving fast. `"local"` and `"cluster"` sources are implemented; a container
-source and deferred/parallel resolution across multiple services are planned next — see
-[`docs/superpowers/`](docs/superpowers/) for design and implementation history.
+Early stage, evolving fast. `"local"`, `"kubernetes"`, `"url"`, and `"container"` sources are
+all implemented — see [`docs/superpowers/`](docs/superpowers/) for design and implementation
+history, including the phase 2 backlog (repo auto-update, config discovery walk-up,
+dependency/infrastructure resolution, and more).
