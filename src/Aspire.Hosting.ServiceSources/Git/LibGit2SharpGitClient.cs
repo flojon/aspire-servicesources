@@ -63,7 +63,12 @@ internal sealed class LibGit2SharpGitClient : IGitClient
     public bool HasUncommittedChanges(string repositoryPath)
     {
         using var repo = new Repository(repositoryPath);
-        return repo.RetrieveStatus().IsDirty;
+
+        // Unlike RepositoryStatus.IsDirty, deliberately excludes untracked files: build output
+        // (e.g. bin/obj) left behind by a plain `dotnet build` shouldn't make an otherwise-clean
+        // checkout look permanently dirty.
+        return repo.RetrieveStatus().Any(entry =>
+            entry.State is not (FileStatus.Ignored or FileStatus.Unaltered or FileStatus.NewInWorkdir));
     }
 
     public bool IsRefCheckedOut(string repositoryPath, string reference)
@@ -90,5 +95,11 @@ internal sealed class LibGit2SharpGitClient : IGitClient
 
         var commit = repo.Lookup<Commit>(reference);
         return commit is not null && commit.Sha == headSha;
+    }
+
+    public string? GetOriginUrl(string repositoryPath)
+    {
+        using var repo = new Repository(repositoryPath);
+        return repo.Network.Remotes["origin"]?.Url;
     }
 }

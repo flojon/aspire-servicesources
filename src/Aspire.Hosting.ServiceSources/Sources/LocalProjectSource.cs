@@ -62,20 +62,32 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
                     CheckoutWithFetchRetry(serviceName, metadata, repoRoot, reference, gitClient);
                 }
             }
-            else if (reference is not null)
+            else
             {
-                if (gitClient.HasUncommittedChanges(repoRoot))
+                var existingOrigin = gitClient.GetOriginUrl(repoRoot);
+                if (existingOrigin is not null && !RepositoryUrlsMatch(existingOrigin, metadata.Repository))
                 {
-                    if (!gitClient.IsRefCheckedOut(repoRoot, reference))
-                    {
-                        throw new ServiceSourcesConfigurationException(
-                            $"Service '{serviceName}': checkout at '{repoRoot}' has uncommitted changes and is not " +
-                            $"on the configured ref '{reference}'. Commit or stash your changes, then re-run.");
-                    }
+                    throw new ServiceSourcesConfigurationException(
+                        $"Service '{serviceName}': checkout at '{repoRoot}' already contains a clone of " +
+                        $"'{existingOrigin}', which does not match the configured repository '{metadata.Repository}'. " +
+                        "Remove the checkout directory or fix the configured repository URL.");
                 }
-                else
+
+                if (reference is not null)
                 {
-                    CheckoutWithFetchRetry(serviceName, metadata, repoRoot, reference, gitClient);
+                    if (gitClient.HasUncommittedChanges(repoRoot))
+                    {
+                        if (!gitClient.IsRefCheckedOut(repoRoot, reference))
+                        {
+                            throw new ServiceSourcesConfigurationException(
+                                $"Service '{serviceName}': checkout at '{repoRoot}' has uncommitted changes and is not " +
+                                $"on the configured ref '{reference}'. Commit or stash your changes, then re-run.");
+                        }
+                    }
+                    else if (!gitClient.IsRefCheckedOut(repoRoot, reference))
+                    {
+                        CheckoutWithFetchRetry(serviceName, metadata, repoRoot, reference, gitClient);
+                    }
                 }
             }
         }
@@ -98,9 +110,14 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
             gitClient.Checkout(repoRoot, reference);
             return;
         }
-        catch
+        catch (ServiceSourcesConfigurationException)
         {
-            // Fall through to fetch-and-retry below.
+            // Ref not resolvable from local data; fall through to fetch-and-retry below.
+        }
+        catch (Exception ex)
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': failed to checkout ref '{reference}' of repository '{metadata.Repository}' at '{repoRoot}'.", ex);
         }
 
         try
@@ -131,9 +148,27 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         Directory.CreateDirectory(dir);
 
         var gitignorePath = Path.Combine(dir, ".gitignore");
-        if (!File.Exists(gitignorePath))
+        try
         {
-            File.WriteAllText(gitignorePath, "*\n!.gitignore\n");
+            // FileMode.CreateNew is atomic: it fails if the file already exists, which makes
+            // this safe against concurrent resolution of multiple services (see
+            // PendingLocalResolutions, which resolves them in parallel) racing to create it.
+            using var stream = new FileStream(gitignorePath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            using var writer = new StreamWriter(stream);
+            writer.Write("*\n!.gitignore\n");
         }
+        catch (IOException)
+        {
+            // Already created by a concurrent resolution or a prior run — leave it as-is.
+        }
+    }
+
+    private static bool RepositoryUrlsMatch(string a, string b) =>
+        string.Equals(NormalizeRepositoryUrl(a), NormalizeRepositoryUrl(b), StringComparison.Ordinal);
+
+    private static string NormalizeRepositoryUrl(string repositoryUrl)
+    {
+        var trimmed = repositoryUrl.TrimEnd('/');
+        return trimmed.EndsWith(".git", StringComparison.OrdinalIgnoreCase) ? trimmed[..^4] : trimmed;
     }
 }

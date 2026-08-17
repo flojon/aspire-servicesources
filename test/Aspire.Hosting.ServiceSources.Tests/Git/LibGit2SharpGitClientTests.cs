@@ -131,6 +131,30 @@ public class LibGit2SharpGitClientTests
     }
 
     [Fact]
+    public void HasUncommittedChanges_UntrackedFile_ReturnsFalse()
+    {
+        var origin = CreateOriginRepo();
+        var destination = Path.Combine(Directory.CreateTempSubdirectory().FullName, "clone");
+        var client = new LibGit2SharpGitClient();
+        client.Clone(origin, destination);
+
+        File.WriteAllText(Path.Combine(destination, "bin-output.dll"), "build output");
+
+        Assert.False(client.HasUncommittedChanges(destination));
+    }
+
+    [Fact]
+    public void GetOriginUrl_ClonedRepository_ReturnsOriginUrl()
+    {
+        var origin = CreateOriginRepo();
+        var destination = Path.Combine(Directory.CreateTempSubdirectory().FullName, "clone");
+        var client = new LibGit2SharpGitClient();
+        client.Clone(origin, destination);
+
+        Assert.Equal(origin, client.GetOriginUrl(destination));
+    }
+
+    [Fact]
     public void IsRefCheckedOut_MatchingRef_ReturnsTrue()
     {
         var origin = CreateOriginRepo();

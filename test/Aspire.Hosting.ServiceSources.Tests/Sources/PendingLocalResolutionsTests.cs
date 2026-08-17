@@ -44,6 +44,8 @@ public class PendingLocalResolutionsTests
         public bool HasUncommittedChanges(string repositoryPath) => false;
 
         public bool IsRefCheckedOut(string repositoryPath, string reference) => false;
+
+        public string? GetOriginUrl(string repositoryPath) => null;
     }
 
     private static IDistributedApplicationBuilder CreateBuilder(string appHostDirectory) =>
