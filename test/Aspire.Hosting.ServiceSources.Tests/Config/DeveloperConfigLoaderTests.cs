@@ -44,13 +44,13 @@ public class DeveloperConfigLoaderTests
     }
 
     [Fact]
-    public void Load_ParsesClusterFieldsFromJson()
+    public void Load_ParsesKubernetesFieldsFromJson()
     {
         var path = Path.GetTempFileName();
         File.WriteAllText(path, """
             {
               "services": {
-                "orders": { "source": "cluster", "context": "dev-west", "namespace": "orders", "port": 8080 }
+                "orders": { "source": "kubernetes", "context": "dev-west", "namespace": "orders", "port": 8080 }
               }
             }
             """);
@@ -59,7 +59,7 @@ public class DeveloperConfigLoaderTests
         {
             var config = DeveloperConfigLoader.Load(path);
 
-            Assert.Equal("cluster", config.Services["orders"].Source);
+            Assert.Equal("kubernetes", config.Services["orders"].Source);
             Assert.Equal("dev-west", config.Services["orders"].Context);
             Assert.Equal("orders", config.Services["orders"].Namespace);
             Assert.Equal(8080, config.Services["orders"].Port);
@@ -71,7 +71,7 @@ public class DeveloperConfigLoaderTests
     }
 
     [Fact]
-    public void Load_ClusterFieldsOmitted_LeavesThemNull()
+    public void Load_KubernetesFieldsOmitted_LeavesThemNull()
     {
         var path = Path.GetTempFileName();
         File.WriteAllText(path, """
@@ -85,6 +85,51 @@ public class DeveloperConfigLoaderTests
             Assert.Null(config.Services["orders"].Context);
             Assert.Null(config.Services["orders"].Namespace);
             Assert.Null(config.Services["orders"].Port);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_ParsesTagFromJson()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            {
+              "services": {
+                "orders": { "source": "container", "tag": "v1.4.2" }
+              }
+            }
+            """);
+
+        try
+        {
+            var config = DeveloperConfigLoader.Load(path);
+
+            Assert.Equal("container", config.Services["orders"].Source);
+            Assert.Equal("v1.4.2", config.Services["orders"].Tag);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_TagOmitted_LeavesItNull()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            { "services": { "orders": { "source": "local" } } }
+            """);
+
+        try
+        {
+            var config = DeveloperConfigLoader.Load(path);
+
+            Assert.Null(config.Services["orders"].Tag);
         }
         finally
         {

@@ -23,18 +23,27 @@ public sealed class ServiceResource : Resource, IResourceWithServiceDiscovery
     {
     }
 
+    internal static IResourceBuilder<IResourceWithServiceDiscovery> CreateEmptyFacade(
+        IDistributedApplicationBuilder builder, string name) =>
+        builder.CreateResourceBuilder(new ServiceResource(name));
+
     internal static IResourceBuilder<IResourceWithServiceDiscovery> CreateFacade<TResource>(
         IDistributedApplicationBuilder builder, string name, IResourceBuilder<TResource> realResource)
         where TResource : IResource
     {
-        var facade = builder.CreateResourceBuilder(new ServiceResource(name));
+        var facade = CreateEmptyFacade(builder, name);
+        CopyEndpointAnnotations(facade, realResource);
+        return facade;
+    }
 
+    internal static void CopyEndpointAnnotations<TResource>(
+        IResourceBuilder<IResourceWithServiceDiscovery> facade, IResourceBuilder<TResource> realResource)
+        where TResource : IResource
+    {
         foreach (var endpoint in realResource.Resource.Annotations.OfType<EndpointAnnotation>())
         {
             facade.Resource.Annotations.Add(endpoint);
         }
-
-        return facade;
     }
 
     /// <summary>
@@ -46,7 +55,7 @@ public sealed class ServiceResource : Resource, IResourceWithServiceDiscovery
     internal static IResourceBuilder<IResourceWithServiceDiscovery> CreateFacadeForUri(
         IDistributedApplicationBuilder builder, string name, Uri uri)
     {
-        var facade = builder.CreateResourceBuilder(new ServiceResource(name));
+        var facade = CreateEmptyFacade(builder, name);
 
         var endpoint = new EndpointAnnotation(
             ProtocolType.Tcp, uriScheme: uri.Scheme, name: uri.Scheme, transport: "http", port: uri.Port, targetPort: uri.Port)

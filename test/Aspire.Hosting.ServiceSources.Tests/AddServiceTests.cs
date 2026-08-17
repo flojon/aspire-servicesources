@@ -1,20 +1,20 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Aspire.Hosting.ServiceSources.Tests;
 
 public class AddServiceTests
 {
     private static IDistributedApplicationBuilder CreateBuilder(string appHostDirectory) =>
-        DistributedApplication.CreateBuilder(new DistributedApplicationOptions
-        {
-            ProjectDirectory = appHostDirectory,
-            Args = [],
-        });
+        TestHelpers.CreateBuilder(appHostDirectory);
+
+    private static Task PublishBeforeStartEventAsync(IDistributedApplicationBuilder builder) =>
+        TestHelpers.PublishBeforeStartEventAsync(builder);
 
     [Fact]
-    public void AddService_LocalSourceWithPathOverride_ReturnsFacadeWrappingRealProject()
+    public async Task AddService_LocalSourceWithPathOverride_ReturnsFacadeWrappingRealProject()
     {
         var projectDir = Directory.CreateTempSubdirectory().FullName;
         File.WriteAllText(Path.Combine(projectDir, "Orders.csproj"), """
@@ -39,13 +39,14 @@ public class AddServiceTests
         var builder = CreateBuilder(appHostDir);
 
         var service = builder.AddService("orders");
+        await PublishBeforeStartEventAsync(builder);
 
         Assert.Contains(builder.Resources, r => r.Name == "orders");
         Assert.DoesNotContain(builder.Resources, r => ReferenceEquals(r, service.Resource));
     }
 
     [Fact]
-    public void AddService_RelativePathOverride_ResolvesRelativeToAppHostDirectoryNotProcessCwd()
+    public async Task AddService_RelativePathOverride_ResolvesRelativeToAppHostDirectoryNotProcessCwd()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
         var projectDir = Directory.CreateTempSubdirectory().FullName;
@@ -75,6 +76,7 @@ public class AddServiceTests
         var builder = CreateBuilder(appHostDir);
 
         var service = builder.AddService("orders");
+        await PublishBeforeStartEventAsync(builder);
 
         Assert.Contains(builder.Resources, r => r.Name == "orders");
     }
@@ -102,7 +104,7 @@ public class AddServiceTests
     }
 
     [Fact]
-    public async Task AddService_ClusterSource_AddsPortForwardExecutableAndReturnsFacade()
+    public async Task AddService_KubernetesSource_AddsPortForwardExecutableAndReturnsFacade()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
@@ -110,12 +112,12 @@ public class AddServiceTests
               orders:
                 repository: https://github.com/company/orders
                 project: Orders.csproj
-                cluster:
+                kubernetes:
                   service: orders-svc
                   port: 8080
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
-            { "services": { "orders": { "source": "cluster", "context": "dev-west", "namespace": "orders-ns" } } }
+            { "services": { "orders": { "source": "kubernetes", "context": "dev-west", "namespace": "orders-ns" } } }
             """);
 
         var builder = CreateBuilder(appHostDir);
@@ -225,7 +227,7 @@ public class AddServiceTests
     }
 
     [Fact]
-    public void AddService_ClusterSourceMissingContext_ThrowsNamingServiceAndContext()
+    public void AddService_KubernetesSourceMissingContext_ThrowsNamingServiceAndContext()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
@@ -233,12 +235,12 @@ public class AddServiceTests
               orders:
                 repository: https://github.com/company/orders
                 project: Orders.csproj
-                cluster:
+                kubernetes:
                   service: orders-svc
                   port: 8080
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
-            { "services": { "orders": { "source": "cluster" } } }
+            { "services": { "orders": { "source": "kubernetes" } } }
             """);
 
         var builder = CreateBuilder(appHostDir);
@@ -247,5 +249,95 @@ public class AddServiceTests
 
         Assert.Contains("orders", ex.Message);
         Assert.Contains("context", ex.Message);
+    }
+
+    [Fact]
+    public void AddService_ContainerSource_AddsContainerAndReturnsFacade()
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+                container:
+                  image: ghcr.io/company/orders
+                  port: 8080
+                  defaultTag: latest
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "container" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var service = builder.AddService("orders");
+
+        Assert.Contains(builder.Resources, r => r.Name == "orders");
+        Assert.DoesNotContain(builder.Resources, r => ReferenceEquals(r, service.Resource));
+
+        var container = Assert.IsType<ContainerResource>(
+            Assert.Single(builder.Resources, r => r.Name == "orders"));
+        var imageAnnotation = container.Annotations.OfType<ContainerImageAnnotation>().Single();
+        Assert.Equal("ghcr.io/company/orders", imageAnnotation.Image);
+        Assert.Equal("latest", imageAnnotation.Tag);
+
+        var endpoint = service.GetEndpoint("http");
+        Assert.Equal("http", endpoint.EndpointName);
+
+        var endpointAnnotation = container.Annotations.OfType<EndpointAnnotation>().Single();
+        Assert.Equal(8080, endpointAnnotation.TargetPort);
+        Assert.Null(endpointAnnotation.Port);
+        Assert.True(endpointAnnotation.IsProxied);
+    }
+
+    [Fact]
+    public void AddService_ContainerSourceLocalTagOverride_TakesPrecedenceOverCatalogDefaultTag()
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+                container:
+                  image: ghcr.io/company/orders
+                  port: 8080
+                  defaultTag: latest
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "container", "tag": "v1.4.2" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var service = builder.AddService("orders");
+
+        var container = Assert.IsType<ContainerResource>(
+            Assert.Single(builder.Resources, r => r.Name == "orders"));
+        var imageAnnotation = container.Annotations.OfType<ContainerImageAnnotation>().Single();
+        Assert.Equal("v1.4.2", imageAnnotation.Tag);
+    }
+
+    [Fact]
+    public void AddService_ContainerSourceMissingImage_ThrowsNamingServiceAndImage()
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "container" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
+
+        Assert.Contains("orders", ex.Message);
+        Assert.Contains("container.image", ex.Message);
     }
 }

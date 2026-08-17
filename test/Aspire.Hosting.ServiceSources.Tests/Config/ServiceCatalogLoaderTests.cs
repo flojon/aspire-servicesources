@@ -43,7 +43,7 @@ public class ServiceCatalogLoaderTests
     }
 
     [Fact]
-    public void Load_ParsesClusterBlockFromYaml()
+    public void Load_ParsesKubernetesBlockFromYaml()
     {
         var path = Path.GetTempFileName();
         File.WriteAllText(path, """
@@ -51,7 +51,7 @@ public class ServiceCatalogLoaderTests
               orders:
                 repository: https://github.com/company/orders
                 project: src/Orders.Api/Orders.Api.csproj
-                cluster:
+                kubernetes:
                   service: orders-svc
                   port: 8080
             """);
@@ -61,9 +61,9 @@ public class ServiceCatalogLoaderTests
             var catalog = ServiceCatalogLoader.Load(path);
 
             var orders = Assert.Single(catalog.Services);
-            Assert.NotNull(orders.Value.Cluster);
-            Assert.Equal("orders-svc", orders.Value.Cluster.Service);
-            Assert.Equal(8080, orders.Value.Cluster.Port);
+            Assert.NotNull(orders.Value.Kubernetes);
+            Assert.Equal("orders-svc", orders.Value.Kubernetes.Service);
+            Assert.Equal(8080, orders.Value.Kubernetes.Port);
         }
         finally
         {
@@ -72,7 +72,7 @@ public class ServiceCatalogLoaderTests
     }
 
     [Fact]
-    public void Load_NoClusterBlock_LeavesClusterNull()
+    public void Load_NoKubernetesBlock_LeavesKubernetesNull()
     {
         var path = Path.GetTempFileName();
         File.WriteAllText(path, """
@@ -86,7 +86,61 @@ public class ServiceCatalogLoaderTests
         {
             var catalog = ServiceCatalogLoader.Load(path);
 
-            Assert.Null(catalog.Services["orders"].Cluster);
+            Assert.Null(catalog.Services["orders"].Kubernetes);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_ParsesContainerBlockFromYaml()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+                container:
+                  image: ghcr.io/company/orders
+                  port: 8080
+                  defaultTag: latest
+            """);
+
+        try
+        {
+            var catalog = ServiceCatalogLoader.Load(path);
+
+            var orders = Assert.Single(catalog.Services);
+            Assert.NotNull(orders.Value.Container);
+            Assert.Equal("ghcr.io/company/orders", orders.Value.Container.Image);
+            Assert.Equal(8080, orders.Value.Container.Port);
+            Assert.Equal("latest", orders.Value.Container.DefaultTag);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_NoContainerBlock_LeavesContainerNull()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+            """);
+
+        try
+        {
+            var catalog = ServiceCatalogLoader.Load(path);
+
+            Assert.Null(catalog.Services["orders"].Container);
         }
         finally
         {

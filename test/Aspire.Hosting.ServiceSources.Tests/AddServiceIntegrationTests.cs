@@ -1,6 +1,7 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Aspire.Hosting.ServiceSources.Tests;
 
@@ -9,11 +10,10 @@ public class AddServiceIntegrationTests
     private static string FixtureRepoPath => Path.Combine(AppContext.BaseDirectory, "Fixtures", "sample-service.git");
 
     private static IDistributedApplicationBuilder CreateBuilder(string appHostDirectory) =>
-        DistributedApplication.CreateBuilder(new DistributedApplicationOptions
-        {
-            ProjectDirectory = appHostDirectory,
-            Args = [],
-        });
+        TestHelpers.CreateBuilder(appHostDirectory);
+
+    private static Task PublishBeforeStartEventAsync(IDistributedApplicationBuilder builder) =>
+        TestHelpers.PublishBeforeStartEventAsync(builder);
 
     private static int? PortOf(IDistributedApplicationBuilder builder, string serviceName)
     {
@@ -24,7 +24,7 @@ public class AddServiceIntegrationTests
     }
 
     [Fact]
-    public void AddService_ManagedClone_ClonesRealRepoAndChecksOutFeatureRef()
+    public async Task AddService_ManagedClone_ClonesRealRepoAndChecksOutFeatureRef()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
 
@@ -45,7 +45,13 @@ public class AddServiceIntegrationTests
 
         var service = builder.AddService("orders");
 
+        // Deferred resolution: nothing is cloned or registered until BeforeStartEvent fires.
         var clonedProjectPath = Path.Combine(appHostDir, ".servicesources", "checkouts", "orders", "SampleProj", "SampleProj.csproj");
+        Assert.False(File.Exists(clonedProjectPath));
+        Assert.DoesNotContain(builder.Resources, r => r.Name == "orders");
+
+        await PublishBeforeStartEventAsync(builder);
+
         Assert.True(File.Exists(clonedProjectPath));
 
         var endpoint = service.GetEndpoint("http");
@@ -54,7 +60,7 @@ public class AddServiceIntegrationTests
     }
 
     [Fact]
-    public void AddService_TwoServicesSameRepoDifferentRefs_BothResolveIndependently()
+    public async Task AddService_TwoServicesSameRepoDifferentRefs_BothResolveIndependently()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
 
@@ -81,12 +87,14 @@ public class AddServiceIntegrationTests
         builder.AddService("orders-main");
         builder.AddService("orders-v2");
 
+        await PublishBeforeStartEventAsync(builder);
+
         Assert.Equal(5001, PortOf(builder, "orders-main"));
         Assert.Equal(5002, PortOf(builder, "orders-v2"));
     }
 
     [Fact]
-    public void AddService_TwoServicesSameRepoSameRef_BothResolveIndependently()
+    public async Task AddService_TwoServicesSameRepoSameRef_BothResolveIndependently()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
 
@@ -112,6 +120,8 @@ public class AddServiceIntegrationTests
 
         builder.AddService("orders-a");
         builder.AddService("orders-b");
+
+        await PublishBeforeStartEventAsync(builder);
 
         Assert.Equal(5001, PortOf(builder, "orders-a"));
         Assert.Equal(5001, PortOf(builder, "orders-b"));

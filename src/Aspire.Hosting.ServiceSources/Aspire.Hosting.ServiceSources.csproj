@@ -6,10 +6,20 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <PackageId>Aspire.Hosting.ServiceSources</PackageId>
+    <Description>Aspire hosting integration for declarative service sources.</Description>
+    <RepositoryUrl>https://github.com/flojon/aspire-servicesources</RepositoryUrl>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting" Version="13.4.6" />
     <PackageReference Include="LibGit2Sharp" Version="0.32.0" />
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
+    <PackageReference Include="MinVer" Version="6.0.0" PrivateAssets="All" />
   </ItemGroup>
 
 </Project>
