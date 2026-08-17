@@ -132,7 +132,7 @@ public class PendingLocalResolutionsTests
     public async Task ResolveAllAsync_TwoSlowPendingResolutions_RunsThemInParallel()
     {
         var builder = CreateBuilder(CreateAppHostDirectory());
-        var delay = TimeSpan.FromMilliseconds(300);
+        var delay = TimeSpan.FromMilliseconds(400);
         var facadeA = ServiceResource.CreateEmptyFacade(builder, "orders");
         var facadeB = ServiceResource.CreateEmptyFacade(builder, "billing");
         var pending = PendingLocalResolutions.For(builder);
@@ -143,6 +143,9 @@ public class PendingLocalResolutionsTests
         await PublishBeforeStartEventAsync(builder);
         stopwatch.Stop();
 
-        Assert.True(stopwatch.Elapsed < delay * 2, $"Expected parallel resolution to take less than {delay * 2}, took {stopwatch.Elapsed}.");
+        // Sequential execution would take ~2x delay; parallel execution should land close to 1x delay.
+        // The 1.5x threshold sits comfortably between the two to absorb CI scheduling jitter.
+        var threshold = delay + delay / 2;
+        Assert.True(stopwatch.Elapsed < threshold, $"Expected parallel resolution to take less than {threshold}, took {stopwatch.Elapsed}.");
     }
 }
