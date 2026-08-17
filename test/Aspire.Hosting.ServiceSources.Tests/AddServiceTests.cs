@@ -1,20 +1,20 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Aspire.Hosting.ServiceSources.Tests;
 
 public class AddServiceTests
 {
     private static IDistributedApplicationBuilder CreateBuilder(string appHostDirectory) =>
-        DistributedApplication.CreateBuilder(new DistributedApplicationOptions
-        {
-            ProjectDirectory = appHostDirectory,
-            Args = [],
-        });
+        TestHelpers.CreateBuilder(appHostDirectory);
+
+    private static Task PublishBeforeStartEventAsync(IDistributedApplicationBuilder builder) =>
+        TestHelpers.PublishBeforeStartEventAsync(builder);
 
     [Fact]
-    public void AddService_LocalSourceWithPathOverride_ReturnsFacadeWrappingRealProject()
+    public async Task AddService_LocalSourceWithPathOverride_ReturnsFacadeWrappingRealProject()
     {
         var projectDir = Directory.CreateTempSubdirectory().FullName;
         File.WriteAllText(Path.Combine(projectDir, "Orders.csproj"), """
@@ -39,13 +39,14 @@ public class AddServiceTests
         var builder = CreateBuilder(appHostDir);
 
         var service = builder.AddService("orders");
+        await PublishBeforeStartEventAsync(builder);
 
         Assert.Contains(builder.Resources, r => r.Name == "orders");
         Assert.DoesNotContain(builder.Resources, r => ReferenceEquals(r, service.Resource));
     }
 
     [Fact]
-    public void AddService_RelativePathOverride_ResolvesRelativeToAppHostDirectoryNotProcessCwd()
+    public async Task AddService_RelativePathOverride_ResolvesRelativeToAppHostDirectoryNotProcessCwd()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
         var projectDir = Directory.CreateTempSubdirectory().FullName;
@@ -75,6 +76,7 @@ public class AddServiceTests
         var builder = CreateBuilder(appHostDir);
 
         var service = builder.AddService("orders");
+        await PublishBeforeStartEventAsync(builder);
 
         Assert.Contains(builder.Resources, r => r.Name == "orders");
     }

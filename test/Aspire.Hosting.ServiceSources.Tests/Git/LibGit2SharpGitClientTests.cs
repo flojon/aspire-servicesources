@@ -94,4 +94,21 @@ public class LibGit2SharpGitClientTests
 
         Assert.Equal(origin, originUrl);
     }
+
+    [Fact]
+    public async Task Clone_TwoDifferentRepositoriesConcurrently_BothSucceedWithoutCorruption()
+    {
+        var originA = CreateOriginRepo();
+        var originB = CreateOriginRepo();
+        var destinationA = Path.Combine(Directory.CreateTempSubdirectory().FullName, "clone-a");
+        var destinationB = Path.Combine(Directory.CreateTempSubdirectory().FullName, "clone-b");
+        var client = new LibGit2SharpGitClient();
+
+        await Task.WhenAll(
+            Task.Run(() => client.Clone(originA, destinationA)),
+            Task.Run(() => client.Clone(originB, destinationB)));
+
+        Assert.Equal("main content", File.ReadAllText(Path.Combine(destinationA, "file.txt")));
+        Assert.Equal("main content", File.ReadAllText(Path.Combine(destinationB, "file.txt")));
+    }
 }

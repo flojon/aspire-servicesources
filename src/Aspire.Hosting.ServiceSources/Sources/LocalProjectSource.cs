@@ -9,11 +9,11 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)
     {
-        var cacheDirectory = ServiceSourcesConfigCache.GetCacheDirectory(builder);
-        var projectPath = ResolveProjectPath(serviceName, metadata, config, cacheDirectory, builder.AppHostDirectory, gitClient);
+        var facade = ServiceResource.CreateEmptyFacade(builder, serviceName);
 
-        var projectBuilder = builder.AddProject(serviceName, projectPath);
-        return ServiceResource.CreateFacade(builder, serviceName, projectBuilder);
+        PendingLocalResolutions.For(builder).Add(new PendingResolution(serviceName, metadata, config, facade, gitClient));
+
+        return facade;
     }
 
     internal static string ResolveProjectPath(
