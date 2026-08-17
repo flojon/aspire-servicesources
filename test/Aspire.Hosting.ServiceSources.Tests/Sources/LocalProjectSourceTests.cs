@@ -295,6 +295,22 @@ public class LocalProjectSourceTests
     }
 
     [Fact]
+    public void ResolveProjectPath_CacheHit_OriginMatchesConfiguredRepositoryAsSshRemote_DoesNotThrow()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
+        Directory.CreateDirectory(repoDir);
+        Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
+        File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
+        var gitClient = new FakeGitClient { OriginUrl = "git@github.com:company/orders.git" };
+
+        var projectPath = LocalProjectSource.ResolveProjectPath(
+            ServiceName, Metadata(repository: "https://github.com/company/orders"), DevConfig(), appHostDirectory, gitClient);
+
+        Assert.Equal(Path.Combine(repoDir, "Orders.csproj"), projectPath);
+    }
+
+    [Fact]
     public void ResolveProjectPath_CheckoutFailsWithNonRefException_DoesNotAttemptFetchAndWrapsOriginalException()
     {
         var appHostDirectory = Directory.CreateTempSubdirectory().FullName;

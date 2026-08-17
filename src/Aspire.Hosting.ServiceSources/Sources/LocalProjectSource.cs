@@ -168,7 +168,43 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
 
     private static string NormalizeRepositoryUrl(string repositoryUrl)
     {
-        var trimmed = repositoryUrl.TrimEnd('/');
-        return trimmed.EndsWith(".git", StringComparison.OrdinalIgnoreCase) ? trimmed[..^4] : trimmed;
+        var trimmed = repositoryUrl.Trim().TrimEnd('/');
+        if (trimmed.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
+        {
+            trimmed = trimmed[..^4];
+        }
+
+        // Normalize both URL forms (https://host/path) and scp-like SSH syntax
+        // ([user@]host:path, e.g. git@github.com:example/orders) down to "host/path"
+        // so an HTTPS remote and an SSH remote for the same repository compare equal.
+        var schemeIndex = trimmed.IndexOf("://", StringComparison.Ordinal);
+        if (schemeIndex >= 0)
+        {
+            trimmed = trimmed[(schemeIndex + 3)..];
+            var slashIndex = trimmed.IndexOf('/');
+            var atIndex = trimmed.IndexOf('@');
+            if (atIndex >= 0 && (slashIndex < 0 || atIndex < slashIndex))
+            {
+                trimmed = trimmed[(atIndex + 1)..];
+            }
+        }
+        else
+        {
+            var colonIndex = trimmed.IndexOf(':');
+            var slashIndex = trimmed.IndexOf('/');
+            if (colonIndex >= 0 && (slashIndex < 0 || colonIndex < slashIndex))
+            {
+                var host = trimmed[..colonIndex];
+                var atIndex = host.IndexOf('@');
+                if (atIndex >= 0)
+                {
+                    host = host[(atIndex + 1)..];
+                }
+
+                trimmed = $"{host}/{trimmed[(colonIndex + 1)..]}";
+            }
+        }
+
+        return trimmed.TrimEnd('/');
     }
 }

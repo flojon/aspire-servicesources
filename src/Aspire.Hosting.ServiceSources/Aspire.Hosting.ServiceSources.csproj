@@ -9,11 +9,16 @@
   <PropertyGroup>
     <PackageId>Aspire.Hosting.ServiceSources</PackageId>
     <Description>Aspire hosting integration for declarative service sources.</Description>
+    <Authors>Jonas Flodén</Authors>
+    <PackageProjectUrl>https://github.com/flojon/aspire-servicesources</PackageProjectUrl>
+    <PackageTags>aspire;dotnet-aspire;service-discovery;apphost;kubernetes</PackageTags>
     <RepositoryUrl>https://github.com/flojon/aspire-servicesources</RepositoryUrl>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <MinVerTagPrefix>v</MinVerTagPrefix>
   </PropertyGroup>
 
   <ItemGroup>
@@ -25,6 +30,7 @@
 
   <ItemGroup>
     <None Include="../../LICENSE" Pack="true" PackagePath="" />
+    <None Include="../../README.md" Pack="true" PackagePath="" />
   </ItemGroup>
 
 </Project>
