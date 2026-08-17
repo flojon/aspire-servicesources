@@ -21,7 +21,13 @@ developer switches sources.
 
 ## Install
 
-Not yet published as a NuGet package. Reference the project directly from your AppHost:
+Published on [nuget.org](https://www.nuget.org/profiles/flojon) as `Aspire.Hosting.ServiceSources`:
+
+```bash
+dotnet add package Aspire.Hosting.ServiceSources
+```
+
+Or reference the project directly from your AppHost instead:
 
 ```xml
 <ItemGroup>
