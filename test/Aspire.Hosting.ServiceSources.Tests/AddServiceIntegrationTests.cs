@@ -115,5 +115,8 @@ public class AddServiceIntegrationTests
 
         Assert.Equal(5001, PortOf(builder, "orders-a"));
         Assert.Equal(5001, PortOf(builder, "orders-b"));
+
+        Assert.True(File.Exists(Path.Combine(appHostDir, ".servicesources", "checkouts", "orders-a", "SampleProj", "SampleProj.csproj")));
+        Assert.True(File.Exists(Path.Combine(appHostDir, ".servicesources", "checkouts", "orders-b", "SampleProj", "SampleProj.csproj")));
     }
 }

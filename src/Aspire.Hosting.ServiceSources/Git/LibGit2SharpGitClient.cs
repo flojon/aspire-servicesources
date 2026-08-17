@@ -85,7 +85,7 @@ internal sealed class LibGit2SharpGitClient : IGitClient
         var tag = repo.Tags[reference];
         if (tag is not null)
         {
-            return tag.Target.Sha == headSha;
+            return tag.PeeledTarget.Sha == headSha;
         }
 
         var commit = repo.Lookup<Commit>(reference);

@@ -190,6 +190,7 @@ public class LocalProjectSourceTests
         var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
         var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
         Directory.CreateDirectory(repoDir);
+        Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
         File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
         var gitClient = new FakeGitClient();
 
@@ -201,11 +202,28 @@ public class LocalProjectSourceTests
     }
 
     [Fact]
+    public void ResolveProjectPath_DirectoryExistsWithoutGitMarker_TreatedAsCacheMissAndReClones()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
+        Directory.CreateDirectory(repoDir);
+        var gitClient = new FakeGitClient();
+
+        LocalProjectSource.ResolveProjectPath(
+            ServiceName, Metadata(repository: "https://github.com/company/orders"), DevConfig(), appHostDirectory, gitClient);
+
+        var (repositoryUrl, destinationPath) = Assert.Single(gitClient.ClonedRepos);
+        Assert.Equal("https://github.com/company/orders", repositoryUrl);
+        Assert.Equal(repoDir, destinationPath);
+    }
+
+    [Fact]
     public void ResolveProjectPath_CacheHit_CleanTree_ReconcilesChangedRef()
     {
         var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
         var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
         Directory.CreateDirectory(repoDir);
+        Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
         File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
         var gitClient = new FakeGitClient();
 
@@ -223,6 +241,7 @@ public class LocalProjectSourceTests
         var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
         var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
         Directory.CreateDirectory(repoDir);
+        Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
         File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
         var gitClient = new FakeGitClient
         {
@@ -243,6 +262,7 @@ public class LocalProjectSourceTests
         var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
         var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
         Directory.CreateDirectory(repoDir);
+        Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
         File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
         var gitClient = new FakeGitClient
         {

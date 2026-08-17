@@ -44,7 +44,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
             repoRoot = Path.Combine(appHostDirectory, ".servicesources", "checkouts", serviceName);
             var reference = config.Ref ?? metadata.DefaultRef;
 
-            if (!Directory.Exists(repoRoot))
+            if (!Directory.Exists(Path.Combine(repoRoot, ".git")))
             {
                 try
                 {

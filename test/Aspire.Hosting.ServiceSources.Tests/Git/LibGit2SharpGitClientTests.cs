@@ -143,6 +143,24 @@ public class LibGit2SharpGitClientTests
     }
 
     [Fact]
+    public void IsRefCheckedOut_MatchingAnnotatedTag_ReturnsTrue()
+    {
+        var origin = CreateOriginRepo();
+        var destination = Path.Combine(Directory.CreateTempSubdirectory().FullName, "clone");
+        var client = new LibGit2SharpGitClient();
+        client.Clone(origin, destination);
+        client.Checkout(destination, "v1.0.0");
+
+        using (var repo = new Repository(destination))
+        {
+            var signature = new Signature("test", "test@test.com", DateTimeOffset.Now);
+            repo.ApplyTag("v1.0.0-annotated", signature, "release message");
+        }
+
+        Assert.True(client.IsRefCheckedOut(destination, "v1.0.0-annotated"));
+    }
+
+    [Fact]
     public void IsRefCheckedOut_DifferentRef_ReturnsFalse()
     {
         var origin = CreateOriginRepo();
