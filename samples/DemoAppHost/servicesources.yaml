@@ -1,4 +1,13 @@
 services:
   orders:
-    repository: https://github.com/example/orders
-    project: SampleService/SampleService.csproj
+    repository: https://github.com/dotnet/aspire-samples
+    project: samples/health-checks-ui/HealthChecksUI.ApiService/HealthChecksUI.ApiService.csproj
+    defaultRef: main
+  inventory:
+    url:
+      url: https://httpbin.org
+  payments:
+    container:
+      image: nginxdemos/hello
+      port: 8080
+      defaultTag: latest

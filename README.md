@@ -8,16 +8,17 @@ running resource whose *source* is chosen per developer, not baked into the AppH
 `AddProject<T>()` assumes a service lives in the AppHost's own solution. In a real
 microservice environment, services live in separate repositories, and different developers
 want different things for the same service: clone it locally to edit, run it from an
-already-checked-out working copy, or just reach an instance already running in a shared
-Kubernetes dev cluster. The AppHost should only describe *what* it depends on; where that
-dependency actually comes from is a per-developer choice, made without ever touching the
-AppHost's `.csproj`/`.sln`.
+already-checked-out working copy, reach an instance already running in a shared Kubernetes
+dev cluster, hit a fixed URL, or just run a published container image. The AppHost should
+only describe *what* it depends on; where that dependency actually comes from is a
+per-developer choice, made without ever touching the AppHost's `.csproj`/`.sln`.
 
 `AddService()` is the seam: the AppHost calls it once per service, and a developer-local
-config file decides how it's actually resolved — today via a managed or self-managed local
-git checkout (`"local"` source) or a `kubectl port-forward` against a dev cluster
-(`"kubernetes"` source) — behind one stable return type, so the AppHost code never has to
-change when a developer switches sources.
+config file decides how it's actually resolved — a managed or self-managed local git
+checkout (`"local"`), a `kubectl port-forward` against a dev cluster (`"kubernetes"`), a
+fixed, already-known URL (`"url"`), or a published container image run locally
+(`"container"`) — behind one stable return type, so the AppHost code never has to change
+when a developer switches sources.
 
 ## Install
 
@@ -35,8 +36,8 @@ Or reference the project directly from your AppHost instead:
 </ItemGroup>
 ```
 
-Requires .NET 10 and an AppHost project using the `Aspire.AppHost.Sdk` (`aspire new` /
-`aspire restore` sets this up).
+Requires .NET 8 or later (net8.0, net9.0, and net10.0 are all supported) and an AppHost
+project using the `Aspire.AppHost.Sdk` (`aspire new` / `aspire restore` sets this up).
 
 ## Getting started
 
@@ -100,7 +101,8 @@ a project reference would be.
   `<AppHostDirectory>/.servicesources/checkouts/<serviceName>/`, and reconciled to the
   configured `ref` (or the catalog's `defaultRef`) on every run. Uncommitted edits are never
   discarded — if the checkout is dirty and the ref changed, resolution fails loudly instead of
-  overwriting your work.
+  overwriting your work. The `.servicesources/` directory gitignores itself on first use — no
+  need to add it to your own `.gitignore`.
 - Set `path` to point at a checkout you manage yourself (e.g. an existing local clone). It's
   used as-is — no clone, no checkout, no fetch, ever. `ref` cannot be combined with `path`.
 
@@ -134,10 +136,128 @@ services:
 
 Requires `kubectl` on `PATH`, authenticated against the named `context`.
 
+### `"url"` source
+
+Point a service at a fixed, already-known URL — e.g. a Kubernetes ingress, a staging
+deployment, or any other reachable HTTP(S) endpoint. There's no underlying resource for
+Aspire to run; the facade's endpoint resolves straight to the configured URL.
+
+`servicesources.yaml`:
+```yaml
+services:
+  orders:
+    url:
+      url: https://orders.example.com
+```
+
+`servicesources.local.json`:
+```json
+{
+  "services": {
+    "orders": { "source": "url" }
+  }
+}
+```
+
+Set `url` in the developer config instead to override the catalog's URL for just that
+developer (e.g. pointing at a personal tunnel or local proxy):
+
+```json
+{
+  "services": {
+    "orders": { "source": "url", "url": "https://orders.dev.internal" }
+  }
+}
+```
+
+### `"container"` source
+
+Run a published container image locally via Aspire's own container-runtime integration —
+image pull and lifecycle are managed entirely by Aspire.
+
+`servicesources.yaml`:
+```yaml
+services:
+  orders:
+    container:
+      image: ghcr.io/company/orders
+      port: 8080
+      defaultTag: latest
+```
+
+`servicesources.local.json`:
+```json
+{
+  "services": {
+    "orders": { "source": "container" }
+  }
+}
+```
+
+Set `tag` in the developer config to override the catalog's `defaultTag` for just that
+developer:
+
+```json
+{
+  "services": {
+    "orders": { "source": "container", "tag": "v1.4.2" }
+  }
+}
+```
+
+### Combining sources on one catalog entry
+
+A single `servicesources.yaml` entry can carry blocks for every source at once — the catalog
+just describes *how* each source would resolve the service; each developer's
+`servicesources.local.json` picks which one actually applies to them:
+
+```yaml
+services:
+  orders:
+    repository: https://github.com/example/orders
+    project: src/Orders.Api/Orders.Api.csproj
+    kubernetes:
+      service: orders-svc
+      port: 8080
+    url:
+      url: https://orders.example.com
+    container:
+      image: ghcr.io/example/orders
+      port: 8080
+      defaultTag: latest
+```
+
+A developer editing the service picks `"local"`; one debugging against a shared dev cluster
+picks `"kubernetes"`; one who just needs it reachable picks `"url"` or `"container"` — same
+catalog entry, same `AddService("orders")` call in the AppHost, no code changes either way.
+Each developer's own `servicesources.local.json` just names which source applies to them —
+editing `orders` locally:
+
+```json
+{ "services": { "orders": { "source": "local" } } }
+```
+
+debugging against a shared dev cluster:
+
+```json
+{ "services": { "orders": { "source": "kubernetes", "context": "dev-west", "namespace": "orders", "port": 8080 } } }
+```
+
+or just needing it reachable, not caring how:
+
+```json
+{ "services": { "orders": { "source": "url" } } }
+```
+
 ## Sample
 
-`samples/DemoAppHost` is a minimal working AppHost wired up against `samples/SampleService`
-via the `"local"` source with `path` — run it to see the whole flow end to end:
+`samples/DemoAppHost` is a minimal working AppHost demonstrating all three easily-runnable
+sources: `orders` via a real managed `"local"` git checkout (a small project cloned from
+[`dotnet/aspire-samples`](https://github.com/dotnet/aspire-samples)), `inventory` via the
+`"url"` source (pointing at [httpbin.org](https://httpbin.org), a live public test API), and
+`payments` via the `"container"` source (the `nginxdemos/hello` hello-world image) — run it to
+see the whole flow end to end. (`"kubernetes"` isn't demoed here since it needs a real cluster
+and `kubectl`; see its section above.)
 
 ```bash
 cd samples/DemoAppHost

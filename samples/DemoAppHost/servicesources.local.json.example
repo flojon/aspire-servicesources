@@ -1,5 +1,7 @@
 {
   "services": {
-    "orders": { "source": "local", "path": ".." }
+    "orders": { "source": "local" },
+    "inventory": { "source": "url" },
+    "payments": { "source": "container" }
   }
 }
