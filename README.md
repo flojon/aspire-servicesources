@@ -8,16 +8,17 @@ running resource whose *source* is chosen per developer, not baked into the AppH
 `AddProject<T>()` assumes a service lives in the AppHost's own solution. In a real
 microservice environment, services live in separate repositories, and different developers
 want different things for the same service: clone it locally to edit, run it from an
-already-checked-out working copy, or just reach an instance already running in a shared
-Kubernetes dev cluster. The AppHost should only describe *what* it depends on; where that
-dependency actually comes from is a per-developer choice, made without ever touching the
-AppHost's `.csproj`/`.sln`.
+already-checked-out working copy, reach an instance already running in a shared Kubernetes
+dev cluster, hit a fixed URL, or just run a published container image. The AppHost should
+only describe *what* it depends on; where that dependency actually comes from is a
+per-developer choice, made without ever touching the AppHost's `.csproj`/`.sln`.
 
 `AddService()` is the seam: the AppHost calls it once per service, and a developer-local
-config file decides how it's actually resolved — today via a managed or self-managed local
-git checkout (`"local"` source) or a `kubectl port-forward` against a dev cluster
-(`"kubernetes"` source) — behind one stable return type, so the AppHost code never has to
-change when a developer switches sources.
+config file decides how it's actually resolved — a managed or self-managed local git
+checkout (`"local"`), a `kubectl port-forward` against a dev cluster (`"kubernetes"`), a
+fixed, already-known URL (`"url"`), or a published container image run locally
+(`"container"`) — behind one stable return type, so the AppHost code never has to change
+when a developer switches sources.
 
 ## Install
 
@@ -133,6 +134,75 @@ services:
 ```
 
 Requires `kubectl` on `PATH`, authenticated against the named `context`.
+
+### `"url"` source
+
+Point a service at a fixed, already-known URL — e.g. a Kubernetes ingress, a staging
+deployment, or any other reachable HTTP(S) endpoint. There's no underlying resource for
+Aspire to run; the facade's endpoint resolves straight to the configured URL.
+
+`servicesources.yaml`:
+```yaml
+services:
+  orders:
+    url:
+      url: https://orders.example.com
+```
+
+`servicesources.local.json`:
+```json
+{
+  "services": {
+    "orders": { "source": "url" }
+  }
+}
+```
+
+Set `url` in the developer config instead to override the catalog's URL for just that
+developer (e.g. pointing at a personal tunnel or local proxy):
+
+```json
+{
+  "services": {
+    "orders": { "source": "url", "url": "https://orders.dev.internal" }
+  }
+}
+```
+
+### `"container"` source
+
+Run a published container image locally via Aspire's own container-runtime integration —
+image pull and lifecycle are managed entirely by Aspire.
+
+`servicesources.yaml`:
+```yaml
+services:
+  orders:
+    container:
+      image: ghcr.io/company/orders
+      port: 8080
+      defaultTag: latest
+```
+
+`servicesources.local.json`:
+```json
+{
+  "services": {
+    "orders": { "source": "container" }
+  }
+}
+```
+
+Set `tag` in the developer config to override the catalog's `defaultTag` for just that
+developer:
+
+```json
+{
+  "services": {
+    "orders": { "source": "container", "tag": "v1.4.2" }
+  }
+}
+```
 
 ## Sample
 
