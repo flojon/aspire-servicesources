@@ -230,6 +230,24 @@ services:
 A developer editing the service picks `"local"`; one debugging against a shared dev cluster
 picks `"kubernetes"`; one who just needs it reachable picks `"url"` or `"container"` — same
 catalog entry, same `AddService("orders")` call in the AppHost, no code changes either way.
+Each developer's own `servicesources.local.json` just names which source applies to them —
+editing `orders` locally:
+
+```json
+{ "services": { "orders": { "source": "local" } } }
+```
+
+debugging against a shared dev cluster:
+
+```json
+{ "services": { "orders": { "source": "kubernetes", "context": "dev-west", "namespace": "orders", "port": 8080 } } }
+```
+
+or just needing it reachable, not caring how:
+
+```json
+{ "services": { "orders": { "source": "url" } } }
+```
 
 ## Sample
 
