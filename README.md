@@ -21,10 +21,10 @@ change when a developer switches sources.
 
 ## Install
 
-Published on [nuget.org](https://www.nuget.org/profiles/flojon) as `Koala.Aspire.ServiceSources`:
+Published on [nuget.org](https://www.nuget.org/profiles/flojon) as `Koala.Aspire.Hosting.ServiceSources`:
 
 ```bash
-dotnet add package Koala.Aspire.ServiceSources
+dotnet add package Koala.Aspire.Hosting.ServiceSources
 ```
 
 Or reference the project directly from your AppHost instead:
