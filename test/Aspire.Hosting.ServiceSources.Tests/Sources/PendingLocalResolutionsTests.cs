@@ -17,8 +17,19 @@ public class PendingLocalResolutionsTests
 
         public Exception? CloneException { get; set; }
 
+        public Barrier? StartBarrier { get; set; }
+
         public void Clone(string repositoryUrl, string destinationPath)
         {
+            // Rendezvous with the other clone(s) before proceeding: if resolution were sequential
+            // rather than parallel, only one participant would ever reach this point at a time and
+            // the wait below would time out, deterministically failing the test regardless of
+            // machine speed or thread-pool warm-up latency.
+            if (StartBarrier is not null && !StartBarrier.SignalAndWait(TimeSpan.FromSeconds(5)))
+            {
+                throw new TimeoutException("Timed out waiting for the other clone to start concurrently.");
+            }
+
             if (CloneDelay > TimeSpan.Zero)
             {
                 Thread.Sleep(CloneDelay);
@@ -132,20 +143,15 @@ public class PendingLocalResolutionsTests
     public async Task ResolveAllAsync_TwoSlowPendingResolutions_RunsThemInParallel()
     {
         var builder = CreateBuilder(CreateAppHostDirectory());
-        var delay = TimeSpan.FromMilliseconds(400);
         var facadeA = ServiceResource.CreateEmptyFacade(builder, "orders");
         var facadeB = ServiceResource.CreateEmptyFacade(builder, "billing");
         var pending = PendingLocalResolutions.For(builder);
-        pending.Add(new PendingResolution("orders", Metadata("https://fake/orders"), DevConfig(), facadeA, new FakeGitClient { CloneDelay = delay }));
-        pending.Add(new PendingResolution("billing", Metadata("https://fake/billing"), DevConfig(), facadeB, new FakeGitClient { CloneDelay = delay }));
+        // Both clones rendezvous on this barrier before either is allowed to proceed, so
+        // completion below is only possible if the two resolutions actually ran concurrently.
+        var startBarrier = new Barrier(2);
+        pending.Add(new PendingResolution("orders", Metadata("https://fake/orders"), DevConfig(), facadeA, new FakeGitClient { StartBarrier = startBarrier }));
+        pending.Add(new PendingResolution("billing", Metadata("https://fake/billing"), DevConfig(), facadeB, new FakeGitClient { StartBarrier = startBarrier }));
 
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         await PublishBeforeStartEventAsync(builder);
-        stopwatch.Stop();
-
-        // Sequential execution would take ~2x delay; parallel execution should land close to 1x delay.
-        // The 1.5x threshold sits comfortably between the two to absorb CI scheduling jitter.
-        var threshold = delay + delay / 2;
-        Assert.True(stopwatch.Elapsed < threshold, $"Expected parallel resolution to take less than {threshold}, took {stopwatch.Elapsed}.");
     }
 }
