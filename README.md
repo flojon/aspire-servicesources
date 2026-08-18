@@ -35,8 +35,8 @@ Or reference the project directly from your AppHost instead:
 </ItemGroup>
 ```
 
-Requires .NET 10 and an AppHost project using the `Aspire.AppHost.Sdk` (`aspire new` /
-`aspire restore` sets this up).
+Requires .NET 8 or later (net8.0, net9.0, and net10.0 are all supported) and an AppHost
+project using the `Aspire.AppHost.Sdk` (`aspire new` / `aspire restore` sets this up).
 
 ## Getting started
 
