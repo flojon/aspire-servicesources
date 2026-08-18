@@ -7,7 +7,7 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <PackageId>Aspire.Hosting.ServiceSources</PackageId>
+    <PackageId>Koala.Aspire.ServiceSources</PackageId>
     <Description>Aspire hosting integration for declarative service sources.</Description>
     <Authors>Jonas Flodén</Authors>
     <PackageProjectUrl>https://github.com/flojon/aspire-servicesources</PackageProjectUrl>
