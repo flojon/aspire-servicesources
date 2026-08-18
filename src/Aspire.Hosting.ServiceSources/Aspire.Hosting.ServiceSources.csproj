@@ -11,7 +11,7 @@
     <Description>Aspire hosting integration for declarative service sources.</Description>
     <Authors>Jonas Flodén</Authors>
     <PackageProjectUrl>https://github.com/flojon/aspire-servicesources</PackageProjectUrl>
-    <PackageTags>aspire;dotnet-aspire;service-discovery;apphost;kubernetes</PackageTags>
+    <PackageTags>aspire;dotnet-aspire;service-discovery;apphost;kubernetes;git;microservices;local-development;port-forward</PackageTags>
     <RepositoryUrl>https://github.com/flojon/aspire-servicesources</RepositoryUrl>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <IncludeSymbols>true</IncludeSymbols>
