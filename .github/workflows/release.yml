@@ -35,3 +35,28 @@ jobs:
 
       - name: Push to nuget.org
         run: dotnet nuget push "./artifacts/*.nupkg" --source https://api.nuget.org/v3/index.json --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --skip-duplicate
+
+      - name: Verify package is actually live on nuget.org
+        # --skip-duplicate treats ANY 409 Conflict as a benign "already published this exact
+        # version" and exits 0 - including a rejection for an unrelated reason (e.g. a reserved
+        # ID prefix owned by someone else), which the workflow would otherwise report as success.
+        # Confirm the version is really retrievable before calling the release done.
+        run: |
+          nupkg=$(ls ./artifacts/*.nupkg | head -n1)
+          filename=$(basename "$nupkg" .nupkg)
+          version=$(echo "$filename" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+.*$')
+          id=${filename%".$version"}
+          id_lower=$(echo "$id" | tr '[:upper:]' '[:lower:]')
+          version_lower=$(echo "$version" | tr '[:upper:]' '[:lower:]')
+          url="https://api.nuget.org/v3-flatcontainer/${id_lower}/${version_lower}/${id_lower}.nuspec"
+          for i in $(seq 1 10); do
+            status=$(curl -s -o /dev/null -w '%{http_code}' "$url")
+            if [ "$status" = "200" ]; then
+              echo "Verified $id $version is live at $url"
+              exit 0
+            fi
+            echo "Attempt $i: $url returned $status, retrying in 15s..."
+            sleep 15
+          done
+          echo "::error::$id $version was not retrievable from nuget.org after push (last status: $status). The push likely failed silently - check for a reserved namespace/ID ownership conflict."
+          exit 1
