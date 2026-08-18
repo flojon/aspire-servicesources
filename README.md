@@ -101,7 +101,8 @@ a project reference would be.
   `<AppHostDirectory>/.servicesources/checkouts/<serviceName>/`, and reconciled to the
   configured `ref` (or the catalog's `defaultRef`) on every run. Uncommitted edits are never
   discarded — if the checkout is dirty and the ref changed, resolution fails loudly instead of
-  overwriting your work.
+  overwriting your work. The `.servicesources/` directory gitignores itself on first use — no
+  need to add it to your own `.gitignore`.
 - Set `path` to point at a checkout you manage yourself (e.g. an existing local clone). It's
   used as-is — no clone, no checkout, no fetch, ever. `ref` cannot be combined with `path`.
 
@@ -204,6 +205,32 @@ developer:
 }
 ```
 
+### Combining sources on one catalog entry
+
+A single `servicesources.yaml` entry can carry blocks for every source at once — the catalog
+just describes *how* each source would resolve the service; each developer's
+`servicesources.local.json` picks which one actually applies to them:
+
+```yaml
+services:
+  orders:
+    repository: https://github.com/example/orders
+    project: src/Orders.Api/Orders.Api.csproj
+    kubernetes:
+      service: orders-svc
+      port: 8080
+    url:
+      url: https://orders.example.com
+    container:
+      image: ghcr.io/example/orders
+      port: 8080
+      defaultTag: latest
+```
+
+A developer editing the service picks `"local"`; one debugging against a shared dev cluster
+picks `"kubernetes"`; one who just needs it reachable picks `"url"` or `"container"` — same
+catalog entry, same `AddService("orders")` call in the AppHost, no code changes either way.
+
 ## Sample
 
 `samples/DemoAppHost` is a minimal working AppHost demonstrating all three easily-runnable
@@ -211,7 +238,8 @@ sources: `orders` via a real managed `"local"` git checkout (a small project clo
 [`dotnet/aspire-samples`](https://github.com/dotnet/aspire-samples)), `inventory` via the
 `"url"` source (pointing at [httpbin.org](https://httpbin.org), a live public test API), and
 `payments` via the `"container"` source (the `nginxdemos/hello` hello-world image) — run it to
-see the whole flow end to end:
+see the whole flow end to end. (`"kubernetes"` isn't demoed here since it needs a real cluster
+and `kubectl`; see its section above.)
 
 ```bash
 cd samples/DemoAppHost
