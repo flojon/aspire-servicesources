@@ -206,8 +206,12 @@ developer:
 
 ## Sample
 
-`samples/DemoAppHost` is a minimal working AppHost wired up against `samples/SampleService`
-via the `"local"` source with `path` — run it to see the whole flow end to end:
+`samples/DemoAppHost` is a minimal working AppHost demonstrating all three easily-runnable
+sources: `orders` via a real managed `"local"` git checkout (a small project cloned from
+[`dotnet/aspire-samples`](https://github.com/dotnet/aspire-samples)), `inventory` via the
+`"url"` source (pointing at [httpbin.org](https://httpbin.org), a live public test API), and
+`payments` via the `"container"` source (the `nginxdemos/hello` hello-world image) — run it to
+see the whole flow end to end:
 
 ```bash
 cd samples/DemoAppHost
