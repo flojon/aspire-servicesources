@@ -8,7 +8,7 @@
 
   <PropertyGroup>
     <PackageId>KoalaSoft.Aspire.Hosting.ServiceSources</PackageId>
-    <Description>Aspire hosting integration for declarative service sources.</Description>
+    <Description>Aspire hosting integration for declarative service sources, e.g. a git checkout or a Kubernetes cluster.</Description>
     <Authors>Jonas Flodén</Authors>
     <PackageProjectUrl>https://github.com/flojon/aspire-servicesources</PackageProjectUrl>
     <PackageTags>aspire;dotnet-aspire;service-discovery;apphost;kubernetes;git;microservices;local-development;port-forward</PackageTags>
