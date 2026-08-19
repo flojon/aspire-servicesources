@@ -57,8 +57,31 @@ internal sealed class PendingLocalResolutions
 
         foreach (var result in results)
         {
-            var projectBuilder = builder.AddProject(result.Pending.ServiceName, result.ProjectPath!);
-            ServiceResource.CopyEndpointAnnotations(result.Pending.Facade, projectBuilder);
+            var pending = result.Pending;
+            if (pending.Metadata.Kind == "dotnet")
+            {
+                var projectPath = Path.Combine(result.RepoRoot!, pending.Metadata.Project);
+                if (!File.Exists(projectPath))
+                {
+                    throw new ServiceSourcesConfigurationException(
+                        $"Service '{pending.ServiceName}': project file '{pending.Metadata.Project}' was not found under '{result.RepoRoot}'.");
+                }
+
+                var projectBuilder = builder.AddProject(pending.ServiceName, projectPath);
+                ServiceResource.CopyEndpointAnnotations(pending.Facade, projectBuilder);
+                continue;
+            }
+
+            if (!LocalKindRegistry.For(builder).TryGet(pending.Metadata.Kind, out var handler))
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Service '{pending.ServiceName}': kind '{pending.Metadata.Kind}' is not registered. " +
+                    "Add the satellite package for this kind and call its registration method " +
+                    "(e.g. builder.UseJavaScript()) before this service is resolved.");
+            }
+
+            var resourceBuilder = handler!.Resolve(builder, pending.ServiceName, result.RepoRoot!, pending.Metadata.KindConfig);
+            ServiceResource.CopyEndpointAnnotations(pending.Facade, resourceBuilder);
         }
     }
 
@@ -66,9 +89,9 @@ internal sealed class PendingLocalResolutions
     {
         try
         {
-            var projectPath = LocalProjectSource.ResolveProjectPath(
+            var repoRoot = LocalGitCheckout.ResolveRepoRoot(
                 pending.ServiceName, pending.Metadata, pending.Config, appHostDirectory, pending.GitClient);
-            return new ResolutionResult(pending, projectPath, null);
+            return new ResolutionResult(pending, repoRoot, null);
         }
         catch (Exception ex)
         {
@@ -86,5 +109,5 @@ internal sealed class PendingLocalResolutions
         return new ServiceSourcesConfigurationException(message, failures.First().Exception!);
     }
 
-    private readonly record struct ResolutionResult(PendingResolution Pending, string? ProjectPath, Exception? Exception);
+    private readonly record struct ResolutionResult(PendingResolution Pending, string? RepoRoot, Exception? Exception);
 }

@@ -59,6 +59,18 @@ public class PendingLocalResolutionsTests
         public string? GetOriginUrl(string repositoryPath) => null;
     }
 
+    private sealed class FakeLocalResourceKind : ILocalResourceKind
+    {
+        public List<(string ServiceName, string RepoRoot, object? RawConfig)> Calls { get; } = [];
+
+        public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+            IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig)
+        {
+            Calls.Add((serviceName, repoRoot, rawConfig));
+            return ServiceResource.CreateEmptyFacade(builder, serviceName);
+        }
+    }
+
     private static IDistributedApplicationBuilder CreateBuilder(string appHostDirectory) =>
         TestHelpers.CreateBuilder(appHostDirectory);
 
@@ -72,6 +84,9 @@ public class PendingLocalResolutionsTests
 
     private static ServiceMetadata Metadata(string repository) =>
         new() { Repository = repository, Project = "Service.csproj" };
+
+    private static ServiceMetadata MetadataWithKind(string repository, string kind, object? kindConfig = null) =>
+        new() { Repository = repository, Kind = kind, KindConfig = kindConfig };
 
     private static ServiceDeveloperConfig DevConfig() => new() { Source = "local" };
 
@@ -153,5 +168,39 @@ public class PendingLocalResolutionsTests
         pending.Add(new PendingResolution("billing", Metadata("https://fake/billing"), DevConfig(), facadeB, new FakeGitClient { StartBarrier = startBarrier }));
 
         await PublishBeforeStartEventAsync(builder);
+    }
+
+    [Fact]
+    public async Task ResolveAllAsync_RegisteredNonDotnetKind_DispatchesToHandlerWithResolvedRepoRoot()
+    {
+        var builder = CreateBuilder(CreateAppHostDirectory());
+        var handler = new FakeLocalResourceKind();
+        builder.AddLocalKind("javascript", handler);
+        var facade = ServiceResource.CreateEmptyFacade(builder, "frontend");
+        var kindConfig = new Dictionary<object, object> { ["appDirectory"] = "." };
+        PendingLocalResolutions.For(builder).Add(new PendingResolution(
+            "frontend", MetadataWithKind("https://fake/frontend", "javascript", kindConfig), DevConfig(), facade, new FakeGitClient()));
+
+        await PublishBeforeStartEventAsync(builder);
+
+        var call = Assert.Single(handler.Calls);
+        Assert.Equal("frontend", call.ServiceName);
+        Assert.EndsWith(Path.Combine(".servicesources", "checkouts", "frontend"), call.RepoRoot);
+        Assert.Same(kindConfig, call.RawConfig);
+    }
+
+    [Fact]
+    public async Task ResolveAllAsync_UnregisteredNonDotnetKind_ThrowsNamingServiceAndKind()
+    {
+        var builder = CreateBuilder(CreateAppHostDirectory());
+        var facade = ServiceResource.CreateEmptyFacade(builder, "frontend");
+        PendingLocalResolutions.For(builder).Add(new PendingResolution(
+            "frontend", MetadataWithKind("https://fake/frontend", "javascript"), DevConfig(), facade, new FakeGitClient()));
+
+        var ex = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(
+            () => PublishBeforeStartEventAsync(builder));
+
+        Assert.Contains("frontend", ex.Message);
+        Assert.Contains("javascript", ex.Message);
     }
 }
