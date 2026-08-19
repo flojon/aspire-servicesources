@@ -13,4 +13,8 @@ internal sealed class ServiceMetadata
     public UrlMetadata? Url { get; set; }
 
     public ContainerMetadata? Container { get; set; }
+
+    public string Kind { get; set; } = "dotnet";
+
+    public object? KindConfig { get; set; }
 }

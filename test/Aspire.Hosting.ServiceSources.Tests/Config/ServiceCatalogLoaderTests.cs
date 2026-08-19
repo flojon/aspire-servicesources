@@ -147,4 +147,85 @@ public class ServiceCatalogLoaderTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public void Load_NoKindSpecified_DefaultsToDotnet()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+            """);
+
+        try
+        {
+            var catalog = ServiceCatalogLoader.Load(path);
+
+            Assert.Equal("dotnet", catalog.Services["orders"].Kind);
+            Assert.Null(catalog.Services["orders"].KindConfig);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_CustomKindWithMatchingBlock_CapturesKindAndRawBlock()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              frontend:
+                repository: https://github.com/company/frontend
+                kind: javascript
+                javascript:
+                  appDirectory: .
+                  runScript: dev
+                  packageManager: npm
+            """);
+
+        try
+        {
+            var catalog = ServiceCatalogLoader.Load(path);
+            var frontend = catalog.Services["frontend"];
+
+            Assert.Equal("javascript", frontend.Kind);
+            Assert.NotNull(frontend.KindConfig);
+            var block = Assert.IsAssignableFrom<IDictionary<object, object>>(frontend.KindConfig);
+            Assert.Equal(".", block["appDirectory"]);
+            Assert.Equal("dev", block["runScript"]);
+            Assert.Equal("npm", block["packageManager"]);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_CustomKindWithoutMatchingBlock_LeavesKindConfigNull()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              frontend:
+                repository: https://github.com/company/frontend
+                kind: javascript
+            """);
+
+        try
+        {
+            var catalog = ServiceCatalogLoader.Load(path);
+
+            Assert.Equal("javascript", catalog.Services["frontend"].Kind);
+            Assert.Null(catalog.Services["frontend"].KindConfig);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }
