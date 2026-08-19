@@ -58,4 +58,17 @@ public static class ServiceSourcesBuilderExtensions
 
         return source.Resolve(builder, name, metadata, developerConfig);
     }
+
+    /// <summary>
+    /// Registers <paramref name="handler"/> as the resolver for local-sourced services whose
+    /// <c>servicesources.yaml</c> entry declares <c>kind: &lt;paramref name="kind"/&gt;</c>.
+    /// Called by a satellite package's own registration method (e.g. a hypothetical
+    /// <c>UseJavaScript()</c>), not typically called directly by an AppHost author.
+    /// </summary>
+    public static IDistributedApplicationBuilder AddLocalKind(
+        this IDistributedApplicationBuilder builder, string kind, ILocalResourceKind handler)
+    {
+        LocalKindRegistry.For(builder).Register(kind, handler);
+        return builder;
+    }
 }
