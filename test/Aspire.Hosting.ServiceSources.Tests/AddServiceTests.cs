@@ -346,10 +346,10 @@ public class AddServiceTests
     [Fact]
     public void AddService_IsExportedToAts()
     {
-        var method = typeof(ServiceSourcesBuilderExtensions).GetMethod(nameof(ServiceSourcesBuilderExtensions.AddService));
-        Assert.NotNull(method);
+        var method = typeof(ServiceSourcesBuilderExtensions).GetMethods()
+            .Single(m => m.Name == nameof(ServiceSourcesBuilderExtensions.AddService));
 
-        var exportAttribute = method!.GetCustomAttributes(typeof(AspireExportAttribute), inherit: false);
+        var exportAttribute = method.GetCustomAttributes(typeof(AspireExportAttribute), inherit: false);
         Assert.Single(exportAttribute);
 
         var nameParameter = method.GetParameters().Single(p => p.Name == "name");

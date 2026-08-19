@@ -76,6 +76,24 @@ additional export declaration beyond the method annotation itself.
   additive (attributes only). Existing `AddServiceTests.cs` continues to validate the same
   runtime behavior unchanged.
 
+## Outcome
+
+The ATS-level export reasoning above held: `aspire restore` registers `AddService` cleanly,
+producing a correctly-shaped `addService(name: string)` binding in the generated TypeScript SDK
+with no diagnostics. But that's incomplete regarding guest-language *usability* — Task 2
+discovered a separate, upstream gap in the Aspire CLI's TypeScript codegen for methods returning
+a bare Aspire interface (`IResourceBuilder<IResourceWithServiceDiscovery>`) rather than a
+concrete resource class: the codegen never emits the `*Promise`/`*PromiseImpl` wrapper pair that
+every other exported method gets, so the generated SDK fails to compile. Reproduced on both
+Aspire CLI 13.4.6 and 13.5.0. This currently blocks the guest-language call path from compiling,
+even though the export itself registers correctly. See the README's "Known issue" section for
+live status.
+
+Changing `AddService`'s return type to the concrete `ServiceResource` class to route around this
+was considered and rejected: it would change the public C# API and contradict `ServiceResource`'s
+deliberate "reference-only facade, don't configure me directly" design (see `ServiceResource.cs`'s
+class-level `<remarks>`). The right move is waiting for the upstream fix, not a workaround here.
+
 ## Explicitly Out of Scope for This Pass
 
 - Exporting anything from the `IServiceSource` implementations (`LocalProjectSource`,
