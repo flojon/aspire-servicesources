@@ -1,0 +1,5 @@
+{
+  "services": {
+    "inventory": { "source": "url" }
+  }
+}

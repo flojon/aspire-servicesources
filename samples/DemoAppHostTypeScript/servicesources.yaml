@@ -1,0 +1,4 @@
+services:
+  inventory:
+    url:
+      url: https://httpbin.org
