@@ -285,9 +285,10 @@ because the Aspire CLI's TypeScript codegen doesn't emit a `*Promise`/`*PromiseI
 for extension methods that return a bare Aspire interface type
 (`IResourceBuilder<IResourceWithServiceDiscovery>`) rather than a concrete resource class. This
 appears to affect any integration whose exported method returns a bare Aspire interface rather
-than a concrete resource class, though we've only confirmed it for this one. Until that's fixed
-upstream, `aspire run` on this sample fails at its TypeScript build step even though the export
-itself is correctly registered.
+than a concrete resource class, though we've only confirmed it for this one. Tracked upstream at
+[microsoft/aspire#19507](https://github.com/microsoft/aspire/issues/19507); until that's fixed,
+`aspire run` on this sample fails at its TypeScript build step even though the export itself is
+correctly registered.
 
 ## Status
 

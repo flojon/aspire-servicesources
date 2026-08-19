@@ -86,8 +86,9 @@ a bare Aspire interface (`IResourceBuilder<IResourceWithServiceDiscovery>`) rath
 concrete resource class: the codegen never emits the `*Promise`/`*PromiseImpl` wrapper pair that
 every other exported method gets, so the generated SDK fails to compile. Reproduced on both
 Aspire CLI 13.4.6 and 13.5.0. This currently blocks the guest-language call path from compiling,
-even though the export itself registers correctly. See the README's "Known issue" section for
-live status.
+even though the export itself registers correctly. Filed upstream as
+[microsoft/aspire#19507](https://github.com/microsoft/aspire/issues/19507); see the README's
+"Known issue" section for live status.
 
 Changing `AddService`'s return type to the concrete `ServiceResource` class to route around this
 was considered and rejected: it would change the public C# API and contradict `ServiceResource`'s
