@@ -49,7 +49,7 @@ delegate to these rather than reinventing "how to start a Node or Java app."
   }
   ```
   and a registry populated via
-  `builder.AddLocalResourceKind(string kind, ILocalResourceKind handler)`.
+  `builder.AddLocalKind(string kind, ILocalResourceKind handler)`.
   Core registers `"dotnet"` itself, backed by today's `AddProject` logic
   reading the existing `project` field — no separate package needed for
   this, since `AddProject` lives in `Aspire.Hosting`, which the core package
@@ -65,23 +65,22 @@ delegate to these rather than reinventing "how to start a Node or Java app."
 - Two new satellite packages, built in this repo/solution alongside core:
   - `Aspire.Hosting.ServiceSources.JavaScript` (NuGet id
     `KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript`), depending on core
-    + `Aspire.Hosting.JavaScript`. Exposes
-    `builder.AddJavaScriptServiceSourceKind()`, which registers a handler
-    parsing `appDirectory`/`runScript`/`packageManager` and calling
-    `AddViteApp`/`AddNpmApp`/etc with the matching `.WithNpm()`/
+    + `Aspire.Hosting.JavaScript`. Exposes `builder.UseJavaScript()`, which
+    registers a handler parsing `appDirectory`/`runScript`/`packageManager`
+    and calling `AddViteApp`/`AddNpmApp`/etc with the matching `.WithNpm()`/
     `.WithYarn()`/`.WithPnpm()`/`.WithBun()` modifier.
   - `Aspire.Hosting.ServiceSources.Java` (NuGet id
     `KoalaSoft.Aspire.Hosting.ServiceSources.Java`), depending on core +
-    `CommunityToolkit.Aspire.Hosting.Java`. Exposes
-    `builder.AddJavaServiceSourceKind()`, which registers a handler parsing
-    `workingDirectory`/`mavenGoal`/`port` and calling `AddJavaApp`/
-    `AddSpringApp` with `.WithMavenGoal()`/`.WithHttpEndpoint()`.
+    `CommunityToolkit.Aspire.Hosting.Java`. Exposes `builder.UseJava()`,
+    which registers a handler parsing `workingDirectory`/`mavenGoal`/`port`
+    and calling `AddJavaApp`/`AddSpringApp` with `.WithMavenGoal()`/
+    `.WithHttpEndpoint()`.
 - Referencing an unregistered `kind` in yaml throws
   `ServiceSourcesConfigurationException` naming the service, the unknown
   kind, and which package/call to add — e.g. "Service 'frontend': kind
   'javascript' is not registered. Add the
   `KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript` package and call
-  `builder.AddJavaScriptServiceSourceKind()`."
+  `builder.UseJavaScript()`."
 
 ## Config schema example
 
@@ -113,8 +112,8 @@ using Aspire.Hosting.ServiceSources;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
-builder.AddJavaScriptServiceSourceKind();
-builder.AddJavaServiceSourceKind();
+builder.UseJavaScript();
+builder.UseJava();
 
 var orders   = builder.AddService("orders");
 var frontend = builder.AddService("frontend");
@@ -148,6 +147,27 @@ var javaApi  = builder.AddService("java-api");
 Fully additive: `kind` is optional and defaults to `"dotnet"`; existing
 `project`/`path`/`ref` fields and `AddProject` behavior are untouched. No
 existing `servicesources.yaml` needs any change.
+
+## TypeScript/guest-language AppHost compatibility
+
+Following up from #42 (exporting `AddService()` to Aspire's Type System so it
+can be called from a TypeScript AppHost): `builder.UseJavaScript()` and
+`builder.UseJava()` need the same `[AspireExport]` treatment `AddService` got
+in #42 — no `[ResourceName]` needed since neither takes a name parameter.
+
+This is a one-line addition per method, not a design change: the part of ATS
+that's genuinely hard — exporting delegates/callback objects across the
+guest/host JSON-RPC boundary — never comes into play here. `ILocalResourceKind`
+and `builder.AddLocalKind(kind, handler)` are internal registry machinery;
+each satellite package constructs its own handler and registers it *inside*
+its own extension method body, entirely on the .NET host-process side. A
+TypeScript AppHost author would never see or implement `ILocalResourceKind`
+— they'd just call `useJavaScript()` then `addService("frontend")`, same
+shape as the plain `AddService`-only case.
+
+The `kind`/`javascript:`/`java:` yaml config in `servicesources.yaml` is read
+host-side regardless of AppHost language, so no config-schema changes are
+needed for TS compatibility either.
 
 ## Repo layout
 
