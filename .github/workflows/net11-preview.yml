@@ -9,8 +9,10 @@ on:
 jobs:
   smoke-test:
     runs-on: ubuntu-latest
-    # Exploratory only: verifies the existing net8/9/10 build+test still works under a
-    # preview SDK ahead of .NET 11 GA. Must not block merges or releases while APIs
+    # Exploratory only: verifies both that the existing net8/9/10 build+test still works
+    # under a preview SDK, and that the library actually compiles and passes tests when
+    # targeting net11.0 itself (opted into via IncludeNet11Preview, not part of the
+    # shipped package's TargetFrameworks). Must not block merges or releases while APIs
     # can still change, so failures here are surfaced but never fail the workflow.
     continue-on-error: true
     permissions:
@@ -34,7 +36,7 @@ jobs:
           dotnet-quality: preview
 
       - name: Build
-        run: dotnet build -c Release
+        run: dotnet build -c Release -p:IncludeNet11Preview=true
 
       - name: Test
-        run: dotnet test -c Release
+        run: dotnet test -c Release -p:IncludeNet11Preview=true
