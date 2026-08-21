@@ -2,6 +2,8 @@ using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources;
 using Microsoft.Extensions.DependencyInjection;
+using System.Linq;
+using System.Reflection;
 
 namespace Aspire.Hosting.ServiceSources.Tests;
 
@@ -339,6 +341,20 @@ public class AddServiceTests
 
         Assert.Contains("orders", ex.Message);
         Assert.Contains("container.image", ex.Message);
+    }
+
+    [Fact]
+    public void AddService_IsExportedToAts()
+    {
+        var method = typeof(ServiceSourcesBuilderExtensions).GetMethods()
+            .Single(m => m.Name == nameof(ServiceSourcesBuilderExtensions.AddService));
+
+        var exportAttribute = method.GetCustomAttributes(typeof(AspireExportAttribute), inherit: false);
+        Assert.Single(exportAttribute);
+
+        var nameParameter = method.GetParameters().Single(p => p.Name == "name");
+        var resourceNameAttribute = nameParameter.GetCustomAttributes(typeof(ResourceNameAttribute), inherit: false);
+        Assert.Single(resourceNameAttribute);
     }
 
     [Fact]

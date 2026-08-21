@@ -265,6 +265,31 @@ cp servicesources.local.json.example servicesources.local.json
 aspire run
 ```
 
+A TypeScript AppHost equivalent — proving `AddService()` is correctly exported and registers with
+Aspire's Type System from a guest language — lives in `samples/DemoAppHostTypeScript` (**note:**
+this sample does not currently run end-to-end — see the known issue below the code block for why):
+
+```bash
+cd samples/DemoAppHostTypeScript
+npm install
+cp servicesources.local.json.example servicesources.local.json
+aspire restore
+aspire run
+```
+
+**Known issue:** as of Aspire CLI 13.4.6/13.5.0, `aspire restore`/`aspire add` correctly
+registers `addService(name: string)` in the generated TypeScript SDK (`.aspire/modules/aspire.mts`)
+with no diagnostics — confirming Task 1's `[AspireExport]` on `AddService` works — but the
+generated SDK fails to compile (`TS2552: Cannot find name 'ResourceWithServiceDiscoveryPromise'`)
+because the Aspire CLI's TypeScript codegen doesn't emit a `*Promise`/`*PromiseImpl` wrapper pair
+for extension methods that return a bare Aspire interface type
+(`IResourceBuilder<IResourceWithServiceDiscovery>`) rather than a concrete resource class. This
+appears to affect any integration whose exported method returns a bare Aspire interface rather
+than a concrete resource class, though we've only confirmed it for this one. Tracked upstream at
+[microsoft/aspire#19507](https://github.com/microsoft/aspire/issues/19507); until that's fixed,
+`aspire run` on this sample fails at its TypeScript build step even though the export itself is
+correctly registered.
+
 ## Status
 
 Early stage, evolving fast. `"local"`, `"kubernetes"`, `"url"`, and `"container"` sources are

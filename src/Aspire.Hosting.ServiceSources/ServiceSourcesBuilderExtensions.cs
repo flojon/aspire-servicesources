@@ -1,3 +1,4 @@
+using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Git;
@@ -45,8 +46,9 @@ public static class ServiceSourcesBuilderExtensions
     /// resource model (the real, underlying project resource is what runs). See
     /// <see cref="ServiceResource"/> for the full explanation.
     /// </remarks>
+    [AspireExport]
     public static IResourceBuilder<IResourceWithServiceDiscovery> AddService(
-        this IDistributedApplicationBuilder builder, string name)
+        this IDistributedApplicationBuilder builder, [ResourceName] string name)
     {
         var (metadata, developerConfig) = ServiceSourcesConfigCache.ResolveService(builder, name);
 
