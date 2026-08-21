@@ -249,4 +249,45 @@ public class LibGit2SharpGitClientTests
     [InlineData("the index is locked")]
     public void LooksLikeAuthFailure_UnrelatedFailures_ReturnFalse(string message) =>
         Assert.False(LibGit2SharpGitClient.LooksLikeAuthFailure(message));
+
+    [Fact]
+    public void WithAuthFailureDetection_AuthenticationFailure_DropsTheCachedCredentialForTheRepository()
+    {
+        var forgotten = new List<string>();
+
+        Assert.Throws<GitAuthenticationFailedException>(() => LibGit2SharpGitClient.WithAuthFailureDetection(
+            "https://example.invalid/org/repo",
+            () => throw new LibGit2SharpException("request failed with status code: 401"),
+            forgotten.Add));
+
+        // Otherwise a token rotated mid-session stays shadowed by the cached one until the AppHost
+        // process restarts.
+        Assert.Equal("https://example.invalid/org/repo", Assert.Single(forgotten));
+    }
+
+    [Fact]
+    public void WithAuthFailureDetection_UnrelatedFailure_KeepsTheCachedCredential()
+    {
+        var forgotten = new List<string>();
+
+        Assert.Throws<LibGit2SharpException>(() => LibGit2SharpGitClient.WithAuthFailureDetection(
+            "https://example.invalid/org/repo",
+            () => throw new LibGit2SharpException("early EOF"),
+            forgotten.Add));
+
+        Assert.Empty(forgotten);
+    }
+
+    [Fact]
+    public void WithAuthFailureDetection_OperationSucceeds_KeepsTheCachedCredential()
+    {
+        var forgotten = new List<string>();
+
+        LibGit2SharpGitClient.WithAuthFailureDetection(
+            "https://example.invalid/org/repo",
+            () => { },
+            forgotten.Add);
+
+        Assert.Empty(forgotten);
+    }
 }

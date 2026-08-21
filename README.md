@@ -117,10 +117,23 @@ Clone and fetch for a managed checkout (no `path` override) authenticate the sam
    `git credential fill` yourself against the same host to confirm it resolves before wiring it
    up here).
 2. **`SERVICESOURCES_GIT_USERNAME`/`SERVICESOURCES_GIT_TOKEN` environment variables**, if the
-   helper above yields nothing (e.g. no helper configured, or `git` isn't on `PATH`).
-   `SERVICESOURCES_GIT_TOKEN` alone is enough for hosts that accept any username alongside a
-   personal access token (GitHub, GitLab, Azure DevOps); set `SERVICESOURCES_GIT_USERNAME` too
-   if your host requires a specific one.
+   helper above yields nothing (e.g. no helper configured, or `git` isn't on `PATH`) — or if what
+   it yielded was refused, see below. `SERVICESOURCES_GIT_TOKEN` alone is enough for hosts that
+   accept any username alongside a personal access token (GitHub, GitLab, Azure DevOps); set
+   `SERVICESOURCES_GIT_USERNAME` too if your host requires a specific one.
+
+The order is a ladder, not a one-shot choice: if the host refuses the credential your helper
+supplied, the environment variables are tried next, and only then the request is left
+unauthenticated. Each credential is offered once per clone or fetch — a refused one is never
+replayed.
+
+A credential the host actually refuses is also reported back to your helper with
+`git credential reject`, exactly as `git` itself does, so Git Credential Manager, `osxkeychain`,
+`libsecret` and friends erase their stored copy and resolve afresh next time instead of serving the
+same dead token on every run. That only happens on an outright rejection of the credential
+(HTTP 401); a "not found" answer never erases anything, since a repository your credential simply
+can't see is at least as likely an explanation as a bad credential. Rotating a token therefore
+takes effect on the next resolution — there's no need to restart the AppHost to clear a cached one.
 
 Credentials are never read from `servicesources.yaml` (committed) or `servicesources.local.json`
 — there's no field for them in either file, by design, so a secret can't accidentally end up in

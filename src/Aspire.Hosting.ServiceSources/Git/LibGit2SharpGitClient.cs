@@ -15,7 +15,7 @@ internal sealed class LibGit2SharpGitClient : IGitClient
             FetchOptions = { CredentialsProvider = GitCredentialResolver.CreateProvider(repositoryUrl) },
         };
 
-        WithAuthFailureDetection(() => Repository.Clone(repositoryUrl, destinationPath, options));
+        WithAuthFailureDetection(repositoryUrl, () => Repository.Clone(repositoryUrl, destinationPath, options));
     }
 
     public void Checkout(string repositoryPath, string reference)
@@ -73,7 +73,7 @@ internal sealed class LibGit2SharpGitClient : IGitClient
             CredentialsProvider = GitCredentialResolver.CreateProvider(remote.Url),
         };
 
-        WithAuthFailureDetection(() => Commands.Fetch(repo, remote.Name, refSpecs, fetchOptions, null));
+        WithAuthFailureDetection(remote.Url, () => Commands.Fetch(repo, remote.Name, refSpecs, fetchOptions, null));
     }
 
     /// <summary>
@@ -81,7 +81,17 @@ internal sealed class LibGit2SharpGitClient : IGitClient
     /// <see cref="GitAuthenticationFailedException"/> so callers can name authentication as the
     /// likely cause instead of reporting a generic clone/fetch failure.
     /// </summary>
-    private static void WithAuthFailureDetection(Action operation)
+    private static void WithAuthFailureDetection(string repositoryUrl, Action operation) =>
+        WithAuthFailureDetection(repositoryUrl, operation, GitCredentialResolver.ForgetCachedCredentials);
+
+    /// <summary>
+    /// Test seam: takes the credential-cache eviction as a parameter, so what a failure does to the
+    /// cached credential can be observed without a real credential helper behind it.
+    /// </summary>
+    internal static void WithAuthFailureDetection(
+        string repositoryUrl,
+        Action operation,
+        Action<string> forgetCachedCredentials)
     {
         try
         {
@@ -89,6 +99,13 @@ internal sealed class LibGit2SharpGitClient : IGitClient
         }
         catch (LibGit2SharpException ex) when (LooksLikeAuthFailure(ex.Message))
         {
+            // Whatever the credential helper last gave us for this host didn't get us in, so drop
+            // the cached copy: the next attempt re-reads the developer's credential store instead
+            // of replaying a stale token for the lifetime of the AppHost process. Deliberately not
+            // `git credential reject` — a "not found" reaching here is at least as likely to be a
+            // repository this credential genuinely can't see as a bad credential, and erasing a
+            // working entry over that would be worse than keeping it.
+            forgetCachedCredentials(repositoryUrl);
             throw new GitAuthenticationFailedException(ex.Message, ex);
         }
     }
