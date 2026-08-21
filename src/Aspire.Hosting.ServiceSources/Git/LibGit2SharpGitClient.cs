@@ -6,7 +6,19 @@ internal sealed class LibGit2SharpGitClient : IGitClient
 {
     public void Clone(string repositoryUrl, string destinationPath)
     {
-        Repository.Clone(repositoryUrl, destinationPath);
+        var options = new CloneOptions
+        {
+            FetchOptions = { CredentialsProvider = GitCredentialResolver.CreateProvider(repositoryUrl) },
+        };
+
+        try
+        {
+            Repository.Clone(repositoryUrl, destinationPath, options);
+        }
+        catch (Exception ex) when (LooksLikeAuthFailure(ex))
+        {
+            throw new GitAuthenticationFailedException(ex.Message, ex);
+        }
     }
 
     public void Checkout(string repositoryPath, string reference)
@@ -57,7 +69,34 @@ internal sealed class LibGit2SharpGitClient : IGitClient
         }
 
         var refSpecs = remote.FetchRefSpecs.Select(r => r.Specification);
-        Commands.Fetch(repo, remote.Name, refSpecs, null, null);
+        var fetchOptions = new FetchOptions
+        {
+            CredentialsProvider = GitCredentialResolver.CreateProvider(remote.Url),
+        };
+
+        try
+        {
+            Commands.Fetch(repo, remote.Name, refSpecs, fetchOptions, null);
+        }
+        catch (Exception ex) when (LooksLikeAuthFailure(ex))
+        {
+            throw new GitAuthenticationFailedException(ex.Message, ex);
+        }
+    }
+
+    private static bool LooksLikeAuthFailure(Exception ex)
+    {
+        if (ex is not LibGit2SharpException)
+        {
+            return false;
+        }
+
+        var message = ex.Message;
+        return message.Contains("authentication", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("credentials", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("401", StringComparison.Ordinal)
+            || message.Contains("403", StringComparison.Ordinal)
+            || message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase);
     }
 
     public bool HasUncommittedChanges(string repositoryPath)

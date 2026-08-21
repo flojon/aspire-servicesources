@@ -49,9 +49,19 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
 
             if (!Directory.Exists(Path.Combine(repoRoot, ".git")))
             {
+                GitUrlValidator.EnsureSupported(serviceName, metadata.Repository);
+
                 try
                 {
                     gitClient.Clone(metadata.Repository, repoRoot);
+                }
+                catch (GitAuthenticationFailedException ex)
+                {
+                    throw new ServiceSourcesConfigurationException(
+                        $"Service '{serviceName}': failed to clone repository '{metadata.Repository}' into " +
+                        $"'{repoRoot}' — authentication failed. Configure credentials via a git credential " +
+                        "helper (`git credential fill` must resolve them for this host) or the " +
+                        "SERVICESOURCES_GIT_USERNAME/SERVICESOURCES_GIT_TOKEN environment variables.", ex);
                 }
                 catch (Exception ex)
                 {
@@ -125,6 +135,14 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         try
         {
             gitClient.Fetch(repoRoot);
+        }
+        catch (GitAuthenticationFailedException ex)
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': failed to fetch repository '{metadata.Repository}' at '{repoRoot}' " +
+                $"while resolving ref '{reference}' — authentication failed. Configure credentials via a git " +
+                "credential helper (`git credential fill` must resolve them for this host) or the " +
+                "SERVICESOURCES_GIT_USERNAME/SERVICESOURCES_GIT_TOKEN environment variables.", ex);
         }
         catch (Exception ex)
         {

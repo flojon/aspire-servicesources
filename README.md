@@ -106,6 +106,34 @@ a project reference would be.
 - Set `path` to point at a checkout you manage yourself (e.g. an existing local clone). It's
   used as-is — no clone, no checkout, no fetch, ever. `ref` cannot be combined with `path`.
 
+#### Private repositories
+
+Clone and fetch for a managed checkout (no `path` override) authenticate the same way, in order:
+
+1. **Your `git` credential helper.** The managed checkout shells out to `git credential fill` for
+   the repository's host, so whatever you already have configured — Git Credential Manager,
+   `osxkeychain`, `libsecret`, a cached PAT, a `.netrc`-backed helper — is reused automatically.
+   Nothing to configure here beyond having `git` on `PATH` with a working credential helper (run
+   `git credential fill` yourself against the same host to confirm it resolves before wiring it
+   up here).
+2. **`SERVICESOURCES_GIT_USERNAME`/`SERVICESOURCES_GIT_TOKEN` environment variables**, if the
+   helper above yields nothing (e.g. no helper configured, or `git` isn't on `PATH`).
+   `SERVICESOURCES_GIT_TOKEN` alone is enough for hosts that accept any username alongside a
+   personal access token (GitHub, GitLab, Azure DevOps); set `SERVICESOURCES_GIT_USERNAME` too
+   if your host requires a specific one.
+
+Credentials are never read from `servicesources.yaml` (committed) or `servicesources.local.json`
+— there's no field for them in either file, by design, so a secret can't accidentally end up in
+the committed catalog.
+
+A clone or fetch that fails for what looks like an authentication reason raises an error naming
+the service, the repository, and authentication as the likely cause, rather than a generic
+"failed to clone" message.
+
+**SSH is not supported.** LibGit2Sharp's bundled native binaries don't include an SSH transport,
+so a `repository` written as `git@host:org/repo` or `ssh://...` fails fast at resolution time
+with a message pointing at the HTTPS equivalent — use `https://host/org/repo` instead.
+
 ### `"kubernetes"` source
 
 Point a service at an already-running instance in a Kubernetes dev cluster via

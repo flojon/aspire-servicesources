@@ -401,6 +401,39 @@ public class LocalProjectSourceTests
     }
 
     [Fact]
+    public void ResolveProjectPath_CloneFailsWithAuthError_MessageNamesAuthenticationAsCause()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var gitClient = new FakeGitClient
+        {
+            CloneException = new GitAuthenticationFailedException("401 unauthorized", new InvalidOperationException()),
+        };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            LocalProjectSource.ResolveProjectPath(
+                ServiceName, Metadata(repository: "https://github.com/company/orders"), DevConfig(), appHostDirectory, gitClient));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("https://github.com/company/orders", ex.Message);
+        Assert.Contains("authentication", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_SshRepositoryUrl_ThrowsWithoutAttemptingClone()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var gitClient = new FakeGitClient();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            LocalProjectSource.ResolveProjectPath(
+                ServiceName, Metadata(repository: "git@github.com:company/orders.git"), DevConfig(), appHostDirectory, gitClient));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("SSH", ex.Message);
+        Assert.Empty(gitClient.ClonedRepos);
+    }
+
+    [Fact]
     public void ResolveProjectPath_CheckoutFails_WrapsAsConfigurationExceptionNamingServiceAndRef()
     {
         var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
@@ -469,6 +502,24 @@ public class LocalProjectSourceTests
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.IsType<InvalidOperationException>(ex.InnerException);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_CacheMiss_FetchFailsWithAuthError_MessageNamesAuthenticationAsCause()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var gitClient = new FakeGitClient
+        {
+            FailFirstCheckoutOnly = true,
+            FetchException = new GitAuthenticationFailedException("401 unauthorized", new InvalidOperationException()),
+        };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            LocalProjectSource.ResolveProjectPath(
+                ServiceName, Metadata(defaultRef: "feature/late"), DevConfig(), appHostDirectory, gitClient));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("authentication", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
