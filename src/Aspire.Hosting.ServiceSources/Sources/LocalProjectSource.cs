@@ -25,11 +25,22 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
     {
         var repoRoot = LocalGitCheckout.ResolveRepoRoot(serviceName, metadata, config, appHostDirectory, gitClient);
 
-        var projectPath = Path.Combine(repoRoot, metadata.Project);
+        return ResolveProjectFile(serviceName, repoRoot, metadata.Project);
+    }
+
+    /// <summary>
+    /// Resolves and validates the project file path for a "dotnet"-kind service whose repo root
+    /// has already been resolved. Shared by <see cref="ResolveProjectPath"/> (used directly by
+    /// tests) and <see cref="PendingLocalResolutions"/>'s production resolution path, so the check
+    /// and its error message can't drift between the two.
+    /// </summary>
+    internal static string ResolveProjectFile(string serviceName, string repoRoot, string project)
+    {
+        var projectPath = Path.Combine(repoRoot, project);
         if (!File.Exists(projectPath))
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': project file '{metadata.Project}' was not found under '{repoRoot}'.");
+                $"Service '{serviceName}': project file '{project}' was not found under '{repoRoot}'.");
         }
 
         return projectPath;

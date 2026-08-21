@@ -228,4 +228,52 @@ public class ServiceCatalogLoaderTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public void Load_UnknownTopLevelProperty_ThrowsNamingServiceAndProperty()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repositry: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("orders", ex.Message);
+            Assert.Contains("repositry", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_EmptyKindValue_DefaultsToDotnet()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+                kind:
+            """);
+
+        try
+        {
+            var catalog = ServiceCatalogLoader.Load(path);
+
+            Assert.Equal("dotnet", catalog.Services["orders"].Kind);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

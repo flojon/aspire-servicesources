@@ -10,6 +10,11 @@ internal static class ServiceCatalogLoader
         .IgnoreUnmatchedProperties()
         .Build();
 
+    private static readonly HashSet<string> KnownTopLevelProperties = new(StringComparer.Ordinal)
+    {
+        "repository", "project", "defaultRef", "kind", "kubernetes", "url", "container",
+    };
+
     public static ServiceCatalog Load(string path)
     {
         if (!File.Exists(path))
@@ -24,8 +29,36 @@ internal static class ServiceCatalogLoader
 
         foreach (var (name, metadata) in catalog.Services)
         {
-            if (raw.Services.TryGetValue(name, out var rawService) &&
-                rawService.TryGetValue(metadata.Kind, out var kindBlock))
+            // YamlDotNet assigns null for an empty `kind:` scalar, overriding the "dotnet" default —
+            // normalize before it's used as a dictionary key or compared against raw property names.
+            if (string.IsNullOrWhiteSpace(metadata.Kind))
+            {
+                metadata.Kind = "dotnet";
+            }
+
+            if (!raw.Services.TryGetValue(name, out var rawService))
+            {
+                continue;
+            }
+
+            // IgnoreUnmatchedProperties() above is required so a legitimate per-kind block (e.g.
+            // "javascript:") doesn't trip the typed pass — but that also silently drops real typos
+            // on the well-known top-level fields (e.g. "repositry:"). Catch those here instead: any
+            // top-level key that's neither a known ServiceMetadata property nor this service's own
+            // kind block is an error, not a silently-ignored no-op. (Typos nested *inside* an
+            // existing typed block like `kubernetes:` are a separate, pre-existing concern and out
+            // of scope for this fix.)
+            foreach (var key in rawService.Keys)
+            {
+                if (!KnownTopLevelProperties.Contains(key) && key != metadata.Kind)
+                {
+                    throw new ServiceSourcesConfigurationException(
+                        $"Service '{name}': unknown property '{key}'. Expected one of: " +
+                        "repository, project, defaultRef, kind, kubernetes, url, container, or a block matching the service's kind.");
+                }
+            }
+
+            if (rawService.TryGetValue(metadata.Kind, out var kindBlock))
             {
                 metadata.KindConfig = kindBlock;
             }

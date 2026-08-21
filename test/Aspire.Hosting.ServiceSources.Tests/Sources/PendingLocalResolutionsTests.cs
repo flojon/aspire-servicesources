@@ -19,8 +19,12 @@ public class PendingLocalResolutionsTests
 
         public Barrier? StartBarrier { get; set; }
 
+        public bool CloneCalled { get; private set; }
+
         public void Clone(string repositoryUrl, string destinationPath)
         {
+            CloneCalled = true;
+
             // Rendezvous with the other clone(s) before proceeding: if resolution were sequential
             // rather than parallel, only one participant would ever reach this point at a time and
             // the wait below would time out, deterministically failing the test regardless of
@@ -202,5 +206,76 @@ public class PendingLocalResolutionsTests
 
         Assert.Contains("frontend", ex.Message);
         Assert.Contains("javascript", ex.Message);
+    }
+
+    [Fact]
+    public async Task ResolveAllAsync_TwoServicesMissingProjectFile_AggregatesBothAndAddsNeither()
+    {
+        var builder = CreateBuilder(CreateAppHostDirectory());
+        var ordersFacade = ServiceResource.CreateEmptyFacade(builder, "orders");
+        var billingFacade = ServiceResource.CreateEmptyFacade(builder, "billing");
+        var pending = PendingLocalResolutions.For(builder);
+        pending.Add(new PendingResolution(
+            "orders", new ServiceMetadata { Repository = "https://fake/orders", Project = "Missing.csproj" }, DevConfig(), ordersFacade, new FakeGitClient()));
+        pending.Add(new PendingResolution(
+            "billing", new ServiceMetadata { Repository = "https://fake/billing", Project = "Missing.csproj" }, DevConfig(), billingFacade, new FakeGitClient()));
+
+        var ex = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(
+            () => PublishBeforeStartEventAsync(builder));
+
+        Assert.Contains("orders", ex.Message);
+        Assert.Contains("billing", ex.Message);
+        Assert.Contains("Missing.csproj", ex.Message);
+        Assert.DoesNotContain(builder.Resources, r => r.Name == "orders");
+        Assert.DoesNotContain(builder.Resources, r => r.Name == "billing");
+    }
+
+    [Fact]
+    public async Task ResolveAllAsync_OneUnregisteredKindAndOneValidDotnetService_ThrowsWithoutAddingValidService()
+    {
+        var builder = CreateBuilder(CreateAppHostDirectory());
+        var ordersFacade = ServiceResource.CreateEmptyFacade(builder, "orders");
+        var frontendFacade = ServiceResource.CreateEmptyFacade(builder, "frontend");
+        var pending = PendingLocalResolutions.For(builder);
+        pending.Add(new PendingResolution("orders", Metadata("https://fake/orders"), DevConfig(), ordersFacade, new FakeGitClient()));
+        pending.Add(new PendingResolution(
+            "frontend", MetadataWithKind("https://fake/frontend", "javascript"), DevConfig(), frontendFacade, new FakeGitClient()));
+
+        var ex = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(
+            () => PublishBeforeStartEventAsync(builder));
+
+        Assert.Contains("frontend", ex.Message);
+        Assert.Contains("javascript", ex.Message);
+        Assert.DoesNotContain(builder.Resources, r => r.Name == "orders");
+    }
+
+    [Fact]
+    public async Task ResolveAllAsync_UnregisteredKind_ThrowsWithoutCloningAnyService()
+    {
+        var builder = CreateBuilder(CreateAppHostDirectory());
+        var frontendFacade = ServiceResource.CreateEmptyFacade(builder, "frontend");
+        var gitClient = new FakeGitClient();
+        PendingLocalResolutions.For(builder).Add(new PendingResolution(
+            "frontend", MetadataWithKind("https://fake/frontend", "javascript"), DevConfig(), frontendFacade, gitClient));
+
+        await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(
+            () => PublishBeforeStartEventAsync(builder));
+
+        Assert.False(gitClient.CloneCalled);
+    }
+
+    [Fact]
+    public async Task ResolveAllAsync_RegisteredKindStillResolvesAfterPreflightPasses()
+    {
+        var builder = CreateBuilder(CreateAppHostDirectory());
+        var handler = new FakeLocalResourceKind();
+        builder.AddLocalKind("javascript", handler);
+        var facade = ServiceResource.CreateEmptyFacade(builder, "frontend");
+        PendingLocalResolutions.For(builder).Add(new PendingResolution(
+            "frontend", MetadataWithKind("https://fake/frontend", "javascript"), DevConfig(), facade, new FakeGitClient()));
+
+        await PublishBeforeStartEventAsync(builder);
+
+        Assert.Single(handler.Calls);
     }
 }

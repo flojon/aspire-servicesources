@@ -46,40 +46,43 @@ internal sealed class PendingLocalResolutions
     {
         _resolutionStarted = true;
 
+        // Cheap, synchronous pre-flight: catch unregistered kinds before paying for anyone's git
+        // clone. This depends only on the registry and each service's already-loaded metadata, so
+        // it doesn't need to wait for (or trigger) any I/O.
+        var unregisteredKindFailures = _pending
+            .Where(p => p.Metadata.Kind != "dotnet" && !LocalKindRegistry.For(builder).TryGet(p.Metadata.Kind, out _))
+            .Select(p => (Exception)new ServiceSourcesConfigurationException(
+                $"Service '{p.ServiceName}': kind '{p.Metadata.Kind}' is not registered. " +
+                "Add the satellite package for this kind and call its registration method " +
+                "(e.g. builder.UseJavaScript()) before this service is resolved."))
+            .ToArray();
+        if (unregisteredKindFailures.Length > 0)
+        {
+            throw AggregateFailures(unregisteredKindFailures);
+        }
+
         var results = await Task.WhenAll(_pending.Select(pending =>
             Task.Run(() => ResolveOne(pending, builder.AppHostDirectory), cancellationToken)));
 
-        var failures = results.Where(r => r.Exception is not null).ToArray();
-        if (failures.Length > 0)
+        var resolutionFailures = results.Where(r => r.Exception is not null).Select(r => r.Exception!).ToArray();
+        if (resolutionFailures.Length > 0)
         {
-            throw AggregateFailures(failures);
+            throw AggregateFailures(resolutionFailures);
         }
 
+        // Every check above has already passed for every service, so this loop only ever creates
+        // resources — it never throws, and so never leaves the app model partially populated.
         foreach (var result in results)
         {
             var pending = result.Pending;
-            if (pending.Metadata.Kind == "dotnet")
+            if (result.ProjectPath is not null)
             {
-                var projectPath = Path.Combine(result.RepoRoot!, pending.Metadata.Project);
-                if (!File.Exists(projectPath))
-                {
-                    throw new ServiceSourcesConfigurationException(
-                        $"Service '{pending.ServiceName}': project file '{pending.Metadata.Project}' was not found under '{result.RepoRoot}'.");
-                }
-
-                var projectBuilder = builder.AddProject(pending.ServiceName, projectPath);
+                var projectBuilder = builder.AddProject(pending.ServiceName, result.ProjectPath);
                 ServiceResource.CopyEndpointAnnotations(pending.Facade, projectBuilder);
                 continue;
             }
 
-            if (!LocalKindRegistry.For(builder).TryGet(pending.Metadata.Kind, out var handler))
-            {
-                throw new ServiceSourcesConfigurationException(
-                    $"Service '{pending.ServiceName}': kind '{pending.Metadata.Kind}' is not registered. " +
-                    "Add the satellite package for this kind and call its registration method " +
-                    "(e.g. builder.UseJavaScript()) before this service is resolved.");
-            }
-
+            LocalKindRegistry.For(builder).TryGet(pending.Metadata.Kind, out var handler);
             var resourceBuilder = handler!.Resolve(builder, pending.ServiceName, result.RepoRoot!, pending.Metadata.KindConfig);
             ServiceResource.CopyEndpointAnnotations(pending.Facade, resourceBuilder);
         }
@@ -91,23 +94,30 @@ internal sealed class PendingLocalResolutions
         {
             var repoRoot = LocalGitCheckout.ResolveRepoRoot(
                 pending.ServiceName, pending.Metadata, pending.Config, appHostDirectory, pending.GitClient);
-            return new ResolutionResult(pending, repoRoot, null);
+
+            if (pending.Metadata.Kind == "dotnet")
+            {
+                var projectPath = LocalProjectSource.ResolveProjectFile(pending.ServiceName, repoRoot, pending.Metadata.Project);
+                return new ResolutionResult(pending, repoRoot, projectPath, null);
+            }
+
+            return new ResolutionResult(pending, repoRoot, null, null);
         }
         catch (Exception ex)
         {
-            return new ResolutionResult(pending, null, ex);
+            return new ResolutionResult(pending, null, null, ex);
         }
     }
 
-    private static ServiceSourcesConfigurationException AggregateFailures(IReadOnlyCollection<ResolutionResult> failures)
+    private static ServiceSourcesConfigurationException AggregateFailures(IReadOnlyCollection<Exception> failures)
     {
-        var lines = failures.Select(f => f.Exception!.InnerException is not null
-            ? $"  - {f.Exception.Message} ({f.Exception.InnerException.Message})"
-            : $"  - {f.Exception.Message}");
+        var lines = failures.Select(ex => ex.InnerException is not null
+            ? $"  - {ex.Message} ({ex.InnerException.Message})"
+            : $"  - {ex.Message}");
         var message = "Failed to resolve one or more 'local'-sourced services:" + Environment.NewLine +
             string.Join(Environment.NewLine, lines);
-        return new ServiceSourcesConfigurationException(message, failures.First().Exception!);
+        return new ServiceSourcesConfigurationException(message, failures.First());
     }
 
-    private readonly record struct ResolutionResult(PendingResolution Pending, string? RepoRoot, Exception? Exception);
+    private readonly record struct ResolutionResult(PendingResolution Pending, string? RepoRoot, string? ProjectPath, Exception? Exception);
 }
