@@ -358,4 +358,93 @@ public class ServiceCatalogLoaderTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public void Load_ServiceEntryWithNoBody_ThrowsNamingService()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+            """);
+
+        try
+        {
+            // YamlDotNet stores a null entry for a bodyless service key; report it by name rather
+            // than dereferencing it while normalizing `kind`.
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("orders", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_EveryKnownPropertyOnOneService_LoadsWithoutError()
+    {
+        // The unknown-property sets are derived from the metadata types by reflection; this guards
+        // the derivation itself, so a property that the typed pass accepts can never be rejected
+        // here as unknown.
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+                defaultRef: main
+                kind: dotnet
+                kubernetes:
+                  service: orders-svc
+                  port: 8080
+                url:
+                  url: https://orders.example.com
+                container:
+                  image: ghcr.io/company/orders
+                  port: 8080
+                  defaultTag: latest
+            """);
+
+        try
+        {
+            var orders = ServiceCatalogLoader.Load(path).Services["orders"];
+
+            Assert.Equal("main", orders.DefaultRef);
+            Assert.Equal("orders-svc", orders.Kubernetes!.Service);
+            Assert.Equal("https://orders.example.com", orders.Url!.Url);
+            Assert.Equal("latest", orders.Container!.DefaultTag);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_KindConfigProperty_IsRejectedAsUnknown()
+    {
+        // KindConfig is populated from the kind-matching block, never bound from yaml — so the
+        // reflection-derived set must not start accepting it as a writable key.
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                kindConfig:
+                  runScript: dev
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("kindConfig", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

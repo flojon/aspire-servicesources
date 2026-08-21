@@ -46,13 +46,16 @@ internal sealed class PendingLocalResolutions
     {
         _resolutionStarted = true;
 
+        var registry = LocalKindRegistry.For(builder);
+
         // Cheap, synchronous pre-flight: catch unregistered kinds before paying for anyone's git
         // clone. This depends only on the registry and each service's already-loaded metadata, so
         // it doesn't need to wait for (or trigger) any I/O.
         var unregisteredKindFailures = _pending
-            .Where(p => p.Metadata.Kind != "dotnet" && !LocalKindRegistry.For(builder).TryGet(p.Metadata.Kind, out _))
+            .Where(p => !IsDotnet(p.Metadata.Kind) && !registry.TryGet(p.Metadata.Kind, out _))
             .Select(p => (Exception)new ServiceSourcesConfigurationException(
                 $"Service '{p.ServiceName}': kind '{p.Metadata.Kind}' is not registered. " +
+                registry.DescribeNearMatch(p.Metadata.Kind) +
                 "Add the satellite package for this kind and call its registration method " +
                 "(e.g. builder.UseJavaScript()) before this service is resolved."))
             .ToArray();
@@ -62,7 +65,7 @@ internal sealed class PendingLocalResolutions
         }
 
         var results = await Task.WhenAll(_pending.Select(pending =>
-            Task.Run(() => ResolveOne(pending, builder.AppHostDirectory), cancellationToken)));
+            Task.Run(() => ResolveOne(pending, builder.AppHostDirectory, registry), cancellationToken)));
 
         var resolutionFailures = results.Where(r => r.Exception is not null).Select(r => r.Exception!).ToArray();
         if (resolutionFailures.Length > 0)
@@ -70,47 +73,50 @@ internal sealed class PendingLocalResolutions
             throw AggregateFailures(resolutionFailures);
         }
 
-        // Every check above has already passed for every service, so this loop only ever creates
-        // resources — it never throws, and so never leaves the app model partially populated.
+        // Every check above has already passed for every service — including the registry lookup,
+        // whose result each ResolutionResult carries — so this loop only ever creates resources: it
+        // never throws, and so never leaves the app model partially populated.
         foreach (var result in results)
         {
             var pending = result.Pending;
-            if (result.ProjectPath is not null)
+            if (result.Handler is null)
             {
-                var projectBuilder = builder.AddProject(pending.ServiceName, result.ProjectPath);
+                // No handler means the built-in dotnet kind, for which ResolveOne always set ProjectPath.
+                var projectBuilder = builder.AddProject(pending.ServiceName, result.ProjectPath!);
                 ServiceResource.CopyEndpointAnnotations(pending.Facade, projectBuilder);
                 continue;
             }
 
-            if (!LocalKindRegistry.For(builder).TryGet(pending.Metadata.Kind, out var handler))
-            {
-                throw new ServiceSourcesConfigurationException(
-                    $"Service '{pending.ServiceName}': kind '{pending.Metadata.Kind}' is not registered.");
-            }
-
-            var resourceBuilder = handler!.Resolve(builder, pending.ServiceName, result.RepoRoot!, pending.Metadata.KindConfig);
+            var resourceBuilder = result.Handler.Resolve(
+                builder, pending.ServiceName, result.RepoRoot!, pending.Metadata.KindConfig);
             ServiceResource.CopyEndpointAnnotations(pending.Facade, resourceBuilder);
         }
     }
 
-    private static ResolutionResult ResolveOne(PendingResolution pending, string appHostDirectory)
+    private static bool IsDotnet(string kind) => string.Equals(kind, LocalKinds.Dotnet, StringComparison.Ordinal);
+
+    private static ResolutionResult ResolveOne(
+        PendingResolution pending, string appHostDirectory, LocalKindRegistry registry)
     {
         try
         {
             var repoRoot = LocalGitCheckout.ResolveRepoRoot(
                 pending.ServiceName, pending.Metadata, pending.Config, appHostDirectory, pending.GitClient);
 
-            if (pending.Metadata.Kind == "dotnet")
+            if (IsDotnet(pending.Metadata.Kind))
             {
                 var projectPath = LocalProjectSource.ResolveProjectFile(pending.ServiceName, repoRoot, pending.Metadata.Project);
-                return new ResolutionResult(pending, repoRoot, projectPath, null);
+                return new ResolutionResult(pending, repoRoot, projectPath, null, null);
             }
 
-            return new ResolutionResult(pending, repoRoot, null, null);
+            // The pre-flight above already proved this lookup succeeds; carrying the handler through
+            // to the creation loop keeps that loop free of any check that could fail mid-way.
+            registry.TryGet(pending.Metadata.Kind, out var handler);
+            return new ResolutionResult(pending, repoRoot, null, handler, null);
         }
         catch (Exception ex)
         {
-            return new ResolutionResult(pending, null, null, ex);
+            return new ResolutionResult(pending, null, null, null, ex);
         }
     }
 
@@ -124,5 +130,15 @@ internal sealed class PendingLocalResolutions
         return new ServiceSourcesConfigurationException(message, failures.First());
     }
 
-    private readonly record struct ResolutionResult(PendingResolution Pending, string? RepoRoot, string? ProjectPath, Exception? Exception);
+    /// <summary>
+    /// One service's parallel-phase outcome. On success exactly one of <paramref name="ProjectPath"/>
+    /// (built-in dotnet kind) and <paramref name="Handler"/> (any registered kind) is set, and that
+    /// pair is what the sequential creation loop dispatches on.
+    /// </summary>
+    private readonly record struct ResolutionResult(
+        PendingResolution Pending,
+        string? RepoRoot,
+        string? ProjectPath,
+        ILocalResourceKind? Handler,
+        Exception? Exception);
 }

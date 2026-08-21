@@ -1,3 +1,4 @@
+using System.Reflection;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
@@ -10,17 +11,32 @@ internal static class ServiceCatalogLoader
         .IgnoreUnmatchedProperties()
         .Build();
 
-    private static readonly HashSet<string> KnownTopLevelProperties = new(StringComparer.Ordinal)
-    {
-        "repository", "project", "defaultRef", "kind", "kubernetes", "url", "container",
-    };
+    // Both sets are derived from the metadata types rather than hand-listed, so a property added to
+    // ServiceMetadata (or to one of its nested blocks) can never be accepted by the typed pass while
+    // being rejected as "unknown" by the checks in Load below.
+    private static readonly HashSet<string> KnownTopLevelProperties = YamlPropertyNames(typeof(ServiceMetadata));
 
-    private static readonly Dictionary<string, HashSet<string>> KnownNestedProperties = new(StringComparer.Ordinal)
-    {
-        ["kubernetes"] = new HashSet<string>(StringComparer.Ordinal) { "service", "port" },
-        ["url"] = new HashSet<string>(StringComparer.Ordinal) { "url" },
-        ["container"] = new HashSet<string>(StringComparer.Ordinal) { "image", "port", "defaultTag" },
-    };
+    private static readonly Dictionary<string, HashSet<string>> KnownNestedProperties =
+        YamlProperties(typeof(ServiceMetadata))
+            .Where(p => IsNestedBlock(p.PropertyType))
+            .ToDictionary(
+                p => CamelCaseNamingConvention.Instance.Apply(p.Name),
+                p => YamlPropertyNames(p.PropertyType),
+                StringComparer.Ordinal);
+
+    private static IEnumerable<PropertyInfo> YamlProperties(Type type) =>
+        type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(p => p.GetCustomAttribute<YamlIgnoreAttribute>() is null);
+
+    private static HashSet<string> YamlPropertyNames(Type type) =>
+        YamlProperties(type)
+            .Select(p => CamelCaseNamingConvention.Instance.Apply(p.Name))
+            .ToHashSet(StringComparer.Ordinal);
+
+    // A nested yaml block is a metadata class declared alongside ServiceMetadata; scalar properties
+    // (including Nullable<int>, which is a struct) and the untyped kind block are not.
+    private static bool IsNestedBlock(Type type) =>
+        type.IsClass && type != typeof(string) && type.Namespace == typeof(ServiceMetadata).Namespace;
 
     public static ServiceCatalog Load(string path)
     {
@@ -36,11 +52,19 @@ internal static class ServiceCatalogLoader
 
         foreach (var (name, metadata) in catalog.Services)
         {
+            // A service key with nothing under it deserializes to a null entry — report that by name
+            // rather than dereferencing it below.
+            if (metadata is null)
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Service '{name}': entry is empty. Expected at least a 'repository' property.");
+            }
+
             // YamlDotNet assigns null for an empty `kind:` scalar, overriding the "dotnet" default —
             // normalize before it's used as a dictionary key or compared against raw property names.
             if (string.IsNullOrWhiteSpace(metadata.Kind))
             {
-                metadata.Kind = "dotnet";
+                metadata.Kind = LocalKinds.Dotnet;
             }
 
             if (!raw.Services.TryGetValue(name, out var rawService))
@@ -60,7 +84,7 @@ internal static class ServiceCatalogLoader
                 {
                     throw new ServiceSourcesConfigurationException(
                         $"Service '{name}': unknown property '{key}'. Expected one of: " +
-                        "repository, project, defaultRef, kind, kubernetes, url, container, or a block matching the service's kind.");
+                        string.Join(", ", KnownTopLevelProperties) + ", or a block matching the service's kind.");
                 }
 
                 if (KnownNestedProperties.TryGetValue(key, out var knownNested) &&

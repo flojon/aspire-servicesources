@@ -63,6 +63,8 @@ public class PendingLocalResolutionsTests
         public string? GetOriginUrl(string repositoryPath) => null;
     }
 
+    private sealed class FakeKindResource(string name) : Resource(name), IResourceWithServiceDiscovery;
+
     private sealed class FakeLocalResourceKind : ILocalResourceKind
     {
         public List<(string ServiceName, string RepoRoot, object? RawConfig)> Calls { get; } = [];
@@ -71,7 +73,12 @@ public class PendingLocalResolutionsTests
             IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig)
         {
             Calls.Add((serviceName, repoRoot, rawConfig));
-            return ServiceResource.CreateEmptyFacade(builder, serviceName);
+
+            // A real, registered resource with an endpoint — deliberately NOT
+            // ServiceResource.CreateEmptyFacade, which is documented as never entering the app
+            // model and so can't show that a handler's resource actually reaches it.
+            return builder.AddResource(new FakeKindResource(serviceName))
+                .WithHttpEndpoint(port: 5555, name: "http");
         }
     }
 
@@ -277,5 +284,40 @@ public class PendingLocalResolutionsTests
         await PublishBeforeStartEventAsync(builder);
 
         Assert.Single(handler.Calls);
+    }
+
+    [Fact]
+    public async Task ResolveAllAsync_RegisteredNonDotnetKind_AddsHandlerResourceToAppModelAndCopiesEndpoints()
+    {
+        var builder = CreateBuilder(CreateAppHostDirectory());
+        builder.AddLocalKind("javascript", new FakeLocalResourceKind());
+        var facade = ServiceResource.CreateEmptyFacade(builder, "frontend");
+        PendingLocalResolutions.For(builder).Add(new PendingResolution(
+            "frontend", MetadataWithKind("https://fake/frontend", "javascript"), DevConfig(), facade, new FakeGitClient()));
+
+        await PublishBeforeStartEventAsync(builder);
+
+        // Dispatching to the handler isn't enough: the resource it returns has to land in the app
+        // model, and its endpoints have to reach the facade consumers hold.
+        Assert.Single(builder.Resources, r => r.Name == "frontend");
+        var endpoint = Assert.Single(facade.Resource.Annotations.OfType<EndpointAnnotation>());
+        Assert.Equal(5555, endpoint.Port);
+    }
+
+    [Fact]
+    public async Task ResolveAllAsync_KindDifferingOnlyByCase_ErrorPointsAtTheCasing()
+    {
+        var builder = CreateBuilder(CreateAppHostDirectory());
+        builder.AddLocalKind("javascript", new FakeLocalResourceKind());
+        var facade = ServiceResource.CreateEmptyFacade(builder, "frontend");
+        PendingLocalResolutions.For(builder).Add(new PendingResolution(
+            "frontend", MetadataWithKind("https://fake/frontend", "JavaScript"), DevConfig(), facade, new FakeGitClient()));
+
+        var ex = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(
+            () => PublishBeforeStartEventAsync(builder));
+
+        // Without the hint this reads as a missing satellite package rather than a casing slip.
+        Assert.Contains("case-sensitive", ex.Message);
+        Assert.Contains("'javascript'", ex.Message);
     }
 }
