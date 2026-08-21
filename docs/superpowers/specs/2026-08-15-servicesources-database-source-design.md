@@ -1,6 +1,6 @@
 # Aspire.Hosting.ServiceSources — Backing Service Source Design
 
-**Status:** Draft — revised 2026-08-21 against `main` (see Revision Notes). Expect further revision once this is prototyped against a real service that consumes a database.
+**Status:** Draft — revised 2026-08-21 against `main` (see Revision Notes). The two questions that blocked the design have since been settled by running a real AppHost; see [Resolved by Prototype](#resolved-by-prototype). What remains open needs a real cluster, not a prototype.
 **Date:** 2026-08-15 (revised 2026-08-21)
 **Scope:** Extends the local-vs-kubernetes source-switching model from services to the backing resources a service connects to: databases (Postgres, SQL Server) and, on exactly the same mechanism, message brokers and caches (RabbitMQ, Redis, …). The mechanism is connection-string-based and backend-agnostic — see [Generalization](#generalization-beyond-databases), where this is verified rather than assumed. Closes out the "Database/queue source switching" item from the [phase 2 reference doc](2026-08-09-servicesources-phase2-future-work.md) and [issue #10](https://github.com/flojon/aspire-servicesources/issues/10).
 
@@ -40,7 +40,7 @@ Resolves `name`'s developer config (local.json only — see Config Schema) and d
 
 - **`"local"`** (default when no entry, or `"source": "local"`) — invokes the caller-supplied `local` factory as-is and returns its result. No catalog, no provisioning logic of our own — this is exactly `builder.AddPostgres("orders-pg").AddDatabase("orders")` or similar, written by the AppHost author like any other Aspire resource.
 - **`"external"`** — builds a `ReferenceExpression` from the config's `connectionString` (after placeholder substitution — see Templating) and calls Aspire's own `ConnectionStringBuilderExtensions.AddConnectionString(builder, name, expression)`, which returns a real `IResourceBuilder<ConnectionStringResource>`. Covers both a manually-run local instance and a cluster database reachable directly through an ingress/gateway — from Aspire's perspective these are identical: "connect to this host:port," no process to manage.
-- **`"kubernetes"`** — same `AddConnectionString(...)` mechanism as `"external"`, but first allocates a local port (`IPortAllocator`, existing seam) and adds a `kubectl port-forward` `AddExecutable(...)` (same shape as `KubernetesSource`), then substitutes `{port}` in the connection-string template with the allocated port before building the expression.
+- **`"kubernetes"`** — same `AddConnectionString(...)` mechanism as `"external"`, but first allocates a local port (`IPortAllocator`, existing seam) and adds a `kubectl port-forward` `AddExecutable(...)` (same shape as `KubernetesSource`), then substitutes `{port}` in the connection-string template with the allocated port before building the expression. **It must also attach a TCP health check on that local port via `.WithHealthCheck(...)`** — without it a consumer's `.WaitFor(...)` does not actually wait for the tunnel, which was measured, not assumed (see [Resolved by Prototype](#resolved-by-prototype)).
 
 Called once per logical backing service; the returned builder is reused across every consumer, exactly like vanilla Aspire (`var db = builder.AddPostgres(...); a.WithReference(db); b.WithReference(db);`) — no caching/memoization needed on our side.
 
@@ -232,10 +232,35 @@ Runtime errors (`kubectl` not on `PATH`, secret not found, invalid context) surf
 - Source dispatch: `"local"` invokes the given factory and nothing else; `"external"`/`"kubernetes"` build the expected `ConnectionStringResource`; `"kubernetes"` additionally builds the expected port-forward `AddExecutable` args (reusing `KubernetesSource.BuildPortForwardArgs`-style coverage).
 - `AddService(configure:)`: the callback fires for `ContainerSource` inside `Resolve()`; fires for `LocalProjectSource` only after `BeforeStartEvent` has run, against the real `AddProject` builder; and is never invoked by `KubernetesSource` or `UrlSource`.
 - The `WaitFor` shim: exercised through both a project-sourced and a container-sourced service, asserting the cast never throws.
+- `"kubernetes"` attaches a health check annotation to the returned resource (regression guard for the `WaitFor` gap found by prototype).
+- End-to-end, in the style of `AddServiceIntegrationTests`: a consumer configured under `BeforeStartEvent` has `ConnectionStrings__<name>` in its materialised environment after the event has been published.
+
+## Resolved by Prototype
+
+Both questions that blocked this design have been answered by running a real AppHost (Aspire 13.4.6, DCP, Linux) rather than by reasoning about the lifecycle. The probes are described here so the results can be re-checked when Aspire changes.
+
+**Applying `WithReference`/`WaitFor` under `BeforeStartEvent` works.** This was the highest-risk unknown: `PendingLocalResolutions` registers the project resource from a `BeforeStartEvent` handler, and if Aspire had already read env-var and wait annotations by then, the `configure:` callback would silently do nothing for `"local"` services — reintroducing `ServiceResource`'s facade failure one layer down.
+
+Probe: a `ConnectionStringResource` registered normally, and a consumer executable added *from inside* a `BeforeStartEvent` handler with `.WithReference(db).WaitFor(db)`. After `StartAsync`, the consumer reached `Running` with `ConnectionStrings__orders-db=Host=localhost;Port=5432;Database=orders` present in its materialised environment. Annotations applied that late are honoured; env-var injection happens well after `BeforeStartEvent`. **The `configure:` callback design is sound as specified, for both the container source (synchronous) and the local source (deferred).**
+
+**`WaitFor` on a `ConnectionStringResource` does *not* gate on the port-forward tunnel — but a health check fixes it.** This was previously listed as "accept and document"; that would have been the wrong call, because the failure is silent and total rather than a small race.
+
+Probe: a `tunnel` executable that only begins listening after 8 seconds, plus a `ConnectionStringResource` pointing at that port, plus a consumer with `.WaitFor(db)`. The connection-string resource reported `Running` at 3.4s — as soon as its template resolved, knowing nothing about the tunnel — and the consumer started at 3.4s too, roughly 5 seconds before anything was listening. A consumer that connects on startup would fail.
+
+The fix, verified in a second run: attach a TCP health check to the resource the `"kubernetes"` branch returns.
+
+```csharp
+builder.Services.AddHealthChecks().AddCheck($"{name}-tcp", () => /* TcpClient connect to 127.0.0.1:localPort */);
+
+var backingService = builder.AddConnectionString(name, expr)
+    .WithHealthCheck($"{name}-tcp");
+```
+
+With the health check attached, the same consumer reached `Running` at 11.5s — i.e. it genuinely waited for the tunnel. `WaitFor` waits for Running *and* healthy, so this makes `.WaitFor(ordersDb)` mean what an AppHost author expects.
+
+**This makes the health check a required part of the `"kubernetes"` branch, not an optional nicety** — without it, `WaitFor` on a kubernetes-sourced backing service is decorative. It should be added to the Architecture section's `"kubernetes"` bullet and covered by a test that asserts the health check annotation is present. The `"external"` branch has the same gap in principle (nothing is being waited on), but there the developer is pointing at something they already run, so a connectivity check is a convenience rather than a correctness fix; making it opt-in via a config flag is probably right, and is left open.
 
 ## Open Questions
-
-**Does `WithReference`/`WaitFor` still take effect when applied under `BeforeStartEvent`?** This is the highest-risk unknown in the design and it is a direct consequence of deferred local resolution. `PendingLocalResolutions` already calls `builder.AddProject(...)` that late and Aspire evidently builds and runs the result, but env-var injection and wait-graph construction may be read at different points in the start sequence than resource registration. If `WaitFor` in particular is processed before `BeforeStartEvent` handlers complete, the callback would silently do nothing for `"local"` services — the exact failure mode `ServiceResource`'s facade already has, reintroduced one layer down. **This must be resolved by prototype before the rest of the design is worth building**; if it doesn't hold, the options are to move the callback to an earlier event, to have `LocalProjectSource` register a placeholder project resource eagerly, or to reconsider deferred resolution for services that declare backing services.
 
 **Kubernetes + whole-connection-string-in-secret.** For `"kubernetes"`, a secret holding the *entire* connection string doesn't work as-is: the value was written for in-cluster use and bakes in the real Service host:port, not our dynamically-allocated `localhost:{port}`. Fetching it verbatim produces a connection string that bypasses the port-forward tunnel entirely. Options, none chosen yet:
 
@@ -246,6 +271,6 @@ Runtime errors (`kubectl` not on `PATH`, secret not found, invalid context) surf
 
 **Whether `servicesources.yaml` should be involved at all.** This draft keeps all backing-service config in local.json, reasoning that catalog data would only ever matter for `"kubernetes"` and be thin (`service`/`port`). But since `connectionString` can be secret-backed via `{secret:name:key}` placeholders rather than embedding literal credentials, the *template itself* may contain no actual secret material. If so, it (along with `service`/`port`) could live in the catalog as shared, committed, team-wide data instead of being hand-copied into every developer's local.json, mirroring the services split (catalog = shared identity, local.json = per-developer environment choice) more closely than this draft does. Worth revisiting once it's clear how often a team's `connectionString` template really is secret-free versus genuinely varying per developer (e.g. a personal username).
 
-**`WaitFor` readiness for the port-forward tunnel.** `.WaitFor(ordersDb)` targets the `ConnectionStringResource`, which has no process/health state of its own — it's unclear whether this actually delays a consumer until the underlying `kubectl port-forward` executable is listening, or whether an explicit dependency needs wiring between the two. `KubernetesSource` already accepts a small, documented TOCTOU-style race for port allocation; the same posture (accept and document) may be the right default, but should be confirmed against a real port-forward.
+**Whether `"external"` should get an opt-in connectivity health check.** The `"kubernetes"` branch now requires one (see Resolved by Prototype). `"external"` points at something the developer already runs, so a check there is a convenience — it turns "connection refused, deep in your app's startup" into "this backing service is unhealthy" on the dashboard. Probably a `"healthCheck": true` config flag; not designed here.
 
 **Multi-port backends.** Whether `{port:<name>}` is worth adding for cases like RabbitMQ's AMQP + management ports, or whether a second backing-service entry is an acceptable workaround. Defer until someone asks.
