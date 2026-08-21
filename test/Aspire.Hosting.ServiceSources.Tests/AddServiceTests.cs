@@ -356,4 +356,30 @@ public class AddServiceTests
         var resourceNameAttribute = nameParameter.GetCustomAttributes(typeof(ResourceNameAttribute), inherit: false);
         Assert.Single(resourceNameAttribute);
     }
+
+    [Fact]
+    public void AddService_ContainerSourceWithForeignPortField_ThrowsNamingServiceFieldAndSource()
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+                container:
+                  image: ghcr.io/company/orders
+                  port: 8080
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "container", "port": 9090 } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
+
+        Assert.Contains("orders", ex.Message);
+        Assert.Contains("port", ex.Message);
+        Assert.Contains("container", ex.Message);
+    }
 }

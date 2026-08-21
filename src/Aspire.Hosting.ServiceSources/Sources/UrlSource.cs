@@ -9,6 +9,8 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 // so `ServiceResource.CreateFacadeForUri` builds the `EndpointAnnotation` by hand instead.
 internal sealed class UrlSource : IServiceSource
 {
+    public IReadOnlySet<string> RelevantFields { get; } = new HashSet<string> { "url" };
+
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)
     {

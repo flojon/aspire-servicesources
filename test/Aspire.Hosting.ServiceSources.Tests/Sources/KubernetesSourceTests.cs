@@ -132,6 +132,44 @@ public class KubernetesSourceTests
     }
 
     [Fact]
+    public void BuildPortForwardArgs_ZeroPort_ThrowsNamingServiceAndPort()
+    {
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            KubernetesSource.BuildPortForwardArgs(
+                ServiceName, Metadata(kubernetesPort: 0), DevConfig(port: null),
+                new FakePortAllocator(1), out _, out _));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("port", ex.Message);
+    }
+
+    [Fact]
+    public void BuildPortForwardArgs_PortAboveValidRange_ThrowsNamingServiceAndPort()
+    {
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            KubernetesSource.BuildPortForwardArgs(
+                ServiceName, Metadata(kubernetesPort: 8080), DevConfig(port: 70000),
+                new FakePortAllocator(1), out _, out _));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("port", ex.Message);
+    }
+
+    [Fact]
+    public void BuildPortForwardArgs_PortOutOfRange_DoesNotAllocatePortWhenValidationFailsFirst()
+    {
+        var allocatorCalled = false;
+        var allocator = new TrackingPortAllocator(() => allocatorCalled = true, 1);
+
+        Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            KubernetesSource.BuildPortForwardArgs(
+                ServiceName, Metadata(kubernetesPort: 70000), DevConfig(),
+                allocator, out _, out _));
+
+        Assert.False(allocatorCalled);
+    }
+
+    [Fact]
     public void BuildPortForwardArgs_ValidConfig_DoesNotAllocatePortWhenValidationFailsFirst()
     {
         // Fail-fast config errors must be raised before any port allocation occurs — no point
