@@ -110,18 +110,23 @@ builder.AddDatabase("orders-db", local: () => builder.AddPostgres("pg").AddDatab
 //      ^ ours                                                          ^ Aspire's
 ```
 
-It is also simply wrong once the same mechanism carries RabbitMQ and Redis (see below). Candidates, and what rules them in or out:
+It is also simply wrong once the same mechanism carries RabbitMQ and Redis (see below).
+
+**No candidate name is ruled out by the compiler.** Aspire's existing `IDistributedApplicationBuilder` members were enumerated by reflection, and each competing name was then tried as an actual extension method with our proposed signature: `AddConnectionString`, `AddExternalService`, and `AddResource` all compile alongside the Aspire members they share a name with, and Aspire's own versions stay callable. Our signature `(string name, Func<IResourceBuilder<IResourceWithConnectionString>> local)` matches none of theirs, so overload resolution separates them cleanly. (`AddResource` is an *instance* member of the interface, `AddResource<T>(T resource)`; an instance method only suppresses an extension method when it is applicable to the call, which a one-argument `IResource` overload never is here.)
+
+So the decision is entirely about readability, and the meaningful axis is how badly a name pollutes an existing overload set:
 
 | Name | Verdict |
 |---|---|
-| `AddDependency` | **Recommended.** No conflict in Aspire.Hosting core; pairs naturally with the existing `AddService`; accurate for every backend. |
-| `AddConnection` | Viable alternative. Slightly narrower reading ("a connection" vs "a thing you connect to"). |
-| `AddBackingService` | Accurate but collides conceptually with `AddService`, which means something quite different here. |
-| `AddConnectionString` | **Ruled out** — exact signature conflict with Aspire's own `IDistributedApplicationBuilder.AddConnectionString`. |
-| `AddExternalService` | **Ruled out** — already exists in Aspire.Hosting core with a different meaning. |
-| `AddResource` | **Ruled out** — `IDistributedApplicationBuilder.AddResource<T>` already exists. |
+| `AddDependency` | **Recommended.** The only candidate that introduces a name Aspire.Hosting does not already use anywhere, so it adds nothing to an existing overload set. Pairs naturally with `AddService`; accurate for every backend. |
+| `AddConnection` | Viable alternative, also unused by Aspire. Slightly narrower reading ("a connection" vs "a thing you connect to"). |
+| `AddBackingService` | Unused by Aspire, but collides conceptually with our own `AddService`, which means something quite different. |
+| `AddDatabase` | Legal, and on a *different* receiver type from Aspire's — but the two land on adjacent lines in the common case (above), and the name stops being true for brokers and caches. |
+| `AddResource` | Legal, but the worst of the group: same receiver type as Aspire's, so both appear in one IntelliSense list on `builder.` with unrelated meanings, and a wrong-arity call produces an overload-resolution error mentioning a method the author never meant to call. |
+| `AddConnectionString` | Legal, same objection as `AddResource` — same receiver, and here the two meanings are close enough to genuinely mislead ("returns a connection string resource" vs "builds one from a template"). |
+| `AddExternalService` | Legal, but it means an external *HTTP* service in Aspire, and ours would cover a local Postgres container. Actively misleading. |
 
-(The list of existing `IDistributedApplicationBuilder` extension methods in Aspire.Hosting core was enumerated by reflection to check these.) This document uses `AddDependency` throughout; the `"external"` source key is also worth a second look, since Aspire uses "external" for `AddExternalService` (an external *HTTP* service) and the service-side equivalent of this source is already called `"url"`.
+This document uses `AddDependency` throughout. The `"external"` source *key* is worth a second look for the same reason the `AddExternalService` row is: Aspire already uses "external" for something narrower, and the service-side equivalent of this source is already called `"url"`.
 
 ## Generalization Beyond Databases
 
