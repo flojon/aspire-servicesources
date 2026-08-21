@@ -42,6 +42,12 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
             $"Service '{serviceName}': no 'port' configured for source 'kubernetes' — set it in " +
             "servicesources.local.json or servicesources.yaml's kubernetes.port.");
 
+        if (remotePort is < 1 or > 65535)
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': port value '{remotePort}' is not a valid port (must be between 1 and 65535).");
+        }
+
         var @namespace = config.Namespace ?? "default";
 
         localPort = portAllocator.AllocatePort();
