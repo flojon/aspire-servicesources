@@ -128,11 +128,16 @@ the committed catalog.
 
 A clone or fetch that fails for what looks like an authentication reason raises an error naming
 the service, the repository, and authentication as the likely cause, rather than a generic
-"failed to clone" message.
+"failed to clone" message. This includes a "not found" response: GitHub, GitLab and Azure DevOps
+all answer an unauthenticated request for a private repository with 404 rather than 401, so as not
+to leak whether it exists, so the error covers both readings — bad credentials, or a repository
+the credentials in use can't see.
 
 **SSH is not supported.** LibGit2Sharp's bundled native binaries don't include an SSH transport,
-so a `repository` written as `git@host:org/repo` or `ssh://...` fails fast at resolution time
-with a message pointing at the HTTPS equivalent — use `https://host/org/repo` instead.
+so a `repository` written as `git@host:org/repo`, `host:org/repo` or `ssh://...` fails fast at
+resolution time with a message pointing at the HTTPS equivalent — use `https://host/org/repo`
+instead. The same check covers an existing checkout whose `origin` is an SSH remote, before any
+fetch is attempted against it.
 
 ### `"kubernetes"` source
 

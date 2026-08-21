@@ -11,14 +11,7 @@ internal sealed class LibGit2SharpGitClient : IGitClient
             FetchOptions = { CredentialsProvider = GitCredentialResolver.CreateProvider(repositoryUrl) },
         };
 
-        try
-        {
-            Repository.Clone(repositoryUrl, destinationPath, options);
-        }
-        catch (Exception ex) when (LooksLikeAuthFailure(ex))
-        {
-            throw new GitAuthenticationFailedException(ex.Message, ex);
-        }
+        WithAuthFailureDetection(() => Repository.Clone(repositoryUrl, destinationPath, options));
     }
 
     public void Checkout(string repositoryPath, string reference)
@@ -74,30 +67,39 @@ internal sealed class LibGit2SharpGitClient : IGitClient
             CredentialsProvider = GitCredentialResolver.CreateProvider(remote.Url),
         };
 
+        WithAuthFailureDetection(() => Commands.Fetch(repo, remote.Name, refSpecs, fetchOptions, null));
+    }
+
+    /// <summary>
+    /// Runs a network operation, translating what looks like a rejected or missing credential into
+    /// <see cref="GitAuthenticationFailedException"/> so callers can name authentication as the
+    /// likely cause instead of reporting a generic clone/fetch failure.
+    /// </summary>
+    private static void WithAuthFailureDetection(Action operation)
+    {
         try
         {
-            Commands.Fetch(repo, remote.Name, refSpecs, fetchOptions, null);
+            operation();
         }
-        catch (Exception ex) when (LooksLikeAuthFailure(ex))
+        catch (LibGit2SharpException ex) when (LooksLikeAuthFailure(ex.Message))
         {
             throw new GitAuthenticationFailedException(ex.Message, ex);
         }
     }
 
-    private static bool LooksLikeAuthFailure(Exception ex)
-    {
-        if (ex is not LibGit2SharpException)
-        {
-            return false;
-        }
-
-        var message = ex.Message;
-        return message.Contains("authentication", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("credentials", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("401", StringComparison.Ordinal)
-            || message.Contains("403", StringComparison.Ordinal)
-            || message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase);
-    }
+    internal static bool LooksLikeAuthFailure(string message) =>
+        message.Contains("authentication", StringComparison.OrdinalIgnoreCase)
+        || message.Contains("credentials", StringComparison.OrdinalIgnoreCase)
+        || message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase)
+        || message.Contains("401", StringComparison.Ordinal)
+        || message.Contains("403", StringComparison.Ordinal)
+        // GitHub, GitLab and Azure DevOps all answer an unauthenticated request for a private
+        // repository with 404 rather than 401, so as not to leak whether it exists. A remote
+        // "not found" is therefore far more often a missing credential than an absent repository
+        // — which is exactly the case this detection exists to explain. The caller's message is
+        // worded to cover both readings.
+        || message.Contains("404", StringComparison.Ordinal)
+        || message.Contains("not found", StringComparison.OrdinalIgnoreCase);
 
     public bool HasUncommittedChanges(string repositoryPath)
     {

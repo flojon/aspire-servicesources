@@ -311,6 +311,34 @@ public class LocalProjectSourceTests
     }
 
     [Fact]
+    public void ResolveProjectPath_CacheHit_SshOriginNeedingFetch_ThrowsWithoutAttemptingFetch()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
+        Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
+        File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
+        // The checkout's origin is SSH, which LibGit2Sharp cannot fetch over. The clone path's
+        // up-front check never ran for this pre-existing checkout, so the fetch path must catch it.
+        var gitClient = new FakeGitClient
+        {
+            OriginUrl = "git@github.com:company/orders.git",
+            FailFirstCheckoutOnly = true,
+        };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            LocalProjectSource.ResolveProjectPath(
+                ServiceName,
+                Metadata(repository: "https://github.com/company/orders", defaultRef: "feature/late"),
+                DevConfig(),
+                appHostDirectory,
+                gitClient));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("SSH", ex.Message);
+        Assert.Empty(gitClient.FetchedRepos);
+    }
+
+    [Fact]
     public void ResolveProjectPath_CheckoutFailsWithNonRefException_DoesNotAttemptFetchAndWrapsOriginalException()
     {
         var appHostDirectory = Directory.CreateTempSubdirectory().FullName;

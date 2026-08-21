@@ -212,4 +212,25 @@ public class LibGit2SharpGitClientTests
         Assert.Equal("main content", File.ReadAllText(Path.Combine(destinationA, "file.txt")));
         Assert.Equal("main content", File.ReadAllText(Path.Combine(destinationB, "file.txt")));
     }
+
+    [Theory]
+    [InlineData("request failed with status code: 401")]
+    [InlineData("too many redirects or authentication replays")]
+    [InlineData("callback returned unsupported credentials type")]
+    [InlineData("request failed with status code: 403")]
+    [InlineData("Unauthorized")]
+    // GitHub, GitLab and Azure DevOps answer an unauthenticated request for a private repository
+    // with 404, so as not to leak whether it exists — the single most common shape of the failure
+    // this detection exists to explain.
+    [InlineData("request failed with status code: 404")]
+    [InlineData("remote: Repository not found")]
+    public void LooksLikeAuthFailure_MessagesIndicatingMissingOrRejectedCredentials_ReturnTrue(string message) =>
+        Assert.True(LibGit2SharpGitClient.LooksLikeAuthFailure(message));
+
+    [Theory]
+    [InlineData("early EOF")]
+    [InlineData("failed to resolve address for gitserver.invalid")]
+    [InlineData("the index is locked")]
+    public void LooksLikeAuthFailure_UnrelatedFailures_ReturnFalse(string message) =>
+        Assert.False(LibGit2SharpGitClient.LooksLikeAuthFailure(message));
 }

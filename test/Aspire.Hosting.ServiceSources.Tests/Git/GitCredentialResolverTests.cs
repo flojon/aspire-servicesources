@@ -5,73 +5,152 @@ namespace Aspire.Hosting.ServiceSources.Tests.Git;
 
 public class GitCredentialResolverTests
 {
+    private const string RepositoryUrl = "https://example.invalid/org/repo";
+
     [Fact]
     public void CreateProvider_NoHelperNoEnvironmentVariables_ReturnsDefaultCredentials()
     {
-        WithEnvironmentVariables(username: null, token: null, () =>
-        {
-            var provider = GitCredentialResolver.CreateProvider("https://example.invalid/org/repo");
+        var provider = CreateProvider();
 
-            var credentials = provider("https://example.invalid/org/repo", null, SupportedCredentialTypes.UsernamePassword);
+        var credentials = provider(RepositoryUrl, null, SupportedCredentialTypes.UsernamePassword);
 
-            Assert.IsType<DefaultCredentials>(credentials);
-        });
+        Assert.IsType<DefaultCredentials>(credentials);
     }
 
     [Fact]
     public void CreateProvider_TokenEnvironmentVariableSet_UsesItAsPasswordWithDefaultUsername()
     {
-        WithEnvironmentVariables(username: null, token: "s3cr3t", () =>
-        {
-            var provider = GitCredentialResolver.CreateProvider("https://example.invalid/org/repo");
+        var provider = CreateProvider(token: "s3cr3t");
 
-            var credentials = Assert.IsType<UsernamePasswordCredentials>(
-                provider("https://example.invalid/org/repo", null, SupportedCredentialTypes.UsernamePassword));
+        var credentials = Assert.IsType<UsernamePasswordCredentials>(
+            provider(RepositoryUrl, null, SupportedCredentialTypes.UsernamePassword));
 
-            Assert.Equal("git", credentials.Username);
-            Assert.Equal("s3cr3t", credentials.Password);
-        });
+        Assert.Equal("git", credentials.Username);
+        Assert.Equal("s3cr3t", credentials.Password);
     }
 
     [Fact]
     public void CreateProvider_UsernameAndTokenEnvironmentVariablesSet_UsesBoth()
     {
-        WithEnvironmentVariables(username: "alice", token: "s3cr3t", () =>
-        {
-            var provider = GitCredentialResolver.CreateProvider("https://example.invalid/org/repo");
+        var provider = CreateProvider(username: "alice", token: "s3cr3t");
 
-            var credentials = Assert.IsType<UsernamePasswordCredentials>(
-                provider("https://example.invalid/org/repo", null, SupportedCredentialTypes.UsernamePassword));
+        var credentials = Assert.IsType<UsernamePasswordCredentials>(
+            provider(RepositoryUrl, null, SupportedCredentialTypes.UsernamePassword));
 
-            Assert.Equal("alice", credentials.Username);
-            Assert.Equal("s3cr3t", credentials.Password);
-        });
+        Assert.Equal("alice", credentials.Username);
+        Assert.Equal("s3cr3t", credentials.Password);
     }
 
-    private static void WithEnvironmentVariables(string? username, string? token, Action action)
+    [Fact]
+    public void CreateProvider_HelperResolvesCredentials_PreferredOverEnvironmentVariables()
     {
-        const string UsernameVariable = "SERVICESOURCES_GIT_USERNAME";
-        const string TokenVariable = "SERVICESOURCES_GIT_TOKEN";
+        var provider = CreateProvider(
+            username: "alice",
+            token: "s3cr3t",
+            helper: _ => new HelperCredentials("from-helper", "helper-token"));
 
-        var originalUsername = Environment.GetEnvironmentVariable(UsernameVariable);
-        var originalToken = Environment.GetEnvironmentVariable(TokenVariable);
-        var originalPath = Environment.GetEnvironmentVariable("PATH");
-        try
-        {
-            Environment.SetEnvironmentVariable(UsernameVariable, username);
-            Environment.SetEnvironmentVariable(TokenVariable, token);
-            // Make `git credential fill` unresolvable so these tests exercise only the
-            // environment-variable fallback, not whatever credential helper happens to be
-            // configured on the machine running the tests.
-            Environment.SetEnvironmentVariable("PATH", "");
+        var credentials = Assert.IsType<UsernamePasswordCredentials>(
+            provider(RepositoryUrl, null, SupportedCredentialTypes.UsernamePassword));
 
-            action();
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(UsernameVariable, originalUsername);
-            Environment.SetEnvironmentVariable(TokenVariable, originalToken);
-            Environment.SetEnvironmentVariable("PATH", originalPath);
-        }
+        Assert.Equal("from-helper", credentials.Username);
+        Assert.Equal("helper-token", credentials.Password);
     }
+
+    [Fact]
+    public void CreateProvider_HelperYieldsNothing_FallsBackToEnvironmentVariables()
+    {
+        var provider = CreateProvider(token: "s3cr3t", helper: _ => null);
+
+        var credentials = Assert.IsType<UsernamePasswordCredentials>(
+            provider(RepositoryUrl, null, SupportedCredentialTypes.UsernamePassword));
+
+        Assert.Equal("s3cr3t", credentials.Password);
+    }
+
+    [Fact]
+    public void CreateProvider_SshRepositoryUrl_DoesNotConsultHelper()
+    {
+        var helperCalls = 0;
+        var provider = CreateProvider(helper: _ =>
+        {
+            helperCalls++;
+            return new HelperCredentials("alice", "s3cr3t");
+        });
+
+        provider("git@example.invalid:org/repo.git", null, SupportedCredentialTypes.UsernamePassword);
+
+        Assert.Equal(0, helperCalls);
+    }
+
+    [Fact]
+    public void CreateProvider_LibGit2PassesDifferentUrl_ResolvesAgainstThatUrlNotTheConfiguredOne()
+    {
+        GitUrl? seen = null;
+        var provider = CreateProvider(helper: url =>
+        {
+            seen = url;
+            return new HelperCredentials("alice", "s3cr3t");
+        });
+
+        // libgit2 hands the callback the URL it is actually authenticating against, which can
+        // differ from the configured one after a redirect.
+        provider("https://redirected.invalid/other/repo", null, SupportedCredentialTypes.UsernamePassword);
+
+        Assert.Equal("redirected.invalid", seen?.Host);
+    }
+
+    [Fact]
+    public void CreateProvider_LibGit2PassesNoUrl_FallsBackToTheConfiguredUrl()
+    {
+        GitUrl? seen = null;
+        var provider = CreateProvider(helper: url =>
+        {
+            seen = url;
+            return new HelperCredentials("alice", "s3cr3t");
+        });
+
+        provider("", null, SupportedCredentialTypes.UsernamePassword);
+
+        Assert.Equal("example.invalid", seen?.Host);
+    }
+
+    [Fact]
+    public void ParseCredentials_UsernameAndPasswordPresent_ParsesBoth()
+    {
+        var credentials = GitCredentialResolver.ParseCredentials(
+            "protocol=https\nhost=example.invalid\nusername=alice\npassword=s3cr3t\n");
+
+        Assert.Equal("alice", credentials?.Username);
+        Assert.Equal("s3cr3t", credentials?.Password);
+    }
+
+    [Theory]
+    [InlineData("protocol=https\nhost=example.invalid\n")]
+    [InlineData("username=alice\n")]
+    [InlineData("password=s3cr3t\n")]
+    [InlineData("")]
+    public void ParseCredentials_IncompleteOutput_ReturnsNull(string output) =>
+        Assert.Null(GitCredentialResolver.ParseCredentials(output));
+
+    [Fact]
+    public void ParseCredentials_PasswordContainsEqualsSign_KeepsItIntact()
+    {
+        var credentials = GitCredentialResolver.ParseCredentials("username=alice\npassword=a=b=c\n");
+
+        Assert.Equal("a=b=c", credentials?.Password);
+    }
+
+    private static LibGit2Sharp.Handlers.CredentialsHandler CreateProvider(
+        string? username = null,
+        string? token = null,
+        Func<GitUrl, HelperCredentials?>? helper = null) =>
+        GitCredentialResolver.CreateProvider(
+            RepositoryUrl,
+            name => name switch
+            {
+                "SERVICESOURCES_GIT_USERNAME" => username,
+                "SERVICESOURCES_GIT_TOKEN" => token,
+                _ => null,
+            },
+            helper ?? (_ => null));
 }

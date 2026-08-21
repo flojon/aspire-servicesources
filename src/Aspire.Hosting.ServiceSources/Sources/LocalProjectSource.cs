@@ -58,10 +58,10 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
                 catch (GitAuthenticationFailedException ex)
                 {
                     throw new ServiceSourcesConfigurationException(
-                        $"Service '{serviceName}': failed to clone repository '{metadata.Repository}' into " +
-                        $"'{repoRoot}' — authentication failed. Configure credentials via a git credential " +
-                        "helper (`git credential fill` must resolve them for this host) or the " +
-                        "SERVICESOURCES_GIT_USERNAME/SERVICESOURCES_GIT_TOKEN environment variables.", ex);
+                        AuthFailureMessage(
+                            $"Service '{serviceName}': failed to clone repository '{metadata.Repository}' " +
+                            $"into '{repoRoot}'"),
+                        ex);
                 }
                 catch (Exception ex)
                 {
@@ -132,6 +132,12 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
                 $"Service '{serviceName}': failed to checkout ref '{reference}' of repository '{metadata.Repository}' at '{repoRoot}'.", ex);
         }
 
+        // The fetch talks to the checkout's own origin, which need not be the configured
+        // `repository` (a pre-existing checkout, or a `repository` edited after the initial clone),
+        // so validate the URL actually about to be used — the clone path's check upfront doesn't
+        // cover it, and an SSH remote would otherwise fail with an opaque native error.
+        GitUrlValidator.EnsureSupported(serviceName, gitClient.GetOriginUrl(repoRoot) ?? metadata.Repository);
+
         try
         {
             gitClient.Fetch(repoRoot);
@@ -139,10 +145,10 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         catch (GitAuthenticationFailedException ex)
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': failed to fetch repository '{metadata.Repository}' at '{repoRoot}' " +
-                $"while resolving ref '{reference}' — authentication failed. Configure credentials via a git " +
-                "credential helper (`git credential fill` must resolve them for this host) or the " +
-                "SERVICESOURCES_GIT_USERNAME/SERVICESOURCES_GIT_TOKEN environment variables.", ex);
+                AuthFailureMessage(
+                    $"Service '{serviceName}': failed to fetch repository '{metadata.Repository}' at " +
+                    $"'{repoRoot}' while resolving ref '{reference}'"),
+                ex);
         }
         catch (Exception ex)
         {
@@ -161,6 +167,19 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
                 $"Service '{serviceName}': failed to checkout ref '{reference}' of repository '{metadata.Repository}' at '{repoRoot}'.", ex);
         }
     }
+
+    /// <summary>
+    /// Appends the shared authentication remediation to <paramref name="failureDescription"/>.
+    /// Worded to cover both readings of the underlying failure: hosts commonly answer an
+    /// unauthenticated request for a private repository with "not found" rather than "unauthorized"
+    /// (see <see cref="LibGit2SharpGitClient.LooksLikeAuthFailure"/>), so the message must not
+    /// assert that credentials were definitely rejected.
+    /// </summary>
+    private static string AuthFailureMessage(string failureDescription) =>
+        $"{failureDescription} — authentication failed, or the repository is not visible to the " +
+        "credentials in use. Configure credentials via a git credential helper (`git credential " +
+        "fill` must resolve them for this host) or the SERVICESOURCES_GIT_USERNAME/" +
+        "SERVICESOURCES_GIT_TOKEN environment variables.";
 
     private static void EnsureGitignore(string appHostDirectory)
     {
@@ -183,48 +202,9 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         }
     }
 
+    // GitUrl.Identity reduces both URL forms (https://host/path) and scp-like SSH syntax
+    // ([user@]host:path, e.g. git@github.com:example/orders) down to "host/path", so an HTTPS
+    // remote and an SSH remote for the same repository compare equal.
     private static bool RepositoryUrlsMatch(string a, string b) =>
-        string.Equals(NormalizeRepositoryUrl(a), NormalizeRepositoryUrl(b), StringComparison.Ordinal);
-
-    private static string NormalizeRepositoryUrl(string repositoryUrl)
-    {
-        var trimmed = repositoryUrl.Trim().TrimEnd('/');
-        if (trimmed.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
-        {
-            trimmed = trimmed[..^4];
-        }
-
-        // Normalize both URL forms (https://host/path) and scp-like SSH syntax
-        // ([user@]host:path, e.g. git@github.com:example/orders) down to "host/path"
-        // so an HTTPS remote and an SSH remote for the same repository compare equal.
-        var schemeIndex = trimmed.IndexOf("://", StringComparison.Ordinal);
-        if (schemeIndex >= 0)
-        {
-            trimmed = trimmed[(schemeIndex + 3)..];
-            var slashIndex = trimmed.IndexOf('/');
-            var atIndex = trimmed.IndexOf('@');
-            if (atIndex >= 0 && (slashIndex < 0 || atIndex < slashIndex))
-            {
-                trimmed = trimmed[(atIndex + 1)..];
-            }
-        }
-        else
-        {
-            var colonIndex = trimmed.IndexOf(':');
-            var slashIndex = trimmed.IndexOf('/');
-            if (colonIndex >= 0 && (slashIndex < 0 || colonIndex < slashIndex))
-            {
-                var host = trimmed[..colonIndex];
-                var atIndex = host.IndexOf('@');
-                if (atIndex >= 0)
-                {
-                    host = host[(atIndex + 1)..];
-                }
-
-                trimmed = $"{host}/{trimmed[(colonIndex + 1)..]}";
-            }
-        }
-
-        return trimmed.TrimEnd('/');
-    }
+        string.Equals(GitUrl.Parse(a).Identity, GitUrl.Parse(b).Identity, StringComparison.Ordinal);
 }

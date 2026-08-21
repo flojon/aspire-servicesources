@@ -1,0 +1,109 @@
+namespace Aspire.Hosting.ServiceSources.Git;
+
+/// <summary>
+/// The one parser for the repository URL forms this package accepts. SSH detection, credential
+/// host lookup, and repository-identity comparison all read from it, so they can't drift apart on
+/// the edge cases (scp-like syntax, userinfo, explicit ports, Windows drive paths).
+/// </summary>
+internal sealed record GitUrl
+{
+    private GitUrl(string? scheme, string? host, string path, bool isScpSyntax)
+    {
+        Scheme = scheme;
+        Host = host;
+        Path = path;
+        IsScpSyntax = isScpSyntax;
+    }
+
+    /// <summary>Lowercased scheme, or <see langword="null"/> for scp-like syntax and local paths.</summary>
+    public string? Scheme { get; }
+
+    /// <summary>
+    /// Host including any explicit port (which is how <c>git credential</c> expects it), or
+    /// <see langword="null"/> for a local filesystem path.
+    /// </summary>
+    public string? Host { get; }
+
+    /// <summary>Repository path, with any trailing '/' and '.git' suffix removed.</summary>
+    public string Path { get; }
+
+    /// <summary>Whether this was written as scp-like <c>[user@]host:path</c>.</summary>
+    public bool IsScpSyntax { get; }
+
+    public bool IsSsh => IsScpSyntax || Scheme is "ssh" or "git+ssh";
+
+    public bool IsHttp => Scheme is "http" or "https";
+
+    /// <summary>
+    /// Host-and-path identity used to decide whether two URLs name the same repository, so an
+    /// HTTPS remote and the equivalent SSH remote compare equal.
+    /// </summary>
+    public string Identity => Host is null ? Path : $"{Host}/{Path}";
+
+    public static GitUrl Parse(string repositoryUrl)
+    {
+        var trimmed = TrimSuffixes(repositoryUrl);
+
+        var schemeIndex = trimmed.IndexOf("://", StringComparison.Ordinal);
+        if (schemeIndex >= 0)
+        {
+            var scheme = trimmed[..schemeIndex].ToLowerInvariant();
+            var rest = StripUserInfo(trimmed[(schemeIndex + 3)..]);
+            var slashIndex = rest.IndexOf('/');
+            return slashIndex >= 0
+                ? new GitUrl(scheme, rest[..slashIndex], rest[(slashIndex + 1)..], isScpSyntax: false)
+                : new GitUrl(scheme, rest, path: "", isScpSyntax: false);
+        }
+
+        if (TryFindScpColon(trimmed, out var colonIndex))
+        {
+            return new GitUrl(
+                scheme: null,
+                StripUserInfo(trimmed[..colonIndex]),
+                trimmed[(colonIndex + 1)..],
+                isScpSyntax: true);
+        }
+
+        // A local filesystem path, including a Windows drive path such as "C:\repos\orders".
+        return new GitUrl(scheme: null, host: null, trimmed, isScpSyntax: false);
+    }
+
+    private static string TrimSuffixes(string repositoryUrl)
+    {
+        var trimmed = repositoryUrl.Trim().TrimEnd('/');
+        if (trimmed.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
+        {
+            trimmed = trimmed[..^4].TrimEnd('/');
+        }
+
+        return trimmed;
+    }
+
+    private static string StripUserInfo(string hostAndPath)
+    {
+        var slashIndex = hostAndPath.IndexOf('/');
+        var atIndex = hostAndPath.IndexOf('@');
+        return atIndex >= 0 && (slashIndex < 0 || atIndex < slashIndex)
+            ? hostAndPath[(atIndex + 1)..]
+            : hostAndPath;
+    }
+
+    /// <summary>
+    /// Finds the colon separating host from path in scp-like syntax (<c>[user@]host:path</c>, e.g.
+    /// <c>git@github.com:example/orders</c>). Unlike requiring a literal '@' this also recognizes
+    /// the implicit-user form (<c>host:path</c>) while still rejecting a Windows drive path, whose
+    /// single-character prefix before the colon can never be a hostname.
+    /// </summary>
+    private static bool TryFindScpColon(string candidate, out int colonIndex)
+    {
+        colonIndex = candidate.IndexOf(':');
+        if (colonIndex <= 1)
+        {
+            return false;
+        }
+
+        // A separator before the colon means the colon is inside a path segment, not a host/path
+        // delimiter (e.g. "/mnt/my:dir/repo").
+        return !candidate.AsSpan()[..colonIndex].ContainsAny('/', '\\');
+    }
+}

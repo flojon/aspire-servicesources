@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using LibGit2Sharp;
 using LibGit2Sharp.Handlers;
@@ -19,22 +20,49 @@ internal static class GitCredentialResolver
 
     private static readonly TimeSpan CredentialHelperTimeout = TimeSpan.FromSeconds(30);
 
-    public static CredentialsHandler CreateProvider(string repositoryUrl) =>
-        (_, _, _) => Resolve(repositoryUrl);
+    /// <summary>
+    /// Cached <c>git credential fill</c> results, keyed by "protocol://host". libgit2 can invoke
+    /// the credentials callback several times for a single clone or fetch (an anonymous attempt
+    /// followed by a 401-driven retry, a redirect to another host), and an AppHost resolves its
+    /// services in parallel, so several services sharing one host would otherwise each re-run the
+    /// subprocess. The helper is deterministic per host, so caching changes nothing but the cost.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, Lazy<HelperCredentials?>> HelperCache =
+        new(StringComparer.Ordinal);
 
-    private static Credentials Resolve(string repositoryUrl)
+    public static CredentialsHandler CreateProvider(string repositoryUrl) =>
+        CreateProvider(repositoryUrl, Environment.GetEnvironmentVariable, CachedGitCredentialFill);
+
+    /// <summary>
+    /// Test seam: <paramref name="environment"/> and <paramref name="credentialHelper"/> stand in
+    /// for the process environment and the <c>git credential fill</c> subprocess, so the fallback
+    /// order can be exercised without mutating process-wide state.
+    /// </summary>
+    internal static CredentialsHandler CreateProvider(
+        string repositoryUrl,
+        Func<string, string?> environment,
+        Func<GitUrl, HelperCredentials?> credentialHelper) =>
+        // libgit2 passes the URL it is actually authenticating against, which need not be the one
+        // we were configured with (a redirect, or a submodule remote), so prefer it when supplied.
+        (url, _, _) => Resolve(string.IsNullOrEmpty(url) ? repositoryUrl : url, environment, credentialHelper);
+
+    private static Credentials Resolve(
+        string repositoryUrl,
+        Func<string, string?> environment,
+        Func<GitUrl, HelperCredentials?> credentialHelper)
     {
-        if (TryGitCredentialFill(repositoryUrl) is { } fromHelper)
+        var parsed = GitUrl.Parse(repositoryUrl);
+        if (parsed is { IsHttp: true, Host: not null } && credentialHelper(parsed) is { } fromHelper)
         {
-            return fromHelper;
+            return new UsernamePasswordCredentials { Username = fromHelper.Username, Password = fromHelper.Password };
         }
 
-        var token = Environment.GetEnvironmentVariable(TokenEnvironmentVariable);
+        var token = environment(TokenEnvironmentVariable);
         if (!string.IsNullOrEmpty(token))
         {
             return new UsernamePasswordCredentials
             {
-                Username = Environment.GetEnvironmentVariable(UsernameEnvironmentVariable) ?? "git",
+                Username = environment(UsernameEnvironmentVariable) ?? "git",
                 Password = token,
             };
         }
@@ -42,13 +70,15 @@ internal static class GitCredentialResolver
         return new DefaultCredentials();
     }
 
-    private static UsernamePasswordCredentials? TryGitCredentialFill(string repositoryUrl)
-    {
-        if (!TryGetProtocolAndHost(repositoryUrl, out var protocol, out var host))
-        {
-            return null;
-        }
+    private static HelperCredentials? CachedGitCredentialFill(GitUrl url) =>
+        HelperCache.GetOrAdd(
+            $"{url.Scheme}://{url.Host}",
+            _ => new Lazy<HelperCredentials?>(
+                () => GitCredentialFill(url.Scheme!, url.Host!),
+                LazyThreadSafetyMode.ExecutionAndPublication)).Value;
 
+    private static HelperCredentials? GitCredentialFill(string protocol, string host)
+    {
         try
         {
             var startInfo = new ProcessStartInfo("git", "credential fill")
@@ -66,26 +96,39 @@ internal static class GitCredentialResolver
             }
 
             var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            // Drain stderr too. A helper that writes diagnostics there (verbose GCM builds, a
+            // locked keychain) would otherwise fill the pipe buffer, block mid-write, and never
+            // exit — stalling resolution for the full timeout on every clone and fetch.
+            var stderrTask = process.StandardError.ReadToEndAsync();
 
             process.StandardInput.Write($"protocol={protocol}\nhost={host}\n\n");
             process.StandardInput.Flush();
             process.StandardInput.Close();
 
-            if (!stdoutTask.Wait(CredentialHelperTimeout))
+            // Task.Wait would rethrow a faulted read wrapped in an AggregateException, which the
+            // catch filter below does not match — so it would escape across libgit2's native
+            // callback boundary. Task.WhenAny never faults, which keeps a crashed helper on the
+            // silent fall-back path.
+            var reads = Task.WhenAll(stdoutTask, stderrTask);
+            if (Task.WhenAny(reads, Task.Delay(CredentialHelperTimeout)).GetAwaiter().GetResult() != reads
+                || !stdoutTask.IsCompletedSuccessfully)
             {
                 TryKill(process);
                 return null;
             }
 
-            process.WaitForExit();
-            if (process.ExitCode != 0)
+            // Both pipes are at EOF by now, so the process is on its way out — but never block the
+            // AppHost indefinitely on a helper that refuses to exit.
+            if (!process.WaitForExit((int)CredentialHelperTimeout.TotalMilliseconds))
             {
+                TryKill(process);
                 return null;
             }
 
-            return ParseCredentials(stdoutTask.Result);
+            return process.ExitCode == 0 ? ParseCredentials(stdoutTask.Result) : null;
         }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException)
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException
+                                      or InvalidOperationException or ObjectDisposedException)
         {
             // `git` isn't on PATH, or the credential helper failed to launch — fall back silently.
             return null;
@@ -104,7 +147,7 @@ internal static class GitCredentialResolver
         }
     }
 
-    private static UsernamePasswordCredentials? ParseCredentials(string output)
+    internal static HelperCredentials? ParseCredentials(string output)
     {
         string? username = null;
         string? password = null;
@@ -130,39 +173,13 @@ internal static class GitCredentialResolver
             }
         }
 
-        return username is not null && password is not null
-            ? new UsernamePasswordCredentials { Username = username, Password = password }
-            : null;
-    }
-
-    private static bool TryGetProtocolAndHost(string repositoryUrl, out string protocol, out string host)
-    {
-        protocol = "";
-        host = "";
-
-        var schemeIndex = repositoryUrl.IndexOf("://", StringComparison.Ordinal);
-        if (schemeIndex < 0)
-        {
-            return false;
-        }
-
-        protocol = repositoryUrl[..schemeIndex];
-        if (!protocol.Equals("http", StringComparison.OrdinalIgnoreCase) &&
-            !protocol.Equals("https", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        var rest = repositoryUrl[(schemeIndex + 3)..];
-        var atIndex = rest.IndexOf('@');
-        var slashIndex = rest.IndexOf('/');
-        if (atIndex >= 0 && (slashIndex < 0 || atIndex < slashIndex))
-        {
-            rest = rest[(atIndex + 1)..];
-            slashIndex = rest.IndexOf('/');
-        }
-
-        host = slashIndex >= 0 ? rest[..slashIndex] : rest;
-        return host.Length > 0;
+        return username is not null && password is not null ? new HelperCredentials(username, password) : null;
     }
 }
+
+/// <summary>
+/// A username/password pair resolved from a credential helper. Kept separate from LibGit2Sharp's
+/// <see cref="UsernamePasswordCredentials"/> so the cached value is plain data and every callback
+/// invocation hands libgit2 a fresh credentials instance to marshal.
+/// </summary>
+internal sealed record HelperCredentials(string Username, string Password);
