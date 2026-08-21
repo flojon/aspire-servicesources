@@ -6,6 +6,8 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 
 internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceSource
 {
+    public IReadOnlySet<string> RelevantFields { get; } = new HashSet<string> { "context", "namespace", "port" };
+
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)
     {

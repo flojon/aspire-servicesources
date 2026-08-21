@@ -6,6 +6,14 @@ public class ServiceDeveloperConfigValidatorTests
 {
     private const string ServiceName = "orders";
 
+    private static readonly Dictionary<string, IReadOnlySet<string>> RelevantFieldsBySource = new()
+    {
+        ["local"] = new HashSet<string> { "path", "ref" },
+        ["kubernetes"] = new HashSet<string> { "context", "namespace", "port" },
+        ["container"] = new HashSet<string> { "tag" },
+        ["url"] = new HashSet<string> { "url" },
+    };
+
     [Theory]
     [InlineData("local", "path", "/checkout")]
     [InlineData("local", "ref", "main")]
@@ -13,7 +21,7 @@ public class ServiceDeveloperConfigValidatorTests
     {
         var config = ConfigWith(source, field, value);
 
-        ServiceDeveloperConfigValidator.Validate(ServiceName, source, config);
+        ServiceDeveloperConfigValidator.Validate(ServiceName, source, RelevantFieldsBySource[source], config);
     }
 
     [Theory]
@@ -23,7 +31,7 @@ public class ServiceDeveloperConfigValidatorTests
     {
         var config = ConfigWith(source, field, value);
 
-        ServiceDeveloperConfigValidator.Validate(ServiceName, source, config);
+        ServiceDeveloperConfigValidator.Validate(ServiceName, source, RelevantFieldsBySource[source], config);
     }
 
     [Fact]
@@ -31,7 +39,7 @@ public class ServiceDeveloperConfigValidatorTests
     {
         var config = new ServiceDeveloperConfig { Source = "kubernetes", Port = 8080 };
 
-        ServiceDeveloperConfigValidator.Validate(ServiceName, "kubernetes", config);
+        ServiceDeveloperConfigValidator.Validate(ServiceName, "kubernetes", RelevantFieldsBySource["kubernetes"], config);
     }
 
     [Fact]
@@ -39,7 +47,7 @@ public class ServiceDeveloperConfigValidatorTests
     {
         var config = new ServiceDeveloperConfig { Source = "container", Tag = "v1.4.2" };
 
-        ServiceDeveloperConfigValidator.Validate(ServiceName, "container", config);
+        ServiceDeveloperConfigValidator.Validate(ServiceName, "container", RelevantFieldsBySource["container"], config);
     }
 
     [Fact]
@@ -47,7 +55,7 @@ public class ServiceDeveloperConfigValidatorTests
     {
         var config = new ServiceDeveloperConfig { Source = "url", Url = "https://orders.dev.internal" };
 
-        ServiceDeveloperConfigValidator.Validate(ServiceName, "url", config);
+        ServiceDeveloperConfigValidator.Validate(ServiceName, "url", RelevantFieldsBySource["url"], config);
     }
 
     [Fact]
@@ -55,7 +63,7 @@ public class ServiceDeveloperConfigValidatorTests
     {
         var config = new ServiceDeveloperConfig { Source = "local" };
 
-        ServiceDeveloperConfigValidator.Validate(ServiceName, "local", config);
+        ServiceDeveloperConfigValidator.Validate(ServiceName, "local", RelevantFieldsBySource["local"], config);
     }
 
     [Theory]
@@ -69,7 +77,7 @@ public class ServiceDeveloperConfigValidatorTests
         var config = ConfigWith("local", field, ForeignValue(field));
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            ServiceDeveloperConfigValidator.Validate(ServiceName, "local", config));
+            ServiceDeveloperConfigValidator.Validate(ServiceName, "local", RelevantFieldsBySource["local"], config));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains(field, ex.Message);
@@ -86,7 +94,7 @@ public class ServiceDeveloperConfigValidatorTests
         var config = ConfigWith("kubernetes", field, ForeignValue(field));
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            ServiceDeveloperConfigValidator.Validate(ServiceName, "kubernetes", config));
+            ServiceDeveloperConfigValidator.Validate(ServiceName, "kubernetes", RelevantFieldsBySource["kubernetes"], config));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains(field, ex.Message);
@@ -105,7 +113,7 @@ public class ServiceDeveloperConfigValidatorTests
         var config = ConfigWith("container", field, ForeignValue(field));
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            ServiceDeveloperConfigValidator.Validate(ServiceName, "container", config));
+            ServiceDeveloperConfigValidator.Validate(ServiceName, "container", RelevantFieldsBySource["container"], config));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains(field, ex.Message);
@@ -124,7 +132,7 @@ public class ServiceDeveloperConfigValidatorTests
         var config = ConfigWith("url", field, ForeignValue(field));
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            ServiceDeveloperConfigValidator.Validate(ServiceName, "url", config));
+            ServiceDeveloperConfigValidator.Validate(ServiceName, "url", RelevantFieldsBySource["url"], config));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains(field, ex.Message);
@@ -137,7 +145,7 @@ public class ServiceDeveloperConfigValidatorTests
         var config = new ServiceDeveloperConfig { Source = "local", Context = "dev-west", Port = 8080, Tag = "v1" };
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            ServiceDeveloperConfigValidator.Validate(ServiceName, "local", config));
+            ServiceDeveloperConfigValidator.Validate(ServiceName, "local", RelevantFieldsBySource["local"], config));
 
         Assert.Contains("context", ex.Message);
         Assert.Contains("port", ex.Message);

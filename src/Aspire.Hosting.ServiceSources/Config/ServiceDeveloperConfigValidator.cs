@@ -1,27 +1,17 @@
+using Aspire.Hosting.ServiceSources;
+
 namespace Aspire.Hosting.ServiceSources.Config;
 
 internal static class ServiceDeveloperConfigValidator
 {
-    private static readonly Dictionary<string, string[]> RelevantFieldsBySource = new()
-    {
-        ["local"] = ["path", "ref"],
-        ["kubernetes"] = ["context", "namespace", "port"],
-        ["container"] = ["tag"],
-        ["url"] = ["url"],
-    };
-
     /// <summary>
-    /// Fails fast if <paramref name="config"/> sets a field that the given <paramref name="source"/>
-    /// does not use — e.g. <c>port</c> under a <c>local</c> source — instead of silently ignoring it,
-    /// which would let a developer typo or leftover field from switching sources go unnoticed.
+    /// Fails fast if <paramref name="config"/> sets a field that <paramref name="relevantFields"/>
+    /// (from the given source's <see cref="IServiceSource.RelevantFields"/>) doesn't list — e.g.
+    /// <c>port</c> under a <c>local</c> source — instead of silently ignoring it, which would let
+    /// a developer typo or leftover field from switching sources go unnoticed.
     /// </summary>
-    public static void Validate(string serviceName, string source, ServiceDeveloperConfig config)
+    public static void Validate(string serviceName, string source, IReadOnlySet<string> relevantFields, ServiceDeveloperConfig config)
     {
-        if (!RelevantFieldsBySource.TryGetValue(source, out var relevantFields))
-        {
-            return;
-        }
-
         var foreignFields = new List<string>();
 
         void CheckField(string? value, string fieldName)

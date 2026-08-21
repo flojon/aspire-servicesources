@@ -5,6 +5,8 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 
 internal sealed class ContainerSource : IServiceSource
 {
+    public IReadOnlySet<string> RelevantFields { get; } = new HashSet<string> { "tag" };
+
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)
     {

@@ -56,7 +56,7 @@ public static class ServiceSourcesBuilderExtensions
                 $"Service '{name}' has source '{developerConfig.Source}', which is not implemented yet.");
         }
 
-        ServiceDeveloperConfigValidator.Validate(name, developerConfig.Source, developerConfig);
+        ServiceDeveloperConfigValidator.Validate(name, developerConfig.Source, source.RelevantFields, developerConfig);
 
         return source.Resolve(builder, name, metadata, developerConfig);
     }
