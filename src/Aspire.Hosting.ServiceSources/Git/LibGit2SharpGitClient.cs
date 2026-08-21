@@ -6,6 +6,10 @@ internal sealed class LibGit2SharpGitClient : IGitClient
 {
     public void Clone(string repositoryUrl, string destinationPath)
     {
+        // The missing SSH transport is a property of this implementation, so enforce it here
+        // rather than relying on every caller to remember the check.
+        GitUrlValidator.EnsureSupported(repositoryUrl);
+
         var options = new CloneOptions
         {
             FetchOptions = { CredentialsProvider = GitCredentialResolver.CreateProvider(repositoryUrl) },
@@ -60,6 +64,8 @@ internal sealed class LibGit2SharpGitClient : IGitClient
         {
             return;
         }
+
+        GitUrlValidator.EnsureSupported(remote.Url);
 
         var refSpecs = remote.FetchRefSpecs.Select(r => r.Specification);
         var fetchOptions = new FetchOptions

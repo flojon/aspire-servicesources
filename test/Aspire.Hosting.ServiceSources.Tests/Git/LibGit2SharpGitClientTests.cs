@@ -214,6 +214,22 @@ public class LibGit2SharpGitClientTests
     }
 
     [Theory]
+    [InlineData("git@github.com:company/orders.git")]
+    [InlineData("ssh://git@github.com/company/orders.git")]
+    [InlineData("gitserver:company/orders.git")]
+    public void Clone_SshUrl_RejectsItRatherThanFailingWithAnOpaqueNativeError(string repositoryUrl)
+    {
+        var destination = Path.Combine(Directory.CreateTempSubdirectory().FullName, "clone");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => new LibGit2SharpGitClient().Clone(repositoryUrl, destination));
+
+        Assert.Contains("SSH", ex.Message);
+        Assert.Contains("HTTPS", ex.Message);
+        Assert.False(Directory.Exists(destination));
+    }
+
+    [Theory]
     [InlineData("request failed with status code: 401")]
     [InlineData("too many redirects or authentication replays")]
     [InlineData("callback returned unsupported credentials type")]
