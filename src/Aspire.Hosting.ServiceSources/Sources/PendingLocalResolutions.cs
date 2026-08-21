@@ -82,7 +82,12 @@ internal sealed class PendingLocalResolutions
                 continue;
             }
 
-            LocalKindRegistry.For(builder).TryGet(pending.Metadata.Kind, out var handler);
+            if (!LocalKindRegistry.For(builder).TryGet(pending.Metadata.Kind, out var handler))
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Service '{pending.ServiceName}': kind '{pending.Metadata.Kind}' is not registered.");
+            }
+
             var resourceBuilder = handler!.Resolve(builder, pending.ServiceName, result.RepoRoot!, pending.Metadata.KindConfig);
             ServiceResource.CopyEndpointAnnotations(pending.Facade, resourceBuilder);
         }

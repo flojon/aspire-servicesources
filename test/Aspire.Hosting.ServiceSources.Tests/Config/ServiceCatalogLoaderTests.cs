@@ -254,6 +254,88 @@ public class ServiceCatalogLoaderTests
     }
 
     [Fact]
+    public void Load_UnknownPropertyInsideKubernetesBlock_ThrowsNamingServiceAndProperty()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+                kubernetes:
+                  servicee: orders-svc
+                  port: 8080
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("orders", ex.Message);
+            Assert.Contains("servicee", ex.Message);
+            Assert.Contains("kubernetes", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_UnknownPropertyInsideUrlBlock_ThrowsNamingServiceAndProperty()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+                url:
+                  urll: https://orders.example.com
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("orders", ex.Message);
+            Assert.Contains("urll", ex.Message);
+            Assert.Contains("url", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_UnknownPropertyInsideContainerBlock_ThrowsNamingServiceAndProperty()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+                container:
+                  imagee: ghcr.io/company/orders
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("orders", ex.Message);
+            Assert.Contains("imagee", ex.Message);
+            Assert.Contains("container", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void Load_EmptyKindValue_DefaultsToDotnet()
     {
         var path = Path.GetTempFileName();

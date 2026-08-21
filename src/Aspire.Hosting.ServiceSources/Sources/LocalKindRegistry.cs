@@ -19,6 +19,12 @@ internal sealed class LocalKindRegistry
 
     public void Register(string kind, ILocalResourceKind handler)
     {
+        if (kind == "dotnet")
+        {
+            throw new ServiceSourcesConfigurationException(
+                "Local kind 'dotnet' is reserved for the built-in project resolution and cannot be registered via AddLocalKind.");
+        }
+
         if (!_handlers.TryAdd(kind, handler))
         {
             throw new ServiceSourcesConfigurationException(

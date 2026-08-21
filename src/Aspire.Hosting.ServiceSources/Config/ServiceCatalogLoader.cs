@@ -15,6 +15,13 @@ internal static class ServiceCatalogLoader
         "repository", "project", "defaultRef", "kind", "kubernetes", "url", "container",
     };
 
+    private static readonly Dictionary<string, HashSet<string>> KnownNestedProperties = new(StringComparer.Ordinal)
+    {
+        ["kubernetes"] = new HashSet<string>(StringComparer.Ordinal) { "service", "port" },
+        ["url"] = new HashSet<string>(StringComparer.Ordinal) { "url" },
+        ["container"] = new HashSet<string>(StringComparer.Ordinal) { "image", "port", "defaultTag" },
+    };
+
     public static ServiceCatalog Load(string path)
     {
         if (!File.Exists(path))
@@ -43,11 +50,10 @@ internal static class ServiceCatalogLoader
 
             // IgnoreUnmatchedProperties() above is required so a legitimate per-kind block (e.g.
             // "javascript:") doesn't trip the typed pass — but that also silently drops real typos
-            // on the well-known top-level fields (e.g. "repositry:"). Catch those here instead: any
+            // on the well-known top-level fields (e.g. "repositry:") and on fields nested inside a
+            // typed block (e.g. "kubernetes: { servicee: ... }"). Catch both here instead: any
             // top-level key that's neither a known ServiceMetadata property nor this service's own
-            // kind block is an error, not a silently-ignored no-op. (Typos nested *inside* an
-            // existing typed block like `kubernetes:` are a separate, pre-existing concern and out
-            // of scope for this fix.)
+            // kind block is an error, and so is any unknown key nested inside a typed block.
             foreach (var key in rawService.Keys)
             {
                 if (!KnownTopLevelProperties.Contains(key) && key != metadata.Kind)
@@ -55,6 +61,21 @@ internal static class ServiceCatalogLoader
                     throw new ServiceSourcesConfigurationException(
                         $"Service '{name}': unknown property '{key}'. Expected one of: " +
                         "repository, project, defaultRef, kind, kubernetes, url, container, or a block matching the service's kind.");
+                }
+
+                if (KnownNestedProperties.TryGetValue(key, out var knownNested) &&
+                    rawService[key] is System.Collections.IDictionary nestedBlock)
+                {
+                    foreach (var nestedKeyObj in nestedBlock.Keys)
+                    {
+                        var nestedKey = nestedKeyObj?.ToString() ?? "";
+                        if (!knownNested.Contains(nestedKey))
+                        {
+                            throw new ServiceSourcesConfigurationException(
+                                $"Service '{name}': unknown property '{nestedKey}' inside '{key}'. Expected one of: " +
+                                string.Join(", ", knownNested) + ".");
+                        }
+                    }
                 }
             }
 

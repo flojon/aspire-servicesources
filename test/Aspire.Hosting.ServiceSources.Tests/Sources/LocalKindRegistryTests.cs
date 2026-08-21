@@ -70,6 +70,18 @@ public class LocalKindRegistryTests
     }
 
     [Fact]
+    public void Register_ReservedDotnetKind_ThrowsAndDoesNotRegister()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => LocalKindRegistry.For(builder).Register("dotnet", new FakeKind()));
+
+        Assert.Contains("dotnet", ex.Message);
+        Assert.False(LocalKindRegistry.For(builder).TryGet("dotnet", out _));
+    }
+
+    [Fact]
     public void AddLocalKind_RegistersHandlerRetrievableViaFor()
     {
         var builder = CreateBuilder();
