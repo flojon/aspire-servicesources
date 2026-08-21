@@ -32,6 +32,17 @@ internal static class LocalGitCheckout
             // AddProject behavior), not to the process's current working directory.
             // Path.GetFullPath is a no-op when config.Path is already absolute.
             repoRoot = Path.GetFullPath(config.Path, appHostDirectory);
+
+            // Only the built-in dotnet kind goes on to look for a project file underneath this
+            // directory; every other kind hands repoRoot straight to its handler, so without this
+            // check a typo'd override surfaces as an obscure failure inside that handler (or as a
+            // resource with a nonsensical working directory) rather than as a named config error.
+            if (!Directory.Exists(repoRoot))
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Service '{serviceName}': the 'path' override points at '{repoRoot}', which does not exist. " +
+                    "'path' must name an existing local directory.");
+            }
         }
         else
         {

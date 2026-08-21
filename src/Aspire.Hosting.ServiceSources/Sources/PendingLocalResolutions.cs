@@ -73,22 +73,46 @@ internal sealed class PendingLocalResolutions
             throw AggregateFailures(resolutionFailures);
         }
 
-        // Every check above has already passed for every service — including the registry lookup,
-        // whose result each ResolutionResult carries — so this loop only ever creates resources: it
-        // never throws, and so never leaves the app model partially populated.
+        // Every check core can make has already passed for every service — the registry lookup
+        // (whose result each ResolutionResult carries), the checkout, and each handler's own
+        // Validate — so nothing core does below can fail mid-way and leave the app model partially
+        // populated. Resolve itself is third-party code and can still throw; a handler that reports
+        // a configuration problem here rather than from Validate does abort a partially populated
+        // app model, so say which service did it and point its author at Validate.
         foreach (var result in results)
         {
             var pending = result.Pending;
-            if (result.Handler is null)
+            if (IsDotnet(pending.Metadata.Kind))
             {
-                // No handler means the built-in dotnet kind, for which ResolveOne always set ProjectPath.
+                // ResolveOne always set ProjectPath for the built-in dotnet kind.
                 var projectBuilder = builder.AddProject(pending.ServiceName, result.ProjectPath!);
                 ServiceResource.CopyEndpointAnnotations(pending.Facade, projectBuilder);
                 continue;
             }
 
-            var resourceBuilder = result.Handler.Resolve(
-                builder, pending.ServiceName, result.RepoRoot!, pending.Metadata.KindConfig);
+            IResourceBuilder<IResourceWithServiceDiscovery>? resourceBuilder;
+            try
+            {
+                resourceBuilder = result.Handler!.Resolve(
+                    builder, pending.ServiceName, result.RepoRoot!, pending.Metadata.KindConfig);
+            }
+            catch (Exception ex)
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Service '{pending.ServiceName}': the handler for kind '{pending.Metadata.Kind}' failed while " +
+                    "creating its resource, after other services had already been added to the app model. If this is " +
+                    $"a configuration problem, report it from {nameof(ILocalResourceKind)}.{nameof(ILocalResourceKind.Validate)} " +
+                    "instead, which runs before anything is added.", ex);
+            }
+
+            if (resourceBuilder is null)
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Service '{pending.ServiceName}': the handler for kind '{pending.Metadata.Kind}' returned no " +
+                    $"resource. {nameof(ILocalResourceKind)}.{nameof(ILocalResourceKind.Resolve)} must return the " +
+                    "resource it created.");
+            }
+
             ServiceResource.CopyEndpointAnnotations(pending.Facade, resourceBuilder);
         }
     }
@@ -111,7 +135,16 @@ internal sealed class PendingLocalResolutions
 
             // The pre-flight above already proved this lookup succeeds; carrying the handler through
             // to the creation loop keeps that loop free of any check that could fail mid-way.
-            registry.TryGet(pending.Metadata.Kind, out var handler);
+            if (!registry.TryGet(pending.Metadata.Kind, out var handler) || handler is null)
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Service '{pending.ServiceName}': kind '{pending.Metadata.Kind}' is not registered.");
+            }
+
+            // Give the handler its chance to reject a malformed options block while we're still in
+            // the failure-aggregating phase, before any service has touched the app model.
+            handler.Validate(pending.ServiceName, pending.Metadata.KindConfig);
+
             return new ResolutionResult(pending, repoRoot, null, handler, null);
         }
         catch (Exception ex)
@@ -132,8 +165,8 @@ internal sealed class PendingLocalResolutions
 
     /// <summary>
     /// One service's parallel-phase outcome. On success exactly one of <paramref name="ProjectPath"/>
-    /// (built-in dotnet kind) and <paramref name="Handler"/> (any registered kind) is set, and that
-    /// pair is what the sequential creation loop dispatches on.
+    /// (built-in dotnet kind) and <paramref name="Handler"/> (any registered kind) is set; which one
+    /// follows from the service's kind, which is what the sequential creation loop dispatches on.
     /// </summary>
     private readonly record struct ResolutionResult(
         PendingResolution Pending,

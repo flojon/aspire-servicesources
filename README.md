@@ -107,7 +107,9 @@ a project reference would be.
   overwriting your work. The `.servicesources/` directory gitignores itself on first use — no
   need to add it to your own `.gitignore`.
 - Set `path` to point at a checkout you manage yourself (e.g. an existing local clone). It's
-  used as-is — no clone, no checkout, no fetch, ever. `ref` cannot be combined with `path`.
+  used as-is — no clone, no checkout, no fetch, ever. A relative `path` is anchored to the
+  AppHost directory, and must name a directory that already exists. `ref` cannot be combined
+  with `path`.
 
 ### Non-.NET local services: `kind`
 
@@ -142,6 +144,12 @@ public sealed class JavaScriptKind : ILocalResourceKind
         public string? RunScript { get; set; }
     }
 
+    // Optional, and worth implementing whenever Resolve parses rawConfig: this runs for every
+    // service before any of them has added a resource, so a typo'd options block is reported
+    // alongside every other service's failure instead of aborting a half-built app model.
+    public void Validate(string serviceName, object? rawConfig) =>
+        LocalKindConfig.Parse<Options>(rawConfig, serviceName);
+
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig)
     {
@@ -158,7 +166,10 @@ public static IDistributedApplicationBuilder UseJavaScript(this IDistributedAppl
 `LocalKindConfig.Parse<T>` turns the opaque options block into a typed object, and rejects an
 unknown property or a block that isn't a mapping with a `ServiceSourcesConfigurationException`
 naming the service. `AddLocalKind` must be called before the service resolves (i.e. before the
-app host starts), accepts each kind name at most once, and cannot re-register `"dotnet"`.
+app host starts), accepts each kind name at most once, and cannot re-register `"dotnet"` or use a
+name that collides with a well-known service property (`repository`, `project`, `defaultRef`,
+`kind`, `kubernetes`, `url`, `container`) — a block by one of those names would be read as that
+property rather than as the kind's options.
 
 ### `"kubernetes"` source
 

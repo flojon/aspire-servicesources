@@ -82,6 +82,39 @@ public class PendingLocalResolutionsTests
         }
     }
 
+    /// <summary>
+    /// Stands in for a real handler that parses its options block: rejects a bad block from
+    /// <see cref="Validate"/> (the supported way) or, when <paramref name="fromResolve"/> is set,
+    /// from <see cref="Resolve"/> — the unsupported way that reaches the app model mid-creation.
+    /// </summary>
+    private sealed class RejectingLocalResourceKind(bool fromResolve = false) : ILocalResourceKind
+    {
+        public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+            IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig)
+        {
+            if (fromResolve)
+            {
+                throw new ServiceSourcesConfigurationException($"Service '{serviceName}': unknown property 'runScrip'.");
+            }
+
+            return builder.AddResource(new FakeKindResource(serviceName));
+        }
+
+        public void Validate(string serviceName, object? rawConfig)
+        {
+            if (!fromResolve)
+            {
+                throw new ServiceSourcesConfigurationException($"Service '{serviceName}': unknown property 'runScrip'.");
+            }
+        }
+    }
+
+    private sealed class NullReturningLocalResourceKind : ILocalResourceKind
+    {
+        public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+            IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) => null!;
+    }
+
     private static IDistributedApplicationBuilder CreateBuilder(string appHostDirectory) =>
         TestHelpers.CreateBuilder(appHostDirectory);
 
@@ -319,5 +352,63 @@ public class PendingLocalResolutionsTests
         // Without the hint this reads as a missing satellite package rather than a casing slip.
         Assert.Contains("case-sensitive", ex.Message);
         Assert.Contains("'javascript'", ex.Message);
+    }
+
+    [Fact]
+    public async Task ResolveAllAsync_HandlerRejectsConfigFromValidate_AggregatesAndAddsNoResource()
+    {
+        var builder = CreateBuilder(CreateAppHostDirectory());
+        builder.AddLocalKind("javascript", new RejectingLocalResourceKind());
+        builder.AddLocalKind("java", new RejectingLocalResourceKind());
+        var ordersFacade = ServiceResource.CreateEmptyFacade(builder, "orders");
+        var frontendFacade = ServiceResource.CreateEmptyFacade(builder, "frontend");
+        var apiFacade = ServiceResource.CreateEmptyFacade(builder, "api");
+        var pending = PendingLocalResolutions.For(builder);
+        pending.Add(new PendingResolution("orders", Metadata("https://fake/orders"), DevConfig(), ordersFacade, new FakeGitClient()));
+        pending.Add(new PendingResolution("frontend", MetadataWithKind("https://fake/frontend", "javascript"), DevConfig(), frontendFacade, new FakeGitClient()));
+        pending.Add(new PendingResolution("api", MetadataWithKind("https://fake/api", "java"), DevConfig(), apiFacade, new FakeGitClient()));
+
+        var ex = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(
+            () => PublishBeforeStartEventAsync(builder));
+
+        // Both bad services are reported together, and the good one that sorts before them never
+        // reached the app model — the half-populated state a Resolve-time throw would leave behind.
+        Assert.Contains("frontend", ex.Message);
+        Assert.Contains("api", ex.Message);
+        Assert.DoesNotContain(builder.Resources, r => r.Name == "orders");
+        Assert.DoesNotContain(builder.Resources, r => r.Name == "frontend");
+    }
+
+    [Fact]
+    public async Task ResolveAllAsync_HandlerThrowsFromResolve_ErrorNamesServiceAndPointsAtValidate()
+    {
+        var builder = CreateBuilder(CreateAppHostDirectory());
+        builder.AddLocalKind("javascript", new RejectingLocalResourceKind(fromResolve: true));
+        var facade = ServiceResource.CreateEmptyFacade(builder, "frontend");
+        PendingLocalResolutions.For(builder).Add(new PendingResolution(
+            "frontend", MetadataWithKind("https://fake/frontend", "javascript"), DevConfig(), facade, new FakeGitClient()));
+
+        var ex = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(
+            () => PublishBeforeStartEventAsync(builder));
+
+        Assert.Contains("frontend", ex.Message);
+        Assert.Contains(nameof(ILocalResourceKind.Validate), ex.Message);
+        Assert.Contains("runScrip", ex.InnerException!.Message);
+    }
+
+    [Fact]
+    public async Task ResolveAllAsync_HandlerReturnsNull_ThrowsNamingServiceInsteadOfNullReference()
+    {
+        var builder = CreateBuilder(CreateAppHostDirectory());
+        builder.AddLocalKind("javascript", new NullReturningLocalResourceKind());
+        var facade = ServiceResource.CreateEmptyFacade(builder, "frontend");
+        PendingLocalResolutions.For(builder).Add(new PendingResolution(
+            "frontend", MetadataWithKind("https://fake/frontend", "javascript"), DevConfig(), facade, new FakeGitClient()));
+
+        var ex = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(
+            () => PublishBeforeStartEventAsync(builder));
+
+        Assert.Contains("frontend", ex.Message);
+        Assert.Contains("javascript", ex.Message);
     }
 }

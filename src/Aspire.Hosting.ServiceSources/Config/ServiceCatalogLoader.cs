@@ -16,6 +16,16 @@ internal static class ServiceCatalogLoader
     // being rejected as "unknown" by the checks in Load below.
     private static readonly HashSet<string> KnownTopLevelProperties = YamlPropertyNames(typeof(ServiceMetadata));
 
+    private static readonly HashSet<string> KnownRootProperties = YamlPropertyNames(typeof(ServiceCatalog));
+
+    /// <summary>
+    /// A kind whose name matches a well-known <see cref="ServiceMetadata"/> key can't be expressed
+    /// in yaml: its options block would be bound as that typed property instead, and validated
+    /// against that property's schema. <see cref="Sources.LocalKindRegistry.Register"/> rejects such
+    /// names up front so the collision can never reach the loader.
+    /// </summary>
+    internal static bool IsReservedKindName(string kind) => KnownTopLevelProperties.Contains(kind);
+
     private static readonly Dictionary<string, HashSet<string>> KnownNestedProperties =
         YamlProperties(typeof(ServiceMetadata))
             .Where(p => IsNestedBlock(p.PropertyType))
@@ -49,6 +59,20 @@ internal static class ServiceCatalogLoader
         var yaml = File.ReadAllText(path);
         var catalog = Deserializer.Deserialize<ServiceCatalog>(yaml) ?? new ServiceCatalog();
         var raw = Deserializer.Deserialize<RawServiceCatalog>(yaml) ?? new RawServiceCatalog();
+
+        // IgnoreUnmatchedProperties() applies to the root document too, so a misspelled 'services:'
+        // would otherwise deserialize to an empty catalog and be reported later as "service 'x' was
+        // not found" — pointing at the service name rather than at the actual typo.
+        var rawRoot = Deserializer.Deserialize<Dictionary<string, object?>>(yaml) ?? [];
+        foreach (var rootKey in rawRoot.Keys)
+        {
+            if (!KnownRootProperties.Contains(rootKey))
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Unknown top-level property '{rootKey}' in '{path}'. Expected one of: " +
+                    string.Join(", ", KnownRootProperties) + ".");
+            }
+        }
 
         foreach (var (name, metadata) in catalog.Services)
         {
@@ -85,6 +109,15 @@ internal static class ServiceCatalogLoader
                     throw new ServiceSourcesConfigurationException(
                         $"Service '{name}': unknown property '{key}'. Expected one of: " +
                         string.Join(", ", KnownTopLevelProperties) + ", or a block matching the service's kind.");
+                }
+
+                // The service's own kind block is opaque to core — validating it against a typed
+                // block that happens to share its name would reject the block's real properties.
+                // LocalKindRegistry.Register makes this unreachable for a registered kind; it still
+                // matters for an unregistered one, which must fail with "kind is not registered".
+                if (key == metadata.Kind)
+                {
+                    continue;
                 }
 
                 if (KnownNestedProperties.TryGetValue(key, out var knownNested) &&

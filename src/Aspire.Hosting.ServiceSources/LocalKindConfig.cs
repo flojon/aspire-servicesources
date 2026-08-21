@@ -42,9 +42,15 @@ public static class LocalKindConfig
 
         if (rawConfig is not System.Collections.IDictionary)
         {
+            // A sequence under the kind key stringifies to its CLR type name, which points the reader
+            // nowhere — name the shape instead, and only quote the value when it really is a scalar.
+            var found = rawConfig is System.Collections.IEnumerable and not string
+                ? "a list"
+                : $"the scalar '{rawConfig}'";
+
             throw new ServiceSourcesConfigurationException(
                 $"{Prefix(serviceName)}the per-kind config block must be a block of key/value pairs, " +
-                $"but found the scalar '{rawConfig}'. Check the indentation under the kind's key.");
+                $"but found {found}. Check the indentation under the kind's key.");
         }
 
         var yaml = Serializer.Serialize(rawConfig);

@@ -81,6 +81,25 @@ public class LocalKindRegistryTests
         Assert.False(LocalKindRegistry.For(builder).TryGet("dotnet", out _));
     }
 
+    [Theory]
+    [InlineData("container")]
+    [InlineData("url")]
+    [InlineData("kubernetes")]
+    [InlineData("repository")]
+    [InlineData("kind")]
+    public void Register_KindNameCollidingWithAWellKnownServiceProperty_Throws(string reserved)
+    {
+        var builder = CreateBuilder();
+
+        // A block named after a typed ServiceMetadata property is bound as that property, so a kind
+        // by that name could never receive its own options — reject it at registration instead.
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => LocalKindRegistry.For(builder).Register(reserved, new FakeKind()));
+
+        Assert.Contains(reserved, ex.Message);
+        Assert.False(LocalKindRegistry.For(builder).TryGet(reserved, out _));
+    }
+
     [Fact]
     public void AddLocalKind_RegistersHandlerRetrievableViaFor()
     {

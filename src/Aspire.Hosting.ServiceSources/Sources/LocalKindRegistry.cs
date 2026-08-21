@@ -25,6 +25,14 @@ internal sealed class LocalKindRegistry
                 "Local kind 'dotnet' is reserved for the built-in project resolution and cannot be registered via AddLocalKind.");
         }
 
+        if (Config.ServiceCatalogLoader.IsReservedKindName(kind))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Local kind '{kind}' is reserved: it collides with a well-known property of a service's " +
+                "yaml entry, so a block by that name would be read as that property rather than as the " +
+                "kind's options. Choose a different kind name.");
+        }
+
         if (!_handlers.TryAdd(kind, handler))
         {
             throw new ServiceSourcesConfigurationException(

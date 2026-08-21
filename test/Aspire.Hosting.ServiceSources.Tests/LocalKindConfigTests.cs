@@ -61,6 +61,21 @@ public class LocalKindConfigTests
     }
 
     [Fact]
+    public void Parse_SequenceInsteadOfBlock_SaysListRatherThanStringifyingTheCollection()
+    {
+        // A sequence under the kind key also fails the mapping test, and stringifying it yields
+        // "System.Collections.Generic.List`1[System.Object]", which points the reader nowhere.
+        var raw = new List<object> { "a", "b" };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => LocalKindConfig.Parse<Options>(raw, "frontend"));
+
+        Assert.Contains("frontend", ex.Message);
+        Assert.Contains("a list", ex.Message);
+        Assert.DoesNotContain("System.Collections", ex.Message);
+    }
+
+    [Fact]
     public void Parse_MalformedBlockWithoutServiceName_StillThrowsConfigurationException()
     {
         Assert.Throws<ServiceSourcesConfigurationException>(() => LocalKindConfig.Parse<Options>("dev"));

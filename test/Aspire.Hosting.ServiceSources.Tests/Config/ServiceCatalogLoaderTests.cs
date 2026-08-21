@@ -423,6 +423,61 @@ public class ServiceCatalogLoaderTests
     }
 
     [Fact]
+    public void Load_MisspelledRootKey_ThrowsNamingItInsteadOfYieldingAnEmptyCatalog()
+    {
+        // IgnoreUnmatchedProperties applies to the root too, so without the root check this parses
+        // to an empty catalog and is reported much later as "service 'orders' was not found".
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            service:
+              orders:
+                repository: https://github.com/company/orders
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("service", ex.Message);
+            Assert.Contains("services", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_KindNamedAfterATypedBlock_DoesNotValidateItAgainstThatBlocksSchema()
+    {
+        // LocalKindRegistry.Register makes this unreachable for a registered kind; the loader must
+        // still not reject the block's own keys against ContainerMetadata's schema, so that the
+        // failure the user sees is the accurate "kind 'container' is not registered".
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              frontend:
+                repository: https://github.com/company/frontend
+                kind: container
+                container:
+                  runScript: dev
+            """);
+
+        try
+        {
+            var catalog = ServiceCatalogLoader.Load(path);
+
+            var frontend = catalog.Services["frontend"];
+            Assert.Equal("container", frontend.Kind);
+            Assert.NotNull(frontend.KindConfig);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void Load_KindConfigProperty_IsRejectedAsUnknown()
     {
         // KindConfig is populated from the kind-matching block, never bound from yaml — so the

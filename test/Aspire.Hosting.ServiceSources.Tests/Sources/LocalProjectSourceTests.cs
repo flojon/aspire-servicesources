@@ -141,6 +141,24 @@ public class LocalProjectSourceTests
     }
 
     [Fact]
+    public void ResolveRepoRoot_PathOverridePointsAtMissingDirectory_ThrowsNamingServiceAndPath()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var missing = Path.Combine(appHostDirectory, "frontned");
+        var gitClient = new FakeGitClient();
+
+        // Asserted on ResolveRepoRoot rather than the full project-path composition because this is
+        // the guard every kind shares: for a non-dotnet kind nothing downstream would catch it.
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            LocalGitCheckout.ResolveRepoRoot(
+                ServiceName, Metadata(), DevConfig(path: "frontned"), appHostDirectory, gitClient));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains(missing, ex.Message);
+        Assert.Empty(gitClient.ClonedRepos);
+    }
+
+    [Fact]
     public void ResolveProjectPath_RelativePathOverride_AnchorsToAppHostDirectoryNotProcessCwd()
     {
         var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
