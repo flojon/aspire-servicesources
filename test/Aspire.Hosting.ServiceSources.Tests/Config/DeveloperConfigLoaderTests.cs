@@ -136,4 +136,28 @@ public class DeveloperConfigLoaderTests
             File.Delete(path);
         }
     }
+
+    [Theory]
+    [InlineData("""{ "services": null }""")]
+    [InlineData("""{ "services": {} }""")]
+    [InlineData("{ }")]
+    public void Load_NoServices_YieldsEmptyConfig(string json)
+    {
+        // An explicit null overrides the property initializer, so without the coercion in
+        // DeveloperConfigFile a lookup against this config faults with a NullReferenceException
+        // instead of reporting the service by name.
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, json);
+
+        try
+        {
+            var config = DeveloperConfigLoader.Load(path);
+
+            Assert.Empty(config.Services);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }
