@@ -1,0 +1,14 @@
+<Project>
+
+  <PropertyGroup>
+    <!-- Aspire.Hosting.targets defaults this to false, so Aspire's own integration analyzers
+         (the ASPIREEXPORT* rules over the [AspireExport] surface consumed by TypeScript
+         AppHosts) never run unless a project opts in. Enable it repo-wide: every
+         ServiceSources package is an Aspire integration, and forgetting the opt-in in a new
+         satellite project is silent — the analyzer simply does not run, and a broken export
+         surface is found by `aspire` CLI codegen against a released package instead of at
+         build time. -->
+    <EnableAspireIntegrationAnalyzers>true</EnableAspireIntegrationAnalyzers>
+  </PropertyGroup>
+
+</Project>
