@@ -502,4 +502,82 @@ public class ServiceCatalogLoaderTests
             File.Delete(path);
         }
     }
+
+    [Theory]
+    [InlineData("services:\n")]
+    [InlineData("services: {}\n")]
+    public void Load_ServicesKeyWithNoServices_YieldsEmptyCatalog(string yaml)
+    {
+        // A bare 'services:' deserializes the map itself to null, overriding the property
+        // initializer — it must still behave like the explicit empty mapping (and like an omitted
+        // key) rather than faulting while the loader enumerates the catalog. A service that is
+        // actually referenced is then reported by name by ServiceSourcesConfigCache.
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, yaml);
+
+        try
+        {
+            var catalog = ServiceCatalogLoader.Load(path);
+
+            Assert.Empty(catalog.Services);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("    kind: dotnet\n")]
+    public void Load_StrayDotnetBlock_ThrowsNamingServiceAndProperty(string kindLine)
+    {
+        // 'dotnet' is resolved from the top-level repository/project metadata and never reads
+        // KindConfig, and LocalKindRegistry.Register refuses to register it — so a 'dotnet:' block
+        // is always stray or misspelled and must be rejected rather than captured and ignored.
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path,
+            "services:\n" +
+            "  orders:\n" +
+            "    repository: https://github.com/company/orders\n" +
+            "    project: src/Orders.Api/Orders.Api.csproj\n" +
+            kindLine +
+            "    dotnet:\n" +
+            "      runScript: dev\n");
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("orders", ex.Message);
+            Assert.Contains("dotnet", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_DotnetService_LeavesKindConfigNull()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+            """);
+
+        try
+        {
+            var catalog = ServiceCatalogLoader.Load(path);
+
+            Assert.Null(catalog.Services["orders"].KindConfig);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

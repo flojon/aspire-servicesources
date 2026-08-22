@@ -10,5 +10,15 @@ namespace Aspire.Hosting.ServiceSources.Config;
 /// </summary>
 internal sealed class RawServiceCatalog
 {
-    public Dictionary<string, Dictionary<string, object>> Services { get; set; } = new();
+    private Dictionary<string, Dictionary<string, object>> _services = new();
+
+    /// <summary>
+    /// Coerced away from null for the same reason as <see cref="ServiceCatalog.Services"/>: a bare
+    /// <c>services:</c> key deserializes the map itself to null, overriding the field initializer.
+    /// </summary>
+    public Dictionary<string, Dictionary<string, object>> Services
+    {
+        get => _services;
+        set => _services = value ?? [];
+    }
 }

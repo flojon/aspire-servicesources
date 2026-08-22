@@ -102,20 +102,28 @@ internal static class ServiceCatalogLoader
             // typed block (e.g. "kubernetes: { servicee: ... }"). Catch both here instead: any
             // top-level key that's neither a known ServiceMetadata property nor this service's own
             // kind block is an error, and so is any unknown key nested inside a typed block.
+            // Only a non-dotnet kind has an options block to exempt from the checks below. The
+            // built-in "dotnet" kind is resolved from the service's top-level repository/project
+            // metadata and never reads KindConfig, and LocalKindRegistry.Register refuses to
+            // register "dotnet" at all — so a `dotnet:` block is always stray or misspelled.
+            // Exempting it would have it silently accepted here and then silently ignored.
+            var kindBlockKey = metadata.Kind == LocalKinds.Dotnet ? null : metadata.Kind;
+
             foreach (var key in rawService.Keys)
             {
-                if (!KnownTopLevelProperties.Contains(key) && key != metadata.Kind)
+                if (!KnownTopLevelProperties.Contains(key) && key != kindBlockKey)
                 {
                     throw new ServiceSourcesConfigurationException(
                         $"Service '{name}': unknown property '{key}'. Expected one of: " +
-                        string.Join(", ", KnownTopLevelProperties) + ", or a block matching the service's kind.");
+                        string.Join(", ", KnownTopLevelProperties) +
+                        (kindBlockKey is null ? "." : ", or a block matching the service's kind."));
                 }
 
                 // The service's own kind block is opaque to core — validating it against a typed
                 // block that happens to share its name would reject the block's real properties.
                 // LocalKindRegistry.Register makes this unreachable for a registered kind; it still
                 // matters for an unregistered one, which must fail with "kind is not registered".
-                if (key == metadata.Kind)
+                if (key == kindBlockKey)
                 {
                     continue;
                 }
@@ -136,7 +144,7 @@ internal static class ServiceCatalogLoader
                 }
             }
 
-            if (rawService.TryGetValue(metadata.Kind, out var kindBlock))
+            if (kindBlockKey is not null && rawService.TryGetValue(kindBlockKey, out var kindBlock))
             {
                 metadata.KindConfig = kindBlock;
             }
