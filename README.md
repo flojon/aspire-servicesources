@@ -111,6 +111,54 @@ a project reference would be.
   AppHost directory, and must name a directory that already exists. `ref` cannot be combined
   with `path`.
 
+#### Several services from one repository
+
+A catalog entry maps one service to one thing to run, so a repository holding several services
+gets one entry per service — each naming the same `repository`, and each selecting its own part
+of the tree (`project` for the default `dotnet` kind, or the kind's own options block, such as
+`appDirectory`, for the kinds below):
+
+```yaml
+services:
+  orders:
+    repository: https://github.com/example/monorepo
+    project: src/Orders.Api/Orders.Api.csproj
+    defaultRef: main
+  payments:
+    repository: https://github.com/example/monorepo
+    project: src/Payments.Api/Payments.Api.csproj
+    defaultRef: main
+```
+
+The catalog is the same either way; what differs is how many checkouts of that repository end
+up on your machine, which each developer chooses in `servicesources.local.json`:
+
+- **One managed checkout per service** — omit `path`. Managed checkouts are keyed by service
+  name, so `orders` and `payments` each get their own independent clone of the repository, at
+  `.servicesources/checkouts/orders/` and `.servicesources/checkouts/payments/`. Each can sit
+  on its own `ref` and neither can disturb the other, but the repository is cloned once per
+  service, and an edit to shared code in one checkout is invisible to the other.
+- **One checkout shared by every service** — set `path`. Clone the repository yourself, then
+  point each service at that same directory; the entry's `project` (or `appDirectory`) is
+  resolved relative to it:
+
+  ```json
+  {
+    "services": {
+      "orders":   { "source": "local", "path": "/home/dev/code/monorepo" },
+      "payments": { "source": "local", "path": "/home/dev/code/monorepo" }
+    }
+  }
+  ```
+
+  This is usually what you want when the services share code: one clone, one branch, and an
+  edit to a shared project is picked up by every service at once. The trade-off is that the
+  clone is yours to manage — nothing is ever cloned, fetched or checked out on your behalf —
+  and `ref` cannot be combined with `path`.
+
+Mixing the two is fine: services you're actively editing can share one `path` checkout while
+the rest stay on managed clones.
+
 ### Non-.NET local services: `kind`
 
 A `"local"` service is resolved as a .NET project by default. Set `kind` in the catalog to run
