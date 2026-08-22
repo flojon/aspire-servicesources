@@ -40,6 +40,42 @@ internal sealed record GitUrl
     /// </summary>
     public string Identity => Host is null ? Path : $"{Host}/{Path}";
 
+    /// <summary>
+    /// The URL with any userinfo removed, for use in messages. A repository URL may legitimately
+    /// carry a personal access token — as the password, or as the username with no password at all —
+    /// and an exception message reaches the console and every log sink the AppHost is wired to, so
+    /// the whole userinfo goes rather than only the part after a ':'. Everything else is left
+    /// byte-for-byte as the developer wrote it, so the message still names a URL they recognize.
+    /// This is what git itself shows when a remote operation fails.
+    /// </summary>
+    public static string Redact(string repositoryUrl)
+    {
+        // Only the "scheme://[userinfo@]host/path" form has a userinfo component to remove: scp-like
+        // syntax has no password syntax at all (its user is an SSH account name, not a secret), and a
+        // local filesystem path has no authority to carry one.
+        var schemeIndex = repositoryUrl.IndexOf("://", StringComparison.Ordinal);
+        if (schemeIndex < 0)
+        {
+            return repositoryUrl;
+        }
+
+        var authorityStart = schemeIndex + 3;
+        var authorityEnd = repositoryUrl.IndexOf('/', authorityStart);
+        if (authorityEnd < 0)
+        {
+            authorityEnd = repositoryUrl.Length;
+        }
+
+        // The last '@' within the authority, for the same reason StripUserInfo uses it: a token can
+        // itself contain '@'. An '@' past the authority belongs to the path and is left alone.
+        var atIndex = repositoryUrl.AsSpan(authorityStart, authorityEnd - authorityStart).LastIndexOf('@');
+        return atIndex < 0
+            ? repositoryUrl
+            : string.Concat(
+                repositoryUrl.AsSpan(0, authorityStart),
+                repositoryUrl.AsSpan(authorityStart + atIndex + 1));
+    }
+
     public static GitUrl Parse(string repositoryUrl)
     {
         var trimmed = TrimSuffixes(repositoryUrl);

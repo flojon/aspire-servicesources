@@ -25,6 +25,10 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         string appHostDirectory,
         IGitClient gitClient)
     {
+        // Every message below names the repository, and a repository URL may carry a token. Redact
+        // once here so no message site has to remember to; the real URL still goes to git itself.
+        var displayRepository = GitUrl.Redact(metadata.Repository);
+
         string repoRoot;
 
         if (config.Path is not null)
@@ -59,14 +63,14 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
                 {
                     throw new ServiceSourcesConfigurationException(
                         AuthFailureMessage(
-                            $"Service '{serviceName}': failed to clone repository '{metadata.Repository}' " +
+                            $"Service '{serviceName}': failed to clone repository '{displayRepository}' " +
                             $"into '{repoRoot}'"),
                         ex);
                 }
                 catch (Exception ex)
                 {
                     throw new ServiceSourcesConfigurationException(
-                        $"Service '{serviceName}': failed to clone repository '{metadata.Repository}' into '{repoRoot}'.", ex);
+                        $"Service '{serviceName}': failed to clone repository '{displayRepository}' into '{repoRoot}'.", ex);
                 }
 
                 if (reference is not null)
@@ -81,7 +85,8 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
                 {
                     throw new ServiceSourcesConfigurationException(
                         $"Service '{serviceName}': checkout at '{repoRoot}' already contains a clone of " +
-                        $"'{existingOrigin}', which does not match the configured repository '{metadata.Repository}'. " +
+                        $"'{GitUrl.Redact(existingOrigin)}', which does not match the configured repository " +
+                        $"'{displayRepository}'. " +
                         "Remove the checkout directory or fix the configured repository URL.");
                 }
 
@@ -117,6 +122,9 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
     private static void CheckoutWithFetchRetry(
         string serviceName, ServiceMetadata metadata, string repoRoot, string reference, IGitClient gitClient)
     {
+        // See ResolveProjectPath: the real URL goes to git, the redacted one goes into messages.
+        var displayRepository = GitUrl.Redact(metadata.Repository);
+
         try
         {
             gitClient.Checkout(repoRoot, reference);
@@ -129,7 +137,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         catch (Exception ex)
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': failed to checkout ref '{reference}' of repository '{metadata.Repository}' at '{repoRoot}'.", ex);
+                $"Service '{serviceName}': failed to checkout ref '{reference}' of repository '{displayRepository}' at '{repoRoot}'.", ex);
         }
 
         // The fetch talks to the checkout's own origin, which need not be the configured
@@ -146,14 +154,14 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         {
             throw new ServiceSourcesConfigurationException(
                 AuthFailureMessage(
-                    $"Service '{serviceName}': failed to fetch repository '{metadata.Repository}' at " +
+                    $"Service '{serviceName}': failed to fetch repository '{displayRepository}' at " +
                     $"'{repoRoot}' while resolving ref '{reference}'"),
                 ex);
         }
         catch (Exception ex)
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': failed to fetch repository '{metadata.Repository}' at '{repoRoot}' " +
+                $"Service '{serviceName}': failed to fetch repository '{displayRepository}' at '{repoRoot}' " +
                 $"while resolving ref '{reference}'.", ex);
         }
 
@@ -164,7 +172,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         catch (Exception ex)
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': failed to checkout ref '{reference}' of repository '{metadata.Repository}' at '{repoRoot}'.", ex);
+                $"Service '{serviceName}': failed to checkout ref '{reference}' of repository '{displayRepository}' at '{repoRoot}'.", ex);
         }
     }
 

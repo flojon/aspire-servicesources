@@ -137,7 +137,11 @@ takes effect on the next resolution — there's no need to restart the AppHost t
 
 Credentials are never read from `servicesources.yaml` (committed) or `servicesources.local.json`
 — there's no field for them in either file, by design, so a secret can't accidentally end up in
-the committed catalog.
+the committed catalog. The one way to get one in there anyway is to embed it in the `repository`
+URL itself (`https://user:token@host/org/repo`); git accepts that form, but it commits the token
+along with the catalog, so use one of the two mechanisms above instead. Should such a URL be
+configured regardless, every message this tool prints strips the userinfo from it first, so the
+token doesn't spread from the catalog into your console and logs.
 
 A clone or fetch that fails for what looks like an authentication reason raises an error naming
 the service, the repository, and authentication as the likely cause, rather than a generic

@@ -99,4 +99,33 @@ public class GitUrlTests
         Assert.True(url.IsScpSyntax);
         Assert.Null(url.Scheme);
     }
+
+    [Theory]
+    // A token pasted in as the password.
+    [InlineData("https://alice:ghp_secret@github.com/company/orders.git", "https://github.com/company/orders.git")]
+    // A token pasted in as the username, with no password at all — just as common, and just as secret,
+    // so the whole userinfo goes rather than only the part after a ':'.
+    [InlineData("https://ghp_secret@github.com/company/orders", "https://github.com/company/orders")]
+    // A token containing '@' — split on the last one, as GitUrl.Parse does.
+    [InlineData("https://alice:pa@ss@github.com/company/orders", "https://github.com/company/orders")]
+    [InlineData("http://alice:secret@gitserver:8443/company/orders", "http://gitserver:8443/company/orders")]
+    [InlineData("ssh://alice:secret@gitserver/company/orders", "ssh://gitserver/company/orders")]
+    public void Redact_UrlCarryingCredentials_RemovesTheWholeUserInfo(string repositoryUrl, string expected) =>
+        Assert.Equal(expected, GitUrl.Redact(repositoryUrl));
+
+    [Theory]
+    [InlineData("https://github.com/company/orders.git")]
+    [InlineData("https://github.com/company/orders/")]
+    // scp-like syntax has no password component, so its user is an SSH account name, not a secret.
+    [InlineData("git@github.com:company/orders.git")]
+    [InlineData("/home/alice/repos/orders")]
+    [InlineData(@"C:\repos\orders")]
+    // An '@' after the authority belongs to the path.
+    [InlineData("https://gitserver/company/orders@v2")]
+    public void Redact_NothingSecretToRemove_ReturnsTheUrlByteForByte(string repositoryUrl) =>
+        Assert.Equal(repositoryUrl, GitUrl.Redact(repositoryUrl));
+
+    [Fact]
+    public void Redact_UrlWithNoPathAtAll_StillRemovesTheUserInfo() =>
+        Assert.Equal("https://gitserver", GitUrl.Redact("https://alice:secret@gitserver"));
 }
