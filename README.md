@@ -39,6 +39,14 @@ Or reference the project directly from your AppHost instead:
 Requires .NET 8 or later (net8.0, net9.0, and net10.0 are all supported) and an AppHost
 project using the `Aspire.AppHost.Sdk` (`aspire new` / `aspire restore` sets this up).
 
+Running a `"local"` service written in a language other than .NET needs one extra package per
+language, so an AppHost only takes on the hosting dependencies it actually uses — see
+[`kind: java`](#kind-java):
+
+| Language | Package |
+| --- | --- |
+| Java | `KoalaSoft.Aspire.Hosting.ServiceSources.Java` |
+
 ## Getting started
 
 **1. Declare the service in `Program.cs`:**
@@ -223,6 +231,79 @@ resolution time with a message pointing at the HTTPS equivalent — use `https:/
 instead. The same check covers an existing checkout whose `origin` is an SSH remote, before any
 fetch is attempted against it.
 
+### `kind: java`
+
+Java services are supported by a satellite package, so an AppHost that doesn't run Java never
+takes on the dependency:
+
+```bash
+dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources.Java
+```
+
+Call `UseJava()` once, before the `AddService(...)` calls it applies to:
+
+```csharp
+using Aspire.Hosting.ServiceSources;
+
+var builder = DistributedApplication.CreateBuilder(args);
+
+builder.UseJava();
+
+var catalog = builder.AddService("catalog");
+```
+
+`servicesources.yaml`:
+```yaml
+services:
+  catalog:
+    repository: https://github.com/example/catalog
+    kind: java
+    java:
+      mavenGoal: spring-boot:run
+      port: 8080
+```
+
+The checkout is cloned exactly as for any other `"local"` service (`path`, `ref`, and
+`defaultRef` all behave identically), then handed to the .NET Aspire Community Toolkit's
+[Java integration](https://github.com/CommunityToolkit/Aspire) to run.
+
+**`java:` block options**
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `mavenGoal` | one of these three | Run via the Maven wrapper, e.g. `spring-boot:run`. |
+| `gradleTask` | one of these three | Run via the Gradle wrapper, e.g. `bootRun`. |
+| `jarPath` | one of these three | Run a pre-built jar with `java -jar`, relative to `workingDirectory`. |
+| `port` | yes | The port the app listens on. Becomes the service's HTTP endpoint, so consumers can `WithReference(...)` it. |
+| `workingDirectory` | no (defaults to the repository root) | Where in the checkout the project lives — the directory holding `pom.xml` / `build.gradle` and the `mvnw`/`gradlew` wrapper. Must stay inside the checkout. |
+| `args` | no | Extra arguments for whichever run mode is configured — passed to the Maven wrapper, the Gradle wrapper, or the jar. |
+
+`mavenGoal`, `gradleTask`, and `jarPath` are mutually exclusive: exactly one must be set. A
+monorepo service, running a Gradle task with an extra argument:
+
+```yaml
+services:
+  catalog:
+    repository: https://github.com/example/monorepo
+    kind: java
+    java:
+      workingDirectory: services/catalog
+      gradleTask: bootRun
+      args: ["--args=--spring.profiles.active=dev"]
+      port: 8080
+```
+
+`mavenGoal` and `gradleTask` run the repository's own `mvnw`/`gradlew` wrapper, so a JDK must be
+on the developer's machine but Maven/Gradle itself need not be. Every problem with the block bar
+one — unknown properties, a missing or out-of-range `port`, no run mode or more than one, a
+`workingDirectory` escaping the repository — is reported before any service is added to the app
+model, alongside every other service's configuration failure. The exception is a
+`workingDirectory` that doesn't exist in the checkout, which is reported a little later and on its
+own.
+
+`UseJava()` is exported to Aspire's Type System, so a TypeScript AppHost can call `useJava()`
+before `addService(...)` the same way.
+
 ### `"kubernetes"` source
 
 Point a service at an already-running instance in a Kubernetes dev cluster via
@@ -375,6 +456,11 @@ sources: `orders` via a real managed `"local"` git checkout (a small project clo
 `payments` via the `"container"` source (the `nginxdemos/hello` hello-world image) — run it to
 see the whole flow end to end. (`"kubernetes"` isn't demoed here since it needs a real cluster
 and `kubectl`; see its section above.)
+
+It also carries a `catalog` service showing `kind: java` — a `"local"` checkout of
+[Spring PetClinic](https://github.com/spring-projects/spring-petclinic) run with its own Maven
+wrapper. `builder.UseJava()` is wired up, but the `AddService("catalog")` call is commented out,
+since unlike the three above it needs a JDK on the machine; uncomment it to run it.
 
 ```bash
 cd samples/DemoAppHost

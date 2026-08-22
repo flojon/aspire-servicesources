@@ -14,4 +14,14 @@ var inventory = builder.AddService("inventory");
 // container-runtime integration. See servicesources.local.json.example.
 var payments = builder.AddService("payments");
 
+// Registers the "java" local kind, so a service whose catalog entry says `kind: java` can be
+// cloned and run via the Aspire Community Toolkit's Java integration. Inert until some service
+// actually resolves to it, so it costs nothing to leave in.
+builder.UseJava();
+
+// The "catalog" service in servicesources.yaml is `kind: java`. Uncomment to run it — unlike the
+// services above it needs a JDK on the machine, since it builds and runs the checkout with the
+// repository's own Maven wrapper.
+// var catalog = builder.AddService("catalog");
+
 builder.Build().Run();

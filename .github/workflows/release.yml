@@ -27,8 +27,12 @@ jobs:
       - name: Test
         run: dotnet test -c Release
 
+      # Packed project by project rather than solution-wide, so adding a project can never
+      # accidentally publish one (the samples are not packages). Add a line per new package.
       - name: Pack
-        run: dotnet pack src/Aspire.Hosting.ServiceSources/Aspire.Hosting.ServiceSources.csproj -c Release -o ./artifacts
+        run: |
+          dotnet pack src/Aspire.Hosting.ServiceSources/Aspire.Hosting.ServiceSources.csproj -c Release -o ./artifacts
+          dotnet pack src/Aspire.Hosting.ServiceSources.Java/Aspire.Hosting.ServiceSources.Java.csproj -c Release -o ./artifacts
 
       - name: NuGet login (OIDC -> temp API key)
         uses: NuGet/login@v1

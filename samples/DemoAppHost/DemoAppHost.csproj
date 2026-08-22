@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/Aspire.Hosting.ServiceSources/Aspire.Hosting.ServiceSources.csproj" IsAspireProjectResource="false" />
+    <ProjectReference Include="../../src/Aspire.Hosting.ServiceSources.Java/Aspire.Hosting.ServiceSources.Java.csproj" IsAspireProjectResource="false" />
   </ItemGroup>
 
 </Project>
