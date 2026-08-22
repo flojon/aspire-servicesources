@@ -171,6 +171,58 @@ name that collides with a well-known service property (`repository`, `project`, 
 `kind`, `kubernetes`, `url`, `container`) — a block by one of those names would be read as that
 property rather than as the kind's options.
 
+#### Private repositories
+
+Clone and fetch for a managed checkout (no `path` override) authenticate the same way, in order:
+
+1. **Your `git` credential helper.** The managed checkout shells out to `git credential fill` for
+   the repository's host, so whatever you already have configured — Git Credential Manager,
+   `osxkeychain`, `libsecret`, a cached PAT, a `.netrc`-backed helper — is reused automatically.
+   Nothing to configure here beyond having `git` on `PATH` with a working credential helper (run
+   `git credential fill` yourself against the same host to confirm it resolves before wiring it
+   up here).
+2. **`SERVICESOURCES_GIT_USERNAME`/`SERVICESOURCES_GIT_TOKEN` environment variables**, if the
+   helper above yields nothing (e.g. no helper configured, or `git` isn't on `PATH`) — or if what
+   it yielded was refused, see below. `SERVICESOURCES_GIT_TOKEN` alone is enough for hosts that
+   accept any username alongside a personal access token (GitHub, GitLab, Azure DevOps); set
+   `SERVICESOURCES_GIT_USERNAME` too if your host requires a specific one.
+
+The order is a ladder, not a one-shot choice: if the host refuses the credential your helper
+supplied, the environment variables are tried next, and only then the request is left
+unauthenticated. Each credential is offered once per clone or fetch — a refused one is never
+replayed.
+
+A credential the host actually refuses is also reported back to your helper with
+`git credential reject`, exactly as `git` itself does, so Git Credential Manager, `osxkeychain`,
+`libsecret` and friends erase their stored copy and resolve afresh next time instead of serving the
+same dead token on every run. That only happens on an outright rejection of the credential
+(HTTP 401); a "not found" answer never erases anything, since a repository your credential simply
+can't see is at least as likely an explanation as a bad credential. Rotating a token therefore
+takes effect on the next resolution — there's no need to restart the AppHost to clear a cached one.
+
+Credentials are never read from `servicesources.yaml` (committed) or `servicesources.local.json`
+— there's no field for them in either file, by design, so a secret can't accidentally end up in
+the committed catalog. The one way to get one in there anyway is to embed it in the `repository`
+URL itself (`https://user:token@host/org/repo`); git accepts that form, but it commits the token
+along with the catalog, so use one of the two mechanisms above instead. Should such a URL be
+configured regardless, every message this tool prints strips the userinfo from it first, so the
+token doesn't spread from the catalog into your console and logs.
+
+A clone or fetch that fails for what looks like an authentication reason raises an error naming
+the service, the repository, and authentication as the likely cause, rather than a generic
+"failed to clone" message. This includes a "not found" response: GitHub, GitLab and Azure DevOps
+all answer an unauthenticated request for a private repository with 404 rather than 401, so as not
+to leak whether it exists, so the error covers both readings — bad credentials, or a repository
+the credentials in use can't see. A rate-limited response is deliberately left out, even though
+hosts answer it with the same `403` as a token that's missing a scope: there the credential is
+fine and the fix is to wait, so it's reported as the transport failure it is.
+
+**SSH is not supported.** LibGit2Sharp's bundled native binaries don't include an SSH transport,
+so a `repository` written as `git@host:org/repo`, `host:org/repo` or `ssh://...` fails fast at
+resolution time with a message pointing at the HTTPS equivalent — use `https://host/org/repo`
+instead. The same check covers an existing checkout whose `origin` is an SSH remote, before any
+fetch is attempted against it.
+
 ### `"kubernetes"` source
 
 Point a service at an already-running instance in a Kubernetes dev cluster via

@@ -212,4 +212,100 @@ public class LibGit2SharpGitClientTests
         Assert.Equal("main content", File.ReadAllText(Path.Combine(destinationA, "file.txt")));
         Assert.Equal("main content", File.ReadAllText(Path.Combine(destinationB, "file.txt")));
     }
+
+    [Theory]
+    [InlineData("git@github.com:company/orders.git")]
+    [InlineData("ssh://git@github.com/company/orders.git")]
+    [InlineData("gitserver:company/orders.git")]
+    public void Clone_SshUrl_RejectsItRatherThanFailingWithAnOpaqueNativeError(string repositoryUrl)
+    {
+        var destination = Path.Combine(Directory.CreateTempSubdirectory().FullName, "clone");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => new LibGit2SharpGitClient().Clone(repositoryUrl, destination));
+
+        Assert.Contains("SSH", ex.Message);
+        Assert.Contains("HTTPS", ex.Message);
+        Assert.False(Directory.Exists(destination));
+    }
+
+    [Theory]
+    [InlineData("request failed with status code: 401")]
+    [InlineData("too many redirects or authentication replays")]
+    [InlineData("callback returned unsupported credentials type")]
+    // A bare 403 over git-on-HTTPS is "authenticated, but not allowed" — typically a token missing a
+    // scope, or an SSO session that was never authorized.
+    [InlineData("request failed with status code: 403")]
+    [InlineData("Unauthorized")]
+    // GitHub, GitLab and Azure DevOps answer an unauthenticated request for a private repository
+    // with 404, so as not to leak whether it exists — the single most common shape of the failure
+    // this detection exists to explain.
+    [InlineData("request failed with status code: 404")]
+    [InlineData("unexpected HTTP status code: 404")]
+    [InlineData("remote: Repository not found")]
+    public void LooksLikeAuthFailure_MessagesIndicatingMissingOrRejectedCredentials_ReturnTrue(string message) =>
+        Assert.True(LibGit2SharpGitClient.LooksLikeAuthFailure(message));
+
+    [Theory]
+    [InlineData("early EOF")]
+    [InlineData("failed to resolve address for gitserver.invalid")]
+    [InlineData("the index is locked")]
+    // A "not found" about a ref or an object is a local lookup miss, not a rejected credential:
+    // reporting it as an authentication problem sends the developer after the wrong cause.
+    [InlineData("object not found - no match for id (9404aef)")]
+    [InlineData("Reference 'refs/heads/feature' not found")]
+    // "404" is only a status code when it is written as one. A port, an object id or a byte count
+    // that happens to contain those digits says nothing about credentials.
+    [InlineData("failed to connect to gitserver.invalid:404")]
+    [InlineData("early EOF after 40412 bytes")]
+    // Being throttled comes back as a 403 too, but it says nothing about the credential: naming
+    // authentication would send the developer after the wrong cause and evict a credential that
+    // works, when the fix is simply to wait.
+    [InlineData("request failed with status code: 403 - You have exceeded a secondary rate limit")]
+    [InlineData("request failed with status code: 403 - too many requests")]
+    [InlineData("unexpected HTTP status code: 403 (request throttled)")]
+    [InlineData("request failed with status code: 403 - rate-limited, try again later")]
+    public void LooksLikeAuthFailure_UnrelatedFailures_ReturnFalse(string message) =>
+        Assert.False(LibGit2SharpGitClient.LooksLikeAuthFailure(message));
+
+    [Fact]
+    public void WithAuthFailureDetection_AuthenticationFailure_DropsTheCachedCredentialForTheRepository()
+    {
+        var forgotten = new List<string>();
+
+        Assert.Throws<GitAuthenticationFailedException>(() => LibGit2SharpGitClient.WithAuthFailureDetection(
+            "https://example.invalid/org/repo",
+            () => throw new LibGit2SharpException("request failed with status code: 401"),
+            forgotten.Add));
+
+        // Otherwise a token rotated mid-session stays shadowed by the cached one until the AppHost
+        // process restarts.
+        Assert.Equal("https://example.invalid/org/repo", Assert.Single(forgotten));
+    }
+
+    [Fact]
+    public void WithAuthFailureDetection_UnrelatedFailure_KeepsTheCachedCredential()
+    {
+        var forgotten = new List<string>();
+
+        Assert.Throws<LibGit2SharpException>(() => LibGit2SharpGitClient.WithAuthFailureDetection(
+            "https://example.invalid/org/repo",
+            () => throw new LibGit2SharpException("early EOF"),
+            forgotten.Add));
+
+        Assert.Empty(forgotten);
+    }
+
+    [Fact]
+    public void WithAuthFailureDetection_OperationSucceeds_KeepsTheCachedCredential()
+    {
+        var forgotten = new List<string>();
+
+        LibGit2SharpGitClient.WithAuthFailureDetection(
+            "https://example.invalid/org/repo",
+            () => { },
+            forgotten.Add);
+
+        Assert.Empty(forgotten);
+    }
 }

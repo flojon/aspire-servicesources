@@ -347,6 +347,34 @@ public class LocalProjectSourceTests
     }
 
     [Fact]
+    public void ResolveProjectPath_CacheHit_SshOriginNeedingFetch_ThrowsWithoutAttemptingFetch()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
+        Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
+        File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
+        // The checkout's origin is SSH, which LibGit2Sharp cannot fetch over. The clone path's
+        // up-front check never ran for this pre-existing checkout, so the fetch path must catch it.
+        var gitClient = new FakeGitClient
+        {
+            OriginUrl = "git@github.com:company/orders.git",
+            FailFirstCheckoutOnly = true,
+        };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveProjectPath(
+                ServiceName,
+                Metadata(repository: "https://github.com/company/orders", defaultRef: "feature/late"),
+                DevConfig(),
+                appHostDirectory,
+                gitClient));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("SSH", ex.Message);
+        Assert.Empty(gitClient.FetchedRepos);
+    }
+
+    [Fact]
     public void ResolveProjectPath_CheckoutFailsWithNonRefException_DoesNotAttemptFetchAndWrapsOriginalException()
     {
         var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
@@ -437,6 +465,162 @@ public class LocalProjectSourceTests
     }
 
     [Fact]
+    public void ResolveProjectPath_CloneFailsWithAuthError_MessageNamesAuthenticationAsCause()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var gitClient = new FakeGitClient
+        {
+            CloneException = new GitAuthenticationFailedException("401 unauthorized", new InvalidOperationException()),
+        };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveProjectPath(
+                ServiceName, Metadata(repository: "https://github.com/company/orders"), DevConfig(), appHostDirectory, gitClient));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("https://github.com/company/orders", ex.Message);
+        Assert.Contains("authentication", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // A repository URL may legitimately carry a personal access token, and these exception messages
+    // travel to the console and every log sink the AppHost is wired to. Each test below covers a
+    // different message, because each one formats the URL itself.
+    private const string EmbeddedToken = "ghp_secrettoken";
+
+    private const string RepositoryWithToken = $"https://alice:{EmbeddedToken}@github.com/company/orders";
+
+    [Fact]
+    public void ResolveProjectPath_CloneFailsWithAuthError_DoesNotEchoATokenEmbeddedInTheRepositoryUrl()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var gitClient = new FakeGitClient
+        {
+            CloneException = new GitAuthenticationFailedException("401 unauthorized", new InvalidOperationException()),
+        };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveProjectPath(
+                ServiceName, Metadata(repository: RepositoryWithToken), DevConfig(), appHostDirectory, gitClient));
+
+        Assert.DoesNotContain(EmbeddedToken, ex.Message);
+        // Still has to name the repository well enough for the developer to act on it.
+        Assert.Contains("github.com/company/orders", ex.Message);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_CloneFails_DoesNotEchoATokenEmbeddedInTheRepositoryUrl()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var gitClient = new FakeGitClient { CloneException = new InvalidOperationException("network unreachable") };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveProjectPath(
+                ServiceName, Metadata(repository: RepositoryWithToken), DevConfig(), appHostDirectory, gitClient));
+
+        Assert.DoesNotContain(EmbeddedToken, ex.Message);
+        Assert.Contains("github.com/company/orders", ex.Message);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_FetchFailsWithAuthError_DoesNotEchoATokenEmbeddedInTheRepositoryUrl()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var gitClient = new FakeGitClient
+        {
+            FailFirstCheckoutOnly = true,
+            FetchException = new GitAuthenticationFailedException("401 unauthorized", new InvalidOperationException()),
+        };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveProjectPath(
+                ServiceName,
+                Metadata(repository: RepositoryWithToken, defaultRef: "feature/late"),
+                DevConfig(),
+                appHostDirectory,
+                gitClient));
+
+        Assert.DoesNotContain(EmbeddedToken, ex.Message);
+        Assert.Contains("github.com/company/orders", ex.Message);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_RefMissingAfterFetch_DoesNotEchoATokenEmbeddedInTheRepositoryUrl()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var gitClient = new FakeGitClient
+        {
+            CheckoutException = new ServiceSourcesConfigurationException(
+                "Ref 'does-not-exist' was not found in repository at '/tmp/x'."),
+        };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveProjectPath(
+                ServiceName,
+                Metadata(repository: RepositoryWithToken, defaultRef: "does-not-exist"),
+                DevConfig(),
+                appHostDirectory,
+                gitClient));
+
+        Assert.DoesNotContain(EmbeddedToken, ex.Message);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_OriginMismatch_DoesNotEchoATokenEmbeddedInEitherUrl()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
+        Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
+        File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
+        // A checkout cloned with the token embedded keeps it in its own remote config, so the origin
+        // side of this message is just as much a leak as the configured side.
+        var gitClient = new FakeGitClient
+        {
+            OriginUrl = $"https://bob:{EmbeddedToken}@github.com/company/other-repo.git",
+        };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveProjectPath(
+                ServiceName, Metadata(repository: RepositoryWithToken), DevConfig(), appHostDirectory, gitClient));
+
+        Assert.DoesNotContain(EmbeddedToken, ex.Message);
+        Assert.Contains("company/other-repo", ex.Message);
+        Assert.Contains("company/orders", ex.Message);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_SshRepositoryUrl_ThrowsWithoutAttemptingClone()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var gitClient = new FakeGitClient();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveProjectPath(
+                ServiceName, Metadata(repository: "git@github.com:company/orders.git"), DevConfig(), appHostDirectory, gitClient));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("SSH", ex.Message);
+        Assert.Empty(gitClient.ClonedRepos);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_SshRepositoryUrlWithEmbeddedCredentials_DoesNotEchoThem()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var gitClient = new FakeGitClient();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveProjectPath(
+                ServiceName,
+                Metadata(repository: $"ssh://alice:{EmbeddedToken}@github.com/company/orders"),
+                DevConfig(),
+                appHostDirectory,
+                gitClient));
+
+        Assert.DoesNotContain(EmbeddedToken, ex.Message);
+        Assert.Contains("SSH", ex.Message);
+    }
+
+    [Fact]
     public void ResolveProjectPath_CheckoutFails_WrapsAsConfigurationExceptionNamingServiceAndRef()
     {
         var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
@@ -505,6 +689,24 @@ public class LocalProjectSourceTests
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.IsType<InvalidOperationException>(ex.InnerException);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_CacheMiss_FetchFailsWithAuthError_MessageNamesAuthenticationAsCause()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var gitClient = new FakeGitClient
+        {
+            FailFirstCheckoutOnly = true,
+            FetchException = new GitAuthenticationFailedException("401 unauthorized", new InvalidOperationException()),
+        };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveProjectPath(
+                ServiceName, Metadata(defaultRef: "feature/late"), DevConfig(), appHostDirectory, gitClient));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("authentication", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
