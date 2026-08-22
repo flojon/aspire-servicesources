@@ -221,6 +221,7 @@ Fail fast at `AddBackingService()`-call time, naming the backing service and the
 - `"external"` missing `connectionString`.
 - A `{port}` placeholder present for a source where it isn't resolvable, or a `{secret:...}` placeholder with no `context`/`namespace` to resolve it against.
 - A malformed placeholder (e.g. `{secret:name}` with no key) — caught by parsing at `Add`-time even though the *fetch* is deferred.
+- Whole-string mode selected but the local port matching the configured remote `port` is already in use — named explicitly, since this mode deliberately bypasses `IPortAllocator`.
 
 Runtime errors (`kubectl` not on `PATH`, secret not found, invalid context) surface at app start: for the port-forward, through the `ExecutableResource`'s own state/logs; for a secret fetch, as a failed `ParameterResource` resolution, which Aspire reports against that parameter in the dashboard. The error message should name the backing service, the secret, and the key, since the parameter name alone won't be obvious to the developer.
 
@@ -233,6 +234,7 @@ Runtime errors (`kubectl` not on `PATH`, secret not found, invalid context) surf
 - `AddService(configure:)`: the callback fires for `ContainerSource` inside `Resolve()`; fires for `LocalProjectSource` only after `BeforeStartEvent` has run, against the real `AddProject` builder; and is never invoked by `KubernetesSource` or `UrlSource`.
 - The `WaitFor` shim: exercised through both a project-sourced and a container-sourced service, asserting the cast never throws.
 - `"kubernetes"` attaches a health check annotation to the returned resource (regression guard for the `WaitFor` gap found by prototype).
+- Whole-string mode: a template that is exactly one `{secret:...}` placeholder selects same-port forwarding; the resolved value has every in-cluster host form (`<service>`, `.<namespace>`, `.svc`, `.svc.cluster.local`) replaced and the port left untouched; a mixed template does not select the mode; an occupied local port fails fast with the backing service and port named.
 - End-to-end, in the style of `AddServiceIntegrationTests`: a consumer configured under `BeforeStartEvent` has `ConnectionStrings__<name>` in its materialised environment after the event has been published.
 
 ## Resolved by Prototype
@@ -264,22 +266,38 @@ With the health check attached, the same consumer reached `Running` at 11.5s —
 
 A `kind` cluster (v0.30.0, Kubernetes in Docker) settled the two remaining *technical* questions. What is left after this needs a team decision, not an experiment.
 
-### Whole-connection-string-in-secret: use per-field placeholders
+### Whole-connection-string-in-secret: two supported modes
 
-The concern was real, and the objection to the obvious fix turns out not to be.
+Both secret shapes occur in practice and both must work. Per-field is preferred where it exists; whole-string is supported through same-port forwarding.
 
-A real Postgres operator — CloudNativePG 1.24, deployed into `kind` — generates one `kubernetes.io/basic-auth` secret per cluster (`<cluster>-app`) with **nine** keys covering *both* shapes at once:
+**Operator-generated secrets carry both shapes.** CloudNativePG 1.24, deployed into `kind`, generates one `kubernetes.io/basic-auth` secret per cluster (`<cluster>-app`) with **nine** keys:
 
 | Kind | Keys | Example value |
 |---|---|---|
 | Per-field | `host`, `port`, `dbname`, `username`, `user`, `password` | `orders-pg-rw`, `5432`, `orders`, `orders_app` |
 | Whole-string | `uri`, `jdbc-uri`, `pgpass` | `postgresql://orders_app:…@orders-pg-rw.default:5432/orders` |
 
-The whole-string keys confirm the problem exactly as predicted — `uri` bakes in the in-cluster address `orders-pg-rw.default:5432`, so fetching it verbatim would bypass the tunnel entirely.
+The whole-string keys confirm the original concern — `uri` bakes in the in-cluster address `orders-pg-rw.default:5432`, so fetching it verbatim bypasses the tunnel.
 
-But the per-field keys sit **in the same secret**. That removes the one serious objection to restricting `"kubernetes"` to per-field placeholders ("pushes a constraint onto a secret layout the developer may not control"): a developer using a mainstream operator already has `host`/`port`/`dbname`/`username`/`password` available and does not need to change anything.
+**But hand-authored secrets often carry only the whole string.** A team using [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets) commonly seals a single `connectionString` value, with no per-field keys to fall back on, and re-shaping it means re-sealing against the cluster's key and a commit to the GitOps repo — frequently owned by a platform team, not the developer. An earlier draft of this section restricted `"kubernetes"` to per-field placeholders on the grounds that operators supply them anyway; that reasoning does not survive contact with hand-authored sealed secrets, so it has been withdrawn.
 
-**Decision: restrict `"kubernetes"` to per-field `{secret:...}` placeholders.** Whole-string secrets remain usable, but only under the direct-connection source, where no rewriting is needed. Parsing-and-rewriting is rejected: it buys nothing the per-field keys don't already give, and it gets worse with every backend added. This should be an explicit, named error — a `{secret:...}` placeholder that resolves to something containing `://` or `Host=` under `"kubernetes"` is almost certainly a whole-string key used by mistake, and saying so beats a confusing connection failure.
+Verified in `kind` with the sealed-secrets controller v0.27.1: a `SealedSecret` holding only `connectionString` decrypts into an **ordinary** `Secret`, read back byte-identically by the exact `kubectl get secret <name> -o jsonpath='{.data.<key>}'` command `IKubernetesSecretReader` uses. **Sealing changes nothing about the fetch** — only about the shape available.
+
+#### Whole-string mode: same-port forwarding, host-token rewrite
+
+The fix avoids connection-string parsing entirely. If the local port equals the remote port, the port needs no rewriting, and the *host* is a single unambiguous token — one literal string replacement, identical for every backend and dialect.
+
+Verified end-to-end: the sealed `postgresql://orders_app:…@orders-pg-rw.default:5432/orders`, forwarded with `kubectl port-forward service/orders-pg-rw 5432:5432`, with `orders-pg-rw.default` replaced by the local host and nothing else touched, authenticated against the real database and returned `db=orders, usr=orders_app`.
+
+Selection happens at `Add`-time from the *template shape*, which is local config and therefore known early even though the secret value is not: **if the whole `connectionString` template is exactly one `{secret:...}` placeholder, use whole-string mode.** Then:
+
+- Allocate the local port as the *same number* as the configured remote `port`, bypassing `IPortAllocator`.
+- Fail fast, naming the backing service and port, if that local port is already in use. This is the real cost of the mode — it gives up the collision avoidance `IPortAllocator` exists to provide — and a clear error is what makes it tolerable.
+- At resolution time, replace every in-cluster form of the host with `localhost`: `<service>`, `<service>.<namespace>`, `<service>.<namespace>.svc`, and `<service>.<namespace>.svc.cluster.local`. All four are derived from config already present for the port-forward.
+
+Anything richer stays rejected. **Parsing and rewriting the connection string per backend is not adopted** — it reintroduces the per-dialect grammars (`Host=`/`Port=`, `Server=host,1433`, URI authorities) that the single-field design exists to avoid, and the host-token replacement above achieves the same result without knowing the dialect.
+
+**Per-field placeholders remain preferred** where the secret offers them: they keep `IPortAllocator`'s collision avoidance, which whole-string mode must give up.
 
 ### Multi-port backends: one port-forward, many ports
 
