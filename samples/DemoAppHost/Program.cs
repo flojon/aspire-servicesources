@@ -12,8 +12,8 @@ var orders = builder.AddService("orders")
     .Configure<IResourceWithEnvironment>(r => r.WithEnvironment("DEMO_INJECTED_BY_APPHOST", "true"));
 
 // "url" source: resolves straight to a fixed, already-known URL — no resource for Aspire to
-// run. See servicesources.local.json.example. This one runs out of band, so it accepts no
-// configuration from the AppHost and cannot be referenced by a container.
+// run. See servicesources.local.json.example. This one runs out of band, so any Configure call
+// on it would be skipped with a logged warning, and a container cannot reference it.
 var inventory = builder.AddService("inventory");
 
 // "container" source: runs a published container image locally via Aspire's own

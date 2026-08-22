@@ -48,6 +48,17 @@ public static class ServiceConfigurationExtensions
     {
         ArgumentNullException.ThrowIfNull(configure);
 
+        var annotation = service.Resource.Annotations.OfType<ServiceSourceAnnotation>().FirstOrDefault();
+
+        // Skipped, not applied and not thrown. A developer switching this service to a remote source
+        // in their own servicesources.local.json must not break a Program.cs they don't own — that
+        // per-developer switch is the point of the package. The skip is logged rather than silent.
+        if (annotation is not null && OutOfBandSources.Contains(annotation.Source))
+        {
+            ServiceConfigurationWarnings.For(service.ApplicationBuilder).Add(SkipReason<T>(service.Resource, annotation));
+            return service;
+        }
+
         configure(service.As<T>());
 
         return service;
@@ -58,10 +69,17 @@ public static class ServiceConfigurationExtensions
     /// <see cref="Configure{T}"/> would, plus a satellite kind's own extension methods
     /// (<c>service.As&lt;JavaScriptAppResource&gt;().WithRunScript("dev")</c>).
     /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="Configure{T}"/>, this <b>throws</b> for an out-of-band source rather than
+    /// skipping: it has to return a builder, and the only alternatives would be handing back the
+    /// <c>kubectl port-forward</c> executable — silently configuring the wrong process — or
+    /// returning null. Prefer <see cref="Configure{T}"/> for anything that should survive a
+    /// developer switching the service's source; reach for this when the AppHost genuinely requires
+    /// a specific resource type.
+    /// </remarks>
     /// <exception cref="ServiceSourcesConfigurationException">
-    /// The resolved resource is not a <typeparamref name="T"/>. Most often the service's source
-    /// resolves to a different kind of resource than the AppHost assumed — a <c>"url"</c>-sourced
-    /// service has no local process to configure at all.
+    /// The resolved resource is not a <typeparamref name="T"/>, or the service's source runs out of
+    /// band (<c>"url"</c>, <c>"kubernetes"</c>) and has no local resource for this AppHost to touch.
     /// </exception>
     public static IResourceBuilder<T> As<T>(this IResourceBuilder<IResourceWithServiceDiscovery> service)
         where T : IResource
@@ -87,12 +105,33 @@ public static class ServiceConfigurationExtensions
     }
 
     /// <summary>
-    /// Sources that resolve to something already running elsewhere. The AppHost has no say over how
-    /// those are configured, so a configuration call against one is refused rather than quietly
-    /// dropped — matching how this package already rejects dev-config fields irrelevant to a
-    /// service's source.
+    /// Sources that resolve to something already running elsewhere, so there is nothing here for the
+    /// AppHost to configure. <see cref="Configure{T}"/> skips and logs for these; <see cref="As{T}"/>
+    /// throws, because it must return a builder.
     /// </summary>
     private static readonly HashSet<string> OutOfBandSources = new(StringComparer.Ordinal) { "url", "kubernetes" };
+
+    /// <summary>
+    /// Explains a skip in terms of what the reader can act on: which service, which source, what was
+    /// dropped, and where the source is chosen.
+    /// </summary>
+    private static string SkipReason<T>(IResource resource, ServiceSourceAnnotation annotation)
+    {
+        var detail = annotation.Source switch
+        {
+            "url" =>
+                "it resolves to a fixed, already-running URL with no local process to configure",
+            "kubernetes" =>
+                "it resolves to a 'kubectl port-forward' in front of an already-running service, so the " +
+                "configuration would reach kubectl rather than the service",
+            _ => "it runs out of band",
+        };
+
+        return $"Service '{annotation.ServiceName}': skipped Configure<{typeof(T).Name}> because its source is " +
+               $"'{annotation.Source}' — {detail}. The service is expected to be configured wherever it actually " +
+               "runs. Set its source to 'local' or 'container' in servicesources.local.json for this AppHost's " +
+               "configuration to apply.";
+    }
 
     /// <summary>
     /// Names the source as well as the type, because the source is what a developer changes to make
