@@ -69,6 +69,7 @@ public static class ServiceSourcesBuilderExtensions
     /// Called by a satellite package's own registration method (e.g. a hypothetical
     /// <c>UseJavaScript()</c>), not typically called directly by an AppHost author.
     /// </summary>
+    [AspireExportIgnore]
     public static IDistributedApplicationBuilder AddLocalKind(
         this IDistributedApplicationBuilder builder, string kind, ILocalResourceKind handler)
     {
