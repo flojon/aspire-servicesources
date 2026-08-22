@@ -12,13 +12,19 @@ internal sealed class ContainerSource : IServiceSource
     {
         var (image, tag, port) = ResolveContainerConfig(serviceName, metadata, config);
 
-        var containerBuilder = tag is null
-            ? builder.AddContainer(serviceName, image)
-            : builder.AddContainer(serviceName, image, tag);
+        // Built by hand rather than via AddContainer so the resource can be a
+        // ServiceContainerResource, which adds the IResourceWithServiceDiscovery that
+        // ContainerResource lacks. WithImage/WithImageTag are what AddContainer itself uses.
+        var containerBuilder = builder.AddResource(new ServiceContainerResource(serviceName))
+            .WithImage(image)
+            .WithHttpEndpoint(targetPort: port);
 
-        containerBuilder.WithHttpEndpoint(targetPort: port);
+        if (tag is not null)
+        {
+            containerBuilder.WithImageTag(tag);
+        }
 
-        return ServiceResource.CreateFacade(builder, serviceName, containerBuilder);
+        return ResolvedService.Tag(containerBuilder, serviceName, "container");
     }
 
     internal static (string Image, string? Tag, int Port) ResolveContainerConfig(

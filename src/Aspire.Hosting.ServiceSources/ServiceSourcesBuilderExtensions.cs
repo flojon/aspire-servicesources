@@ -34,17 +34,24 @@ public static class ServiceSourcesBuilderExtensions
     /// integration (the <c>"container"</c> source).
     /// </summary>
     /// <returns>
-    /// An <see cref="IResourceBuilder{T}"/> wrapping a <see cref="ServiceResource"/> facade —
-    /// see its remarks for the important caveat that this builder is reference-only.
+    /// An <see cref="IResourceBuilder{T}"/> over the <b>real</b> resource Aspire runs. Pass it to a
+    /// consumer's <c>WithReference(...)</c>, call <c>GetEndpoint(...)</c> on it, or apply this
+    /// AppHost's own configuration with <see cref="ServiceConfigurationExtensions.Configure{T}"/>
+    /// and <see cref="ServiceConfigurationExtensions.As{T}"/>.
     /// </returns>
     /// <remarks>
-    /// The returned builder is intended to be passed to a consumer's <c>WithReference(...)</c>
-    /// call, or used to call <c>GetEndpoint(...)</c> directly. It is <b>not</b> intended for
-    /// applying further resource configuration: calls such as <c>.WithEnvironment(...)</c> or
-    /// <c>.WithHttpEndpoint(...)</c> on the returned builder compile but silently have no
-    /// effect, because the facade resource is deliberately never registered in Aspire's
-    /// resource model (the real, underlying project resource is what runs). See
-    /// <see cref="ServiceResource"/> for the full explanation.
+    /// <para>
+    /// The resource is registered in Aspire's model, so configuration applied through the returned
+    /// builder reaches the process that actually runs, and a container consumer's
+    /// <c>WithReference(...)</c> resolves. Which configuration applies depends on the resolved
+    /// source; the <c>"url"</c> source runs out of band and accepts none.
+    /// </para>
+    /// <para>
+    /// The bare <c>IResourceBuilder&lt;IResourceWithServiceDiscovery&gt;</c> return type is load
+    /// bearing — Aspire's TypeScript code generator emits nothing for an exported method returning a
+    /// custom interface, so narrowing it would drop <c>addService</c> from the generated SDK
+    /// entirely and break the TypeScript AppHost.
+    /// </para>
     /// </remarks>
     [AspireExport]
     public static IResourceBuilder<IResourceWithServiceDiscovery> AddService(

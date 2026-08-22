@@ -569,8 +569,11 @@ public class LocalProjectSourceTests
     }
 
     [Fact]
-    public void Resolve_DoesNotCloneOrRegisterSynchronously_DefersUntilBeforeStartEvent()
+    public void Resolve_ClonesAndRegistersTheRealResourceBeforeReturning()
     {
+        // The inverse of the old deferred contract. AddService has to hand back the resource Aspire
+        // actually runs, so resolution can no longer wait for BeforeStartEvent. Checkouts stay
+        // parallel across services via the prefetch — see LocalCheckoutPrefetchTests.
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
         var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
         {
@@ -580,11 +583,10 @@ public class LocalProjectSourceTests
         var gitClient = new FakeGitClient();
         var source = new LocalProjectSource(gitClient);
 
-        var facade = source.Resolve(builder, ServiceName, Metadata(), DevConfig());
+        var service = source.Resolve(builder, ServiceName, Metadata(), DevConfig());
 
-        Assert.Empty(gitClient.ClonedRepos);
-        Assert.Empty(gitClient.CheckedOutRefs);
-        Assert.Empty(facade.Resource.Annotations.OfType<EndpointAnnotation>());
-        Assert.DoesNotContain(builder.Resources, r => r.Name == ServiceName);
+        Assert.NotEmpty(gitClient.ClonedRepos);
+        Assert.Contains(builder.Resources, r => ReferenceEquals(r, service.Resource));
+        Assert.IsAssignableFrom<ProjectResource>(service.Resource);
     }
 }
