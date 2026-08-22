@@ -1,0 +1,239 @@
+// NextJsAppResource is [Experimental] in Aspire.Hosting.JavaScript, and the nextjs app type exists
+// to reach it — asserting on the type it produces has to opt in to the same diagnostic the handler does.
+#pragma warning disable ASPIREJAVASCRIPT001
+
+using Aspire.Hosting;
+using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.JavaScript;
+using Aspire.Hosting.ServiceSources;
+
+namespace Aspire.Hosting.ServiceSources.JavaScript.Tests;
+
+/// <summary>
+/// Covers what the handler builds out of an already-resolved checkout: which
+/// <c>Aspire.Hosting.JavaScript</c> integration runs the app, and how the options block reaches it.
+/// </summary>
+public class JavaScriptLocalKindResolutionTests
+{
+    private static IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+        IDistributedApplicationBuilder builder, string repoRoot, string? yaml = null) =>
+        new JavaScriptLocalKind().Resolve(
+            builder, "frontend", repoRoot, yaml is null ? null : TestHelpers.ParseOptionsBlock(yaml));
+
+    private static IDistributedApplicationBuilder Builder() =>
+        TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory("servicesources-js-apphost-").FullName);
+
+    [Fact]
+    public void DefaultsToAJavaScriptAppAtTheRepositoryRoot()
+    {
+        var repoRoot = TestHelpers.CreateRepo();
+        var builder = Builder();
+
+        var app = Resolve(builder, repoRoot);
+
+        var resource = Assert.IsType<JavaScriptAppResource>(app.Resource);
+        Assert.Equal("frontend", resource.Name);
+        Assert.Equal(repoRoot, resource.WorkingDirectory);
+    }
+
+    [Theory]
+    [InlineData("vite", typeof(ViteAppResource))]
+    [InlineData("nextjs", typeof(NextJsAppResource))]
+    public void AppTypeSelectsTheMatchingIntegration(string appType, Type expected)
+    {
+        var repoRoot = TestHelpers.CreateRepo();
+
+        var app = Resolve(Builder(), repoRoot, $"appType: {appType}");
+
+        Assert.IsType(expected, app.Resource);
+    }
+
+    [Theory]
+    [InlineData("node", typeof(NodeAppResource))]
+    [InlineData("bun", typeof(BunAppResource))]
+    public void AppTypeThatRunsAScriptFileSelectsTheMatchingIntegration(string appType, Type expected)
+    {
+        var repoRoot = TestHelpers.CreateRepo();
+
+        var app = Resolve(Builder(), repoRoot, $"""
+            appType: {appType}
+            scriptPath: server.js
+            """);
+
+        Assert.IsType(expected, app.Resource);
+    }
+
+    [Fact]
+    public void AppDirectoryIsAnchoredToTheCheckout()
+    {
+        var repoRoot = TestHelpers.CreateRepo("src/frontend");
+
+        var app = Resolve(Builder(), repoRoot, "appDirectory: src/frontend");
+
+        var resource = Assert.IsType<JavaScriptAppResource>(app.Resource);
+        Assert.Equal(Path.Combine(repoRoot, "src", "frontend"), resource.WorkingDirectory);
+    }
+
+    [Fact]
+    public void MissingAppDirectoryIsReportedAgainstTheService()
+    {
+        var repoRoot = TestHelpers.CreateRepo();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(Builder(), repoRoot, "appDirectory: src/frontendd"));
+
+        Assert.Contains("frontend", ex.Message);
+        Assert.Contains("src/frontendd", ex.Message);
+        Assert.Contains("not found", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("../..")]
+    [InlineData("/etc")]
+    public void AppDirectoryOutsideTheCheckoutIsRejected(string appDirectory)
+    {
+        // Path.Combine returns an absolute appDirectory unchanged and "../.." climbs out of the
+        // checkout, either of which would otherwise run something the service doesn't own.
+        var repoRoot = TestHelpers.CreateRepo();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(Builder(), repoRoot, $"appDirectory: {appDirectory}"));
+
+        Assert.Contains("outside the service's checkout", ex.Message);
+    }
+
+    [Fact]
+    public void RunScriptReachesTheResource()
+    {
+        var repoRoot = TestHelpers.CreateRepo();
+
+        var app = Resolve(Builder(), repoRoot, "runScript: start");
+
+        var runScript = Assert.Single(app.Resource.Annotations.OfType<JavaScriptRunScriptAnnotation>());
+        Assert.Equal("start", runScript.ScriptName);
+    }
+
+    [Theory]
+    [InlineData("node")]
+    [InlineData("bun")]
+    public void RunScriptOverridesTheScriptFileForAppTypesThatRunOne(string appType)
+    {
+        // AddNodeApp/AddBunApp take the file to execute, so a run script can only be layered on
+        // afterwards — Aspire's own documented pattern for these two.
+        var repoRoot = TestHelpers.CreateRepo();
+
+        var app = Resolve(Builder(), repoRoot, $"""
+            appType: {appType}
+            scriptPath: server.js
+            runScript: start
+            """);
+
+        var runScript = Assert.Single(app.Resource.Annotations.OfType<JavaScriptRunScriptAnnotation>());
+        Assert.Equal("start", runScript.ScriptName);
+    }
+
+    [Theory]
+    [InlineData("npm", "npm")]
+    [InlineData("yarn", "yarn")]
+    [InlineData("pnpm", "pnpm")]
+    [InlineData("bun", "bun")]
+    public void PackageManagerSelectsTheMatchingModifier(string packageManager, string expectedExecutable)
+    {
+        var repoRoot = TestHelpers.CreateRepo();
+
+        var app = Resolve(Builder(), repoRoot, $"packageManager: {packageManager}");
+
+        // The modifier is applied last, so the annotation it added is the one that counts.
+        var annotation = app.Resource.Annotations.OfType<JavaScriptPackageManagerAnnotation>().Last();
+        Assert.Equal(expectedExecutable, annotation.ExecutableName);
+    }
+
+    [Fact]
+    public void PackageManagerLeftUnsetKeepsTheIntegrationsOwnChoice()
+    {
+        // AddBunApp already picks Bun; defaulting to npm here would quietly override it.
+        var repoRoot = TestHelpers.CreateRepo();
+
+        var app = Resolve(Builder(), repoRoot, """
+            appType: bun
+            scriptPath: server.js
+            """);
+
+        var annotation = app.Resource.Annotations.OfType<JavaScriptPackageManagerAnnotation>().Last();
+        Assert.Equal("bun", annotation.ExecutableName);
+    }
+
+    [Fact]
+    public void AnHttpEndpointIsAlwaysAdded()
+    {
+        // AddJavaScriptApp adds no endpoint of its own, and without one the facade AddService hands
+        // back carries nothing for a consumer's WithReference to resolve.
+        var repoRoot = TestHelpers.CreateRepo();
+
+        var app = Resolve(Builder(), repoRoot);
+
+        var endpoint = TestHelpers.SingleEndpoint(app.Resource);
+        Assert.Equal("http", endpoint.Name);
+        Assert.Equal("PORT", TestHelpers.TargetPortEnvironmentVariable(endpoint));
+    }
+
+    [Fact]
+    public void PortEnvRenamesThePortEnvironmentVariable()
+    {
+        var repoRoot = TestHelpers.CreateRepo();
+
+        var app = Resolve(Builder(), repoRoot, "portEnv: SERVER_PORT");
+
+        Assert.Equal("SERVER_PORT", TestHelpers.TargetPortEnvironmentVariable(TestHelpers.SingleEndpoint(app.Resource)));
+    }
+
+    [Fact]
+    public void PortAndTargetPortReachTheEndpoint()
+    {
+        var repoRoot = TestHelpers.CreateRepo();
+
+        var app = Resolve(Builder(), repoRoot, """
+            port: 3000
+            targetPort: 3001
+            """);
+
+        var endpoint = TestHelpers.SingleEndpoint(app.Resource);
+        Assert.Equal(3000, endpoint.Port);
+        Assert.Equal(3001, endpoint.TargetPort);
+    }
+
+    [Fact]
+    public void ViteKeepsItsOwnSingleEndpointAndItsOwnPortVariable()
+    {
+        // AddViteApp already added an "http" endpoint, bound to the port variable of its own
+        // choosing. Setting a port has to update that endpoint rather than add a second one, and
+        // must leave the variable Vite wired up alone — which is why portEnv is rejected outright
+        // for this app type.
+        var repoRoot = TestHelpers.CreateRepo();
+
+        var untouched = Resolve(Builder(), repoRoot, "appType: vite");
+        var viteOwnPortVariable = TestHelpers.TargetPortEnvironmentVariable(TestHelpers.SingleEndpoint(untouched.Resource));
+
+        var app = Resolve(Builder(), repoRoot, """
+            appType: vite
+            port: 4000
+            """);
+
+        var endpoint = TestHelpers.SingleEndpoint(app.Resource);
+        Assert.Equal("http", endpoint.Name);
+        Assert.Equal(4000, endpoint.Port);
+        Assert.Equal(viteOwnPortVariable, TestHelpers.TargetPortEnvironmentVariable(endpoint));
+    }
+
+    [Fact]
+    public void TheResolvedResourceExposesServiceDiscovery()
+    {
+        // The whole point of the handler's return type: AddService copies this resource's endpoint
+        // annotations onto the facade it hands the AppHost author.
+        var repoRoot = TestHelpers.CreateRepo();
+
+        var app = Resolve(Builder(), repoRoot);
+
+        Assert.IsAssignableFrom<IResourceWithServiceDiscovery>(app.Resource);
+    }
+}

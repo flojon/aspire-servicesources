@@ -27,8 +27,12 @@ jobs:
       - name: Test
         run: dotnet test -c Release
 
+      # Packed project by project rather than solution-wide: the solution also holds the sample
+      # AppHost and the test projects, which must never reach a feed.
       - name: Pack
-        run: dotnet pack src/Aspire.Hosting.ServiceSources/Aspire.Hosting.ServiceSources.csproj -c Release -o ./artifacts
+        run: |
+          dotnet pack src/Aspire.Hosting.ServiceSources/Aspire.Hosting.ServiceSources.csproj -c Release -o ./artifacts
+          dotnet pack src/Aspire.Hosting.ServiceSources.JavaScript/Aspire.Hosting.ServiceSources.JavaScript.csproj -c Release -o ./artifacts
 
       - name: NuGet login (OIDC -> temp API key)
         uses: NuGet/login@v1
