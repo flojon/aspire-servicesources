@@ -600,15 +600,14 @@ Two caveats found while verifying:
   13.6.0-pr build, it reproduces only when returning to a hive-sourced PR build that was already
   built in that directory — switches between released versions were consistent. Reported upstream as
   [microsoft/aspire#19603](https://github.com/microsoft/aspire/issues/19603).
-- **A container cannot `withReference()` an `AddService()` result.** Referencing one from
-  `addContainer(...)` fails in DCP with `Host endpoint 'https' on resource 'inventory' should have
-  an associated DCP Service resource already set up`. This is unrelated to the codegen fix — it
-  reproduces on released 13.5.1 and from a C# AppHost too — and it is a ServiceSources limitation
-  rather than an Aspire one: the `ServiceResource` facade `AddService()` returns is deliberately
-  never registered in `builder.Resources`, so DCP has no Service object to plumb container-to-host
-  networking with. Plain Aspire `AddExternalService(...)` referenced from a container works fine.
-  Tracked as [#58](https://github.com/flojon/aspire-servicesources/issues/58). The sample therefore
-  demonstrates the reference from `addExecutable(...)`, which works.
+- **A container can't `withReference()` a `"url"`-source service.** This sample's `inventory` is a
+  `"url"` service, so `addContainer(...).withReference(inventory)` fails — the service runs out of
+  band with no local resource for DCP to route a container to. A project or executable consumer works
+  fine, so the sample demonstrates the reference from `addExecutable(...)`. Unrelated to the codegen
+  fix: it reproduces on released 13.5.1 and from a C# AppHost too. Tracked as
+  [#58](https://github.com/flojon/aspire-servicesources/issues/58), which turns the raw DCP failure
+  (`Host endpoint 'https' on resource 'inventory' should have an associated DCP Service resource
+  already set up`) into a clear error and fixes the other sources outright.
 
 ## Status
 
