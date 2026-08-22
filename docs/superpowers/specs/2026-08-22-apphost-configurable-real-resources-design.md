@@ -135,6 +135,30 @@ alternatives are handing back the `kubectl` executable (silently configuring the
 returning null. The asymmetry is documented on both methods — `Configure` is for configuration that
 should survive a source switch, `As` for when the AppHost genuinely requires a specific type.
 
+### Guest-language exports
+
+`Configure<T>`/`As<T>` cannot cross Aspire's Type System, so #51's TypeScript AppHost would be able
+to *resolve* a service but never configure it — the precise failure #53 describes. Two further
+codegen constraints, established by generating against Aspire CLI 13.6.0 and reading the output:
+
+- **A generic method loses its type parameter.** `Configure<T>` projects as `configure(...)` with no
+  `T`, and `T` is the capability being requested — so it would arrive broken rather than absent.
+- **Overloads are silently dropped.** Only the first overload of a name reaches the generated SDK.
+
+`ServiceConfigurationExports` therefore carries one non-generic, distinctly-named `[AspireExport]`
+shim per shape — `WithServiceEnvironment`, `WithServiceEnvironmentFromParameter`,
+`WithServiceEnvironmentFromEndpoint`, `WithServiceReference`, `WithServiceConnectionString`,
+`WaitForService`, `WaitForServiceCompletion`, `WithServiceArg` — each delegating to `Configure<T>`
+so the skip-and-log behaviour is inherited rather than duplicated. Verified generating onto
+`ResourceWithServiceDiscoveryPromise` and chaining, with the TypeScript sample type-checking clean.
+
+They are marked `[EditorBrowsable(Never)]`: `IResourceBuilder<T>`'s covariance would otherwise put
+eight extra methods on every resource builder in IntelliSense, and C# should use `Configure<T>`,
+which reaches every Aspire extension method rather than the mirrored subset. ATS exports them
+regardless of the attribute — also verified. Two reflection tests pin both codegen constraints so a
+future contributor can't silently break guest-language support by adding a generic export or an
+overload.
+
 ### Eager resolution with parallel checkouts preserved
 
 `AddService` must return a real resource, so `local` resolution can no longer wait for
@@ -173,6 +197,8 @@ container- and local-sourced services; the `url` pre-flight firing for a contain
 staying silent for a host-process one; `Configure<T>`/`As<T>` landing annotations on the real
 resource; `Configure<T>` skipping `url` and `kubernetes` without throwing, recording a message that
 names the service and source, and that message reaching the log at `BeforeStartEvent`; `As<T>`
-throwing for the same sources; parallel prefetch; catalog-missing services being skipped; and a
-checkout failure surfacing only for the service that asked. The existing `AddServiceIntegrationTests` were updated from deferred to
+throwing for the same sources; every exported shim landing its annotation on the real resource,
+inheriting the skip, and chaining; every `[AspireExport]` method being non-generic and uniquely
+named; parallel prefetch; catalog-missing services being skipped; and a checkout failure surfacing
+only for the service that asked. The existing `AddServiceIntegrationTests` were updated from deferred to
 eager expectations and continue to exercise a real git fixture.
