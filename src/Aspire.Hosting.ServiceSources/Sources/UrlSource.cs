@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using System.Runtime.CompilerServices;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 
@@ -54,12 +55,38 @@ internal sealed class UrlSource : IServiceSource
     /// trace from inside <c>ContainerCreator</c>.
     /// </summary>
     private static void RegisterContainerConsumerCheck(IDistributedApplicationBuilder builder)
-    {
-        if (!ContainerConsumerCheckRegistered.Add(builder))
-        {
-            return;
-        }
+        => ContainerConsumerCheckRegistrations.GetValue(builder, static _ => new CheckRegistration())
+            .EnsureRegistered(builder);
 
+    /// <summary>
+    /// Keyed weakly so a builder isn't kept alive for the process lifetime by this bookkeeping, and
+    /// guarded because AddService can run on more than one builder concurrently (xUnit does exactly
+    /// that). Same shape as <see cref="LocalKindRegistry"/> and <see cref="LocalCheckoutPrefetch"/>.
+    /// </summary>
+    private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, CheckRegistration>
+        ContainerConsumerCheckRegistrations = new();
+
+    private sealed class CheckRegistration
+    {
+        private bool _registered;
+
+        public void EnsureRegistered(IDistributedApplicationBuilder builder)
+        {
+            lock (this)
+            {
+                if (_registered)
+                {
+                    return;
+                }
+
+                _registered = true;
+                Subscribe(builder);
+            }
+        }
+    }
+
+    private static void Subscribe(IDistributedApplicationBuilder builder)
+    {
         builder.Eventing.Subscribe<BeforeStartEvent>((@event, _) =>
         {
             foreach (var consumer in @event.Model.Resources.OfType<ContainerResource>())
@@ -84,8 +111,6 @@ internal sealed class UrlSource : IServiceSource
             return Task.CompletedTask;
         });
     }
-
-    private static readonly HashSet<IDistributedApplicationBuilder> ContainerConsumerCheckRegistered = [];
 
     internal static Uri ResolveUrl(string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)
     {

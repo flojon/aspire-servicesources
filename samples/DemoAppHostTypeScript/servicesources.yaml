@@ -1,7 +1,14 @@
 services:
   inventory:
+    # Two sources are described here on purpose. Switching this service between them is a
+    # servicesources.local.json edit — apphost.mts never changes. The example config picks
+    # "container"; see the comment in apphost.mts before switching it to "url".
     url:
       url: https://httpbin.org
+    container:
+      image: nginxdemos/hello
+      port: 8080
+      defaultTag: latest
   payments:
     container:
       image: nginxdemos/hello
