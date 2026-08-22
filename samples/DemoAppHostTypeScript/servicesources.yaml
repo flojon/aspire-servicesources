@@ -2,3 +2,8 @@ services:
   inventory:
     url:
       url: https://httpbin.org
+  payments:
+    container:
+      image: nginxdemos/hello
+      port: 8080
+      defaultTag: latest

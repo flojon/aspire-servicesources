@@ -366,6 +366,34 @@ warn: Aspire.Hosting.ServiceSources
 back the `kubectl` executable would silently configure the wrong process. Prefer `Configure` for
 anything that should survive a source switch.
 
+### From a guest-language AppHost
+
+`Configure<T>` is generic, and Aspire's Type System projects a generic method with its type
+parameter erased — so guest languages get a set of non-generic equivalents instead, one per shape
+(overloads don't survive codegen either):
+
+```typescript
+const payments = await builder
+  .addService('payments')
+  .withServiceEnvironment('DEMO_INJECTED_BY_APPHOST', 'true')
+  .withServiceReference(inventory);
+```
+
+| TypeScript | C# equivalent |
+|---|---|
+| `withServiceEnvironment(name, value)` | `.Configure<IResourceWithEnvironment>(r => r.WithEnvironment(name, value))` |
+| `withServiceEnvironmentFromParameter(name, parameter)` | `…WithEnvironment(name, parameter)` |
+| `withServiceEnvironmentFromEndpoint(name, endpoint)` | `…WithEnvironment(name, endpoint)` |
+| `withServiceReference(other)` | `…WithReference(other)` |
+| `withServiceConnectionString(source)` | `…WithReference(source)` |
+| `waitForService(dependency)` | `.Configure<IResourceWithWaitSupport>(r => r.WaitFor(dependency))` |
+| `waitForServiceCompletion(dependency, { exitCode })` | `…WaitForCompletion(dependency, exitCode)` |
+| `withServiceArg(arg)` | `.Configure<IResourceWithArgs>(r => r.WithArgs(arg))` |
+
+They delegate to `Configure<T>`, so out-of-band sources are skipped and logged exactly as above.
+In C# they're hidden from IntelliSense — use `Configure<T>`, which reaches every Aspire extension
+method rather than just these.
+
 ## Sample
 
 `samples/DemoAppHost` is a minimal working AppHost demonstrating all three easily-runnable
@@ -383,8 +411,10 @@ aspire run
 ```
 
 A TypeScript AppHost equivalent — proving `AddService()` is correctly exported and registers with
-Aspire's Type System from a guest language — lives in `samples/DemoAppHostTypeScript` (**note:**
-this sample does not currently run end-to-end — see the known issue below the code block for why):
+Aspire's Type System from a guest language, and that a resolved service can be
+[configured from TypeScript](#from-a-guest-language-apphost) — lives in
+`samples/DemoAppHostTypeScript` (**note:** this sample does not currently run end-to-end — see the
+known issue below the code block for why):
 
 ```bash
 cd samples/DemoAppHostTypeScript
