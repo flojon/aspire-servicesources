@@ -3,6 +3,12 @@ using Aspire.Hosting.ServiceSources;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
+// Registers the "java" local kind, so a service whose catalog entry says `kind: java` can be
+// cloned and run via the Aspire Community Toolkit's Java integration. Must come before the first
+// AddService call, which resolves eagerly; inert until a service actually resolves to it, so it
+// costs nothing to leave in.
+builder.UseJava();
+
 // "local" source: clones (or uses an existing checkout of) a real project and runs it via
 // Aspire's own project orchestration. See servicesources.local.json.example.
 //
@@ -19,5 +25,13 @@ var inventory = builder.AddService("inventory");
 // "container" source: runs a published container image locally via Aspire's own
 // container-runtime integration. See servicesources.local.json.example.
 var payments = builder.AddService("payments");
+
+// The "catalog" service in servicesources.yaml is `kind: java`. To run it, uncomment below AND add
+//   "catalog": { "source": "local" }
+// to servicesources.local.json. Both steps are needed, and deliberately: the first AddService call
+// clones every "local" entry in that file up front, so listing catalog there by default would clone
+// Spring PetClinic on every run of this sample even with the line below commented out. Unlike the
+// services above it also needs a JDK, since it builds the checkout with the repo's Maven wrapper.
+// var catalog = builder.AddService("catalog");
 
 builder.Build().Run();

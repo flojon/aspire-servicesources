@@ -13,3 +13,13 @@ services:
       image: nginxdemos/hello
       port: 80
       defaultTag: latest
+  catalog:
+    # A "local" service that isn't .NET: cloned exactly like `orders` above, but run with the
+    # repository's own Maven wrapper instead of AddProject. Needs builder.UseJava() in Program.cs
+    # and the KoalaSoft.Aspire.Hosting.ServiceSources.Java package.
+    repository: https://github.com/spring-projects/spring-petclinic
+    defaultRef: main
+    kind: java
+    java:
+      mavenGoal: spring-boot:run
+      port: 8080

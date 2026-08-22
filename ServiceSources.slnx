@@ -9,10 +9,12 @@
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Aspire.Hosting.ServiceSources/Aspire.Hosting.ServiceSources.csproj" />
+    <Project Path="src/Aspire.Hosting.ServiceSources.Java/Aspire.Hosting.ServiceSources.Java.csproj" />
     <Project Path="src/Aspire.Hosting.ServiceSources.JavaScript/Aspire.Hosting.ServiceSources.JavaScript.csproj" />
   </Folder>
   <Folder Name="/test/">
     <Project Path="test/Aspire.Hosting.ServiceSources.Tests/Aspire.Hosting.ServiceSources.Tests.csproj" />
+    <Project Path="test/Aspire.Hosting.ServiceSources.Java.Tests/Aspire.Hosting.ServiceSources.Java.Tests.csproj" />
     <Project Path="test/Aspire.Hosting.ServiceSources.JavaScript.Tests/Aspire.Hosting.ServiceSources.JavaScript.Tests.csproj" />
   </Folder>
 </Solution>
