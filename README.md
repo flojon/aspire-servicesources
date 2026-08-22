@@ -328,7 +328,12 @@ Requires `kubectl` on `PATH`, authenticated against the named `context`.
 
 Point a service at a fixed, already-known URL — e.g. a Kubernetes ingress, a staging
 deployment, or any other reachable HTTP(S) endpoint. There's no underlying resource for
-Aspire to run; the facade's endpoint resolves straight to the configured URL.
+Aspire to run; the endpoint resolves straight to the configured URL.
+
+Two consequences follow from the service running out of band, and both are reported with a clear
+error rather than a confusing failure: the AppHost can't
+[configure it](#configuring-a-resolved-service), and a **container** can't `WithReference` it (a
+project or executable can) — see [#58](https://github.com/flojon/aspire-servicesources/issues/58).
 
 `servicesources.yaml`:
 ```yaml
@@ -436,6 +441,41 @@ or just needing it reachable, not caring how:
 ```json
 { "services": { "orders": { "source": "url" } } }
 ```
+
+## Configuring a resolved service
+
+`AddService()` returns a builder over the **real** resource Aspire runs, so the AppHost can inject
+its own configuration — connection strings, generated secrets, a sibling's endpoint, wait ordering.
+Values like these come from the AppHost's own graph and can't be written into
+`servicesources.yaml`/`servicesources.local.json`.
+
+The resolved resource's type depends on the source, which each developer chooses, so name the
+capability you need and it is checked at composition time:
+
+```csharp
+var backend = builder.AddService("backend")
+    .Configure<IResourceWithEnvironment>(r => r
+        .WithReference(planningDb)
+        .WithEnvironment("DBPASSWORD", postgres.Resource.PasswordParameter)
+        .WithEnvironment("ENCRYPTIONKEY", builder.AddParameter("EncryptionKey", new GenerateParameterDefault(), secret: true))
+        .WithEnvironment("Services__CommonAuth", commonAuth.GetEndpoint("https")))
+    .Configure<IResourceWithWaitSupport>(r => r.WaitForCompletion(migrationService));
+```
+
+`As<T>()` is the same cast without the callback, and reaches anything `Configure` would — including
+a satellite kind's own extension methods:
+
+```csharp
+backend.As<JavaScriptAppResource>().WithRunScript("dev");
+```
+
+**The `"url"` and `"kubernetes"` sources refuse configuration.** Both resolve to something already
+running elsewhere: a `"url"` service has no local process at all, and a `"kubernetes"` service is a
+`kubectl port-forward` in front of a remote one, so environment variables applied here would
+configure `kubectl` rather than the service. Both throw a `ServiceSourcesConfigurationException`
+naming the service and its source rather than starting it misconfigured — so a service the AppHost
+configures can be sourced `"local"` or `"container"`, but not switched to a remote source without
+dropping the configuration.
 
 ## Sample
 
