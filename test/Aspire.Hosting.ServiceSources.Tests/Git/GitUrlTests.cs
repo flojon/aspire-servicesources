@@ -58,6 +58,28 @@ public class GitUrlTests
         Assert.Equal("github.com", GitUrl.Parse("https://alice:pat@github.com/company/orders").Host);
 
     [Fact]
+    public void Parse_UserInfoContainingAnAtSign_StripsAllOfItFromTheHost()
+    {
+        // A personal access token pasted straight into the URL can itself contain '@'. Splitting on
+        // the first one would leave the tail of the token in the host, which both misses the
+        // credential-helper cache entry for the real host and asks `git credential` about a host
+        // that doesn't exist.
+        var url = GitUrl.Parse("https://alice:pa@ss@github.com/company/orders");
+
+        Assert.Equal("github.com", url.Host);
+        Assert.Equal("company/orders", url.Path);
+    }
+
+    [Fact]
+    public void Parse_AtSignInThePathOnly_IsNotTreatedAsUserInfo()
+    {
+        var url = GitUrl.Parse("https://gitserver/company/orders@v2");
+
+        Assert.Equal("gitserver", url.Host);
+        Assert.Equal("company/orders@v2", url.Path);
+    }
+
+    [Fact]
     public void Parse_LocalPath_HasNoHostAndIsNotHttp()
     {
         var url = GitUrl.Parse("/home/alice/repos/orders");

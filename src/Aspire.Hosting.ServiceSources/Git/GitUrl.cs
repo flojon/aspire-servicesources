@@ -82,10 +82,15 @@ internal sealed record GitUrl
     private static string StripUserInfo(string hostAndPath)
     {
         var slashIndex = hostAndPath.IndexOf('/');
-        var atIndex = hostAndPath.IndexOf('@');
-        return atIndex >= 0 && (slashIndex < 0 || atIndex < slashIndex)
-            ? hostAndPath[(atIndex + 1)..]
-            : hostAndPath;
+        var authority = slashIndex < 0 ? hostAndPath : hostAndPath[..slashIndex];
+
+        // The last '@' in the authority, not the first: a personal access token pasted straight into
+        // the URL can itself contain '@', and everything up to the final one is userinfo. Splitting
+        // on the first would leave the tail of the token in the host, which asks `git credential`
+        // about a host that doesn't exist and misses the cache entry for the real one. An '@' after
+        // the first '/' belongs to the path and is left alone.
+        var atIndex = authority.LastIndexOf('@');
+        return atIndex >= 0 ? hostAndPath[(atIndex + 1)..] : hostAndPath;
     }
 
     /// <summary>

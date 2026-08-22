@@ -239,6 +239,7 @@ public class LibGit2SharpGitClientTests
     // with 404, so as not to leak whether it exists — the single most common shape of the failure
     // this detection exists to explain.
     [InlineData("request failed with status code: 404")]
+    [InlineData("unexpected HTTP status code: 404")]
     [InlineData("remote: Repository not found")]
     public void LooksLikeAuthFailure_MessagesIndicatingMissingOrRejectedCredentials_ReturnTrue(string message) =>
         Assert.True(LibGit2SharpGitClient.LooksLikeAuthFailure(message));
@@ -247,6 +248,14 @@ public class LibGit2SharpGitClientTests
     [InlineData("early EOF")]
     [InlineData("failed to resolve address for gitserver.invalid")]
     [InlineData("the index is locked")]
+    // A "not found" about a ref or an object is a local lookup miss, not a rejected credential:
+    // reporting it as an authentication problem sends the developer after the wrong cause.
+    [InlineData("object not found - no match for id (9404aef)")]
+    [InlineData("Reference 'refs/heads/feature' not found")]
+    // "404" is only a status code when it is written as one. A port, an object id or a byte count
+    // that happens to contain those digits says nothing about credentials.
+    [InlineData("failed to connect to gitserver.invalid:404")]
+    [InlineData("early EOF after 40412 bytes")]
     public void LooksLikeAuthFailure_UnrelatedFailures_ReturnFalse(string message) =>
         Assert.False(LibGit2SharpGitClient.LooksLikeAuthFailure(message));
 

@@ -114,15 +114,27 @@ internal sealed class LibGit2SharpGitClient : IGitClient
         message.Contains("authentication", StringComparison.OrdinalIgnoreCase)
         || message.Contains("credentials", StringComparison.OrdinalIgnoreCase)
         || message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase)
-        || message.Contains("401", StringComparison.Ordinal)
-        || message.Contains("403", StringComparison.Ordinal)
+        || HasHttpStatus(message, "401")
+        || HasHttpStatus(message, "403")
         // GitHub, GitLab and Azure DevOps all answer an unauthenticated request for a private
         // repository with 404 rather than 401, so as not to leak whether it exists. A remote
         // "not found" is therefore far more often a missing credential than an absent repository
         // — which is exactly the case this detection exists to explain. The caller's message is
         // worded to cover both readings.
-        || message.Contains("404", StringComparison.Ordinal)
-        || message.Contains("not found", StringComparison.OrdinalIgnoreCase);
+        || HasHttpStatus(message, "404")
+        || message.Contains("repository not found", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether the message reports the given HTTP status, as libgit2's HTTP transports word it
+    /// ("request failed with status code: 404"). Anchoring on the phrase rather than the bare digits
+    /// keeps a port number, an object id or a byte count that happens to contain them from being read
+    /// as a rejected credential — a false positive costs the developer a wrong diagnosis and evicts a
+    /// working credential from the cache.
+    /// </summary>
+    private static bool HasHttpStatus(string message, string statusCode) =>
+        message.Contains($"status code: {statusCode}", StringComparison.OrdinalIgnoreCase)
+        || message.Contains($"status code {statusCode}", StringComparison.OrdinalIgnoreCase)
+        || message.Contains($"HTTP {statusCode}", StringComparison.OrdinalIgnoreCase);
 
     public bool HasUncommittedChanges(string repositoryPath)
     {
