@@ -147,4 +147,437 @@ public class ServiceCatalogLoaderTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public void Load_NoKindSpecified_DefaultsToDotnet()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+            """);
+
+        try
+        {
+            var catalog = ServiceCatalogLoader.Load(path);
+
+            Assert.Equal("dotnet", catalog.Services["orders"].Kind);
+            Assert.Null(catalog.Services["orders"].KindConfig);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_CustomKindWithMatchingBlock_CapturesKindAndRawBlock()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              frontend:
+                repository: https://github.com/company/frontend
+                kind: javascript
+                javascript:
+                  appDirectory: .
+                  runScript: dev
+                  packageManager: npm
+            """);
+
+        try
+        {
+            var catalog = ServiceCatalogLoader.Load(path);
+            var frontend = catalog.Services["frontend"];
+
+            Assert.Equal("javascript", frontend.Kind);
+            Assert.NotNull(frontend.KindConfig);
+            var block = Assert.IsAssignableFrom<IDictionary<object, object>>(frontend.KindConfig);
+            Assert.Equal(".", block["appDirectory"]);
+            Assert.Equal("dev", block["runScript"]);
+            Assert.Equal("npm", block["packageManager"]);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_CustomKindWithoutMatchingBlock_LeavesKindConfigNull()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              frontend:
+                repository: https://github.com/company/frontend
+                kind: javascript
+            """);
+
+        try
+        {
+            var catalog = ServiceCatalogLoader.Load(path);
+
+            Assert.Equal("javascript", catalog.Services["frontend"].Kind);
+            Assert.Null(catalog.Services["frontend"].KindConfig);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_UnknownTopLevelProperty_ThrowsNamingServiceAndProperty()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repositry: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("orders", ex.Message);
+            Assert.Contains("repositry", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_UnknownPropertyInsideKubernetesBlock_ThrowsNamingServiceAndProperty()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+                kubernetes:
+                  servicee: orders-svc
+                  port: 8080
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("orders", ex.Message);
+            Assert.Contains("servicee", ex.Message);
+            Assert.Contains("kubernetes", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_UnknownPropertyInsideUrlBlock_ThrowsNamingServiceAndProperty()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+                url:
+                  urll: https://orders.example.com
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("orders", ex.Message);
+            Assert.Contains("urll", ex.Message);
+            Assert.Contains("url", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_UnknownPropertyInsideContainerBlock_ThrowsNamingServiceAndProperty()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+                container:
+                  imagee: ghcr.io/company/orders
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("orders", ex.Message);
+            Assert.Contains("imagee", ex.Message);
+            Assert.Contains("container", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_EmptyKindValue_DefaultsToDotnet()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+                kind:
+            """);
+
+        try
+        {
+            var catalog = ServiceCatalogLoader.Load(path);
+
+            Assert.Equal("dotnet", catalog.Services["orders"].Kind);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_ServiceEntryWithNoBody_ThrowsNamingService()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+            """);
+
+        try
+        {
+            // YamlDotNet stores a null entry for a bodyless service key; report it by name rather
+            // than dereferencing it while normalizing `kind`.
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("orders", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_EveryKnownPropertyOnOneService_LoadsWithoutError()
+    {
+        // The unknown-property sets are derived from the metadata types by reflection; this guards
+        // the derivation itself, so a property that the typed pass accepts can never be rejected
+        // here as unknown.
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+                defaultRef: main
+                kind: dotnet
+                kubernetes:
+                  service: orders-svc
+                  port: 8080
+                url:
+                  url: https://orders.example.com
+                container:
+                  image: ghcr.io/company/orders
+                  port: 8080
+                  defaultTag: latest
+            """);
+
+        try
+        {
+            var orders = ServiceCatalogLoader.Load(path).Services["orders"];
+
+            Assert.Equal("main", orders.DefaultRef);
+            Assert.Equal("orders-svc", orders.Kubernetes!.Service);
+            Assert.Equal("https://orders.example.com", orders.Url!.Url);
+            Assert.Equal("latest", orders.Container!.DefaultTag);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_MisspelledRootKey_ThrowsNamingItInsteadOfYieldingAnEmptyCatalog()
+    {
+        // IgnoreUnmatchedProperties applies to the root too, so without the root check this parses
+        // to an empty catalog and is reported much later as "service 'orders' was not found".
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            service:
+              orders:
+                repository: https://github.com/company/orders
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("service", ex.Message);
+            Assert.Contains("services", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_KindNamedAfterATypedBlock_DoesNotValidateItAgainstThatBlocksSchema()
+    {
+        // LocalKindRegistry.Register makes this unreachable for a registered kind; the loader must
+        // still not reject the block's own keys against ContainerMetadata's schema, so that the
+        // failure the user sees is the accurate "kind 'container' is not registered".
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              frontend:
+                repository: https://github.com/company/frontend
+                kind: container
+                container:
+                  runScript: dev
+            """);
+
+        try
+        {
+            var catalog = ServiceCatalogLoader.Load(path);
+
+            var frontend = catalog.Services["frontend"];
+            Assert.Equal("container", frontend.Kind);
+            Assert.NotNull(frontend.KindConfig);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_KindConfigProperty_IsRejectedAsUnknown()
+    {
+        // KindConfig is populated from the kind-matching block, never bound from yaml — so the
+        // reflection-derived set must not start accepting it as a writable key.
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                kindConfig:
+                  runScript: dev
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("kindConfig", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData("services:\n")]
+    [InlineData("services: {}\n")]
+    public void Load_ServicesKeyWithNoServices_YieldsEmptyCatalog(string yaml)
+    {
+        // A bare 'services:' deserializes the map itself to null, overriding the property
+        // initializer — it must still behave like the explicit empty mapping (and like an omitted
+        // key) rather than faulting while the loader enumerates the catalog. A service that is
+        // actually referenced is then reported by name by ServiceSourcesConfigCache.
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, yaml);
+
+        try
+        {
+            var catalog = ServiceCatalogLoader.Load(path);
+
+            Assert.Empty(catalog.Services);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("    kind: dotnet\n")]
+    public void Load_StrayDotnetBlock_ThrowsNamingServiceAndProperty(string kindLine)
+    {
+        // 'dotnet' is resolved from the top-level repository/project metadata and never reads
+        // KindConfig, and LocalKindRegistry.Register refuses to register it — so a 'dotnet:' block
+        // is always stray or misspelled and must be rejected rather than captured and ignored.
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path,
+            "services:\n" +
+            "  orders:\n" +
+            "    repository: https://github.com/company/orders\n" +
+            "    project: src/Orders.Api/Orders.Api.csproj\n" +
+            kindLine +
+            "    dotnet:\n" +
+            "      runScript: dev\n");
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("orders", ex.Message);
+            Assert.Contains("dotnet", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_DotnetService_LeavesKindConfigNull()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+            """);
+
+        try
+        {
+            var catalog = ServiceCatalogLoader.Load(path);
+
+            Assert.Null(catalog.Services["orders"].KindConfig);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

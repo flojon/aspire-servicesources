@@ -66,6 +66,9 @@ services:
     defaultRef: main          # optional; branch, tag, or commit SHA
 ```
 
+(A service that isn't a .NET project also takes a `kind` — see
+[Non-.NET local services](#non-net-local-services-kind).)
+
 **3. Add your own `servicesources.local.json` next to it (gitignore this file — it's
 per-developer):**
 
@@ -104,7 +107,69 @@ a project reference would be.
   overwriting your work. The `.servicesources/` directory gitignores itself on first use — no
   need to add it to your own `.gitignore`.
 - Set `path` to point at a checkout you manage yourself (e.g. an existing local clone). It's
-  used as-is — no clone, no checkout, no fetch, ever. `ref` cannot be combined with `path`.
+  used as-is — no clone, no checkout, no fetch, ever. A relative `path` is anchored to the
+  AppHost directory, and must name a directory that already exists. `ref` cannot be combined
+  with `path`.
+
+### Non-.NET local services: `kind`
+
+A `"local"` service is resolved as a .NET project by default. Set `kind` in the catalog to run
+the checkout some other way — the git clone/checkout is identical, only what gets built out of
+the resulting directory changes:
+
+```yaml
+services:
+  frontend:
+    repository: https://github.com/example/frontend
+    kind: javascript          # optional; defaults to "dotnet"
+    javascript:               # per-kind options block, named after the kind
+      appDirectory: .
+      runScript: dev
+```
+
+`kind: dotnet` (the default) uses the entry's `project` property and needs no options block.
+Any other kind is resolved by a handler that a satellite package registers, and its options
+live in a block named after the kind. Kind names are matched case-sensitively, and a kind with
+no registered handler fails at startup before anything is cloned.
+
+**Implementing a kind.** A satellite package implements `ILocalResourceKind` and registers it
+from its own extension method:
+
+```csharp
+public sealed class JavaScriptKind : ILocalResourceKind
+{
+    private sealed class Options
+    {
+        public string? AppDirectory { get; set; }
+        public string? RunScript { get; set; }
+    }
+
+    // Optional, and worth implementing whenever Resolve parses rawConfig: this runs for every
+    // service before any of them has added a resource, so a typo'd options block is reported
+    // alongside every other service's failure instead of aborting a half-built app model.
+    public void Validate(string serviceName, object? rawConfig) =>
+        LocalKindConfig.Parse<Options>(rawConfig, serviceName);
+
+    public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+        IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig)
+    {
+        // repoRoot is the already-cloned, already-checked-out directory.
+        var options = LocalKindConfig.Parse<Options>(rawConfig, serviceName);
+        ...
+    }
+}
+
+public static IDistributedApplicationBuilder UseJavaScript(this IDistributedApplicationBuilder builder) =>
+    builder.AddLocalKind("javascript", new JavaScriptKind());
+```
+
+`LocalKindConfig.Parse<T>` turns the opaque options block into a typed object, and rejects an
+unknown property or a block that isn't a mapping with a `ServiceSourcesConfigurationException`
+naming the service. `AddLocalKind` must be called before the service resolves (i.e. before the
+app host starts), accepts each kind name at most once, and cannot re-register `"dotnet"` or use a
+name that collides with a well-known service property (`repository`, `project`, `defaultRef`,
+`kind`, `kubernetes`, `url`, `container`) — a block by one of those names would be read as that
+property rather than as the kind's options.
 
 #### Private repositories
 
