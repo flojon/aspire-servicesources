@@ -330,10 +330,10 @@ Point a service at a fixed, already-known URL — e.g. a Kubernetes ingress, a s
 deployment, or any other reachable HTTP(S) endpoint. There's no underlying resource for
 Aspire to run; the endpoint resolves straight to the configured URL.
 
-Two consequences follow from the service running out of band, and both are reported with a clear
-error rather than a confusing failure: the AppHost can't
-[configure it](#configuring-a-resolved-service), and a **container** can't `WithReference` it (a
-project or executable can) — see [#58](https://github.com/flojon/aspire-servicesources/issues/58).
+Two consequences follow from the service running out of band: the AppHost's
+[`Configure` calls are skipped and logged](#configuring-a-resolved-service), and a **container**
+can't `WithReference` it — a project or executable can — which fails with a clear error rather than
+a DCP stack trace. See [#58](https://github.com/flojon/aspire-servicesources/issues/58).
 
 `servicesources.yaml`:
 ```yaml
@@ -469,13 +469,25 @@ a satellite kind's own extension methods:
 backend.As<JavaScriptAppResource>().WithRunScript("dev");
 ```
 
-**The `"url"` and `"kubernetes"` sources refuse configuration.** Both resolve to something already
-running elsewhere: a `"url"` service has no local process at all, and a `"kubernetes"` service is a
-`kubectl port-forward` in front of a remote one, so environment variables applied here would
-configure `kubectl` rather than the service. Both throw a `ServiceSourcesConfigurationException`
-naming the service and its source rather than starting it misconfigured — so a service the AppHost
-configures can be sourced `"local"` or `"container"`, but not switched to a remote source without
-dropping the configuration.
+**`Configure` is skipped for the `"url"` and `"kubernetes"` sources**, and the skip is logged at
+startup. Both resolve to something already running elsewhere — a `"url"` service has no local
+process at all, and a `"kubernetes"` service is a `kubectl port-forward` in front of a remote one,
+so environment variables applied here would configure `kubectl` rather than the service. Those
+services are expected to be configured wherever they actually run.
+
+Skipping rather than failing is deliberate: a developer switching a service to a remote source in
+their own `servicesources.local.json` must not break a `Program.cs` they don't own. You'll see:
+
+```
+warn: Aspire.Hosting.ServiceSources
+      Service 'backend': skipped Configure<IResourceWithEnvironment> because its source is
+      'kubernetes' — it resolves to a 'kubectl port-forward' in front of an already-running
+      service, so the configuration would reach kubectl rather than the service. ...
+```
+
+`As<T>()` **throws** for those sources instead of skipping — it has to return a builder, and handing
+back the `kubectl` executable would silently configure the wrong process. Prefer `Configure` for
+anything that should survive a source switch.
 
 ## Sample
 

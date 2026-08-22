@@ -100,32 +100,82 @@ public class ServiceConfigurationExtensionsTests
     }
 
     [Fact]
-    public void Configure_OnUrlSource_ThrowsExplainingThereIsNothingLocalToConfigure()
+    public void Configure_OnUrlSource_SkipsWithoutThrowing_SoSourceSwitchingKeepsWorking()
     {
         var builder = Builder();
+        var callbackRan = false;
 
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => AddUrlService(builder).Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B")));
+        // A developer switching this service to "url" in their own servicesources.local.json must
+        // not break a Program.cs they don't own.
+        var service = AddUrlService(builder)
+            .Configure<IResourceWithEnvironment>(_ => callbackRan = true);
 
-        Assert.Contains("inventory", ex.Message);
-        Assert.Contains("'url'", ex.Message);
-        Assert.Contains("servicesources.local.json", ex.Message);
+        Assert.False(callbackRan);
+        Assert.NotNull(service);
     }
 
     [Fact]
-    public void Configure_OnKubernetesSource_ThrowsExplainingItWouldReachThePortForward()
+    public void Configure_OnUrlSource_ReportsTheSkip()
+    {
+        var builder = Builder();
+
+        AddUrlService(builder).Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B"));
+
+        var message = Assert.Single(ServiceConfigurationWarnings.For(builder).Messages);
+        Assert.Contains("inventory", message);
+        Assert.Contains("'url'", message);
+        Assert.Contains("servicesources.local.json", message);
+    }
+
+    [Fact]
+    public void Configure_OnKubernetesSource_SkipsRatherThanConfiguringThePortForward()
     {
         var builder = Builder();
         var service = new KubernetesSource(new FixedPortAllocator()).Resolve(
             builder, "orders", KubernetesMetadata,
             new ServiceDeveloperConfig { Source = "kubernetes", Context = "dev" });
 
-        // The port-forward executable does accept environment variables, so this has to be a
-        // deliberate refusal rather than a capability check — configuring it would silently
-        // configure kubectl rather than the service behind it.
-        var ex = Record.Exception(() => service.Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B")));
+        // The port-forward executable would accept environment variables happily, so skipping has to
+        // be driven by the source rather than by a capability check.
+        service.Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B"));
 
-        Assert.NotNull(ex);
-        Assert.Contains("port-forward", ex.Message);
+        Assert.Empty(service.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>());
+        Assert.Contains("port-forward", Assert.Single(ServiceConfigurationWarnings.For(builder).Messages));
+    }
+
+    [Fact]
+    public async Task SkippedConfiguration_IsLoggedAtStartup()
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              inventory:
+                url:
+                  url: https://orders.example.com
+            """);
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.local.json"),
+            """{ "services": { "inventory": { "source": "url" } } }""");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+
+        builder.AddService("inventory").Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B"));
+
+        // Buffered during composition — there is no logger yet — and flushed here.
+        var ex = await Record.ExceptionAsync(() => TestHelpers.PublishBeforeStartEventAsync(builder));
+
+        Assert.Null(ex);
+        Assert.Single(ServiceConfigurationWarnings.For(builder).Messages);
+    }
+
+    [Fact]
+    public void As_OnUrlSource_StillThrows_BecauseItMustReturnABuilder()
+    {
+        var builder = Builder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => AddUrlService(builder).As<IResourceWithEnvironment>());
+
+        Assert.Contains("inventory", ex.Message);
+        Assert.Contains("'url'", ex.Message);
     }
 }

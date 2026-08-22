@@ -119,13 +119,21 @@ chain. Neither needs updating as Aspire's API grows, and both reach satellite-sp
 The trade-off versus a flat fluent chain is that a capability must be named and cannot be mixed in
 one lambda.
 
-**Out-of-band sources are refused, not silently dropped.** `url` and `kubernetes` resolve to
-something already running elsewhere, so both methods throw for them *before* the type check — the
-kubernetes resource is an `ExecutableResource` wrapping `kubectl port-forward` and would happily
-accept environment variables that never reach the service. This follows the precedent set by #43
-(fail fast on dev-config fields irrelevant to a service's source). The cost is that switching a
-configured service to `kubernetes` in `servicesources.local.json` now fails the AppHost with an
-explanatory error rather than starting it misconfigured.
+**Out-of-band sources are skipped and reported, not applied and not fatal.** `url` and `kubernetes`
+resolve to something already running elsewhere, so `Configure<T>` checks the source *before* the
+type check — the kubernetes resource is an `ExecutableResource` wrapping `kubectl port-forward` and
+would otherwise happily accept environment variables that never reach the service.
+
+Skipping rather than throwing preserves the package's core promise: a developer switching a service
+to a remote source in their own `servicesources.local.json` must not break a `Program.cs` they don't
+own. Silently dropping the configuration is the failure mode #53 was filed about, so every skip is
+logged. Warnings are buffered during composition — `AddService` runs before there is an `ILogger` —
+and flushed at `BeforeStartEvent`, still ahead of DCP.
+
+`As<T>` is the exception: it **throws** for those sources, because it must return a builder and the
+alternatives are handing back the `kubectl` executable (silently configuring the wrong process) or
+returning null. The asymmetry is documented on both methods — `Configure` is for configuration that
+should survive a source switch, `As` for when the AppHost genuinely requires a specific type.
 
 ### Eager resolution with parallel checkouts preserved
 
@@ -163,7 +171,8 @@ Prefetch is speculative, so it must never invent a failure:
 Unit tests cover: each source returning a registered resource; a container consumer referencing
 container- and local-sourced services; the `url` pre-flight firing for a container consumer and
 staying silent for a host-process one; `Configure<T>`/`As<T>` landing annotations on the real
-resource; both refusing `url` and `kubernetes` with a message naming the service and source;
-parallel prefetch; catalog-missing services being skipped; and a checkout failure surfacing only for
-the service that asked. The existing `AddServiceIntegrationTests` were updated from deferred to
+resource; `Configure<T>` skipping `url` and `kubernetes` without throwing, recording a message that
+names the service and source, and that message reaching the log at `BeforeStartEvent`; `As<T>`
+throwing for the same sources; parallel prefetch; catalog-missing services being skipped; and a
+checkout failure surfacing only for the service that asked. The existing `AddServiceIntegrationTests` were updated from deferred to
 eager expectations and continue to exercise a real git fixture.
