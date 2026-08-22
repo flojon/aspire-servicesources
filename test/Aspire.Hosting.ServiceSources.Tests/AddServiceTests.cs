@@ -121,7 +121,11 @@ public class AddServiceTests
 
         var service = builder.AddService("orders");
 
-        Assert.Contains(builder.Resources, r => r.Name == "orders-portforward");
+        // Named for the service, not "orders-portforward": Aspire derives service-discovery keys
+        // from the resource name, so a suffix would publish this as "services__orders-portforward"
+        // and break a consumer resolving "orders".
+        Assert.Equal("orders", service.Resource.Name);
+        Assert.DoesNotContain(builder.Resources, r => r.Name.Contains("portforward", StringComparison.Ordinal));
         // No facade any more: the returned builder wraps the registered port-forward executable
         // itself, so DCP creates a Service for it and a container consumer can reference it (#58).
         Assert.Contains(builder.Resources, r => ReferenceEquals(r, service.Resource));
@@ -130,7 +134,7 @@ public class AddServiceTests
         Assert.Equal("http", endpoint.EndpointName);
 
         var executable = Assert.IsAssignableFrom<ExecutableResource>(
-            Assert.Single(builder.Resources, r => r.Name == "orders-portforward"));
+            Assert.Single(builder.Resources, r => r.Name == "orders"));
 
         Assert.Equal("kubectl", executable.Command);
 

@@ -413,8 +413,10 @@ aspire run
 A TypeScript AppHost equivalent — proving `AddService()` is correctly exported and registers with
 Aspire's Type System from a guest language, and that a resolved service can be
 [configured from TypeScript](#from-a-guest-language-apphost) — lives in
-`samples/DemoAppHostTypeScript` (**note:** this sample does not currently run end-to-end — see the
-known issue below the code block for why):
+`samples/DemoAppHostTypeScript`. Both of its services use the `"container"` source so that
+`payments` can `withServiceReference(inventory)`: a `"url"` service runs out of band, and a
+container consumer of one is [rejected up front](#url-source). (**Note:** this sample does not
+currently run end-to-end — see the known issue below the code block for why.)
 
 ```bash
 cd samples/DemoAppHostTypeScript

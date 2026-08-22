@@ -16,6 +16,7 @@ public class LocalCheckoutPrefetchTests
     private sealed class FakeGitClient : IGitClient
     {
         private readonly Dictionary<string, Exception> _failFor = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, ManualResetEventSlim> _blockUntil = new(StringComparer.Ordinal);
 
         public Barrier? StartBarrier { get; set; }
 
@@ -23,11 +24,20 @@ public class LocalCheckoutPrefetchTests
 
         public void FailFor(string repositoryUrl, Exception exception) => _failFor[repositoryUrl] = exception;
 
+        /// <summary>Holds this repository's clone open until the returned gate is set.</summary>
+        public ManualResetEventSlim BlockFor(string repositoryUrl) =>
+            _blockUntil[repositoryUrl] = new ManualResetEventSlim(false);
+
         public void Clone(string repositoryUrl, string destinationPath)
         {
             lock (Cloned)
             {
                 Cloned.Add(repositoryUrl);
+            }
+
+            if (_blockUntil.TryGetValue(repositoryUrl, out var gate))
+            {
+                gate.Wait(TimeSpan.FromSeconds(30));
             }
 
             // Rendezvous with the other clone(s): if the prefetch were sequential, only one
@@ -160,6 +170,50 @@ public class LocalCheckoutPrefetchTests
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => source.Resolve(builder, "billing", Metadata("billing"), DevConfig()));
         Assert.Contains("billing", ex.Message);
+    }
+
+    [Fact]
+    public async Task SlowCheckoutForAnotherService_DoesNotBlockTheRequestedOne()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var builder = TestHelpers.CreateBuilder(dir);
+        var git = new FakeGitClient();
+        // "billing" is prefetched speculatively and never finishes. The AppHost only asks for
+        // "orders", so it must not wait on it — the prefetch is parallel *and* deferred.
+        var billingGate = git.BlockFor("https://example.com/billing.git");
+        var source = new LocalProjectSource(git);
+
+        try
+        {
+            var resolve = Task.Run(() => source.Resolve(builder, "orders", Metadata("orders"), DevConfig()));
+            var finished = await Task.WhenAny(resolve, Task.Delay(TimeSpan.FromSeconds(10)));
+
+            Assert.True(
+                ReferenceEquals(finished, resolve),
+                "AddService blocked on a speculative checkout for a service it never asked for.");
+            Assert.NotNull(await resolve);
+        }
+        finally
+        {
+            billingGate.Set();
+        }
+    }
+
+    [Fact]
+    public void CheckoutFailure_KeepsTheStackTraceFromWhereItActuallyFailed()
+    {
+        var dir = CreateAppHostDirectory("billing");
+        var builder = TestHelpers.CreateBuilder(dir);
+        var git = new FakeGitClient();
+        git.FailFor("https://example.com/billing.git", new InvalidOperationException("no such repo"));
+        var source = new LocalProjectSource(git);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => source.Resolve(builder, "billing", Metadata("billing"), DevConfig()));
+
+        // A plain `throw storedException` would have reset this to the re-throw site, hiding the
+        // prefetch worker the clone actually failed on.
+        Assert.Contains(nameof(LocalGitCheckout.ResolveRepoRoot), ex.StackTrace);
     }
 
     [Fact]

@@ -1,6 +1,6 @@
 {
   "services": {
-    "inventory": { "source": "url" },
+    "inventory": { "source": "container" },
     "payments": { "source": "container" }
   }
 }

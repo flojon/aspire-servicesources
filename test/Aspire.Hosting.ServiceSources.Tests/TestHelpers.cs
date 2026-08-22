@@ -17,16 +17,20 @@ internal static class TestHelpers
     /// <summary>
     /// A builder that can actually publish <c>BeforeStartEvent</c>. Aspire's own
     /// <c>InitializeDcpAnnotations</c> handler runs first and validates DCP options, which a plain
-    /// test builder doesn't have — harmless in a real AppHost, fatal here. The paths only have to
-    /// exist as strings; nothing launches them.
+    /// test builder doesn't have — harmless in a real AppHost, fatal here.
     /// </summary>
+    /// <remarks>
+    /// The validation only requires these to be non-empty; it never resolves them and nothing is
+    /// launched, so a deliberately non-path sentinel keeps the tests OS-agnostic and stops the value
+    /// from reading like a real Linux-only dependency.
+    /// </remarks>
     public static IDistributedApplicationBuilder CreateBuilderThatCanStart(string appHostDirectory)
     {
         var builder = CreateBuilder(appHostDirectory);
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["DcpPublisher:CliPath"] = "/usr/bin/true",
-            ["DcpPublisher:DashboardPath"] = "/usr/bin/true",
+            ["DcpPublisher:CliPath"] = "unused-dcp-path",
+            ["DcpPublisher:DashboardPath"] = "unused-dcp-path",
         });
         return builder;
     }
