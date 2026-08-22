@@ -384,7 +384,7 @@ aspire run
 
 A TypeScript AppHost equivalent — proving `AddService()` is correctly exported and registers with
 Aspire's Type System from a guest language — lives in `samples/DemoAppHostTypeScript` (**note:**
-this sample does not currently run end-to-end — see the known issue below the code block for why):
+this sample requires Aspire CLI 13.6.0 or newer — see the compatibility note below the code block):
 
 ```bash
 cd samples/DemoAppHostTypeScript
@@ -394,18 +394,43 @@ aspire restore
 aspire run
 ```
 
-**Known issue:** as of Aspire CLI 13.4.6/13.5.0, `aspire restore`/`aspire add` correctly
+**Requires Aspire CLI 13.6.0+:** on 13.4.6 through 13.5.2, `aspire restore`/`aspire add` correctly
 registers `addService(name: string)` in the generated TypeScript SDK (`.aspire/modules/aspire.mts`)
-with no diagnostics — confirming Task 1's `[AspireExport]` on `AddService` works — but the
-generated SDK fails to compile (`TS2552: Cannot find name 'ResourceWithServiceDiscoveryPromise'`)
-because the Aspire CLI's TypeScript codegen doesn't emit a `*Promise`/`*PromiseImpl` wrapper pair
-for extension methods that return a bare Aspire interface type
-(`IResourceBuilder<IResourceWithServiceDiscovery>`) rather than a concrete resource class. This
-appears to affect any integration whose exported method returns a bare Aspire interface rather
-than a concrete resource class, though we've only confirmed it for this one. Tracked upstream at
-[microsoft/aspire#19507](https://github.com/microsoft/aspire/issues/19507); until that's fixed,
-`aspire run` on this sample fails at its TypeScript build step even though the export itself is
-correctly registered.
+with no diagnostics — confirming the `[AspireExport]` on `AddService` works — but the generated SDK
+fails to compile (`TS2552: Cannot find name 'ResourceWithServiceDiscoveryPromise'`, six errors)
+because the Aspire CLI's TypeScript codegen didn't emit a `*Promise`/`*PromiseImpl` wrapper pair for
+extension methods returning a bare Aspire interface type (`IResourceBuilder<IResourceWithServiceDiscovery>`)
+rather than a concrete resource class.
+
+This was reported as [microsoft/aspire#19507](https://github.com/microsoft/aspire/issues/19507) and
+fixed by [microsoft/aspire#19577](https://github.com/microsoft/aspire/pull/19577), which shipped to
+`main` on 2026-08-22 and lands in Aspire CLI **13.6.0**. Verified against a build of that PR
+(`13.6.0-pr.19577.gfa0aea2c`): the generated SDK type-checks clean under strict `tsc`, and the
+sample runs end-to-end — `withReference()` on the `addService()` result injects
+`services__inventory__https__0=https://httpbin.org:443` into a consuming resource. The same sample
+regenerated with 13.5.1 still reproduces all six `TS2552` errors.
+
+Two caveats found while verifying:
+
+- **Switching *back* to a dogfood CLI build leaves stale generated code.** `aspire restore` rewrites
+  the pinned package version in the generated
+  `.aspire/integrations/.../integration-restore/IntegrationRestore.csproj` but does not re-restore or
+  rebuild it, so the previous CLI's code generator stays in that project's `bin/` and keeps producing
+  the old output — while reporting `SDK code restored successfully`. Deleting `.aspire/modules` alone
+  is *not* enough, since the stale generator lives under `.aspire/integrations/`; remove the whole
+  `.aspire/` directory. This bites the exact loop you'd use to verify a codegen fix (dogfood build →
+  compare against a release → back to the dogfood build). Testing across 13.5.1, 13.5.2 and a
+  13.6.0-pr build, it reproduces only when returning to a hive-sourced PR build that was already
+  built in that directory — switches between released versions were consistent. Reported upstream as
+  [microsoft/aspire#19603](https://github.com/microsoft/aspire/issues/19603).
+- **A container can't `withReference()` a `"url"`-source service.** This sample's `inventory` is a
+  `"url"` service, so `addContainer(...).withReference(inventory)` fails — the service runs out of
+  band with no local resource for DCP to route a container to. A project or executable consumer works
+  fine, so the sample demonstrates the reference from `addExecutable(...)`. Unrelated to the codegen
+  fix: it reproduces on released 13.5.1 and from a C# AppHost too. Tracked as
+  [#58](https://github.com/flojon/aspire-servicesources/issues/58), which turns the raw DCP failure
+  (`Host endpoint 'https' on resource 'inventory' should have an associated DCP Service resource
+  already set up`) into a clear error and fixes the other sources outright.
 
 ## Status
 
