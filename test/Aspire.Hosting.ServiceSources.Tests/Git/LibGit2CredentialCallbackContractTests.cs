@@ -31,6 +31,26 @@ public class LibGit2CredentialCallbackContractTests
         Assert.Single(requests);
     }
 
+    /// <summary>
+    /// A clone makes two HTTP requests — the ref advertisement, then the pack POST — and each one is
+    /// a chance for libgit2 to come back to the callback without the credential having been refused.
+    /// The ladder would read that as a rejection and erase a working credential from the developer's
+    /// helper, so it is asserted over the whole clone and not just the first request. The pack
+    /// request is asserted to have happened: if the stub's advertisement ever stops parsing, the
+    /// clone would end after one request and the single-ask assertion would pass without having
+    /// tested anything.
+    /// </summary>
+    [Fact]
+    public void CredentialsCallback_AcceptedCredentialCarriesThePackRequestToo_IsAskedOnlyOnce()
+    {
+        using var server = StubGitServer.Accepting("u", "p");
+
+        var requests = CloneCountingCredentialRequests(server);
+
+        Assert.Contains(StubGitServer.PackRequest, server.Requests);
+        Assert.Single(requests);
+    }
+
     [Fact]
     public void CredentialsCallback_IsOnlyAskedAfterAnUnauthenticatedAttemptWasRefused()
     {

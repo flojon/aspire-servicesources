@@ -115,7 +115,12 @@ internal sealed class LibGit2SharpGitClient : IGitClient
         || message.Contains("credentials", StringComparison.OrdinalIgnoreCase)
         || message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase)
         || HasHttpStatus(message, "401")
-        || HasHttpStatus(message, "403")
+        // A 403 is "authenticated, but not allowed", which over git-on-HTTPS is usually a token
+        // missing a scope or an SSO session the developer hasn't authorized — a credential problem,
+        // and one worth naming. Being throttled answers with that same status while saying nothing
+        // about the credential, so those are excluded: pointing at authentication there sends the
+        // developer after the wrong cause and drops a credential that works.
+        || (HasHttpStatus(message, "403") && !LooksLikeThrottling(message))
         // GitHub, GitLab and Azure DevOps all answer an unauthenticated request for a private
         // repository with 404 rather than 401, so as not to leak whether it exists. A remote
         // "not found" is therefore far more often a missing credential than an absent repository
@@ -123,6 +128,20 @@ internal sealed class LibGit2SharpGitClient : IGitClient
         // worded to cover both readings.
         || HasHttpStatus(message, "404")
         || message.Contains("repository not found", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether the message reports a request turned away for coming too often, rather than for the
+    /// credential it carried. Only the host's own wording can tell the two apart, so this catches
+    /// what the major hosts say when they throttle and leaves the rest reading as a credential
+    /// problem.
+    /// </summary>
+    private static bool LooksLikeThrottling(string message) =>
+        message.Contains("rate limit", StringComparison.OrdinalIgnoreCase)
+        || message.Contains("rate-limit", StringComparison.OrdinalIgnoreCase)
+        || message.Contains("ratelimit", StringComparison.OrdinalIgnoreCase)
+        || message.Contains("too many requests", StringComparison.OrdinalIgnoreCase)
+        || message.Contains("throttl", StringComparison.OrdinalIgnoreCase)
+        || message.Contains("try again later", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Whether the message reports the given HTTP status, as libgit2's HTTP transports word it

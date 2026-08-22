@@ -233,6 +233,8 @@ public class LibGit2SharpGitClientTests
     [InlineData("request failed with status code: 401")]
     [InlineData("too many redirects or authentication replays")]
     [InlineData("callback returned unsupported credentials type")]
+    // A bare 403 over git-on-HTTPS is "authenticated, but not allowed" — typically a token missing a
+    // scope, or an SSO session that was never authorized.
     [InlineData("request failed with status code: 403")]
     [InlineData("Unauthorized")]
     // GitHub, GitLab and Azure DevOps answer an unauthenticated request for a private repository
@@ -256,6 +258,13 @@ public class LibGit2SharpGitClientTests
     // that happens to contain those digits says nothing about credentials.
     [InlineData("failed to connect to gitserver.invalid:404")]
     [InlineData("early EOF after 40412 bytes")]
+    // Being throttled comes back as a 403 too, but it says nothing about the credential: naming
+    // authentication would send the developer after the wrong cause and evict a credential that
+    // works, when the fix is simply to wait.
+    [InlineData("request failed with status code: 403 - You have exceeded a secondary rate limit")]
+    [InlineData("request failed with status code: 403 - too many requests")]
+    [InlineData("unexpected HTTP status code: 403 (request throttled)")]
+    [InlineData("request failed with status code: 403 - rate-limited, try again later")]
     public void LooksLikeAuthFailure_UnrelatedFailures_ReturnFalse(string message) =>
         Assert.False(LibGit2SharpGitClient.LooksLikeAuthFailure(message));
 

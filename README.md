@@ -213,7 +213,9 @@ the service, the repository, and authentication as the likely cause, rather than
 "failed to clone" message. This includes a "not found" response: GitHub, GitLab and Azure DevOps
 all answer an unauthenticated request for a private repository with 404 rather than 401, so as not
 to leak whether it exists, so the error covers both readings — bad credentials, or a repository
-the credentials in use can't see.
+the credentials in use can't see. A rate-limited response is deliberately left out, even though
+hosts answer it with the same `403` as a token that's missing a scope: there the credential is
+fine and the fix is to wait, so it's reported as the transport failure it is.
 
 **SSH is not supported.** LibGit2Sharp's bundled native binaries don't include an SSH transport,
 so a `repository` written as `git@host:org/repo`, `host:org/repo` or `ssh://...` fails fast at

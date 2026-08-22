@@ -6,15 +6,18 @@ namespace Aspire.Hosting.ServiceSources.Tests.Git;
 
 /// <summary>
 /// The smallest HTTP server that makes libgit2 run its authentication handshake: it demands Basic
-/// auth, then either refuses what it is given or answers with an empty upload-pack advertisement.
-/// Only the handshake is served — no stub here is a real repository, so a clone against one always
-/// ends in a <see cref="LibGit2Sharp.LibGit2SharpException"/> whatever the credentials.
+/// auth, then either refuses what it is given or advertises a single branch. The advertisement names
+/// a commit no stub can actually serve, so a clone against one always ends in a
+/// <see cref="LibGit2Sharp.LibGit2SharpException"/> whatever the credentials — but it ends there
+/// having made both requests of a real clone, the ref advertisement and the pack POST, which is what
+/// lets a credential re-challenge on the second request be observed at all.
 /// </summary>
 internal sealed class StubGitServer : IDisposable
 {
     private readonly HttpListener _listener = new();
     private readonly Func<string, bool> _accepts;
     private readonly List<string> _authorizations = [];
+    private readonly List<string> _requests = [];
     private readonly Task _serving;
 
     private StubGitServer(Func<string, bool> accepts)
@@ -45,7 +48,26 @@ internal sealed class StubGitServer : IDisposable
         }
     }
 
+    /// <summary>
+    /// The method and path of each request received, in order (<c>"GET /repo.git/info/refs"</c>), so
+    /// a test can assert which stage of the clone it actually got to rather than trusting that a
+    /// still-parseable advertisement carried it there.
+    /// </summary>
+    public IReadOnlyList<string> Requests
+    {
+        get
+        {
+            lock (_requests)
+            {
+                return [.. _requests];
+            }
+        }
+    }
+
     public const string NoAuthorization = "<none>";
+
+    /// <summary>The pack request a clone makes once it has the ref advertisement.</summary>
+    public const string PackRequest = "POST /repo.git/git-upload-pack";
 
     public static StubGitServer RefusingEverything() => new(_ => false);
 
@@ -70,11 +92,35 @@ internal sealed class StubGitServer : IDisposable
         return port;
     }
 
-    private static byte[] EmptyUploadPackAdvertisement()
+    /// <summary>A commit id to advertise. Nothing can fetch it; it only has to be well formed.</summary>
+    private const string AdvertisedCommit = "1234567890abcdef1234567890abcdef12345678";
+
+    private static string PktLine(string payload) => $"{payload.Length + 4:x4}{payload}";
+
+    /// <summary>
+    /// A ref advertisement for a single branch, with the <c>HEAD</c> symref a clone needs to pick a
+    /// default branch — without it libgit2 gives up before asking for the pack, and the second
+    /// request would never be made.
+    /// </summary>
+    private static byte[] UploadPackAdvertisement()
     {
-        const string Service = "# service=git-upload-pack\n";
-        return Encoding.UTF8.GetBytes($"{Service.Length + 4:x4}{Service}00000000");
+        const string Capabilities = "multi_ack_detailed thin-pack ofs-delta agent=stub/1";
+
+        var advertisement =
+            PktLine("# service=git-upload-pack\n")
+            + "0000"
+            + PktLine($"{AdvertisedCommit} HEAD\0{Capabilities} symref=HEAD:refs/heads/main\n")
+            + PktLine($"{AdvertisedCommit} refs/heads/main\n")
+            + "0000";
+
+        return Encoding.UTF8.GetBytes(advertisement);
     }
+
+    /// <summary>
+    /// Enough of a pack response to acknowledge the request and then end: the clone fails on the
+    /// truncated pack that follows, which is fine — the request having been made at all is the point.
+    /// </summary>
+    private static byte[] UploadPackResult() => Encoding.UTF8.GetBytes(PktLine("NAK\n"));
 
     private void Serve()
     {
@@ -96,6 +142,19 @@ internal sealed class StubGitServer : IDisposable
                 _authorizations.Add(authorization ?? NoAuthorization);
             }
 
+            var request = $"{context.Request.HttpMethod} {context.Request.Url?.AbsolutePath}";
+            lock (_requests)
+            {
+                _requests.Add(request);
+            }
+
+            // Drain the body whatever happens to it, so the client is never left writing a pack
+            // request into a socket nobody is reading.
+            using (var body = context.Request.InputStream)
+            {
+                body.CopyTo(Stream.Null);
+            }
+
             if (authorization is null || !_accepts(authorization))
             {
                 context.Response.StatusCode = 401;
@@ -104,10 +163,13 @@ internal sealed class StubGitServer : IDisposable
                 continue;
             }
 
-            var body = EmptyUploadPackAdvertisement();
-            context.Response.ContentType = "application/x-git-upload-pack-advertisement";
-            context.Response.ContentLength64 = body.Length;
-            context.Response.OutputStream.Write(body);
+            var isPackRequest = request == PackRequest;
+            var responseBody = isPackRequest ? UploadPackResult() : UploadPackAdvertisement();
+            context.Response.ContentType = isPackRequest
+                ? "application/x-git-upload-pack-result"
+                : "application/x-git-upload-pack-advertisement";
+            context.Response.ContentLength64 = responseBody.Length;
+            context.Response.OutputStream.Write(responseBody);
             context.Response.Close();
         }
     }
