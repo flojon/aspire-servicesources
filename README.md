@@ -47,9 +47,13 @@ project using the `Aspire.AppHost.Sdk` (`aspire new` / `aspire restore` sets thi
 
 Every push to `main` publishes a prerelease build (`0.x.y-alpha.0.N`) to GitHub Packages.
 Stable releases go to nuget.org only — use those unless you specifically need an unreleased
-fix. The GitHub Packages NuGet feed requires authentication even though the repository is
-public, so consuming a preview means adding the feed with a personal access token that has
-the `read:packages` scope:
+fix.
+
+GitHub's NuGet registry requires authentication for every download, even for public
+packages — unlike the container registry, it has no anonymous access. This is *not* a grant
+on this repository: any authenticated GitHub user can download a public package, so all you
+need is a token on your own account. It must be a **classic** personal access token with the
+`read:packages` scope; fine-grained tokens are not supported by GitHub Packages.
 
 ```bash
 dotnet nuget add source https://nuget.pkg.github.com/flojon/index.json \
