@@ -11,13 +11,24 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)
     {
+        var isDotnetKind = string.Equals(metadata.Kind, LocalKinds.Dotnet, StringComparison.Ordinal);
+
+        // Settle everything configuration alone can settle before paying for a checkout. Looking
+        // the kind up is a dictionary probe against registry state; the handler's own Validate
+        // only reads the kind config. Neither needs a working tree, and running them after the
+        // clone would make a typo'd kind — or a satellite package nobody registered — cost a cold
+        // clone of this repository, and via the prefetch of every other "local" one, before
+        // saying so.
+        var handler = isDotnetKind ? null : ResolveKindHandler(builder, serviceName, metadata);
+        handler?.Validate(serviceName, metadata.KindConfig);
+
         // Blocks on this service's checkout, but every "local" service's checkout was started
         // together on the first AddService call, so the wait is for the slowest one overall rather
         // than for this one in turn. See LocalCheckoutPrefetch.
         var repoRoot = LocalCheckoutPrefetch.For(builder, gitClient)
             .GetRepoRoot(serviceName, metadata, config, builder.AppHostDirectory, gitClient);
 
-        if (string.Equals(metadata.Kind, LocalKinds.Dotnet, StringComparison.Ordinal))
+        if (isDotnetKind)
         {
             var projectPath = ResolveProjectFile(serviceName, repoRoot, metadata.Project);
 
@@ -29,11 +40,15 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
             return ResolvedService.Tag(builder.AddProject(serviceName, projectPath), serviceName, "local");
         }
 
-        return ResolveViaKindHandler(builder, serviceName, metadata, repoRoot);
+        return InvokeKindHandler(builder, serviceName, metadata, repoRoot, handler!);
     }
 
-    private static IResourceBuilder<IResourceWithServiceDiscovery> ResolveViaKindHandler(
-        IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, string repoRoot)
+    /// <summary>
+    /// Looks up the handler for a non-dotnet kind, or throws naming the kind. Deliberately free of
+    /// filesystem and network work so it can run as a pre-flight, before the checkout.
+    /// </summary>
+    private static ILocalResourceKind ResolveKindHandler(
+        IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata)
     {
         var registry = LocalKindRegistry.For(builder);
 
@@ -46,8 +61,13 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
                 "(e.g. builder.UseJavaScript()) before the first AddService call.");
         }
 
-        handler.Validate(serviceName, metadata.KindConfig);
+        return handler;
+    }
 
+    private static IResourceBuilder<IResourceWithServiceDiscovery> InvokeKindHandler(
+        IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, string repoRoot,
+        ILocalResourceKind handler)
+    {
         IResourceBuilder<IResourceWithServiceDiscovery>? resourceBuilder;
         try
         {

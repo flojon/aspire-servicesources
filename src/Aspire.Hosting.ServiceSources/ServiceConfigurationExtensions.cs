@@ -55,7 +55,8 @@ public static class ServiceConfigurationExtensions
         // per-developer switch is the point of the package. The skip is logged rather than silent.
         if (annotation is not null && OutOfBandSources.Contains(annotation.Source))
         {
-            ServiceConfigurationWarnings.For(service.ApplicationBuilder).Add(SkipReason<T>(service.Resource, annotation));
+            ServiceConfigurationWarnings.For(service.ApplicationBuilder)
+                .AddSkip(annotation.ServiceName, annotation.Source, $"Configure<{typeof(T).Name}>");
             return service;
         }
 
@@ -110,28 +111,6 @@ public static class ServiceConfigurationExtensions
     /// throws, because it must return a builder.
     /// </summary>
     private static readonly HashSet<string> OutOfBandSources = new(StringComparer.Ordinal) { "url", "kubernetes" };
-
-    /// <summary>
-    /// Explains a skip in terms of what the reader can act on: which service, which source, what was
-    /// dropped, and where the source is chosen.
-    /// </summary>
-    private static string SkipReason<T>(IResource resource, ServiceSourceAnnotation annotation)
-    {
-        var detail = annotation.Source switch
-        {
-            "url" =>
-                "it resolves to a fixed, already-running URL with no local process to configure",
-            "kubernetes" =>
-                "it resolves to a 'kubectl port-forward' in front of an already-running service, so the " +
-                "configuration would reach kubectl rather than the service",
-            _ => "it runs out of band",
-        };
-
-        return $"Service '{annotation.ServiceName}': skipped Configure<{typeof(T).Name}> because its source is " +
-               $"'{annotation.Source}' — {detail}. The service is expected to be configured wherever it actually " +
-               "runs. Set its source to 'local' or 'container' in servicesources.local.json for this AppHost's " +
-               "configuration to apply.";
-    }
 
     /// <summary>
     /// Names the source as well as the type, because the source is what a developer changes to make

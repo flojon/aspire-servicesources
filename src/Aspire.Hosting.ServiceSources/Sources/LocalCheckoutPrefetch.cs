@@ -39,14 +39,44 @@ internal sealed class LocalCheckoutPrefetch
 
     private readonly Dictionary<string, Task<CheckoutResult>> _checkouts = new(StringComparer.Ordinal);
 
+    // Plain object rather than System.Threading.Lock: this package still targets net8.0.
+    private readonly object _gate = new();
+
+    private bool _started;
+
     public static LocalCheckoutPrefetch For(
-        IDistributedApplicationBuilder builder, IGitClient gitClient) =>
-        Cache.GetValue(builder, b =>
+        IDistributedApplicationBuilder builder, IGitClient gitClient)
+    {
+        // The factory has to stay free of side effects. ConditionalWeakTable.GetValue may run it
+        // concurrently for the same key and keep only one of the results, so starting the clones
+        // in there would let a discarded instance race the surviving one into the same checkout
+        // directories. Starting them behind a lock on the instance that actually won is the shape
+        // UrlSource's CheckRegistration uses for the same reason.
+        var prefetch = Cache.GetValue(builder, _ => new LocalCheckoutPrefetch());
+
+        prefetch.EnsureStarted(builder, gitClient);
+
+        return prefetch;
+    }
+
+    /// <summary>
+    /// Starts the prefetch once per builder. Returns only after every checkout task has been
+    /// created, so <see cref="_checkouts"/> is fully populated — and thereafter read-only — before
+    /// any caller can reach <see cref="GetRepoRoot"/>.
+    /// </summary>
+    private void EnsureStarted(IDistributedApplicationBuilder builder, IGitClient gitClient)
+    {
+        lock (_gate)
         {
-            var prefetch = new LocalCheckoutPrefetch();
-            prefetch.Run(b, gitClient);
-            return prefetch;
-        });
+            if (_started)
+            {
+                return;
+            }
+
+            _started = true;
+            Run(builder, gitClient);
+        }
+    }
 
     /// <summary>
     /// The checkout directory for <paramref name="serviceName"/>, re-throwing the failure the

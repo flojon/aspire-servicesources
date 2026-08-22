@@ -128,6 +128,42 @@ public class ServiceConfigurationExtensionsTests
     }
 
     [Fact]
+    public void Configure_ManyCallsOnOneService_ReportOneAggregatedSkip()
+    {
+        var builder = Builder();
+        var service = AddUrlService(builder);
+
+        // The shape this package is built for: one service carrying a lot of AppHost configuration.
+        // Before these were grouped, switching it to an out-of-band source emitted one near-identical
+        // warning per call.
+        for (var i = 0; i < 25; i++)
+        {
+            service.Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B"));
+        }
+
+        service.Configure<IResourceWithWaitSupport>(_ => { });
+
+        var message = Assert.Single(ServiceConfigurationWarnings.For(builder).Messages);
+        Assert.Contains("26 Configure calls", message);
+        Assert.Contains("Configure<IResourceWithEnvironment> ×25", message);
+        Assert.Contains("Configure<IResourceWithWaitSupport>", message);
+    }
+
+    [Fact]
+    public void Configure_OnTwoDifferentServices_ReportsThemSeparately()
+    {
+        var builder = Builder();
+
+        AddUrlService(builder).Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B"));
+        new UrlSource()
+            .Resolve(builder, "billing", UrlMetadata, new ServiceDeveloperConfig { Source = "url" })
+            .Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B"));
+
+        // Grouping is per service, not global — each service names itself and its own remedy.
+        Assert.Equal(2, ServiceConfigurationWarnings.For(builder).Messages.Count);
+    }
+
+    [Fact]
     public void Configure_OnKubernetesSource_SkipsRatherThanConfiguringThePortForward()
     {
         var builder = Builder();

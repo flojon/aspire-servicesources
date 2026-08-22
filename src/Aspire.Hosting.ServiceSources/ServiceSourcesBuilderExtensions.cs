@@ -44,7 +44,10 @@ public static class ServiceSourcesBuilderExtensions
     /// The resource is registered in Aspire's model, so configuration applied through the returned
     /// builder reaches the process that actually runs, and a container consumer's
     /// <c>WithReference(...)</c> resolves. Which configuration applies depends on the resolved
-    /// source; the <c>"url"</c> source runs out of band and accepts none.
+    /// source: the <c>"url"</c> and <c>"kubernetes"</c> sources run out of band — one is a fixed
+    /// remote URL, the other a <c>kubectl port-forward</c> in front of something already running —
+    /// so neither accepts any, and <see cref="ServiceConfigurationExtensions.Configure{T}"/> skips
+    /// with a warning rather than applying it.
     /// </para>
     /// <para>
     /// The bare <c>IResourceBuilder&lt;IResourceWithServiceDiscovery&gt;</c> return type is load

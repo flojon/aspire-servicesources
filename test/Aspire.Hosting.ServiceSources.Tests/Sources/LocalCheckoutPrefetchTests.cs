@@ -104,6 +104,24 @@ public class LocalCheckoutPrefetchTests
         return dir;
     }
 
+    /// <summary>
+    /// Writes an app host directory whose services all live in <b>one</b> repository — the monorepo
+    /// shape, where each service is a different project inside the same clone.
+    /// </summary>
+    private static string CreateMonorepoAppHostDirectory(string repository, params string[] localServices)
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+
+        var yaml = string.Join("\n", localServices.Select(name =>
+            $"  {name}:\n    repository: {repository}\n    project: Service.csproj"));
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), $"services:\n{yaml}\n");
+
+        var json = string.Join(",", localServices.Select(name => $"\"{name}\": {{ \"source\": \"local\" }}"));
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), $"{{ \"services\": {{ {json} }} }}");
+
+        return dir;
+    }
+
     private static ServiceMetadata Metadata(string name) =>
         new() { Repository = $"https://example.com/{name}.git", Project = "Service.csproj" };
 
@@ -122,6 +140,26 @@ public class LocalCheckoutPrefetchTests
         source.Resolve(builder, "orders", Metadata("orders"), DevConfig());
 
         Assert.Equal(2, git.Cloned.Count);
+    }
+
+    [Fact]
+    public void FirstAddService_TwoServicesInOneRepository_DownloadsItTwiceConcurrently()
+    {
+        const string Repository = "https://example.com/monorepo.git";
+        var dir = CreateMonorepoAppHostDirectory(Repository, "orders", "billing");
+        var builder = TestHelpers.CreateBuilder(dir);
+        // Barrier(2): neither clone may return until both have started, so this cannot pass unless
+        // the two downloads really do overlap.
+        var git = new FakeGitClient { StartBarrier = new Barrier(2) };
+        var source = new LocalProjectSource(git);
+
+        source.Resolve(builder, "orders", new ServiceMetadata { Repository = Repository, Project = "Service.csproj" }, DevConfig());
+
+        // Checkouts are keyed by service, not by repository, so a monorepo is fetched once per
+        // service that lives in it — concurrently, competing for the same bandwidth. Documented
+        // rather than asserted-against: each service needs its own working tree (they can sit on
+        // different refs), so sharing one clone is not a drop-in change.
+        Assert.Equal([Repository, Repository], git.Cloned);
     }
 
     [Fact]
@@ -255,9 +293,15 @@ public class LocalCheckoutPrefetchTests
         var dir = CreateAppHostDirectory("frontend");
         var builder = TestHelpers.CreateBuilder(dir);
         var metadata = new ServiceMetadata { Repository = "https://example.com/frontend.git", Kind = "javascript" };
+        var git = new FakeGitClient();
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => new LocalProjectSource(new FakeGitClient()).Resolve(builder, "frontend", metadata, DevConfig()));
+            () => new LocalProjectSource(git).Resolve(builder, "frontend", metadata, DevConfig()));
+
+        // The kind lookup is a registry probe, so it has to happen before the checkout: a typo'd
+        // kind must not cost a cold clone of this repository — nor, through the prefetch, of every
+        // other "local" service in the developer config.
+        Assert.Empty(git.Cloned);
 
         Assert.Contains("frontend", ex.Message);
         Assert.Contains("javascript", ex.Message);
