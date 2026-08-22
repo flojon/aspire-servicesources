@@ -12,9 +12,6 @@ public class AddServiceIntegrationTests
     private static IDistributedApplicationBuilder CreateBuilder(string appHostDirectory) =>
         TestHelpers.CreateBuilder(appHostDirectory);
 
-    private static Task PublishBeforeStartEventAsync(IDistributedApplicationBuilder builder) =>
-        TestHelpers.PublishBeforeStartEventAsync(builder);
-
     private static int? PortOf(IDistributedApplicationBuilder builder, string serviceName)
     {
         var realResource = Assert.Single(builder.Resources, r => r.Name == serviceName);
@@ -24,7 +21,7 @@ public class AddServiceIntegrationTests
     }
 
     [Fact]
-    public async Task AddService_ManagedClone_ClonesRealRepoAndChecksOutFeatureRef()
+    public void AddService_ManagedClone_ClonesRealRepoAndChecksOutFeatureRef()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
 
@@ -45,14 +42,13 @@ public class AddServiceIntegrationTests
 
         var service = builder.AddService("orders");
 
-        // Deferred resolution: nothing is cloned or registered until BeforeStartEvent fires.
+        // Eager resolution: AddService hands back the real, registered resource, so the checkout
+        // has already happened by the time it returns. Checkouts still run in parallel across
+        // services — see LocalCheckoutPrefetchTests.
         var clonedProjectPath = Path.Combine(appHostDir, ".servicesources", "checkouts", "orders", "SampleProj", "SampleProj.csproj");
-        Assert.False(File.Exists(clonedProjectPath));
-        Assert.DoesNotContain(builder.Resources, r => r.Name == "orders");
-
-        await PublishBeforeStartEventAsync(builder);
-
         Assert.True(File.Exists(clonedProjectPath));
+        Assert.Contains(builder.Resources, r => ReferenceEquals(r, service.Resource));
+        Assert.IsAssignableFrom<ProjectResource>(service.Resource);
 
         var endpoint = service.GetEndpoint("http");
         Assert.Equal("http", endpoint.EndpointName);
@@ -60,7 +56,7 @@ public class AddServiceIntegrationTests
     }
 
     [Fact]
-    public async Task AddService_TwoServicesSameRepoDifferentRefs_BothResolveIndependently()
+    public void AddService_TwoServicesSameRepoDifferentRefs_BothResolveIndependently()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
 
@@ -87,14 +83,13 @@ public class AddServiceIntegrationTests
         builder.AddService("orders-main");
         builder.AddService("orders-v2");
 
-        await PublishBeforeStartEventAsync(builder);
 
         Assert.Equal(5001, PortOf(builder, "orders-main"));
         Assert.Equal(5002, PortOf(builder, "orders-v2"));
     }
 
     [Fact]
-    public async Task AddService_TwoServicesSameRepoSameRef_BothResolveIndependently()
+    public void AddService_TwoServicesSameRepoSameRef_BothResolveIndependently()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
 
@@ -121,7 +116,6 @@ public class AddServiceIntegrationTests
         builder.AddService("orders-a");
         builder.AddService("orders-b");
 
-        await PublishBeforeStartEventAsync(builder);
 
         Assert.Equal(5001, PortOf(builder, "orders-a"));
         Assert.Equal(5001, PortOf(builder, "orders-b"));

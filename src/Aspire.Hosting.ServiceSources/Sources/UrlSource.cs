@@ -1,12 +1,28 @@
+using System.Net.Sockets;
+using System.Runtime.CompilerServices;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
 
-// Resolves a service reachable at a fixed, pre-known URL. Doesn't delegate to Aspire's
-// `ExternalServiceResource` — it has no `EndpointAnnotation`, so it can't satisfy
-// `IResourceWithServiceDiscovery` (microsoft/aspire#9965, #15961, #15993; tracked here as #5) —
-// so `ServiceResource.CreateFacadeForUri` builds the `EndpointAnnotation` by hand instead.
+/// <summary>
+/// Resolves a service reachable at a fixed, pre-known URL.
+/// </summary>
+/// <remarks>
+/// The odd one out: every other source registers its resource, but there is nothing here for Aspire
+/// to run. Aspire's <c>ExternalServiceResource</c> would be the natural home and DCP handles it
+/// correctly for container consumers, but it is <c>sealed</c> and carries no
+/// <see cref="EndpointAnnotation"/>, so it cannot satisfy <see cref="IResourceWithServiceDiscovery"/>
+/// (microsoft/aspire#9965, #15961, #15993; tracked here as #5). So this source keeps building the
+/// <see cref="EndpointAnnotation"/> by hand, with the <see cref="AllocatedEndpoint"/> set eagerly
+/// since DCP will never allocate one, and leaves the resource unregistered.
+/// <para>
+/// That is issue #58: a <b>container</b> consumer of one of these fails inside DCP with
+/// <c>"Host endpoint 'x' on resource 'y' should have an associated DCP Service resource already set
+/// up"</c>. <see cref="RegisterContainerConsumerCheck"/> catches that case up front and explains it.
+/// Host-process consumers work and are unaffected.
+/// </para>
+/// </remarks>
 internal sealed class UrlSource : IServiceSource
 {
     public IReadOnlySet<string> RelevantFields { get; } = new HashSet<string> { "url" };
@@ -16,7 +32,84 @@ internal sealed class UrlSource : IServiceSource
     {
         var uri = ResolveUrl(serviceName, metadata, config);
 
-        return ServiceResource.CreateFacadeForUri(builder, serviceName, uri);
+        var resource = new ServiceUrlResource(serviceName);
+        var endpoint = new EndpointAnnotation(
+            ProtocolType.Tcp, uriScheme: uri.Scheme, name: uri.Scheme, transport: "http", port: uri.Port, targetPort: uri.Port)
+        {
+            TargetHost = uri.Host,
+            IsProxied = false,
+        };
+        endpoint.AllocatedEndpoint = new AllocatedEndpoint(
+            endpoint, uri.Host, uri.Port, EndpointBindingMode.SingleAddress, targetPortExpression: null);
+        resource.Annotations.Add(endpoint);
+
+        RegisterContainerConsumerCheck(builder);
+
+        return ResolvedService.Tag(builder.CreateResourceBuilder(resource), serviceName, "url");
+    }
+
+    /// <summary>
+    /// Subscribes (once per builder) a <c>BeforeStartEvent</c> pre-flight that turns the DCP failure
+    /// described in this class's remarks into a ServiceSources error naming the actual cause.
+    /// Runs before DCP starts anything, so the AppHost fails with an explanation instead of a stack
+    /// trace from inside <c>ContainerCreator</c>.
+    /// </summary>
+    private static void RegisterContainerConsumerCheck(IDistributedApplicationBuilder builder)
+        => ContainerConsumerCheckRegistrations.GetValue(builder, static _ => new CheckRegistration())
+            .EnsureRegistered(builder);
+
+    /// <summary>
+    /// Keyed weakly so a builder isn't kept alive for the process lifetime by this bookkeeping, and
+    /// guarded because AddService can run on more than one builder concurrently (xUnit does exactly
+    /// that). Same shape as <see cref="LocalKindRegistry"/> and <see cref="LocalCheckoutPrefetch"/>.
+    /// </summary>
+    private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, CheckRegistration>
+        ContainerConsumerCheckRegistrations = new();
+
+    private sealed class CheckRegistration
+    {
+        private bool _registered;
+
+        public void EnsureRegistered(IDistributedApplicationBuilder builder)
+        {
+            lock (this)
+            {
+                if (_registered)
+                {
+                    return;
+                }
+
+                _registered = true;
+                Subscribe(builder);
+            }
+        }
+    }
+
+    private static void Subscribe(IDistributedApplicationBuilder builder)
+    {
+        builder.Eventing.Subscribe<BeforeStartEvent>((@event, _) =>
+        {
+            foreach (var consumer in @event.Model.Resources.OfType<ContainerResource>())
+            {
+                foreach (var reference in consumer.Annotations.OfType<EndpointReferenceAnnotation>())
+                {
+                    if (reference.Resource is not ServiceUrlResource urlService)
+                    {
+                        continue;
+                    }
+
+                    throw new ServiceSourcesConfigurationException(
+                        $"Container '{consumer.Name}' references service '{urlService.Name}', whose source is 'url'. " +
+                        "A 'url'-sourced service has no resource for Aspire to run, so DCP has no Service object to " +
+                        "plumb container-to-host networking through, and the container would fail to start. " +
+                        "Reference it from a project or executable instead, or give the service a source that runs " +
+                        "locally ('local' or 'container') in servicesources.local.json. " +
+                        "Tracked as issue #58; it depends on microsoft/aspire#9965.");
+                }
+            }
+
+            return Task.CompletedTask;
+        });
     }
 
     internal static Uri ResolveUrl(string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)

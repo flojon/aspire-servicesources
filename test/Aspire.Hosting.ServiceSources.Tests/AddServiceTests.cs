@@ -12,11 +12,8 @@ public class AddServiceTests
     private static IDistributedApplicationBuilder CreateBuilder(string appHostDirectory) =>
         TestHelpers.CreateBuilder(appHostDirectory);
 
-    private static Task PublishBeforeStartEventAsync(IDistributedApplicationBuilder builder) =>
-        TestHelpers.PublishBeforeStartEventAsync(builder);
-
     [Fact]
-    public async Task AddService_LocalSourceWithPathOverride_ReturnsFacadeWrappingRealProject()
+    public void AddService_LocalSourceWithPathOverride_ReturnsTheRealRegisteredProject()
     {
         var projectDir = Directory.CreateTempSubdirectory().FullName;
         File.WriteAllText(Path.Combine(projectDir, "Orders.csproj"), """
@@ -41,14 +38,13 @@ public class AddServiceTests
         var builder = CreateBuilder(appHostDir);
 
         var service = builder.AddService("orders");
-        await PublishBeforeStartEventAsync(builder);
 
         Assert.Contains(builder.Resources, r => r.Name == "orders");
-        Assert.DoesNotContain(builder.Resources, r => ReferenceEquals(r, service.Resource));
+        Assert.Contains(builder.Resources, r => ReferenceEquals(r, service.Resource));
     }
 
     [Fact]
-    public async Task AddService_RelativePathOverride_ResolvesRelativeToAppHostDirectoryNotProcessCwd()
+    public void AddService_RelativePathOverride_ResolvesRelativeToAppHostDirectoryNotProcessCwd()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
         var projectDir = Directory.CreateTempSubdirectory().FullName;
@@ -78,7 +74,6 @@ public class AddServiceTests
         var builder = CreateBuilder(appHostDir);
 
         var service = builder.AddService("orders");
-        await PublishBeforeStartEventAsync(builder);
 
         Assert.Contains(builder.Resources, r => r.Name == "orders");
     }
@@ -106,7 +101,7 @@ public class AddServiceTests
     }
 
     [Fact]
-    public async Task AddService_KubernetesSource_AddsPortForwardExecutableAndReturnsFacade()
+    public async Task AddService_KubernetesSource_AddsPortForwardExecutableAndReturnsIt()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
@@ -126,14 +121,20 @@ public class AddServiceTests
 
         var service = builder.AddService("orders");
 
-        Assert.Contains(builder.Resources, r => r.Name == "orders-portforward");
-        Assert.DoesNotContain(builder.Resources, r => ReferenceEquals(r, service.Resource));
+        // Named for the service, not "orders-portforward": Aspire derives service-discovery keys
+        // from the resource name, so a suffix would publish this as "services__orders-portforward"
+        // and break a consumer resolving "orders".
+        Assert.Equal("orders", service.Resource.Name);
+        Assert.DoesNotContain(builder.Resources, r => r.Name.Contains("portforward", StringComparison.Ordinal));
+        // No facade any more: the returned builder wraps the registered port-forward executable
+        // itself, so DCP creates a Service for it and a container consumer can reference it (#58).
+        Assert.Contains(builder.Resources, r => ReferenceEquals(r, service.Resource));
 
         var endpoint = service.GetEndpoint("http");
         Assert.Equal("http", endpoint.EndpointName);
 
-        var executable = Assert.IsType<ExecutableResource>(
-            Assert.Single(builder.Resources, r => r.Name == "orders-portforward"));
+        var executable = Assert.IsAssignableFrom<ExecutableResource>(
+            Assert.Single(builder.Resources, r => r.Name == "orders"));
 
         Assert.Equal("kubectl", executable.Command);
 
@@ -156,7 +157,7 @@ public class AddServiceTests
     }
 
     [Fact]
-    public void AddService_UrlSource_ReturnsFacadeResolvingToConfiguredUrl()
+    public void AddService_UrlSource_StaysUnregisteredAndResolvesToConfiguredUrl()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
@@ -175,6 +176,9 @@ public class AddServiceTests
 
         var service = builder.AddService("orders");
 
+        // The one source that still hands back an unregistered resource: there is nothing for
+        // Aspire to run, and ExternalServiceResource — which DCP would materialize — is sealed and
+        // can't satisfy IResourceWithServiceDiscovery. See UrlSource's remarks and issue #58.
         Assert.DoesNotContain(builder.Resources, r => ReferenceEquals(r, service.Resource));
 
         var endpoint = service.GetEndpoint("https");
@@ -254,7 +258,7 @@ public class AddServiceTests
     }
 
     [Fact]
-    public void AddService_ContainerSource_AddsContainerAndReturnsFacade()
+    public void AddService_ContainerSource_AddsContainerAndReturnsIt()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
@@ -276,9 +280,9 @@ public class AddServiceTests
         var service = builder.AddService("orders");
 
         Assert.Contains(builder.Resources, r => r.Name == "orders");
-        Assert.DoesNotContain(builder.Resources, r => ReferenceEquals(r, service.Resource));
+        Assert.Contains(builder.Resources, r => ReferenceEquals(r, service.Resource));
 
-        var container = Assert.IsType<ContainerResource>(
+        var container = Assert.IsAssignableFrom<ContainerResource>(
             Assert.Single(builder.Resources, r => r.Name == "orders"));
         var imageAnnotation = container.Annotations.OfType<ContainerImageAnnotation>().Single();
         Assert.Equal("ghcr.io/company/orders", imageAnnotation.Image);
@@ -315,7 +319,7 @@ public class AddServiceTests
 
         var service = builder.AddService("orders");
 
-        var container = Assert.IsType<ContainerResource>(
+        var container = Assert.IsAssignableFrom<ContainerResource>(
             Assert.Single(builder.Resources, r => r.Name == "orders"));
         var imageAnnotation = container.Annotations.OfType<ContainerImageAnnotation>().Single();
         Assert.Equal("v1.4.2", imageAnnotation.Tag);
