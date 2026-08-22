@@ -91,25 +91,64 @@ internal sealed class UrlSource : IServiceSource
         {
             foreach (var consumer in @event.Model.Resources.OfType<ContainerResource>())
             {
-                foreach (var reference in consumer.Annotations.OfType<EndpointReferenceAnnotation>())
+                if (ConsumedUrlService(consumer) is not { } urlService)
                 {
-                    if (reference.Resource is not ServiceUrlResource urlService)
-                    {
-                        continue;
-                    }
-
-                    throw new ServiceSourcesConfigurationException(
-                        $"Container '{consumer.Name}' references service '{urlService.Name}', whose source is 'url'. " +
-                        "A 'url'-sourced service has no resource for Aspire to run, so DCP has no Service object to " +
-                        "plumb container-to-host networking through, and the container would fail to start. " +
-                        "Reference it from a project or executable instead, or give the service a source that runs " +
-                        "locally ('local' or 'container') in servicesources.local.json. " +
-                        "Tracked as issue #58; it depends on microsoft/aspire#9965.");
+                    continue;
                 }
+
+                throw new ServiceSourcesConfigurationException(
+                    $"Container '{consumer.Name}' references service '{urlService.Name}', whose source is 'url'. " +
+                    "A 'url'-sourced service has no resource for Aspire to run, so DCP has no Service object to " +
+                    "plumb container-to-host networking through, and the container would fail to start. " +
+                    "Reference it from a project or executable instead, or give the service a source that runs " +
+                    "locally ('local' or 'container') in servicesources.local.json. " +
+                    "Tracked as issue #58; it depends on microsoft/aspire#9965.");
             }
 
             return Task.CompletedTask;
         });
+    }
+
+    /// <summary>
+    /// Aspire's relationship type for a resource one depends on, as opposed to the <c>"Parent"</c>
+    /// that <c>WithParentRelationship</c> records. Not exposed as a constant by Aspire.
+    /// </summary>
+    private const string ReferenceRelationship = "Reference";
+
+    /// <summary>
+    /// The <c>"url"</c>-sourced service <paramref name="consumer"/> consumes, or
+    /// <see langword="null"/> if it consumes none.
+    /// </summary>
+    /// <remarks>
+    /// Two annotations, because Aspire records the same dependency differently depending on how the
+    /// AppHost wrote it. <c>WithReference(service)</c> leaves an
+    /// <see cref="EndpointReferenceAnnotation"/>; <c>WithEnvironment("X", service.GetEndpoint("https"))</c>
+    /// leaves only a <see cref="ResourceRelationshipAnnotation"/>. Both reach DCP as the same
+    /// container-to-host wiring and fail identically, so matching just the first let the second
+    /// through to the raw DCP trace this pre-flight exists to replace. Relationships are narrowed to
+    /// <see cref="ReferenceRelationship"/> so that <c>WithParentRelationship</c>, which implies no
+    /// networking, is not failed.
+    /// </remarks>
+    private static ServiceUrlResource? ConsumedUrlService(ContainerResource consumer)
+    {
+        foreach (var annotation in consumer.Annotations)
+        {
+            IResource? consumed = annotation switch
+            {
+                EndpointReferenceAnnotation endpointReference => endpointReference.Resource,
+                ResourceRelationshipAnnotation relationship
+                    when string.Equals(relationship.Type, ReferenceRelationship, StringComparison.Ordinal)
+                    => relationship.Resource,
+                _ => null,
+            };
+
+            if (consumed is ServiceUrlResource urlService)
+            {
+                return urlService;
+            }
+        }
+
+        return null;
     }
 
     internal static Uri ResolveUrl(string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)

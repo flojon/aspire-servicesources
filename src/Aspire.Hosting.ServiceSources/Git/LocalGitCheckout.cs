@@ -47,20 +47,13 @@ internal static class LocalGitCheckout
         else
         {
             EnsureGitignore(appHostDirectory);
-            repoRoot = Path.Combine(appHostDirectory, ".servicesources", "checkouts", serviceName);
+            var checkoutsRoot = Path.Combine(appHostDirectory, ".servicesources", "checkouts");
+            repoRoot = Path.Combine(checkoutsRoot, serviceName);
             var reference = config.Ref ?? metadata.DefaultRef;
 
             if (!Directory.Exists(Path.Combine(repoRoot, ".git")))
             {
-                try
-                {
-                    gitClient.Clone(metadata.Repository, repoRoot);
-                }
-                catch (Exception ex)
-                {
-                    throw new ServiceSourcesConfigurationException(
-                        $"Service '{serviceName}': failed to clone repository '{metadata.Repository}' into '{repoRoot}'.", ex);
-                }
+                CloneIntoPlace(serviceName, metadata, checkoutsRoot, repoRoot, gitClient);
 
                 if (reference is not null)
                 {
@@ -98,6 +91,95 @@ internal static class LocalGitCheckout
         }
 
         return repoRoot;
+    }
+
+    /// <summary>
+    /// Clones into a scratch directory alongside the destination and renames it into place, so an
+    /// interrupted clone can never leave a half-populated <c>checkouts/&lt;service&gt;</c> behind.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Cloning straight into the destination is not recoverable. A clone is not one filesystem
+    /// operation, and nothing that runs it is guaranteed to finish — checkouts are prefetched on
+    /// background threads (see <see cref="Sources.LocalCheckoutPrefetch"/>), so a Ctrl-C, or an
+    /// unrelated <c>AddService</c> that throws and takes the host down with it, can stop a clone
+    /// halfway. What survives is a directory with content but no <c>.git</c>: exactly the state
+    /// that sends the next run back down this branch, where libgit2 refuses to clone into a
+    /// non-empty directory ("exists and is not an empty directory"). The service would then be
+    /// unresolvable on every subsequent run until someone deleted the directory by hand.
+    /// </para>
+    /// <para>
+    /// Renaming sidesteps that. Scratch and destination share a parent, so the move is a single
+    /// rename(2)/MoveFileEx and <c>checkouts/&lt;service&gt;</c> is only ever absent or a complete
+    /// clone — never something in between.
+    /// </para>
+    /// </remarks>
+    private static void CloneIntoPlace(
+        string serviceName, ServiceMetadata metadata, string checkoutsRoot, string repoRoot, IGitClient gitClient)
+    {
+        Directory.CreateDirectory(checkoutsRoot);
+
+        // Debris from a version that predates this method, or from a crash between here and the
+        // rename below. Everything under .servicesources is tool-managed and gitignored, and a
+        // checkout with no ".git" holds nothing worth keeping.
+        if (Directory.Exists(repoRoot))
+        {
+            try
+            {
+                Directory.Delete(repoRoot, recursive: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Service '{serviceName}': the checkout at '{repoRoot}' is not a git repository — it is left over " +
+                    "from an interrupted clone — and could not be removed automatically. Delete it and re-run.", ex);
+            }
+        }
+
+        // Unique per attempt: two builders resolving the same service concurrently (xUnit does
+        // exactly that) must not clone into a shared scratch directory.
+        var scratch = Path.Combine(checkoutsRoot, $".incoming-{serviceName}-{Guid.NewGuid():N}");
+
+        try
+        {
+            try
+            {
+                gitClient.Clone(metadata.Repository, scratch);
+            }
+            catch (Exception ex)
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Service '{serviceName}': failed to clone repository '{metadata.Repository}' into '{repoRoot}'.", ex);
+            }
+
+            try
+            {
+                Directory.Move(scratch, repoRoot);
+            }
+            catch (IOException) when (Directory.Exists(Path.Combine(repoRoot, ".git")))
+            {
+                // A concurrent resolution of the same service landed its clone first. Ours is
+                // redundant rather than wrong — discard it below and use theirs.
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(scratch))
+            {
+                try
+                {
+                    Directory.Delete(scratch, recursive: true);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // Best effort, deliberately not fatal. A leaked scratch directory costs disk
+                    // inside a gitignored, tool-managed tree and can never block a later clone:
+                    // its name is unique per attempt and the destination name is untouched.
+                    // Sweeping these on startup would be worse than leaking them — a second
+                    // AppHost running concurrently would have its in-flight clone deleted.
+                }
+            }
+        }
     }
 
     private static void CheckoutWithFetchRetry(

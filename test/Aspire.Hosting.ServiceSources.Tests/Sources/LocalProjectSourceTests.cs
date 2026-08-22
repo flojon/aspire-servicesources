@@ -17,6 +17,13 @@ public class LocalProjectSourceTests
 
         public Exception? CloneException { get; set; }
 
+        /// <summary>
+        /// Makes <see cref="Clone"/> write into the destination and only then throw, reproducing a
+        /// clone interrupted partway through (a killed process, a dropped connection) rather than
+        /// one that fails before touching the disk.
+        /// </summary>
+        public Exception? PartialCloneException { get; set; }
+
         public Exception? CheckoutException { get; set; }
 
         private int _checkoutAttempts;
@@ -27,9 +34,26 @@ public class LocalProjectSourceTests
 
         public void Clone(string repositoryUrl, string destinationPath)
         {
+            // libgit2 refuses to clone into a directory that already has content ("exists and is
+            // not an empty directory"), which is precisely what turns an interrupted clone into a
+            // permanently unresolvable service. The fake has to model that, or the tests guarding
+            // against it pass vacuously.
+            if (Directory.Exists(destinationPath) && Directory.EnumerateFileSystemEntries(destinationPath).Any())
+            {
+                throw new IOException($"'{destinationPath}' exists and is not an empty directory");
+            }
+
             if (CloneException is not null)
             {
                 throw CloneException;
+            }
+
+            if (PartialCloneException is not null)
+            {
+                ClonedRepos.Add((repositoryUrl, destinationPath));
+                Directory.CreateDirectory(destinationPath);
+                File.WriteAllText(Path.Combine(destinationPath, "partial.pack"), "half a clone");
+                throw PartialCloneException;
             }
 
             ClonedRepos.Add((repositoryUrl, destinationPath));
@@ -91,8 +115,8 @@ public class LocalProjectSourceTests
     private static string UnusedAppHostDirectory => Directory.CreateTempSubdirectory().FullName;
 
     /// <summary>
-    /// Mirrors the exact composition <see cref="PendingLocalResolutions.ResolveOne"/> uses in
-    /// production (<see cref="LocalGitCheckout.ResolveRepoRoot"/> then
+    /// Mirrors the exact composition <see cref="LocalProjectSource"/> uses in production
+    /// (<see cref="LocalGitCheckout.ResolveRepoRoot"/> then
     /// <see cref="LocalProjectSource.ResolveProjectFile"/>), so these tests exercise the real
     /// resolution path rather than a separate one that could drift from it.
     /// </summary>
@@ -182,10 +206,17 @@ public class LocalProjectSourceTests
         var projectPath = ResolveProjectPath(
             ServiceName, Metadata(repository: "https://github.com/company/orders"), DevConfig(), appHostDirectory, gitClient);
 
+        var expectedRepoRoot = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
+
         var (repositoryUrl, destinationPath) = Assert.Single(gitClient.ClonedRepos);
         Assert.Equal("https://github.com/company/orders", repositoryUrl);
-        Assert.Equal(Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName), destinationPath);
-        Assert.Equal(Path.Combine(destinationPath, "Orders.csproj"), projectPath);
+
+        // Git clones into a scratch sibling that is renamed into place (LocalGitCheckout.CloneIntoPlace),
+        // so the contract is where the checkout ends up, not where git was pointed.
+        Assert.Equal(Path.Combine(appHostDirectory, ".servicesources", "checkouts"), Path.GetDirectoryName(destinationPath));
+        Assert.NotEqual(expectedRepoRoot, destinationPath);
+        Assert.False(Directory.Exists(destinationPath), "the scratch directory should not outlive the rename");
+        Assert.Equal(Path.Combine(expectedRepoRoot, "Orders.csproj"), projectPath);
     }
 
     [Fact]
@@ -254,9 +285,63 @@ public class LocalProjectSourceTests
         ResolveProjectPath(
             ServiceName, Metadata(repository: "https://github.com/company/orders"), DevConfig(), appHostDirectory, gitClient);
 
-        var (repositoryUrl, destinationPath) = Assert.Single(gitClient.ClonedRepos);
-        Assert.Equal("https://github.com/company/orders", repositoryUrl);
-        Assert.Equal(repoDir, destinationPath);
+        Assert.Equal("https://github.com/company/orders", Assert.Single(gitClient.ClonedRepos).RepositoryUrl);
+        Assert.True(File.Exists(Path.Combine(repoDir, "Orders.csproj")));
+    }
+
+    [Fact]
+    public void ResolveProjectPath_DirectoryHasContentButNoGitMarker_ClearsTheDebrisAndReClones()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
+        Directory.CreateDirectory(repoDir);
+        // What an interrupted clone leaves behind: content, but no ".git". libgit2 refuses to clone
+        // into a non-empty directory, so before this was cleared the service stayed unresolvable on
+        // every subsequent run until someone deleted the directory by hand.
+        File.WriteAllText(Path.Combine(repoDir, "partial.pack"), "half a clone");
+        var gitClient = new FakeGitClient();
+
+        var projectPath = ResolveProjectPath(
+            ServiceName, Metadata(), DevConfig(), appHostDirectory, gitClient);
+
+        Assert.Single(gitClient.ClonedRepos);
+        Assert.False(File.Exists(Path.Combine(repoDir, "partial.pack")));
+        Assert.Equal(Path.Combine(repoDir, "Orders.csproj"), projectPath);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_CloneDiesPartway_LeavesNoCheckoutDirectoryBehind()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
+        var gitClient = new FakeGitClient { PartialCloneException = new InvalidOperationException("connection reset") };
+
+        Assert.Throws<ServiceSourcesConfigurationException>(() => ResolveProjectPath(
+            ServiceName, Metadata(), DevConfig(), appHostDirectory, gitClient));
+
+        // The half-written clone must not be observable as the checkout: leaving it there is what
+        // poisons the directory for every later run.
+        Assert.False(Directory.Exists(repoDir));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(
+            Path.Combine(appHostDirectory, ".servicesources", "checkouts")));
+    }
+
+    [Fact]
+    public void ResolveProjectPath_RetriedAfterAPartialClone_Succeeds()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var failing = new FakeGitClient { PartialCloneException = new InvalidOperationException("connection reset") };
+
+        Assert.Throws<ServiceSourcesConfigurationException>(() => ResolveProjectPath(
+            ServiceName, Metadata(), DevConfig(), appHostDirectory, failing));
+
+        // The whole point of the rename: a failed attempt costs nothing but the download.
+        var projectPath = ResolveProjectPath(
+            ServiceName, Metadata(), DevConfig(), appHostDirectory, new FakeGitClient());
+
+        Assert.Equal(
+            Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName, "Orders.csproj"),
+            projectPath);
     }
 
     [Fact]
