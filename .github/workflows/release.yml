@@ -42,3 +42,21 @@ jobs:
         # ANY 409 as a benign "already published this exact version", which also masked a rejection
         # for an unrelated reason (a reserved ID prefix owned by someone else) as a false success.
         run: dotnet nuget push "./artifacts/*.nupkg" --source https://api.nuget.org/v3/index.json --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
+
+  # main publishes a preview per commit; a release makes the ones behind it obsolete. Pruned
+  # on release rather than on every preview push so previews stay installable in between.
+  prune-previews:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+
+    steps:
+      - name: Delete superseded prerelease versions
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: KoalaSoft.Aspire.Hosting.ServiceSources
+          package-type: nuget
+          delete-only-pre-release-versions: "true"
+          # Floor: GitHub Packages holds only previews, so an unbounded prune empties it.
+          min-versions-to-keep: 5

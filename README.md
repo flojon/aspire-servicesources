@@ -47,7 +47,8 @@ project using the `Aspire.AppHost.Sdk` (`aspire new` / `aspire restore` sets thi
 
 Every push to `main` publishes a prerelease build (`0.x.y-alpha.0.N`) to GitHub Packages.
 Stable releases go to nuget.org only — use those unless you specifically need an unreleased
-fix.
+fix. Previews are pruned after each release — only the five most recent are kept — so treat
+them as disposable and never pin one in a long-lived project.
 
 GitHub's NuGet registry requires authentication for every download, even for public
 packages — unlike the container registry, it has no anonymous access. This is *not* a grant
