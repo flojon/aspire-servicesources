@@ -260,17 +260,60 @@ With the health check attached, the same consumer reached `Running` at 11.5s —
 
 **This makes the health check a required part of the `"kubernetes"` branch, not an optional nicety** — without it, `WaitFor` on a kubernetes-sourced backing service is decorative. It should be added to the Architecture section's `"kubernetes"` bullet and covered by a test that asserts the health check annotation is present. The `"external"` branch has the same gap in principle (nothing is being waited on), but there the developer is pointing at something they already run, so a connectivity check is a convenience rather than a correctness fix; making it opt-in via a config flag is probably right, and is left open.
 
+## Resolved Against a Real Cluster
+
+A `kind` cluster (v0.30.0, Kubernetes in Docker) settled the two remaining *technical* questions. What is left after this needs a team decision, not an experiment.
+
+### Whole-connection-string-in-secret: use per-field placeholders
+
+The concern was real, and the objection to the obvious fix turns out not to be.
+
+A real Postgres operator — CloudNativePG 1.24, deployed into `kind` — generates one `kubernetes.io/basic-auth` secret per cluster (`<cluster>-app`) with **nine** keys covering *both* shapes at once:
+
+| Kind | Keys | Example value |
+|---|---|---|
+| Per-field | `host`, `port`, `dbname`, `username`, `user`, `password` | `orders-pg-rw`, `5432`, `orders`, `orders_app` |
+| Whole-string | `uri`, `jdbc-uri`, `pgpass` | `postgresql://orders_app:…@orders-pg-rw.default:5432/orders` |
+
+The whole-string keys confirm the problem exactly as predicted — `uri` bakes in the in-cluster address `orders-pg-rw.default:5432`, so fetching it verbatim would bypass the tunnel entirely.
+
+But the per-field keys sit **in the same secret**. That removes the one serious objection to restricting `"kubernetes"` to per-field placeholders ("pushes a constraint onto a secret layout the developer may not control"): a developer using a mainstream operator already has `host`/`port`/`dbname`/`username`/`password` available and does not need to change anything.
+
+**Decision: restrict `"kubernetes"` to per-field `{secret:...}` placeholders.** Whole-string secrets remain usable, but only under the direct-connection source, where no rewriting is needed. Parsing-and-rewriting is rejected: it buys nothing the per-field keys don't already give, and it gets worse with every backend added. This should be an explicit, named error — a `{secret:...}` placeholder that resolves to something containing `://` or `Host=` under `"kubernetes"` is almost certainly a whole-string key used by mistake, and saying so beats a confusing connection failure.
+
+### Multi-port backends: one port-forward, many ports
+
+`kubectl port-forward` accepts **multiple port pairs in a single invocation**, against one Service, from one process. Verified against a two-port Service in `kind`:
+
+```
+kubectl port-forward service/broker 25672:5672 35672:15672
+  Forwarding from 127.0.0.1:25672 -> 5672
+  Forwarding from 127.0.0.1:35672 -> 15672
+```
+
+Both forwarded ports carried real traffic to their respective listeners. So the earlier suggestion — "a second backing-service entry is the workaround" — is unnecessary and would be actively worse, since two entries means two `kubectl` processes and two tunnels to the same Service.
+
+**Decision: `port` accepts either a single port or a named map, and `{port:<name>}` resolves against it.** One `AddExecutable`, one process, one health check per forwarded port.
+
+```json
+"orders-events": {
+  "source": "kubernetes",
+  "service": "rabbitmq",
+  "port": { "amqp": 5672, "management": 15672 },
+  "connectionString": "amqp://dev:{secret:rabbit-creds:password}@localhost:{port:amqp}/"
+}
+```
+
+The single-port form stays the common case and keeps `{port}` as a shorthand for it.
+
+### End-to-end tunnel check
+
+Port-forwarding the operator-created `orders-pg-rw` Service to a local port and TCP-connecting to it succeeded, confirming that the health-check gating fix from the previous section works against a real Kubernetes Service and not just the `nc` stand-in it was developed against.
+
 ## Open Questions
-
-**Kubernetes + whole-connection-string-in-secret.** For `"kubernetes"`, a secret holding the *entire* connection string doesn't work as-is: the value was written for in-cluster use and bakes in the real Service host:port, not our dynamically-allocated `localhost:{port}`. Fetching it verbatim produces a connection string that bypasses the port-forward tunnel entirely. Options, none chosen yet:
-
-- Restrict `"kubernetes"` to per-field secret placeholders only and document that a whole-string secret is an `"external"`-only pattern. Simplest, but pushes a real constraint onto the developer's secret layout, which they may not control. The [generalization](#generalization-beyond-databases) argument favors this one, since parsing gets harder the more backends are supported.
-- Parse and rewrite the host/port portion of the fetched string before use. Reintroduces the backend-specific parsing (Postgres `Host=`/`Port=` vs. SQL Server `Server=`/`,1433` vs. AMQP/Redis URIs) that "full connection string as one field" was meant to avoid.
-- Bind the port-forward to the exact remote port number found in the fetched string instead of an `IPortAllocator`-chosen free port, so no rewrite is needed. Reintroduces local port-collision risk that `IPortAllocator` exists to prevent. Also now impossible to do at `Add`-time, since the secret is deferred and the port is needed early.
-- Something else entirely — worth revisiting once this is tried against a real cluster secret shape.
 
 **Whether `servicesources.yaml` should be involved at all.** This draft keeps all backing-service config in local.json, reasoning that catalog data would only ever matter for `"kubernetes"` and be thin (`service`/`port`). But since `connectionString` can be secret-backed via `{secret:name:key}` placeholders rather than embedding literal credentials, the *template itself* may contain no actual secret material. If so, it (along with `service`/`port`) could live in the catalog as shared, committed, team-wide data instead of being hand-copied into every developer's local.json, mirroring the services split (catalog = shared identity, local.json = per-developer environment choice) more closely than this draft does. Worth revisiting once it's clear how often a team's `connectionString` template really is secret-free versus genuinely varying per developer (e.g. a personal username).
 
 **Whether `"external"` should get an opt-in connectivity health check.** The `"kubernetes"` branch now requires one (see Resolved by Prototype). `"external"` points at something the developer already runs, so a check there is a convenience — it turns "connection refused, deep in your app's startup" into "this backing service is unhealthy" on the dashboard. Probably a `"healthCheck": true` config flag; not designed here.
 
-**Multi-port backends.** Whether `{port:<name>}` is worth adding for cases like RabbitMQ's AMQP + management ports, or whether a second backing-service entry is an acceptable workaround. Defer until someone asks.
+**The name of the direct-connection source.** Currently `"external"`, which is the weakest name in the schema: Aspire already uses "external" for `AddExternalService` (an external *HTTP* service), and the service-side source meaning the same thing — "a fixed address of something already running that we do not manage" — is called `"url"`. Reusing `"url"` would maximise consistency but misdescribes an ADO.NET-style `Host=…;Port=…` string; `"existing"` or `"connectionString"` are accurate but break the parallel with the service-side vocabulary. Not settled.
