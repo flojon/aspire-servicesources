@@ -594,11 +594,15 @@ Two caveats found while verifying:
   and silently keeps the previous output. Deleting `.aspire/modules` alone is *not* enough — the
   pinned assemblies under `.aspire/integrations/` also have to go. Remove the whole `.aspire/`
   directory when switching CLI versions.
-- **A container cannot `withReference()` a `url`-source service.** The `url` source produces an
-  external service, and referencing one from `addContainer(...)` fails in DCP with
-  `Host endpoint 'https' on resource 'inventory' should have an associated DCP Service resource
-  already set up`. This is unrelated to the codegen fix — it reproduces independently of it. The
-  sample therefore demonstrates the reference from `addExecutable(...)`, which works.
+- **A container cannot `withReference()` an `AddService()` result.** Referencing one from
+  `addContainer(...)` fails in DCP with `Host endpoint 'https' on resource 'inventory' should have
+  an associated DCP Service resource already set up`. This is unrelated to the codegen fix — it
+  reproduces on released 13.5.1 and from a C# AppHost too — and it is a ServiceSources limitation
+  rather than an Aspire one: the `ServiceResource` facade `AddService()` returns is deliberately
+  never registered in `builder.Resources`, so DCP has no Service object to plumb container-to-host
+  networking with. Plain Aspire `AddExternalService(...)` referenced from a container works fine.
+  Tracked as [#58](https://github.com/flojon/aspire-servicesources/issues/58). The sample therefore
+  demonstrates the reference from `addExecutable(...)`, which works.
 
 ## Status
 
