@@ -1,5 +1,9 @@
 # Aspire.Hosting.ServiceSources
 
+[![NuGet](https://img.shields.io/nuget/v/KoalaSoft.Aspire.Hosting.ServiceSources?logo=nuget&label=nuget)](https://www.nuget.org/packages/KoalaSoft.Aspire.Hosting.ServiceSources)
+[![Downloads](https://img.shields.io/nuget/dt/KoalaSoft.Aspire.Hosting.ServiceSources?logo=nuget&label=downloads)](https://www.nuget.org/packages/KoalaSoft.Aspire.Hosting.ServiceSources)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/flojon/aspire-servicesources/blob/main/LICENSE)
+
 A .NET Aspire AppHost extension that lets `builder.AddService("orders")` resolve to a real,
 running resource whose *source* is chosen per developer, not baked into the AppHost.
 
@@ -22,7 +26,7 @@ when a developer switches sources.
 
 ## Install
 
-Published on [nuget.org](https://www.nuget.org/profiles/flojon) as `KoalaSoft.Aspire.Hosting.ServiceSources`:
+Published on nuget.org as [`KoalaSoft.Aspire.Hosting.ServiceSources`](https://www.nuget.org/packages/KoalaSoft.Aspire.Hosting.ServiceSources):
 
 ```bash
 dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources
@@ -38,6 +42,24 @@ Or reference the project directly from your AppHost instead:
 
 Requires .NET 8 or later (net8.0, net9.0, and net10.0 are all supported) and an AppHost
 project using the `Aspire.AppHost.Sdk` (`aspire new` / `aspire restore` sets this up).
+
+### Preview builds
+
+Every push to `main` publishes a prerelease build (`0.x.y-alpha.0.N`) to GitHub Packages.
+Stable releases go to nuget.org only — use those unless you specifically need an unreleased
+fix.
+
+GitHub's NuGet registry requires authentication for every download, even for public
+packages — unlike the container registry, it has no anonymous access. This is *not* a grant
+on this repository: any authenticated GitHub user can download a public package, so all you
+need is a token on your own account. It must be a **classic** personal access token with the
+`read:packages` scope; fine-grained tokens are not supported by GitHub Packages.
+
+```bash
+dotnet nuget add source https://nuget.pkg.github.com/flojon/index.json \
+  --name servicesources-preview --username <your-github-username> --password <your-pat>
+dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources --prerelease
+```
 
 ## Getting started
 
