@@ -2,6 +2,7 @@
   "services": {
     "orders": { "source": "local" },
     "inventory": { "source": "url" },
-    "payments": { "source": "container" }
+    "payments": { "source": "container" },
+    "catalog": { "source": "local" }
   }
 }
