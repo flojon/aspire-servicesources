@@ -589,11 +589,14 @@ regenerated with 13.5.1 still reproduces all six `TS2552` errors.
 
 Two caveats found while verifying:
 
-- **Switching CLI versions leaves stale generated code.** `aspire restore`'s codegen cache is not
-  keyed on the CLI/codegen assembly version, so re-running it after changing CLI version is a no-op
-  and silently keeps the previous output. Deleting `.aspire/modules` alone is *not* enough — the
-  pinned assemblies under `.aspire/integrations/` also have to go. Remove the whole `.aspire/`
-  directory when switching CLI versions.
+- **Switching CLI versions leaves stale generated code.** `aspire restore` rewrites the pinned
+  package version in the generated `.aspire/integrations/.../integration-restore/IntegrationRestore.csproj`
+  but does not re-restore or rebuild it, so the previous CLI's code generator stays in that project's
+  `bin/` and keeps producing the old output — while reporting `SDK code restored successfully`.
+  Deleting `.aspire/modules` alone is *not* enough, since the stale generator lives under
+  `.aspire/integrations/`. Remove the whole `.aspire/` directory when switching CLI versions.
+  Reported upstream as
+  [microsoft/aspire#19603](https://github.com/microsoft/aspire/issues/19603).
 - **A container cannot `withReference()` an `AddService()` result.** Referencing one from
   `addContainer(...)` fails in DCP with `Host endpoint 'https' on resource 'inventory' should have
   an associated DCP Service resource already set up`. This is unrelated to the codegen fix — it
