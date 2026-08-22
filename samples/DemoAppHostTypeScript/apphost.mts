@@ -1,9 +1,5 @@
 // TypeScript AppHost demonstrating AddService(), exported via Aspire's Type System (ATS) so it's
 // callable from a guest-language AppHost. See servicesources.local.json.example.
-//
-// Known issue: this file currently cannot compile due to an upstream Aspire CLI TypeScript
-// codegen bug (confirmed on Aspire CLI 13.4.6/13.5.0) — see the README's "Known issue" section
-// under the Sample heading for details.
 import { createBuilder } from './.aspire/modules/aspire.mjs';
 
 const builder = await createBuilder();
@@ -25,5 +21,13 @@ const payments = await builder
   .addService('payments')
   .withServiceEnvironment('DEMO_INJECTED_BY_APPHOST', 'true')
   .withServiceReference(inventory);
+
+// addService() returns a ResourceWithServiceDiscoveryPromise, so the handle also goes straight
+// into Aspire's *own* withReference() — the wrapper type microsoft/aspire#19577 fixed, and the
+// reason this sample compiles at all on 13.6.0+. Distinct from payments' withServiceReference()
+// above, which is this package's own ATS export; this line exercises the native Aspire path.
+await builder
+    .addExecutable('probe', '/usr/bin/env', '.', [])
+    .withReference(inventory);
 
 await builder.build().run();
