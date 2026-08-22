@@ -180,6 +180,39 @@ public class ServiceConfigurationExtensionsTests
     }
 
     [Fact]
+    public void Configure_WaitOnKubernetesSource_StillApplies_BecauseOrderingThePortForwardIsCorrect()
+    {
+        var builder = Builder();
+        var migrations = builder.AddResource(new ServiceContainerResource("migrations")).WithImage("migrate");
+        var service = new KubernetesSource(new FixedPortAllocator()).Resolve(
+            builder, "orders", KubernetesMetadata,
+            new ServiceDeveloperConfig { Source = "kubernetes", Context = "dev" });
+
+        // Unlike environment variables, start ordering is not "configuring the wrong process": the
+        // port-forward is a real registered executable, and holding it back until migrations finish is
+        // exactly what the AppHost asked for. Skipping it lost the ordering silently the moment
+        // someone switched a service to "kubernetes".
+        service.Configure<IResourceWithWaitSupport>(r => r.WaitForCompletion(migrations));
+
+        Assert.NotEmpty(service.Resource.Annotations.OfType<WaitAnnotation>());
+        Assert.Empty(ServiceConfigurationWarnings.For(builder).Messages);
+    }
+
+    [Fact]
+    public void Configure_WaitOnUrlSource_StillSkips_BecauseNothingIsRegisteredToOrder()
+    {
+        var builder = Builder();
+        var migrations = builder.AddResource(new ServiceContainerResource("migrations")).WithImage("migrate");
+
+        var service = AddUrlService(builder)
+            .Configure<IResourceWithWaitSupport>(r => r.WaitForCompletion(migrations));
+
+        // A "url" service's resource is never registered, so there is no process to hold back.
+        Assert.Empty(service.Resource.Annotations.OfType<WaitAnnotation>());
+        Assert.Single(ServiceConfigurationWarnings.For(builder).Messages);
+    }
+
+    [Fact]
     public async Task SkippedConfiguration_IsLoggedAtStartup()
     {
         var dir = Directory.CreateTempSubdirectory().FullName;

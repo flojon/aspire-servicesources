@@ -130,10 +130,25 @@ internal static class LocalGitCheckout
         var displayRepository = GitUrl.Redact(metadata.Repository);
 
         Directory.CreateDirectory(checkoutsRoot);
+        SweepAbandonedScratchDirectories(checkoutsRoot);
+
+        // Reached because ".git" is not a *directory*, which is not the same as "no repository":
+        // ".git" is a file for a linked worktree ("git worktree add") and for a clone made with
+        // --separate-git-dir. Both are complete checkouts that can hold uncommitted work, so the
+        // delete below would destroy one. Only debris — content with no ".git" entry at all — is
+        // removable; anything else keeps the non-destructive error this branch used to produce.
+        if (File.Exists(Path.Combine(repoRoot, ".git")))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': the checkout at '{repoRoot}' has a '.git' file rather than a '.git' " +
+                "directory, so it is a linked worktree or a clone made with --separate-git-dir rather than a " +
+                "checkout this tool cloned. Move it aside and re-run to have it cloned fresh, or point the " +
+                "service at it with the 'path' override in servicesources.local.json.");
+        }
 
         // Debris from a version that predates this method, or from a crash between here and the
         // rename below. Everything under .servicesources is tool-managed and gitignored, and a
-        // checkout with no ".git" holds nothing worth keeping.
+        // checkout with no ".git" entry holds nothing worth keeping.
         if (Directory.Exists(repoRoot))
         {
             try
@@ -195,10 +210,62 @@ internal static class LocalGitCheckout
                     // Best effort, deliberately not fatal. A leaked scratch directory costs disk
                     // inside a gitignored, tool-managed tree and can never block a later clone:
                     // its name is unique per attempt and the destination name is untouched.
-                    // Sweeping these on startup would be worse than leaking them — a second
-                    // AppHost running concurrently would have its in-flight clone deleted.
+                    // SweepAbandonedScratchDirectories collects it on a later run.
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// How long a scratch directory must have gone untouched before it counts as abandoned.
+    /// </summary>
+    /// <remarks>
+    /// The <c>finally</c> in <see cref="CloneIntoPlace"/> removes the scratch directory on every
+    /// path it controls, but it does not run when the process is killed — and checkouts are cloned
+    /// speculatively on background threads for every <c>"local"</c> service in
+    /// <c>servicesources.local.json</c>, including ones this AppHost never calls <c>AddService</c>
+    /// for (see <see cref="Sources.LocalCheckoutPrefetch"/>). A Ctrl-C during startup, or the host
+    /// exiting while an unrequested clone is still in flight, therefore leaks a partial copy of a
+    /// repository that nothing would otherwise remove.
+    /// <para>
+    /// Sweeping on age rather than on liveness is what makes this safe. A concurrent AppHost's
+    /// in-flight clone is seconds or minutes old, so it can never be mistaken for debris, and
+    /// nothing is still cloning a day later — which is why this is not the "sweeping would delete a
+    /// live clone" hazard that an unconditional startup sweep would be.
+    /// </para>
+    /// </remarks>
+    private static readonly TimeSpan AbandonedScratchAge = TimeSpan.FromHours(24);
+
+    /// <summary>
+    /// Removes <c>.incoming-*</c> directories left behind by clones that were killed rather than
+    /// completed. Best effort throughout: a scratch directory that cannot be removed costs disk in a
+    /// gitignored, tool-managed tree and can never block a clone, so failing here must not fail
+    /// resolution.
+    /// </summary>
+    private static void SweepAbandonedScratchDirectories(string checkoutsRoot)
+    {
+        try
+        {
+            foreach (var scratch in Directory.EnumerateDirectories(checkoutsRoot, ".incoming-*"))
+            {
+                try
+                {
+                    if (DateTime.UtcNow - Directory.GetLastWriteTimeUtc(scratch) < AbandonedScratchAge)
+                    {
+                        continue;
+                    }
+
+                    Directory.Delete(scratch, recursive: true);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // Held open by something, or not ours to delete. Leave it for a later run.
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The enumeration itself failed, so there is nothing we can sweep.
         }
     }
 
@@ -282,7 +349,7 @@ internal static class LocalGitCheckout
         {
             // FileMode.CreateNew is atomic: it fails if the file already exists, which makes
             // this safe against concurrent resolution of multiple services (see
-            // PendingLocalResolutions, which resolves them in parallel) racing to create it.
+            // Sources.LocalCheckoutPrefetch, which clones them in parallel) racing to create it.
             using var stream = new FileStream(gitignorePath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
             using var writer = new StreamWriter(stream);
             writer.Write("*\n!.gitignore\n");

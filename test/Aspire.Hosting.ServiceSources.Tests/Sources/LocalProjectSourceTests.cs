@@ -327,6 +327,64 @@ public class LocalProjectSourceTests
     }
 
     [Fact]
+    public void ResolveProjectPath_CheckoutHasAGitFileRatherThanADirectory_RefusesToDeleteIt()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
+        Directory.CreateDirectory(repoDir);
+        // A linked worktree ("git worktree add") or a clone made with --separate-git-dir: ".git" is a
+        // file pointing at the real git directory, not a directory. Resolution reaches the clone path
+        // because it probes for a ".git" *directory*, and this is a complete checkout that can hold
+        // work nobody else has a copy of — so the debris sweep must not treat it as debris.
+        File.WriteAllText(Path.Combine(repoDir, ".git"), "gitdir: /elsewhere/.git/worktrees/orders\n");
+        File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
+        var gitClient = new FakeGitClient();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ResolveProjectPath(
+            ServiceName, Metadata(), DevConfig(), appHostDirectory, gitClient));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("worktree", ex.Message);
+        Assert.True(File.Exists(Path.Combine(repoDir, "Orders.csproj")));
+        Assert.True(File.Exists(Path.Combine(repoDir, ".git")));
+        Assert.Empty(gitClient.ClonedRepos);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_AbandonedScratchDirectory_IsSweptOnALaterClone()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var checkoutsRoot = Path.Combine(appHostDirectory, ".servicesources", "checkouts");
+        var abandoned = Path.Combine(checkoutsRoot, ".incoming-billing-deadbeef");
+        Directory.CreateDirectory(abandoned);
+        File.WriteAllText(Path.Combine(abandoned, "partial.pack"), "half a clone");
+        // A clone killed mid-flight: the finally that normally removes this never ran. Aged past the
+        // sweep threshold, because nothing is still cloning a day later.
+        Directory.SetLastWriteTimeUtc(abandoned, DateTime.UtcNow - TimeSpan.FromDays(3));
+        var gitClient = new FakeGitClient();
+
+        ResolveProjectPath(ServiceName, Metadata(), DevConfig(), appHostDirectory, gitClient);
+
+        Assert.False(Directory.Exists(abandoned));
+    }
+
+    [Fact]
+    public void ResolveProjectPath_RecentScratchDirectory_IsLeftAlone_SoAConcurrentCloneSurvives()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var checkoutsRoot = Path.Combine(appHostDirectory, ".servicesources", "checkouts");
+        var inFlight = Path.Combine(checkoutsRoot, ".incoming-billing-cafe");
+        Directory.CreateDirectory(inFlight);
+        File.WriteAllText(Path.Combine(inFlight, "partial.pack"), "a clone happening right now");
+        var gitClient = new FakeGitClient();
+
+        ResolveProjectPath(ServiceName, Metadata(), DevConfig(), appHostDirectory, gitClient);
+
+        // Sweeping on age is what keeps a second AppHost's in-flight clone safe from this one.
+        Assert.True(Directory.Exists(inFlight));
+    }
+
+    [Fact]
     public void ResolveProjectPath_RetriedAfterAPartialClone_Succeeds()
     {
         var appHostDirectory = Directory.CreateTempSubdirectory().FullName;

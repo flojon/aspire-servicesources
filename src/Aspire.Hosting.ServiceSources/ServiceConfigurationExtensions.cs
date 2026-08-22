@@ -53,7 +53,7 @@ public static class ServiceConfigurationExtensions
         // Skipped, not applied and not thrown. A developer switching this service to a remote source
         // in their own servicesources.local.json must not break a Program.cs they don't own — that
         // per-developer switch is the point of the package. The skip is logged rather than silent.
-        if (annotation is not null && OutOfBandSources.Contains(annotation.Source))
+        if (annotation is not null && IsUnreachable<T>(annotation.Source))
         {
             ServiceConfigurationWarnings.For(service.ApplicationBuilder)
                 .AddSkip(annotation.ServiceName, annotation.Source, $"Configure<{typeof(T).Name}>");
@@ -79,8 +79,9 @@ public static class ServiceConfigurationExtensions
     /// a specific resource type.
     /// </remarks>
     /// <exception cref="ServiceSourcesConfigurationException">
-    /// The resolved resource is not a <typeparamref name="T"/>, or the service's source runs out of
-    /// band (<c>"url"</c>, <c>"kubernetes"</c>) and has no local resource for this AppHost to touch.
+    /// The resolved resource is not a <typeparamref name="T"/>, or <typeparamref name="T"/> cannot
+    /// reach the service behind an out-of-band source (<c>"url"</c>, <c>"kubernetes"</c>) — see
+    /// <see cref="IsUnreachable{T}"/> for the one capability that still can.
     /// </exception>
     public static IResourceBuilder<T> As<T>(this IResourceBuilder<IResourceWithServiceDiscovery> service)
         where T : IResource
@@ -92,7 +93,7 @@ public static class ServiceConfigurationExtensions
         // service is an ExecutableResource wrapping `kubectl port-forward`, so it takes environment
         // variables happily — and they would reach kubectl, never the service behind it. Silently
         // configuring the wrong process is exactly the failure mode issue #53 was filed about.
-        if (annotation is not null && OutOfBandSources.Contains(annotation.Source))
+        if (annotation is not null && IsUnreachable<T>(annotation.Source))
         {
             throw new ServiceSourcesConfigurationException(Explain<T>(service.Resource, annotation));
         }
@@ -106,11 +107,34 @@ public static class ServiceConfigurationExtensions
     }
 
     /// <summary>
-    /// Sources that resolve to something already running elsewhere, so there is nothing here for the
-    /// AppHost to configure. <see cref="Configure{T}"/> skips and logs for these; <see cref="As{T}"/>
-    /// throws, because it must return a builder.
+    /// Sources that resolve to something already running elsewhere, so what the AppHost configures
+    /// here is not the service itself. <see cref="Configure{T}"/> skips and logs for these;
+    /// <see cref="As{T}"/> throws, because it must return a builder.
     /// </summary>
     private static readonly HashSet<string> OutOfBandSources = new(StringComparer.Ordinal) { "url", "kubernetes" };
+
+    /// <summary>
+    /// Whether <typeparamref name="T"/> cannot reach the service behind <paramref name="source"/>.
+    /// </summary>
+    /// <remarks>
+    /// Keyed on the capability as well as the source, because "runs out of band" and "nothing here
+    /// can honour this" are not the same claim. A <c>"kubernetes"</c> service resolves to a real,
+    /// registered <c>kubectl port-forward</c> executable: configuration that would reach the
+    /// <i>process</i> is wrong, since it lands on kubectl rather than the service behind it, but
+    /// start ordering is not — holding the port-forward back until a migration finishes is exactly
+    /// what the AppHost asked for, and Aspire honours it. Skipping that too meant a
+    /// <c>Configure&lt;IResourceWithWaitSupport&gt;</c> written against a local service silently lost
+    /// its ordering when someone switched the service to <c>"kubernetes"</c>.
+    /// <para>
+    /// Nothing is reachable for <c>"url"</c>: its resource is deliberately never registered (see
+    /// <see cref="Sources.UrlSource"/>), so there is no process to order and no configuration to
+    /// apply.
+    /// </para>
+    /// </remarks>
+    private static bool IsUnreachable<T>(string source)
+        where T : IResource =>
+        OutOfBandSources.Contains(source)
+        && !(string.Equals(source, "kubernetes", StringComparison.Ordinal) && typeof(T) == typeof(IResourceWithWaitSupport));
 
     /// <summary>
     /// Names the source as well as the type, because the source is what a developer changes to make

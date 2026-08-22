@@ -127,8 +127,10 @@ a project reference would be.
   `<AppHostDirectory>/.servicesources/checkouts/<serviceName>/`, and reconciled to the
   configured `ref` (or the catalog's `defaultRef`) on every run. Uncommitted edits are never
   discarded — if the checkout is dirty and the ref changed, resolution fails loudly instead of
-  overwriting your work. The `.servicesources/` directory gitignores itself on first use — no
-  need to add it to your own `.gitignore`.
+  overwriting your work. Anything you put at that path yourself that isn't a plain clone — a linked
+  `git worktree`, or a clone made with `--separate-git-dir` — is refused with an explanation rather
+  than replaced; point at it with `path` instead. The `.servicesources/` directory gitignores itself
+  on first use — no need to add it to your own `.gitignore`.
 - Set `path` to point at a checkout you manage yourself (e.g. an existing local clone). It's
   used as-is — no clone, no checkout, no fetch, ever. A relative `path` is anchored to the
   AppHost directory, and must name a directory that already exists. `ref` cannot be combined
@@ -475,6 +477,13 @@ process at all, and a `"kubernetes"` service is a `kubectl port-forward` in fron
 so environment variables applied here would configure `kubectl` rather than the service. Those
 services are expected to be configured wherever they actually run.
 
+The one exception is **wait ordering on a `"kubernetes"` service**, which still applies:
+`Configure<IResourceWithWaitSupport>` (and `WaitForService` / `WaitForServiceCompletion`) reach a
+real, registered `kubectl port-forward` executable, and holding *that* back until a migration
+finishes is exactly what the AppHost asked for. Only configuration that would land on the wrong
+process is dropped. A `"url"` service skips wait ordering too, since it has no registered resource
+for Aspire to hold back.
+
 Skipping rather than failing is deliberate: a developer switching a service to a remote source in
 their own `servicesources.local.json` must not break a `Program.cs` they don't own. You'll see:
 
@@ -487,7 +496,9 @@ warn: Aspire.Hosting.ServiceSources
 
 `As<T>()` **throws** for those sources instead of skipping — it has to return a builder, and handing
 back the `kubectl` executable would silently configure the wrong process. Prefer `Configure` for
-anything that should survive a source switch.
+anything that should survive a source switch. It follows the same wait-ordering exception:
+`As<IResourceWithWaitSupport>()` on a `"kubernetes"` service returns the port-forward's builder
+rather than throwing.
 
 ### From a guest-language AppHost
 
@@ -513,7 +524,8 @@ const payments = await builder
 | `waitForServiceCompletion(dependency, { exitCode })` | `…WaitForCompletion(dependency, exitCode)` |
 | `withServiceArg(arg)` | `.Configure<IResourceWithArgs>(r => r.WithArgs(arg))` |
 
-They delegate to `Configure<T>`, so out-of-band sources are skipped and logged exactly as above.
+They delegate to `Configure<T>`, so out-of-band sources are skipped and logged exactly as above —
+including the wait-ordering exception, which `waitForService` and `waitForServiceCompletion` inherit.
 In C# they're hidden from IntelliSense — use `Configure<T>`, which reaches every Aspire extension
 method rather than just these.
 

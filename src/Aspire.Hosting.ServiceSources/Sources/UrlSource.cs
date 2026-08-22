@@ -128,6 +128,15 @@ internal sealed class UrlSource : IServiceSource
     /// through to the raw DCP trace this pre-flight exists to replace. Relationships are narrowed to
     /// <see cref="ReferenceRelationship"/> so that <c>WithParentRelationship</c>, which implies no
     /// networking, is not failed.
+    /// <para>
+    /// Matching on annotation shape bounds what this can catch. A container that consumes the
+    /// service in a form leaving neither annotation — <c>WithEnvironment("X",
+    /// ReferenceExpression.Create($"{svc.GetEndpoint("https")}"))</c>, or an
+    /// <see cref="EnvironmentCallbackAnnotation"/> the AppHost writes itself — still reaches DCP and
+    /// still produces the raw trace. Those carry the dependency inside an opaque delegate that would
+    /// have to be executed to inspect, so this is a floor on the diagnostics rather than a
+    /// guarantee: the common spellings are named, the rest fail as they did before.
+    /// </para>
     /// </remarks>
     private static ServiceUrlResource? ConsumedUrlService(ContainerResource consumer)
     {

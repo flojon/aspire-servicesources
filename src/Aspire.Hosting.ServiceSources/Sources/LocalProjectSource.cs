@@ -17,8 +17,11 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         // the kind up is a dictionary probe against registry state; the handler's own Validate
         // only reads the kind config. Neither needs a working tree, and running them after the
         // clone would make a typo'd kind — or a satellite package nobody registered — cost a cold
-        // clone of this repository, and via the prefetch of every other "local" one, before
-        // saying so.
+        // clone of this repository before saying so.
+        //
+        // Only the first "local" AddService gets that for free across the board: the prefetch below
+        // starts cloning every "local" service at once, so once any of them has been resolved the
+        // other clones are already in flight and this check no longer runs ahead of them.
         var handler = isDotnetKind ? null : ResolveKindHandler(builder, serviceName, metadata);
         handler?.Validate(serviceName, metadata.KindConfig);
 
