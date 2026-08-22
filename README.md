@@ -32,6 +32,13 @@ Published on nuget.org as [`KoalaSoft.Aspire.Hosting.ServiceSources`](https://ww
 dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources
 ```
 
+Services that aren't .NET projects need the satellite package for their language as well — see
+[Non-.NET local services](#non-net-local-services-kind):
+
+```bash
+dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript
+```
+
 Or reference the project directly from your AppHost instead:
 
 ```xml
@@ -214,6 +221,58 @@ services:
 Any other kind is resolved by a handler that a satellite package registers, and its options
 live in a block named after the kind. Kind names are matched case-sensitively, and a kind with
 no registered handler fails at startup before anything is cloned.
+
+#### JavaScript: `kind: javascript`
+
+Provided by the `KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript` package, which runs the
+checkout through [`Aspire.Hosting.JavaScript`](https://www.nuget.org/packages/Aspire.Hosting.JavaScript).
+Install it, then call `UseJavaScript()` once, before the `AddService()` call for any such service:
+
+```csharp
+using Aspire.Hosting.ServiceSources;
+
+var builder = DistributedApplication.CreateBuilder(args);
+
+builder.UseJavaScript();
+
+var frontend = builder.AddService("frontend");
+```
+
+```yaml
+services:
+  frontend:
+    repository: https://github.com/example/frontend
+    kind: javascript
+    javascript:
+      appType: vite         # javascript (default) | vite | nextjs | node | bun
+      appDirectory: web     # directory holding package.json, relative to the repo root
+      runScript: dev        # package.json script to run
+      packageManager: pnpm  # npm | yarn | pnpm | bun
+      port: 4321            # the port consumers reach the service on
+```
+
+Every option is optional:
+
+- **`appType`** — which integration runs the app: `javascript` (the default, `AddJavaScriptApp`),
+  `vite`, `nextjs`, `node`, or `bun`. `node` and `bun` execute a file directly rather than a
+  `package.json` script, so they require `scriptPath`; the other three run a script and reject it.
+- **`appDirectory`** — the directory holding the app's `package.json`, relative to the repository
+  root, which is also the default. It must stay inside the checkout.
+- **`runScript`** — the `package.json` script to run; the integrations default this to `dev`. For
+  `node`/`bun` it overrides the `scriptPath` they would otherwise execute directly.
+- **`scriptPath`** — the entry-point file (e.g. `server.js`) relative to `appDirectory`. Required
+  by `appType: node` and `appType: bun`, and rejected for the others.
+- **`packageManager`** — `npm`, `yarn`, `pnpm`, or `bun`, used to install dependencies before the
+  app starts (a fresh clone has no `node_modules`). Left unset, the integration's own default
+  applies: npm for most app types, Bun for `appType: bun`.
+- **`port`** / **`targetPort`** — the port consumers reach the service on, and the port the app
+  itself listens on. Both are allocated by Aspire when unset.
+- **`portEnv`** — the environment variable the app reads its listen port from; defaults to `PORT`.
+  Rejected for `vite`/`nextjs`, whose integrations bind the dev server's port themselves.
+
+The service always gets an `http` endpoint, so the builder `AddService()` returns can be passed to
+a consumer's `WithReference(...)` like any other. Node and Bun must be on `PATH` for the app types
+that use them.
 
 **Implementing a kind.** A satellite package implements `ILocalResourceKind` and registers it
 from its own extension method:
