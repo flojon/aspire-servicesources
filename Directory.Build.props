@@ -11,21 +11,12 @@
     <EnableAspireIntegrationAnalyzers>true</EnableAspireIntegrationAnalyzers>
   </PropertyGroup>
 
-  <!--
-    Versioning is lockstep: one release tag mints the same version for every package in the
-    repo, and a satellite depends on the exact core it was built against (see
-    PinCoreDependency in Directory.Build.targets). Aspire itself ships this way - every
-    Aspire.Hosting.* package carries one version - and the satellites implement
-    ILocalResourceKind, a core extension point that is not yet stable across versions, so
-    letting the two drift apart would buy nothing and break combinations nobody tested.
-
-    MinVer therefore lives here rather than per-project, for the same reason as the analyzer
-    switch above: omitting it in a new satellite is silent, and the failure is expensive. A
-    project without MinVer packs as the SDK default 1.0.0, and release.yml deliberately does
-    not pass the "skip duplicate" flag when pushing, so such a package either lands on
-    nuget.org as a bogus 1.0.0 or fails the release outright. Repo-wide also keeps the pin
-    honest, since it is only correct while every package reads the same tag series.
-  -->
+  <!-- Versioning is lockstep: one release tag mints the same version for every package, and a
+       satellite pins the exact core it was built against (PinCoreDependency in
+       Directory.Build.targets), which is only sound while every package reads the same tag
+       series. MinVer is repo-wide for that reason and the analyzer switch's: a project that
+       omits it packs as the SDK default 1.0.0, which release.yml would then push to
+       nuget.org or fail the release on. -->
   <PropertyGroup>
     <MinVerTagPrefix>v</MinVerTagPrefix>
   </PropertyGroup>
@@ -47,9 +38,8 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
-  <!-- $(MSBuildThisFileDirectory) rather than the ../../ these used to carry per project:
-       the path is then correct regardless of how deep the project sits. Inert in projects
-       that set IsPackable=false, which never run pack. -->
+  <!-- Resolved from the repo root, so the path holds regardless of project depth. Inert where
+       IsPackable is false - those projects never pack. -->
   <ItemGroup>
     <None Include="$(MSBuildThisFileDirectory)LICENSE" Pack="true" PackagePath="" />
     <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="" />

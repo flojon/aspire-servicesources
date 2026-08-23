@@ -99,24 +99,16 @@ Full changelog: $(ChangelogUrl)</PackageReleaseNotes>
   </Target>
 
   <!--
-    Pin a satellite's dependency on core to the exact version it was built against.
+    A ProjectReference packs as a version *floor*, so a satellite would declare "core >= X"
+    and NuGet could satisfy it with any later core. A satellite implements core's
+    ILocalResourceKind, so a mismatched pair throws MissingMethodException/TypeLoadException
+    at run time rather than failing at restore; this rewrites the dependency to exactly X.
 
-    A ProjectReference packs as a version *floor*: without this, the Java package built at
-    0.3.0 declares "KoalaSoft.Aspire.Hosting.ServiceSources >= 0.3.0" and NuGet will happily
-    satisfy it with core 1.5.0. That is the one edge that must not float - a satellite
-    implements core's ILocalResourceKind, so a core that moved the interface produces a
-    MissingMethodException/TypeLoadException at run time rather than an error at restore.
-
-    Lives here rather than in Directory.Build.props because it reads $(PackageVersion), which
-    MinVer computes during the build - the same reason the changelog target above does.
-
-    Safe for the per-commit prereleases preview.yml pushes, not just tagged releases: every
-    package shares the MinVerTagPrefix set in Directory.Build.props and none sets
-    MinVerIgnoreHeight, so at any given commit core and its satellites resolve to the
-    identical version and the pinned version is one that actually exists.
-
-    A no-op in projects that do not reference core (core itself, which cannot; the sample and
-    test projects, which do not pack).
+    Reads $(PackageVersion) from MinVer, so it belongs here rather than in
+    Directory.Build.props - the same reason as the changelog target above. Exact is safe for
+    the prereleases preview.yml pushes per commit, too: every package shares one
+    MinVerTagPrefix and none sets MinVerIgnoreHeight, so core and its satellites always
+    resolve to the identical version.
   -->
   <Target Name="PinCoreDependency" AfterTargets="_GetProjectReferenceVersions">
     <ItemGroup>
