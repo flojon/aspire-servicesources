@@ -103,6 +103,73 @@ public class JavaScriptLocalKindResolutionTests
     }
 
     [Fact]
+    public void AppDirectoryIsAnchoredToACheckoutPathThatEndsInASeparator()
+    {
+        // A developer "path" override reaches the handler verbatim, and shell tab-completion puts a
+        // trailing slash on it. Path.GetFullPath preserves that slash, so a containment check that
+        // appends its own separator would compare against "root//" and reject every appDirectory the
+        // service could name — including the default ".".
+        var repoRoot = TestHelpers.CreateRepo() + Path.DirectorySeparatorChar;
+
+        var app = Resolve(Builder(), repoRoot);
+
+        var resource = Assert.IsType<JavaScriptAppResource>(app.Resource);
+        Assert.Equal(Path.TrimEndingDirectorySeparator(repoRoot), resource.WorkingDirectory);
+    }
+
+    [Theory]
+    [InlineData("../../../../etc/evil.js")]
+    [InlineData("/etc/evil.js")]
+    public void ScriptPathOutsideTheCheckoutIsRejected(string scriptPath)
+    {
+        // node/bun are handed this file to execute, so it needs the same guard appDirectory gets:
+        // without it a catalog entry runs something the service doesn't own.
+        var repoRoot = TestHelpers.CreateRepo();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(Builder(), repoRoot, $"""
+                appType: node
+                scriptPath: {scriptPath}
+                """));
+
+        Assert.Contains("outside the service's checkout", ex.Message);
+    }
+
+    [Fact]
+    public void MissingScriptPathIsReportedAgainstTheService()
+    {
+        // Otherwise a typo surfaces at run time as "node: cannot find module", detached from the
+        // service whose catalog entry named it — the dotnet kind checks its project file the same way.
+        var repoRoot = TestHelpers.CreateRepo();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(Builder(), repoRoot, """
+                appType: node
+                scriptPath: serverr.js
+                """));
+
+        Assert.Contains("frontend", ex.Message);
+        Assert.Contains("serverr.js", ex.Message);
+        Assert.Contains("not found", ex.Message);
+    }
+
+    [Fact]
+    public void ScriptPathIsResolvedRelativeToTheAppDirectory()
+    {
+        // AddNodeApp runs the script from the app directory, so that is what it is checked against —
+        // not the repository root.
+        var repoRoot = TestHelpers.CreateRepo("src/frontend");
+
+        var app = Resolve(Builder(), repoRoot, """
+            appType: node
+            appDirectory: src/frontend
+            scriptPath: server.js
+            """);
+
+        Assert.IsType<NodeAppResource>(app.Resource);
+    }
+
+    [Fact]
     public void RunScriptReachesTheResource()
     {
         var repoRoot = TestHelpers.CreateRepo();
@@ -211,7 +278,10 @@ public class JavaScriptLocalKindResolutionTests
         // for this app type.
         var repoRoot = TestHelpers.CreateRepo();
 
-        var untouched = Resolve(Builder(), repoRoot, "appType: vite");
+        // The baseline comes from AddViteApp directly rather than from Resolve: taken from Resolve it
+        // would already have been through WithHttpEndpoint, so if that call ever cleared Vite's own
+        // variable both sides would read null and the assertion below could not fail.
+        var untouched = Builder().AddViteApp("frontend", repoRoot);
         var viteOwnPortVariable = TestHelpers.TargetPortEnvironmentVariable(TestHelpers.SingleEndpoint(untouched.Resource));
 
         var app = Resolve(Builder(), repoRoot, """

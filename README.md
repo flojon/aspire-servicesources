@@ -261,7 +261,9 @@ Every option is optional:
 - **`runScript`** — the `package.json` script to run; the integrations default this to `dev`. For
   `node`/`bun` it overrides the `scriptPath` they would otherwise execute directly.
 - **`scriptPath`** — the entry-point file (e.g. `server.js`) relative to `appDirectory`. Required
-  by `appType: node` and `appType: bun`, and rejected for the others.
+  by `appType: node` and `appType: bun`, and rejected for the others. Like `appDirectory` it must
+  stay inside the checkout, and it is checked to exist so a typo is reported against the service
+  rather than surfacing later as a `cannot find module` crash.
 - **`packageManager`** — `npm`, `yarn`, `pnpm`, or `bun`, used to install dependencies before the
   app starts (a fresh clone has no `node_modules`). Left unset, the integration's own default
   applies: npm for most app types, Bun for `appType: bun`.

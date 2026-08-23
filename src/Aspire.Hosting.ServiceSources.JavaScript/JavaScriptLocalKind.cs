@@ -25,7 +25,19 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
         IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig)
     {
         var options = ResolveOptions(serviceName, rawConfig);
-        var appDirectory = ResolveAppDirectory(serviceName, repoRoot, options.AppDirectory);
+
+        // Trailing separators are trimmed once here: Path.GetFullPath preserves them, and a
+        // developer "path" override reaches this handler verbatim — so an override written with the
+        // trailing slash shell tab-completion produces would otherwise make every containment check
+        // below compare against "root//" and reject even the default appDirectory ".".
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(repoRoot));
+
+        var appDirectory = ResolveAppDirectory(serviceName, root, options.AppDirectory);
+
+        if (options.ScriptPath is not null)
+        {
+            RequireScriptPath(serviceName, root, appDirectory, options.ScriptPath);
+        }
 
         var app = AddApp(builder, serviceName, appDirectory, options);
 
@@ -92,28 +104,57 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
 
     /// <summary>
     /// Anchors <paramref name="appDirectory"/> to the checkout and checks it exists. Runs in
-    /// <see cref="Resolve"/> rather than <see cref="Validate"/> because it is the only check here
-    /// that needs the repository on disk, and <see cref="ILocalResourceKind.Validate"/> is
+    /// <see cref="Resolve"/> rather than <see cref="Validate"/> because these are the only checks
+    /// here that need the repository on disk, and <see cref="ILocalResourceKind.Validate"/> is
     /// deliberately not given the checkout path.
     /// </summary>
-    private static string ResolveAppDirectory(string serviceName, string repoRoot, string appDirectory)
+    private static string ResolveAppDirectory(string serviceName, string root, string appDirectory)
     {
-        var root = Path.GetFullPath(repoRoot);
-        var resolved = Path.GetFullPath(Path.Combine(root, appDirectory));
-
-        // Path.Combine hands back an absolute appDirectory unchanged, and "../.." climbs out, either
-        // of which would silently run something from outside the service's own checkout.
-        if (resolved != root && !resolved.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-        {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': javascript appDirectory '{appDirectory}' resolves to '{resolved}', " +
-                "which is outside the service's checkout. It must be a relative path within the repository.");
-        }
+        var resolved = RequireInsideCheckout(serviceName, "appDirectory", root, root, appDirectory);
 
         if (!Directory.Exists(resolved))
         {
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}': javascript appDirectory '{appDirectory}' was not found under '{root}'.");
+        }
+
+        return resolved;
+    }
+
+    /// <summary>
+    /// The same pair of checks for the file node/bun are handed to execute. Anchored to
+    /// <paramref name="appDirectory"/>, which is the working directory the integration runs it from,
+    /// but still confined to the checkout — a sibling app directory is a legitimate target, anything
+    /// outside the repository is not. Without the existence check a typo reaches the developer as
+    /// <c>node: cannot find module</c> at run time rather than as a named config error.
+    /// </summary>
+    private static void RequireScriptPath(string serviceName, string root, string appDirectory, string scriptPath)
+    {
+        var resolved = RequireInsideCheckout(serviceName, "scriptPath", root, appDirectory, scriptPath);
+
+        if (!File.Exists(resolved))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': javascript scriptPath '{scriptPath}' was not found under '{appDirectory}'.");
+        }
+    }
+
+    /// <summary>
+    /// Resolves <paramref name="value"/> against <paramref name="basePath"/> and refuses anything
+    /// that lands outside <paramref name="root"/>. <see cref="Path.Combine(string, string)"/> hands
+    /// back an absolute value unchanged, and <c>"../.."</c> climbs out — either of which would
+    /// silently run something from outside the service's own checkout.
+    /// </summary>
+    private static string RequireInsideCheckout(
+        string serviceName, string field, string root, string basePath, string value)
+    {
+        var resolved = Path.GetFullPath(Path.Combine(basePath, value));
+
+        if (resolved != root && !resolved.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': javascript {field} '{value}' resolves to '{resolved}', " +
+                "which is outside the service's checkout. It must be a relative path within the repository.");
         }
 
         return resolved;
@@ -129,11 +170,15 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
     {
         var options = LocalKindConfig.Parse<JavaScriptKindOptions>(rawConfig, serviceName) ?? new JavaScriptKindOptions();
 
-        // Non-null: ParseChoice only returns null when the fallback it is given is null.
+        // Through RequireNonBlank first so the choice fields follow the same rule as the free-text
+        // ones below: an explicitly empty value is a mistake to name, not a reason to fall back to
+        // the default. Non-null: ParseChoice only returns null when the fallback it is given is null.
         var appType = ParseChoice(
-            serviceName, "appType", options.AppType, JavaScriptAppTypes.All, JavaScriptAppTypes.JavaScript)!;
+            serviceName, "appType", RequireNonBlank(serviceName, "appType", options.AppType),
+            JavaScriptAppTypes.All, JavaScriptAppTypes.JavaScript)!;
         var packageManager = ParseChoice(
-            serviceName, "packageManager", options.PackageManager, JavaScriptPackageManagers.All, null);
+            serviceName, "packageManager", RequireNonBlank(serviceName, "packageManager", options.PackageManager),
+            JavaScriptPackageManagers.All, null);
 
         var appDirectory = RequireNonBlank(serviceName, "appDirectory", options.AppDirectory) ?? ".";
         var runScript = RequireNonBlank(serviceName, "runScript", options.RunScript);
@@ -181,16 +226,18 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
     private static string? ParseChoice(
         string serviceName, string field, string? value, IReadOnlyList<string> allowed, string? whenUnset)
     {
-        if (string.IsNullOrWhiteSpace(value))
+        // Null is "not set" — an empty or whitespace value was already rejected by RequireNonBlank,
+        // which every caller routes its value through.
+        if (value is null)
         {
             return whenUnset;
         }
 
-        var normalized = value.Trim().ToLowerInvariant();
+        var normalized = value.ToLowerInvariant();
         if (!allowed.Contains(normalized))
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': javascript {field} '{value.Trim()}' is not supported. " +
+                $"Service '{serviceName}': javascript {field} '{value}' is not supported. " +
                 $"Use one of: {string.Join(", ", allowed)}.");
         }
 

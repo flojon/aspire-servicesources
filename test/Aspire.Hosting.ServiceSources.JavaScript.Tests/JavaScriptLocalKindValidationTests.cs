@@ -4,9 +4,10 @@ namespace Aspire.Hosting.ServiceSources.JavaScript.Tests;
 
 /// <summary>
 /// Covers everything the handler can reject from its options block alone. These all go through
-/// <see cref="ILocalResourceKind.Validate"/>, which core calls for every service before any of them
-/// has added a resource — a config mistake should be reported alongside the other services'
-/// failures, not half-way through building the app model.
+/// <see cref="ILocalResourceKind.Validate"/>, which core calls immediately before this service's
+/// <see cref="ILocalResourceKind.Resolve"/> and ahead of its checkout — so a typo'd options block is
+/// caught without paying for a clone, and without the handler having to start building a resource
+/// before it can tell the config is wrong.
 /// </summary>
 public class JavaScriptLocalKindValidationTests
 {
@@ -154,6 +155,11 @@ public class JavaScriptLocalKindValidationTests
     [InlineData("appDirectory")]
     [InlineData("runScript")]
     [InlineData("portEnv")]
+    [InlineData("scriptPath")]
+    // The two choice fields follow the same rule as the free-text ones: an explicitly empty value is
+    // a mistake to name, not a reason to quietly fall back to the default.
+    [InlineData("appType")]
+    [InlineData("packageManager")]
     public void ExplicitlyEmptyValueIsRejected(string field)
     {
         // Distinct from omitting the field, which falls back to a default. Writing `runScript: ""`
