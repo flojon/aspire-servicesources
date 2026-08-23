@@ -113,6 +113,20 @@ nothing will fail to build to warn you.
 
 ### Changed
 
+- **The Java satellite accepts older Community Toolkit versions** ([#80]). Its floor was the
+  version it happened to be developed against rather than the oldest carrying the API it
+  calls, so consumers already on 13.3.0 were excluded for no reason. `WithMavenGoal`,
+  `WithGradleTask` and `WithWrapperPath` all first ship in
+  `CommunityToolkit.Aspire.Hosting.Java` **13.3.0**, so the floor moves from 13.4.0 to that.
+
+  Nothing changes for consumers on a newer version: NuGet takes the lowest version that
+  satisfies every constraint in the graph, so a floor only decides how far *back* a consumer
+  may go. The test suite runs against the floor rather than latest, for the same reason.
+
+  The JavaScript satellite's `Aspire.Hosting.JavaScript` floor is deliberately left alone -
+  it is part of the Aspire package family and has to move in step with core's
+  `Aspire.Hosting`, tracked in [#89].
+
 - **Calls on an `AddService()` result that used to do nothing now take effect** ([#62]).
   `IResourceWithServiceDiscovery` extends `IResourceWithEndpoints` and `IResource`, so every
   Aspire extension constrained to those already bound to `AddService()`'s return type and
@@ -226,3 +240,5 @@ Targets `net10.0`.
 [#68]: https://github.com/flojon/aspire-servicesources/pull/68
 [#72]: https://github.com/flojon/aspire-servicesources/issues/72
 [#79]: https://github.com/flojon/aspire-servicesources/issues/79
+[#80]: https://github.com/flojon/aspire-servicesources/issues/80
+[#89]: https://github.com/flojon/aspire-servicesources/issues/89
