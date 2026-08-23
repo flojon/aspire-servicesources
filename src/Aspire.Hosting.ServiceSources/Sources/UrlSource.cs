@@ -23,9 +23,10 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// Host-process consumers work and are unaffected.
 /// </para>
 /// <para>
-/// Registering the resource — the obvious fix, and the one #58 proposes — clears that DCP failure
-/// but replaces it with a worse one: the consuming container is never created and nothing says why.
-/// See <see cref="ServiceUrlResource"/> for the measurement.
+/// Registering the resource (#58's option 1) clears that DCP failure but replaces it with a worse
+/// one: the consuming container is never created and nothing says why. Delegating to
+/// <c>ExternalServiceResource</c> (option 2) is the route that would work, and is what the upstream
+/// issue blocks. See <see cref="ServiceUrlResource"/> for both.
 /// </para>
 /// </remarks>
 internal sealed class UrlSource : IServiceSource

@@ -39,9 +39,13 @@ Established empirically against Aspire.Hosting 13.4.6 and Aspire CLI 13.5.1 / 13
 3. **Subclassing works.** `class X : ContainerResource, IResourceWithServiceDiscovery` registers via
    `AddResource`, is `WithReference`-able by a container consumer, and accepts
    `WithEnvironment`/`WithArgs`/`WaitFor`. This is Aspire's own integration pattern.
-4. **`ExternalServiceResource` is `sealed`.** The `url` source cannot delegate to it
-   (microsoft/aspire#9965, #15961, #15993), so it declares its own `ServiceUrlResource`. This
-   decides which type is declared; it is *not* what makes #58 unfixable for `url` — see finding 8.
+4. **`ExternalServiceResource` is `sealed` and carries no `EndpointAnnotation`.** Delegating to it
+   is the route that *would* fix #58 for `url` — no endpoint means DCP never plumbs
+   container-to-host networking and injects the URL directly, which a container consumer handles
+   fine (verified against plain Aspire 13.4.6). It is blocked twice over: no `EndpointAnnotation`
+   means it cannot satisfy `IResourceWithServiceDiscovery` (microsoft/aspire#9965, #15961, #15993),
+   and `sealed` means this package cannot add that interface itself. Hence its own
+   `ServiceUrlResource`, and hence the genuine dependency on the upstream issue.
 5. **`AddProject` validates the project path at add time**, so a project resource cannot be
    registered eagerly with a placeholder path. Registering a `ProjectResource` with a *custom*
    `IProjectMetadata` does not throw, but skips `WithProjectDefaults` — `internal`, reads
@@ -97,14 +101,22 @@ unaffected and gains #58's fix for free.
 
 ### The `url` source stays unregistered
 
-Registering `ServiceUrlResource` — #58's own option 1 — was tried and measured, not reasoned about.
-DCP creates a Service for *every* model resource carrying an `EndpointAnnotation`, whatever its
-type (`DcpExecutor.PrepareServices`), so registration does clear the `"should have an associated DCP
+Both routes #58 lists are blocked, so it stays unfixed here.
+
+*Option 1, register `ServiceUrlResource`* — tried and measured, not reasoned about. DCP creates a
+Service for *every* model resource carrying an `EndpointAnnotation`, whatever its type
+(`DcpExecutor.PrepareServices`), so registration does clear the `"should have an associated DCP
 Service resource"` failure, and nothing tries to launch the resource. But the endpoint names a
 remote host DCP cannot bind a local port for, so it then fails to allocate the container-network
 port (`"Unable to allocate a network port for service '<name>-1'"`) and the consuming container is
-never created at all — a silent hang in place of a clear error. So #58 stays unfixed for `url` on
-those grounds rather than on `ExternalServiceResource` being sealed. The resource keeps its current shape; a
+never created at all — a silent hang in place of a clear error.
+
+*Option 2, delegate to `ExternalServiceResource`* — the route that would work, blocked upstream. See
+finding 4: no `EndpointAnnotation` means DCP never plumbs container-to-host networking for it, which
+is exactly why a container consumer of one works in plain Aspire; the same absence means it cannot
+satisfy `IResourceWithServiceDiscovery`, and `sealed` blocks adding that here.
+
+The resource keeps its current shape; a
 `BeforeStartEvent` pre-flight detects a container consumer holding an `EndpointReferenceAnnotation`
 targeting a `ServiceUrlResource` and throws a `ServiceSourcesConfigurationException` naming the
 service, its source and the upstream issues — replacing the raw DCP stack trace (#58 option 3).
