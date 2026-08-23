@@ -1,0 +1,39 @@
+<Project>
+
+  <!--
+    Package versions for the published packages. Every version here is a floor a consumer
+    inherits: NuGet resolves the lowest version that satisfies the graph, so this is the
+    oldest release a consumer may bring, not the newest tested. Each is the version that
+    first carries the API the package actually calls, and moves only when new API is needed
+    or an advisory forces it - .github/dependabot.yml deliberately does not watch this
+    directory.
+
+    The floors are self-checking rather than asserted: because restore takes the lowest
+    applicable version, `dotnet test` compiles and runs against exactly these versions.
+
+    Kept separate from the root file rather than merged into it so the two roles stay
+    distinguishable by path - which is what lets .github/dependabot.yml scope itself to the
+    test and sample projects without an id-by-id ignore list that silently rots.
+  -->
+
+  <!--
+    MSBuild takes the *nearest* Directory.Packages.props and stops, so without this import
+    the projects here would not see the root file at all - and MinVer, which
+    Directory.Build.props adds to every project in the repository, would have no version.
+    Importing keeps shared entries defined once instead of duplicated into both files.
+  -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Packages.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <ItemGroup>
+    <!-- Aspire.Hosting and Aspire.Hosting.JavaScript are one matched set: the latter calls
+         into the former across a friend-assembly boundary, so a mixed pair throws
+         MethodAccessException at run time. Move them together. See #89. -->
+    <PackageVersion Include="Aspire.Hosting" Version="13.4.6" />
+    <PackageVersion Include="Aspire.Hosting.JavaScript" Version="13.4.6" />
+
+    <PackageVersion Include="CommunityToolkit.Aspire.Hosting.Java" Version="13.3.0" />
+    <PackageVersion Include="LibGit2Sharp" Version="0.32.0" />
+    <PackageVersion Include="YamlDotNet" Version="18.1.0" />
+  </ItemGroup>
+
+</Project>
