@@ -28,10 +28,11 @@ jobs:
         run: dotnet test -c Release
 
       # Packed project by project rather than solution-wide: the solution also holds the sample
-      # AppHost and the test projects, which must never reach a feed.
+      # AppHost and the test projects, which must never reach a feed. Add a line per new package.
       - name: Pack
         run: |
           dotnet pack src/Aspire.Hosting.ServiceSources/Aspire.Hosting.ServiceSources.csproj -c Release -o ./artifacts
+          dotnet pack src/Aspire.Hosting.ServiceSources.Java/Aspire.Hosting.ServiceSources.Java.csproj -c Release -o ./artifacts
           dotnet pack src/Aspire.Hosting.ServiceSources.JavaScript/Aspire.Hosting.ServiceSources.JavaScript.csproj -c Release -o ./artifacts
 
       - name: NuGet login (OIDC -> temp API key)
@@ -55,6 +56,8 @@ jobs:
     permissions:
       packages: write
 
+    # Every package published by preview.yml needs pruning, or its version list is the one that
+    # grows without bound. Add a name here whenever a package is added to the pack steps above.
     strategy:
       # The action takes one package-name, so each published package gets its own job. Independent
       # of each other: a package with no previews yet — a satellite's first release — fails its own
@@ -63,6 +66,7 @@ jobs:
       matrix:
         package:
           - KoalaSoft.Aspire.Hosting.ServiceSources
+          - KoalaSoft.Aspire.Hosting.ServiceSources.Java
           - KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript
 
     steps:

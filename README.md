@@ -32,8 +32,14 @@ Published on nuget.org as [`KoalaSoft.Aspire.Hosting.ServiceSources`](https://ww
 dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources
 ```
 
-Services that aren't .NET projects need the satellite package for their language as well — see
+Services that aren't .NET projects need the satellite package for their language as well, so an
+AppHost only takes on the hosting dependencies it actually uses — see
 [Non-.NET local services](#non-net-local-services-kind):
+
+| Language | Package |
+| --- | --- |
+| Java | `KoalaSoft.Aspire.Hosting.ServiceSources.Java` |
+| JavaScript | `KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript` |
 
 ```bash
 dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript
@@ -281,8 +287,108 @@ The service always gets an `http` endpoint, so the builder `AddService()` return
 a consumer's `WithReference(...)` like any other. Node and Bun must be on `PATH` for the app types
 that use them.
 
-**Implementing a kind.** A satellite package implements `ILocalResourceKind` and registers it
-from its own extension method:
+#### Java: `kind: java`
+
+Provided by the `KoalaSoft.Aspire.Hosting.ServiceSources.Java` package, which runs the checkout
+through the .NET Aspire Community Toolkit's
+[Java integration](https://github.com/CommunityToolkit/Aspire). Install it, then call `UseJava()`
+once, before the first `AddService()` call — `AddService()` resolves eagerly, so a `kind: java`
+service registered after it has already run has nowhere to look up its handler:
+
+```csharp
+using Aspire.Hosting.ServiceSources;
+
+var builder = DistributedApplication.CreateBuilder(args);
+
+builder.UseJava();
+
+var catalog = builder.AddService("catalog");
+```
+
+`servicesources.yaml`:
+```yaml
+services:
+  catalog:
+    repository: https://github.com/example/catalog
+    kind: java
+    java:
+      mavenGoal: spring-boot:run
+      port: 8080
+```
+
+The checkout is cloned exactly as for any other `"local"` service (`path`, `ref`, and
+`defaultRef` all behave identically), then handed to that integration to run.
+
+**`java:` block options**
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `mavenGoal` | one of these three | Run via the Maven wrapper, e.g. `spring-boot:run`. |
+| `gradleTask` | one of these three | Run via the Gradle wrapper, e.g. `bootRun`. |
+| `jarPath` | one of these three | Run a pre-built jar with `java -jar`, relative to `workingDirectory`. May climb out of it — a monorepo's shared build output directory — but must stay inside the checkout. |
+| `port` | yes | The port the app listens on. Becomes the service's HTTP endpoint, so consumers can `WithReference(...)` it. |
+| `workingDirectory` | no (defaults to the repository root) | Where in the checkout the project lives — the directory holding `pom.xml` / `build.gradle`, and by default the `mvnw`/`gradlew` wrapper too. Must stay inside the checkout. |
+| `wrapperPath` | no (defaults to the wrapper in `workingDirectory`) | Where the `mvnw`/`gradlew` wrapper script lives, relative to the **repository root** — for the monorepo that commits a single wrapper at its root while the service itself sits further down. Name it without an extension (`gradlew`, not `gradlew.bat`) and it works for the whole team: on Windows the `.cmd`/`.bat` wrapper beside it is the one run. Only meaningful with `mavenGoal` or `gradleTask`. |
+| `args` | no | Extra arguments for whichever run mode is configured — passed to the Maven wrapper, the Gradle wrapper, or the jar. |
+
+`mavenGoal`, `gradleTask`, and `jarPath` are mutually exclusive: exactly one must be set. A
+monorepo service, running a Gradle task with an extra argument:
+
+```yaml
+services:
+  catalog:
+    repository: https://github.com/example/monorepo
+    kind: java
+    java:
+      workingDirectory: services/catalog
+      gradleTask: bootRun
+      wrapperPath: gradlew
+      args: ["--args=--spring.profiles.active=dev"]
+      port: 8080
+```
+
+A multi-project Gradle repository (like a multi-module Maven one) commits a single wrapper at its
+root rather than one per project, which is what `wrapperPath: gradlew` names here — without it the
+wrapper is looked for in `services/catalog`, beside the project.
+
+`mavenGoal` and `gradleTask` run the repository's own `mvnw`/`gradlew` wrapper, so a JDK must be
+on the developer's machine but Maven/Gradle itself need not be. That wrapper has to be in the
+checkout — there is no fallback to a system-wide `mvn`/`gradle` — so a checkout without one is
+reported as such, rather than left to surface as a failure to start the app. On Windows the wrapper
+run is `mvnw.cmd`/`gradlew.bat`, whether it was found by default or named by `wrapperPath`: the
+extensionless scripts beside them are POSIX shell scripts that Windows cannot exec.
+
+Every problem with the block bar two — unknown properties, a missing or out-of-range `port`, no run
+mode or more than one, a `workingDirectory`, `wrapperPath` or `jarPath` escaping the repository, a
+`wrapperPath` set alongside `jarPath` — is reported by the `AddService("catalog")` call itself,
+before the service has added anything to the app model. The two exceptions are a `workingDirectory`
+that doesn't exist in the checkout and a wrapper script that isn't there: both need the checkout on
+disk, which isn't cloned until the block itself has been checked, so they are reported a moment
+later, once the resource is being created.
+
+**Reaching the rest of the Java integration.** The `java:` block covers how to start the app; it
+deliberately doesn't mirror every modifier the Community Toolkit offers. Anything else is reachable
+from the AppHost with `As<JavaAppExecutableResource>()`, which hands back the real resource builder:
+
+```csharp
+builder.AddService("catalog")
+    .As<JavaAppExecutableResource>()
+    .WithMavenBuild()                      // compile before starting
+    .WithJvmArgs(["-Xmx512m"])
+    .WithOtelAgent("/path/to/opentelemetry-javaagent.jar");
+```
+
+Use `Configure<T>(...)` instead for anything that should survive a developer switching that service
+to a non-`local` source — `As<T>()` throws if the service no longer resolves to a Java resource,
+which is the point when the AppHost genuinely requires one.
+
+`UseJava()` is exported to Aspire's Type System, so a TypeScript AppHost can call `useJava()`
+before `addService(...)` the same way.
+
+#### Implementing a kind
+
+A satellite package implements `ILocalResourceKind` and registers it from its own extension
+method:
 
 ```csharp
 public sealed class JavaScriptKind : ILocalResourceKind
@@ -615,6 +721,15 @@ sources: `orders` via a real managed `"local"` git checkout (a small project clo
 `payments` via the `"container"` source (the `nginxdemos/hello` hello-world image) — run it to
 see the whole flow end to end. (`"kubernetes"` isn't demoed here since it needs a real cluster
 and `kubectl`; see its section above.)
+
+It also carries a `catalog` service showing `kind: java` — a `"local"` checkout of
+[Spring PetClinic](https://github.com/spring-projects/spring-petclinic) run with its own Maven
+wrapper. `builder.UseJava()` is wired up, but `AddService("catalog")` is commented out and the
+service is left out of `servicesources.local.json.example`, since unlike the three above it needs a
+JDK. To run it, do both: uncomment the call and add `"catalog": { "source": "local" }` to your
+`servicesources.local.json`. Leaving it out of that file by default is what keeps the sample from
+cloning PetClinic on every run — the first `AddService` prefetches every `"local"` entry there,
+whether or not you add it.
 
 ```bash
 cd samples/DemoAppHost
