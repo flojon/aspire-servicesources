@@ -216,6 +216,12 @@ internal static class LocalGitCheckout
                 {
                     Directory.Delete(repoRoot, recursive: true);
                 }
+                catch (DirectoryNotFoundException)
+                {
+                    // A concurrent resolution of the same service removed the same debris first.
+                    // That is exactly what this delete wanted, so carry on to the rename rather than
+                    // failing the AppHost with advice to delete a directory that is already gone.
+                }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
                     throw new ServiceSourcesConfigurationException(
@@ -228,11 +234,23 @@ internal static class LocalGitCheckout
             {
                 Directory.Move(scratch, repoRoot);
             }
-            catch (IOException) when (Directory.Exists(Path.Combine(repoRoot, ".git")))
+            catch (IOException ex)
             {
                 // The same collision one instant later: the check above and this rename are not one
                 // atomic operation. Ours is redundant rather than wrong — discard it and use theirs.
-                return true;
+                if (Directory.Exists(Path.Combine(repoRoot, ".git")))
+                {
+                    return true;
+                }
+
+                // Something else put a non-repository directory there inside the same window (a
+                // concurrent AppHost that got as far as creating it). Reported as a named
+                // configuration failure because the raw rename error — "Cannot create a file when
+                // that file already exists" — says neither which service failed nor what to do.
+                throw new ServiceSourcesConfigurationException(
+                    $"Service '{serviceName}': the freshly cloned checkout could not be moved into '{repoRoot}' — " +
+                    "something else created that path while the clone was running. Re-run; if it persists, delete " +
+                    "the directory and re-run.", ex);
             }
 
             return false;
