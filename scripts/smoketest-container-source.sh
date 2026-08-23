@@ -16,6 +16,11 @@ ECHO_TAG="latest"
 ECHO_PORT="80"
 ECHO_TEXT_MARKER="Hostname:"
 
+# Stand-in address for the services this test resolves to the "url" source. The url source
+# registers no resource and nothing ever connects, so this is never dialled; `.invalid` is the
+# reserved TLD (RFC 2606) that can never resolve, which says outright that it isn't meant to.
+UNUSED_URL="http://unused.invalid"
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 apphost_dir="$repo_root/samples/DemoAppHost"
 cache_dir="$repo_root/.smoketest-cache"
@@ -23,6 +28,19 @@ mkdir -p "$cache_dir"
 
 log() { printf '\n==> %s\n' "$*"; }
 fail() { printf '\nFAIL: %s\n' "$*" >&2; exit 1; }
+
+# Once the AppHost has been launched, a failed assertion here usually means the AppHost itself
+# exited instead of whatever the assertion was about, and the reason is only in its log. Emit
+# the tail on the way out so the cause travels with the failure, rather than sitting in a file
+# that a CI runner discards when the job ends.
+fail_with_apphost_log() {
+  printf '\nFAIL: %s\n' "$*" >&2
+  if [[ -s "$cache_dir/apphost.log" ]]; then
+    printf '\n--- last 40 lines of apphost.log ---\n' >&2
+    tail -n 40 "$cache_dir/apphost.log" >&2
+  fi
+  exit 1
+}
 
 command -v docker >/dev/null 2>&1 || fail "docker is required (and must be running)"
 docker info >/dev/null 2>&1 || fail "docker daemon is not reachable"
@@ -59,6 +77,14 @@ if [[ -f "$apphost_dir/servicesources.local.json" ]]; then
 fi
 
 log "pointing DemoAppHost's container source at ${ECHO_IMAGE}:${ECHO_TAG}"
+# This catalog replaces the sample's own, so it has to declare every service DemoAppHost's
+# Program.cs calls AddService for: AddService throws on a name the catalog doesn't carry, and
+# that surfaces as the AppHost dying at startup rather than as a config error.
+#
+# Only `orders` is the subject of this test, so only it gets the echo image. `inventory` and
+# `payments` resolve to the "url" source, which registers no resource and starts nothing,
+# keeping the run down to the single container being verified — and keeping the sample's real
+# entries (a repository clone and a second container image) out of it.
 cat > "$apphost_dir/servicesources.yaml" <<EOF
 services:
   orders:
@@ -68,14 +94,47 @@ services:
       image: ${ECHO_IMAGE}
       port: ${ECHO_PORT}
       defaultTag: ${ECHO_TAG}
+  inventory:
+    url:
+      url: ${UNUSED_URL}
+  payments:
+    url:
+      url: ${UNUSED_URL}
 EOF
 cat > "$apphost_dir/servicesources.local.json" <<EOF
 {
   "services": {
-    "orders": { "source": "container" }
+    "orders": { "source": "container" },
+    "inventory": { "source": "url" },
+    "payments": { "source": "url" }
   }
 }
 EOF
+
+log "pre-pulling ${ECHO_IMAGE}:${ECHO_TAG}"
+# DCP pulls this image itself when it starts the container, so this is not strictly required.
+# It is here because an unauthenticated Docker Hub pull is rate-limited per source IP, which
+# shared CI egress reaches routinely: pulling up front, with retries, reports that as its own
+# failure instead of as a container that mysteriously never appears, and it warms the local
+# cache so DCP's pull is a no-op.
+#
+# The retries cover a transient network blip, not a Hub 429: that limit is measured in hours,
+# so a few seconds of waiting cannot clear it. Docker's own stderr is kept and reported on the
+# way out, because it is the only thing that distinguishes the two.
+pull_attempts=3
+pulled=0
+pull_error=""
+for attempt in $(seq 1 $pull_attempts); do
+  if pull_error="$(docker pull "${ECHO_IMAGE}:${ECHO_TAG}" 2>&1 >/dev/null)"; then
+    pulled=1
+    break
+  fi
+  if [[ $attempt -lt $pull_attempts ]]; then
+    log "pull attempt ${attempt} of ${pull_attempts} failed, retrying"
+    sleep 5
+  fi
+done
+[[ $pulled -eq 1 ]] || fail "could not pull ${ECHO_IMAGE}:${ECHO_TAG} after ${pull_attempts} attempts: ${pull_error}"
 
 log "building DemoAppHost"
 dotnet build "$apphost_dir/DemoAppHost.csproj" -v quiet
@@ -92,7 +151,7 @@ for _ in $(seq 1 60); do
   [[ -n "$container_id" ]] && break
   sleep 1
 done
-[[ -n "$container_id" ]] || fail "no ${ECHO_IMAGE}:${ECHO_TAG} container appeared (see $cache_dir/apphost.log)"
+[[ -n "$container_id" ]] || fail_with_apphost_log "no ${ECHO_IMAGE}:${ECHO_TAG} container appeared"
 
 log "waiting for the container's port to be published"
 host_port=""
@@ -104,10 +163,13 @@ for _ in $(seq 1 30); do
   fi
   sleep 1
 done
-[[ -n "$host_port" ]] || fail "container ${container_id} never published port ${ECHO_PORT} (see $cache_dir/apphost.log)"
+[[ -n "$host_port" ]] || fail_with_apphost_log "container ${container_id} never published port ${ECHO_PORT}"
 
 log "curling the published port ($host_port)"
-response="$(curl -fsS --retry 10 --retry-delay 1 --retry-connrefused "http://127.0.0.1:$host_port/")"
-[[ "$response" == *"$ECHO_TEXT_MARKER"* ]] || fail "unexpected response: '$response'"
+# The explicit `|| fail_with_apphost_log` is what makes this report anything at all: under
+# `set -e` a bare failing assignment aborts the script on the spot, before the handler runs.
+response="$(curl -fsS --retry 10 --retry-delay 1 --retry-connrefused "http://127.0.0.1:$host_port/")" \
+  || fail_with_apphost_log "no answer from the published port $host_port"
+[[ "$response" == *"$ECHO_TEXT_MARKER"* ]] || fail_with_apphost_log "unexpected response: '$response'"
 
 log "PASS: ContainerSource served traffic from the Aspire-managed container correctly"
