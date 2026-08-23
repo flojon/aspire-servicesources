@@ -17,10 +17,6 @@ internal static class LocalGitCheckout
         string appHostDirectory,
         IGitClient gitClient)
     {
-        // Every message below names the repository, and a repository URL may carry a token. Redact
-        // once here so no message site has to remember to; the real URL still goes to git itself.
-        var displayRepository = GitUrl.Redact(metadata.Repository);
-
         string repoRoot;
 
         if (config.Path is not null)
@@ -57,45 +53,26 @@ internal static class LocalGitCheckout
 
             if (!Directory.Exists(Path.Combine(repoRoot, ".git")))
             {
-                // Validated before any work is done, so an unsupported URL fails fast rather than
-                // after a sweep and a directory create.
+                // Validated before any work is done, so an unsupported URL fails fast rather
+                // than after a sweep and a directory create.
                 GitUrlValidator.EnsureSupported(serviceName, metadata.Repository);
 
-                CloneIntoPlace(serviceName, metadata, checkoutsRoot, repoRoot, gitClient);
-
-                if (reference is not null)
+                // A clone that loses the race to a concurrent AppHost leaves us using *their*
+                // checkout, not one we just made, so it gets the same treatment as a checkout found
+                // there on a later run: theirs may be a clone of another repository, and may hold
+                // work in flight that a checkout would discard.
+                if (CloneIntoPlace(serviceName, metadata, checkoutsRoot, repoRoot, gitClient))
+                {
+                    UseExistingCheckout(serviceName, metadata, repoRoot, reference, gitClient);
+                }
+                else if (reference is not null)
                 {
                     CheckoutWithFetchRetry(serviceName, metadata, repoRoot, reference, gitClient);
                 }
             }
             else
             {
-                var existingOrigin = gitClient.GetOriginUrl(repoRoot);
-                if (existingOrigin is not null && !RepositoryUrlsMatch(existingOrigin, metadata.Repository))
-                {
-                    throw new ServiceSourcesConfigurationException(
-                        $"Service '{serviceName}': checkout at '{repoRoot}' already contains a clone of " +
-                        $"'{GitUrl.Redact(existingOrigin)}', which does not match the configured repository " +
-                        $"'{displayRepository}'. " +
-                        "Remove the checkout directory or fix the configured repository URL.");
-                }
-
-                if (reference is not null)
-                {
-                    if (gitClient.HasUncommittedChanges(repoRoot))
-                    {
-                        if (!gitClient.IsRefCheckedOut(repoRoot, reference))
-                        {
-                            throw new ServiceSourcesConfigurationException(
-                                $"Service '{serviceName}': checkout at '{repoRoot}' has uncommitted changes and is not " +
-                                $"on the configured ref '{reference}'. Commit or stash your changes, then re-run.");
-                        }
-                    }
-                    else if (!gitClient.IsRefCheckedOut(repoRoot, reference))
-                    {
-                        CheckoutWithFetchRetry(serviceName, metadata, repoRoot, reference, gitClient);
-                    }
-                }
+                UseExistingCheckout(serviceName, metadata, repoRoot, reference, gitClient);
             }
         }
 
@@ -103,8 +80,50 @@ internal static class LocalGitCheckout
     }
 
     /// <summary>
+    /// Adopts a checkout this call did not create — one left by an earlier run, or one a concurrent
+    /// AppHost landed while we were cloning. Both cases are the same problem: the working tree
+    /// belongs to someone else, so it is verified to be the right repository and left alone unless
+    /// moving it to <paramref name="reference"/> is safe.
+    /// </summary>
+    private static void UseExistingCheckout(
+        string serviceName, ServiceMetadata metadata, string repoRoot, string? reference, IGitClient gitClient)
+    {
+        var existingOrigin = gitClient.GetOriginUrl(repoRoot);
+        if (existingOrigin is not null && !RepositoryUrlsMatch(existingOrigin, metadata.Repository))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': checkout at '{repoRoot}' already contains a clone of " +
+                $"'{GitUrl.Redact(existingOrigin)}', which does not match the configured repository " +
+                $"'{GitUrl.Redact(metadata.Repository)}'. " +
+                "Remove the checkout directory or fix the configured repository URL.");
+        }
+
+        if (reference is null)
+        {
+            return;
+        }
+
+        if (gitClient.HasUncommittedChanges(repoRoot))
+        {
+            if (!gitClient.IsRefCheckedOut(repoRoot, reference))
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Service '{serviceName}': checkout at '{repoRoot}' has uncommitted changes and is not " +
+                    $"on the configured ref '{reference}'. Commit or stash your changes, then re-run.");
+            }
+        }
+        else if (!gitClient.IsRefCheckedOut(repoRoot, reference))
+        {
+            CheckoutWithFetchRetry(serviceName, metadata, repoRoot, reference, gitClient);
+        }
+    }
+
+    /// <summary>
     /// Clones into a scratch directory alongside the destination and renames it into place, so an
     /// interrupted clone can never leave a half-populated <c>checkouts/&lt;service&gt;</c> behind.
+    /// Returns <see langword="true"/> when a concurrent resolution won the race and its checkout was
+    /// adopted instead — the caller must then treat <c>repoRoot</c> as someone else's working tree
+    /// rather than as the clone it asked for.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -123,7 +142,7 @@ internal static class LocalGitCheckout
     /// clone — never something in between.
     /// </para>
     /// </remarks>
-    private static void CloneIntoPlace(
+    private static bool CloneIntoPlace(
         string serviceName, ServiceMetadata metadata, string checkoutsRoot, string repoRoot, IGitClient gitClient)
     {
         // See ResolveRepoRoot: the real URL goes to git, the redacted one goes into messages.
@@ -185,7 +204,7 @@ internal static class LocalGitCheckout
             {
                 // A concurrent resolution of the same service landed its clone first. Ours is
                 // redundant rather than wrong — discard it in the finally and use theirs.
-                return;
+                return true;
             }
 
             // Debris from a version that predates this method, or from a crash before the rename
@@ -213,7 +232,10 @@ internal static class LocalGitCheckout
             {
                 // The same collision one instant later: the check above and this rename are not one
                 // atomic operation. Ours is redundant rather than wrong — discard it and use theirs.
+                return true;
             }
+
+            return false;
         }
         finally
         {

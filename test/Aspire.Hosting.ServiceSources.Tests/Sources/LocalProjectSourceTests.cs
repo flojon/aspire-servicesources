@@ -388,6 +388,72 @@ public class LocalProjectSourceTests
     }
 
     [Fact]
+    public void ResolveProjectPath_ConcurrentResolutionLandsACloneOfAnotherRepository_ThrowsRatherThanUsingIt()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
+        // Same service name, a different repository behind it: two AppHost directories sharing a
+        // checkouts root, or a catalog edited between the two runs. Adopting the winner's clone has
+        // to apply the same origin check that finding it there on a later run would.
+        var gitClient = new FakeGitClient { OriginUrl = "https://github.com/company/billing" };
+        gitClient.DuringClone = () =>
+        {
+            Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
+            File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
+        };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveProjectPath(ServiceName, Metadata(), DevConfig(), appHostDirectory, gitClient));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("https://github.com/company/billing", ex.Message);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_ConcurrentResolutionLandsACheckoutWithUncommittedChanges_DoesNotCheckOutOverThem()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
+        // The checkout that won the race is on another ref and has work in flight — the winner is
+        // still starting up, or someone is editing in it. Forcing our ref onto it would discard
+        // that, which is exactly what the existing-checkout path refuses to do.
+        var gitClient = new FakeGitClient { UncommittedChanges = true, CurrentlyCheckedOutRef = "main" };
+        gitClient.DuringClone = () =>
+        {
+            Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
+            File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
+        };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveProjectPath(ServiceName, Metadata(), DevConfig(@ref: "feature/x"), appHostDirectory, gitClient));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("uncommitted changes", ex.Message);
+        Assert.Empty(gitClient.CheckedOutRefs);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_ConcurrentResolutionLandsACheckoutAlreadyOnTheRef_LeavesItAlone()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
+        var gitClient = new FakeGitClient { CurrentlyCheckedOutRef = "feature/x" };
+        gitClient.DuringClone = () =>
+        {
+            Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
+            File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
+        };
+
+        var projectPath = ResolveProjectPath(
+            ServiceName, Metadata(), DevConfig(@ref: "feature/x"), appHostDirectory, gitClient);
+
+        Assert.Equal(Path.Combine(repoDir, "Orders.csproj"), projectPath);
+        // Already where it needs to be: adopting it is not a reason to re-run a checkout over a
+        // working tree another process owns.
+        Assert.Empty(gitClient.CheckedOutRefs);
+    }
+
+    [Fact]
     public void ResolveProjectPath_CloneFailsOverDebris_LeavesTheDebrisForARetryToClear()
     {
         var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
