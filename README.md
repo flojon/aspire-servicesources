@@ -257,9 +257,14 @@ Every option is optional:
   `vite`, `nextjs`, `node`, or `bun`. `node` and `bun` execute a file directly rather than a
   `package.json` script, so they require `scriptPath`; the other three run a script and reject it.
 - **`appDirectory`** — the directory holding the app's `package.json`, relative to the repository
-  root, which is also the default. It must stay inside the checkout.
+  root, which is also the default. It must stay inside the checkout, and — for every app type that
+  runs a `package.json` script — it is checked to actually hold one, so pointing it at the wrong
+  directory of a monorepo is reported against the service rather than surfacing later as an npm
+  `could not read package.json`.
 - **`runScript`** — the `package.json` script to run; the integrations default this to `dev`. For
-  `node`/`bun` it overrides the `scriptPath` they would otherwise execute directly.
+  `node`/`bun` it overrides the `scriptPath` they would otherwise execute directly, which needs a
+  `package.json` in `appDirectory` — without one those two app types run `scriptPath` and nothing
+  else, so a `runScript` set there is rejected rather than silently ignored.
 - **`scriptPath`** — the entry-point file (e.g. `server.js`) relative to `appDirectory`. Required
   by `appType: node` and `appType: bun`, and rejected for the others. Like `appDirectory` it must
   stay inside the checkout, and it is checked to exist so a typo is reported against the service

@@ -88,6 +88,64 @@ public class JavaScriptLocalKindResolutionTests
     }
 
     [Theory]
+    [InlineData("javascript")]
+    [InlineData("vite")]
+    [InlineData("nextjs")]
+    public void AppDirectoryWithoutAPackageJsonIsReportedAgainstTheService(string appType)
+    {
+        // These app types run a package.json script, so an appDirectory without one cannot work.
+        // Left unchecked it reaches the developer as an npm "could not read package.json" from the
+        // installer resource, detached from the service whose entry pointed at the wrong directory —
+        // the same reason scriptPath is checked to exist.
+        var repoRoot = TestHelpers.CreateRepo(withPackageJson: false);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(Builder(), repoRoot, $"appType: {appType}"));
+
+        Assert.Contains("frontend", ex.Message);
+        Assert.Contains("package.json", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("node")]
+    [InlineData("bun")]
+    public void RunScriptWithoutAPackageJsonIsReportedAgainstTheService(string appType)
+    {
+        // A run script IS a package.json script, and Aspire's AddNodeApp/AddBunApp only wire up a
+        // package manager when the app directory has a package.json. Without this check the run
+        // script is silently dropped and the service starts the scriptPath it was told to override.
+        var repoRoot = TestHelpers.CreateRepo(withPackageJson: false);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(Builder(), repoRoot, $"""
+                appType: {appType}
+                scriptPath: server.js
+                runScript: start
+                """));
+
+        Assert.Contains("frontend", ex.Message);
+        Assert.Contains("package.json", ex.Message);
+        Assert.Contains("runScript", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("node")]
+    [InlineData("bun")]
+    public void AnAppTypeThatRunsAScriptFileNeedsNoPackageJson(string appType)
+    {
+        // The whole point of these two app types: a checkout holding nothing but an entry-point file
+        // is a legitimate service, so the package.json requirement must not reach them.
+        var repoRoot = TestHelpers.CreateRepo(withPackageJson: false);
+
+        var app = Resolve(Builder(), repoRoot, $"""
+            appType: {appType}
+            scriptPath: server.js
+            """);
+
+        Assert.Equal("frontend", app.Resource.Name);
+    }
+
+    [Theory]
     [InlineData("../..")]
     [InlineData("/etc")]
     public void AppDirectoryOutsideTheCheckoutIsRejected(string appDirectory)
@@ -100,6 +158,34 @@ public class JavaScriptLocalKindResolutionTests
             () => Resolve(Builder(), repoRoot, $"appDirectory: {appDirectory}"));
 
         Assert.Contains("outside the service's checkout", ex.Message);
+    }
+
+    [Fact]
+    public void AppDirectoryIsComparedWithTheCheckoutTheWayTheFilesystemCompares()
+    {
+        // An appDirectory that climbs out of the checkout and back in ("../Frontend/web") is the one
+        // way its resolved path can differ from the root in casing. Where the filesystem ignores
+        // casing that is the same directory and has to be accepted; where it does not it is a
+        // different directory and the guard has to reject it. Which branch runs is decided by
+        // probing the filesystem rather than by the OS, since a macOS volume can be either.
+        var repoRoot = TestHelpers.CreateRepo("web");
+        var parent = Path.GetDirectoryName(repoRoot)!;
+        var recased = Path.GetFileName(repoRoot).ToUpperInvariant();
+        var appDirectory = $"../{recased}/web";
+
+        if (Directory.Exists(Path.Combine(parent, recased)))
+        {
+            var app = Resolve(Builder(), repoRoot, $"appDirectory: {appDirectory}");
+
+            Assert.Equal("frontend", app.Resource.Name);
+        }
+        else
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+                () => Resolve(Builder(), repoRoot, $"appDirectory: {appDirectory}"));
+
+            Assert.Contains("outside the service's checkout", ex.Message);
+        }
     }
 
     [Fact]

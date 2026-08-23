@@ -39,6 +39,8 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
             RequireScriptPath(serviceName, root, appDirectory, options.ScriptPath);
         }
 
+        RequirePackageJsonIfOneIsNeeded(serviceName, appDirectory, options);
+
         var app = AddApp(builder, serviceName, appDirectory, options);
 
         ApplyPackageManager(app, options.PackageManager);
@@ -140,17 +142,69 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
     }
 
     /// <summary>
+    /// Requires a <c>package.json</c> in the app directory for the app types that run one of its
+    /// scripts. Every app type but node/bun does, and a <c>runScript</c> on those two means the same
+    /// thing — Aspire's <c>AddNodeApp</c>/<c>AddBunApp</c> only attach a package manager when the
+    /// app directory has a <c>package.json</c>, so a run script set without one is silently dropped
+    /// and the service starts the <c>scriptPath</c> it was meant to override. Left to run time both
+    /// cases surface as an npm "could not read package.json" from the installer resource, detached
+    /// from the service whose entry named the wrong directory.
+    /// </summary>
+    private static void RequirePackageJsonIfOneIsNeeded(
+        string serviceName, string appDirectory, ResolvedOptions options)
+    {
+        if (JavaScriptAppTypes.RunsAScriptFile(options.AppType) && options.RunScript is null)
+        {
+            // A checkout holding nothing but the entry-point file is exactly what these two are for.
+            return;
+        }
+
+        if (File.Exists(Path.Combine(appDirectory, "package.json")))
+        {
+            return;
+        }
+
+        var (what, remedy) = JavaScriptAppTypes.RunsAScriptFile(options.AppType)
+            ? ($"runScript '{options.RunScript}' names a package.json script",
+                "Remove it to run 'scriptPath' directly, or point 'appDirectory' at the directory holding the app's package.json.")
+            : ($"appType '{options.AppType}' runs a package.json script",
+                "Point 'appDirectory' at the directory holding the app's package.json.");
+
+        throw new ServiceSourcesConfigurationException(
+            $"Service '{serviceName}': javascript {what}, but no 'package.json' was found in " +
+            $"'{appDirectory}'. {remedy}");
+    }
+
+    /// <summary>
+    /// How resolved paths are compared with the checkout root: the way the filesystem itself
+    /// compares them. An <c>appDirectory</c> that climbs out and back in (<c>"../Frontend/web"</c>)
+    /// is the one way a path genuinely inside the checkout can differ from the root in casing, and
+    /// on Windows and macOS that is the same directory — an ordinal comparison would reject it as
+    /// being outside. The trade-off is a case-sensitive macOS volume, where a sibling differing only
+    /// in casing is let through; that is a mistake this check would rather have caught, but a far
+    /// cheaper outcome than refusing a path that really is inside the checkout.
+    /// </summary>
+    private static readonly StringComparison PathComparison =
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+    /// <summary>
     /// Resolves <paramref name="value"/> against <paramref name="basePath"/> and refuses anything
     /// that lands outside <paramref name="root"/>. <see cref="Path.Combine(string, string)"/> hands
     /// back an absolute value unchanged, and <c>"../.."</c> climbs out — either of which would
-    /// silently run something from outside the service's own checkout.
+    /// silently run something from outside the service's own checkout. This catches the mistake, not
+    /// a determined author: the catalog is a file in the AppHost's own repository, and symlinks are
+    /// deliberately left unresolved so that a checkout linked into place from elsewhere — a normal
+    /// thing to do while working on a service locally — keeps working.
     /// </summary>
     private static string RequireInsideCheckout(
         string serviceName, string field, string root, string basePath, string value)
     {
         var resolved = Path.GetFullPath(Path.Combine(basePath, value));
 
-        if (resolved != root && !resolved.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+        if (!string.Equals(resolved, root, PathComparison)
+            && !resolved.StartsWith(root + Path.DirectorySeparatorChar, PathComparison))
         {
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}': javascript {field} '{value}' resolves to '{resolved}', " +

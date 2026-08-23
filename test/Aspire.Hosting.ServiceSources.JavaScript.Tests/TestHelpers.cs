@@ -26,17 +26,22 @@ internal static class TestHelpers
 
     /// <summary>
     /// Creates a directory that stands in for a checked-out repository, with a JavaScript app in
-    /// it. Returns the repository root.
+    /// it. Returns the repository root. Pass <paramref name="withPackageJson"/> as <c>false</c> for
+    /// the checkout of a plain Node app that has nothing but its entry-point file.
     /// </summary>
-    public static string CreateRepo(string? appSubdirectory = null)
+    public static string CreateRepo(string? appSubdirectory = null, bool withPackageJson = true)
     {
         var repoRoot = Directory.CreateTempSubdirectory("servicesources-js-").FullName;
         var appDirectory = appSubdirectory is null ? repoRoot : Path.Combine(repoRoot, appSubdirectory);
         Directory.CreateDirectory(appDirectory);
 
-        File.WriteAllText(
-            Path.Combine(appDirectory, "package.json"),
-            """{ "name": "frontend", "scripts": { "dev": "node server.js", "start": "node server.js" } }""");
+        if (withPackageJson)
+        {
+            File.WriteAllText(
+                Path.Combine(appDirectory, "package.json"),
+                """{ "name": "frontend", "scripts": { "dev": "node server.js", "start": "node server.js" } }""");
+        }
+
         File.WriteAllText(Path.Combine(appDirectory, "server.js"), "");
 
         return repoRoot;
