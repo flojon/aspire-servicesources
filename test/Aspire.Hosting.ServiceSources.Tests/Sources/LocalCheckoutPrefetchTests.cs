@@ -307,4 +307,39 @@ public class LocalCheckoutPrefetchTests
         Assert.Contains("javascript", ex.Message);
         Assert.Contains("before the first AddService call", ex.Message);
     }
+
+    [Fact]
+    public void ServiceMarkedLocalButNeverAdded_IsReportedRatherThanClonedSilently()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var builder = TestHelpers.CreateBuilder(dir);
+        var git = new FakeGitClient { StartBarrier = new Barrier(2) };
+
+        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+
+        // "billing" was cloned because the prefetch cannot know which services the AppHost will
+        // add — but the developer can act on that, since the file is theirs. Paying for it in
+        // silence is what makes a first run look like a hang.
+        var message = LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage;
+
+        Assert.NotNull(message);
+        Assert.Contains("billing", message);
+        Assert.DoesNotContain("orders", message);
+        Assert.Contains("1 service", message);
+    }
+
+    [Fact]
+    public void EveryLocalServiceAdded_ReportsNothing()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var builder = TestHelpers.CreateBuilder(dir);
+        var git = new FakeGitClient { StartBarrier = new Barrier(2) };
+        var source = new LocalProjectSource(git);
+
+        source.Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        source.Resolve(builder, "billing", Metadata("billing"), DevConfig());
+
+        // Nothing was speculative in the end, so there is nothing to tell the developer about.
+        Assert.Null(LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage);
+    }
 }

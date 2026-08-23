@@ -129,12 +129,19 @@ a project reference would be.
   discarded — if the checkout is dirty and the ref changed, resolution fails loudly instead of
   overwriting your work. Anything you put at that path yourself that isn't a plain clone — a linked
   `git worktree`, or a clone made with `--separate-git-dir` — is refused with an explanation rather
-  than replaced; point at it with `path` instead. The `.servicesources/` directory gitignores itself
+  than replaced; point at it with `path` instead. A directory there with no `.git` entry at all is
+  treated as debris from an interrupted clone and **deleted**, so don't hand-place a plain directory
+  as a quick override — use `path` for that too. The `.servicesources/` directory gitignores itself
   on first use — no need to add it to your own `.gitignore`.
 - Set `path` to point at a checkout you manage yourself (e.g. an existing local clone). It's
   used as-is — no clone, no checkout, no fetch, ever. A relative `path` is anchored to the
   AppHost directory, and must name a directory that already exists. `ref` cannot be combined
   with `path`.
+- Keep the file to the services you actually add. `AddService()` has to hand back the real
+  resource, so it can't wait until the AppHost has finished composing to find out which services
+  it wants — the first call clones and reconciles the checkouts for *every* `"local"` entry, in
+  parallel. Entries you never `AddService()` are still paid for in network and disk. The AppHost
+  logs which ones those were at startup, so you know what to drop.
 
 #### Several services from one repository
 

@@ -59,7 +59,17 @@ public class LocalProjectSourceTests
             ClonedRepos.Add((repositoryUrl, destinationPath));
             Directory.CreateDirectory(destinationPath);
             File.WriteAllText(Path.Combine(destinationPath, "Orders.csproj"), "<Project />");
+
+            // Runs while this clone is notionally still in flight, so a test can land a second
+            // AppHost's checkout in the destination the way a concurrent process would.
+            DuringClone?.Invoke();
         }
+
+        /// <summary>
+        /// Invoked from inside <see cref="Clone"/>, after it has written its output but before
+        /// resolution decides what to do with the destination directory.
+        /// </summary>
+        public Action? DuringClone { get; set; }
 
         public void Checkout(string repositoryPath, string reference)
         {
@@ -348,6 +358,57 @@ public class LocalProjectSourceTests
         Assert.True(File.Exists(Path.Combine(repoDir, "Orders.csproj")));
         Assert.True(File.Exists(Path.Combine(repoDir, ".git")));
         Assert.Empty(gitClient.ClonedRepos);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_ConcurrentResolutionLandsItsCloneFirst_UsesItRatherThanDeletingIt()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var checkoutsRoot = Path.Combine(appHostDirectory, ".servicesources", "checkouts");
+        var repoDir = Path.Combine(checkoutsRoot, ServiceName);
+        var gitClient = new FakeGitClient();
+        // A second AppHost over the same directory — a restart while the first is still starting,
+        // or two "aspire run"s — finishes its clone and renames it into place while ours is still
+        // downloading. Resolution got this far on a "no .git directory" probe taken before that
+        // happened; acting on that stale probe would recursively delete a complete checkout,
+        // including work only it has.
+        gitClient.DuringClone = () =>
+        {
+            Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
+            File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
+            File.WriteAllText(Path.Combine(repoDir, "theirs.txt"), "work only the other process has");
+        };
+
+        var projectPath = ResolveProjectPath(ServiceName, Metadata(), DevConfig(), appHostDirectory, gitClient);
+
+        Assert.True(File.Exists(Path.Combine(repoDir, "theirs.txt")));
+        Assert.Equal(Path.Combine(repoDir, "Orders.csproj"), projectPath);
+        // Ours was redundant rather than wrong, so it is discarded rather than left as a leak.
+        Assert.Empty(Directory.EnumerateDirectories(checkoutsRoot, ".incoming-*"));
+    }
+
+    [Fact]
+    public void ResolveProjectPath_CloneFailsOverDebris_LeavesTheDebrisForARetryToClear()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
+        Directory.CreateDirectory(repoDir);
+        File.WriteAllText(Path.Combine(repoDir, "partial.pack"), "half a clone");
+
+        Assert.Throws<ServiceSourcesConfigurationException>(() => ResolveProjectPath(
+            ServiceName, Metadata(), DevConfig(), appHostDirectory,
+            new FakeGitClient { CloneException = new InvalidOperationException("connection reset") }));
+
+        // Removing the destination is deferred until a replacement is in hand, so a clone that never
+        // arrives costs nothing. Deleting up front and then failing would have left the service with
+        // neither its debris nor a checkout.
+        Assert.True(File.Exists(Path.Combine(repoDir, "partial.pack")));
+
+        var projectPath = ResolveProjectPath(
+            ServiceName, Metadata(), DevConfig(), appHostDirectory, new FakeGitClient());
+
+        Assert.False(File.Exists(Path.Combine(repoDir, "partial.pack")));
+        Assert.Equal(Path.Combine(repoDir, "Orders.csproj"), projectPath);
     }
 
     [Fact]

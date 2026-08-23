@@ -135,8 +135,10 @@ internal static class LocalGitCheckout
         // Reached because ".git" is not a *directory*, which is not the same as "no repository":
         // ".git" is a file for a linked worktree ("git worktree add") and for a clone made with
         // --separate-git-dir. Both are complete checkouts that can hold uncommitted work, so the
-        // delete below would destroy one. Only debris — content with no ".git" entry at all — is
-        // removable; anything else keeps the non-destructive error this branch used to produce.
+        // delete further below would destroy one. Only debris — content with no ".git" entry at all
+        // — is removable; anything else keeps the non-destructive error this branch used to produce.
+        // Refused up here, before the clone, so the download is never paid for: unlike the
+        // concurrent-clone collision below, this state is the user's own and cannot appear midway.
         if (File.Exists(Path.Combine(repoRoot, ".git")))
         {
             throw new ServiceSourcesConfigurationException(
@@ -144,23 +146,6 @@ internal static class LocalGitCheckout
                 "directory, so it is a linked worktree or a clone made with --separate-git-dir rather than a " +
                 "checkout this tool cloned. Move it aside and re-run to have it cloned fresh, or point the " +
                 "service at it with the 'path' override in servicesources.local.json.");
-        }
-
-        // Debris from a version that predates this method, or from a crash between here and the
-        // rename below. Everything under .servicesources is tool-managed and gitignored, and a
-        // checkout with no ".git" entry holds nothing worth keeping.
-        if (Directory.Exists(repoRoot))
-        {
-            try
-            {
-                Directory.Delete(repoRoot, recursive: true);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                throw new ServiceSourcesConfigurationException(
-                    $"Service '{serviceName}': the checkout at '{repoRoot}' is not a git repository — it is left over " +
-                    "from an interrupted clone — and could not be removed automatically. Delete it and re-run.", ex);
-            }
         }
 
         // Unique per attempt: two builders resolving the same service concurrently (xUnit does
@@ -187,14 +172,47 @@ internal static class LocalGitCheckout
                     $"Service '{serviceName}': failed to clone repository '{displayRepository}' into '{repoRoot}'.", ex);
             }
 
+            // What happens to the destination is decided here, after the clone, rather than
+            // inherited from the "no .git directory" probe in ResolveRepoRoot. By now that probe is
+            // as old as a clone plus the sweep above — seconds or minutes — and a second AppHost
+            // resolving the same service (a restart while the first is still starting, or two
+            // "aspire run"s over one AppHost directory) can have landed a complete checkout in the
+            // meantime. Deleting on the strength of the stale probe would destroy that checkout,
+            // including work only it has. Deciding immediately before the rename narrows the window
+            // to these adjacent operations, and means nothing is removed until its replacement is
+            // already in hand.
+            if (Directory.Exists(Path.Combine(repoRoot, ".git")))
+            {
+                // A concurrent resolution of the same service landed its clone first. Ours is
+                // redundant rather than wrong — discard it in the finally and use theirs.
+                return;
+            }
+
+            // Debris from a version that predates this method, or from a crash before the rename
+            // below. Everything under .servicesources is tool-managed and gitignored, and a
+            // checkout with no ".git" entry holds nothing worth keeping.
+            if (Directory.Exists(repoRoot))
+            {
+                try
+                {
+                    Directory.Delete(repoRoot, recursive: true);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    throw new ServiceSourcesConfigurationException(
+                        $"Service '{serviceName}': the checkout at '{repoRoot}' is not a git repository — it is left over " +
+                        "from an interrupted clone — and could not be removed automatically. Delete it and re-run.", ex);
+                }
+            }
+
             try
             {
                 Directory.Move(scratch, repoRoot);
             }
             catch (IOException) when (Directory.Exists(Path.Combine(repoRoot, ".git")))
             {
-                // A concurrent resolution of the same service landed its clone first. Ours is
-                // redundant rather than wrong — discard it below and use theirs.
+                // The same collision one instant later: the check above and this rename are not one
+                // atomic operation. Ours is redundant rather than wrong — discard it and use theirs.
             }
         }
         finally
