@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# A PR that gets a second push doesn't need the first run's result any more.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # Everything runs in one job so the solution is restored and compiled once; the display
+    # name spells out what that single check actually covers.
+    name: 🔨 build, test & pack
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # MinVer derives the package version from tags/history, so the pack step
+          # needs the full history rather than a shallow clone.
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore
+
+      # The build is warning-clean today; -warnaserror keeps it that way instead of letting
+      # warnings accumulate unnoticed in PRs.
+      - name: Build
+        run: dotnet build -c Release --no-restore -warnaserror
+
+      # LogFilePrefix rather than LogFileName: every project multi-targets net8/9/10, and a
+      # fixed file name makes each target framework overwrite the previous one's results.
+      - name: Test
+        run: dotnet test -c Release --no-build --logger "trx;LogFilePrefix=results" --results-directory ./artifacts/test-results
+
+      # Packing on every PR catches packaging-only breakage (missing README/LICENSE, bad
+      # metadata) here rather than at release time, where release.yml deliberately has no
+      # --skip-duplicate safety net. Packed project by project like preview.yml/release.yml:
+      # the solution also holds the sample AppHost and the test projects.
+      - name: Pack
+        run: |
+          dotnet pack src/Aspire.Hosting.ServiceSources/Aspire.Hosting.ServiceSources.csproj -c Release --no-build -o ./artifacts/package
+          dotnet pack src/Aspire.Hosting.ServiceSources.JavaScript/Aspire.Hosting.ServiceSources.JavaScript.csproj -c Release --no-build -o ./artifacts/package
+
+      - name: Upload test results
+        # Test results are most useful exactly when the run failed.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: ./artifacts/test-results
+          if-no-files-found: warn
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: ./artifacts/package/*.nupkg
