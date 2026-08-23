@@ -43,6 +43,11 @@ Or reference the project directly from your AppHost instead:
 Requires .NET 8 or later (net8.0, net9.0, and net10.0 are all supported) and an AppHost
 project using the `Aspire.AppHost.Sdk` (`aspire new` / `aspire restore` sets this up).
 
+Every release is listed in the
+[changelog](https://github.com/flojon/aspire-servicesources/blob/main/CHANGELOG.md), which
+is where breaking changes and their migrations are recorded. Check it before upgrading —
+while the version is below `1.0.0`, a breaking change can ship in a minor release.
+
 ### Preview builds
 
 Every push to `main` publishes a prerelease build (`0.x.y-alpha.0.N`) to GitHub Packages.
