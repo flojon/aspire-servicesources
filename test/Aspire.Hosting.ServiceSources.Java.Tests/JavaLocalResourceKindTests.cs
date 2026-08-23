@@ -175,6 +175,51 @@ public class JavaLocalResourceKindTests
     }
 
     [Fact]
+    public void Resolve_WrapperPathWrittenPosixStyle_RunsThePlatformWrapper()
+    {
+        var builder = CreateBuilder();
+        var repoRoot = CreateRepoRoot(Path.Combine("services", "catalog"));
+        var wrapper = WriteWrapper(repoRoot, GradleWrapperName);
+
+        // servicesources.yaml is shared by the whole team across platforms, so a wrapperPath can only
+        // be written one way — POSIX-style, as the README's monorepo example writes it. On Windows the
+        // file the checkout actually holds is gradlew.bat, and execing the POSIX script instead would
+        // fail to start the app.
+        var resource = ResolveResource(builder, repoRoot,
+            ("workingDirectory", "services/catalog"),
+            ("gradleTask", "bootRun"),
+            ("wrapperPath", "gradlew"),
+            ("port", 8080));
+
+        Assert.Equal(Path.GetFullPath(wrapper), resource.Command);
+    }
+
+    // The platform is a parameter of WrapperForPlatform rather than read from OperatingSystem, so that
+    // the Windows naming is assertable at all: these tests only ever run on the app host's own
+    // platform, and CI's is Linux.
+    [Theory]
+    [InlineData("mvnw", ".cmd", "mvnw.cmd")]
+    [InlineData("gradlew", ".bat", "gradlew.bat")]
+    [InlineData("tools/mvnw", ".cmd", "tools/mvnw.cmd")]
+    public void WrapperForPlatform_OnWindows_AppendsTheExtensionAnExtensionlessWrapperLacks(
+        string wrapperPath, string windowsExtension, string expected) =>
+        Assert.Equal(
+            expected, JavaLocalResourceKind.WrapperForPlatform(wrapperPath, windowsExtension, isWindows: true));
+
+    [Theory]
+    [InlineData("gradlew.bat")]
+    [InlineData("tools/mvnw.cmd")]
+    [InlineData("scripts/run-maven.sh")]
+    public void WrapperForPlatform_OnWindows_LeavesAWrapperThatNamesItsOwnExtension(string wrapperPath) =>
+        Assert.Equal(wrapperPath, JavaLocalResourceKind.WrapperForPlatform(wrapperPath, ".cmd", isWindows: true));
+
+    [Theory]
+    [InlineData("mvnw")]
+    [InlineData("tools/mvnw")]
+    public void WrapperForPlatform_OffWindows_LeavesTheWrapperAsWritten(string wrapperPath) =>
+        Assert.Equal(wrapperPath, JavaLocalResourceKind.WrapperForPlatform(wrapperPath, ".cmd", isWindows: false));
+
+    [Fact]
     public void Resolve_WorkingDirectory_IsResolvedRelativeToTheCheckout()
     {
         var builder = CreateBuilder();

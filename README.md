@@ -328,7 +328,7 @@ The checkout is cloned exactly as for any other `"local"` service (`path`, `ref`
 | `jarPath` | one of these three | Run a pre-built jar with `java -jar`, relative to `workingDirectory`. May climb out of it — a monorepo's shared build output directory — but must stay inside the checkout. |
 | `port` | yes | The port the app listens on. Becomes the service's HTTP endpoint, so consumers can `WithReference(...)` it. |
 | `workingDirectory` | no (defaults to the repository root) | Where in the checkout the project lives — the directory holding `pom.xml` / `build.gradle`, and by default the `mvnw`/`gradlew` wrapper too. Must stay inside the checkout. |
-| `wrapperPath` | no (defaults to the wrapper in `workingDirectory`) | Where the `mvnw`/`gradlew` wrapper script lives, relative to the **repository root** — for the monorepo that commits a single wrapper at its root while the service itself sits further down. Only meaningful with `mavenGoal` or `gradleTask`. |
+| `wrapperPath` | no (defaults to the wrapper in `workingDirectory`) | Where the `mvnw`/`gradlew` wrapper script lives, relative to the **repository root** — for the monorepo that commits a single wrapper at its root while the service itself sits further down. Name it without an extension (`gradlew`, not `gradlew.bat`) and it works for the whole team: on Windows the `.cmd`/`.bat` wrapper beside it is the one run. Only meaningful with `mavenGoal` or `gradleTask`. |
 | `args` | no | Extra arguments for whichever run mode is configured — passed to the Maven wrapper, the Gradle wrapper, or the jar. |
 
 `mavenGoal`, `gradleTask`, and `jarPath` are mutually exclusive: exactly one must be set. A
@@ -354,7 +354,9 @@ wrapper is looked for in `services/catalog`, beside the project.
 `mavenGoal` and `gradleTask` run the repository's own `mvnw`/`gradlew` wrapper, so a JDK must be
 on the developer's machine but Maven/Gradle itself need not be. That wrapper has to be in the
 checkout — there is no fallback to a system-wide `mvn`/`gradle` — so a checkout without one is
-reported as such, rather than left to surface as a failure to start the app.
+reported as such, rather than left to surface as a failure to start the app. On Windows the wrapper
+run is `mvnw.cmd`/`gradlew.bat`, whether it was found by default or named by `wrapperPath`: the
+extensionless scripts beside them are POSIX shell scripts that Windows cannot exec.
 
 Every problem with the block bar two — unknown properties, a missing or out-of-range `port`, no run
 mode or more than one, a `workingDirectory`, `wrapperPath` or `jarPath` escaping the repository, a

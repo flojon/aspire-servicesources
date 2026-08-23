@@ -13,12 +13,13 @@ internal sealed class JavaLocalResourceKind : ILocalResourceKind
     /// <summary>The <c>kind:</c> value in <c>servicesources.yaml</c> this handler is registered for.</summary>
     public const string KindName = "java";
 
-    // What the Community Toolkit's integration execs when no wrapper override is annotated. Mirrored
-    // here rather than read from it (they're private) so the wrapper this checks for is the very file
-    // the resource would run.
-    private static string DefaultMavenWrapper => OperatingSystem.IsWindows() ? "mvnw.cmd" : "mvnw";
-
-    private static string DefaultGradleWrapper => OperatingSystem.IsWindows() ? "gradlew.bat" : "gradlew";
+    // What the Community Toolkit's integration execs when no wrapper override is annotated, and the
+    // extension Windows spells that same wrapper with. Mirrored here rather than read from it (they're
+    // private) so the wrapper this checks for is the very file the resource would run.
+    private const string MavenWrapper = "mvnw";
+    private const string MavenWindowsExtension = ".cmd";
+    private const string GradleWrapper = "gradlew";
+    private const string GradleWindowsExtension = ".bat";
 
     public void Validate(string serviceName, object? rawConfig) => JavaKindOptions.Parse(serviceName, rawConfig);
 
@@ -107,19 +108,22 @@ internal sealed class JavaLocalResourceKind : ILocalResourceKind
     private static string ResolveWrapper(
         string serviceName, string repoRoot, string workingDirectory, ValidatedJavaKindOptions options)
     {
-        var (runModeField, defaultWrapperName) = options.RunMode.Kind switch
+        var (runModeField, wrapperName, windowsExtension) = options.RunMode.Kind switch
         {
-            JavaRunModeKind.MavenGoal => ("mavenGoal", DefaultMavenWrapper),
-            JavaRunModeKind.GradleTask => ("gradleTask", DefaultGradleWrapper),
+            JavaRunModeKind.MavenGoal => ("mavenGoal", MavenWrapper, MavenWindowsExtension),
+            JavaRunModeKind.GradleTask => ("gradleTask", GradleWrapper, GradleWindowsExtension),
             _ => throw new InvalidOperationException(
                 $"Java run mode '{options.RunMode.Kind}' runs no wrapper script."),
         };
 
         // A configured wrapperPath is relative to the repository root — the monorepo case it exists
         // for keeps the wrapper above the project — while the default sits in the working directory.
-        var wrapper = options.WrapperPath is null
-            ? Path.GetFullPath(Path.Combine(workingDirectory, defaultWrapperName))
-            : Path.GetFullPath(Path.Combine(repoRoot, options.WrapperPath));
+        // Both go through WrapperForPlatform, so an override is named for this platform exactly as the
+        // default is: whichever of the two is in play, the file looked for is the runnable one.
+        var relativeWrapper = WrapperForPlatform(
+            options.WrapperPath ?? wrapperName, windowsExtension, OperatingSystem.IsWindows());
+        var wrapper = Path.GetFullPath(
+            Path.Combine(options.WrapperPath is null ? workingDirectory : repoRoot, relativeWrapper));
 
         if (File.Exists(wrapper))
         {
@@ -134,9 +138,32 @@ internal sealed class JavaLocalResourceKind : ILocalResourceKind
         }
 
         throw new ServiceSourcesConfigurationException(
-            $"Service '{serviceName}': java.{runModeField} runs the repository's own '{defaultWrapperName}' " +
+            $"Service '{serviceName}': java.{runModeField} runs the repository's own '{relativeWrapper}' " +
             $"wrapper script, but '{wrapper}' does not exist. Commit the wrapper beside the project, or set " +
             "java.wrapperPath to where this checkout keeps it — a multi-module repository usually has a single " +
             "wrapper at its root, relative to which java.wrapperPath is read.");
     }
+
+    /// <summary>
+    /// <paramref name="wrapperPath"/> as this platform spells it: on Windows a wrapper named without
+    /// an extension gets the run mode's <c>.cmd</c>/<c>.bat</c> one, which is what the repository
+    /// actually commits it as — <c>mvnw</c> and <c>gradlew</c> are POSIX shell scripts, and Windows
+    /// cannot exec them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the whole reason <c>wrapperPath</c> can be written POSIX-style: one
+    /// <c>servicesources.yaml</c> is shared by a team on every platform, so the value can only be
+    /// spelled one way, and the plain name is the one a developer writes. A value that <em>does</em>
+    /// name an extension is left alone — it names a specific file, including the Windows wrapper
+    /// itself for a repository that commits only that.
+    /// </para>
+    /// <para>
+    /// <paramref name="isWindows"/> is a parameter rather than read from
+    /// <see cref="OperatingSystem.IsWindows"/> here so the Windows naming is testable from the
+    /// Linux/macOS run this repository's tests and CI do.
+    /// </para>
+    /// </remarks>
+    internal static string WrapperForPlatform(string wrapperPath, string windowsExtension, bool isWindows) =>
+        isWindows && Path.GetExtension(wrapperPath).Length == 0 ? wrapperPath + windowsExtension : wrapperPath;
 }
