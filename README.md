@@ -584,13 +584,11 @@ fixed by [microsoft/aspire#19577](https://github.com/microsoft/aspire/pull/19577
 `main` on 2026-08-22 and lands in Aspire CLI **13.6.0**. Verified against a build of that PR
 (`13.6.0-pr.19577.gfa0aea2c`): the generated SDK type-checks clean under strict `tsc`, and the
 sample runs end-to-end — `withReference()` on the `addService()` result injects the resolved
-service's `services__inventory__*` discovery variables into a consuming resource. (That run was
-against the then-`"url"`-sourced sample, injecting
-`services__inventory__https__0=https://httpbin.org:443`; the sample now uses the `"container"`
-source, so the scheme and address differ.) The same sample regenerated with 13.5.1 still
-reproduces all six `TS2552` errors.
+service's discovery variables into the consuming resource, e.g.
+`services__inventory__http__0=http://localhost:<port>` pointing at the running `inventory`
+container. The same sample regenerated with 13.5.1 still reproduces all six `TS2552` errors.
 
-Two caveats found while verifying:
+One caveat found while verifying:
 
 - **Switching *back* to a dogfood CLI build leaves stale generated code.** `aspire restore` rewrites
   the pinned package version in the generated
@@ -603,14 +601,6 @@ Two caveats found while verifying:
   13.6.0-pr build, it reproduces only when returning to a hive-sourced PR build that was already
   built in that directory — switches between released versions were consistent. Reported upstream as
   [microsoft/aspire#19603](https://github.com/microsoft/aspire/issues/19603).
-- **A container can't `withReference()` a `"url"`-source service.** This sample's `inventory` is a
-  `"url"` service, so `addContainer(...).withReference(inventory)` fails — the service runs out of
-  band with no local resource for DCP to route a container to. A project or executable consumer works
-  fine, so the sample demonstrates the reference from `addExecutable(...)`. Unrelated to the codegen
-  fix: it reproduces on released 13.5.1 and from a C# AppHost too. Tracked as
-  [#58](https://github.com/flojon/aspire-servicesources/issues/58), which turns the raw DCP failure
-  (`Host endpoint 'https' on resource 'inventory' should have an associated DCP Service resource
-  already set up`) into a clear error and fixes the other sources outright.
 
 ## Status
 
