@@ -382,8 +382,10 @@ which is the point when the AppHost genuinely requires one.
 `UseJava()` is exported to Aspire's Type System, so a TypeScript AppHost can call `useJava()`
 before `addService(...)` the same way.
 
-**Implementing a kind.** A satellite package implements `ILocalResourceKind` and registers it
-from its own extension method:
+#### Implementing a kind
+
+A satellite package implements `ILocalResourceKind` and registers it from its own extension
+method:
 
 ```csharp
 public sealed class JavaScriptKind : ILocalResourceKind
