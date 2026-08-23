@@ -12,6 +12,9 @@ concurrency:
 
 jobs:
   build:
+    # Everything runs in one job so the solution is restored and compiled once; the display
+    # name spells out what that single check actually covers.
+    name: build, test & pack
     runs-on: ubuntu-latest
     permissions:
       contents: read
