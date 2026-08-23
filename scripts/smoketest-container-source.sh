@@ -117,16 +117,24 @@ log "pre-pulling ${ECHO_IMAGE}:${ECHO_TAG}"
 # shared CI egress reaches routinely: pulling up front, with retries, reports that as its own
 # failure instead of as a container that mysteriously never appears, and it warms the local
 # cache so DCP's pull is a no-op.
+#
+# The retries cover a transient network blip, not a Hub 429: that limit is measured in hours,
+# so a few seconds of waiting cannot clear it. Docker's own stderr is kept and reported on the
+# way out, because it is the only thing that distinguishes the two.
+pull_attempts=3
 pulled=0
-for attempt in 1 2 3; do
-  if docker pull "${ECHO_IMAGE}:${ECHO_TAG}" >/dev/null 2>&1; then
+pull_error=""
+for attempt in $(seq 1 $pull_attempts); do
+  if pull_error="$(docker pull "${ECHO_IMAGE}:${ECHO_TAG}" 2>&1 >/dev/null)"; then
     pulled=1
     break
   fi
-  log "pull attempt ${attempt} failed, retrying"
-  sleep 5
+  if [[ $attempt -lt $pull_attempts ]]; then
+    log "pull attempt ${attempt} of ${pull_attempts} failed, retrying"
+    sleep 5
+  fi
 done
-[[ $pulled -eq 1 ]] || fail "could not pull ${ECHO_IMAGE}:${ECHO_TAG} (Docker Hub rate limit or no network?)"
+[[ $pulled -eq 1 ]] || fail "could not pull ${ECHO_IMAGE}:${ECHO_TAG} after ${pull_attempts} attempts: ${pull_error}"
 
 log "building DemoAppHost"
 dotnet build "$apphost_dir/DemoAppHost.csproj" -v quiet
@@ -158,7 +166,10 @@ done
 [[ -n "$host_port" ]] || fail_with_apphost_log "container ${container_id} never published port ${ECHO_PORT}"
 
 log "curling the published port ($host_port)"
-response="$(curl -fsS --retry 10 --retry-delay 1 --retry-connrefused "http://127.0.0.1:$host_port/")"
-[[ "$response" == *"$ECHO_TEXT_MARKER"* ]] || fail "unexpected response: '$response'"
+# The explicit `|| fail_with_apphost_log` is what makes this report anything at all: under
+# `set -e` a bare failing assignment aborts the script on the spot, before the handler runs.
+response="$(curl -fsS --retry 10 --retry-delay 1 --retry-connrefused "http://127.0.0.1:$host_port/")" \
+  || fail_with_apphost_log "no answer from the published port $host_port"
+[[ "$response" == *"$ECHO_TEXT_MARKER"* ]] || fail_with_apphost_log "unexpected response: '$response'"
 
 log "PASS: ContainerSource served traffic from the Aspire-managed container correctly"

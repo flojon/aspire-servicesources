@@ -107,12 +107,16 @@ jobs:
             9.0.x
             10.0.x
 
+      # Keyed apart from the `build` job's cache on purpose. The two jobs run concurrently, so
+      # sharing a key means whichever finishes second fails its save -- and worse, this job
+      # restores only DemoAppHost, so if it saved under the shared key `build` would restore a
+      # cache missing the test and pack dependencies and re-download them every run.
       - name: Cache NuGet packages
         uses: actions/cache@v4
         with:
           path: ~/.nuget/packages
-          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
-          restore-keys: nuget-${{ runner.os }}-
+          key: nuget-smoketest-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-smoketest-${{ runner.os }}-
 
       # Docker is preinstalled and running on ubuntu-latest, which is the script's only
       # requirement beyond the .NET SDK. The script pins the image and pre-pulls it itself,
