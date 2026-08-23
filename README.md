@@ -32,6 +32,13 @@ Published on nuget.org as [`KoalaSoft.Aspire.Hosting.ServiceSources`](https://ww
 dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources
 ```
 
+Services that aren't .NET projects need the satellite package for their language as well — see
+[Non-.NET local services](#non-net-local-services-kind):
+
+```bash
+dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript
+```
+
 Or reference the project directly from your AppHost instead:
 
 ```xml
@@ -213,7 +220,66 @@ services:
 `kind: dotnet` (the default) uses the entry's `project` property and needs no options block.
 Any other kind is resolved by a handler that a satellite package registers, and its options
 live in a block named after the kind. Kind names are matched case-sensitively, and a kind with
-no registered handler fails at startup before anything is cloned.
+no registered handler fails at that service's `AddService()` call, before its checkout is used.
+
+#### JavaScript: `kind: javascript`
+
+Provided by the `KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript` package, which runs the
+checkout through [`Aspire.Hosting.JavaScript`](https://www.nuget.org/packages/Aspire.Hosting.JavaScript).
+Install it, then call `UseJavaScript()` once, before the first `AddService()` call:
+
+```csharp
+using Aspire.Hosting.ServiceSources;
+
+var builder = DistributedApplication.CreateBuilder(args);
+
+builder.UseJavaScript();
+
+var frontend = builder.AddService("frontend");
+```
+
+```yaml
+services:
+  frontend:
+    repository: https://github.com/example/frontend
+    kind: javascript
+    javascript:
+      appType: vite         # javascript (default) | vite | nextjs | node | bun
+      appDirectory: web     # directory holding package.json, relative to the repo root
+      runScript: dev        # package.json script to run
+      packageManager: pnpm  # npm | yarn | pnpm | bun
+      port: 4321            # the port consumers reach the service on
+```
+
+Every option is optional:
+
+- **`appType`** — which integration runs the app: `javascript` (the default, `AddJavaScriptApp`),
+  `vite`, `nextjs`, `node`, or `bun`. `node` and `bun` execute a file directly rather than a
+  `package.json` script, so they require `scriptPath`; the other three run a script and reject it.
+- **`appDirectory`** — the directory holding the app's `package.json`, relative to the repository
+  root, which is also the default. It must stay inside the checkout, and — for every app type that
+  runs a `package.json` script — it is checked to actually hold one, so pointing it at the wrong
+  directory of a monorepo is reported against the service rather than surfacing later as an npm
+  `could not read package.json`.
+- **`runScript`** — the `package.json` script to run; the integrations default this to `dev`. For
+  `node`/`bun` it overrides the `scriptPath` they would otherwise execute directly, which needs a
+  `package.json` in `appDirectory` — without one those two app types run `scriptPath` and nothing
+  else, so a `runScript` set there is rejected rather than silently ignored.
+- **`scriptPath`** — the entry-point file (e.g. `server.js`) relative to `appDirectory`. Required
+  by `appType: node` and `appType: bun`, and rejected for the others. Like `appDirectory` it must
+  stay inside the checkout, and it is checked to exist so a typo is reported against the service
+  rather than surfacing later as a `cannot find module` crash.
+- **`packageManager`** — `npm`, `yarn`, `pnpm`, or `bun`, used to install dependencies before the
+  app starts (a fresh clone has no `node_modules`). Left unset, the integration's own default
+  applies: npm for most app types, Bun for `appType: bun`.
+- **`port`** / **`targetPort`** — the port consumers reach the service on, and the port the app
+  itself listens on. Both are allocated by Aspire when unset.
+- **`portEnv`** — the environment variable the app reads its listen port from; defaults to `PORT`.
+  Rejected for `vite`/`nextjs`, whose integrations bind the dev server's port themselves.
+
+The service always gets an `http` endpoint, so the builder `AddService()` returns can be passed to
+a consumer's `WithReference(...)` like any other. Node and Bun must be on `PATH` for the app types
+that use them.
 
 **Implementing a kind.** A satellite package implements `ILocalResourceKind` and registers it
 from its own extension method:
@@ -227,9 +293,9 @@ public sealed class JavaScriptKind : ILocalResourceKind
         public string? RunScript { get; set; }
     }
 
-    // Optional, and worth implementing whenever Resolve parses rawConfig: this runs for every
-    // service before any of them has added a resource, so a typo'd options block is reported
-    // alongside every other service's failure instead of aborting a half-built app model.
+    // Optional, and worth implementing whenever Resolve parses rawConfig: this runs immediately
+    // before Resolve, and before this service's checkout, so a typo'd options block is reported
+    // without a half-created resource behind it and without paying for a clone first.
     public void Validate(string serviceName, object? rawConfig) =>
         LocalKindConfig.Parse<Options>(rawConfig, serviceName);
 
@@ -248,8 +314,9 @@ public static IDistributedApplicationBuilder UseJavaScript(this IDistributedAppl
 
 `LocalKindConfig.Parse<T>` turns the opaque options block into a typed object, and rejects an
 unknown property or a block that isn't a mapping with a `ServiceSourcesConfigurationException`
-naming the service. `AddLocalKind` must be called before the service resolves (i.e. before the
-app host starts), accepts each kind name at most once, and cannot re-register `"dotnet"` or use a
+naming the service. `AddLocalKind` must be called before the `AddService()` call for a service of
+that kind — resolution is eager, so registering later is too late — accepts each kind name at most
+once, and cannot re-register `"dotnet"` or use a
 name that collides with a well-known service property (`repository`, `project`, `defaultRef`,
 `kind`, `kubernetes`, `url`, `container`) — a block by one of those names would be read as that
 property rather than as the kind's options.

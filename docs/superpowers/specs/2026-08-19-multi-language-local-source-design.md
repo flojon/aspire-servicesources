@@ -176,3 +176,50 @@ New `src/Aspire.Hosting.ServiceSources.JavaScript` and
 `ServiceSources.slnx` alongside the core project, each with their own
 `.csproj`, own NuGet package, and own `test/` folder — built, tested, and
 released from this repo's existing CI pipeline.
+
+## Adding a satellite package
+
+Each language is one package, and the pattern below is what #44 (JavaScript)
+and #45 (Java) both follow. The first six steps are the package itself; the
+last three are release wiring that is easy to forget, because each is a
+hard-coded list that a new package has to be added to by hand.
+
+1. `src/Aspire.Hosting.ServiceSources.<Lang>/` with a `.csproj` copied from an
+   existing satellite: same `TargetFrameworks` (`net8.0;net9.0;net10.0`),
+   `PackageId` `KoalaSoft.Aspire.Hosting.ServiceSources.<Lang>`, MinVer with
+   `MinVerTagPrefix` `v`, symbols on, and `LICENSE`/`README.md` packed in. It
+   references core by project reference and the language's hosting integration
+   by package reference — never the other way round, so a consumer of core
+   never takes on a hosting dependency it doesn't use.
+2. `AssemblyInfo.cs` with `InternalsVisibleTo` for the package's own test
+   project, so the handler and its options type can stay `internal`.
+3. An options record for the kind's yaml block, parsed with
+   `LocalKindConfig.Parse<T>` so an unknown property is rejected by name.
+4. An `ILocalResourceKind` implementation. `Validate` takes the options block
+   alone and runs immediately before that service's `Resolve` and ahead of its
+   checkout, so a typo is caught without paying for a clone; anything needing
+   the repository on disk (path existence, containment in the checkout) has to
+   run from `Resolve`, which is the only one given `repoRoot`. Any path the
+   block can name — an app directory, a script or project file — must be
+   resolved against the checkout and rejected if it lands outside it, or a
+   catalog entry can run something the service doesn't own.
+5. A `Use<Lang>()` extension calling `builder.AddLocalKind(...)`, carrying
+   `[AspireExport]` so a TypeScript AppHost can call it too. If it ever takes
+   parameters, they need the same ATS treatment `AddService` got in #42.
+6. `test/Aspire.Hosting.ServiceSources.<Lang>.Tests/` — its own suite, run
+   independently of core's, plus an entry for both new projects in
+   `ServiceSources.slnx`, and README coverage of the new `kind` and its block.
+7. `.github/workflows/preview.yml` → the `Pack` step. Packing is project by
+   project rather than solution-wide, because the solution also holds the
+   sample AppHost and the test projects, which must never reach a feed. A
+   package missing from this list is simply never published.
+8. `.github/workflows/release.yml` → the same `Pack` step, separately. The two
+   workflows do not share it.
+9. `.github/workflows/release.yml` → the `prune-previews` matrix. `preview.yml`
+   publishes a preview of every packed package on every push to `main`, and
+   this job is the only thing that trims them; a package packed in step 7 but
+   missing here accumulates preview versions without bound. The matrix exists
+   because `actions/delete-package-versions` takes a single `package-name`, and
+   it runs `fail-fast: false` because a package with no previews yet — every
+   satellite's first release — fails its own prune, and must not cancel the
+   jobs pruning the packages that do have previews.
