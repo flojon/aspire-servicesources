@@ -1,0 +1,101 @@
+<Project>
+
+  <!--
+    Put the CHANGELOG.md section for the version being packed into PackageReleaseNotes, so a
+    breaking change reaches the nuget.org listing rather than only the repo. Hand-maintaining
+    the property in the csproj would mean writing every release note twice and noticing when
+    the two drift; reading the changelog keeps one source of truth.
+
+    Lives in .targets rather than .props because it reads $(PackageVersion), which MinVer
+    computes from the git tag during the build - it does not exist yet at .props time.
+  -->
+
+  <PropertyGroup>
+    <ChangelogFile Condition="'$(ChangelogFile)' == ''">$(MSBuildThisFileDirectory)CHANGELOG.md</ChangelogFile>
+    <ChangelogUrl Condition="'$(ChangelogUrl)' == ''">https://github.com/flojon/aspire-servicesources/blob/main/CHANGELOG.md</ChangelogUrl>
+  </PropertyGroup>
+
+  <UsingTask TaskName="ReadChangelogSection"
+             TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <ChangelogFile ParameterType="System.String" Required="true" />
+      <ReleaseVersion ParameterType="System.String" Required="true" />
+      <SectionName ParameterType="System.String" Output="true" />
+      <Section ParameterType="System.String" Output="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System" />
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Text.RegularExpressions" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        // Body of "## [<name>] ...", up to the next "## " heading or the reference-link
+        // block Keep a Changelog puts at the end of the file.
+        Func<string, string, string> body = (text, name) =>
+        {
+            var match = Regex.Match(
+                text,
+                @"^\#\# \[" + Regex.Escape(name) + @"\][^\n]*\n(?<body>.*?)(?=^\#\# |^\[)",
+                RegexOptions.Multiline | RegexOptions.Singleline);
+            if (!match.Success) return "";
+
+            // "([#62])" is a markdown reference link, and its definition lives at the end of
+            // the file, outside the section. NuGet renders release notes as plain text, so
+            // unwrap it to "(#62)" rather than shipping a link that resolves to nothing.
+            return Regex.Replace(match.Groups["body"].Value.Trim(), @"\[(\#\d+)\]", "$1");
+        };
+
+        var changelog = File.ReadAllText(ChangelogFile);
+
+        // A tagged release has its own section. The per-commit prereleases preview.yml
+        // pushes never do, so they describe what is sitting unreleased on main instead.
+        Section = body(changelog, ReleaseVersion);
+        SectionName = Section.Length > 0 ? ReleaseVersion : "";
+
+        if (Section.Length == 0 && ReleaseVersion.Contains("-"))
+        {
+            Section = body(changelog, "Unreleased");
+            SectionName = Section.Length > 0 ? "Unreleased" : "";
+        }
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <Target Name="SetPackageReleaseNotesFromChangelog"
+          AfterTargets="MinVer"
+          BeforeTargets="GenerateNuspec"
+          Condition="'$(IsPackable)' != 'false' and '$(PackageReleaseNotes)' == '' and Exists('$(ChangelogFile)')">
+
+    <ReadChangelogSection ChangelogFile="$(ChangelogFile)" ReleaseVersion="$(PackageVersion)">
+      <Output TaskParameter="SectionName" PropertyName="_ChangelogSectionName" />
+      <Output TaskParameter="Section" PropertyName="_ChangelogSection" />
+    </ReadChangelogSection>
+
+    <!-- No section for this version and no Unreleased to fall back on: link, rather than
+         pack a release carrying no notes at all. -->
+    <PropertyGroup Condition="'$(_ChangelogSectionName)' == ''">
+      <PackageReleaseNotes>Release notes: $(ChangelogUrl)</PackageReleaseNotes>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(_ChangelogSectionName)' == 'Unreleased'">
+      <PackageReleaseNotes>Preview build. Unreleased changes since the last release:
+
+$(_ChangelogSection)
+
+Full changelog: $(ChangelogUrl)</PackageReleaseNotes>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(_ChangelogSectionName)' != '' and '$(_ChangelogSectionName)' != 'Unreleased'">
+      <PackageReleaseNotes>$(_ChangelogSection)
+
+Full changelog: $(ChangelogUrl)</PackageReleaseNotes>
+    </PropertyGroup>
+
+    <Message Importance="normal"
+             Text="PackageReleaseNotes taken from $(ChangelogFile) section '$(_ChangelogSectionName)'."
+             Condition="'$(_ChangelogSectionName)' != ''" />
+    <Warning Text="No '$(PackageVersion)' section in $(ChangelogFile) - packing with a link to the changelog instead of release notes."
+             Condition="'$(_ChangelogSectionName)' == ''" />
+  </Target>
+
+</Project>
