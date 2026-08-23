@@ -39,7 +39,10 @@ namespace Aspire.Hosting.ServiceSources;
 /// <para>
 /// Every method here delegates to <c>Configure&lt;T&gt;</c>, so they inherit its behaviour exactly:
 /// skipped with a logged warning when the service's source runs out of band (<c>"url"</c>,
-/// <c>"kubernetes"</c>).
+/// <c>"kubernetes"</c>). Wait ordering is the exception — a <c>"kubernetes"</c> service resolves to
+/// a real <c>kubectl port-forward</c> process, so <see cref="WaitForService"/> and
+/// <see cref="WaitForServiceCompletion"/> still apply to it (see
+/// <see cref="ServiceConfigurationExtensions.Configure{T}"/>). Only <c>"url"</c> drops everything.
 /// </para>
 /// </remarks>
 public static class ServiceConfigurationExports

@@ -77,6 +77,7 @@ public class ServiceConfigurationExportsTests
         Assert.Contains(nameof(ServiceConfigurationExports.WithServiceConnectionString), names);
         Assert.Contains(nameof(ServiceConfigurationExports.WaitForService), names);
         Assert.Contains(nameof(ServiceConfigurationExports.WaitForServiceCompletion), names);
+        Assert.Contains(nameof(ServiceConfigurationExports.WithServiceArg), names);
     }
 
     [Fact]

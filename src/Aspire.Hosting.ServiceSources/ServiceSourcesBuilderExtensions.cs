@@ -46,8 +46,10 @@ public static class ServiceSourcesBuilderExtensions
     /// <c>WithReference(...)</c> resolves. Which configuration applies depends on the resolved
     /// source: the <c>"url"</c> and <c>"kubernetes"</c> sources run out of band — one is a fixed
     /// remote URL, the other a <c>kubectl port-forward</c> in front of something already running —
-    /// so neither accepts any, and <see cref="ServiceConfigurationExtensions.Configure{T}"/> skips
-    /// with a warning rather than applying it.
+    /// so <see cref="ServiceConfigurationExtensions.Configure{T}"/> skips with a warning rather than
+    /// applying it. Wait ordering survives for <c>"kubernetes"</c>, whose port-forward is a real
+    /// local process to order against; <c>"url"</c> registers no resource at all, so nothing
+    /// applies to it.
     /// </para>
     /// <para>
     /// The bare <c>IResourceBuilder&lt;IResourceWithServiceDiscovery&gt;</c> return type is load
