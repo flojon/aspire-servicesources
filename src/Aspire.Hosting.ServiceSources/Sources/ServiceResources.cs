@@ -24,8 +24,9 @@ internal sealed class ServiceExecutableResource(string name, string command, str
 /// </summary>
 /// <remarks>
 /// Alone among the sources this resource is <b>not</b> registered in <c>builder.Resources</c>, so
-/// DCP never materializes it and never creates a Service for it. The consequence is issue #58: a
-/// <b>container</b> consumer referencing one of these fails inside DCP. <see cref="UrlSource"/>
+/// DCP never materializes it and never creates a Service for it. The consequence was reported as
+/// issue #58 and stays open as #72: a <b>container</b> consumer referencing one of these fails
+/// inside DCP. <see cref="UrlSource"/>
 /// installs a pre-flight check that reports that case as a ServiceSources error instead.
 /// Host-process consumers (projects, executables) work, and are the tested path.
 /// <para>
@@ -49,8 +50,8 @@ internal sealed class ServiceExecutableResource(string name, string command, str
 /// where a container consumer of an <c>AddExternalService</c> comes up clean. It is blocked because
 /// that same missing <see cref="EndpointAnnotation"/> means it cannot satisfy
 /// <see cref="IResourceWithServiceDiscovery"/> (microsoft/aspire#9965, #15961, #15993; tracked here
-/// as #5), and because it is <c>sealed</c>, so this package cannot add the interface itself. That is
-/// the real dependency on the upstream issue, and why <c>sealed</c> matters.
+/// as #72), and because it is <c>sealed</c>, so this package cannot add the interface itself. That
+/// is the real dependency on the upstream issue, and why <c>sealed</c> matters.
 /// </para>
 /// </remarks>
 internal sealed class ServiceUrlResource(string name) : Resource(name), IResourceWithServiceDiscovery;
