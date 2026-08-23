@@ -86,8 +86,13 @@ need is a token on your own account. It must be a **classic** personal access to
 ```bash
 dotnet nuget add source https://nuget.pkg.github.com/flojon/index.json \
   --name servicesources-preview --username <your-github-username> --password <your-pat>
-dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources --prerelease
+dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript --prerelease
 ```
+
+Add the satellite here too, not core alongside it — the feed carries a prerelease of all
+three packages per commit, so two direct references are two prereleases to keep in step.
+If you use no satellite at all, `dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources
+--prerelease` is the single reference to add.
 
 ## Getting started
 

@@ -12,11 +12,12 @@
   </PropertyGroup>
 
   <!-- Versioning is lockstep: one release tag mints the same version for every package, and a
-       satellite pins the exact core it was built against (PinCoreDependency in
-       Directory.Build.targets), which is only sound while every package reads the same tag
-       series. MinVer is repo-wide for that reason and the analyzer switch's: a project that
-       omits it packs as the SDK default 1.0.0, which release.yml would then push to
-       nuget.org or fail the release on. -->
+       satellite constrains core to the minor it was built against - not to an exact version,
+       so core patches still reach consumers on their own (PinCoreDependency in
+       Directory.Build.targets). MinVer is repo-wide for the same reason as the analyzer
+       switch above, that the failure of omitting it is silent: a project without it packs as
+       the SDK default 1.0.0, which release.yml would then push to nuget.org or fail the
+       release on. -->
   <PropertyGroup>
     <MinVerTagPrefix>v</MinVerTagPrefix>
   </PropertyGroup>

@@ -7,8 +7,9 @@
   </PropertyGroup>
 
   <!-- Shared package metadata, MinVer and the LICENSE/README pack items live in
-       Directory.Build.props. The dependency on core is pinned to this exact version by
-       PinCoreDependency in Directory.Build.targets. -->
+       Directory.Build.props. The dependency on core is rewritten into a range closed at
+       core's next minor by PinCoreDependency in Directory.Build.targets, so a core patch
+       resolves without republishing this package. -->
   <PropertyGroup>
     <PackageId>KoalaSoft.Aspire.Hosting.ServiceSources.Java</PackageId>
     <Description>Java support for KoalaSoft.Aspire.Hosting.ServiceSources — lets an AddService() "local" source clone and run a Java service (Maven goal, Gradle task, or a jar) via the .NET Aspire Community Toolkit's Java integration.</Description>

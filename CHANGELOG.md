@@ -62,8 +62,13 @@ nothing will fail to build to warn you.
   <!-- before: any core at or above this version -->
   <dependency id="KoalaSoft.Aspire.Hosting.ServiceSources" version="0.3.0" />
   <!-- after: this minor only -->
-  <dependency id="KoalaSoft.Aspire.Hosting.ServiceSources" version="[0.3.0, 0.4.0)" />
+  <dependency id="KoalaSoft.Aspire.Hosting.ServiceSources" version="[0.3.0, 0.4.0-0)" />
   ```
+
+  The `-0` on the upper bound keeps the next minor's prereleases out as well as its release:
+  `0.4.0-alpha.0.1` sorts *below* `0.4.0`, so a plain `0.4.0` bound would still admit it. That
+  matters on the GitHub Packages preview feed, where every package is published as a
+  prerelease.
 
   A satellite implements core's `ILocalResourceKind`, so a mismatched pair failed at run time
   with `MissingMethodException`/`TypeLoadException` rather than at restore. The minor is the
