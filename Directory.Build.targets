@@ -102,18 +102,34 @@ Full changelog: $(ChangelogUrl)</PackageReleaseNotes>
     A ProjectReference packs as a version *floor*, so a satellite would declare "core >= X"
     and NuGet could satisfy it with any later core. A satellite implements core's
     ILocalResourceKind, so a mismatched pair throws MissingMethodException/TypeLoadException
-    at run time rather than failing at restore; this rewrites the dependency to exactly X.
+    at run time rather than failing at restore. This rewrites the dependency to a range that
+    is open at the patch level but closed at the next minor: [X, major.(minor+1).0).
 
-    Reads $(PackageVersion) from MinVer, so it belongs here rather than in
-    Directory.Build.props - the same reason as the changelog target above. Exact is safe for
-    the prereleases preview.yml pushes per commit, too: every package shares one
-    MinVerTagPrefix and none sets MinVerIgnoreHeight, so core and its satellites always
-    resolve to the identical version.
+    The minor is the boundary because that is where this project's changelog policy allows an
+    interface to break while the version is below 1.0. A core patch still reaches consumers
+    without republishing every satellite, which an exact pin would forbid.
+
+    Both bounds come from %(ProjectVersion) - the version NuGet computed for the referenced
+    project - rather than this project's own $(PackageVersion), so the range describes core
+    even if the two ever stop resolving to the same version. Runs here rather than in
+    Directory.Build.props because _GetProjectReferenceVersions is what populates
+    %(ProjectVersion), the same reason as the changelog target above.
   -->
   <Target Name="PinCoreDependency" AfterTargets="_GetProjectReferenceVersions">
+    <!-- Split first: the range needs minor+1, and MSBuild cannot do arithmetic on a
+         version string without pulling the components out one at a time. -->
     <ItemGroup>
-      <_ProjectReferencesWithVersions Condition="'%(Filename)' == 'Aspire.Hosting.ServiceSources'">
-        <ProjectVersion>[$(PackageVersion)]</ProjectVersion>
+      <_ProjectReferencesWithVersions>
+        <_Major>$([System.Text.RegularExpressions.Regex]::Replace('%(ProjectVersion)', '^([0-9]+)\..*$', '$1'))</_Major>
+        <_Minor>$([System.Text.RegularExpressions.Regex]::Replace('%(ProjectVersion)', '^[0-9]+\.([0-9]+).*$', '$1'))</_Minor>
+      </_ProjectReferencesWithVersions>
+    </ItemGroup>
+    <!-- Every in-repo project reference is to an in-repo package released from the same tag,
+         so this deliberately matches on all of them rather than on core's project filename,
+         which a rename would silently stop matching. -->
+    <ItemGroup>
+      <_ProjectReferencesWithVersions>
+        <ProjectVersion>[%(ProjectVersion), %(_Major).$([MSBuild]::Add('%(_Minor)', 1)).0)</ProjectVersion>
       </_ProjectReferencesWithVersions>
     </ItemGroup>
   </Target>

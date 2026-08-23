@@ -53,6 +53,28 @@ nothing will fail to build to warn you.
   See **Changed** below for two things that keep compiling and change behavior: calls on the
   returned builder that used to no-op, and the `kubernetes` resource rename.
 
+- **A satellite package now accepts only core versions within its own minor** ([#79]).
+  `KoalaSoft.Aspire.Hosting.ServiceSources.Java` and `.JavaScript` used to declare a floor on
+  `KoalaSoft.Aspire.Hosting.ServiceSources`, so NuGet was free to satisfy a satellite with any
+  later core, including one whose interfaces had moved:
+
+  ```xml
+  <!-- before: any core at or above this version -->
+  <dependency id="KoalaSoft.Aspire.Hosting.ServiceSources" version="0.3.0" />
+  <!-- after: this minor only -->
+  <dependency id="KoalaSoft.Aspire.Hosting.ServiceSources" version="[0.3.0, 0.4.0)" />
+  ```
+
+  A satellite implements core's `ILocalResourceKind`, so a mismatched pair failed at run time
+  with `MissingMethodException`/`TypeLoadException` rather than at restore. The minor is the
+  boundary because that is where a breaking change ships while the version is below `1.0.0`.
+  A core patch still resolves, so core can be serviced without republishing every satellite.
+
+  If your AppHost references core and a satellite separately, as the install instructions in
+  the README describe, moving core alone to the next minor now fails restore with `NU1107`
+  rather than building and throwing at startup. Move both together, or reference only the
+  satellite and let restore pull the matching core in for you.
+
 ### Added
 
 - `Configure<T>()` and `As<T>()`, for configuring the resource a service resolved to from
@@ -84,25 +106,6 @@ nothing will fail to build to warn you.
   `container` source already had ([#40], fixes [#23]).
 
 ### Changed
-
-- **A satellite package now requires the exact core version it was built against** ([#79]).
-  `KoalaSoft.Aspire.Hosting.ServiceSources.Java` and `.JavaScript` used to declare a floor on
-  `KoalaSoft.Aspire.Hosting.ServiceSources`, so NuGet was free to satisfy the satellite with
-  any newer core:
-
-  ```xml
-  <!-- before: any core at or above this version -->
-  <dependency id="KoalaSoft.Aspire.Hosting.ServiceSources" version="0.2.0" />
-  <!-- after: this core exactly -->
-  <dependency id="KoalaSoft.Aspire.Hosting.ServiceSources" version="[0.2.0]" />
-  ```
-
-  A satellite implements core's `ILocalResourceKind`, so a mismatched pair failed at run time
-  with `MissingMethodException`/`TypeLoadException` rather than at restore. Every package in
-  the repo is versioned in lockstep from one release tag, so the matching core always exists.
-
-  Upgrade both together — a satellite pinned to `0.2.x` will not accept core `0.3.0`. If you
-  reference only the satellite, restore pulls the right core for you.
 
 - **Calls on an `AddService()` result that used to do nothing now take effect** ([#62]).
   `IResourceWithServiceDiscovery` extends `IResourceWithEndpoints` and `IResource`, so every
