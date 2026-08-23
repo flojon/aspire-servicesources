@@ -85,6 +85,25 @@ nothing will fail to build to warn you.
 
 ### Changed
 
+- **A satellite package now requires the exact core version it was built against** ([#79]).
+  `KoalaSoft.Aspire.Hosting.ServiceSources.Java` and `.JavaScript` used to declare a floor on
+  `KoalaSoft.Aspire.Hosting.ServiceSources`, so NuGet was free to satisfy the satellite with
+  any newer core:
+
+  ```xml
+  <!-- before: any core at or above this version -->
+  <dependency id="KoalaSoft.Aspire.Hosting.ServiceSources" version="0.2.0" />
+  <!-- after: this core exactly -->
+  <dependency id="KoalaSoft.Aspire.Hosting.ServiceSources" version="[0.2.0]" />
+  ```
+
+  A satellite implements core's `ILocalResourceKind`, so a mismatched pair failed at run time
+  with `MissingMethodException`/`TypeLoadException` rather than at restore. Every package in
+  the repo is versioned in lockstep from one release tag, so the matching core always exists.
+
+  Upgrade both together — a satellite pinned to `0.2.x` will not accept core `0.3.0`. If you
+  reference only the satellite, restore pulls the right core for you.
+
 - **Calls on an `AddService()` result that used to do nothing now take effect** ([#62]).
   `IResourceWithServiceDiscovery` extends `IResourceWithEndpoints` and `IResource`, so every
   Aspire extension constrained to those already bound to `AddService()`'s return type and
@@ -194,3 +213,4 @@ Targets `net10.0`.
 [#67]: https://github.com/flojon/aspire-servicesources/pull/67
 [#68]: https://github.com/flojon/aspire-servicesources/pull/68
 [#72]: https://github.com/flojon/aspire-servicesources/issues/72
+[#79]: https://github.com/flojon/aspire-servicesources/issues/79
