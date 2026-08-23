@@ -62,6 +62,20 @@ nothing will fail to build to warn you.
 - A `kind` extension point for the `local` source: `ILocalResourceKind` and
   `AddLocalKind(...)` let a satellite package teach `local` to run a non-.NET service
   ([#55], closes [#41]).
+- A `javascript` kind for the `local` source, in the satellite package
+  `KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript` ([#59], closes [#44]). After
+  `builder.UseJavaScript()`, a `local` service with `kind: javascript` is cloned like any
+  other and then run through `Aspire.Hosting.JavaScript`. Its `javascript:` block picks the
+  integration — `javascript`, `vite`, `nextjs`, `node` or `bun` — plus the package manager,
+  the app directory within the checkout, and the HTTP endpoint a consumer's
+  `WithReference(...)` resolves against.
+- A `java` kind for the `local` source, in the satellite package
+  `KoalaSoft.Aspire.Hosting.ServiceSources.Java` ([#60], closes [#45]). After
+  `builder.UseJava()`, a `local` service with `kind: java` runs through the Aspire Community
+  Toolkit's Java integration. Its `java:` block selects exactly one run mode — a Maven goal,
+  a Gradle task, or a pre-built jar — and `mavenGoal`/`gradleTask` execute the repository's
+  own `mvnw`/`gradlew` wrapper, so a JDK is required on the machine but Maven or Gradle
+  itself is not.
 - Authentication for private git repositories, resolved through the developer's existing
   git credential helpers ([#56]).
 - `AddService()` is exported to Aspire's Type System, so TypeScript AppHosts can call
@@ -166,11 +180,15 @@ Targets `net10.0`.
 [#40]: https://github.com/flojon/aspire-servicesources/pull/40
 [#41]: https://github.com/flojon/aspire-servicesources/issues/41
 [#43]: https://github.com/flojon/aspire-servicesources/pull/43
+[#44]: https://github.com/flojon/aspire-servicesources/issues/44
+[#45]: https://github.com/flojon/aspire-servicesources/issues/45
 [#51]: https://github.com/flojon/aspire-servicesources/pull/51
 [#53]: https://github.com/flojon/aspire-servicesources/issues/53
 [#55]: https://github.com/flojon/aspire-servicesources/pull/55
 [#56]: https://github.com/flojon/aspire-servicesources/pull/56
 [#58]: https://github.com/flojon/aspire-servicesources/issues/58
+[#59]: https://github.com/flojon/aspire-servicesources/pull/59
+[#60]: https://github.com/flojon/aspire-servicesources/pull/60
 [#62]: https://github.com/flojon/aspire-servicesources/pull/62
 [#64]: https://github.com/flojon/aspire-servicesources/pull/64
 [#67]: https://github.com/flojon/aspire-servicesources/pull/67
