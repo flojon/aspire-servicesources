@@ -42,6 +42,11 @@ public static class ServiceConfigurationExtensions
     /// <exception cref="ServiceSourcesConfigurationException">
     /// The resolved resource is not a <typeparamref name="T"/> — see <see cref="As{T}"/>.
     /// </exception>
+    [AspireExportIgnore(Reason =
+        "A generic method projects into ATS with its type parameter dropped, and here T *is* " +
+        "the capability being requested, so the export would arrive broken rather than absent. " +
+        "Guest-language AppHosts use the non-generic shims in ServiceConfigurationExports " +
+        "instead, which delegate here.")]
     public static IResourceBuilder<IResourceWithServiceDiscovery> Configure<T>(
         this IResourceBuilder<IResourceWithServiceDiscovery> service, Action<IResourceBuilder<T>> configure)
         where T : IResource
@@ -83,6 +88,11 @@ public static class ServiceConfigurationExtensions
     /// reach the service behind an out-of-band source (<c>"url"</c>, <c>"kubernetes"</c>) — see
     /// <see cref="IsUnreachable{T}"/> for the one capability that still can.
     /// </exception>
+    [AspireExportIgnore(Reason =
+        "A generic method projects into ATS with its type parameter dropped, and here T *is* " +
+        "the capability being requested, so the export would arrive broken rather than absent. " +
+        "Guest-language AppHosts use the non-generic shims in ServiceConfigurationExports " +
+        "instead, which delegate here.")]
     public static IResourceBuilder<T> As<T>(this IResourceBuilder<IResourceWithServiceDiscovery> service)
         where T : IResource
     {
