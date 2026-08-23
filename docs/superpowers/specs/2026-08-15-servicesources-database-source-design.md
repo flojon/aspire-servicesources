@@ -1,12 +1,25 @@
 # Aspire.Hosting.ServiceSources — Backing Service Source Design
 
-**Status:** Draft — revised 2026-08-21 against `main` (see Revision Notes). The two questions that blocked the design have since been settled by running a real AppHost; see [Resolved by Prototype](#resolved-by-prototype). What remains open needs a real cluster, not a prototype.
-**Date:** 2026-08-15 (revised 2026-08-21)
+**Status:** Draft — revised 2026-08-22 against `main` at #62, which removed the `ServiceResource` facade and shipped `Configure<T>`/`As<T>`; the proposed `AddService(configure:)` parameter and `WaitFor` shim are withdrawn as a result, and `AddBackingService` is now the design's only new public surface. Earlier questions were settled by prototype and against a `kind` cluster; the open items are a guest-language gap introduced by #51 and two team decisions. See Revision Notes.
+**Date:** 2026-08-15 (revised 2026-08-21, 2026-08-22)
 **Scope:** Extends the local-vs-kubernetes source-switching model from services to the backing resources a service connects to: databases (Postgres, SQL Server) and, on exactly the same mechanism, message brokers and caches (RabbitMQ, Redis, …). The mechanism is connection-string-based and backend-agnostic — see [Generalization](#generalization-beyond-databases), where this is verified rather than assumed. Closes out the "Database/queue source switching" item from the [phase 2 reference doc](2026-08-09-servicesources-phase2-future-work.md) and [issue #10](https://github.com/flojon/aspire-servicesources/issues/10).
 
 ## Revision Notes
 
-The first draft of this document was written against the tree at PR #12 and has been corrected against current `main`. Four premises changed:
+### 2026-08-22 — rebased onto #62 and the work merged with it
+
+`main` has moved substantially since the previous revision, and #62 in particular removed the foundation two sections of this design were built on. Changes that matter here:
+
+- **The `ServiceResource` facade is gone (#62, closing #53 and #58).** Every source now returns the real, registered resource — `ProjectResource`, `ServiceContainerResource`, `ServiceExecutableResource`, or whatever a satellite kind produces. `ServiceResource.cs` no longer exists. The "any builder-extension call chained onto it silently does nothing" premise is obsolete.
+- **`Configure<T>()` / `As<T>()` already ship** (`ServiceConfigurationExtensions`). This supersedes the `configure:` callback parameter this design proposed for `AddService`, and the `WaitFor` shim that went with it. Both are deleted below; no change to `AddService` or `IServiceSource.Resolve()` is needed any more.
+- **Reachability is per capability *and* source**, via `IsUnreachable<T>` and `ServiceSourceAnnotation`, with skip-and-log rather than silent loss. Notably `Configure<IResourceWithWaitSupport>` **is** honoured for `"kubernetes"`, which contradicts this design's earlier claim that backing-service wiring only ever matters for locally-running services.
+- **Local resolution is synchronous again.** `PendingLocalResolutions` is gone, replaced by `LocalCheckoutPrefetch`: clones for every `"local"` service start together on the first `AddService`, but `Resolve()` blocks on its own checkout and calls `builder.AddProject(...)` inline. The `BeforeStartEvent` ordering analysis below is therefore moot — retained only as a record of what was measured.
+- **`ILocalResourceKind` (#41/#55)** means a `"local"` service can resolve to a resource type this package has never heard of. Anything this design says about "the two resource types the callback may see" no longer holds; capability-based `Configure<T>` handles it.
+- **Guest-language AppHosts (#51, and `ServiceConfigurationExports`)** consume this package through ATS, where generic methods lose their type parameter and overloads are silently dropped. That is a new constraint on `AddBackingService`'s surface — see [Guest-language exports](#guest-language-exports).
+
+### Earlier — corrections against the tree at PR #12
+
+The first draft of this document was written against the tree at PR #12 and was corrected against `main` as it then stood. Four premises changed:
 
 - **`"cluster"` is called `"kubernetes"`.** The source key, the class (`KubernetesSource`), and its helper (`KubernetesSource.BuildPortForwardArgs`) all use the `kubernetes` name. This document now does too.
 - **`local` service resolution is deferred, not synchronous.** `LocalProjectSource.Resolve()` no longer creates the `AddProject` builder; it creates the facade and queues a `PendingResolution`, and `PendingLocalResolutions.ResolveAllAsync` calls `builder.AddProject(...)` from a `BeforeStartEvent` handler. The `local:` callback design below is rewritten around this.
@@ -20,7 +33,7 @@ Milestone 1a and the [kubernetes source design](2026-08-13-servicesources-cluste
 This is a different shape of problem than the service case, for three reasons:
 
 1. **The abstraction must carry a connection string, not just service-discovery endpoints.** `IServiceSource.Resolve()`'s return type (`IResourceBuilder<IResourceWithServiceDiscovery>`) doesn't fit — `WithReference()` for a database needs `IResourceWithConnectionString`.
-2. **`WithReference()`/`WaitFor()` only work on a resource Aspire actually manages the lifecycle of.** `ServiceResource` (the facade `AddService()` returns) is deliberately never registered, so any builder-extension call chained onto it already silently does nothing — existing, documented milestone-1a behavior, not something new here. Backing-service wiring for a service can therefore only happen against the *real* underlying builder, inside the resolution path. That restricts it to the two sources that produce a real, locally-running resource whose environment we control: `"local"` (an `AddProject` resource) and `"container"` (an `AddContainer` resource). A `"kubernetes"`-sourced service is an already-running remote pod — setting env vars on the local `kubectl port-forward` executable would not reach it — and a `"url"`-sourced service has no resource at all.
+2. **Whether the AppHost's wiring reaches the service depends on that service's source.** Since #62 every source but `"url"` returns a real, registered resource, so there is always something to configure — but what that configuration *reaches* differs. Environment given to a `"kubernetes"`-sourced service lands on the local `kubectl port-forward` process, never on the pod behind it; a `"url"`-sourced service has no registered resource at all. This is no longer this design's problem to solve: `Configure<T>` already skips-and-warns per capability and source (see [Consuming a backing service](#consuming-a-backing-service-nothing-new-needed)). It does mean a backing-service reference is not uniformly meaningful across sources, and the design must not pretend otherwise.
 3. **Local provisioning shouldn't be reinvented.** Unlike services (where the catalog owns `repository`/`project` so `AddService()` can build the local case itself), local provisioning of a database or broker (image/version, extra config) already exists as ordinary Aspire code (`builder.AddPostgres(...)`, `builder.AddRabbitMQ(...)`) in the AppHost. The `"local"` source should wrap that, not replace it.
 
 ## Architecture
@@ -28,11 +41,14 @@ This is a different shape of problem than the service case, for three reasons:
 ### `AddBackingService()`
 
 ```csharp
+[AspireExportIgnore]   // the `local` callback cannot cross ATS — see Guest-language exports
 public static IResourceBuilder<IResourceWithConnectionString> AddBackingService(
     this IDistributedApplicationBuilder builder,
-    string name,
+    [ResourceName] string name,
     Func<IResourceBuilder<IResourceWithConnectionString>> local)
 ```
+
+`[ResourceName]` matches `AddService` and lets Aspire's own naming analyzers (enabled package-wide in #61) validate call sites.
 
 (On the method name, and why it isn't `AddDatabase`, see [Naming](#naming).)
 
@@ -46,42 +62,11 @@ Called once per logical backing service; the returned builder is reused across e
 
 **No facade class is needed here, and no type gymnastics either.** `IResourceBuilder<out T>` is covariant, so every branch's concrete builder (`PostgresDatabaseResource`, `RabbitMQServerResource`, `ConnectionStringResource`, …) converts implicitly to the declared `IResourceBuilder<IResourceWithConnectionString>` return type. This is worth stating plainly because the first draft claimed the opposite and proposed a `CreateResourceBuilder<IResourceWithConnectionString>(resource)` re-view to work around it; that workaround is unnecessary.
 
-> The same correction weakens — but does not by itself invalidate — the stated rationale for `ServiceResource`'s existence, which cites non-covariance. `ServiceResource` has other reasons to exist (deferred local resolution needs a handle to hand back before the real resource exists; the `"url"` source has no underlying resource at all). Re-examining it is out of scope here, but it should not be cited as precedent for a covariance workaround.
+> This correction has since been overtaken by events: #62 removed `ServiceResource` entirely, on the grounds that the only thing the facade bought — `ContainerResource`/`ExecutableResource` not implementing `IResourceWithServiceDiscovery` — is better solved by subclassing, which is Aspire's own integration pattern. Nothing in this package now depends on a covariance workaround.
 
-### `AddService(..., local: ...)`
+### Consuming a backing service: nothing new needed
 
-```csharp
-public static IResourceBuilder<IResourceWithServiceDiscovery> AddService(
-    this IDistributedApplicationBuilder builder,
-    string name,
-    Action<IResourceBuilder<IResourceWithEnvironment>>? configure = null)
-```
-
-`configure` is a configuration callback, not a factory. It is invoked by the two sources that produce a real, locally-running resource, against that real builder:
-
-- **`ContainerSource`** invokes it synchronously inside `Resolve()`, against the `AddContainer` builder, before `ServiceResource.CreateFacade(...)` wraps it.
-- **`LocalProjectSource`** *cannot* invoke it inside `Resolve()`, because as of the deferred-resolution work there is no project builder at that point. `Resolve()` creates the facade and queues a `PendingResolution`; the real `builder.AddProject(...)` call happens later, in `PendingLocalResolutions.ResolveAllAsync` under `BeforeStartEvent`. The callback must therefore be carried on the `PendingResolution` record and invoked there, immediately after `AddProject` returns and alongside the existing `CopyEndpointAnnotations` call.
-
-`KubernetesSource` and `UrlSource` receive the same parameter (broadening `IServiceSource.Resolve()`'s signature, as anticipated in issue #10) and never invoke it. This makes "backing-service wiring only applies to a locally-running service" a structural fact rather than a caveat the AppHost author has to remember.
-
-**The parameter type is widened to `IResourceWithEnvironment`, not `ProjectResource`,** so that one callback serves both `ProjectResource` and `ContainerResource`. Covariance makes both concrete builders convert implicitly, with no cast at the call site. One wrinkle: `WithReference` constrains to `IResourceWithEnvironment` but `WaitFor` constrains to `IResourceWithWaitSupport`, and no interface in Aspire combines the two (`IComputeResource`, the nearest common ancestor of `ProjectResource` and `ContainerResource`, does not derive from `IResourceWithEnvironment` — verified by compiler error CS0311). A small package-local shim closes the gap:
-
-```csharp
-// Safe by construction: the only sources that invoke the callback resolve to
-// ProjectResource / ContainerResource, both of which implement IResourceWithWaitSupport.
-public static IResourceBuilder<IResourceWithEnvironment> WaitFor(
-    this IResourceBuilder<IResourceWithEnvironment> builder,
-    IResourceBuilder<IResourceWithConnectionString> backingService)
-{
-    var waitable = (IResourceWithWaitSupport)builder.Resource;
-    builder.ApplicationBuilder.CreateResourceBuilder(waitable).WaitFor(backingService);
-    return builder;
-}
-```
-
-With that shim in place, `s => s.WithReference(db).WaitFor(db)` compiles and runs unchanged for both a project-sourced and a container-sourced service (verified against Aspire 13.4.2).
-
-A callback is chosen over a plain `backingServices: IResourceBuilder<IResourceWithConnectionString>[]` list because a list can only ever mean "call `.WithReference()` on each" — a callback lets the caller compose whatever's needed (`.WithReference(db).WaitFor(db)`, `.WithEnvironment(...)`, etc.) with ordinary Aspire chaining.
+Earlier drafts proposed adding a `configure:` callback parameter to `AddService`, plus a `WaitFor` shim to bridge a constraint gap. **All of that is superseded by #62**, which removed the `ServiceResource` facade, made every source return the real registered resource, and shipped a general configuration mechanism. The design now consumes what already exists:
 
 ```csharp
 var ordersDb = builder.AddBackingService("orders-db",
@@ -90,16 +75,36 @@ var ordersDb = builder.AddBackingService("orders-db",
 var events = builder.AddBackingService("orders-events",
     local: () => builder.AddRabbitMQ("rabbit"));
 
-var orders = builder.AddService("orders",
-    configure: s => s.WithReference(ordersDb).WaitFor(ordersDb).WithReference(events));
+builder.AddService("orders")
+    .Configure<IResourceWithEnvironment>(r => r.WithReference(ordersDb).WithReference(events))
+    .Configure<IResourceWithWaitSupport>(r => r.WaitFor(ordersDb));
 
-var migrator = builder.AddService("orders-migrator",
-    configure: s => s.WithReference(ordersDb).WaitFor(ordersDb));
+builder.AddService("orders-migrator")
+    .Configure<IResourceWithEnvironment>(r => r.WithReference(ordersDb))
+    .Configure<IResourceWithWaitSupport>(r => r.WaitFor(ordersDb));
 ```
+
+This is strictly better than the callback parameter, for reasons the earlier draft could not have reached:
+
+- **It covers resource types this design has never heard of.** A `"local"` service may resolve through a satellite `ILocalResourceKind` to any Aspire integration's resource. A callback typed on `IResourceWithEnvironment` would have worked for those too, but `Configure<T>` also reaches `As<JavaScriptAppResource>().WithRunScript("dev")`-style, kind-specific extensions.
+- **The `WaitFor` shim is unnecessary.** The constraint gap it existed to bridge (`WithReference` needs `IResourceWithEnvironment`, `WaitFor` needs `IResourceWithWaitSupport`, and no Aspire interface combines them) is answered by naming the capability per call instead of finding one type that satisfies both.
+- **Reachability is already handled, and more precisely than "structural fact".** `Configure<T>` skips-and-logs when the capability cannot reach the service behind its source, and `IsUnreachable<T>` is keyed on the capability *as well as* the source.
+
+That last point changes a conclusion in the Problem section. The earlier framing — backing-service wiring is meaningful only for locally-running services — is **half wrong**:
+
+| Service source | `Configure<IResourceWithEnvironment>` (`WithReference`) | `Configure<IResourceWithWaitSupport>` (`WaitFor`) |
+|---|---|---|
+| `local`, `container` | applied | applied |
+| `kubernetes` | skipped + warned — would reach `kubectl`, not the service | **applied** — holding the port-forward back is exactly what was asked |
+| `url` | skipped + warned — nothing registered | skipped + warned |
+
+So `.WaitFor(ordersDb)` written against a local service **survives** a developer switching that service to `"kubernetes"`, which is precisely the property the package exists to protect. `WithReference` does not survive, and is warned about rather than silently dropped.
+
+**No change to `AddService` or `IServiceSource.Resolve()` is required by this design.** The only new public surface is `AddBackingService` itself.
 
 #### Ordering constraint
 
-Because the `"local"` service path now runs its callback under `BeforeStartEvent`, the backing-service builder passed into that callback must be fully constructed by then. For `"local"`/`"external"` backing services this is automatic (they are built during `AddBackingService()`). It also means `AddBackingService` must not itself defer, or the two deferral schedules would need ordering between them — a good reason to keep backing-service resolution synchronous at `Add`-time even where the *value* it produces is deferred (see Templating).
+`AddBackingService(...)` must be called before the `AddService(...)` whose `Configure` references it — ordinary C# variable ordering, nothing more. Since #62, `LocalProjectSource.Resolve()` calls `builder.AddProject(...)` synchronously (blocking on a checkout that `LocalCheckoutPrefetch` started in parallel on the first `"local"` `AddService`), so there is no deferred phase to sequence against.
 
 ### Naming
 
@@ -130,6 +135,18 @@ So the decision is entirely about readability, and the meaningful axis is how ba
 **Caveat on the chosen name.** `Service` already means something specific in this package — `AddService()` is the source-switched *application* resource, and `servicesources.yaml` / the `services:` config section are about those. `AddBackingService` deliberately borrows that word for a different kind of thing, relying on the "backing" qualifier to separate them. This is accepted as a readability trade: the qualifier is doing real work in prose ("a service and the backing services it connects to"), and the two never appear as competing overloads. It does mean documentation should avoid the bare word "service" where either could be meant.
 
 This document uses `AddBackingService` throughout, with `backingServices:` as the matching local.json section. The `"external"` source *key* is worth a second look for the same reason the `AddExternalService` row is: Aspire already uses "external" for something narrower, and the service-side equivalent of this source is already called `"url"`.
+
+### Guest-language exports
+
+#51 exports `AddService` to TypeScript AppHosts through ATS, and #62 had to add non-generic `ServiceConfigurationExports` shims because ATS drops a generic method's type parameter and silently keeps only the first overload of a name. `AddBackingService` inherits a harder version of that problem: **its `local` parameter is a `Func<>` returning a resource builder, and a callback cannot cross the ATS boundary at all.**
+
+The consequences, none of which have been prototyped:
+
+- The `"external"` and `"kubernetes"` branches are fine — they need no callback, only config, and produce a `ConnectionStringResource` like any other.
+- The `"local"` branch has no guest-language equivalent as designed. A TypeScript AppHost cannot pass a lambda that calls `builder.AddPostgres(...)`.
+- The obvious answer is to make the local case *declarative for guest languages only* — image, tag, port in the catalog, the way the `"container"` service source already works — which reopens the [config-schema question](#config-schema) this design deliberately closed by keeping the catalog untouched.
+
+This is a genuinely new constraint introduced after the design was written, and it is the largest piece of unfinished work remaining. Left as an open question rather than answered here.
 
 ## Generalization Beyond Databases
 
@@ -231,19 +248,19 @@ Runtime errors (`kubectl` not on `PATH`, secret not found, invalid context) surf
 - Placeholder handling: `{port}` literal substitution and `{secret:name:key}` → `ParameterResource` wiring, including multiple placeholders and mixed use, via fake `IPortAllocator`/`IKubernetesSecretReader` — no real socket or `kubectl` calls.
 - **Deferral:** assert the fake secret reader is *not* called during `AddBackingService()`, is called on first expression resolution, and is called exactly once across repeated resolutions.
 - Source dispatch: `"local"` invokes the given factory and nothing else; `"external"`/`"kubernetes"` build the expected `ConnectionStringResource`; `"kubernetes"` additionally builds the expected port-forward `AddExecutable` args (reusing `KubernetesSource.BuildPortForwardArgs`-style coverage).
-- `AddService(configure:)`: the callback fires for `ContainerSource` inside `Resolve()`; fires for `LocalProjectSource` only after `BeforeStartEvent` has run, against the real `AddProject` builder; and is never invoked by `KubernetesSource` or `UrlSource`.
+- Consumption through the shipped `Configure<T>`: `Configure<IResourceWithEnvironment>(r => r.WithReference(db))` reaches a `"local"`- and a `"container"`-sourced service, and is skipped-and-warned for `"kubernetes"`/`"url"`; `Configure<IResourceWithWaitSupport>(r => r.WaitFor(db))` is additionally honoured for `"kubernetes"`. These assert existing behaviour against a backing-service argument rather than testing new code, and exist to catch a regression in the interaction.
 - The `WaitFor` shim: exercised through both a project-sourced and a container-sourced service, asserting the cast never throws.
 - `"kubernetes"` attaches a health check annotation to the returned resource (regression guard for the `WaitFor` gap found by prototype).
 - Whole-string mode: a template that is exactly one `{secret:...}` placeholder selects same-port forwarding; the resolved value has every in-cluster host form (`<service>`, `.<namespace>`, `.svc`, `.svc.cluster.local`) replaced and the port left untouched; a mixed template does not select the mode; an occupied local port fails fast with the backing service and port named.
-- End-to-end, in the style of `AddServiceIntegrationTests`: a consumer configured under `BeforeStartEvent` has `ConnectionStrings__<name>` in its materialised environment after the event has been published.
+- End-to-end, in the style of `AddServiceIntegrationTests`: a `"local"`-sourced service configured with `.Configure<IResourceWithEnvironment>(r => r.WithReference(db))` has `ConnectionStrings__<name>` in its materialised environment.
 
 ## Resolved by Prototype
 
 Both questions that blocked this design have been answered by running a real AppHost (Aspire 13.4.6, DCP, Linux) rather than by reasoning about the lifecycle. The probes are described here so the results can be re-checked when Aspire changes.
 
-**Applying `WithReference`/`WaitFor` under `BeforeStartEvent` works.** This was the highest-risk unknown: `PendingLocalResolutions` registers the project resource from a `BeforeStartEvent` handler, and if Aspire had already read env-var and wait annotations by then, the `configure:` callback would silently do nothing for `"local"` services — reintroducing `ServiceResource`'s facade failure one layer down.
+**Applying `WithReference`/`WaitFor` under `BeforeStartEvent` works.** *(Moot as of #62 — `PendingLocalResolutions` is gone and local resolution is synchronous again. Kept as a record of what was measured, in case deferred registration returns.)* This was the highest-risk unknown at the time: `PendingLocalResolutions` registered the project resource from a `BeforeStartEvent` handler, and if Aspire had already read env-var and wait annotations by then, the callback would silently do nothing for `"local"` services.
 
-Probe: a `ConnectionStringResource` registered normally, and a consumer executable added *from inside* a `BeforeStartEvent` handler with `.WithReference(db).WaitFor(db)`. After `StartAsync`, the consumer reached `Running` with `ConnectionStrings__orders-db=Host=localhost;Port=5432;Database=orders` present in its materialised environment. Annotations applied that late are honoured; env-var injection happens well after `BeforeStartEvent`. **The `configure:` callback design is sound as specified, for both the container source (synchronous) and the local source (deferred).**
+Probe: a `ConnectionStringResource` registered normally, and a consumer executable added *from inside* a `BeforeStartEvent` handler with `.WithReference(db).WaitFor(db)`. After `StartAsync`, the consumer reached `Running` with `ConnectionStrings__orders-db=Host=localhost;Port=5432;Database=orders` present in its materialised environment. Annotations applied that late are honoured; env-var injection happens well after `BeforeStartEvent`. The callback design was therefore sound — though #62 has since made the question academic by removing the deferred phase.
 
 **`WaitFor` on a `ConnectionStringResource` does *not* gate on the port-forward tunnel — but a health check fixes it.** This was previously listed as "accept and document"; that would have been the wrong call, because the failure is silent and total rather than a small race.
 
@@ -329,6 +346,8 @@ The single-port form stays the common case and keeps `{port}` as a shorthand for
 Port-forwarding the operator-created `orders-pg-rw` Service to a local port and TCP-connecting to it succeeded, confirming that the health-check gating fix from the previous section works against a real Kubernetes Service and not just the `nc` stand-in it was developed against.
 
 ## Open Questions
+
+**How guest-language AppHosts declare a `"local"` backing service.** The `local` factory is a C# callback and cannot cross ATS, so as designed `AddBackingService` is C#-only for that source. See [Guest-language exports](#guest-language-exports). This is the largest open item and it interacts with the catalog question below: a declarative local spec would most naturally live in `servicesources.yaml`.
 
 **Whether `servicesources.yaml` should be involved at all.** This draft keeps all backing-service config in local.json, reasoning that catalog data would only ever matter for `"kubernetes"` and be thin (`service`/`port`). But since `connectionString` can be secret-backed via `{secret:name:key}` placeholders rather than embedding literal credentials, the *template itself* may contain no actual secret material. If so, it (along with `service`/`port`) could live in the catalog as shared, committed, team-wide data instead of being hand-copied into every developer's local.json, mirroring the services split (catalog = shared identity, local.json = per-developer environment choice) more closely than this draft does. Worth revisiting once it's clear how often a team's `connectionString` template really is secret-free versus genuinely varying per developer (e.g. a personal username).
 
