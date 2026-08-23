@@ -220,13 +220,13 @@ services:
 `kind: dotnet` (the default) uses the entry's `project` property and needs no options block.
 Any other kind is resolved by a handler that a satellite package registers, and its options
 live in a block named after the kind. Kind names are matched case-sensitively, and a kind with
-no registered handler fails at startup before anything is cloned.
+no registered handler fails at that service's `AddService()` call, before its checkout is used.
 
 #### JavaScript: `kind: javascript`
 
 Provided by the `KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript` package, which runs the
 checkout through [`Aspire.Hosting.JavaScript`](https://www.nuget.org/packages/Aspire.Hosting.JavaScript).
-Install it, then call `UseJavaScript()` once, before the `AddService()` call for any such service:
+Install it, then call `UseJavaScript()` once, before the first `AddService()` call:
 
 ```csharp
 using Aspire.Hosting.ServiceSources;
@@ -286,9 +286,9 @@ public sealed class JavaScriptKind : ILocalResourceKind
         public string? RunScript { get; set; }
     }
 
-    // Optional, and worth implementing whenever Resolve parses rawConfig: this runs for every
-    // service before any of them has added a resource, so a typo'd options block is reported
-    // alongside every other service's failure instead of aborting a half-built app model.
+    // Optional, and worth implementing whenever Resolve parses rawConfig: this runs immediately
+    // before Resolve, and before this service's checkout, so a typo'd options block is reported
+    // without a half-created resource behind it and without paying for a clone first.
     public void Validate(string serviceName, object? rawConfig) =>
         LocalKindConfig.Parse<Options>(rawConfig, serviceName);
 
@@ -307,8 +307,9 @@ public static IDistributedApplicationBuilder UseJavaScript(this IDistributedAppl
 
 `LocalKindConfig.Parse<T>` turns the opaque options block into a typed object, and rejects an
 unknown property or a block that isn't a mapping with a `ServiceSourcesConfigurationException`
-naming the service. `AddLocalKind` must be called before the service resolves (i.e. before the
-app host starts), accepts each kind name at most once, and cannot re-register `"dotnet"` or use a
+naming the service. `AddLocalKind` must be called before the `AddService()` call for a service of
+that kind — resolution is eager, so registering later is too late — accepts each kind name at most
+once, and cannot re-register `"dotnet"` or use a
 name that collides with a well-known service property (`repository`, `project`, `defaultRef`,
 `kind`, `kubernetes`, `url`, `container`) — a block by one of those names would be read as that
 property rather than as the kind's options.

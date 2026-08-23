@@ -121,9 +121,9 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
 
     /// <summary>
     /// Parses and fully validates the options block, applying every default. Shared by
-    /// <see cref="Validate"/> and <see cref="Resolve"/> so a service is rejected during the
-    /// failure-aggregating validation phase — before any resource reaches the app model — rather
-    /// than half-way through building it.
+    /// <see cref="Validate"/> and <see cref="Resolve"/> so a service whose options are wrong is
+    /// rejected from <see cref="Validate"/> — which core calls first, and before this service's
+    /// checkout — rather than part-way through creating its resource.
     /// </summary>
     private static ResolvedOptions ResolveOptions(string serviceName, object? rawConfig)
     {

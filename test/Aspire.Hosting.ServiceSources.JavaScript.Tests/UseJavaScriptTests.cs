@@ -33,7 +33,7 @@ public class UseJavaScriptTests
     }
 
     [Fact]
-    public async Task ResolvesAJavaScriptServiceAndGivesTheFacadeItsEndpoint()
+    public void ResolvesAJavaScriptServiceToTheRealRegisteredResource()
     {
         var repoRoot = TestHelpers.CreateRepo();
         var builder = TestHelpers.CreateBuilder(CreateAppHost(repoRoot));
@@ -41,20 +41,19 @@ public class UseJavaScriptTests
         builder.UseJavaScript();
         var service = builder.AddService("frontend");
 
-        await TestHelpers.PublishBeforeStartEventAsync(builder);
-
-        var resource = Assert.Single(builder.Resources.OfType<JavaScriptAppResource>());
+        // AddService hands back the resource Aspire actually runs, already in the app model — the
+        // handler's own return value, carried straight through.
+        var resource = Assert.IsType<JavaScriptAppResource>(service.Resource);
+        Assert.Contains(builder.Resources, r => ReferenceEquals(r, service.Resource));
         Assert.Equal("frontend", resource.Name);
         Assert.Equal(repoRoot, resource.WorkingDirectory);
 
-        // The facade is what the AppHost author holds; without the copied endpoint annotation its
-        // GetEndpoint("http") would have nothing to resolve.
         Assert.Equal("http", service.GetEndpoint("http").EndpointName);
         Assert.Equal("http", TestHelpers.SingleEndpoint(service.Resource).Name);
     }
 
     [Fact]
-    public async Task ReadsTheServicesOwnOptionsBlock()
+    public void ReadsTheServicesOwnOptionsBlock()
     {
         var repoRoot = TestHelpers.CreateRepo("web");
         var appHostDir = CreateAppHost(repoRoot, """
@@ -69,8 +68,6 @@ public class UseJavaScriptTests
         builder.UseJavaScript();
         builder.AddService("frontend");
 
-        await TestHelpers.PublishBeforeStartEventAsync(builder);
-
         var resource = Assert.Single(builder.Resources.OfType<ViteAppResource>());
         Assert.Equal(Path.Combine(repoRoot, "web"), resource.WorkingDirectory);
         Assert.Equal("pnpm", resource.Annotations.OfType<JavaScriptPackageManagerAnnotation>().Last().ExecutableName);
@@ -78,7 +75,7 @@ public class UseJavaScriptTests
     }
 
     [Fact]
-    public async Task ABadOptionsBlockFailsBeforeAnythingReachesTheAppModel()
+    public void ABadOptionsBlockFailsBeforeTheResourceIsCreated()
     {
         var repoRoot = TestHelpers.CreateRepo();
         var appHostDir = CreateAppHost(repoRoot, """
@@ -88,25 +85,22 @@ public class UseJavaScriptTests
         var builder = TestHelpers.CreateBuilder(appHostDir);
 
         builder.UseJavaScript();
-        builder.AddService("frontend");
 
-        var ex = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(
-            () => TestHelpers.PublishBeforeStartEventAsync(builder));
+        // Reported from the handler's Validate, which core calls before Resolve — so the service
+        // fails without leaving a half-created resource behind.
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("frontend"));
 
         Assert.Contains("runScrip", ex.Message);
         Assert.DoesNotContain(builder.Resources, r => r is JavaScriptAppResource);
     }
 
     [Fact]
-    public async Task WithoutUseJavaScriptTheKindIsUnregistered()
+    public void WithoutUseJavaScriptTheKindIsUnregistered()
     {
         var repoRoot = TestHelpers.CreateRepo();
         var builder = TestHelpers.CreateBuilder(CreateAppHost(repoRoot));
 
-        builder.AddService("frontend");
-
-        var ex = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(
-            () => TestHelpers.PublishBeforeStartEventAsync(builder));
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("frontend"));
 
         Assert.Contains("javascript", ex.Message);
         Assert.Contains("not registered", ex.Message);

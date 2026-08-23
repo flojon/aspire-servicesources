@@ -16,10 +16,6 @@ internal static class TestHelpers
             Args = [],
         });
 
-    public static Task PublishBeforeStartEventAsync(IDistributedApplicationBuilder builder) =>
-        builder.Eventing.PublishAsync(new BeforeStartEvent(
-            builder.Services.BuildServiceProvider(), new DistributedApplicationModel(builder.Resources)));
-
     /// <summary>
     /// Produces the same untyped object the catalog loader hands a kind handler: whatever
     /// YamlDotNet's dynamic deserialization makes of the service's options block. Building it this

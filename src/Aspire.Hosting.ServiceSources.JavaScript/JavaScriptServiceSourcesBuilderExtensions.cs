@@ -11,8 +11,10 @@ public static class JavaScriptServiceSourcesBuilderExtensions
     /// <c>Aspire.Hosting.JavaScript</c> according to the entry's <c>javascript:</c> options block.
     /// </summary>
     /// <remarks>
-    /// Call this once, before the <c>AddService()</c> call for any such service — a kind with no
-    /// registered handler fails at startup, before anything is cloned. The options block accepts
+    /// Call this once, before the first <c>AddService()</c> call. An unregistered kind is reported
+    /// by that service's own <c>AddService()</c>, and registering up front is what lets the very
+    /// first one report it before any checkout has begun — the first <c>AddService()</c> starts
+    /// prefetching every <c>"local"</c> service's checkout at once. The options block accepts
     /// <c>appType</c> (<c>javascript</c> — the default — <c>vite</c>, <c>nextjs</c>, <c>node</c>,
     /// or <c>bun</c>), <c>appDirectory</c>, <c>runScript</c>, <c>scriptPath</c>,
     /// <c>packageManager</c>, <c>port</c>, <c>targetPort</c>, and <c>portEnv</c>; see this
