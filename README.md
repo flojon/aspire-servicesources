@@ -583,9 +583,12 @@ This was reported as [microsoft/aspire#19507](https://github.com/microsoft/aspir
 fixed by [microsoft/aspire#19577](https://github.com/microsoft/aspire/pull/19577), which shipped to
 `main` on 2026-08-22 and lands in Aspire CLI **13.6.0**. Verified against a build of that PR
 (`13.6.0-pr.19577.gfa0aea2c`): the generated SDK type-checks clean under strict `tsc`, and the
-sample runs end-to-end — `withReference()` on the `addService()` result injects
-`services__inventory__https__0=https://httpbin.org:443` into a consuming resource. The same sample
-regenerated with 13.5.1 still reproduces all six `TS2552` errors.
+sample runs end-to-end — `withReference()` on the `addService()` result injects the resolved
+service's `services__inventory__*` discovery variables into a consuming resource. (That run was
+against the then-`"url"`-sourced sample, injecting
+`services__inventory__https__0=https://httpbin.org:443`; the sample now uses the `"container"`
+source, so the scheme and address differ.) The same sample regenerated with 13.5.1 still
+reproduces all six `TS2552` errors.
 
 Two caveats found while verifying:
 
