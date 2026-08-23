@@ -13,11 +13,19 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
     {
         var args = BuildPortForwardArgs(serviceName, metadata, config, portAllocator, out var localPort, out var remotePort);
 
+        // Built by hand rather than via AddExecutable so the resource can be a
+        // ServiceExecutableResource, which adds the IResourceWithServiceDiscovery that
+        // ExecutableResource lacks.
+        //
+        // Named for the service itself, like every other source. Aspire keys service discovery off
+        // the resource name, so a suffix here would publish this service's endpoint as
+        // "services__orders-portforward__..." and break consumers that resolve it as "orders".
         var executableBuilder = builder
-            .AddExecutable($"{serviceName}-portforward", "kubectl", builder.AppHostDirectory, args)
+            .AddResource(new ServiceExecutableResource(serviceName, "kubectl", builder.AppHostDirectory))
+            .WithArgs(args)
             .WithHttpEndpoint(port: localPort, targetPort: localPort, isProxied: false);
 
-        return ServiceResource.CreateFacade(builder, serviceName, executableBuilder);
+        return ResolvedService.Tag(executableBuilder, serviceName, "kubernetes");
     }
 
     internal static string[] BuildPortForwardArgs(

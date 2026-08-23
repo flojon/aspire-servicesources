@@ -127,12 +127,24 @@ a project reference would be.
   `<AppHostDirectory>/.servicesources/checkouts/<serviceName>/`, and reconciled to the
   configured `ref` (or the catalog's `defaultRef`) on every run. Uncommitted edits are never
   discarded — if the checkout is dirty and the ref changed, resolution fails loudly instead of
-  overwriting your work. The `.servicesources/` directory gitignores itself on first use — no
-  need to add it to your own `.gitignore`.
+  overwriting your work. Anything you put at that path yourself that isn't a plain clone — a linked
+  `git worktree`, or a clone made with `--separate-git-dir` — is refused with an explanation rather
+  than replaced; point at it with `path` instead. A directory there with no `.git` entry at all is
+  treated as debris from an interrupted clone and **deleted**, so don't hand-place a plain directory
+  as a quick override — use `path` for that too. The `.servicesources/` directory gitignores itself
+  on first use — no need to add it to your own `.gitignore`.
 - Set `path` to point at a checkout you manage yourself (e.g. an existing local clone). It's
   used as-is — no clone, no checkout, no fetch, ever. A relative `path` is anchored to the
   AppHost directory, and must name a directory that already exists. `ref` cannot be combined
   with `path`.
+- Keep the file to the services you actually add. `AddService()` has to hand back the real
+  resource, so it can't wait until the AppHost has finished composing to find out which services
+  it wants — the first call clones the checkouts for *every* `"local"` entry, in parallel. Only the
+  services you actually add are then reconciled to their configured `ref`: a checkout that already
+  exists is never touched on behalf of an entry you don't `AddService()`, so work in progress on a
+  branch there is safe. Entries you never add still cost network and disk for that first clone. The
+  AppHost logs which ones those were at startup — and warns if one of them failed, since nothing
+  else would ever tell you — so you know what to drop.
 
 #### Several services from one repository
 
@@ -328,7 +340,12 @@ Requires `kubectl` on `PATH`, authenticated against the named `context`.
 
 Point a service at a fixed, already-known URL — e.g. a Kubernetes ingress, a staging
 deployment, or any other reachable HTTP(S) endpoint. There's no underlying resource for
-Aspire to run; the facade's endpoint resolves straight to the configured URL.
+Aspire to run; the endpoint resolves straight to the configured URL.
+
+Two consequences follow from the service running out of band: the AppHost's
+[`Configure` calls are skipped and logged](#configuring-a-resolved-service), and a **container**
+can't `WithReference` it — a project or executable can — which fails with a clear error rather than
+a DCP stack trace. See [#58](https://github.com/flojon/aspire-servicesources/issues/58).
 
 `servicesources.yaml`:
 ```yaml
@@ -437,6 +454,91 @@ or just needing it reachable, not caring how:
 { "services": { "orders": { "source": "url" } } }
 ```
 
+## Configuring a resolved service
+
+`AddService()` returns a builder over the **real** resource Aspire runs, so the AppHost can inject
+its own configuration — connection strings, generated secrets, a sibling's endpoint, wait ordering.
+Values like these come from the AppHost's own graph and can't be written into
+`servicesources.yaml`/`servicesources.local.json`.
+
+The resolved resource's type depends on the source, which each developer chooses, so name the
+capability you need and it is checked at composition time:
+
+```csharp
+var backend = builder.AddService("backend")
+    .Configure<IResourceWithEnvironment>(r => r
+        .WithReference(planningDb)
+        .WithEnvironment("DBPASSWORD", postgres.Resource.PasswordParameter)
+        .WithEnvironment("ENCRYPTIONKEY", builder.AddParameter("EncryptionKey", new GenerateParameterDefault(), secret: true))
+        .WithEnvironment("Services__CommonAuth", commonAuth.GetEndpoint("https")))
+    .Configure<IResourceWithWaitSupport>(r => r.WaitForCompletion(migrationService));
+```
+
+`As<T>()` is the same cast without the callback, and reaches anything `Configure` would — including
+a satellite kind's own extension methods:
+
+```csharp
+backend.As<JavaScriptAppResource>().WithRunScript("dev");
+```
+
+**`Configure` is skipped for the `"url"` and `"kubernetes"` sources**, and the skip is logged at
+startup. Both resolve to something already running elsewhere — a `"url"` service has no local
+process at all, and a `"kubernetes"` service is a `kubectl port-forward` in front of a remote one,
+so environment variables applied here would configure `kubectl` rather than the service. Those
+services are expected to be configured wherever they actually run.
+
+The one exception is **wait ordering on a `"kubernetes"` service**, which still applies:
+`Configure<IResourceWithWaitSupport>` (and `WaitForService` / `WaitForServiceCompletion`) reach a
+real, registered `kubectl port-forward` executable, and holding *that* back until a migration
+finishes is exactly what the AppHost asked for. Only configuration that would land on the wrong
+process is dropped. A `"url"` service skips wait ordering too, since it has no registered resource
+for Aspire to hold back.
+
+Skipping rather than failing is deliberate: a developer switching a service to a remote source in
+their own `servicesources.local.json` must not break a `Program.cs` they don't own. You'll see:
+
+```
+warn: Aspire.Hosting.ServiceSources
+      Service 'backend': skipped Configure<IResourceWithEnvironment> because its source is
+      'kubernetes' — it resolves to a 'kubectl port-forward' in front of an already-running
+      service, so the configuration would reach kubectl rather than the service. ...
+```
+
+`As<T>()` **throws** for those sources instead of skipping — it has to return a builder, and handing
+back the `kubectl` executable would silently configure the wrong process. Prefer `Configure` for
+anything that should survive a source switch. It follows the same wait-ordering exception:
+`As<IResourceWithWaitSupport>()` on a `"kubernetes"` service returns the port-forward's builder
+rather than throwing.
+
+### From a guest-language AppHost
+
+`Configure<T>` is generic, and Aspire's Type System projects a generic method with its type
+parameter erased — so guest languages get a set of non-generic equivalents instead, one per shape
+(overloads don't survive codegen either):
+
+```typescript
+const payments = await builder
+  .addService('payments')
+  .withServiceEnvironment('DEMO_INJECTED_BY_APPHOST', 'true')
+  .withServiceReference(inventory);
+```
+
+| TypeScript | C# equivalent |
+|---|---|
+| `withServiceEnvironment(name, value)` | `.Configure<IResourceWithEnvironment>(r => r.WithEnvironment(name, value))` |
+| `withServiceEnvironmentFromParameter(name, parameter)` | `…WithEnvironment(name, parameter)` |
+| `withServiceEnvironmentFromEndpoint(name, endpoint)` | `…WithEnvironment(name, endpoint)` |
+| `withServiceReference(other)` | `…WithReference(other)` |
+| `withServiceConnectionString(source)` | `…WithReference(source)` |
+| `waitForService(dependency)` | `.Configure<IResourceWithWaitSupport>(r => r.WaitFor(dependency))` |
+| `waitForServiceCompletion(dependency, { exitCode })` | `…WaitForCompletion(dependency, exitCode)` |
+| `withServiceArg(arg)` | `.Configure<IResourceWithArgs>(r => r.WithArgs(arg))` |
+
+They delegate to `Configure<T>`, so out-of-band sources are skipped and logged exactly as above —
+including the wait-ordering exception, which `waitForService` and `waitForServiceCompletion` inherit.
+In C# they're hidden from IntelliSense — use `Configure<T>`, which reaches every Aspire extension
+method rather than just these.
+
 ## Sample
 
 `samples/DemoAppHost` is a minimal working AppHost demonstrating all three easily-runnable
@@ -454,8 +556,12 @@ aspire run
 ```
 
 A TypeScript AppHost equivalent — proving `AddService()` is correctly exported and registers with
-Aspire's Type System from a guest language — lives in `samples/DemoAppHostTypeScript` (**note:**
-this sample does not currently run end-to-end — see the known issue below the code block for why):
+Aspire's Type System from a guest language, and that a resolved service can be
+[configured from TypeScript](#from-a-guest-language-apphost) — lives in
+`samples/DemoAppHostTypeScript`. Both of its services use the `"container"` source so that
+`payments` can `withServiceReference(inventory)`: a `"url"` service runs out of band, and a
+container consumer of one is [rejected up front](#url-source). (**Note:** this sample does not
+currently run end-to-end — see the known issue below the code block for why.)
 
 ```bash
 cd samples/DemoAppHostTypeScript

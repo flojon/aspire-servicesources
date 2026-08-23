@@ -8,6 +8,8 @@ services:
       url: https://httpbin.org
   payments:
     container:
+      # port is the port *inside* the container, so it has to be the one the image
+      # actually listens on — nginxdemos/hello serves on 80, not 8080.
       image: nginxdemos/hello
-      port: 8080
+      port: 80
       defaultTag: latest
