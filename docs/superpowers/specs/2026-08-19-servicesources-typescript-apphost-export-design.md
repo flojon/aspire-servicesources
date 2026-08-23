@@ -85,15 +85,16 @@ discovered a separate, upstream gap in the Aspire CLI's TypeScript codegen for m
 a bare Aspire interface (`IResourceBuilder<IResourceWithServiceDiscovery>`) rather than a
 concrete resource class: the codegen never emits the `*Promise`/`*PromiseImpl` wrapper pair that
 every other exported method gets, so the generated SDK fails to compile. Reproduced on both
-Aspire CLI 13.4.6 and 13.5.0. This currently blocks the guest-language call path from compiling,
-even though the export itself registers correctly. Filed upstream as
-[microsoft/aspire#19507](https://github.com/microsoft/aspire/issues/19507); see the README's
-"Known issue" section for live status.
+Aspire CLI 13.4.6 and 13.5.0. This blocked the guest-language call path from compiling on those
+versions, even though the export itself registers correctly. Filed upstream as
+[microsoft/aspire#19507](https://github.com/microsoft/aspire/issues/19507) and fixed by
+[microsoft/aspire#19577](https://github.com/microsoft/aspire/pull/19577), which lands in Aspire
+CLI 13.6.0; see the README's "Requires Aspire CLI 13.6.0+" note for the current requirement.
 
 Changing `AddService`'s return type to the concrete `ServiceResource` class to route around this
 was considered and rejected: it would change the public C# API and contradict `ServiceResource`'s
 deliberate "reference-only facade, don't configure me directly" design (see `ServiceResource.cs`'s
-class-level `<remarks>`). The right move is waiting for the upstream fix, not a workaround here.
+class-level `<remarks>`). The right move was waiting for the upstream fix, not a workaround here.
 
 ## Explicitly Out of Scope for This Pass
 

@@ -560,8 +560,11 @@ Aspire's Type System from a guest language, and that a resolved service can be
 [configured from TypeScript](#from-a-guest-language-apphost) — lives in
 `samples/DemoAppHostTypeScript`. Both of its services use the `"container"` source so that
 `payments` can `withServiceReference(inventory)`: a `"url"` service runs out of band, and a
-container consumer of one is [rejected up front](#url-source). (**Note:** this sample requires
-Aspire CLI 13.6.0 or newer — see the compatibility note below the code block.)
+container consumer of one is [rejected up front](#url-source). A third resource, the `probe`
+executable, hands the same `inventory` handle to Aspire's *own* `withReference()` and prints the
+`services__inventory__http__0` variable that injects — so it shows as *Exited*, not Running, and
+that single log line is where you see the native service-discovery path working. (**Note:** this
+sample requires Aspire CLI 13.6.0 or newer — see the compatibility note below the code block.)
 
 ```bash
 cd samples/DemoAppHostTypeScript

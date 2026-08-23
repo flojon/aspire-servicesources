@@ -22,12 +22,20 @@ const payments = await builder
   .withServiceEnvironment('DEMO_INJECTED_BY_APPHOST', 'true')
   .withServiceReference(inventory);
 
-// addService() returns a ResourceWithServiceDiscoveryPromise, so the handle also goes straight
-// into Aspire's *own* withReference() — the wrapper type microsoft/aspire#19577 fixed, and the
-// reason this sample compiles at all on 13.6.0+. Distinct from payments' withServiceReference()
-// above, which is this package's own ATS export; this line exercises the native Aspire path.
+// addService()'s declared return type is a bare Aspire interface, IResourceBuilder<
+// IResourceWithServiceDiscovery>, rather than a concrete resource class — the shape whose codegen
+// microsoft/aspire#19577 fixed, and the reason this sample compiles at all on 13.6.0+. With the
+// wrapper types emitted, the resolved handle also flows into Aspire's *own* withReference(),
+// distinct from payments' withServiceReference() above, which is this package's ATS export.
+//
+// probe prints the discovery variable withReference() injected and then exits, so it shows as
+// Exited (not Running) next to the two containers — that one log line is the whole point. node is
+// the interpreter already running this AppHost, so process.execPath keeps it portable to Windows.
+const probeScript =
+  'console.log("services__inventory__http__0=" + process.env.services__inventory__http__0);';
+
 await builder
-    .addExecutable('probe', '/usr/bin/env', '.', [])
-    .withReference(inventory);
+  .addExecutable('probe', process.execPath, '.', ['-e', probeScript])
+  .withReference(inventory);
 
 await builder.build().run();
