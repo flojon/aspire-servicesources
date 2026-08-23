@@ -16,11 +16,17 @@ namespace Aspire.Hosting.ServiceSources;
 /// name the capability they need and check for it at runtime.
 /// </para>
 /// <para>
-/// Both methods are deliberately named so as not to collide with anything in Aspire's own API.
-/// <see cref="IResourceBuilder{T}"/> is covariant, so a method named e.g. <c>WithEnvironment</c>
-/// declared here would also bind to <c>IResourceBuilder&lt;ProjectResource&gt;</c> and become
-/// ambiguous with Aspire's, breaking ordinary <c>AddProject(...).WithEnvironment(...)</c> calls in
-/// any AppHost that references this package.
+/// Both methods are deliberately named so as not to collide with anything in Aspire's own API, and
+/// deliberately not a fluent mirror of it. Not because a mirror would be <i>ambiguous</i>:
+/// <see cref="IResourceBuilder{T}"/> is covariant, so a <c>WithEnvironment</c> declared here on
+/// <c>IResourceBuilder&lt;IResourceWithServiceDiscovery&gt;</c> does bind to
+/// <c>IResourceBuilder&lt;ProjectResource&gt;</c> as well, but overload resolution prefers Aspire's
+/// own generic overload for an exact receiver, so <c>AddProject(...).WithEnvironment(...)</c> keeps
+/// compiling and keeps calling Aspire's. The reasons are the other two: that same covariance would
+/// put every mirrored method into IntelliSense on <i>every</i> resource builder in any AppHost
+/// referencing this package, and a mirror only ever covers the subset of Aspire's API somebody
+/// remembered to mirror. <c>Configure&lt;T&gt;</c> needs no updating as Aspire's API grows, and
+/// reaches satellite-specific extension methods this package has never heard of.
 /// </para>
 /// </remarks>
 public static class ServiceConfigurationExtensions

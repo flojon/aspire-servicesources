@@ -10,17 +10,22 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// </summary>
 /// <remarks>
 /// The odd one out: every other source registers its resource, but there is nothing here for Aspire
-/// to run. Aspire's <c>ExternalServiceResource</c> would be the natural home and DCP handles it
-/// correctly for container consumers, but it is <c>sealed</c> and carries no
-/// <see cref="EndpointAnnotation"/>, so it cannot satisfy <see cref="IResourceWithServiceDiscovery"/>
-/// (microsoft/aspire#9965, #15961, #15993; tracked here as #5). So this source keeps building the
-/// <see cref="EndpointAnnotation"/> by hand, with the <see cref="AllocatedEndpoint"/> set eagerly
-/// since DCP will never allocate one, and leaves the resource unregistered.
+/// to run. Aspire's <c>ExternalServiceResource</c> would be the natural home, but it is
+/// <c>sealed</c> and carries no <see cref="EndpointAnnotation"/>, so it cannot satisfy
+/// <see cref="IResourceWithServiceDiscovery"/> (microsoft/aspire#9965, #15961, #15993; tracked here
+/// as #5). So this source keeps building the <see cref="EndpointAnnotation"/> by hand, with the
+/// <see cref="AllocatedEndpoint"/> set eagerly since DCP will never allocate one, and leaves the
+/// resource unregistered.
 /// <para>
 /// That is issue #58: a <b>container</b> consumer of one of these fails inside DCP with
 /// <c>"Host endpoint 'x' on resource 'y' should have an associated DCP Service resource already set
 /// up"</c>. <see cref="RegisterContainerConsumerCheck"/> catches that case up front and explains it.
 /// Host-process consumers work and are unaffected.
+/// </para>
+/// <para>
+/// Registering the resource — the obvious fix, and the one #58 proposes — clears that DCP failure
+/// but replaces it with a worse one: the consuming container is never created and nothing says why.
+/// See <see cref="ServiceUrlResource"/> for the measurement.
 /// </para>
 /// </remarks>
 internal sealed class UrlSource : IServiceSource

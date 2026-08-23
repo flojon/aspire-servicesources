@@ -39,18 +39,25 @@ Established empirically against Aspire.Hosting 13.4.6 and Aspire CLI 13.5.1 / 13
 3. **Subclassing works.** `class X : ContainerResource, IResourceWithServiceDiscovery` registers via
    `AddResource`, is `WithReference`-able by a container consumer, and accepts
    `WithEnvironment`/`WithArgs`/`WaitFor`. This is Aspire's own integration pattern.
-4. **`ExternalServiceResource` is `sealed`.** The `url` source cannot delegate to it, confirming
-   #58's upstream blocker (microsoft/aspire#9965, #15961, #15993) is unavoidable here.
+4. **`ExternalServiceResource` is `sealed`.** The `url` source cannot delegate to it
+   (microsoft/aspire#9965, #15961, #15993), so it declares its own `ServiceUrlResource`. This
+   decides which type is declared; it is *not* what makes #58 unfixable for `url` — see finding 8.
 5. **`AddProject` validates the project path at add time**, so a project resource cannot be
    registered eagerly with a placeholder path. Registering a `ProjectResource` with a *custom*
    `IProjectMetadata` does not throw, but skips `WithProjectDefaults` — `internal`, reads
    `launchSettings.json` at add time, and contributes eight annotations (launch-profile endpoint,
    OTLP exporter, certificate trust, debugging support, five environment callbacks). Hand-rolling it
    is too fragile to maintain across net8/9/10 × Aspire 13.x.
-6. **`IResourceBuilder<T>` is covariant (`out T`).** Extension methods named like Aspire's own,
-   declared on `IResourceBuilder<IResourceWithServiceDiscovery>`, would therefore also bind to
-   `IResourceBuilder<ProjectResource>` and become ambiguous, breaking ordinary
-   `AddProject(...).WithEnvironment(...)` calls in any AppHost referencing this package.
+6. **`IResourceBuilder<T>` is covariant (`out T`), but that does not create an ambiguity.**
+   Extension methods named like Aspire's own, declared on
+   `IResourceBuilder<IResourceWithServiceDiscovery>`, do also bind to
+   `IResourceBuilder<ProjectResource>` — however overload resolution prefers Aspire's own generic
+   overload for an exact receiver, so `AddProject(...).WithEnvironment(...)` keeps compiling and
+   keeps calling Aspire's (verified by compiling exactly that case). A fluent mirror is still the
+   wrong shape, for two other reasons: covariance would put every mirrored method into IntelliSense
+   on *every* resource builder in any AppHost referencing this package, and a mirror only covers the
+   subset of Aspire's API somebody remembered to mirror. `Configure<T>` needs no updating as
+   Aspire's API grows and reaches satellite-specific extensions this package has never heard of.
 7. **Satellite kinds delegate to official Aspire integrations.** #59's JavaScript kind returns
    `IResourceBuilder<JavaScriptAppResource>` from `AddViteApp`/`AddNodeApp`. That type is Aspire's,
    so no package-defined interface can be *required* of `ILocalResourceKind.Resolve` without forcing
@@ -90,9 +97,14 @@ unaffected and gains #58's fix for free.
 
 ### The `url` source stays unregistered
 
-`ExternalServiceResource` is sealed and a bare registered `Resource` gives DCP nothing to
-materialize, so #58 cannot be fixed for `url`, and registering it speculatively would risk the
-host-process consumer case that works today. The resource keeps its current shape; a
+Registering `ServiceUrlResource` — #58's own option 1 — was tried and measured, not reasoned about.
+DCP creates a Service for *every* model resource carrying an `EndpointAnnotation`, whatever its
+type (`DcpExecutor.PrepareServices`), so registration does clear the `"should have an associated DCP
+Service resource"` failure, and nothing tries to launch the resource. But the endpoint names a
+remote host DCP cannot bind a local port for, so it then fails to allocate the container-network
+port (`"Unable to allocate a network port for service '<name>-1'"`) and the consuming container is
+never created at all — a silent hang in place of a clear error. So #58 stays unfixed for `url` on
+those grounds rather than on `ExternalServiceResource` being sealed. The resource keeps its current shape; a
 `BeforeStartEvent` pre-flight detects a container consumer holding an `EndpointReferenceAnnotation`
 targeting a `ServiceUrlResource` and throws a `ServiceSourcesConfigurationException` naming the
 service, its source and the upstream issues — replacing the raw DCP stack trace (#58 option 3).

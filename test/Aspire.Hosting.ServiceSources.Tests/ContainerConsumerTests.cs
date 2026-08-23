@@ -43,6 +43,80 @@ public class ContainerConsumerTests
         Assert.IsAssignableFrom<ContainerResource>(inventory.Resource);
     }
 
+    /// <summary>
+    /// The <c>kubernetes</c> source is the non-obvious half of the fix. Its resource is registered
+    /// like every other one, but its endpoint is <b>proxyless</b> — and DCP creates a Service for a
+    /// proxyless endpoint too, just in <c>Proxyless</c> allocation mode, so a container consumer
+    /// still resolves. Pinned because "registered" alone would not have settled it.
+    /// </summary>
+    [Fact]
+    public async Task KubernetesSourcedService_IsRegistered_SoAContainerConsumerCanReferenceIt()
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              inventory:
+                kubernetes:
+                  service: inventory
+                  port: 8080
+            """);
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), """
+            { "services": { "inventory": { "source": "kubernetes", "context": "dev" } } }
+            """);
+
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+
+        var inventory = builder.AddService("inventory");
+        builder.AddContainer("storefront", "nginx:alpine").WithReference(inventory);
+
+        Assert.Contains(builder.Resources, r => ReferenceEquals(r, inventory.Resource));
+        Assert.IsAssignableFrom<ExecutableResource>(inventory.Resource);
+
+        var endpoint = Assert.Single(inventory.Resource.Annotations.OfType<EndpointAnnotation>());
+        Assert.False(endpoint.IsProxied);
+
+        // The resource is real, so the url pre-flight has nothing to say about it.
+        Assert.Null(await Record.ExceptionAsync(() => TestHelpers.PublishBeforeStartEventAsync(builder)));
+    }
+
+    /// <summary>
+    /// The <c>local</c> source, via a <c>path</c> override so the test needs no checkout. Resolves
+    /// through Aspire's own <c>AddProject</c>, so the registration comes for free — asserted anyway
+    /// so all four sources are covered here rather than three.
+    /// </summary>
+    [Fact]
+    public async Task LocalSourcedService_IsRegistered_SoAContainerConsumerCanReferenceIt()
+    {
+        var projectDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(projectDir, "Inventory.csproj"), """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+              </PropertyGroup>
+            </Project>
+            """);
+
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              inventory:
+                repository: https://github.com/company/inventory
+                project: Inventory.csproj
+            """);
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), $$"""
+            { "services": { "inventory": { "source": "local", "path": "{{projectDir.Replace("\\", "\\\\")}}" } } }
+            """);
+
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+
+        var inventory = builder.AddService("inventory");
+        builder.AddContainer("storefront", "nginx:alpine").WithReference(inventory);
+
+        Assert.Contains(builder.Resources, r => ReferenceEquals(r, inventory.Resource));
+        Assert.IsAssignableFrom<ProjectResource>(inventory.Resource);
+        Assert.Null(await Record.ExceptionAsync(() => TestHelpers.PublishBeforeStartEventAsync(builder)));
+    }
+
     [Fact]
     public async Task UrlSourcedService_ReferencedByAContainer_FailsWithAServiceSourcesError()
     {
