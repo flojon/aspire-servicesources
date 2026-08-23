@@ -321,6 +321,90 @@ public class JavaKindOptionsTests
         Assert.Contains("absolute", ex.Message);
     }
 
+    [Theory]
+    [InlineData("/opt/prebuilt/app.jar")]
+    [InlineData("C:\\builds\\app.jar")]
+    [InlineData("\\\\server\\share\\app.jar")]
+    public void Parse_AbsoluteJarPath_IsRejectedOnEveryPlatform(string jarPath)
+    {
+        // Checked for the same reason workingDirectory and wrapperPath are: servicesources.yaml is
+        // shared team config a developer clones rather than writes, so a jar named outside the
+        // checkout is one nobody reading the catalog agreed to run.
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => JavaKindOptions.Parse("java-api", Block(
+                ("jarPath", jarPath),
+                ("port", 8080))));
+
+        Assert.Contains("java-api", ex.Message);
+        Assert.Contains("absolute", ex.Message);
+    }
+
+    [Theory]
+    [InlineData(".", "../app.jar")]
+    [InlineData(".", "..\\app.jar")]
+    [InlineData("services/api", "../../../escape/app.jar")]
+    public void Parse_JarPathEscapingTheCheckout_Throws(string workingDirectory, string jarPath)
+    {
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => JavaKindOptions.Parse("java-api", Block(
+                ("workingDirectory", workingDirectory),
+                ("jarPath", jarPath),
+                ("port", 8080))));
+
+        Assert.Contains("java-api", ex.Message);
+        Assert.Contains("outside", ex.Message);
+    }
+
+    [Fact]
+    public void Parse_JarPathClimbingNoHigherThanTheRepositoryRoot_IsAccepted()
+    {
+        // jarPath is read relative to workingDirectory, so climbing out of the project directory is
+        // fine as long as it stays in the checkout — the monorepo case where one build output
+        // directory serves several projects.
+        var options = JavaKindOptions.Parse("java-api", Block(
+            ("workingDirectory", "services/api"),
+            ("jarPath", "../../build/libs/app.jar"),
+            ("port", 8080)));
+
+        Assert.Equal(JavaRunModeKind.Jar, options.RunMode.Kind);
+        Assert.Equal("../../build/libs/app.jar", options.RunMode.Value);
+    }
+
+    [Fact]
+    public void Parse_WindowsStyleWorkingDirectory_IsNormalizedForThisPlatform()
+    {
+        // The validation counts both separators, so this value is accepted; it is then handed to
+        // Path.Combine, where leaving it verbatim resolves to '<checkout>/services\catalog' on
+        // Linux/macOS and is reported as a directory missing from the checkout.
+        var options = JavaKindOptions.Parse("java-api", Block(
+            ("workingDirectory", "services\\catalog"),
+            ("mavenGoal", "spring-boot:run"),
+            ("port", 8080)));
+
+        Assert.Equal(Path.Combine("services", "catalog"), options.WorkingDirectory);
+    }
+
+    [Fact]
+    public void Parse_WindowsStyleWrapperPath_IsNormalizedForThisPlatform()
+    {
+        var options = JavaKindOptions.Parse("java-api", Block(
+            ("gradleTask", "bootRun"),
+            ("wrapperPath", "tools\\gradlew"),
+            ("port", 8080)));
+
+        Assert.Equal(Path.Combine("tools", "gradlew"), options.WrapperPath);
+    }
+
+    [Fact]
+    public void Parse_WindowsStyleJarPath_IsNormalizedForThisPlatform()
+    {
+        var options = JavaKindOptions.Parse("java-api", Block(
+            ("jarPath", "target\\app.jar"),
+            ("port", 8080)));
+
+        Assert.Equal(Path.Combine("target", "app.jar"), options.RunMode.Value);
+    }
+
     [Fact]
     public void Parse_BlockThatIsNotAMapping_ThrowsFromLocalKindConfig()
     {

@@ -65,14 +65,20 @@ internal sealed class JavaLocalResourceKind : ILocalResourceKind
     }
 
     /// <summary>
-    /// Checked here rather than in <see cref="Validate"/> only because
-    /// <see cref="ILocalResourceKind.Validate"/> isn't handed the checkout directory. The checkout
-    /// itself does exist by then — core resolves the repo root, then calls <c>Validate</c>, then
-    /// <c>Resolve</c> — so this check belongs in <c>Validate</c> and would move there as soon as the
-    /// signature carries <c>repoRoot</c> (flojon/aspire-servicesources#63). Until then it runs in
-    /// <see cref="Resolve"/>, which core wraps in a "report this from Validate instead" message that
-    /// can't be acted on.
+    /// Checked here rather than in <see cref="Validate"/> because there is no checkout to check
+    /// against yet when <see cref="Validate"/> runs: core calls it <em>before</em> resolving the repo
+    /// root, deliberately, so that an unregistered kind or a malformed block fails without first
+    /// paying for a cold clone (see <c>LocalProjectSource.Resolve</c>). Handing
+    /// <see cref="ILocalResourceKind.Validate"/> a <c>repoRoot</c>
+    /// (flojon/aspire-servicesources#63) would not on its own let this move, since that ordering
+    /// would have to be given up with it.
     /// </summary>
+    /// <remarks>
+    /// Reporting from <see cref="Resolve"/> costs nothing in message quality: core re-throws a
+    /// <see cref="ServiceSourcesConfigurationException"/> raised there verbatim, and wraps only the
+    /// exception types a handler isn't supposed to surface. What it does cost is that the app model
+    /// is already partly populated by the time this throws.
+    /// </remarks>
     private static string ResolveWorkingDirectory(string serviceName, string repoRoot, string relativeDirectory)
     {
         var workingDirectory = Path.GetFullPath(Path.Combine(repoRoot, relativeDirectory));

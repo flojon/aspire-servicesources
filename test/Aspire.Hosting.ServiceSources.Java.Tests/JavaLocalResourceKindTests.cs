@@ -197,9 +197,9 @@ public class JavaLocalResourceKindTests
         var builder = CreateBuilder();
         var repoRoot = CreateRepoRoot();
 
-        // Reported from Resolve only because Validate isn't handed the checkout directory; the
-        // checkout does exist by the time core calls Validate. Move this once that signature carries
-        // repoRoot.
+        // Reported from Resolve because no checkout exists yet when Validate runs — core calls
+        // Validate before resolving the repo root, so a bad block fails without paying for a clone.
+        // See JavaLocalResourceKind.ResolveWorkingDirectory.
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ResolveResource(builder, repoRoot,
             ("workingDirectory", "services/api"),
             ("mavenGoal", "spring-boot:run"),

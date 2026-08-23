@@ -325,7 +325,7 @@ The checkout is cloned exactly as for any other `"local"` service (`path`, `ref`
 | --- | --- | --- |
 | `mavenGoal` | one of these three | Run via the Maven wrapper, e.g. `spring-boot:run`. |
 | `gradleTask` | one of these three | Run via the Gradle wrapper, e.g. `bootRun`. |
-| `jarPath` | one of these three | Run a pre-built jar with `java -jar`, relative to `workingDirectory`. |
+| `jarPath` | one of these three | Run a pre-built jar with `java -jar`, relative to `workingDirectory`. May climb out of it — a monorepo's shared build output directory — but must stay inside the checkout. |
 | `port` | yes | The port the app listens on. Becomes the service's HTTP endpoint, so consumers can `WithReference(...)` it. |
 | `workingDirectory` | no (defaults to the repository root) | Where in the checkout the project lives — the directory holding `pom.xml` / `build.gradle`, and by default the `mvnw`/`gradlew` wrapper too. Must stay inside the checkout. |
 | `wrapperPath` | no (defaults to the wrapper in `workingDirectory`) | Where the `mvnw`/`gradlew` wrapper script lives, relative to the **repository root** — for the monorepo that commits a single wrapper at its root while the service itself sits further down. Only meaningful with `mavenGoal` or `gradleTask`. |
@@ -357,11 +357,12 @@ checkout — there is no fallback to a system-wide `mvn`/`gradle` — so a check
 reported as such, rather than left to surface as a failure to start the app.
 
 Every problem with the block bar two — unknown properties, a missing or out-of-range `port`, no run
-mode or more than one, a `workingDirectory` or `wrapperPath` escaping the repository, a
+mode or more than one, a `workingDirectory`, `wrapperPath` or `jarPath` escaping the repository, a
 `wrapperPath` set alongside `jarPath` — is reported by the `AddService("catalog")` call itself,
 before the service has added anything to the app model. The two exceptions are a `workingDirectory`
 that doesn't exist in the checkout and a wrapper script that isn't there: both need the checkout on
-disk, so they are reported a moment later, once the resource is being created.
+disk, which isn't cloned until the block itself has been checked, so they are reported a moment
+later, once the resource is being created.
 
 **Reaching the rest of the Java integration.** The `java:` block covers how to start the app; it
 deliberately doesn't mirror every modifier the Community Toolkit offers. Anything else is reachable

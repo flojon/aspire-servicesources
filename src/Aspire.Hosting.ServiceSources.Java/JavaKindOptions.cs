@@ -54,8 +54,8 @@ internal sealed class JavaKindOptions
     /// <exception cref="ServiceSourcesConfigurationException">
     /// The block is missing, malformed, contains an unknown property, names no run mode or more
     /// than one, omits <see cref="Port"/> or gives an out-of-range one, points
-    /// <see cref="WorkingDirectory"/> or <see cref="WrapperPath"/> outside the checkout, or sets
-    /// <see cref="WrapperPath"/> alongside <see cref="JarPath"/>.
+    /// <see cref="WorkingDirectory"/>, <see cref="WrapperPath"/> or <see cref="JarPath"/> outside the
+    /// checkout, or sets <see cref="WrapperPath"/> alongside <see cref="JarPath"/>.
     /// </exception>
     public static ValidatedJavaKindOptions Parse(string serviceName, object? rawConfig)
     {
@@ -68,9 +68,13 @@ internal sealed class JavaKindOptions
                 "missing or empty. It must name how to run the service, e.g. 'mavenGoal: spring-boot:run' " +
                 "and 'port: 8080'.");
 
-        var runMode = ResolveRunMode(serviceName, options);
         var port = ValidatePort(serviceName, options.Port);
         var workingDirectory = ValidateWorkingDirectory(serviceName, options.WorkingDirectory);
+
+        // The jar's path is checked against the working directory it is read relative to, so it has
+        // to wait for that to be validated — the other two run modes name a goal or a task and carry
+        // no path at all.
+        var runMode = ValidateJarPath(serviceName, ResolveRunMode(serviceName, options), workingDirectory);
         var wrapperPath = ValidateWrapperPath(serviceName, options.WrapperPath, runMode);
 
         return new ValidatedJavaKindOptions(workingDirectory, runMode, options.Args ?? [], port, wrapperPath);
@@ -156,7 +160,53 @@ internal sealed class JavaKindOptions
                 "It must stay within the repository.");
         }
 
-        return trimmed;
+        return NormalizeSeparators(trimmed);
+    }
+
+    /// <summary>
+    /// Confines the jar a <c>jarPath</c> run mode names to the checkout, and normalizes its
+    /// separators. Returns <paramref name="runMode"/> untouched for the other two run modes, which
+    /// name a Maven goal or a Gradle task rather than a path.
+    /// </summary>
+    /// <remarks>
+    /// Checked for the same reason <see cref="WorkingDirectory"/> and <see cref="WrapperPath"/> are:
+    /// <c>servicesources.yaml</c> is shared team configuration a developer clones rather than writes,
+    /// so an absolute or climbing <c>jarPath</c> would have <c>java -jar</c> run something from
+    /// outside the checkout the catalog describes. Unlike those two, the base is
+    /// <paramref name="workingDirectory"/> rather than the repository root — that is what
+    /// <see cref="JarPath"/> is documented as being relative to — so climbing out of the project
+    /// directory is allowed as long as the result stays in the repository, which is what a monorepo
+    /// with one shared build output directory needs.
+    /// </remarks>
+    private static JavaRunMode ValidateJarPath(string serviceName, JavaRunMode runMode, string workingDirectory)
+    {
+        if (runMode.Kind != JavaRunModeKind.Jar)
+        {
+            return runMode;
+        }
+
+        // Already trimmed and known non-blank by ResolveRunMode.
+        var jarPath = runMode.Value;
+
+        if (IsAbsolutePath(jarPath))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': java.jarPath '{jarPath}' is an absolute path, but it must be relative to " +
+                "java.workingDirectory — it names a jar built from the service's own checkout, not one sitting " +
+                "elsewhere on the developer's machine.");
+        }
+
+        // Against the working directory, not the bare jarPath: '../app.jar' escapes a project at the
+        // repository root but not one two directories down. '/' is a separator to EscapesRoot on
+        // every platform, so joining with it is safe whichever way workingDirectory was written.
+        if (EscapesRoot($"{workingDirectory}/{jarPath}"))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': java.jarPath '{jarPath}', read relative to java.workingDirectory " +
+                $"'{workingDirectory}', points outside the service's checkout. It must stay within the repository.");
+        }
+
+        return runMode with { Value = NormalizeSeparators(jarPath) };
     }
 
     /// <summary>
@@ -194,8 +244,20 @@ internal sealed class JavaKindOptions
                 "It must stay within the repository.");
         }
 
-        return trimmed;
+        return NormalizeSeparators(trimmed);
     }
+
+    /// <summary>
+    /// Rewrites the separators of an accepted relative path for the platform the app host is running
+    /// on. The validation above counts <c>'\'</c> as a separator so a Windows-style value is judged
+    /// as the path it is, which means such a value is <em>accepted</em> on Linux and macOS too; every
+    /// one of these fields is then handed to <see cref="Path.Combine(string, string)"/>, where an
+    /// unrewritten <c>'services\catalog'</c> would resolve to a single oddly-named directory and be
+    /// reported as missing from the checkout. Only <c>'\'</c> needs rewriting: Windows accepts
+    /// <c>'/'</c> as a separator, so on Windows this is a no-op.
+    /// </summary>
+    private static string NormalizeSeparators(string relativePath) =>
+        relativePath.Replace('\\', Path.DirectorySeparatorChar);
 
     /// <summary>
     /// Whether <paramref name="path"/> is absolute on <em>any</em> platform, rather than only on this
