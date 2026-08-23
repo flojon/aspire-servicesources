@@ -27,6 +27,15 @@ internal sealed class JavaKindOptions
     public string? JarPath { get; set; }
 
     /// <summary>
+    /// Where the <c>mvnw</c>/<c>gradlew</c> wrapper script lives, relative to the repository root —
+    /// like <see cref="WorkingDirectory"/>, and unlike <see cref="JarPath"/>, because the case this
+    /// exists for is the monorepo one: a multi-project Gradle (or multi-module Maven) repository
+    /// commits one wrapper at its root while the service itself sits further down. Defaults to the
+    /// wrapper sitting in <see cref="WorkingDirectory"/> itself.
+    /// </summary>
+    public string? WrapperPath { get; set; }
+
+    /// <summary>
     /// Extra arguments for whichever of the three run modes is configured — passed to the Maven
     /// wrapper, the Gradle wrapper, or the jar.
     /// </summary>
@@ -44,21 +53,27 @@ internal sealed class JavaKindOptions
     /// </summary>
     /// <exception cref="ServiceSourcesConfigurationException">
     /// The block is missing, malformed, contains an unknown property, names no run mode or more
-    /// than one, omits <see cref="Port"/> or gives an out-of-range one, or points
-    /// <see cref="WorkingDirectory"/> outside the checkout.
+    /// than one, omits <see cref="Port"/> or gives an out-of-range one, points
+    /// <see cref="WorkingDirectory"/> or <see cref="WrapperPath"/> outside the checkout, or sets
+    /// <see cref="WrapperPath"/> alongside <see cref="JarPath"/>.
     /// </exception>
     public static ValidatedJavaKindOptions Parse(string serviceName, object? rawConfig)
     {
+        // A 'java:' key with nothing under it arrives as the same null an absent key does — the
+        // loader hands the handler the block's value, not whether the key was written — so the
+        // message has to cover both rather than sending the reader looking for a block they can see.
         var options = LocalKindConfig.Parse<JavaKindOptions>(rawConfig, serviceName)
             ?? throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}' has kind 'java' but servicesources.yaml has no 'java:' block. " +
-                "Add one naming how to run the service, e.g. 'mavenGoal: spring-boot:run' and 'port: 8080'.");
+                $"Service '{serviceName}' has kind 'java' but its 'java:' block in servicesources.yaml is " +
+                "missing or empty. It must name how to run the service, e.g. 'mavenGoal: spring-boot:run' " +
+                "and 'port: 8080'.");
 
         var runMode = ResolveRunMode(serviceName, options);
         var port = ValidatePort(serviceName, options.Port);
         var workingDirectory = ValidateWorkingDirectory(serviceName, options.WorkingDirectory);
+        var wrapperPath = ValidateWrapperPath(serviceName, options.WrapperPath, runMode);
 
-        return new ValidatedJavaKindOptions(workingDirectory, runMode, options.Args ?? [], port);
+        return new ValidatedJavaKindOptions(workingDirectory, runMode, options.Args ?? [], port, wrapperPath);
     }
 
     private static JavaRunMode ResolveRunMode(string serviceName, JavaKindOptions options)
@@ -126,7 +141,7 @@ internal sealed class JavaKindOptions
             return ".";
         }
 
-        if (Path.IsPathRooted(trimmed))
+        if (IsAbsolutePath(trimmed))
         {
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}': java.workingDirectory '{trimmed}' is an absolute path, but it must be " +
@@ -145,12 +160,63 @@ internal sealed class JavaKindOptions
     }
 
     /// <summary>
+    /// Returns <see langword="null"/> when no wrapper override was given, meaning
+    /// <see cref="JavaLocalResourceKind"/> looks for the wrapper in the working directory itself.
+    /// </summary>
+    private static string? ValidateWrapperPath(string serviceName, string? wrapperPath, JavaRunMode runMode)
+    {
+        var trimmed = wrapperPath?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return null;
+        }
+
+        if (runMode.Kind == JavaRunModeKind.Jar)
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': the 'java:' block sets 'wrapperPath', but 'jarPath' starts the app with " +
+                "'java -jar' and runs no Maven or Gradle wrapper at all. Drop 'wrapperPath', or run the app via " +
+                "'mavenGoal' or 'gradleTask' instead.");
+        }
+
+        if (IsAbsolutePath(trimmed))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': java.wrapperPath '{trimmed}' is an absolute path, but it must be relative " +
+                "to the root of the service's checkout — it names a wrapper script committed to the repository, not " +
+                "a Maven or Gradle installation on the developer's machine.");
+        }
+
+        if (EscapesRoot(trimmed))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': java.wrapperPath '{trimmed}' points outside the service's checkout. " +
+                "It must stay within the repository.");
+        }
+
+        return trimmed;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="path"/> is absolute on <em>any</em> platform, rather than only on this
+    /// one. <see cref="Path.IsPathRooted"/> alone is platform-dependent, so a Windows-style value
+    /// ('C:\repos\api', '\\server\share') sails past it on Linux/macOS and is then reported as a
+    /// directory missing from the checkout instead of as the absolute path it is.
+    /// </summary>
+    private static bool IsAbsolutePath(string path) =>
+        Path.IsPathRooted(path)
+        || path[0] is '/' or '\\'
+        || (path.Length >= 2 && path[1] == ':' && char.IsAsciiLetter(path[0]));
+
+    /// <summary>
     /// Whether <paramref name="relativePath"/> climbs above the directory it is relative to. Checked
     /// lexically rather than against the resolved path, because
     /// <see cref="JavaLocalResourceKind.Validate"/> isn't handed the checkout directory — a purely
     /// lexical check is what lets an escaping value be rejected there, before the service has put
     /// anything in the app model, rather than from <c>Resolve</c>. Both separators count regardless
-    /// of platform, so a Windows-style value is still rejected on Linux/macOS.
+    /// of platform, so a Windows-style relative value ('..\sibling') is still rejected on
+    /// Linux/macOS; a rooted one ('C:\repos') never reaches here, being caught by
+    /// <see cref="IsAbsolutePath"/> first.
     /// </summary>
     private static bool EscapesRoot(string relativePath)
     {
@@ -201,4 +267,5 @@ internal sealed record ValidatedJavaKindOptions(
     string WorkingDirectory,
     JavaRunMode RunMode,
     string[] Args,
-    int Port);
+    int Port,
+    string? WrapperPath);

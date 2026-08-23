@@ -55,13 +55,18 @@ public class JavaKindOptionsTests
     }
 
     [Fact]
-    public void Parse_NoBlockAtAll_ThrowsNamingServiceAndBlock()
+    public void Parse_NoBlockAtAll_ThrowsSayingTheBlockIsMissingOrEmpty()
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => JavaKindOptions.Parse("java-api", null));
 
         Assert.Contains("java-api", ex.Message);
         Assert.Contains("'java:'", ex.Message);
+
+        // A 'java:' key with nothing under it arrives here as the same null the loader passes for an
+        // absent key, so the message can't claim the block isn't there - see
+        // UseJavaTests.AddService_EmptyJavaBlock_DoesNotClaimTheBlockIsAbsent.
+        Assert.Contains("missing or empty", ex.Message);
     }
 
     [Fact]
@@ -213,6 +218,107 @@ public class JavaKindOptionsTests
             ("port", 8080)));
 
         Assert.Equal(".", options.WorkingDirectory);
+    }
+
+    [Theory]
+    [InlineData("C:\\repos\\api")]
+    [InlineData("C:/repos/api")]
+    [InlineData("\\\\server\\share\\api")]
+    [InlineData("\\repos\\api")]
+    public void Parse_WindowsStyleAbsoluteWorkingDirectory_IsRejectedOnEveryPlatform(string workingDirectory)
+    {
+        // Path.IsPathRooted alone lets these through on Linux/macOS, where the value then resolves to
+        // '<checkout>/C:\repos\api' and is reported as a missing directory rather than as the
+        // absolute path it is.
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => JavaKindOptions.Parse("java-api", Block(
+                ("workingDirectory", workingDirectory),
+                ("mavenGoal", "spring-boot:run"),
+                ("port", 8080))));
+
+        Assert.Contains("absolute", ex.Message);
+        Assert.Contains("path", ex.Message);
+    }
+
+    [Fact]
+    public void Parse_WrapperPath_CarriesThrough()
+    {
+        var options = JavaKindOptions.Parse("java-api", Block(
+            ("workingDirectory", "services/catalog"),
+            ("gradleTask", "bootRun"),
+            ("wrapperPath", "gradlew"),
+            ("port", 8080)));
+
+        // Relative to the repository root, like workingDirectory - which is the whole point: in a
+        // monorepo the wrapper sits at the root and the project doesn't.
+        Assert.Equal("gradlew", options.WrapperPath);
+    }
+
+    [Fact]
+    public void Parse_NoWrapperPath_LeavesItUnset()
+    {
+        var options = JavaKindOptions.Parse("java-api", Block(
+            ("mavenGoal", "spring-boot:run"),
+            ("port", 8080)));
+
+        Assert.Null(options.WrapperPath);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Parse_BlankWrapperPath_CountsAsAbsent(string wrapperPath)
+    {
+        var options = JavaKindOptions.Parse("java-api", Block(
+            ("mavenGoal", "spring-boot:run"),
+            ("wrapperPath", wrapperPath),
+            ("port", 8080)));
+
+        Assert.Null(options.WrapperPath);
+    }
+
+    [Fact]
+    public void Parse_WrapperPathWithJarPath_ThrowsBecauseAJarRunsNoWrapper()
+    {
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => JavaKindOptions.Parse("java-api", Block(
+                ("jarPath", "target/app.jar"),
+                ("wrapperPath", "mvnw"),
+                ("port", 8080))));
+
+        Assert.Contains("java-api", ex.Message);
+        Assert.Contains("wrapperPath", ex.Message);
+        Assert.Contains("jarPath", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("../gradlew")]
+    [InlineData("..\\gradlew")]
+    [InlineData("services/../../gradlew")]
+    public void Parse_WrapperPathEscapingTheCheckout_Throws(string wrapperPath)
+    {
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => JavaKindOptions.Parse("java-api", Block(
+                ("gradleTask", "bootRun"),
+                ("wrapperPath", wrapperPath),
+                ("port", 8080))));
+
+        Assert.Contains("java-api", ex.Message);
+        Assert.Contains("outside", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("C:\\tools\\mvnw")]
+    [InlineData("/usr/local/bin/mvn")]
+    public void Parse_AbsoluteWrapperPath_IsRejectedOnEveryPlatform(string wrapperPath)
+    {
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => JavaKindOptions.Parse("java-api", Block(
+                ("mavenGoal", "spring-boot:run"),
+                ("wrapperPath", wrapperPath),
+                ("port", 8080))));
+
+        Assert.Contains("absolute", ex.Message);
     }
 
     [Fact]

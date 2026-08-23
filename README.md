@@ -327,7 +327,8 @@ The checkout is cloned exactly as for any other `"local"` service (`path`, `ref`
 | `gradleTask` | one of these three | Run via the Gradle wrapper, e.g. `bootRun`. |
 | `jarPath` | one of these three | Run a pre-built jar with `java -jar`, relative to `workingDirectory`. |
 | `port` | yes | The port the app listens on. Becomes the service's HTTP endpoint, so consumers can `WithReference(...)` it. |
-| `workingDirectory` | no (defaults to the repository root) | Where in the checkout the project lives — the directory holding `pom.xml` / `build.gradle` and the `mvnw`/`gradlew` wrapper. Must stay inside the checkout. |
+| `workingDirectory` | no (defaults to the repository root) | Where in the checkout the project lives — the directory holding `pom.xml` / `build.gradle`, and by default the `mvnw`/`gradlew` wrapper too. Must stay inside the checkout. |
+| `wrapperPath` | no (defaults to the wrapper in `workingDirectory`) | Where the `mvnw`/`gradlew` wrapper script lives, relative to the **repository root** — for the monorepo that commits a single wrapper at its root while the service itself sits further down. Only meaningful with `mavenGoal` or `gradleTask`. |
 | `args` | no | Extra arguments for whichever run mode is configured — passed to the Maven wrapper, the Gradle wrapper, or the jar. |
 
 `mavenGoal`, `gradleTask`, and `jarPath` are mutually exclusive: exactly one must be set. A
@@ -341,17 +342,26 @@ services:
     java:
       workingDirectory: services/catalog
       gradleTask: bootRun
+      wrapperPath: gradlew
       args: ["--args=--spring.profiles.active=dev"]
       port: 8080
 ```
 
+A multi-project Gradle repository (like a multi-module Maven one) commits a single wrapper at its
+root rather than one per project, which is what `wrapperPath: gradlew` names here — without it the
+wrapper is looked for in `services/catalog`, beside the project.
+
 `mavenGoal` and `gradleTask` run the repository's own `mvnw`/`gradlew` wrapper, so a JDK must be
-on the developer's machine but Maven/Gradle itself need not be. Every problem with the block bar
-one — unknown properties, a missing or out-of-range `port`, no run mode or more than one, a
-`workingDirectory` escaping the repository — is reported by the `AddService("catalog")` call
-itself, before the service has added anything to the app model. The exception is a
-`workingDirectory` that doesn't exist in the checkout, which is reported a moment later, once the
-resource is being created.
+on the developer's machine but Maven/Gradle itself need not be. That wrapper has to be in the
+checkout — there is no fallback to a system-wide `mvn`/`gradle` — so a checkout without one is
+reported as such, rather than left to surface as a failure to start the app.
+
+Every problem with the block bar two — unknown properties, a missing or out-of-range `port`, no run
+mode or more than one, a `workingDirectory` or `wrapperPath` escaping the repository, a
+`wrapperPath` set alongside `jarPath` — is reported by the `AddService("catalog")` call itself,
+before the service has added anything to the app model. The two exceptions are a `workingDirectory`
+that doesn't exist in the checkout and a wrapper script that isn't there: both need the checkout on
+disk, so they are reported a moment later, once the resource is being created.
 
 **Reaching the rest of the Java integration.** The `java:` block covers how to start the app; it
 deliberately doesn't mirror every modifier the Community Toolkit offers. Anything else is reachable

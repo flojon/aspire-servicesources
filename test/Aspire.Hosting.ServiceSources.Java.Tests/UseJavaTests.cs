@@ -52,6 +52,7 @@ public class UseJavaTests
                   mavenGoal: spring-boot:run
                   port: 8080
             """);
+        WriteWrapper(checkout, MavenWrapperName);
         var builder = CreateBuilder(appHostDirectory);
         builder.UseJava();
         builder.AddService("java-api");
@@ -64,10 +65,11 @@ public class UseJavaTests
     [Fact]
     public void UseJava_ThenAddService_ReturnsTheJavaResourceCarryingItsEndpoint()
     {
-        var (appHostDirectory, _) = CreateAppHost("""
+        var (appHostDirectory, checkout) = CreateAppHost("""
                   mavenGoal: spring-boot:run
                   port: 8080
             """);
+        WriteWrapper(checkout, MavenWrapperName);
         var builder = CreateBuilder(appHostDirectory);
         builder.UseJava();
         var javaApi = builder.AddService("java-api");
@@ -87,6 +89,7 @@ public class UseJavaTests
                   gradleTask: bootRun
                   port: 9000
             """, Path.Combine("services", "api"));
+        WriteWrapper(Path.Combine(checkout, "services", "api"), GradleWrapperName);
         var builder = CreateBuilder(appHostDirectory);
         builder.UseJava();
         builder.AddService("java-api");
@@ -96,6 +99,48 @@ public class UseJavaTests
         Assert.Equal(
             Path.GetFullPath(Path.Combine(checkout, "services", "api")),
             Path.GetFullPath(resource.WorkingDirectory));
+    }
+
+    [Fact]
+    public void UseJava_WrapperPathBlock_RunsTheWrapperTheMonorepoKeepsAtItsRoot()
+    {
+        var (appHostDirectory, checkout) = CreateAppHost("""
+                  workingDirectory: services/catalog
+                  gradleTask: bootRun
+                  wrapperPath: gradlew
+                  port: 8080
+            """, Path.Combine("services", "catalog"));
+        var wrapper = WriteWrapper(checkout, GradleWrapperName);
+        var builder = CreateBuilder(appHostDirectory);
+        builder.UseJava();
+        builder.AddService("java-api");
+
+        var resource = Assert.IsType<JavaAppExecutableResource>(
+            Assert.Single(builder.Resources, r => r.Name == "java-api"));
+        Assert.Equal(Path.GetFullPath(wrapper), resource.Command);
+        Assert.Equal(
+            Path.GetFullPath(Path.Combine(checkout, "services", "catalog")),
+            Path.GetFullPath(resource.WorkingDirectory));
+    }
+
+    [Fact]
+    public void AddService_WrapperMissingFromTheCheckout_ThrowsWithoutAddingAnyResource()
+    {
+        // No wrapper written into the checkout: the failure a developer would otherwise only see
+        // once DCP tried to exec it.
+        var (appHostDirectory, _) = CreateAppHost("""
+                  gradleTask: bootRun
+                  port: 8080
+            """);
+        var builder = CreateBuilder(appHostDirectory);
+        builder.UseJava();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => builder.AddService("java-api"));
+
+        Assert.Contains("java-api", ex.Message);
+        Assert.Contains(GradleWrapperName, ex.Message);
+        Assert.DoesNotContain(builder.Resources, r => r.Name == "java-api");
     }
 
     [Fact]
@@ -130,6 +175,24 @@ public class UseJavaTests
 
         Assert.Contains("java-api", ex.Message);
         Assert.Contains("port", ex.Message);
+        Assert.DoesNotContain(builder.Resources, r => r.Name == "java-api");
+    }
+
+    [Fact]
+    public void AddService_EmptyJavaBlock_DoesNotClaimTheBlockIsAbsent()
+    {
+        // 'java:' with nothing under it reaches the handler as the same null an absent key does, so
+        // the message has to cover both rather than sending the reader looking for a block they can
+        // see in front of them.
+        var (appHostDirectory, _) = CreateAppHost("");
+        var builder = CreateBuilder(appHostDirectory);
+        builder.UseJava();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => builder.AddService("java-api"));
+
+        Assert.Contains("java-api", ex.Message);
+        Assert.Contains("missing or empty", ex.Message);
         Assert.DoesNotContain(builder.Resources, r => r.Name == "java-api");
     }
 

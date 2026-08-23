@@ -26,6 +26,7 @@ public class JavaLocalResourceKindTests
     {
         var builder = CreateBuilder();
         var repoRoot = CreateRepoRoot();
+        WriteWrapper(repoRoot, MavenWrapperName);
 
         var resource = ResolveResource(builder, repoRoot,
             ("mavenGoal", "spring-boot:run"),
@@ -42,6 +43,7 @@ public class JavaLocalResourceKindTests
     {
         var builder = CreateBuilder();
         var repoRoot = CreateRepoRoot();
+        var wrapper = WriteWrapper(repoRoot, MavenWrapperName);
 
         var resource = ResolveResource(builder, repoRoot,
             ("mavenGoal", "spring-boot:run"),
@@ -50,9 +52,7 @@ public class JavaLocalResourceKindTests
         // WithMavenGoal swaps the command from "java" to the wrapper script in run mode; asserting on
         // the command is what distinguishes a real Maven-run wiring from a resource that would start
         // a bare JVM with no arguments.
-        Assert.Equal(
-            Path.GetFullPath(Path.Combine(repoRoot, OperatingSystem.IsWindows() ? "mvnw.cmd" : "mvnw")),
-            resource.Command);
+        Assert.Equal(Path.GetFullPath(wrapper), resource.Command);
     }
 
     [Fact]
@@ -60,20 +60,22 @@ public class JavaLocalResourceKindTests
     {
         var builder = CreateBuilder();
         var repoRoot = CreateRepoRoot();
+        var wrapper = WriteWrapper(repoRoot, GradleWrapperName);
 
         var resource = ResolveResource(builder, repoRoot,
             ("gradleTask", "bootRun"),
             ("port", 8080));
 
-        Assert.Equal(
-            Path.GetFullPath(Path.Combine(repoRoot, OperatingSystem.IsWindows() ? "gradlew.bat" : "gradlew")),
-            resource.Command);
+        Assert.Equal(Path.GetFullPath(wrapper), resource.Command);
     }
 
     [Fact]
     public void Resolve_JarPath_RunsTheJarAndKeepsTheJavaCommand()
     {
         var builder = CreateBuilder();
+
+        // No wrapper anywhere in this checkout, deliberately: "java -jar" needs none, so the wrapper
+        // check must not reach jar mode.
         var repoRoot = CreateRepoRoot();
 
         var resource = ResolveResource(builder, repoRoot,
@@ -85,10 +87,99 @@ public class JavaLocalResourceKindTests
     }
 
     [Fact]
+    public void Resolve_MavenGoalWithoutTheWrapperInTheCheckout_ThrowsNamingThePathAndTheOverride()
+    {
+        var builder = CreateBuilder();
+        var repoRoot = CreateRepoRoot();
+
+        // Without this the resource is added happily and DCP fails much later, execing a path the
+        // developer never wrote.
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ResolveResource(builder, repoRoot,
+            ("mavenGoal", "spring-boot:run"),
+            ("port", 8080)));
+
+        Assert.Contains("java-api", ex.Message);
+        Assert.Contains(Path.GetFullPath(Path.Combine(repoRoot, MavenWrapperName)), ex.Message);
+        Assert.Contains("wrapperPath", ex.Message);
+        Assert.DoesNotContain(builder.Resources, r => r.Name == "java-api");
+    }
+
+    [Fact]
+    public void Resolve_GradleTaskWithoutTheWrapperInTheCheckout_ThrowsNamingThePathAndTheOverride()
+    {
+        var builder = CreateBuilder();
+        var repoRoot = CreateRepoRoot();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ResolveResource(builder, repoRoot,
+            ("gradleTask", "bootRun"),
+            ("port", 8080)));
+
+        Assert.Contains(Path.GetFullPath(Path.Combine(repoRoot, GradleWrapperName)), ex.Message);
+        Assert.Contains("wrapperPath", ex.Message);
+        Assert.DoesNotContain(builder.Resources, r => r.Name == "java-api");
+    }
+
+    [Fact]
+    public void Resolve_WrapperPathAtTheRepositoryRoot_RunsItFromTheProjectDirectory()
+    {
+        var builder = CreateBuilder();
+        var repoRoot = CreateRepoRoot(Path.Combine("services", "catalog"));
+
+        // The monorepo shape a multi-project Gradle (or multi-module Maven) repository actually has:
+        // one wrapper at the repository root, the project itself further down.
+        var wrapper = WriteWrapper(repoRoot, GradleWrapperName);
+
+        var resource = ResolveResource(builder, repoRoot,
+            ("workingDirectory", "services/catalog"),
+            ("gradleTask", "bootRun"),
+            ("wrapperPath", GradleWrapperName),
+            ("port", 8080));
+
+        Assert.Equal(Path.GetFullPath(wrapper), resource.Command);
+        Assert.Equal(
+            Path.GetFullPath(Path.Combine(repoRoot, "services", "catalog")),
+            Path.GetFullPath(resource.WorkingDirectory));
+    }
+
+    [Fact]
+    public void Resolve_WrapperPathForAMavenGoal_RunsThatWrapper()
+    {
+        var builder = CreateBuilder();
+        var repoRoot = CreateRepoRoot("modules");
+        var wrapper = WriteWrapper(repoRoot, MavenWrapperName);
+
+        var resource = ResolveResource(builder, repoRoot,
+            ("workingDirectory", "modules"),
+            ("mavenGoal", "spring-boot:run"),
+            ("wrapperPath", MavenWrapperName),
+            ("port", 8080));
+
+        Assert.Equal(Path.GetFullPath(wrapper), resource.Command);
+    }
+
+    [Fact]
+    public void Resolve_WrapperPathThatIsNotThere_ThrowsNamingTheConfiguredValue()
+    {
+        var builder = CreateBuilder();
+        var repoRoot = CreateRepoRoot();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ResolveResource(builder, repoRoot,
+            ("mavenGoal", "spring-boot:run"),
+            ("wrapperPath", "tools/mvnw"),
+            ("port", 8080)));
+
+        Assert.Contains("java-api", ex.Message);
+        Assert.Contains("tools/mvnw", ex.Message);
+        Assert.Contains(Path.GetFullPath(Path.Combine(repoRoot, "tools", "mvnw")), ex.Message);
+        Assert.DoesNotContain(builder.Resources, r => r.Name == "java-api");
+    }
+
+    [Fact]
     public void Resolve_WorkingDirectory_IsResolvedRelativeToTheCheckout()
     {
         var builder = CreateBuilder();
         var repoRoot = CreateRepoRoot(Path.Combine("services", "api"));
+        WriteWrapper(Path.Combine(repoRoot, "services", "api"), MavenWrapperName);
 
         var resource = ResolveResource(builder, repoRoot,
             ("workingDirectory", "services/api"),
@@ -124,6 +215,7 @@ public class JavaLocalResourceKindTests
     {
         var builder = CreateBuilder();
         var repoRoot = CreateRepoRoot();
+        WriteWrapper(repoRoot, MavenWrapperName);
 
         var resource = ResolveResource(builder, repoRoot,
             ("mavenGoal", "spring-boot:run"),
@@ -141,6 +233,7 @@ public class JavaLocalResourceKindTests
     {
         var builder = CreateBuilder();
         var repoRoot = CreateRepoRoot();
+        WriteWrapper(repoRoot, MavenWrapperName);
 
         var resourceBuilder = new JavaLocalResourceKind().Resolve(
             builder, "java-api", repoRoot, Block(("mavenGoal", "spring-boot:run"), ("port", 8080)));
@@ -150,20 +243,19 @@ public class JavaLocalResourceKindTests
     }
 
     [Fact]
-    public void Validate_GoodBlock_DoesNotThrowAndAddsNothingToTheAppModel()
+    public void Validate_GoodBlock_DoesNotThrow()
     {
-        var builder = CreateBuilder();
-
         new JavaLocalResourceKind().Validate("java-api", Block(
             ("mavenGoal", "spring-boot:run"),
             ("port", 8080)));
-
-        Assert.Empty(builder.Resources);
     }
 
     [Fact]
-    public void Validate_MalformedBlock_ThrowsBeforeAnythingReachesTheAppModel()
+    public void Validate_MalformedBlock_ThrowsNamingTheService()
     {
+        // That throwing here keeps the service out of the app model is what
+        // UseJavaTests.AddService_MalformedJavaBlock_ThrowsWithoutAddingAnyResource establishes:
+        // ILocalResourceKind.Validate isn't handed a builder, so it can't be asserted from here.
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => new JavaLocalResourceKind().Validate("java-api", Block(("port", 8080))));
 
