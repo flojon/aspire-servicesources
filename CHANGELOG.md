@@ -70,10 +70,11 @@ nothing will fail to build to warn you.
   boundary because that is where a breaking change ships while the version is below `1.0.0`.
   A core patch still resolves, so core can be serviced without republishing every satellite.
 
-  If your AppHost references core and a satellite separately, as the install instructions in
-  the README describe, moving core alone to the next minor now fails restore with `NU1107`
-  rather than building and throwing at startup. Move both together, or reference only the
-  satellite and let restore pull the matching core in for you.
+  If your AppHost references core and a satellite separately, moving core alone to the next
+  minor now fails restore with `NU1107` rather than building and throwing at startup. Move
+  both together, or drop the core reference and let the satellite bring core in for you —
+  which is what the README's install section now recommends, since one reference has no
+  second version to keep in step.
 
 ### Added
 
@@ -161,6 +162,9 @@ nothing will fail to build to warn you.
 - nuget.org version and download badges, and a Preview builds section explaining that the
   GitHub Packages feed needs a `read:packages` token ([#67]).
 - How to run several services out of one repository ([#64]).
+- The install section now says to add a satellite package *instead of* the core package
+  rather than alongside it, so an AppHost that uses one carries a single reference and has no
+  second version to keep in step ([#79]).
 
 ## [0.2.0] - 2026-08-18
 

@@ -26,13 +26,14 @@ when a developer switches sources.
 
 ## Install
 
-Published on nuget.org as [`KoalaSoft.Aspire.Hosting.ServiceSources`](https://www.nuget.org/packages/KoalaSoft.Aspire.Hosting.ServiceSources):
+Published on nuget.org as [`KoalaSoft.Aspire.Hosting.ServiceSources`](https://www.nuget.org/packages/KoalaSoft.Aspire.Hosting.ServiceSources).
+If every service your AppHost declares is a .NET project, this is the only package you need:
 
 ```bash
 dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources
 ```
 
-Services that aren't .NET projects need the satellite package for their language as well, so an
+Services that aren't .NET projects need the satellite package for their language, so an
 AppHost only takes on the hosting dependencies it actually uses — see
 [Non-.NET local services](#non-net-local-services-kind):
 
@@ -41,9 +42,17 @@ AppHost only takes on the hosting dependencies it actually uses — see
 | Java | `KoalaSoft.Aspire.Hosting.ServiceSources.Java` |
 | JavaScript | `KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript` |
 
+A satellite already depends on the core package, so add it *instead of* the core package
+rather than alongside it — restore brings the matching core in for you:
+
 ```bash
 dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript
 ```
+
+Two direct references mean two versions to move in step, because a satellite accepts core
+only within its own minor: bump one and not the other and restore fails with `NU1107`. A
+single reference has nothing to keep in step. Add a satellite per language you use; core
+still arrives once, transitively.
 
 Or reference the project directly from your AppHost instead:
 
