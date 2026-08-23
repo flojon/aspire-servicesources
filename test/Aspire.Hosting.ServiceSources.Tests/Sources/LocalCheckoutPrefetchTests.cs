@@ -22,6 +22,8 @@ public class LocalCheckoutPrefetchTests
 
         public List<string> Cloned { get; } = [];
 
+        public List<(string RepositoryPath, string Reference)> CheckedOut { get; } = [];
+
         public void FailFor(string repositoryUrl, Exception exception) => _failFor[repositoryUrl] = exception;
 
         /// <summary>Holds this repository's clone open until the returned gate is set.</summary>
@@ -59,6 +61,10 @@ public class LocalCheckoutPrefetchTests
 
         public void Checkout(string repositoryPath, string reference)
         {
+            lock (CheckedOut)
+            {
+                CheckedOut.Add((repositoryPath, reference));
+            }
         }
 
         public void Fetch(string repositoryPath)
@@ -105,6 +111,38 @@ public class LocalCheckoutPrefetchTests
     }
 
     /// <summary>
+    /// Like <see cref="CreateAppHostDirectory"/>, but the catalog names a <c>defaultRef</c> — the
+    /// config without which there is no ref reconciliation to defer in the first place.
+    /// </summary>
+    private static string CreateAppHostDirectoryOnRef(string defaultRef, params string[] localServices)
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+
+        var yaml = string.Join("\n", localServices.Select(name =>
+            $"  {name}:\n    repository: https://example.com/{name}.git\n    project: Service.csproj\n" +
+            $"    defaultRef: {defaultRef}"));
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), $"services:\n{yaml}\n");
+
+        var json = string.Join(",", localServices.Select(name => $"\"{name}\": {{ \"source\": \"local\" }}"));
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), $"{{ \"services\": {{ {json} }} }}");
+
+        return dir;
+    }
+
+    /// <summary>
+    /// Plants a checkout that already exists — a working tree this run did not create, which is the
+    /// only kind the prefetch is not allowed to touch.
+    /// </summary>
+    private static string PlantExistingCheckout(string appHostDirectory, string serviceName)
+    {
+        var repoRoot = Path.Combine(appHostDirectory, ".servicesources", "checkouts", serviceName);
+        Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
+        File.WriteAllText(Path.Combine(repoRoot, "Service.csproj"), "<Project />");
+
+        return repoRoot;
+    }
+
+    /// <summary>
     /// Writes an app host directory whose services all live in <b>one</b> repository — the monorepo
     /// shape, where each service is a different project inside the same clone.
     /// </summary>
@@ -122,8 +160,8 @@ public class LocalCheckoutPrefetchTests
         return dir;
     }
 
-    private static ServiceMetadata Metadata(string name) =>
-        new() { Repository = $"https://example.com/{name}.git", Project = "Service.csproj" };
+    private static ServiceMetadata Metadata(string name, string? defaultRef = null) =>
+        new() { Repository = $"https://example.com/{name}.git", Project = "Service.csproj", DefaultRef = defaultRef };
 
     private static ServiceDeveloperConfig DevConfig() => new() { Source = "local" };
 
@@ -251,7 +289,7 @@ public class LocalCheckoutPrefetchTests
 
         // A plain `throw storedException` would have reset this to the re-throw site, hiding the
         // prefetch worker the clone actually failed on.
-        Assert.Contains(nameof(LocalGitCheckout.ResolveRepoRoot), ex.StackTrace);
+        Assert.Contains(nameof(LocalGitCheckout.PrepareRepoRoot), ex.StackTrace);
     }
 
     [Fact]
@@ -326,6 +364,52 @@ public class LocalCheckoutPrefetchTests
         Assert.Contains("billing", message);
         Assert.DoesNotContain("orders", message);
         Assert.Contains("1 service", message);
+    }
+
+    [Fact]
+    public void ExistingCheckoutForAServiceNeverAdded_IsLeftOnTheRefItWasFoundOn()
+    {
+        var dir = CreateAppHostDirectoryOnRef("main", "orders", "billing");
+        var ordersRoot = PlantExistingCheckout(dir, "orders");
+        PlantExistingCheckout(dir, "billing");
+        var builder = TestHelpers.CreateBuilder(dir);
+        var git = new FakeGitClient();
+
+        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders", defaultRef: "main"), DevConfig());
+
+        // Both checkouts already existed, so there was nothing to clone...
+        Assert.Empty(git.Cloned);
+
+        // ...and only the service this AppHost actually added was moved onto its configured ref.
+        // Reconciling "billing" too would run `git checkout` inside a working tree on the strength
+        // of a config entry alone: it discards nothing, but it silently moves committed, unpushed
+        // work off the branch the developer left it on, in a run that never mentioned that service.
+        Assert.Equal([(ordersRoot, "main")], git.CheckedOut);
+    }
+
+    [Fact]
+    public void CheckoutFailureForAServiceNeverAdded_IsReportedRatherThanSwallowed()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var builder = TestHelpers.CreateBuilder(dir);
+        var git = new FakeGitClient();
+        git.FailFor("https://example.com/billing.git", new InvalidOperationException("no such repo"));
+
+        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+
+        var prefetch = LocalCheckoutPrefetch.For(builder, git);
+
+        // "billing" is never added, so GetRepoRoot never re-throws its failure. Without this report
+        // the run pays a failing clone — credential-helper round trip included — and says nothing,
+        // leaving a config entry that has been broken since someone renamed the repository.
+        Assert.True(
+            SpinWait.SpinUntil(
+                () => prefetch.FailedUnusedCheckoutMessages.Count == 1, TimeSpan.FromSeconds(30)),
+            "The failed speculative checkout for 'billing' was never reported.");
+
+        var message = Assert.Single(prefetch.FailedUnusedCheckoutMessages);
+        Assert.Contains("billing", message);
+        Assert.Contains("failed to clone", message);
     }
 
     [Fact]

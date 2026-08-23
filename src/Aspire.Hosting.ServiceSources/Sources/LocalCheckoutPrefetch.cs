@@ -25,8 +25,8 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// service the AppHost adds. The converse does not hold — the file may mark services <c>"local"</c>
 /// that this AppHost never calls <c>AddService()</c> for — so the prefetch is <b>speculative</b> in
 /// both what it does and what it reports. It must never invent a failure: a service missing from the
-/// catalog is skipped, and a checkout that throws has its exception stored and re-thrown only if
-/// that service is actually requested.
+/// catalog is skipped, and a checkout that throws has its exception stored, re-thrown only if that
+/// service is actually requested, and merely logged when it is not.
 /// </para>
 /// <para>
 /// Nothing here blocks on the speculative part. Each checkout is its own task and
@@ -38,17 +38,22 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// </para>
 /// <para>
 /// Free of waiting is not free of cost, and the difference matters. Resolving a checkout is not a
-/// read-only operation: a service with no checkout yet is <b>cloned</b>, and an existing
-/// tool-managed checkout that is not on its configured ref is <b>fetched and checked out</b> onto
-/// it. Speculation therefore spends network and disk, and applies the developer's configured ref,
-/// for services this AppHost never adds — bounded only by what
-/// <c>servicesources.local.json</c> marks <c>"local"</c>. Two things keep that acceptable rather
-/// than merely tolerated: the file is per-developer and gitignored, so its scope is already this
-/// developer and this AppHost, and the ref reconciliation is what that same file asked for, refused
-/// outright by <see cref="Git.LocalGitCheckout"/> when the checkout has uncommitted changes. What
-/// remains — a cold clone of a repository that goes unused — is reported at
-/// <c>BeforeStartEvent</c> by <see cref="ReportUnusedCheckouts"/> rather than paid silently, since
-/// the remedy is for the developer to drop the entries they never <c>AddService()</c>.
+/// read-only operation, so speculation does only the half of it that cannot destroy anything: a
+/// service with no checkout yet is <b>cloned</b>, and a checkout that already exists is left exactly
+/// as it was found. Moving one onto its configured ref — a fetch and a checkout inside a working
+/// tree this run did not create — is deferred to <see cref="GetRepoRoot"/>, which runs only for the
+/// services the AppHost really added. Without that split, a developer with committed work on a
+/// branch of a service this AppHost never adds would find it checked out back onto the configured
+/// ref by a run that never mentioned that service, on the strength of a config entry alone. The
+/// price is that ref reconciliation is serial across services where it used to be parallel; the
+/// clone, which is the part that actually costs time, stays parallel.
+/// </para>
+/// <para>
+/// What remains speculative is a cold clone of a repository that goes unused, and any failure of
+/// one. Both are reported at <c>BeforeStartEvent</c> by <see cref="ReportSpeculativeWork"/> rather
+/// than paid silently: the cost, because the remedy is for the developer to drop the entries they
+/// never <c>AddService()</c>, and the failures, because nothing else ever mentions them —
+/// <see cref="GetRepoRoot"/> re-throws only for a service that was actually asked for.
 /// </para>
 /// </remarks>
 internal sealed class LocalCheckoutPrefetch
@@ -105,7 +110,7 @@ internal sealed class LocalCheckoutPrefetch
             // only once every AddService() call has happened is the unused set known.
             builder.Eventing.Subscribe<BeforeStartEvent>((@event, _) =>
             {
-                ReportUnusedCheckouts(@event.Services);
+                ReportSpeculativeWork(@event.Services);
                 return Task.CompletedTask;
             });
 
@@ -122,43 +127,109 @@ internal sealed class LocalCheckoutPrefetch
     {
         get
         {
-            lock (_gate)
+            var unused = UnusedCheckouts().Select(entry => entry.Name).ToArray();
+
+            if (unused.Length == 0)
             {
-                var unused = _checkouts.Keys
-                    .Where(name => !_requested.Contains(name))
-                    .OrderBy(name => name, StringComparer.Ordinal)
-                    .ToArray();
-
-                if (unused.Length == 0)
-                {
-                    return null;
-                }
-
-                return $"servicesources.local.json marks {unused.Length} " +
-                       $"{(unused.Length == 1 ? "service" : "services")} as 'local' that this AppHost never " +
-                       $"adds ({string.Join(", ", unused)}). Their git checkouts were cloned, and reconciled to " +
-                       "their configured ref, anyway: AddService() has to hand back the real resource, so every " +
-                       "'local' entry is prefetched in parallel before the AppHost says which ones it wants. " +
-                       "Remove the entries you don't call AddService() for to stop paying for them.";
+                return null;
             }
+
+            return $"servicesources.local.json marks {unused.Length} " +
+                   $"{(unused.Length == 1 ? "service" : "services")} as 'local' that this AppHost never " +
+                   $"adds ({string.Join(", ", unused)}). Cloning them was paid for anyway: AddService() has to " +
+                   "hand back the real resource, so every 'local' entry is prefetched in parallel before the " +
+                   "AppHost says which ones it wants. Only the services this AppHost adds are reconciled to " +
+                   "their configured ref. Remove the entries you don't call AddService() for to stop paying " +
+                   "for them.";
         }
     }
 
     /// <summary>
-    /// Reports the cost of the speculative part of the prefetch, so a first run that quietly clones
-    /// repositories the AppHost never uses reads as a cost rather than as a hang.
+    /// Notices for speculative checkouts that failed for services this AppHost never added — the
+    /// failures <see cref="GetRepoRoot"/> will never re-throw, because nothing asked for them. Only
+    /// checkouts that have already finished are included: waiting on one would undo the deferral
+    /// this class exists for. Exposed for tests — the log itself isn't observable in-process.
     /// </summary>
-    private void ReportUnusedCheckouts(IServiceProvider services)
+    public IReadOnlyList<string> FailedUnusedCheckoutMessages =>
+        UnusedCheckouts()
+            .Where(entry => entry.Checkout.IsCompleted && entry.Checkout.Result.Exception is not null)
+            .Select(entry => FailedCheckoutMessage(entry.Name, entry.Checkout.Result.Exception!))
+            .ToArray();
+
+    /// <summary>
+    /// The checkouts the prefetch started that no <c>AddService()</c> call ever asked for. Correct
+    /// only once every <c>AddService()</c> call has happened, which is why the report waits for
+    /// <c>BeforeStartEvent</c>.
+    /// </summary>
+    private (string Name, Task<CheckoutResult> Checkout)[] UnusedCheckouts()
     {
-        if (UnusedCheckoutsMessage is not { } message)
+        lock (_gate)
+        {
+            return _checkouts
+                .Where(entry => !_requested.Contains(entry.Key))
+                .OrderBy(entry => entry.Key, StringComparer.Ordinal)
+                .Select(entry => (entry.Key, entry.Value))
+                .ToArray();
+        }
+    }
+
+    /// <summary>
+    /// Reports the speculative part of the prefetch: what it cost, and what failed inside it while
+    /// nobody was waiting. A first run that quietly clones repositories the AppHost never uses
+    /// should read as a cost rather than as a hang, and a clone that failed for one of those
+    /// services has no other route to the developer at all.
+    /// </summary>
+    private void ReportSpeculativeWork(IServiceProvider services)
+    {
+        var logger = services.GetService<ILoggerFactory>()?.CreateLogger("Aspire.Hosting.ServiceSources");
+
+        if (logger is null)
         {
             return;
         }
 
-        var logger = services.GetService<ILoggerFactory>()?.CreateLogger("Aspire.Hosting.ServiceSources");
+        if (UnusedCheckoutsMessage is { } message)
+        {
+            logger.LogInformation("{ServiceSourcesNotice}", message);
+        }
 
-        logger?.LogInformation("{ServiceSourcesNotice}", message);
+        foreach (var (name, checkout) in UnusedCheckouts())
+        {
+            // A checkout nothing waits on may still be running here, and startup must not block on
+            // one — so the failure is reported when it lands instead. ExecuteSynchronously runs the
+            // continuation inline for those already finished, which is the common case by now.
+            _ = checkout.ContinueWith(
+                task => ReportFailedCheckout(logger, name, task),
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
     }
+
+    private static void ReportFailedCheckout(ILogger logger, string serviceName, Task<CheckoutResult> checkout)
+    {
+        // Never faulted — the worker captures its exception into the result — so this cannot throw.
+        if (checkout.Result.Exception is not { } exception)
+        {
+            return;
+        }
+
+        try
+        {
+            logger.LogWarning(exception, "{ServiceSourcesNotice}", FailedCheckoutMessage(serviceName, exception));
+        }
+        catch (ObjectDisposedException)
+        {
+            // A continuation for a still-running clone can land after the host has torn its logging
+            // down. There is nothing left to report to, and faulting a continuation nobody awaits
+            // would be worse than losing the notice.
+        }
+    }
+
+    private static string FailedCheckoutMessage(string serviceName, Exception exception) =>
+        $"servicesources.local.json marks '{serviceName}' as 'local', so its git checkout was prefetched, and " +
+        $"the prefetch failed: {exception.Message} This AppHost never adds '{serviceName}', so nothing else " +
+        "reports it — remove the entry if you don't use it, or fix what the failure names.";
 
     /// <summary>
     /// The checkout directory for <paramref name="serviceName"/>, re-throwing the failure the
@@ -192,7 +263,11 @@ internal sealed class LocalCheckoutPrefetch
             ExceptionDispatchInfo.Capture(result.Exception).Throw();
         }
 
-        return result.RepoRoot!;
+        // The prefetch stopped at "the checkout exists". Reconciling it onto the configured ref
+        // mutates a working tree, so it happens here — on the thread of the AddService call that
+        // asked for this service, and never for a service the AppHost turns out not to add.
+        return LocalGitCheckout.ReconcileRepoRoot(
+            serviceName, metadata, config, result.Checkout!.Value, gitClient);
     }
 
     private void Run(IDistributedApplicationBuilder builder, IGitClient gitClient)
@@ -232,19 +307,23 @@ internal sealed class LocalCheckoutPrefetch
             {
                 try
                 {
-                    var repoRoot = LocalGitCheckout.ResolveRepoRoot(
+                    // Prepare, not resolve: cloning what is missing is safe to do for a service that
+                    // may never be added, but reconciling an existing checkout is not — see
+                    // GetRepoRoot, which finishes the job for the services that are.
+                    var prepared = LocalGitCheckout.PrepareRepoRoot(
                         candidate.Name, candidate.Metadata, candidate.Config, appHostDirectory, gitClient);
-                    return new CheckoutResult(repoRoot, null);
+                    return new CheckoutResult(prepared, null);
                 }
                 catch (Exception ex)
                 {
                     // Captured, never thrown from the task itself: this service may never be
-                    // requested, and a faulted task nobody awaits is an unobserved exception.
+                    // requested, and a faulted task nobody awaits is an unobserved exception. If it
+                    // is never requested, ReportSpeculativeWork is what surfaces this.
                     return new CheckoutResult(null, ex);
                 }
             });
         }
     }
 
-    private sealed record CheckoutResult(string? RepoRoot, Exception? Exception);
+    private sealed record CheckoutResult(LocalGitCheckout.PreparedCheckout? Checkout, Exception? Exception);
 }

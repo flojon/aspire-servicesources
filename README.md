@@ -139,9 +139,12 @@ a project reference would be.
   with `path`.
 - Keep the file to the services you actually add. `AddService()` has to hand back the real
   resource, so it can't wait until the AppHost has finished composing to find out which services
-  it wants — the first call clones and reconciles the checkouts for *every* `"local"` entry, in
-  parallel. Entries you never `AddService()` are still paid for in network and disk. The AppHost
-  logs which ones those were at startup, so you know what to drop.
+  it wants — the first call clones the checkouts for *every* `"local"` entry, in parallel. Only the
+  services you actually add are then reconciled to their configured `ref`: a checkout that already
+  exists is never touched on behalf of an entry you don't `AddService()`, so work in progress on a
+  branch there is safe. Entries you never add still cost network and disk for that first clone. The
+  AppHost logs which ones those were at startup — and warns if one of them failed, since nothing
+  else would ever tell you — so you know what to drop.
 
 #### Several services from one repository
 
