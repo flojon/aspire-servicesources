@@ -60,6 +60,7 @@ jobs:
       - name: Pack
         run: |
           dotnet pack src/Aspire.Hosting.ServiceSources/Aspire.Hosting.ServiceSources.csproj -c Release --no-build -o ./artifacts/package
+          dotnet pack src/Aspire.Hosting.ServiceSources.Java/Aspire.Hosting.ServiceSources.Java.csproj -c Release --no-build -o ./artifacts/package
           dotnet pack src/Aspire.Hosting.ServiceSources.JavaScript/Aspire.Hosting.ServiceSources.JavaScript.csproj -c Release --no-build -o ./artifacts/package
 
       - name: Upload test results
@@ -76,3 +77,55 @@ jobs:
         with:
           name: nuget-packages
           path: ./artifacts/package/*.nupkg
+
+  smoketest-container:
+    # Runs alongside `build` rather than after it: this is a different kind of workload
+    # (a real container runtime, a real AppHost process) and shares nothing with the
+    # unit-test job, so serialising them would only add its runtime to the critical path.
+    name: 🐳 container source smoke test
+    runs-on: ubuntu-latest
+    # The script's own waits are bounded, but it launches the AppHost in the background, so
+    # this caps the job if that process hangs somewhere the script isn't watching.
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # MinVer reads tags to version the referenced package projects; without full
+          # history it falls back to a placeholder version and warns while doing it.
+          fetch-depth: 0
+
+      # DemoAppHost targets net10.0, but it project-references the multi-targeted package
+      # projects, so the 8 and 9 SDKs are installed too rather than relying on which target
+      # framework MSBuild settles on for those references.
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      # Docker is preinstalled and running on ubuntu-latest, which is the script's only
+      # requirement beyond the .NET SDK. The script pins the image and pre-pulls it itself,
+      # so nothing about the image is repeated here.
+      - name: Run container source smoke test
+        run: ./scripts/smoketest-container-source.sh
+
+      - name: Upload AppHost log
+        # The script prints the tail of this log on failure; the whole file is kept as an
+        # artifact for the failures where 40 lines are not enough.
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoketest-container-apphost-log
+          path: .smoketest-cache/apphost.log
+          if-no-files-found: ignore
