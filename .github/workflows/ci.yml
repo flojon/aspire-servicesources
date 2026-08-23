@@ -60,7 +60,50 @@ jobs:
       - name: Pack
         run: |
           dotnet pack src/Aspire.Hosting.ServiceSources/Aspire.Hosting.ServiceSources.csproj -c Release --no-build -o ./artifacts/package
+          dotnet pack src/Aspire.Hosting.ServiceSources.Java/Aspire.Hosting.ServiceSources.Java.csproj -c Release --no-build -o ./artifacts/package
           dotnet pack src/Aspire.Hosting.ServiceSources.JavaScript/Aspire.Hosting.ServiceSources.JavaScript.csproj -c Release --no-build -o ./artifacts/package
+
+      # PinCoreDependency in Directory.Build.targets rewrites the satellites' core dependency
+      # into a version range, hooking _GetProjectReferenceVersions - a NuGet-internal target.
+      # If a future SDK renames or reorders that target the rewrite silently stops happening
+      # and the satellites go back to shipping a floor, with nothing else failing. Assert the
+      # range reached the packed nuspec instead of trusting the build to notice.
+      #
+      # The grep matches an unescaped "<dependency": PackageReleaseNotes embeds the changelog,
+      # whose XML example contains the same text with &lt; escapes, and would satisfy a looser
+      # pattern on its own even if the real dependency element had lost its range.
+      #
+      # Every packed package except core is checked, rather than a name pattern covering the
+      # satellites that exist today: the failure this guards against is silent, so a satellite
+      # added later must not be able to slip past by being named something else.
+      - name: Verify satellites constrain core
+        run: |
+          core=$(ls ./artifacts/package/KoalaSoft.Aspire.Hosting.ServiceSources.[0-9]*.nupkg)
+          version=$(basename "$core" .nupkg)
+          version=${version#KoalaSoft.Aspire.Hosting.ServiceSources.}
+          # The bound PinCoreDependency computes: next minor, with -0 so the range excludes
+          # that minor's prereleases too. Asserted in full - matching only the floor would
+          # pass a range whose upper bound had drifted anywhere at all.
+          rest=${version#*.}
+          expected="[$version, ${version%%.*}.$((${rest%%.*} + 1)).0-0)"
+          echo "core packed as $version; satellites must declare $expected"
+          for pkg in ./artifacts/package/KoalaSoft.Aspire.Hosting.ServiceSources.*.nupkg; do
+            if [ "$pkg" = "$core" ]; then continue; fi
+            deps=$(unzip -p "$pkg" '*.nuspec' \
+              | grep -o '<dependency id="KoalaSoft.Aspire.Hosting.ServiceSources" version="[^"]*"' \
+              || true)
+            if [ -z "$deps" ]; then
+              echo "::error::$(basename "$pkg") declares no dependency on core"
+              exit 1
+            fi
+            unconstrained=$(printf '%s\n' "$deps" | grep -vF "version=\"$expected\"" || true)
+            if [ -n "$unconstrained" ]; then
+              echo "::error::$(basename "$pkg") does not constrain core to $expected"
+              printf '%s\n' "$unconstrained"
+              exit 1
+            fi
+            echo "$(basename "$pkg"): $(printf '%s\n' "$deps" | head -1)"
+          done
 
       - name: Upload test results
         # Test results are most useful exactly when the run failed.

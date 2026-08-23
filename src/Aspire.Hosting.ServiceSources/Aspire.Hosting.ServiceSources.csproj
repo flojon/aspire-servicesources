@@ -6,31 +6,18 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <!-- Shared package metadata, MinVer and the LICENSE/README pack items live in
+       Directory.Build.props. -->
   <PropertyGroup>
     <PackageId>KoalaSoft.Aspire.Hosting.ServiceSources</PackageId>
     <Description>Aspire hosting integration for configurable, per-developer service sources — e.g. a git checkout or a Kubernetes cluster.</Description>
-    <Authors>Jonas Flodén</Authors>
-    <PackageProjectUrl>https://github.com/flojon/aspire-servicesources</PackageProjectUrl>
     <PackageTags>aspire;dotnet-aspire;service-discovery;apphost;kubernetes;git;microservices;local-development;port-forward</PackageTags>
-    <RepositoryUrl>https://github.com/flojon/aspire-servicesources</RepositoryUrl>
-    <PublishRepositoryUrl>true</PublishRepositoryUrl>
-    <IncludeSymbols>true</IncludeSymbols>
-    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
-    <MinVerTagPrefix>v</MinVerTagPrefix>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting" Version="13.4.6" />
     <PackageReference Include="LibGit2Sharp" Version="0.32.0" />
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
-    <PackageReference Include="MinVer" Version="6.0.0" PrivateAssets="All" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Include="../../LICENSE" Pack="true" PackagePath="" />
-    <None Include="../../README.md" Pack="true" PackagePath="" />
   </ItemGroup>
 
 </Project>

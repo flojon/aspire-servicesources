@@ -53,6 +53,34 @@ nothing will fail to build to warn you.
   See **Changed** below for two things that keep compiling and change behavior: calls on the
   returned builder that used to no-op, and the `kubernetes` resource rename.
 
+- **A satellite package now accepts only core versions within its own minor** ([#79]).
+  `KoalaSoft.Aspire.Hosting.ServiceSources.Java` and `.JavaScript` used to declare a floor on
+  `KoalaSoft.Aspire.Hosting.ServiceSources`, so NuGet was free to satisfy a satellite with any
+  later core, including one whose interfaces had moved:
+
+  ```xml
+  <!-- before: any core at or above this version -->
+  <dependency id="KoalaSoft.Aspire.Hosting.ServiceSources" version="0.3.0" />
+  <!-- after: this minor only -->
+  <dependency id="KoalaSoft.Aspire.Hosting.ServiceSources" version="[0.3.0, 0.4.0-0)" />
+  ```
+
+  The `-0` on the upper bound keeps the next minor's prereleases out as well as its release:
+  `0.4.0-alpha.0.1` sorts *below* `0.4.0`, so a plain `0.4.0` bound would still admit it. That
+  matters on the GitHub Packages preview feed, where every package is published as a
+  prerelease.
+
+  A satellite implements core's `ILocalResourceKind`, so a mismatched pair failed at run time
+  with `MissingMethodException`/`TypeLoadException` rather than at restore. The minor is the
+  boundary because that is where a breaking change ships while the version is below `1.0.0`.
+  A core patch still resolves, so core can be serviced without republishing every satellite.
+
+  If your AppHost references core and a satellite separately, moving core alone to the next
+  minor now fails restore with `NU1107` rather than building and throwing at startup. Move
+  both together, or drop the core reference and let the satellite bring core in for you —
+  which is what the README's install section now recommends, since one reference has no
+  second version to keep in step.
+
 ### Added
 
 - `Configure<T>()` and `As<T>()`, for configuring the resource a service resolved to from
@@ -139,6 +167,9 @@ nothing will fail to build to warn you.
 - nuget.org version and download badges, and a Preview builds section explaining that the
   GitHub Packages feed needs a `read:packages` token ([#67]).
 - How to run several services out of one repository ([#64]).
+- The install section now says to add a satellite package *instead of* the core package
+  rather than alongside it, so an AppHost that uses one carries a single reference and has no
+  second version to keep in step ([#79]).
 
 ## [0.2.0] - 2026-08-18
 
@@ -194,3 +225,4 @@ Targets `net10.0`.
 [#67]: https://github.com/flojon/aspire-servicesources/pull/67
 [#68]: https://github.com/flojon/aspire-servicesources/pull/68
 [#72]: https://github.com/flojon/aspire-servicesources/issues/72
+[#79]: https://github.com/flojon/aspire-servicesources/issues/79

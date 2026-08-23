@@ -98,4 +98,59 @@ Full changelog: $(ChangelogUrl)</PackageReleaseNotes>
              Condition="'$(_ChangelogSectionName)' == ''" />
   </Target>
 
+  <!--
+    A ProjectReference packs as a version *floor*, so a satellite would declare "core >= X"
+    and NuGet could satisfy it with any later core. A satellite implements core's
+    ILocalResourceKind, so a mismatched pair throws MissingMethodException/TypeLoadException
+    at run time rather than failing at restore. This rewrites the dependency to a range that
+    is open at the patch level but closed at the next minor: [X, major.(minor+1).0-0).
+
+    The minor is the boundary because that is where this project's changelog policy allows an
+    interface to break while the version is below 1.0. A core patch still reaches consumers
+    without republishing every satellite, which an exact pin would forbid.
+
+    The -0 on the upper bound excludes the next minor's *prereleases* as well as its release.
+    A bare major.(minor+1).0 bound would admit every major.(minor+1).0-* version, because a
+    prerelease sorts below the release it precedes. That is not theoretical here: preview.yml
+    publishes 0.x.y-alpha.0.N builds of all three packages, and a prerelease floor turns
+    prerelease resolution on for the whole range, so a 0.2.x satellite restoring from the
+    preview feed would happily take core 0.3.0-alpha.0.N - the next-minor pairing this range
+    exists to forbid.
+
+    Both bounds come from %(ProjectVersion) - the version NuGet computed for the referenced
+    project - rather than this project's own $(PackageVersion), so the range describes core
+    even if the two ever stop resolving to the same version. Runs here rather than in
+    Directory.Build.props because _GetProjectReferenceVersions is what populates
+    %(ProjectVersion), the same reason as the changelog target above.
+  -->
+  <Target Name="PinCoreDependency" AfterTargets="_GetProjectReferenceVersions">
+    <!-- Regex::Replace returns its input unchanged when the pattern does not match, so a
+         %(ProjectVersion) that is not major.minor.* would survive the split below and reach
+         MSBuild::Add as a non-numeric string, failing the build with an MSB4184 evaluation
+         error that names only the Add call. Check the shape first and say which reference
+         and which version could not be turned into a range.
+
+         The Identity test is what keeps this quiet for core, which has no in-repo project
+         references at all: a task batched over an empty item list still runs once, with
+         every metadata reference expanding to the empty string. -->
+    <Error Condition="'%(_ProjectReferencesWithVersions.Identity)' != '' AND !$([System.Text.RegularExpressions.Regex]::IsMatch('%(_ProjectReferencesWithVersions.ProjectVersion)', '^[0-9]+\.[0-9]+\.'))"
+           Text="PinCoreDependency cannot build a version range for %(_ProjectReferencesWithVersions.Identity): its resolved package version '%(_ProjectReferencesWithVersions.ProjectVersion)' is not major.minor.patch." />
+    <!-- Split first: the range needs minor+1, and MSBuild cannot do arithmetic on a
+         version string without pulling the components out one at a time. -->
+    <ItemGroup>
+      <_ProjectReferencesWithVersions>
+        <_Major>$([System.Text.RegularExpressions.Regex]::Replace('%(ProjectVersion)', '^([0-9]+)\..*$', '$1'))</_Major>
+        <_Minor>$([System.Text.RegularExpressions.Regex]::Replace('%(ProjectVersion)', '^[0-9]+\.([0-9]+).*$', '$1'))</_Minor>
+      </_ProjectReferencesWithVersions>
+    </ItemGroup>
+    <!-- Every in-repo project reference is to an in-repo package released from the same tag,
+         so this deliberately matches on all of them rather than on core's project filename,
+         which a rename would silently stop matching. -->
+    <ItemGroup>
+      <_ProjectReferencesWithVersions>
+        <ProjectVersion>[%(ProjectVersion), %(_Major).$([MSBuild]::Add('%(_Minor)', 1)).0-0)</ProjectVersion>
+      </_ProjectReferencesWithVersions>
+    </ItemGroup>
+  </Target>
+
 </Project>
