@@ -5,7 +5,9 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the
 version is below `1.0.0`, a breaking change can ship in a minor release, so each one gets a
-**Breaking** entry saying what stops compiling and how to migrate.
+**Breaking** entry saying what breaks and how to migrate. A change that keeps compiling but
+behaves differently is called out under **Changed** — read those before upgrading too, since
+nothing will fail to build to warn you.
 
 ## [Unreleased]
 
@@ -42,10 +44,14 @@ version is below `1.0.0`, a breaking change can ship in a minor release, so each
   IResourceBuilder<ProjectResource> web = builder.AddService("web").As<ProjectResource>();
   ```
 
-  Extension calls made directly on the returned builder — `.WithEnvironment(...)` and
-  friends — used to compile and then silently no-op against the unregistered facade. They
-  now reach a registered resource, so configuration that was previously dead starts taking
-  effect.
+  These exist because most of Aspire's configuration extensions cannot bind to
+  `IResourceBuilder<IResourceWithServiceDiscovery>` at all, facade or not: `WithEnvironment`
+  is constrained to `IResourceWithEnvironment`, which `IResourceWithServiceDiscovery` does
+  not extend, so `service.WithEnvironment(...)` has never compiled — before or after — and
+  fails with `CS0311`. Reaching that API is what `Configure<T>` is for.
+
+  See **Changed** below for two things that keep compiling and change behavior: calls on the
+  returned builder that used to no-op, and the `kubernetes` resource rename.
 
 ### Added
 
@@ -65,6 +71,31 @@ version is below `1.0.0`, a breaking change can ship in a minor release, so each
 
 ### Changed
 
+- **Calls on an `AddService()` result that used to do nothing now take effect** ([#62]).
+  `IResourceWithServiceDiscovery` extends `IResourceWithEndpoints` and `IResource`, so every
+  Aspire extension constrained to those already bound to `AddService()`'s return type and
+  compiled:
+
+  ```csharp
+  IResourceBuilder<IResourceWithServiceDiscovery> service = builder.AddService("orders");
+
+  service.WithHttpEndpoint(targetPort: 1234);   // compiles - before and after
+  service.WithExplicitStart();
+  service.ExcludeFromManifest();
+  service.WithAnnotation(annotation);
+  ```
+
+  Against the old facade these silently did nothing, because it was never in
+  `builder.Resources`. They now land on the real, registered resource and actually happen.
+  Nothing here stops compiling, so an AppHost carrying one of these calls changes behavior on
+  upgrade with no diagnostic: re-read any such call on an `AddService()` result as live
+  rather than inert.
+- **`kubernetes`-sourced resources are renamed from `{service}-portforward` to `{service}`**
+  ([#62]). Aspire keys service discovery off the resource name, so the old name published the
+  endpoint as `services__orders-portforward__…` and a consumer resolving `orders` never found
+  it. The name is user-visible, though: it is what the dashboard shows, so anything keying off
+  it — a `WithReference` by string, saved dashboard state, external log or trace queries
+  filtering on resource name — sees a rename.
 - Developer-config fields that a service's source does not use — `port` under a `local`
   source, `context` under a `container` source — now fail fast with a
   `ServiceSourcesConfigurationException` naming every offending field, instead of being
