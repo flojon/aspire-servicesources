@@ -16,14 +16,10 @@ version: 2
 
 updates:
   - package-ecosystem: "nuget"
-    # `**/*` rather than `**`, which does not mean what it looks like. Dependabot's NuGet
-    # updater treats `*` as recursive only when a `/` follows it, so a *trailing* `**`
-    # compiles to `[^/]*[^/]*` - one level, the same as `*`. Only the exact suffix `/**/*` is
-    # special-cased into "this directory and every subdirectory". Both forms happen to match
-    # today's one-level-deep layout; the difference only shows up the day a project lands
-    # deeper, and it shows up as the bot silently finding nothing rather than as an error.
-    #
-    # Matching is also case-sensitive in practice, so these must track the on-disk casing.
+    # `**/*`, not `**`: Dependabot treats `*` as recursive only when a `/` follows it, so a
+    # trailing `**` means one level. Either form matches today's layout - the shorter one
+    # just starts silently finding nothing the day a project lands deeper. Matching is also
+    # case-sensitive, so these must track the on-disk casing.
     directories:
       - "/test/**/*"
       - "/samples/**/*"
