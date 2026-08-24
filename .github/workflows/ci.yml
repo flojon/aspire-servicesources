@@ -37,7 +37,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.nuget/packages
-          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          # Package versions live in Directory.Packages.props under central package
+          # management, so hashing only the project files would keep serving a stale cache
+          # across a version change.
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props') }}
           restore-keys: nuget-${{ runner.os }}-
 
       - name: Restore
@@ -157,7 +160,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.nuget/packages
-          key: nuget-smoketest-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          # Package versions live in Directory.Packages.props under central package
+          # management, so hashing only the project files would keep serving a stale cache
+          # across a version change.
+          key: nuget-smoketest-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props') }}
           restore-keys: nuget-smoketest-${{ runner.os }}-
 
       # Docker is preinstalled and running on ubuntu-latest, which is the script's only
