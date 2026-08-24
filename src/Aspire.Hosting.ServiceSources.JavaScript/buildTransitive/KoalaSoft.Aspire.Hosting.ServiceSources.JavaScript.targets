@@ -1,0 +1,70 @@
+<Project>
+
+  <!--
+    Ships inside the package, in buildTransitive/, so NuGet imports it into the AppHost that
+    consumes this satellite - directly or transitively - rather than only into this repo.
+
+    What it guards, as measured in the assemblies rather than assumed: Aspire.Hosting.JavaScript
+    13.4.6 carries a TypeRef into Aspire.Hosting's internal Aspire.Hosting.Utils.PathNormalizer,
+    reachable only because Aspire.Hosting 13.4.6 grants it InternalsVisibleTo. Aspire.Hosting
+    13.5.2 no longer grants it, so that same JavaScript assembly loses access and
+    AddJavaScriptApp - which JavaScriptLocalKind calls - throws MethodAccessException the first
+    time a "local" service with kind "javascript" resolves. It restores and compiles clean
+    either way; only running it fails.
+
+    Aspire closed that particular hole from its side: Aspire.Hosting.JavaScript 13.5.2 defines
+    its own copy of PathNormalizer and reaches into no Aspire.Hosting internals at all. The
+    floor this package declares is 13.5.2, and a consumer pinning the JavaScript package below
+    it is already an NU1605 downgrade error, so that specific pairing is not reachable now.
+
+    This target is here because the shape can recur: the Aspire packages are released in
+    lockstep and have coupled across that boundary once already. Comparing the two resolved
+    versions to each other holds whatever Aspire does next, and turns the recurrence into a
+    build error naming both versions rather than a MethodAccessException at run time.
+
+    Why this cannot be expressed as a dependency version instead: both references are floors,
+    and an AppHost on Aspire references Aspire.Hosting directly, so that reference wins while
+    nothing lifts Aspire.Hosting.JavaScript above the floor this package declares - NuGet takes
+    lowest-applicable and hands back exactly the mismatched pair. A range closed at the next
+    minor does not fix it either: a direct PackageReference overriding a transitive constraint
+    is NU1608, a warning, so it would report the mismatch and still build.
+
+    So the check reads what restore actually resolved. ResolvedCompileFileDefinitions carries
+    NuGetPackageId/NuGetPackageVersion per assembly, and ResolvePackageAssets is what populates
+    it - hence the hook, which is also early enough that the build stops before producing an
+    AppHost that would fail at run time.
+
+    Deliberately version-agnostic: it compares the two resolved versions to each other rather
+    than to any version known when this package was built, so an Aspire release years from now
+    is covered without republishing this package.
+  -->
+
+  <Target Name="VerifyAspireFamilyVersionsMatch"
+          AfterTargets="ResolvePackageAssets"
+          Condition="'$(SkipAspireFamilyVersionCheck)' != 'true'">
+
+    <!-- A package contributes one item per assembly, so the same version arrives several
+         times; Distinct() keeps the property below a single version rather than a list that
+         could never compare equal. -->
+    <ItemGroup>
+      <_ServiceSourcesAspireHostingVersion
+          Include="@(ResolvedCompileFileDefinitions->WithMetadataValue('NuGetPackageId', 'Aspire.Hosting')->'%(NuGetPackageVersion)'->Distinct())" />
+      <_ServiceSourcesAspireJavaScriptVersion
+          Include="@(ResolvedCompileFileDefinitions->WithMetadataValue('NuGetPackageId', 'Aspire.Hosting.JavaScript')->'%(NuGetPackageVersion)'->Distinct())" />
+    </ItemGroup>
+
+    <PropertyGroup>
+      <_ServiceSourcesAspireHosting>@(_ServiceSourcesAspireHostingVersion)</_ServiceSourcesAspireHosting>
+      <_ServiceSourcesAspireJavaScript>@(_ServiceSourcesAspireJavaScriptVersion)</_ServiceSourcesAspireJavaScript>
+    </PropertyGroup>
+
+    <!-- Both empty-checks matter. A project that consumes this satellite without compiling
+         against Aspire itself resolves only one of the two, and a project whose assets predate
+         this metadata resolves neither; in both cases there is no pair to compare, and
+         inventing a failure out of a missing version would break builds that are fine. -->
+    <Error Code="KOALASS001"
+           Condition="'$(_ServiceSourcesAspireHosting)' != '' AND '$(_ServiceSourcesAspireJavaScript)' != '' AND '$(_ServiceSourcesAspireHosting)' != '$(_ServiceSourcesAspireJavaScript)'"
+           Text="KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript requires a matched Aspire package set, but this project resolved Aspire.Hosting $(_ServiceSourcesAspireHosting) and Aspire.Hosting.JavaScript $(_ServiceSourcesAspireJavaScript). Aspire releases those two in lockstep and they have coupled across a friend-assembly boundary before: Aspire.Hosting.JavaScript 13.4.6 against Aspire.Hosting 13.5.x restores and compiles clean, then throws MethodAccessException at run time when a &quot;local&quot; service with kind &quot;javascript&quot; resolves. Reference both at one version - &lt;PackageReference Include=&quot;Aspire.Hosting.JavaScript&quot; Version=&quot;$(_ServiceSourcesAspireHosting)&quot; /&gt; matches the Aspire.Hosting this project already resolved - or set &lt;SkipAspireFamilyVersionCheck&gt;true&lt;/SkipAspireFamilyVersionCheck&gt; to build anyway." />
+  </Target>
+
+</Project>

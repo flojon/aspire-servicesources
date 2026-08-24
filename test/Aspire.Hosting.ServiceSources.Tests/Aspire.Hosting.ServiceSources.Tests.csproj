@@ -5,6 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- A test assembly, not an integration; see Directory.Build.props. -->
+    <IsAspirePolyglotCompatible>false</IsAspirePolyglotCompatible>
   </PropertyGroup>
 
   <ItemGroup>

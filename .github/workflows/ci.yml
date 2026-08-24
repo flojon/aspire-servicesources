@@ -105,6 +105,29 @@ jobs:
             echo "$(basename "$pkg"): $(printf '%s\n' "$deps" | head -1)"
           done
 
+      # The JavaScript satellite ships an MSBuild check in buildTransitive/ that fails a
+      # consumer's build when Aspire.Hosting and Aspire.Hosting.JavaScript resolve to different
+      # versions. NuGet imports it by exact name - buildTransitive/<PackageId>.targets - and
+      # imports nothing at all if the name or folder is wrong, silently, with the consumer's
+      # build simply succeeding as it did before the check existed.
+      #
+      # Getting it into the package is also less obvious than it looks: the SDK's default item
+      # globs only run in the per-framework inner builds, while pack runs in the cross-targeting
+      # outer build, so the file has to be included explicitly. That already failed once during
+      # development and produced a package that was correct in every other respect.
+      #
+      # AspireFamilyVersionCheckTests covers what the file does. This covers it arriving.
+      - name: Verify the JavaScript satellite ships its Aspire version check
+        run: |
+          pkg=$(ls ./artifacts/package/KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript.[0-9]*.nupkg)
+          expected="buildTransitive/KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript.targets"
+          if ! unzip -l "$pkg" | grep -qF "$expected"; then
+            echo "::error::$(basename "$pkg") is missing $expected - NuGet would import nothing and the check would never run"
+            unzip -l "$pkg"
+            exit 1
+          fi
+          echo "$(basename "$pkg"): ships $expected"
+
       - name: Upload test results
         # Test results are most useful exactly when the run failed.
         if: always()

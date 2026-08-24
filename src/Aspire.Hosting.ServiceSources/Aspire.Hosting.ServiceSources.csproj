@@ -15,7 +15,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Aspire.Hosting" Version="13.4.6" />
+    <PackageReference Include="Aspire.Hosting" Version="$(AspireVersion)" />
     <PackageReference Include="LibGit2Sharp" Version="0.32.0" />
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
   </ItemGroup>

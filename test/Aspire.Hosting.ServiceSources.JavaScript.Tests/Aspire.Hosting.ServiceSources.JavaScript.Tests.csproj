@@ -5,6 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- A test assembly, not an integration; see Directory.Build.props. -->
+    <IsAspirePolyglotCompatible>false</IsAspirePolyglotCompatible>
   </PropertyGroup>
 
   <ItemGroup>
@@ -20,6 +22,17 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Aspire.Hosting.ServiceSources.JavaScript\Aspire.Hosting.ServiceSources.JavaScript.csproj" />
+  </ItemGroup>
+
+  <!-- AspireFamilyVersionCheckTests runs the MSBuild check the package ships, and a
+       ProjectReference does not bring it along: NuGet imports it out of buildTransitive/ in the
+       restored package, which is a path no project in this repo takes. Copying the real file to
+       the test output is what keeps the test on the shipped one rather than a second copy that
+       could drift from it. -->
+  <ItemGroup>
+    <None Include="..\..\src\Aspire.Hosting.ServiceSources.JavaScript\buildTransitive\KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript.targets"
+          Link="PackagedTargets\KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript.targets"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

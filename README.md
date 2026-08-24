@@ -276,6 +276,23 @@ services:
       port: 4321            # the port consumers reach the service on
 ```
 
+> **`Aspire.Hosting.JavaScript` has to resolve to the same version as `Aspire.Hosting`.** Aspire
+> ships the two in lockstep and they have coupled across a friend-assembly boundary before:
+> `Aspire.Hosting.JavaScript` 13.4.6 against `Aspire.Hosting` 13.5.x restores and compiles clean,
+> then throws `MethodAccessException` the first time a `kind: javascript` service resolves. Your
+> AppHost references `Aspire.Hosting` directly, and nothing lifts `Aspire.Hosting.JavaScript` with
+> it, so raising Aspire on its own can split the pair.
+>
+> This package fails your build rather than letting that reach run time — `KOALASS001`, naming both
+> resolved versions. The fix it suggests is a direct reference pinning the pair together:
+>
+> ```xml
+> <PackageReference Include="Aspire.Hosting.JavaScript" Version="13.5.2" />
+> ```
+>
+> To build anyway, set `<SkipAspireFamilyVersionCheck>true</SkipAspireFamilyVersionCheck>` in your
+> AppHost project.
+
 Every option is optional:
 
 - **`appType`** — which integration runs the app: `javascript` (the default, `AddJavaScriptApp`),

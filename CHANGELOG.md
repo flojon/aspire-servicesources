@@ -152,8 +152,29 @@ nothing will fail to build to warn you.
   `AddService()`.
 - Superseded preview packages are pruned from the GitHub Packages feed after each release,
   keeping the five most recent ([#68]).
+- **The Aspire floor moves from 13.4.6 to 13.5.2** ([#89]). `Aspire.Hosting` for the core
+  package and `Aspire.Hosting.JavaScript` for the JavaScript satellite, which are now declared
+  from one place so they cannot drift apart. Upgrading lifts Aspire to at least 13.5.2 in an
+  AppHost still on 13.4.x — deliberately, because `Aspire.Hosting.JavaScript` 13.4.6 is the
+  half of the pair that breaks below it.
 
 ### Fixed
+
+- **A `kind: javascript` service no longer throws `MethodAccessException` when Aspire resolves
+  above the JavaScript integration** ([#89]). Both references are floors, and an AppHost
+  references `Aspire.Hosting` directly, so raising Aspire on its own left
+  `Aspire.Hosting.JavaScript` at the floor this package declared — and 13.4.6 of it reaches
+  into `Aspire.Hosting`'s internals across a friend-assembly boundary that 13.5.x closes. It
+  restored and compiled clean, then threw the first time a `javascript` service resolved.
+
+  Raising the floor settles today's pairing. For the next one, the satellite now ships an
+  MSBuild check that compares the two resolved versions in your AppHost and fails the build
+  with `KOALASS001`, naming both and the reference that pins them together, rather than letting
+  a mismatch reach run time. Set
+  `<SkipAspireFamilyVersionCheck>true</SkipAspireFamilyVersionCheck>` to build anyway.
+
+  The Java satellite is unaffected: `CommunityToolkit.Aspire.Hosting.Java` carries its own copy
+  of the helper involved and references no `Aspire.Hosting` internals.
 
 - A service consumed by a *container* now works for every source except `url` ([#62], fixes
   [#58]). The resource returned by `AddService()` is registered with the app model, so DCP
@@ -226,3 +247,4 @@ Targets `net10.0`.
 [#68]: https://github.com/flojon/aspire-servicesources/pull/68
 [#72]: https://github.com/flojon/aspire-servicesources/issues/72
 [#79]: https://github.com/flojon/aspire-servicesources/issues/79
+[#89]: https://github.com/flojon/aspire-servicesources/issues/89

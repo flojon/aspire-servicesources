@@ -7,8 +7,29 @@
          ServiceSources package is an Aspire integration, and forgetting the opt-in in a new
          satellite project is silent — the analyzer simply does not run, and a broken export
          surface is found by `aspire` CLI codegen against a released package instead of at
-         build time. -->
+         build time.
+
+         Repo-wide reaches projects that are not integrations too - the test assemblies and the
+         sample AppHost. Those export nothing, which ASPIREEXPORT017 (Aspire 13.5.0 and later)
+         reads as an integration that forgot its exports, so each of them sets
+         IsAspirePolyglotCompatible=false to say outright that it has none. -->
     <EnableAspireIntegrationAnalyzers>true</EnableAspireIntegrationAnalyzers>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- The Aspire package family's version, declared once because these packages are only
+         supported as a matched set and have coupled across a friend-assembly boundary before:
+         Aspire.Hosting.JavaScript 13.4.6 calls Aspire.Hosting's internal PathNormalizer, which
+         Aspire.Hosting 13.5.2 no longer grants it access to, so that pair restores and compiles
+         clean and then throws MethodAccessException at run time. One declaration makes such a
+         mismatch unrepresentable in this repo's own build.
+
+         It cannot do the same for a consumer, who resolves the two packages from their own
+         graph - the satellite ships an MSBuild check for that case; see
+         buildTransitive/KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript.targets.
+
+         Overridable, so a build can be pointed at another version without editing any file. -->
+    <AspireVersion Condition="'$(AspireVersion)' == ''">13.5.2</AspireVersion>
   </PropertyGroup>
 
   <!-- Versioning is lockstep: one release tag mints the same version for every package, and a
