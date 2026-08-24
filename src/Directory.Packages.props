@@ -28,7 +28,7 @@
     <!-- Aspire.Hosting and Aspire.Hosting.JavaScript are one matched set: the latter calls
          into the former across a friend-assembly boundary, so a mixed pair throws
          MethodAccessException at run time. Move them together. See #89. -->
-    <PackageVersion Include="Aspire.Hosting" Version="13.4.6" />
+    <PackageVersion Include="Aspire.Hosting" Version="13.5.2" />
     <PackageVersion Include="Aspire.Hosting.JavaScript" Version="13.4.6" />
 
     <PackageVersion Include="CommunityToolkit.Aspire.Hosting.Java" Version="13.3.0" />
