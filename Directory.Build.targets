@@ -1,6 +1,32 @@
 <Project>
 
   <!--
+    Adds net11.0 to every multi-targeted project when IncludeNet11Preview is set, which is how
+    net11-preview.yml compiles and tests against the preview framework itself rather than only
+    building the shipped frameworks under a preview SDK.
+
+    Off by default, so the TargetFrameworks that pack and publish read are the shipped three and
+    nothing here reaches a released package.
+
+    Lives in .targets rather than .props because it appends to $(TargetFrameworks), which each
+    csproj sets in its own body - at .props time, imported above that, there is nothing to
+    append to yet.
+
+    Repo-wide rather than a line per csproj so a new satellite is covered by existing in the
+    build at all. The same argument Directory.Build.props makes for
+    EnableAspireIntegrationAnalyzers applies here, and more sharply: a project left out is not
+    reported, it is simply never compiled against the preview, which reads as a passing check.
+
+    The TargetFrameworks guard keeps this to projects that already multi-target. A project using
+    singular TargetFramework, as the sample AppHost does, sets no TargetFrameworks for this to
+    append to, and appending a second framework to a single-targeted project would change what
+    it builds rather than adding to it.
+  -->
+  <PropertyGroup>
+    <TargetFrameworks Condition="'$(IncludeNet11Preview)' == 'true' and '$(TargetFrameworks)' != ''">$(TargetFrameworks);net11.0</TargetFrameworks>
+  </PropertyGroup>
+
+  <!--
     Put the CHANGELOG.md section for the version being packed into PackageReleaseNotes, so a
     breaking change reaches the nuget.org listing rather than only the repo. Hand-maintaining
     the property in the csproj would mean writing every release note twice and noticing when
