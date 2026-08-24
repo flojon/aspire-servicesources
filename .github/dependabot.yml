@@ -21,8 +21,53 @@ updates:
       - "/samples/**"
     schedule:
       interval: "weekly"
+    # One PR per decision rather than one per package id. Ungrouped, the versions under
+    # central package management fan out into a PR each, against a default cap of five open
+    # at once - past which further updates are not opened at all, so the noisiest week is
+    # also the one that silently drops something.
+    #
+    # Every group below is restricted to minor and patch. A major still arrives, but as its
+    # own single-package PR: majors are where a bump stops being a version change and starts
+    # being an API change, and that is worth reading on its own rather than in a diff with
+    # three unrelated ids in it.
+    groups:
+      # xunit and its Visual Studio runner are one set - the runner implements the test
+      # adapter against a specific xunit major, and a half-applied bump does not fail loudly:
+      # the suite reports zero discovered tests and CI stays green.
+      xunit:
+        patterns:
+          - "xunit"
+          - "xunit.*"
+        update-types:
+          - "minor"
+          - "patch"
+      # The rest of the harness - the runner host and the coverage collector. Versioned
+      # independently of xunit itself, so a separate group rather than a bigger one.
+      test-tooling:
+        patterns:
+          - "Microsoft.NET.Test.Sdk"
+          - "coverlet.*"
+        update-types:
+          - "minor"
+          - "patch"
+      # Only the sample's Aspire.Hosting.AppHost is in scope here; the published Aspire
+      # floors live in src/ and are not watched. Grouped by pattern anyway so this keeps
+      # holding when a sample or test app pulls in a second Aspire package.
+      aspire:
+        patterns:
+          - "Aspire.*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    # Action bumps are near-uniformly a moved version tag on a pinned ref, and the workflows
+    # themselves are the test: if a bump breaks one, the PR's own run says so. One PR for all
+    # of them each week is therefore the reviewable unit, majors included.
+    groups:
+      actions:
+        patterns:
+          - "*"
