@@ -7,15 +7,24 @@ name: .NET 11 preview smoke test
 # The second half is the one that needs opting into. IncludeNet11Preview adds net11.0 to every
 # multi-targeted project (see Directory.Build.targets); without it a preview SDK would happily
 # build the existing frameworks and say nothing about the new one.
+#
+# Runs on a schedule rather than per-commit, because what it watches moves on Microsoft's
+# calendar and not on this repo's. Tying it to pushes would probe .NET 11 on a README edit and
+# skip a fortnight in which three previews shipped, at twenty minutes of runner time per PR for
+# a result that says nothing about the PR. Weekly matches roughly how often a preview lands.
+#
+# Two things to know about scheduled workflows: they run only from the default branch, so
+# changes here do nothing until merged, and GitHub disables a cron after 60 days with no repo
+# activity (it emails first). Use workflow_dispatch to probe a specific preview on demand.
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  schedule:
+    # Mondays 06:17 UTC. Off the hour deliberately - scheduled runs bunch up at :00 and get
+    # queued, and nothing here needs a punctual start.
+    - cron: "17 6 * * 1"
   workflow_dispatch:
 
 concurrency:
-  group: net11-preview-${{ github.event.pull_request.number || github.ref }}
+  group: net11-preview
   cancel-in-progress: true
 
 jobs:
@@ -23,11 +32,14 @@ jobs:
     name: 🔭 .NET 11 preview
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Exploratory. A preview SDK and its framework are both moving targets, so a failure here is
-    # information about .NET 11, not a defect in the change being merged, and must never gate a
-    # merge or a release. Note the consequence: the run reports green either way, so this is a
-    # check to go and read rather than one to be alerted by.
-    continue-on-error: true
+    # This job is allowed to fail loudly. A preview SDK and its framework are both moving
+    # targets, so a red run here is information about .NET 11 rather than a defect in any
+    # particular change - but it is information worth being told about, and GitHub emails the
+    # repo owner when a scheduled workflow fails. Suppressing the failure to keep the run green
+    # would leave a signal that only reaches someone who thinks to open a passing check.
+    #
+    # Nothing is gated by this either way: the job is not attached to pull requests, so it has
+    # no check to block a merge with.
     permissions:
       contents: read
 
