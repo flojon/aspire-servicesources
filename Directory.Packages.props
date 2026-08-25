@@ -33,7 +33,7 @@
   <!-- Added to every project by Directory.Build.props, so it belongs in the root file:
        src/Directory.Packages.props imports this one rather than repeating it. -->
   <ItemGroup>
-    <PackageVersion Include="MinVer" Version="6.0.0" />
+    <PackageVersion Include="MinVer" Version="7.0.0" />
   </ItemGroup>
 
   <ItemGroup>
