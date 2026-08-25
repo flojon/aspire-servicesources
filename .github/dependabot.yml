@@ -27,10 +27,9 @@ updates:
       interval: "weekly"
     # `directories` above only picks scan entry points. CPM plus the test/sample projects'
     # own ProjectReference into src/ let Dependabot reach src/Directory.Packages.props
-    # anyway and edit it directly (see #101, and the src/ half of #100's "aspire" group).
-    # All five ids below are floors regardless of publisher, not just the Aspire ones - see
-    # the file header. `ignore` only blocks version updates, so the security exception above
-    # still applies to each of these.
+    # anyway and edit it directly. All five ids below are floors regardless of publisher,
+    # not just the Aspire ones - see the file header. `ignore` only blocks version updates,
+    # so the security exception above still applies to each of these.
     ignore:
       - dependency-name: "Aspire.Hosting"
       - dependency-name: "Aspire.Hosting.JavaScript"
