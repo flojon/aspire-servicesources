@@ -25,11 +25,16 @@
   <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Packages.props', '$(MSBuildThisFileDirectory)../'))" />
 
   <ItemGroup>
-    <!-- Aspire.Hosting and Aspire.Hosting.JavaScript are one matched set: the latter calls
-         into the former across a friend-assembly boundary, so a mixed pair throws
-         MethodAccessException at run time. Move them together. See #89. -->
-    <PackageVersion Include="Aspire.Hosting" Version="13.4.6" />
-    <PackageVersion Include="Aspire.Hosting.JavaScript" Version="13.4.6" />
+    <!-- Aspire.Hosting and Aspire.Hosting.JavaScript coupled across a friend-assembly
+         boundary before 13.5.0: Aspire.Hosting.JavaScript 13.4.6 calls Aspire.Hosting's
+         internal PathNormalizer, reachable only via InternalsVisibleTo, which Aspire.Hosting
+         13.5.0+ no longer grants it (Aspire.Hosting.JavaScript 13.5.0+ carries its own copy
+         instead). Kept at the same version here so this repo's own build never reproduces
+         that pair; a consumer resolving the two independently is guarded instead by
+         buildTransitive/KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript.targets, which
+         only objects to a mismatch that could still be the same failure - see #89. -->
+    <PackageVersion Include="Aspire.Hosting" Version="13.5.2" />
+    <PackageVersion Include="Aspire.Hosting.JavaScript" Version="13.5.2" />
 
     <PackageVersion Include="CommunityToolkit.Aspire.Hosting.Java" Version="13.3.0" />
     <PackageVersion Include="LibGit2Sharp" Version="0.32.0" />

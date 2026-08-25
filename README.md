@@ -263,6 +263,22 @@ builder.UseJavaScript();
 var frontend = builder.AddService("frontend");
 ```
 
+> **`Aspire.Hosting.JavaScript` and `Aspire.Hosting` have coupled across a friend-assembly
+> boundary before, below Aspire 13.5.0.** `Aspire.Hosting.JavaScript` 13.4.6 reaches into
+> `Aspire.Hosting`'s internals; `Aspire.Hosting` 13.4.6 grants it access, and 13.5.0+ does not.
+> Pair 13.4.6 of one with 13.5.0+ of the other and the build restores and compiles clean, then
+> throws `MethodAccessException` the first time a `kind: javascript` service resolves. Your
+> AppHost references `Aspire.Hosting` directly, and nothing lifts `Aspire.Hosting.JavaScript`
+> with it, so raising Aspire on its own can produce exactly that pairing.
+>
+> This package fails your build rather than letting that reach run time — `KOALASS001`, naming
+> whichever resolved version is below 13.5.0 and what to reference it at instead. Two different
+> versions that are *both* 13.5.0 or later are not this bug — neither side touches the other's
+> internals any more — so that pairing builds normally.
+>
+> To build anyway, set `<SkipAspireFamilyVersionCheck>true</SkipAspireFamilyVersionCheck>` in
+> your AppHost project.
+
 ```yaml
 services:
   frontend:

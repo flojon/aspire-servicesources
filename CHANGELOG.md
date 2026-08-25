@@ -123,9 +123,8 @@ nothing will fail to build to warn you.
   satisfies every constraint in the graph, so a floor only decides how far *back* a consumer
   may go. The test suite runs against the floor rather than latest, for the same reason.
 
-  The JavaScript satellite's `Aspire.Hosting.JavaScript` floor is deliberately left alone -
-  it is part of the Aspire package family and has to move in step with core's
-  `Aspire.Hosting`, tracked in [#89].
+  The JavaScript satellite's `Aspire.Hosting.JavaScript` floor moves separately - see the
+  Aspire floor bump below and [#89].
 
 - **Calls on an `AddService()` result that used to do nothing now take effect** ([#62]).
   `IResourceWithServiceDiscovery` extends `IResourceWithEndpoints` and `IResource`, so every
@@ -166,6 +165,12 @@ nothing will fail to build to warn you.
   `AddService()`.
 - Superseded preview packages are pruned from the GitHub Packages feed after each release,
   keeping the five most recent ([#68]).
+- **The Aspire floor moves from 13.4.6 to 13.5.2** (fixes [#89]) — `Aspire.Hosting` for the core
+  package, `Aspire.Hosting.JavaScript` for the JavaScript satellite, `Aspire.Hosting.AppHost`
+  and the `Aspire.AppHost.Sdk` for the sample. Below 13.5.0, `Aspire.Hosting.JavaScript` reaches
+  into `Aspire.Hosting`'s internals across a friend-assembly boundary that 13.5.0 closes (see
+  Fixed, below); the floor bump is what lets this repository's own build represent only pairings
+  on the safe side of that boundary.
 
 ### Fixed
 
@@ -175,6 +180,29 @@ nothing will fail to build to warn you.
   `BeforeStartEvent` pre-flight now reports the unsupported combination clearly instead of
   letting DCP fail with `Host endpoint ... should have an associated DCP Service resource`;
   lifting that limitation is tracked as [#72].
+- **A `kind: javascript` service no longer throws `MethodAccessException` when Aspire.Hosting
+  and Aspire.Hosting.JavaScript resolve to versions on opposite sides of Aspire's 13.5.0
+  friend-assembly change** (fixes [#89]). Both references are floors, and an AppHost references
+  `Aspire.Hosting` directly, so raising Aspire on its own could leave `Aspire.Hosting.JavaScript`
+  behind at whatever floor this package declared — restoring and compiling clean, then throwing
+  the first time a `javascript` service resolved.
+
+  Raising this package's own floor to 13.5.2 settles today's pairing. For the next one, the
+  JavaScript satellite now ships an MSBuild check that reads what a consumer's build actually
+  resolved and fails with `KOALASS001`, naming whichever side is still below 13.5.0, rather than
+  letting a mismatch reach run time. Two different versions that are *both* 13.5.0 or later are
+  not this bug and build normally — neither package touches the other's internals once both are
+  past the version where Aspire closed the boundary. Set
+  `<SkipAspireFamilyVersionCheck>true</SkipAspireFamilyVersionCheck>` to build anyway.
+
+  The Java satellite is unaffected: `CommunityToolkit.Aspire.Hosting.Java` carries its own copy
+  of the helper involved and references no `Aspire.Hosting` internals.
+- **`ASPIREEXPORT017` no longer fails the test projects or the sample AppHost** (fixes [#90]).
+  The diagnostic is new in Aspire 13.5.0 and fires on any project that has
+  `EnableAspireIntegrationAnalyzers` on (repo-wide here) but ships no `[AspireExport]` members;
+  the test projects and the sample consume integrations rather than being one, so each now sets
+  `<IsAspirePolyglotCompatible>false</IsAspirePolyglotCompatible>`, exactly what the diagnostic
+  itself prescribes.
 
 ### Documentation
 
@@ -242,3 +270,4 @@ Targets `net10.0`.
 [#79]: https://github.com/flojon/aspire-servicesources/issues/79
 [#80]: https://github.com/flojon/aspire-servicesources/issues/80
 [#89]: https://github.com/flojon/aspire-servicesources/issues/89
+[#90]: https://github.com/flojon/aspire-servicesources/issues/90

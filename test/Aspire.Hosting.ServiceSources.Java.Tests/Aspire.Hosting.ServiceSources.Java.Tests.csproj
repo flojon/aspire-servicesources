@@ -5,6 +5,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- Not an Aspire integration, so it carries no [AspireExport] surface. Without this,
+         Directory.Build.props' repo-wide EnableAspireIntegrationAnalyzers treats it as one
+         anyway and ASPIREEXPORT017 (new in Aspire 13.5.0) fails the build. See #90. -->
+    <IsAspirePolyglotCompatible>false</IsAspirePolyglotCompatible>
   </PropertyGroup>
 
   <ItemGroup>

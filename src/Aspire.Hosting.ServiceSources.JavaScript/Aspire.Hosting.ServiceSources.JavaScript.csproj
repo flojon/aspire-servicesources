@@ -24,4 +24,22 @@
     <ProjectReference Include="../Aspire.Hosting.ServiceSources/Aspire.Hosting.ServiceSources.csproj" />
   </ItemGroup>
 
+  <!-- The consumer-side guard against a mismatched Aspire pair. NuGet imports
+       buildTransitive/<PackageId>.targets into the project that consumes this package, so the
+       file's name has to stay equal to PackageId - hence the property rather than the literal
+       name, which would go stale silently if the package were ever renamed.
+
+       Include, not Update, even though the file sits in the project directory: the SDK's
+       default item globs only run in the per-framework inner builds, and pack runs in the
+       cross-targeting outer build where they do not - so an Update there matches nothing and
+       the file silently never reaches the package. DefaultItemExcludes then keeps the inner
+       builds from globbing a second copy of it on top of this one. -->
+  <PropertyGroup>
+    <DefaultItemExcludes>$(DefaultItemExcludes);buildTransitive/**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="buildTransitive/$(PackageId).targets" Pack="true" PackagePath="buildTransitive/" />
+  </ItemGroup>
+
 </Project>

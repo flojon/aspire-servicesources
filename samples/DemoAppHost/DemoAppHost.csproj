@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <Sdk Name="Aspire.AppHost.Sdk" Version="13.4.6" />
+  <Sdk Name="Aspire.AppHost.Sdk" Version="13.5.2" />
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -9,6 +9,16 @@
     <Nullable>enable</Nullable>
     <IsAspireHost>true</IsAspireHost>
     <IsPackable>false</IsPackable>
+    <!-- An AppHost consumes integrations rather than being one, so it carries no
+         [AspireExport] surface; see Directory.Build.props and #90. -->
+    <IsAspirePolyglotCompatible>false</IsAspirePolyglotCompatible>
+    <!-- ASPIRE010, new in Aspire 13.5.x, fires on every AppHost that has not opted into the
+         Aspire CLI bundle: AspireUseCliBundle defaults to false in Aspire's own SDK. This
+         sample is deliberately built and run without the CLI - scripts/smoketest-container-source.sh
+         uses plain dotnet build/dotnet run, and AspireUseCliBundle=true is exactly what stops
+         the SDK referencing the DCP and dashboard packages those runs need. Only fatal here
+         because ci.yml builds with -warnaserror. -->
+    <NoWarn>$(NoWarn);ASPIRE010</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
