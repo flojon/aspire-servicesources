@@ -166,8 +166,26 @@ nothing will fail to build to warn you.
   `AddService()`.
 - Superseded preview packages are pruned from the GitHub Packages feed after each release,
   keeping the five most recent ([#68]).
+- **The Aspire floor moves from 13.4.6 to 13.5.2** ([#104], fixes [#89]). `Aspire.Hosting` and
+  `Aspire.Hosting.JavaScript` move together as one matched set. Upgrading lifts Aspire to at
+  least 13.5.2 in an AppHost still on 13.4.x — deliberately, because
+  `Aspire.Hosting.JavaScript` 13.4.6 is the half of the pair that breaks once `Aspire.Hosting`
+  reaches 13.5.x.
 
 ### Fixed
+
+- **A `kind: javascript` service no longer throws `MethodAccessException` when Aspire resolves
+  above the JavaScript integration** ([#104], fixes [#89]). Both Aspire references are floors,
+  and an AppHost references `Aspire.Hosting` directly, so raising Aspire on its own left
+  `Aspire.Hosting.JavaScript` at the floor this package declared. 13.4.6 of it reaches into two
+  of `Aspire.Hosting`'s internal types across a friend-assembly boundary, and 13.5.x removes one
+  of them and revokes access to the other, so the pair restored and compiled clean and then
+  threw the first time a `javascript` service resolved.
+
+  Raising the floor to 13.5.2 settles it, on both sides: Aspire closed the coupling in the same
+  release, and `Aspire.Hosting.JavaScript` 13.5.2 references no `Aspire.Hosting` internals at
+  all. The Java satellite was never affected — `CommunityToolkit.Aspire.Hosting.Java` carries
+  its own copy of the helper involved and reaches into no `Aspire.Hosting` internals either.
 
 - A service consumed by a *container* now works for every source except `url` ([#62], fixes
   [#58]). The resource returned by `AddService()` is registered with the app model, so DCP
@@ -242,3 +260,4 @@ Targets `net10.0`.
 [#79]: https://github.com/flojon/aspire-servicesources/issues/79
 [#80]: https://github.com/flojon/aspire-servicesources/issues/80
 [#89]: https://github.com/flojon/aspire-servicesources/issues/89
+[#104]: https://github.com/flojon/aspire-servicesources/pull/104

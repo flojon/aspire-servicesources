@@ -7,7 +7,12 @@
          ServiceSources package is an Aspire integration, and forgetting the opt-in in a new
          satellite project is silent — the analyzer simply does not run, and a broken export
          surface is found by `aspire` CLI codegen against a released package instead of at
-         build time. -->
+         build time.
+
+         Repo-wide reaches projects that are not integrations too - the test assemblies and the
+         sample AppHost. Those export nothing, which ASPIREEXPORT017 (Aspire 13.5.0 and later)
+         reads as an integration that forgot its exports, so each of them sets
+         IsAspirePolyglotCompatible=false to say outright that it has none. -->
     <EnableAspireIntegrationAnalyzers>true</EnableAspireIntegrationAnalyzers>
   </PropertyGroup>
 

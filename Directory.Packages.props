@@ -37,7 +37,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.4.6" />
+    <!-- The sample AppHost is a consumer of the packages, so its Aspire version tracks the
+         floors in src/Directory.Packages.props rather than moving on its own: mixing versions
+         within the Aspire family is exactly what #89 was about. -->
+    <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.5.2" />
     <PackageVersion Include="coverlet.collector" Version="10.0.1" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageVersion Include="xunit" Version="2.9.3" />

@@ -25,11 +25,21 @@
   <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Packages.props', '$(MSBuildThisFileDirectory)../'))" />
 
   <ItemGroup>
-    <!-- Aspire.Hosting and Aspire.Hosting.JavaScript are one matched set: the latter calls
-         into the former across a friend-assembly boundary, so a mixed pair throws
-         MethodAccessException at run time. Move them together. See #89. -->
-    <PackageVersion Include="Aspire.Hosting" Version="13.4.6" />
-    <PackageVersion Include="Aspire.Hosting.JavaScript" Version="13.4.6" />
+    <!-- Aspire.Hosting and Aspire.Hosting.JavaScript are one matched set - move them
+         together. The reason is now historical rather than current, and worth writing down so
+         the floor is not "corrected" back later: Aspire.Hosting.JavaScript 13.4.6 reaches into
+         two of Aspire.Hosting's internal types across a friend-assembly boundary, and 13.5.x
+         removes one of them and revokes access to the other. That pair restores and compiles
+         clean and then throws TypeLoadException/MethodAccessException the first time a
+         javascript service resolves, which is what #89 was.
+
+         Read out of the assemblies, 13.5.2 of the JavaScript package touches no Aspire.Hosting
+         internals at all - Aspire closed the coupling from its side, carrying its own copy of
+         the helper - so above this floor a mismatched pair is ordinary API drift rather than a
+         guaranteed crash. They still ship in lockstep and are only tested that way, so there
+         is nothing to gain by letting the two floors drift apart. -->
+    <PackageVersion Include="Aspire.Hosting" Version="13.5.2" />
+    <PackageVersion Include="Aspire.Hosting.JavaScript" Version="13.5.2" />
 
     <PackageVersion Include="CommunityToolkit.Aspire.Hosting.Java" Version="13.3.0" />
     <PackageVersion Include="LibGit2Sharp" Version="0.32.0" />

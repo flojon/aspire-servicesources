@@ -276,6 +276,17 @@ services:
       port: 4321            # the port consumers reach the service on
 ```
 
+> **Keep `Aspire.Hosting.JavaScript` on the same version as `Aspire.Hosting`.** Aspire releases
+> the two together and tests them that way. They were also coupled across a friend-assembly
+> boundary until 13.5.2: `Aspire.Hosting.JavaScript` 13.4.6 against `Aspire.Hosting` 13.5.x
+> restores and compiles clean, then throws `MethodAccessException` the first time a
+> `kind: javascript` service resolves. This package floors both at 13.5.2, so you get a matched
+> pair by default; if you raise `Aspire.Hosting` on its own, add a matching reference:
+>
+> ```xml
+> <PackageReference Include="Aspire.Hosting.JavaScript" Version="13.6.0" />
+> ```
+
 Every option is optional:
 
 - **`appType`** — which integration runs the app: `javascript` (the default, `AddJavaScriptApp`),
