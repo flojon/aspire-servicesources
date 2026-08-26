@@ -108,6 +108,47 @@ jobs:
             echo "$(basename "$pkg"): $(printf '%s\n' "$deps" | head -1)"
           done
 
+      # `polyglot` is the tag `aspire add` reads to decide whether to surface a package to a
+      # non-C# AppHost, which is the audience the Aspire Type System exports exist for.
+      # Aspire.Hosting.targets appends it, but obj/*.nuget.g.targets imports that file only
+      # inside its per-framework ImportGroups, while pack generates the nuspec from the
+      # cross-targeting outer pass - so the append landed on a property no nuspec was built
+      # from, three times, and every package packed without the tag. Nothing failed.
+      # Directory.Build.targets now appends it in the pass that builds the nuspec.
+      #
+      # That fix is a repo-local PropertyGroup whose whole justification is where NuGet chose
+      # to place an import. Someone reading it after a future SDK changes that, or who takes
+      # Aspire's targets at their word that the tag is already handled, deletes it - and pack
+      # stays green while `aspire add` quietly stops listing these packages. So assert against
+      # the packed nuspec rather than the property: the property being set is exactly what was
+      # true while the tag was missing.
+      #
+      # Exactly once, not merely present: what stops Aspire's own append and this one both
+      # firing is a string test over the tag list, and a list written differently could slip
+      # past it and ship the tag twice.
+      #
+      # Every packed package, for the same reason as the core-dependency check above: a
+      # satellite added later that genuinely is not a polyglot integration has to be excepted
+      # here by name, where the exception is visible, rather than by quietly not matching.
+      - name: Verify packages carry the polyglot tag
+        run: |
+          for pkg in ./artifacts/package/*.nupkg; do
+            tags=$(unzip -p "$pkg" '*.nuspec' | grep -oE '<tags>[^<]*</tags>' || true)
+            # One tag per line before counting: NuGet writes the list space- or
+            # semicolon-separated, grep -c would count matching *lines* and so read a tag
+            # repeated on the single <tags> line as one, and -x keeps a hypothetical
+            # "non-polyglot" from counting as this tag.
+            count=$(printf '%s' "$tags" \
+              | sed -e 's/<[^>]*>//g' -e 's/[;,]/ /g' \
+              | tr ' ' '\n' | grep -cx 'polyglot' || true)
+            if [ "$count" != "1" ]; then
+              echo "::error::$(basename "$pkg") carries the polyglot tag $count time(s), expected exactly 1"
+              echo "$tags"
+              exit 1
+            fi
+            echo "$(basename "$pkg"): $tags"
+          done
+
       - name: Upload test results
         # Test results are most useful exactly when the run failed.
         if: always()

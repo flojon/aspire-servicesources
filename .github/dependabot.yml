@@ -74,10 +74,6 @@ updates:
         update-types:
           - "minor"
           - "patch"
-      # Only the sample's Aspire.Hosting.AppHost is in scope here; the published Aspire
-      # floors live in src/ and are covered by the ignore list above instead. Pattern is
-      # the exact id, not "Aspire.*" - a wildcard here would re-catch Aspire.Hosting and
-      # Aspire.Hosting.JavaScript the moment either is dropped from that list.
 
   - package-ecosystem: "github-actions"
     directory: "/"
