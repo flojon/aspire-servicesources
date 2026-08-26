@@ -33,6 +33,16 @@ If every service your AppHost declares is a .NET project, this is the only packa
 dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources
 ```
 
+> **These packages floor Aspire at 13.5.2, so an AppHost still on 13.4.x gets a mixed Aspire
+> family.** NuGet takes the highest floor, so `Aspire.Hosting` is lifted to 13.5.2 while your
+> `Aspire.AppHost.Sdk`, `Aspire.Hosting.AppHost` and the DCP and dashboard packages the SDK
+> pins to it stay where they are. Nothing warns about it at restore. Move your AppHost's own
+> Aspire version to 13.5.2 or later at the same time:
+>
+> ```xml
+> <Sdk Name="Aspire.AppHost.Sdk" Version="13.5.2" />
+> ```
+
 Services that aren't .NET projects need the satellite package for their language, so an
 AppHost only takes on the hosting dependencies it actually uses — see
 [Non-.NET local services](#non-net-local-services-kind):
@@ -281,10 +291,12 @@ services:
 > boundary until 13.5.0: `Aspire.Hosting.JavaScript` 13.4.6 against `Aspire.Hosting` 13.5.x
 > restores and compiles clean, then throws `MethodAccessException` the first time a
 > `kind: javascript` service resolves. This package floors both at 13.5.2, so you get a matched
-> pair by default; if you raise `Aspire.Hosting` on its own, add a matching reference:
+> pair by default. If you raise `Aspire.Hosting` past that on its own, add a reference at
+> whatever version your AppHost resolves for it — the version below is an example, not a
+> version to copy:
 >
 > ```xml
-> <PackageReference Include="Aspire.Hosting.JavaScript" Version="13.6.0" />
+> <PackageReference Include="Aspire.Hosting.JavaScript" Version="13.5.3" />
 > ```
 
 Every option is optional:

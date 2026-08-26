@@ -37,10 +37,14 @@
          13.5.1 and 13.5.2, each touching nothing non-public across 62 type references and 129
          member references - because Aspire closed it from its side, carrying its own copy of
          the helper. So above 13.5.0 a mismatched pair is ordinary API drift rather than a
-         guaranteed crash. The floor is the latest 13.5 patch rather than 13.5.0 itself, since
-         nothing here needs to support the two releases in between. They still ship in lockstep
-         and are only tested that way, so there is nothing to gain by letting these two floors
-         drift apart. -->
+         guaranteed crash.
+
+         Only 13.5.0 has to be cleared, then; the floor sits at 13.5.2 because that is the
+         version this repository builds and tests against, and a floor no one has run is worth
+         less than one that is exercised on every CI run. Later patches still reach consumers
+         on their own - this is a minimum, not a pin - so it does not need raising to stay
+         current. They still ship in lockstep and are only tested that way, so there is nothing
+         to gain by letting these two floors drift apart. -->
     <PackageVersion Include="Aspire.Hosting" Version="13.5.2" />
     <PackageVersion Include="Aspire.Hosting.JavaScript" Version="13.5.2" />
 
