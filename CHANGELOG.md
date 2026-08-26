@@ -179,6 +179,15 @@ nothing will fail to build to warn you.
 
 ### Fixed
 
+- **The published packages now carry the `polyglot` NuGet tag** ([#112]). It is what `aspire
+  add` reads to surface a package to non-C# AppHosts — the audience the Aspire Type System
+  exports elsewhere in this release exist for. Aspire's own targets append the tag, but
+  `obj/*.nuget.g.targets` imports those only in the per-framework inner builds, while `pack`
+  generates the nuspec from the cross-targeting outer pass: the tag was appended once per
+  inner build, each time to a property no nuspec was generated from, and all three packages
+  packed without it. Appended in `Directory.Build.targets` instead, under Aspire's own
+  condition so the two cannot both add it.
+
 - **A `kind: javascript` service no longer throws `MethodAccessException` when Aspire resolves
   above the JavaScript integration** ([#112], fixes [#89]). Both Aspire references are floors,
   and NuGet resolves the highest floor in the graph: an AppHost on Aspire 13.5.x pulled
