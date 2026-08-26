@@ -24,11 +24,16 @@ internal sealed class StubGitServer : IDisposable
     {
         _accepts = accepts;
 
-        var port = FreePort();
-        _listener.Prefixes.Add($"http://127.0.0.1:{port}/");
-        _listener.Start();
+        var port = BindToFreePort(FreePort, BindListener);
         RepositoryUrl = $"http://127.0.0.1:{port}/repo.git";
         _serving = Task.Run(Serve);
+
+        void BindListener(int candidate)
+        {
+            _listener.Prefixes.Clear();
+            _listener.Prefixes.Add($"http://127.0.0.1:{candidate}/");
+            _listener.Start();
+        }
     }
 
     public string RepositoryUrl { get; }
@@ -90,6 +95,29 @@ internal sealed class StubGitServer : IDisposable
         var port = ((IPEndPoint)probe.LocalEndpoint).Port;
         probe.Stop();
         return port;
+    }
+
+    /// <summary>
+    /// Picks a port and binds it, retrying on a fresh port if the bind fails. <see cref="FreePort"/>
+    /// releases its probe socket before <paramref name="bind"/> claims the same port, leaving a
+    /// window where something else — including a sibling TFM's copy of this same test, since the
+    /// suite runs net8/9/10 concurrently — can take it first. The window can't be closed, only
+    /// tolerated: retry a bounded number of times rather than let the collision fail the test.
+    /// </summary>
+    internal static int BindToFreePort(Func<int> pickPort, Action<int> bind, int maxAttempts = 5)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            var port = pickPort();
+            try
+            {
+                bind(port);
+                return port;
+            }
+            catch (HttpListenerException) when (attempt < maxAttempts)
+            {
+            }
+        }
     }
 
     /// <summary>A commit id to advertise. Nothing can fetch it; it only has to be well formed.</summary>
