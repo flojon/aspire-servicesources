@@ -1,0 +1,112 @@
+name: Aspire matrix
+
+# Rebuilds the repo against Aspire versions other than the floor every other workflow restores.
+# Clock-driven rather than push-driven, since what it guards against is a release on Aspire's
+# side rather than a change on this one.
+on:
+  schedule:
+    # Mondays, 06:00 UTC. Only ever runs on the default branch, as scheduled workflows do.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+  # Also on PRs that touch where the version is declared. Safe to filter by path only while this
+  # workflow is not a required status check: a required check that a path filter skips never
+  # reports, and blocks the merge while it waits.
+  pull_request:
+    branches: [main]
+    paths:
+      - 'Directory.Build.props'
+      # Both central package files, spelled out rather than globbed: src/ carries the
+      # Aspire.Hosting and Aspire.Hosting.JavaScript floors this matrix overrides, and the root
+      # one carries Aspire.Hosting.AppHost for the sample - which is in dependabot.yml's scope,
+      # so a bump lands there touching no csproj at all.
+      - 'Directory.Packages.props'
+      - 'src/Directory.Packages.props'
+      - '**/*.csproj'
+      - '.github/workflows/aspire-matrix.yml'
+
+concurrency:
+  group: aspire-matrix-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: 🧭 aspire ${{ matrix.aspire.label }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    strategy:
+      # One leg failing must not cancel the other: whether the floor still works is what tells a
+      # `latest` failure apart from a break that is this repo's own.
+      fail-fast: false
+      matrix:
+        aspire:
+          # The floor the packages declare, and what every other workflow already builds.
+          - label: floor
+            version: '13.5.2'
+          # A NuGet floating version, so this leg follows new Aspire releases with no edit.
+          - label: latest
+            version: '*'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # MinVer reads tags to version the package projects.
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          # Keyed by leg as well: the two legs restore different Aspire versions, and sharing
+          # one key would have them overwrite each other's cache on every run. Hashes
+          # Directory.Packages.props alongside the csprojs, since CPM moved package versions
+          # there - a csproj-only hash would miss a version bump and serve a stale cache.
+          key: nuget-${{ runner.os }}-aspire-${{ matrix.aspire.label }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props') }}
+          restore-keys: nuget-${{ runner.os }}-aspire-${{ matrix.aspire.label }}-
+
+      # AspireVersion has to be passed to every command: restore resolves with it, and a build
+      # or test that did not see it would look for assets that restore never wrote.
+      #
+      # CentralPackageFloatingVersionsEnabled likewise has to be set on every command, for a
+      # different reason: CPM's PackageVersion items reject a floating version outright
+      # (NU1011) unless this is set, since a floor pinned in Directory.Packages.props floating
+      # underneath every consumer is rarely intended. It only changes behavior when a floating
+      # version is actually resolved, so it is harmless to pass on the `floor` leg too - kept
+      # on both rather than made leg-conditional so one PropertyGroup covers every command
+      # without threading the label through as well.
+      - name: Restore
+        run: dotnet restore -p:AspireVersion='${{ matrix.aspire.version }}' -p:CentralPackageFloatingVersionsEnabled=true
+
+      # No -warnaserror here, unlike ci.yml: a newer Aspire is free to add obsoletions, and
+      # failing on those would report a deprecation as a compatibility break.
+      - name: Build
+        run: dotnet build -c Release --no-restore -p:AspireVersion='${{ matrix.aspire.version }}' -p:CentralPackageFloatingVersionsEnabled=true
+
+      - name: Test
+        run: dotnet test -c Release --no-build -p:AspireVersion='${{ matrix.aspire.version }}' -p:CentralPackageFloatingVersionsEnabled=true --logger "trx;LogFilePrefix=results" --results-directory ./artifacts/test-results
+
+      # `latest` resolves to whatever was newest at the time, so a failure months from now can
+      # only be tied to a version if the run recorded what it actually tested.
+      - name: Report resolved Aspire version
+        if: always()
+        run: |
+          echo "Requested: ${{ matrix.aspire.version }}"
+          grep -ohE '"Aspire\.Hosting(\.[A-Za-z]+)?/[0-9][^"]*"' src/*/obj/project.assets.json \
+            | tr -d '"' | sort -u
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-aspire-${{ matrix.aspire.label }}
+          path: ./artifacts/test-results
+          if-no-files-found: warn

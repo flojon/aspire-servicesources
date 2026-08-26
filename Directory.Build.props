@@ -51,4 +51,22 @@
     <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="" />
   </ItemGroup>
 
+  <!-- The version of the Aspire package family (Aspire.Hosting and the Aspire.Hosting.*
+       packages built alongside it) that every project here references. One property rather
+       than a version per csproj, for two reasons.
+
+       Those packages ship in lockstep and are only tested that way, so they are treated as a
+       matched set - the full history of why is in src/Directory.Packages.props, which reads
+       this property for its floors.
+
+       It is also the knob aspire-matrix.yml turns: overriding this on the command line
+       (-p:AspireVersion=...) rebuilds the whole repo against another Aspire version, which is
+       how a version other than the floor gets exercised at all.
+
+       The condition leaves the value overridable; the default is the floor, since what a
+       consumer who pins nothing gets is what the default build should be testing against. -->
+  <PropertyGroup>
+    <AspireVersion Condition="'$(AspireVersion)' == ''">13.5.2</AspireVersion>
+  </PropertyGroup>
+
 </Project>

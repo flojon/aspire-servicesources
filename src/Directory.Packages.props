@@ -44,9 +44,22 @@
          less than one that is exercised on every CI run. Later patches still reach consumers
          on their own - this is a minimum, not a pin - so it does not need raising to stay
          current. They still ship in lockstep and are only tested that way, so there is nothing
-         to gain by letting these two floors drift apart. -->
-    <PackageVersion Include="Aspire.Hosting" Version="13.5.2" />
-    <PackageVersion Include="Aspire.Hosting.JavaScript" Version="13.5.2" />
+         to gain by letting these two floors drift apart.
+
+         The floor itself lives in $(AspireVersion) (Directory.Build.props) rather than as a
+         literal here, even though this is otherwise the one file that states floors directly.
+         That property is what aspire-matrix.yml overrides to rebuild the repo against another
+         Aspire version, and it has to reach both of these lines at once for the pair to stay
+         matched under an override.
+
+         A NuGet floating version (AspireVersion=*, which is how that workflow's `latest` leg
+         asks for the newest release) additionally needs CentralPackageFloatingVersionsEnabled:
+         CPM rejects a floating PackageVersion outright with NU1011 otherwise, on the grounds
+         that a floor pinned centrally and floating underneath every consumer is rarely what was
+         meant. aspire-matrix.yml passes both; nothing else sets either, so an ordinary build
+         here resolves the literal floor above. -->
+    <PackageVersion Include="Aspire.Hosting" Version="$(AspireVersion)" />
+    <PackageVersion Include="Aspire.Hosting.JavaScript" Version="$(AspireVersion)" />
 
     <PackageVersion Include="CommunityToolkit.Aspire.Hosting.Java" Version="13.3.0" />
     <PackageVersion Include="LibGit2Sharp" Version="0.32.0" />
