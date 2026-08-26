@@ -166,7 +166,7 @@ nothing will fail to build to warn you.
   `AddService()`.
 - Superseded preview packages are pruned from the GitHub Packages feed after each release,
   keeping the five most recent ([#68]).
-- **The Aspire floor moves from 13.4.6 to 13.5.2** ([#104], fixes [#89]). `Aspire.Hosting` and
+- **The Aspire floor moves from 13.4.6 to 13.5.2** ([#112], fixes [#89]). `Aspire.Hosting` and
   `Aspire.Hosting.JavaScript` move together as one matched set. Upgrading lifts Aspire to at
   least 13.5.2 in an AppHost still on 13.4.x — deliberately, because
   `Aspire.Hosting.JavaScript` 13.4.6 is the half of the pair that breaks once `Aspire.Hosting`
@@ -175,7 +175,7 @@ nothing will fail to build to warn you.
 ### Fixed
 
 - **A `kind: javascript` service no longer throws `MethodAccessException` when Aspire resolves
-  above the JavaScript integration** ([#104], fixes [#89]). Both Aspire references are floors,
+  above the JavaScript integration** ([#112], fixes [#89]). Both Aspire references are floors,
   and an AppHost references `Aspire.Hosting` directly, so raising Aspire on its own left
   `Aspire.Hosting.JavaScript` at the floor this package declared. 13.4.6 of it reaches into two
   of `Aspire.Hosting`'s internal types across a friend-assembly boundary, and 13.5.x removes one
@@ -260,4 +260,4 @@ Targets `net10.0`.
 [#79]: https://github.com/flojon/aspire-servicesources/issues/79
 [#80]: https://github.com/flojon/aspire-servicesources/issues/80
 [#89]: https://github.com/flojon/aspire-servicesources/issues/89
-[#104]: https://github.com/flojon/aspire-servicesources/pull/104
+[#112]: https://github.com/flojon/aspire-servicesources/pull/112
