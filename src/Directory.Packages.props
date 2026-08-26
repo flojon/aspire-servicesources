@@ -33,11 +33,14 @@
          clean and then throws TypeLoadException/MethodAccessException the first time a
          javascript service resolves, which is what #89 was.
 
-         Read out of the assemblies, 13.5.2 of the JavaScript package touches no Aspire.Hosting
-         internals at all - Aspire closed the coupling from its side, carrying its own copy of
-         the helper - so above this floor a mismatched pair is ordinary API drift rather than a
-         guaranteed crash. They still ship in lockstep and are only tested that way, so there
-         is nothing to gain by letting the two floors drift apart. -->
+         Read out of the assemblies, the coupling is gone as of 13.5.0 - checked at 13.5.0,
+         13.5.1 and 13.5.2, each touching nothing non-public across 62 type references and 129
+         member references - because Aspire closed it from its side, carrying its own copy of
+         the helper. So above 13.5.0 a mismatched pair is ordinary API drift rather than a
+         guaranteed crash. The floor is the latest 13.5 patch rather than 13.5.0 itself, since
+         nothing here needs to support the two releases in between. They still ship in lockstep
+         and are only tested that way, so there is nothing to gain by letting these two floors
+         drift apart. -->
     <PackageVersion Include="Aspire.Hosting" Version="13.5.2" />
     <PackageVersion Include="Aspire.Hosting.JavaScript" Version="13.5.2" />
 

@@ -182,9 +182,9 @@ nothing will fail to build to warn you.
   of them and revokes access to the other, so the pair restored and compiled clean and then
   threw the first time a `javascript` service resolved.
 
-  Raising the floor to 13.5.2 settles it, on both sides: Aspire closed the coupling in the same
-  release, and `Aspire.Hosting.JavaScript` 13.5.2 references no `Aspire.Hosting` internals at
-  all. The Java satellite was never affected — `CommunityToolkit.Aspire.Hosting.Java` carries
+  Raising the floor settles it, and Aspire closed the coupling from its own side in 13.5.0:
+  from that release on, `Aspire.Hosting.JavaScript` references no `Aspire.Hosting` internals at
+  all, so a mismatched pair above it is ordinary API drift rather than a guaranteed crash. The Java satellite was never affected — `CommunityToolkit.Aspire.Hosting.Java` carries
   its own copy of the helper involved and reaches into no `Aspire.Hosting` internals either.
 
 - A service consumed by a *container* now works for every source except `url` ([#62], fixes
