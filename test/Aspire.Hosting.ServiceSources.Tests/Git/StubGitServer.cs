@@ -14,7 +14,7 @@ namespace Aspire.Hosting.ServiceSources.Tests.Git;
 /// </summary>
 internal sealed class StubGitServer : IDisposable
 {
-    private readonly HttpListener _listener = new();
+    private readonly HttpListener _listener;
     private readonly Func<string, bool> _accepts;
     private readonly List<string> _authorizations = [];
     private readonly List<string> _requests = [];
@@ -24,16 +24,9 @@ internal sealed class StubGitServer : IDisposable
     {
         _accepts = accepts;
 
-        var port = BindToFreePort(FreePort, BindListener);
+        (_listener, var port) = ListenOnFreeLoopbackPort(FreePort);
         RepositoryUrl = $"http://127.0.0.1:{port}/repo.git";
         _serving = Task.Run(Serve);
-
-        void BindListener(int candidate)
-        {
-            _listener.Prefixes.Clear();
-            _listener.Prefixes.Add($"http://127.0.0.1:{candidate}/");
-            _listener.Start();
-        }
     }
 
     public string RepositoryUrl { get; }
@@ -95,6 +88,33 @@ internal sealed class StubGitServer : IDisposable
         var port = ((IPEndPoint)probe.LocalEndpoint).Port;
         probe.Stop();
         return port;
+    }
+
+    /// <summary>
+    /// Starts a listener on a loopback port <paramref name="pickPort"/> believes to be free, and
+    /// reports the port it ended up on.
+    /// </summary>
+    /// <remarks>
+    /// Every attempt gets its own <see cref="HttpListener"/>. A failed <see cref="HttpListener.Start"/>
+    /// puts the instance it was called on into its closed state for good, and every later call on that
+    /// instance — <c>Prefixes.Clear()</c> included — throws <see cref="ObjectDisposedException"/> rather
+    /// than <see cref="HttpListenerException"/>. Carrying one instance across attempts would therefore
+    /// convert the retryable port collision this exists to absorb into a disposal error that escapes
+    /// <see cref="BindToFreePort"/> uncaught.
+    /// </remarks>
+    internal static (HttpListener Listener, int Port) ListenOnFreeLoopbackPort(Func<int> pickPort)
+    {
+        HttpListener? listener = null;
+
+        var port = BindToFreePort(pickPort, candidate =>
+        {
+            var attempt = new HttpListener();
+            attempt.Prefixes.Add($"http://127.0.0.1:{candidate}/");
+            attempt.Start();
+            listener = attempt;
+        });
+
+        return (listener!, port);
     }
 
     /// <summary>
