@@ -37,16 +37,28 @@
     empty and that import does not happen. The tag was appended three times, once per inner
     build, and each time to a property no nuspec was ever generated from.
 
-    So do it here, where the outer pass sees it. The condition is Aspire's own, including the
-    space-padded whole-token test, so if a future SDK makes that import reach the outer pass
-    the two cannot both append. Same reason as everything else in this file: it reads
-    $(PackageTags), which each csproj sets in its own body, so .props is too early.
+    So do it here, where the outer pass sees it. Same reason as everything else in this file:
+    it reads $(PackageTags), which each csproj sets in its own body, so .props is too early.
+
+    The append is plain text, deliberately, and not $([System.String]::Concat(...)) the way
+    Aspire writes it. MSBuild escapes the result of a property function so it cannot be re-read
+    as a list - semicolons come back as %3B - and $(PackageTags) is an MSBuild list that NuGet
+    splits on ';' and rejoins with spaces when it writes the nuspec. Concat therefore produced a
+    single opaque literal, and the packed tags came out as the raw 'a;b;c polyglot' instead of
+    the 'a b c polyglot' every other package on nuget.org ships. Plain expansion keeps the list
+    a list.
+
+    The per-property conditions are Aspire's own space-padded whole-token test, so if a future
+    SDK makes that import reach the outer pass the two cannot both append, and an unrelated tag
+    merely containing the substring does not suppress this one. The empty case is split out
+    rather than trimmed: with no tags to append to, plain expansion would leave a leading space.
   -->
   <PropertyGroup Condition="'$(IsPackable)' != 'false'
                             and '$(EnableAspireIntegrationAnalyzers)' == 'true'
-                            and '$(IsAspirePolyglotCompatible)' != 'false'
-                            and !$([System.String]::Concat(' ', '$(PackageTags)', ' ').Contains(' polyglot '))">
-    <PackageTags>$([System.String]::Concat('$(PackageTags)', ' polyglot').Trim())</PackageTags>
+                            and '$(IsAspirePolyglotCompatible)' != 'false'">
+    <PackageTags Condition="'$(PackageTags)' == ''">polyglot</PackageTags>
+    <PackageTags Condition="'$(PackageTags)' != ''
+                            and !$([System.String]::Concat(' ', '$(PackageTags)', ' ').Contains(' polyglot '))">$(PackageTags) polyglot</PackageTags>
   </PropertyGroup>
 
   <!--
