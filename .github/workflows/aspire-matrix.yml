@@ -43,11 +43,19 @@ jobs:
       matrix:
         aspire:
           # The floor the packages declare, and what every other workflow already builds.
+          # Its inputs only change when a tracked file does, so the content hash alone keys
+          # the cache correctly - salt stays empty.
           - label: floor
             version: '13.5.2'
+            salt: ''
           # A NuGet floating version, so this leg follows new Aspire releases with no edit.
+          # What it resolves changes without any tracked file changing, so the hash alone would
+          # hit on an unchanged commit and actions/cache would skip the save - leaving the
+          # cache holding the first run's packages forever. The run id makes every run a miss
+          # that then saves, with restore-keys still serving the previous run as a base.
           - label: latest
             version: '*'
+            salt: ${{ github.run_id }}
 
     steps:
       - uses: actions/checkout@v4
@@ -69,8 +77,10 @@ jobs:
           # Keyed by leg as well: the two legs restore different Aspire versions, and sharing
           # one key would have them overwrite each other's cache on every run. Hashes
           # Directory.Packages.props alongside the csprojs, since CPM moved package versions
-          # there - a csproj-only hash would miss a version bump and serve a stale cache.
-          key: nuget-${{ runner.os }}-aspire-${{ matrix.aspire.label }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props') }}
+          # there - a csproj-only hash would miss a version bump and serve a stale cache - and
+          # Directory.Build.props, which is where $(AspireVersion) states the floor.
+          # See the salt on each leg above for why the hash alone is not enough.
+          key: nuget-${{ runner.os }}-aspire-${{ matrix.aspire.label }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props', 'Directory.Build.props') }}-${{ matrix.aspire.salt }}
           restore-keys: nuget-${{ runner.os }}-aspire-${{ matrix.aspire.label }}-
 
       # AspireVersion has to be passed to every command: restore resolves with it, and a build
@@ -99,8 +109,15 @@ jobs:
       - name: Report resolved Aspire version
         if: always()
         run: |
+          set -o pipefail
           echo "Requested: ${{ matrix.aspire.version }}"
-          grep -ohE '"Aspire\.Hosting(\.[A-Za-z]+)?/[0-9][^"]*"' src/*/obj/project.assets.json \
+          # Every project directory, not just src/: the sample AppHost and the test projects
+          # resolve Aspire too, and the AppHost is where a mismatch within the family would
+          # show up. The id pattern allows more than one dotted segment for the same reason -
+          # Aspire.Hosting.AppHost has two, and a stricter pattern silently omits it.
+          # pipefail so that a report matching nothing fails the step rather than logging
+          # an empty list that reads like a clean run.
+          grep -ohE '"Aspire\.[A-Za-z.]+/[0-9][^"]*"' */*/obj/project.assets.json \
             | tr -d '"' | sort -u
 
       - name: Upload test results
