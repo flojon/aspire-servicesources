@@ -5,13 +5,34 @@
 # and nobody gains - the satellites are built against their floor, not against latest, and
 # restore hands every consumer that same floor unless something else in their graph forces
 # higher. Bumping those is therefore a deliberate act (new API is actually needed, or a real
-# advisory), not something a bot should do on a schedule. src/ is deliberately absent below.
+# advisory), not something a bot should do on a schedule.
 #
 # test/ and samples/ are the opposite: nobody consumes them, their versions constrain no one,
 # and staying current is exactly what they are for.
 #
-# Security updates - which the repository enables separately from this file - are not scoped
-# by these rules and can still raise a floor in src/. That is the intended exception.
+# `directories` below is scoped to test/ and samples/ for that reason, but scoping alone does
+# not keep Dependabot out of src/: every test project carries a ProjectReference to the
+# satellite it tests, and Dependabot's NuGet updater walks that graph to resolve central
+# package management versions, editing whatever Directory.Packages.props declares a package
+# it decides to bump - regardless of which directory triggered the scan. Confirmed in
+# practice, not just in theory: a test/-scoped run proposed CommunityToolkit.Aspire.Hosting.Java
+# 13.3.0 -> 13.4.0 directly against src/Directory.Packages.props, silently undoing a floor
+# that had been deliberately measured down to the version the code actually needs (#80).
+# Worse, a grouped Aspire bump raised Aspire.Hosting alone and left Aspire.Hosting.JavaScript
+# behind, reproducing the mismatched-pair MethodAccessException from #89 in the repo's own
+# build (verified: 21 test failures against that exact combination).
+#
+# `ignore` below is the actual fix - it is enforced per package id rather than per directory,
+# so it holds regardless of what graph Dependabot walks to get there. The trade-off, confirmed
+# against GitHub's own docs rather than assumed: `ignore` suppresses Dependabot's *security*
+# updates for a matching dependency too, not just version updates, so a real advisory against
+# any of these five packages will not auto-generate a PR the way it does for test/ and
+# samples/. Repository vulnerability alerts stay enabled regardless (Settings > Code security),
+# so an advisory is still visible - it just does not turn into an automatic PR the way it
+# would elsewhere, and a src/ floor bump for a CVE has to be raised and verified by hand
+# regardless, the same as any other src/ floor move. Given #89, that is arguably the safer
+# default anyway: an automatic bump to one half of a version-locked pair is exactly the
+# failure mode that produced it.
 version: 2
 
 updates:
@@ -23,6 +44,16 @@ updates:
     directories:
       - "/test/**/*"
       - "/samples/**/*"
+    # Belt-and-braces alongside `directories` above, not a substitute for it: this is what
+    # actually keeps src/'s floors from moving, since `directories` alone does not (see the
+    # header comment). Every id declared in src/Directory.Packages.props, kept in sync with
+    # it by hand - there is no wildcard that means "whatever that file declares" here.
+    ignore:
+      - dependency-name: "Aspire.Hosting"
+      - dependency-name: "Aspire.Hosting.JavaScript"
+      - dependency-name: "CommunityToolkit.Aspire.Hosting.Java"
+      - dependency-name: "LibGit2Sharp"
+      - dependency-name: "YamlDotNet"
     schedule:
       interval: "weekly"
     # One PR per decision rather than one per package id. Ungrouped, the versions under
