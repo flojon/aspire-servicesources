@@ -20,13 +20,13 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # MinVer derives the package version from tags/history, so the pack step
           # needs the full history rather than a shallow clone.
           fetch-depth: 0
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: |
             8.0.x
@@ -34,7 +34,7 @@ jobs:
             10.0.x
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           # Package versions live in Directory.Packages.props under central package
@@ -111,14 +111,14 @@ jobs:
       - name: Upload test results
         # Test results are most useful exactly when the run failed.
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-results
           path: ./artifacts/test-results
           if-no-files-found: warn
 
       - name: Upload packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nuget-packages
           path: ./artifacts/package/*.nupkg
@@ -136,7 +136,7 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # MinVer reads tags to version the referenced package projects; without full
           # history it falls back to a placeholder version and warns while doing it.
@@ -145,7 +145,7 @@ jobs:
       # DemoAppHost targets net10.0, but it project-references the multi-targeted package
       # projects, so the 8 and 9 SDKs are installed too rather than relying on which target
       # framework MSBuild settles on for those references.
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: |
             8.0.x
@@ -157,7 +157,7 @@ jobs:
       # restores only DemoAppHost, so if it saved under the shared key `build` would restore a
       # cache missing the test and pack dependencies and re-download them every run.
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           # Package versions live in Directory.Packages.props under central package
@@ -176,7 +176,7 @@ jobs:
         # The script prints the tail of this log on failure; the whole file is kept as an
         # artifact for the failures where 40 lines are not enough.
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: smoketest-container-apphost-log
           path: .smoketest-cache/apphost.log
