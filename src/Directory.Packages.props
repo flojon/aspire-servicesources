@@ -25,11 +25,28 @@
   <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Packages.props', '$(MSBuildThisFileDirectory)../'))" />
 
   <ItemGroup>
-    <!-- Aspire.Hosting and Aspire.Hosting.JavaScript are one matched set: the latter calls
-         into the former across a friend-assembly boundary, so a mixed pair throws
-         MethodAccessException at run time. Move them together. See #89. -->
-    <PackageVersion Include="Aspire.Hosting" Version="13.4.6" />
-    <PackageVersion Include="Aspire.Hosting.JavaScript" Version="13.4.6" />
+    <!-- Aspire.Hosting and Aspire.Hosting.JavaScript are one matched set - move them
+         together. The reason is now historical rather than current, and worth writing down so
+         the floor is not "corrected" back later: Aspire.Hosting.JavaScript 13.4.6 reaches into
+         two of Aspire.Hosting's internal types across a friend-assembly boundary, and 13.5.x
+         removes one of them and revokes access to the other. That pair restores and compiles
+         clean and then throws TypeLoadException/MethodAccessException the first time a
+         javascript service resolves, which is what #89 was.
+
+         Read out of the assemblies, the coupling is gone as of 13.5.0 - checked at 13.5.0,
+         13.5.1 and 13.5.2, each touching nothing non-public across 62 type references and 129
+         member references - because Aspire closed it from its side, carrying its own copy of
+         the helper. So above 13.5.0 a mismatched pair is ordinary API drift rather than a
+         guaranteed crash.
+
+         Only 13.5.0 has to be cleared, then; the floor sits at 13.5.2 because that is the
+         version this repository builds and tests against, and a floor no one has run is worth
+         less than one that is exercised on every CI run. Later patches still reach consumers
+         on their own - this is a minimum, not a pin - so it does not need raising to stay
+         current. They still ship in lockstep and are only tested that way, so there is nothing
+         to gain by letting these two floors drift apart. -->
+    <PackageVersion Include="Aspire.Hosting" Version="13.5.2" />
+    <PackageVersion Include="Aspire.Hosting.JavaScript" Version="13.5.2" />
 
     <PackageVersion Include="CommunityToolkit.Aspire.Hosting.Java" Version="13.3.0" />
     <PackageVersion Include="LibGit2Sharp" Version="0.32.0" />

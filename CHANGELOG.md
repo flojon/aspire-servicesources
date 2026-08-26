@@ -166,8 +166,44 @@ nothing will fail to build to warn you.
   `AddService()`.
 - Superseded preview packages are pruned from the GitHub Packages feed after each release,
   keeping the five most recent ([#68]).
+- **The Aspire floor moves from 13.4.6 to 13.5.2** ([#112], fixes [#89]). `Aspire.Hosting` and
+  `Aspire.Hosting.JavaScript` move together as one matched set — deliberately, because
+  `Aspire.Hosting.JavaScript` 13.4.6 is the half of the pair that breaks once `Aspire.Hosting`
+  reaches 13.5.x.
+
+  **Move your AppHost's own Aspire version with it.** In an AppHost still on 13.4.x this lifts
+  `Aspire.Hosting` to 13.5.2 on its own, while `Aspire.AppHost.Sdk`, `Aspire.Hosting.AppHost`
+  and the DCP and dashboard packages the SDK pins to it stay behind — a mixed Aspire family
+  that restore reports nothing about. Raise `Aspire.AppHost.Sdk` and
+  `Aspire.Hosting.AppHost` to 13.5.2 or later at the same time.
 
 ### Fixed
+
+- **The published packages now carry the `polyglot` NuGet tag** ([#112]). It is what `aspire
+  add` reads to surface a package to non-C# AppHosts — the audience the Aspire Type System
+  exports elsewhere in this release exist for. Aspire's own targets append the tag, but
+  `obj/*.nuget.g.targets` imports those only in the per-framework inner builds, while `pack`
+  generates the nuspec from the cross-targeting outer pass: the tag was appended once per
+  inner build, each time to a property no nuspec was generated from, and all three packages
+  packed without it. Appended in `Directory.Build.targets` instead, under Aspire's own
+  condition so the two cannot both add it.
+
+- **A `kind: javascript` service no longer throws `MethodAccessException` when Aspire resolves
+  above the JavaScript integration** ([#112], fixes [#89]). Both Aspire references are floors,
+  and NuGet resolves the highest floor in the graph: an AppHost on Aspire 13.5.x pulled
+  `Aspire.Hosting` up with it — transitively, through the `Aspire.Hosting.AppHost` reference
+  `Aspire.AppHost.Sdk` adds implicitly — while nothing lifted `Aspire.Hosting.JavaScript`
+  above the floor this package declared. 13.4.6 of it reaches into two of `Aspire.Hosting`'s
+  internal types across a friend-assembly boundary, and 13.5.x removes one and revokes access
+  to the other, so the pair restored and compiled clean and then threw the first time a
+  `javascript` service resolved.
+
+  Raising the floor settles it, and Aspire closed the coupling from its own side in 13.5.0:
+  from that release on, `Aspire.Hosting.JavaScript` references no `Aspire.Hosting` internals at
+  all, so a mismatched pair above it is ordinary API drift rather than a guaranteed crash.
+
+  The Java satellite was never affected — `CommunityToolkit.Aspire.Hosting.Java` carries its
+  own copy of the helper involved and reaches into no `Aspire.Hosting` internals either.
 
 - A service consumed by a *container* now works for every source except `url` ([#62], fixes
   [#58]). The resource returned by `AddService()` is registered with the app model, so DCP
@@ -242,3 +278,4 @@ Targets `net10.0`.
 [#79]: https://github.com/flojon/aspire-servicesources/issues/79
 [#80]: https://github.com/flojon/aspire-servicesources/issues/80
 [#89]: https://github.com/flojon/aspire-servicesources/issues/89
+[#112]: https://github.com/flojon/aspire-servicesources/pull/112

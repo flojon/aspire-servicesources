@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <Sdk Name="Aspire.AppHost.Sdk" Version="13.4.6" />
+  <!-- Central Package Management does not cover MSBuild SDK versions, so this one is written
+       out and moves by hand with the Aspire floors in src/Directory.Packages.props. -->
+  <Sdk Name="Aspire.AppHost.Sdk" Version="13.5.2" />
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -9,6 +11,16 @@
     <Nullable>enable</Nullable>
     <IsAspireHost>true</IsAspireHost>
     <IsPackable>false</IsPackable>
+    <!-- An AppHost consumes integrations rather than being one; see Directory.Build.props. -->
+    <IsAspirePolyglotCompatible>false</IsAspirePolyglotCompatible>
+    <!-- ASPIRE010, new in Aspire 13.5.x, fires on every AppHost that has not opted into the
+         Aspire CLI bundle: AspireUseCliBundle defaults to false in Aspire's own SDK, and the
+         warning nags about it. This sample is deliberately built and run without the CLI - the
+         smoke tests in scripts/ use plain dotnet build and dotnet run, and setting
+         AspireUseCliBundle=true is exactly what stops the SDK referencing the DCP and dashboard
+         packages those runs need. So there is nothing to act on here, and the warning is only
+         fatal because ci.yml builds with -warnaserror. -->
+    <NoWarn>$(NoWarn);ASPIRE010</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

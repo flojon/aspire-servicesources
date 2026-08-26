@@ -37,7 +37,15 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.4.6" />
+    <!-- The sample AppHost is a consumer of the packages, so its Aspire version moves with the
+         floors in src/Directory.Packages.props rather than on its own: mixing versions within
+         the Aspire family is exactly what #89 was about.
+
+         It has to be moved by hand, and this line is only half of it - `<Sdk Name=
+         "Aspire.AppHost.Sdk" Version="..." />` in DemoAppHost.csproj carries the same version
+         and has to move with it. .github/dependabot.yml ignores this id for that reason: an
+         automated bump can only reach the half it can parse. -->
+    <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.5.2" />
     <PackageVersion Include="coverlet.collector" Version="10.0.1" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />

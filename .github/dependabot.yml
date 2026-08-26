@@ -64,6 +64,15 @@ updates:
     ignore:
       - dependency-name: "Aspire.Hosting"
       - dependency-name: "Aspire.Hosting.JavaScript"
+      # Not a floor - this one is the sample AppHost's own version, and it is here because
+      # Dependabot cannot move it on its own. The version has a partner it must stay level
+      # with, `<Sdk Name="Aspire.AppHost.Sdk" Version="..." />` in DemoAppHost.csproj, and an
+      # MSBuild SDK reference is not a package reference for Dependabot to edit. A bump here
+      # would raise the AppHost package - and with it the DCP and dashboard packages the SDK
+      # pins to whatever version the project *declares* - while leaving the SDK itself behind:
+      # the split Aspire family this repository warns consumers about, in its own sample, with
+      # nothing in CI that would fail. Move both by hand, together.
+      - dependency-name: "Aspire.Hosting.AppHost"
       - dependency-name: "CommunityToolkit.Aspire.Hosting.Java"
       - dependency-name: "LibGit2Sharp"
       - dependency-name: "YamlDotNet"
@@ -93,16 +102,6 @@ updates:
         patterns:
           - "Microsoft.NET.Test.Sdk"
           - "coverlet.*"
-        update-types:
-          - "minor"
-          - "patch"
-      # Only the sample's Aspire.Hosting.AppHost is in scope here; the published Aspire
-      # floors live in src/ and are covered by the ignore list above instead. Pattern is
-      # the exact id, not "Aspire.*" - a wildcard here would re-catch Aspire.Hosting and
-      # Aspire.Hosting.JavaScript the moment either is dropped from that list.
-      aspire:
-        patterns:
-          - "Aspire.Hosting.AppHost"
         update-types:
           - "minor"
           - "patch"
