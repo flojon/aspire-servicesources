@@ -11,7 +11,7 @@ nothing will fail to build to warn you.
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-08-26
+## [0.3.0] - 2026-08-27
 
 ### Breaking
 
@@ -223,6 +223,8 @@ nothing will fail to build to warn you.
 - The install section now says to add a satellite package *instead of* the core package
   rather than alongside it, so an AppHost that uses one carries a single reference and has no
   second version to keep in step ([#79]).
+- The guest-language section and the TypeScript sample now name the Aspire CLI version they
+  need, 13.6.0 or newer - the codegen fix they depend on is in no released CLI yet ([#57]).
 
 ## [0.2.0] - 2026-08-18
 
@@ -271,6 +273,7 @@ Targets `net10.0`.
 [#53]: https://github.com/flojon/aspire-servicesources/issues/53
 [#55]: https://github.com/flojon/aspire-servicesources/pull/55
 [#56]: https://github.com/flojon/aspire-servicesources/pull/56
+[#57]: https://github.com/flojon/aspire-servicesources/pull/57
 [#58]: https://github.com/flojon/aspire-servicesources/issues/58
 [#59]: https://github.com/flojon/aspire-servicesources/pull/59
 [#60]: https://github.com/flojon/aspire-servicesources/pull/60
