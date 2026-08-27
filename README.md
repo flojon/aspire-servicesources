@@ -598,19 +598,9 @@ resource, e.g. `services__inventory__http__0=http://localhost:<port>` pointing a
 `inventory` container. The same sample regenerated with 13.5.1 still reproduces all six
 `TS2552` errors.
 
-One caveat found while verifying:
-
-- **Switching *back* to a dogfood CLI build leaves stale generated code.** `aspire restore` rewrites
-  the pinned package version in the generated
-  `.aspire/integrations/.../integration-restore/IntegrationRestore.csproj` but does not re-restore or
-  rebuild it, so the previous CLI's code generator stays in that project's `bin/` and keeps producing
-  the old output — while reporting `SDK code restored successfully`. Deleting `.aspire/modules` alone
-  is *not* enough, since the stale generator lives under `.aspire/integrations/`; remove the whole
-  `.aspire/` directory. This bites the exact loop you'd use to verify a codegen fix (dogfood build →
-  compare against a release → back to the dogfood build). Testing across 13.5.1, 13.5.2 and a
-  13.6.0-pr build, it reproduces only when returning to a hive-sourced PR build that was already
-  built in that directory — switches between released versions were consistent. Reported upstream as
-  [microsoft/aspire#19603](https://github.com/microsoft/aspire/issues/19603).
+Switching between CLI builds can leave a stale code generator under `.aspire/`, so remove that
+directory before regenerating:
+[microsoft/aspire#19603](https://github.com/microsoft/aspire/issues/19603).
 
 ## Status
 
