@@ -832,3 +832,6 @@ Early stage, evolving fast. `"local"`, `"kubernetes"`, `"url"`, and `"container"
 all implemented — see [`docs/superpowers/`](docs/superpowers/) for design and implementation
 history, including the phase 2 backlog (repo auto-update, config discovery walk-up,
 dependency/infrastructure resolution, and more).
+
+Changes are recorded in [`CHANGELOG.md`](CHANGELOG.md); how a release is cut is in
+[`RELEASING.md`](RELEASING.md).

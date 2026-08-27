@@ -11,6 +11,56 @@ nothing will fail to build to warn you.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-27
+
+Publishes the two satellite packages, which `0.3.0` could not. Core `0.3.0` is on nuget.org
+and is unchanged by this release in everything but its version number — there is no reason to
+move a core-only AppHost off it.
+
+### Fixed
+
+- **`KoalaSoft.Aspire.Hosting.ServiceSources.Java` and `.JavaScript` are published again**
+  ([#117]). Both satellites were rejected by nuget.org during the `0.3.0` release and exist at
+  no version on that feed; `0.3.1` is the first release either of them reaches it at. The
+  `0.3.0` core package published normally in the same run, so a `0.3.0` AppHost using only
+  core is unaffected.
+
+  The cause was the upper bound introduced in `0.3.0` to stop a satellite pairing with a
+  next-minor core ([#79]). It closed the range with a prerelease bound so that the next minor's
+  *prereleases* were excluded along with its release:
+
+  ```xml
+  <dependency id="KoalaSoft.Aspire.Hosting.ServiceSources" version="[0.3.0, 0.4.0-0)" />
+  ```
+
+  nuget.org's gallery refuses that at push time — `The package manifest contains an invalid
+  Version: '0.4.0-0'`, HTTP 400 — while the NuGet client, `dotnet pack`, `restore` and GitHub
+  Packages all accept it ([NuGetGallery#6948], open). `pack` emits only NU5104, a warning. So
+  the bound was correct on every surface the repository could observe, and wrong on the single
+  surface a release touches.
+
+  The bound is now chosen per build: `-0` on a prerelease build, which is what the GitHub
+  Packages preview feed receives, and a plain `0.4.0` on a stable one, which is what nuget.org
+  receives:
+
+  ```xml
+  <!-- release build, pushed to nuget.org -->
+  <dependency id="KoalaSoft.Aspire.Hosting.ServiceSources" version="[0.3.1, 0.4.0)" />
+  <!-- preview build, pushed to GitHub Packages -->
+  <dependency id="KoalaSoft.Aspire.Hosting.ServiceSources" version="[0.3.1-alpha.0.7, 0.4.0-0)" />
+  ```
+
+  Nothing is lost by the plain bound on nuget.org: every prerelease of these packages goes to
+  GitHub Packages, so there is no `0.4.0-*` on nuget.org for it to admit. The pairing guarantee
+  `0.3.0` documented still holds on both feeds.
+
+### Changed
+
+- CI packs the release shape as well as the prerelease one, and fails on a stable package whose
+  nuspec declares a prerelease version anywhere ([#117]). Every pack before this ran off a tag
+  and so was always a prerelease, which is why `0.3.0` passed every check and then failed the
+  push. `RELEASING.md` records the rest of the process.
+
 ## [0.3.0] - 2026-08-27
 
 ### Breaking
@@ -255,7 +305,8 @@ Targets `net10.0`.
 - Fail-fast configuration validation with `ServiceSourcesConfigurationException`.
 - MIT license, README, symbol packages, and Trusted Publishing (OIDC) to nuget.org.
 
-[Unreleased]: https://github.com/flojon/aspire-servicesources/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/flojon/aspire-servicesources/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/flojon/aspire-servicesources/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/flojon/aspire-servicesources/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/flojon/aspire-servicesources/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/flojon/aspire-servicesources/releases/tag/v0.1.0
@@ -286,3 +337,5 @@ Targets `net10.0`.
 [#80]: https://github.com/flojon/aspire-servicesources/issues/80
 [#89]: https://github.com/flojon/aspire-servicesources/issues/89
 [#112]: https://github.com/flojon/aspire-servicesources/pull/112
+[#117]: https://github.com/flojon/aspire-servicesources/pull/117
+[NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
