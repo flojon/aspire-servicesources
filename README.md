@@ -589,12 +589,7 @@ than a concrete resource class.
 
 This was reported as [microsoft/aspire#19507](https://github.com/microsoft/aspire/issues/19507) and
 fixed by [microsoft/aspire#19577](https://github.com/microsoft/aspire/pull/19577), which merged to
-`main` on 2026-08-22 under the **13.6** milestone.
-
-Dates alone will mislead you here, so check the tag rather than the calendar: Aspire 13.5.3 was
-released on 2026-08-25, *three days after* that fix merged, and still does not carry it - the fix
-commit is not an ancestor of the `v13.5.3` tag, because the 13.5.x patches ship from a release
-branch rather than from `main`. No released CLI contains it yet.
+`main` on 2026-08-22 under the **13.6** milestone. No released CLI carries it, 13.5.3 included.
 
 Verified against a build of that PR (`13.6.0-pr.19577.gfa0aea2c`): the generated SDK type-checks
 clean under strict `tsc`, and the sample runs end-to-end — `withReference()` on the
