@@ -82,7 +82,7 @@ internal static class LocalGitCheckout
             return new PreparedCheckout(overridden, NeedsReconciliation: false);
         }
 
-        EnsureGitignore(appHostDirectory);
+        EnsureToolDirectory(appHostDirectory);
         var checkoutsRoot = Path.Combine(appHostDirectory, ".servicesources", "checkouts");
         var repoRoot = Path.Combine(checkoutsRoot, serviceName);
 
@@ -461,11 +461,23 @@ internal static class LocalGitCheckout
         "fill` must resolve them for this host) or the SERVICESOURCES_GIT_USERNAME/" +
         "SERVICESOURCES_GIT_TOKEN environment variables.";
 
-    private static void EnsureGitignore(string appHostDirectory)
+    /// <summary>
+    /// Creates the tool-owned <c>.servicesources</c> directory and the files it owns outright: the
+    /// <c>.gitignore</c> that keeps checkouts out of the AppHost's repository, and the
+    /// <see cref="CheckoutBuildBarrier"/> that keeps that repository's build settings out of the
+    /// checkouts.
+    /// </summary>
+    private static void EnsureToolDirectory(string appHostDirectory)
     {
         var dir = Path.Combine(appHostDirectory, ".servicesources");
         Directory.CreateDirectory(dir);
 
+        EnsureGitignore(dir);
+        CheckoutBuildBarrier.Ensure(dir);
+    }
+
+    private static void EnsureGitignore(string dir)
+    {
         var gitignorePath = Path.Combine(dir, ".gitignore");
         try
         {

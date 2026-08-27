@@ -11,6 +11,40 @@ nothing will fail to build to warn you.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Managed checkouts no longer inherit the AppHost repository's MSBuild and NuGet settings**
+  ([#119]). A checkout is cloned into `<AppHostDirectory>/.servicesources/checkouts/<service>/`,
+  which is inside the AppHost's own repository, and MSBuild and NuGet resolve
+  `Directory.Build.props`, `Directory.Build.targets`, `Directory.Packages.props` and `nuget.config`
+  by walking *up* from each project. Nothing stopped that walk at `.servicesources/`, so another
+  team's repository was built under rules written for yours.
+
+  Two ways it showed up:
+
+  - An AppHost repository with `ManagePackageVersionsCentrally=true` failed a checkout's restore
+    with `NU1008` for every version pinned on a `PackageReference`. The diagnostic names the cloned
+    project while the cause is a file in the host repository, and the service resolves fine before
+    going `Running -> Finished` with the build failure only in its own console log.
+  - A `packageSourceMapping` in the AppHost repository applied to the checkout and could confine
+    its restores to the wrong feeds. A `<clear />` inside `<packageSources>` in the checkout's own
+    `nuget.config` does not clear a mapping defined further up. This one is silent: a warm
+    `~/.nuget/packages` satisfies the restore without contacting a source, so it passes locally and
+    fails on a clean machine or in CI.
+
+  `.servicesources/` now carries four tool-managed files that end the walk there, written next to
+  the `.gitignore` it already creates: an empty `Directory.Build.props` and
+  `Directory.Build.targets`, a `Directory.Packages.props` setting
+  `ManagePackageVersionsCentrally=false`, and a `nuget.config` containing only
+  `<packageSourceMapping><clear /></packageSourceMapping>`. Unlike the `.gitignore`, whose content
+  is fixed, these are rewritten whenever they differ from what the installed version writes, so an
+  upgrade refreshes existing checkout roots rather than stranding them on a stale copy.
+
+  Both barriers only supply what a checkout lacks. One that brings its own `Directory.Build.props`
+  or `Directory.Packages.props` is found first and keeps its own settings, central package
+  management included; clearing the source *mapping* lifts a restriction rather than removing a
+  feed, so each checkout's `nuget.config` governs its sources as it would standalone.
+
 ## [0.3.1] - 2026-08-27
 
 Publishes the two satellite packages, which `0.3.0` could not. Core `0.3.0` is on nuget.org
@@ -338,4 +372,5 @@ Targets `net10.0`.
 [#89]: https://github.com/flojon/aspire-servicesources/issues/89
 [#112]: https://github.com/flojon/aspire-servicesources/pull/112
 [#117]: https://github.com/flojon/aspire-servicesources/pull/117
+[#119]: https://github.com/flojon/aspire-servicesources/issues/119
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

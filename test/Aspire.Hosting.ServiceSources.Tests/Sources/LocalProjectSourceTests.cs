@@ -1009,6 +1009,24 @@ public class LocalProjectSourceTests
     }
 
     [Fact]
+    public void ResolveProjectPath_ManagedClone_WritesBuildBarrierUnderServiceSourcesDirectory()
+    {
+        // The checkout lives inside the AppHost's own repository, so without these MSBuild and
+        // NuGet walk past .servicesources and apply the host repository's build settings to it.
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var gitClient = new FakeGitClient();
+
+        ResolveProjectPath(
+            ServiceName, Metadata(), DevConfig(), appHostDirectory, gitClient);
+
+        var dir = Path.Combine(appHostDirectory, ".servicesources");
+        Assert.True(File.Exists(Path.Combine(dir, "Directory.Build.props")));
+        Assert.True(File.Exists(Path.Combine(dir, "Directory.Build.targets")));
+        Assert.True(File.Exists(Path.Combine(dir, "Directory.Packages.props")));
+        Assert.True(File.Exists(Path.Combine(dir, "nuget.config")));
+    }
+
+    [Fact]
     public void ResolveProjectPath_ManagedClone_DoesNotOverwriteExistingGitignore()
     {
         var appHostDirectory = Directory.CreateTempSubdirectory().FullName;

@@ -174,7 +174,8 @@ a project reference would be.
   than replaced; point at it with `path` instead. A directory there with no `.git` entry at all is
   treated as debris from an interrupted clone and **deleted**, so don't hand-place a plain directory
   as a quick override — use `path` for that too. The `.servicesources/` directory gitignores itself
-  on first use — no need to add it to your own `.gitignore`.
+  on first use — no need to add it to your own `.gitignore` — and shields what it holds from your
+  AppHost repository's build settings (see below).
 - Set `path` to point at a checkout you manage yourself (e.g. an existing local clone). It's
   used as-is — no clone, no checkout, no fetch, ever. A relative `path` is anchored to the
   AppHost directory, and must name a directory that already exists. `ref` cannot be combined
@@ -187,6 +188,28 @@ a project reference would be.
   branch there is safe. Entries you never add still cost network and disk for that first clone. The
   AppHost logs which ones those were at startup — and warns if one of them failed, since nothing
   else would ever tell you — so you know what to drop.
+
+#### Managed checkouts don't inherit your AppHost repository's build settings
+
+A managed checkout is cloned *inside* your AppHost's repository, and MSBuild and NuGet resolve
+`Directory.Build.props`, `Directory.Build.targets`, `Directory.Packages.props` and `nuget.config`
+by walking **up** from each project. Left alone, that means another team's repository gets built
+under rules written for yours — most visibly as `NU1008` on every pinned `PackageReference` when
+your repository turns on central package management, and least visibly as your
+`packageSourceMapping` confining that repository's restores to your feeds (a leak that hides
+behind a warm `~/.nuget/packages` and only surfaces on a clean machine or in CI).
+
+So alongside the `.gitignore`, `.servicesources/` gets four tool-managed files that end the walk
+there: an empty `Directory.Build.props` and `Directory.Build.targets`, a `Directory.Packages.props`
+setting `ManagePackageVersionsCentrally=false`, and a `nuget.config` whose only content is
+`<packageSourceMapping><clear /></packageSourceMapping>`. They are rewritten whenever their content
+is out of date, so upgrading the package updates them.
+
+This only supplies what a checkout lacks. A checkout carrying its own `Directory.Build.props` or
+`Directory.Packages.props` is found first and keeps its own settings — including central package
+management, if that's how that repository builds. Clearing the source *mapping* is likewise
+permissive: it lifts a restriction rather than removing a feed, so each checkout's `nuget.config`
+governs its sources exactly as it would standalone.
 
 #### Several services from one repository
 
