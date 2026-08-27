@@ -20,7 +20,7 @@ move a core-only AppHost off it.
 ### Fixed
 
 - **`KoalaSoft.Aspire.Hosting.ServiceSources.Java` and `.JavaScript` are published again**
-  ([#116]). Both satellites were rejected by nuget.org during the `0.3.0` release and exist at
+  ([#117]). Both satellites were rejected by nuget.org during the `0.3.0` release and exist at
   no version on that feed; `0.3.1` is the first release either of them reaches it at. The
   `0.3.0` core package published normally in the same run, so a `0.3.0` AppHost using only
   core is unaffected.
@@ -57,7 +57,7 @@ move a core-only AppHost off it.
 ### Changed
 
 - CI packs the release shape as well as the prerelease one, and fails on a stable package whose
-  nuspec declares a prerelease version anywhere ([#116]). Every pack before this ran off a tag
+  nuspec declares a prerelease version anywhere ([#117]). Every pack before this ran off a tag
   and so was always a prerelease, which is why `0.3.0` passed every check and then failed the
   push. `RELEASING.md` records the rest of the process.
 
@@ -337,5 +337,5 @@ Targets `net10.0`.
 [#80]: https://github.com/flojon/aspire-servicesources/issues/80
 [#89]: https://github.com/flojon/aspire-servicesources/issues/89
 [#112]: https://github.com/flojon/aspire-servicesources/pull/112
-[#116]: https://github.com/flojon/aspire-servicesources/pull/116
+[#117]: https://github.com/flojon/aspire-servicesources/pull/117
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
