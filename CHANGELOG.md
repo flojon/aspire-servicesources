@@ -11,6 +11,8 @@ nothing will fail to build to warn you.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-27
+
 ### Breaking
 
 - **Removed the public `ServiceResource` type** ([#62]). `AddService()` used to return a
@@ -123,9 +125,10 @@ nothing will fail to build to warn you.
   satisfies every constraint in the graph, so a floor only decides how far *back* a consumer
   may go. The test suite runs against the floor rather than latest, for the same reason.
 
-  The JavaScript satellite's `Aspire.Hosting.JavaScript` floor is deliberately left alone -
-  it is part of the Aspire package family and has to move in step with core's
-  `Aspire.Hosting`, tracked in [#89].
+  The JavaScript satellite's `Aspire.Hosting.JavaScript` floor was left alone by this change,
+  because it is part of the Aspire package family and has to move in step with core's
+  `Aspire.Hosting` rather than on its own. Both moved together later in this same release -
+  see **The Aspire floor moves from 13.4.6 to 13.5.2** ([#112]) below.
 
 - **Calls on an `AddService()` result that used to do nothing now take effect** ([#62]).
   `IResourceWithServiceDiscovery` extends `IResourceWithEndpoints` and `IResource`, so every
@@ -220,6 +223,8 @@ nothing will fail to build to warn you.
 - The install section now says to add a satellite package *instead of* the core package
   rather than alongside it, so an AppHost that uses one carries a single reference and has no
   second version to keep in step ([#79]).
+- The guest-language section and the TypeScript sample now name the Aspire CLI version they
+  need, 13.6.0 or newer - the codegen fix they depend on is in no released CLI yet ([#57]).
 
 ## [0.2.0] - 2026-08-18
 
@@ -250,7 +255,8 @@ Targets `net10.0`.
 - Fail-fast configuration validation with `ServiceSourcesConfigurationException`.
 - MIT license, README, symbol packages, and Trusted Publishing (OIDC) to nuget.org.
 
-[Unreleased]: https://github.com/flojon/aspire-servicesources/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/flojon/aspire-servicesources/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/flojon/aspire-servicesources/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/flojon/aspire-servicesources/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/flojon/aspire-servicesources/releases/tag/v0.1.0
 
@@ -267,6 +273,7 @@ Targets `net10.0`.
 [#53]: https://github.com/flojon/aspire-servicesources/issues/53
 [#55]: https://github.com/flojon/aspire-servicesources/pull/55
 [#56]: https://github.com/flojon/aspire-servicesources/pull/56
+[#57]: https://github.com/flojon/aspire-servicesources/pull/57
 [#58]: https://github.com/flojon/aspire-servicesources/issues/58
 [#59]: https://github.com/flojon/aspire-servicesources/pull/59
 [#60]: https://github.com/flojon/aspire-servicesources/pull/60

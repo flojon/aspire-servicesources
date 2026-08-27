@@ -155,8 +155,23 @@ Full changelog: $(ChangelogUrl)</PackageReleaseNotes>
     <Message Importance="normal"
              Text="PackageReleaseNotes taken from $(ChangelogFile) section '$(_ChangelogSectionName)'."
              Condition="'$(_ChangelogSectionName)' != ''" />
+    <!-- Split by whether the version is a prerelease, because the two cases mean opposite
+         things and ci.yml builds with -warnaserror.
+
+         A release version with no section of its own is the mistake this guard exists for:
+         a tag was pushed and its notes were never written, and the packages that tag
+         publishes would carry a bare link in place of them.
+
+         A prerelease reaching here is the ordinary state of main for a while after a release.
+         Closing the changelog renames [Unreleased] to the version that shipped, so until the
+         next entry is written there is genuinely nothing unreleased to describe - and every
+         build between those two points is a prerelease. Warning on it would fail CI on every
+         PR for having nothing to say, so report it and move on. -->
+    <Message Importance="normal"
+             Text="No '$(PackageVersion)' section in $(ChangelogFile) and nothing unreleased - packing with a link to the changelog."
+             Condition="'$(_ChangelogSectionName)' == '' and $(PackageVersion.Contains('-'))" />
     <Warning Text="No '$(PackageVersion)' section in $(ChangelogFile) - packing with a link to the changelog instead of release notes."
-             Condition="'$(_ChangelogSectionName)' == ''" />
+             Condition="'$(_ChangelogSectionName)' == '' and !$(PackageVersion.Contains('-'))" />
   </Target>
 
   <!--
