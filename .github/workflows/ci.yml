@@ -66,6 +66,31 @@ jobs:
           dotnet pack src/Aspire.Hosting.ServiceSources.Java/Aspire.Hosting.ServiceSources.Java.csproj -c Release --no-build -o ./artifacts/package
           dotnet pack src/Aspire.Hosting.ServiceSources.JavaScript/Aspire.Hosting.ServiceSources.JavaScript.csproj -c Release --no-build -o ./artifacts/package
 
+      # Everything above packs whatever MinVer computes for the commit, which off a tag is
+      # always a prerelease - so until a release tag existed, no pack in CI had ever produced
+      # the shape that actually gets pushed to nuget.org, and the two differ in a way that
+      # matters: PinCoreDependency closes a prerelease build's range with a -0 upper bound,
+      # which nuget.org's gallery rejects at push time as an invalid version. v0.3.0 tagged,
+      # built, packed and passed every check here, then failed the push for both satellites.
+      #
+      # So pack the release shape too. The version is synthetic and never published; it only
+      # has to be stable, and to have a minor that differs from the patch so a bound built
+      # from the wrong component cannot coincidentally match.
+      #
+      # PackageReleaseNotes is set explicitly for two reasons, and the second is load-bearing.
+      # It keeps the changelog target from warning that 9.9.9 has no section - that target
+      # fills the property only when it is empty. And it keeps the changelog *out* of this
+      # nuspec: the 0.3.0 entry documents this very bound in an XML example, and only < and >
+      # are escaped when it is embedded, so the literal text version="[0.3.0, 0.4.0-0)" would
+      # survive into the manifest and trip the prerelease scan below on prose.
+      - name: Pack the release shape
+        run: |
+          for proj in Aspire.Hosting.ServiceSources Aspire.Hosting.ServiceSources.Java Aspire.Hosting.ServiceSources.JavaScript; do
+            dotnet pack "src/$proj/$proj.csproj" -c Release -o ./artifacts/stable \
+              -p:MinVerVersionOverride=9.9.9 \
+              -p:PackageReleaseNotes="release-shape check"
+          done
+
       # PinCoreDependency in Directory.Build.targets rewrites the satellites' core dependency
       # into a version range, hooking _GetProjectReferenceVersions - a NuGet-internal target.
       # If a future SDK renames or reorders that target the rewrite silently stops happening
@@ -79,34 +104,71 @@ jobs:
       # Every packed package except core is checked, rather than a name pattern covering the
       # satellites that exist today: the failure this guards against is silent, so a satellite
       # added later must not be able to slip past by being named something else.
+      #
+      # Checked over both packed shapes, the prerelease one and the release one, because the
+      # upper bound deliberately differs between them and only one of the two is what gets
+      # pushed to nuget.org. A single shape passing says nothing about the other.
       - name: Verify satellites constrain core
         run: |
-          core=$(ls ./artifacts/package/KoalaSoft.Aspire.Hosting.ServiceSources.[0-9]*.nupkg)
-          version=$(basename "$core" .nupkg)
-          version=${version#KoalaSoft.Aspire.Hosting.ServiceSources.}
-          # The bound PinCoreDependency computes: next minor, with -0 so the range excludes
-          # that minor's prereleases too. Asserted in full - matching only the floor would
-          # pass a range whose upper bound had drifted anywhere at all.
-          rest=${version#*.}
-          expected="[$version, ${version%%.*}.$((${rest%%.*} + 1)).0-0)"
-          echo "core packed as $version; satellites must declare $expected"
-          for pkg in ./artifacts/package/KoalaSoft.Aspire.Hosting.ServiceSources.*.nupkg; do
-            if [ "$pkg" = "$core" ]; then continue; fi
-            deps=$(unzip -p "$pkg" '*.nuspec' \
-              | grep -o '<dependency id="KoalaSoft.Aspire.Hosting.ServiceSources" version="[^"]*"' \
-              || true)
-            if [ -z "$deps" ]; then
-              echo "::error::$(basename "$pkg") declares no dependency on core"
-              exit 1
-            fi
-            unconstrained=$(printf '%s\n' "$deps" | grep -vF "version=\"$expected\"" || true)
-            if [ -n "$unconstrained" ]; then
-              echo "::error::$(basename "$pkg") does not constrain core to $expected"
-              printf '%s\n' "$unconstrained"
-              exit 1
-            fi
-            echo "$(basename "$pkg"): $(printf '%s\n' "$deps" | head -1)"
+          for dir in ./artifacts/package ./artifacts/stable; do
+            core=$(ls "$dir"/KoalaSoft.Aspire.Hosting.ServiceSources.[0-9]*.nupkg)
+            version=$(basename "$core" .nupkg)
+            version=${version#KoalaSoft.Aspire.Hosting.ServiceSources.}
+            # The bound PinCoreDependency computes: next minor, suffixed with -0 on a
+            # prerelease build so the range excludes that minor's prereleases too, and left
+            # bare on a stable one because nuget.org refuses to accept a prerelease bound.
+            # Asserted in full - matching only the floor would pass a range whose upper bound
+            # had drifted anywhere at all.
+            rest=${version#*.}
+            case "$version" in
+              *-*) suffix="-0" ;;
+              *)   suffix="" ;;
+            esac
+            expected="[$version, ${version%%.*}.$((${rest%%.*} + 1)).0$suffix)"
+            echo "core packed as $version; satellites must declare $expected"
+            for pkg in "$dir"/KoalaSoft.Aspire.Hosting.ServiceSources.*.nupkg; do
+              if [ "$pkg" = "$core" ]; then continue; fi
+              deps=$(unzip -p "$pkg" '*.nuspec' \
+                | grep -o '<dependency id="KoalaSoft.Aspire.Hosting.ServiceSources" version="[^"]*"' \
+                || true)
+              if [ -z "$deps" ]; then
+                echo "::error::$(basename "$pkg") declares no dependency on core"
+                exit 1
+              fi
+              unconstrained=$(printf '%s\n' "$deps" | grep -vF "version=\"$expected\"" || true)
+              if [ -n "$unconstrained" ]; then
+                echo "::error::$(basename "$pkg") does not constrain core to $expected"
+                printf '%s\n' "$unconstrained"
+                exit 1
+              fi
+              echo "$(basename "$pkg"): $(printf '%s\n' "$deps" | head -1)"
+            done
           done
+
+      # The rule the release shape has to satisfy, stated on its own rather than inferred from
+      # the bound above: nuget.org fails the *push* of a stable package whose nuspec mentions a
+      # prerelease version anywhere, including as a dependency range's upper bound
+      # (NuGetGallery#6948). Nothing local catches it - pack emits at most NU5104, a warning,
+      # and the client, restore and GitHub Packages all accept the package. The first signal is
+      # a 400 from nuget.org, by which point the tag is pushed and the release is public.
+      #
+      # Scanned over every version attribute in the nuspec rather than only the core
+      # dependency, since the rule is about the manifest as a whole and any third-party
+      # dependency could acquire a prerelease bound the same way.
+      - name: Verify the release shape carries no prerelease version
+        run: |
+          for pkg in ./artifacts/stable/*.nupkg; do
+            prerelease=$(unzip -p "$pkg" '*.nuspec' \
+              | grep -o 'version="[^"]*"' \
+              | grep -- '-' \
+              || true)
+            if [ -n "$prerelease" ]; then
+              echo "::error::$(basename "$pkg") is stable but its nuspec declares a prerelease version; nuget.org will reject the push"
+              printf '%s\n' "$prerelease"
+              exit 1
+            fi
+          done
+          echo "release-shape nuspecs declare no prerelease versions"
 
       # `polyglot` is the tag `aspire add` reads to decide whether to surface a package to a
       # non-C# AppHost, which is the audience the Aspire Type System exports exist for.
