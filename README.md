@@ -191,25 +191,48 @@ a project reference would be.
 
 #### Managed checkouts don't inherit your AppHost repository's build settings
 
-A managed checkout is cloned *inside* your AppHost's repository, and MSBuild and NuGet resolve
-`Directory.Build.props`, `Directory.Build.targets`, `Directory.Packages.props` and `nuget.config`
-by walking **up** from each project. Left alone, that means another team's repository gets built
-under rules written for yours — most visibly as `NU1008` on every pinned `PackageReference` when
-your repository turns on central package management, and least visibly as your
-`packageSourceMapping` confining that repository's restores to your feeds (a leak that hides
-behind a warm `~/.nuget/packages` and only surfaces on a clean machine or in CI).
+A managed checkout is cloned *inside* your AppHost's repository, and MSBuild, NuGet, the .NET SDK
+host and the compiler's analyzer configuration all find their settings by walking **up** from each
+project or source file. Left alone, that means another team's repository gets built under rules
+written for yours — most visibly as `NU1008` on every pinned `PackageReference` when your
+repository turns on central package management, and least visibly as your `packageSourceMapping`
+confining that repository's restores to your feeds (a leak that hides behind a warm
+`~/.nuget/packages` and only surfaces on a clean machine or in CI).
 
-So alongside the `.gitignore`, `.servicesources/` gets four tool-managed files that end the walk
-there: an empty `Directory.Build.props` and `Directory.Build.targets`, a `Directory.Packages.props`
-setting `ManagePackageVersionsCentrally=false`, and a `nuget.config` whose only content is
-`<packageSourceMapping><clear /></packageSourceMapping>`. They are rewritten whenever their content
-is out of date, so upgrading the package updates them.
+So alongside the `.gitignore`, `.servicesources/` gets six tool-managed files that end those walks
+there:
 
-This only supplies what a checkout lacks. A checkout carrying its own `Directory.Build.props` or
-`Directory.Packages.props` is found first and keeps its own settings — including central package
-management, if that's how that repository builds. Clearing the source *mapping* is likewise
-permissive: it lifts a restriction rather than removing a feed, so each checkout's `nuget.config`
-governs its sources exactly as it would standalone.
+| File | Content | Stops |
+| --- | --- | --- |
+| `Directory.Build.props`, `Directory.Build.targets` | `<Project />` | your repository's build customisation |
+| `Directory.Packages.props` | `ManagePackageVersionsCentrally=false` | your repository's central package management |
+| `nuget.config` | `<packageSourceMapping><clear /></packageSourceMapping>` | your repository's package source mapping |
+| `.editorconfig` | `root = true` | your repository's code style and analyzer severities |
+| `global.json` | `{}` | your repository's SDK pin and `msbuild-sdks` versions |
+
+Each is written with a comment saying what it is and why it's there, since you'll find them on disk
+with no git history to explain them, and all are rewritten whenever their content is out of date,
+so upgrading the package updates them.
+
+Every barrier is permissive — each drops a constraint the checkout never opted into, none adds one
+— and this only supplies what a checkout lacks. A checkout carrying its own `Directory.Build.props`,
+`Directory.Packages.props`, `.editorconfig` or `global.json` is found first and keeps its own
+settings, including central package management if that's how that repository builds. Clearing the
+source *mapping* is likewise permissive: it lifts a restriction rather than removing a feed, so
+each checkout's `nuget.config` governs its sources exactly as it would standalone.
+
+Two of these are worth a note:
+
+- **`.editorconfig` needs its own barrier** rather than riding on the `Directory.Build.props` one,
+  because analyzer severity written as `dotnet_diagnostic.<id>.severity = error` comes from the
+  `.editorconfig` itself — not from `EnforceCodeStyleInBuild` or `TreatWarningsAsErrors`. Without
+  it, your repository's code style raises the checkout's own analyzers to errors.
+- **`global.json` has two halves that resolve from different anchors**, so the barrier covers one
+  of them completely and the other conditionally. `msbuild-sdks` resolves by walking up from the
+  *project*, so it is stopped outright. `sdk.version` resolves by walking up from the *current
+  working directory*, so it is stopped only for a build or run launched from inside the checkout —
+  which is the working directory Aspire gives a project resource. A build you launch with the
+  AppHost directory as its working directory still sees your repository's SDK pin.
 
 #### Several services from one repository
 

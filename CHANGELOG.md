@@ -15,12 +15,12 @@ nothing will fail to build to warn you.
 
 - **Managed checkouts no longer inherit the AppHost repository's MSBuild and NuGet settings**
   ([#119]). A checkout is cloned into `<AppHostDirectory>/.servicesources/checkouts/<service>/`,
-  which is inside the AppHost's own repository, and MSBuild and NuGet resolve
-  `Directory.Build.props`, `Directory.Build.targets`, `Directory.Packages.props` and `nuget.config`
-  by walking *up* from each project. Nothing stopped that walk at `.servicesources/`, so another
-  team's repository was built under rules written for yours.
+  which is inside the AppHost's own repository, and MSBuild, NuGet, the .NET SDK host and the
+  compiler's analyzer configuration all find their settings by walking *up* from each project or
+  source file. Nothing stopped those walks at `.servicesources/`, so another team's repository was
+  built under rules written for yours.
 
-  Two ways it showed up:
+  Ways it showed up:
 
   - An AppHost repository with `ManagePackageVersionsCentrally=true` failed a checkout's restore
     with `NU1008` for every version pinned on a `PackageReference`. The diagnostic names the cloned
@@ -31,19 +31,39 @@ nothing will fail to build to warn you.
     `nuget.config` does not clear a mapping defined further up. This one is silent: a warm
     `~/.nuget/packages` satisfies the restore without contacting a source, so it passes locally and
     fails on a clean machine or in CI.
+  - An `.editorconfig` in the AppHost repository applied its code style to the checkout. Where that
+    style is written as `dotnet_diagnostic.<id>.severity = error`, it raised the checkout's own
+    analyzers to errors. Severity comes from the `.editorconfig` itself rather than from
+    `EnforceCodeStyleInBuild` or `TreatWarningsAsErrors`, so neutralizing the MSBuild side does not
+    neutralize this one.
+  - A `global.json` in the AppHost repository applied its SDK pin and its `msbuild-sdks` versions
+    to the checkout.
 
-  `.servicesources/` now carries four tool-managed files that end the walk there, written next to
+  `.servicesources/` now carries six tool-managed files that end those walks there, written next to
   the `.gitignore` it already creates: an empty `Directory.Build.props` and
   `Directory.Build.targets`, a `Directory.Packages.props` setting
-  `ManagePackageVersionsCentrally=false`, and a `nuget.config` containing only
-  `<packageSourceMapping><clear /></packageSourceMapping>`. Unlike the `.gitignore`, whose content
-  is fixed, these are rewritten whenever they differ from what the installed version writes, so an
-  upgrade refreshes existing checkout roots rather than stranding them on a stale copy.
+  `ManagePackageVersionsCentrally=false`, a `nuget.config` containing only
+  `<packageSourceMapping><clear /></packageSourceMapping>`, an `.editorconfig` containing only
+  `root = true`, and a `global.json` containing an empty object. Unlike the `.gitignore`, whose
+  content is fixed, these are rewritten whenever they differ from what the installed version
+  writes, so an upgrade refreshes existing checkout roots rather than stranding them on a stale
+  copy.
 
-  Both barriers only supply what a checkout lacks. One that brings its own `Directory.Build.props`
-  or `Directory.Packages.props` is found first and keeps its own settings, central package
-  management included; clearing the source *mapping* lifts a restriction rather than removing a
-  feed, so each checkout's `nuget.config` governs its sources as it would standalone.
+  Every barrier only supplies what a checkout lacks, and every one of them is permissive — each
+  drops a constraint the checkout never opted into, none adds one. A checkout bringing its own
+  `Directory.Build.props`, `Directory.Packages.props`, `.editorconfig` or `global.json` is found
+  first and keeps its own settings, central package management included; clearing the source
+  *mapping* lifts a restriction rather than removing a feed, so each checkout's `nuget.config`
+  governs its sources as it would standalone.
+
+  `{}` is a genuinely neutral `global.json`, contrary to what [#119] assumed: hostfxr stops at the
+  first `global.json` *file* it finds and does not keep walking in search of one carrying an `sdk`
+  section, so an empty object requests no version at all. Note one asymmetry in what that buys.
+  `msbuild-sdks` resolves by walking up from the *project* directory and is stopped outright;
+  `sdk.version` resolves by walking up from the *current working directory*, so it is stopped only
+  for a build or run launched from inside the checkout — the working directory Aspire gives a
+  project resource. A build launched with the AppHost directory as its working directory still sees
+  the host's pin. That half is documented in the README rather than papered over.
 
 ## [0.3.1] - 2026-08-27
 

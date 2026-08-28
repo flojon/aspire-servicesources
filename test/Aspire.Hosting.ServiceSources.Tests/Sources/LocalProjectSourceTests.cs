@@ -1024,6 +1024,8 @@ public class LocalProjectSourceTests
         Assert.True(File.Exists(Path.Combine(dir, "Directory.Build.targets")));
         Assert.True(File.Exists(Path.Combine(dir, "Directory.Packages.props")));
         Assert.True(File.Exists(Path.Combine(dir, "nuget.config")));
+        Assert.True(File.Exists(Path.Combine(dir, ".editorconfig")));
+        Assert.True(File.Exists(Path.Combine(dir, "global.json")));
     }
 
     [Fact]

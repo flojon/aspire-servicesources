@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Xml.Linq;
 using Aspire.Hosting.ServiceSources.Git;
 
@@ -75,6 +76,45 @@ public class CheckoutBuildBarrierTests
     }
 
     [Fact]
+    public void Ensure_WritesAnEditorConfigThatEndsTheUpwardWalkAndCarriesNoStyleOfItsOwn()
+    {
+        // .editorconfig cascades up too, and stops only at a file setting root = true. Severity
+        // comes from the .editorconfig itself, so the Directory.Build.props barrier does not cover
+        // it: a host repo spelling its code style as dotnet_diagnostic.<id>.severity = error would
+        // otherwise raise the checkout's own analyzers to errors.
+        var dir = NewToolDirectory();
+
+        CheckoutBuildBarrier.Ensure(dir);
+
+        var directives = File.ReadAllLines(Path.Combine(dir, ".editorconfig"))
+            .Select(line => line.Trim())
+            .Where(line => line.Length > 0 && !line.StartsWith('#'))
+            .ToArray();
+        Assert.Equal(["root = true"], directives);
+    }
+
+    [Fact]
+    public void Ensure_WritesAGlobalJsonThatRequestsNoSdkVersionAndPinsNoMSBuildSdk()
+    {
+        // hostfxr stops at the first global.json *file* it finds — it does not keep walking in
+        // search of one carrying an sdk section — so an empty object requests no version at all,
+        // which is exactly what no global.json existing anywhere does. That is the neutral value
+        // the issue assumed did not exist.
+        var dir = NewToolDirectory();
+
+        CheckoutBuildBarrier.Ensure(dir);
+
+        // Comments are skipped rather than rejected: verified against the real toolchain that both
+        // readers of this file tolerate one — hostfxr, and MSBuild's own msbuild-sdks reader.
+        using var document = JsonDocument.Parse(
+            File.ReadAllText(Path.Combine(dir, "global.json")),
+            new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip });
+        Assert.Equal(JsonValueKind.Object, document.RootElement.ValueKind);
+        Assert.False(document.RootElement.TryGetProperty("sdk", out _));
+        Assert.False(document.RootElement.TryGetProperty("msbuild-sdks", out _));
+    }
+
+    [Fact]
     public void Ensure_RunAgainOverItsOwnOutput_DoesNotRewriteTheFiles()
     {
         var dir = NewToolDirectory();
@@ -129,5 +169,11 @@ public class CheckoutBuildBarrierTests
             var document = XDocument.Load(Path.Combine(dir, name));
             Assert.NotNull(document.Root);
         }
+
+        using var globalJson = JsonDocument.Parse(
+            File.ReadAllText(Path.Combine(dir, "global.json")),
+            new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip });
+        Assert.Equal(JsonValueKind.Object, globalJson.RootElement.ValueKind);
+        Assert.Contains("root = true", File.ReadAllText(Path.Combine(dir, ".editorconfig")));
     }
 }
