@@ -112,7 +112,7 @@ services:
     kind: java
     prepare:
       command: ["./prepare.sh"]
-      windows: ["pwsh", "-File", "prepare.ps1"]   # optional
+      windowsCommand: ["pwsh", "-File", "prepare.ps1"]  # optional; overrides command on Windows
       mode: once                                  # oncePerCommit (default) | once | always | never
                                                   # `once` here: the jar version is pinned by the
                                                   # filename below, not by the repository's commit
@@ -135,14 +135,23 @@ mechanisms pick it up with no changes:
 `command` is a list, not a string. There is no shell, so no quoting or word-splitting rules to
 document or get wrong, and an argument containing spaces needs no escaping.
 
-`windows` is the command used when `OperatingSystem.IsWindows()`. It exists because one
-`servicesources.yaml` is committed and shared by a team on every platform, so the value can only be
-spelled one way, and `./prepare.sh` is not executable on Windows. The Java kind solves the same
-problem by convention (`mvnw` → `mvnw.cmd`, `JavaLocalResourceKind.WrapperForPlatform`) because those
-wrapper names are fixed and known; an arbitrary bootstrap command has no canonical Windows
-counterpart, so it must be explicit. It stays optional — with no `windows`, `command` runs as-is,
-which is correct for the many cross-platform cases (`npm`, `make`, `python`, `dotnet`), and only an
-exec failure points the developer at it.
+`windowsCommand` replaces `command` when `OperatingSystem.IsWindows()`. The pair is named this way
+rather than `command`/`windows` because those two are not parallel — one names *what* to run and the
+other names *when*, leaving a reader to guess whether `windows` replaces `command`, adds to it, or
+implies `command` was the POSIX one all along. `windowsCommand` states both halves: it is the
+command, for Windows.
+
+It exists because one `servicesources.yaml` is committed and shared by a team on every platform, so
+each value can only be spelled one way, and `./prepare.sh` is not executable on Windows. The Java
+kind solves the same problem by convention (`mvnw` → `mvnw.cmd`,
+`JavaLocalResourceKind.WrapperForPlatform`) because those wrapper names are fixed and known; an
+arbitrary bootstrap command has no canonical Windows counterpart, so it must be explicit.
+
+It stays optional. With no `windowsCommand`, `command` runs unchanged on Windows too — correct for
+the many cross-platform cases (`npm`, `make`, `python`, `dotnet`) — and only an exec failure points
+the developer at it. There is deliberately no `linuxCommand`/`macosCommand`: the only distinction
+that has ever mattered here is POSIX versus Windows, and a script that must differ between Linux and
+macOS can branch internally.
 
 ### Schema — developer config, and the override rule
 
@@ -156,16 +165,21 @@ exec failure points the developer at it.
 }
 ```
 
-The developer's block is merged over the catalog's **per field**: `command` and `windows` replace if
-present, `mode` overrides if present, anything absent is inherited. Wholesale replacement was
-rejected because the two most valuable uses — disabling an inherited step and forcing it to re-run —
-would then require restating the command:
+The developer's block is merged over the catalog's **per field**, with one exception: `mode`
+overrides if present, anything absent is inherited, and `command`/`windowsCommand` are replaced
+*together* as a unit if the developer supplies either. Wholesale replacement was rejected because the
+two most valuable uses — disabling an inherited step and forcing it to re-run — would then require
+restating the command. The command pair is exempted from the per-field rule because splitting it is
+never what anyone means: a developer who overrides `command` and says nothing about
+`windowsCommand` would otherwise run their own command on Linux and the catalog's on Windows, which
+is a bug wearing the costume of a feature.
 
 | Developer writes | Effect |
 | --- | --- |
 | `{"mode": "never"}` | the catalog's step is disabled; nothing runs |
 | `{"mode": "always"}` | the catalog's command runs on every start |
-| `{"command": ["make", "bootstrap"]}` | the catalog's command is replaced, its mode kept |
+| `{"command": ["make", "bootstrap"]}` | the catalog's command **and** `windowsCommand` are replaced; the developer now has no Windows variant, and `make` runs there too. Mode kept |
+| `{"command": [...], "windowsCommand": [...]}` | both replaced, mode kept |
 | *(absent)* | the catalog's block stands |
 
 A developer block with no catalog block behind it stands on its own: a developer may introduce a
@@ -222,7 +236,7 @@ refuses a linked worktree or a `--separate-git-dir` clone before ever getting he
 compares only the command, so it runs once per checkout and stays satisfied as the commit moves under
 it. Both re-run when the command changes, because a different command is a different step — the hash
 is over the *resolved* argv for the current platform, so a developer who switches from Linux to
-Windows and picks up the `windows` variant re-runs rather than inheriting a completion recorded for a
+Windows and picks up the `windowsCommand` variant re-runs rather than inheriting a completion recorded for a
 different command. `mode: always` skips the marker read. `mode: never` skips everything.
 
 #### What a changed commit does, and what it costs
@@ -358,7 +372,7 @@ step". More defensible than `ifMissing`, since it is general and keeps no knowle
 Dropped on three counts. It does not buy what it appears to: the guard is itself a process launch,
 the same one `always` pays for a command that opens with its own check, so it saves nothing except
 where the *command* is expensive to launch and the guard is not. It doubles the schema — a second
-command needs its own `windows` variant, path confinement, output handling, and interaction with four
+command needs its own `windowsCommand` variant, path confinement, output handling, and interaction with four
 modes. And its failure semantics have no good answer: exit 0 skips and non-zero runs, so a guard
 broken by a typo either silently means "run every time" or is made fatal, in which case a guard can
 fail a service it was only meant to advise. #118 also excludes it by name — "not asking for: a
@@ -434,7 +448,7 @@ same mechanism, different presentation.
 
 A non-zero exit throws `ServiceSourcesConfigurationException` naming the service, the resolved
 command and the exit code, with the tail of the captured output. A command that cannot be launched at
-all is reported separately and, on Windows with no `windows` variant configured, names that as the
+all is reported separately and, on Windows with no `windowsCommand` variant configured, names that as the
 likely cause. Per finding 2, both fail the AppHost.
 
 ### `path` checkouts
@@ -490,6 +504,12 @@ process.
   even when the commit has moved, and re-runs when the command changes; `oncePerCommit` re-runs on a
   moved commit; `always` ignores a matching marker; `never` runs nothing and writes nothing.
 - **An unknown mode value is rejected** by name, listing the four accepted ones, in both files.
+- **Platform selection** — `windowsCommand` is used on Windows and ignored elsewhere; `command` runs
+  on Windows when no `windowsCommand` is set. `JavaLocalResourceKind.WrapperForPlatform` is the
+  precedent for testing the Windows path from a Linux run: the platform is a parameter, not a call
+  to `OperatingSystem.IsWindows()` buried in the resolver.
+- **The command pair overrides as a unit** — a developer block supplying only `command` clears the
+  catalog's `windowsCommand` rather than inheriting it.
 - **Override merge** — each row of the table above, plus a developer block with no catalog block.
 - **Ordering** — the step runs after the checkout is reconciled and before the kind's `Resolve`;
   a `dotnet` service whose project file is produced by the step resolves.
