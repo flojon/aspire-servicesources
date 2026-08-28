@@ -159,6 +159,17 @@ Critically, an unconfigured service is **not** a `"local"` service, so `LocalChe
 never sees it and nothing is cloned for it. This is the mechanism by which the design stops
 paying for repositories the developer never chose.
 
+**The authoring API here is the one upstream is most likely to move.**
+microsoft/aspire#17722 (*Spec: Custom Resource Lifecycle Model*, open, no milestone) proposes
+replacing `WithInitialState` with `WithResourceType` / `WithProperty` and a `ResourceContext`
+exposing `SetStateAsync` / `SetPropertyAsync`. If it lands, this placeholder is the code that
+changes — a contained change, and a reason to keep its construction in one place rather than
+spread across the picker. The same proposal's first layer fixes microsoft/aspire#13647, where
+`DCPExecutor` clobbers custom state published through `PublishUpdateAsync`. That should not reach
+a plain `Resource` subclass, which DCP does not manage, but the placeholder publishes a custom
+state and a custom property, so **confirm it survives a DCP watch cycle when implementing** rather
+than assuming it does. Both are on the watch list in #83.
+
 ### Push, then pull
 
 **Push.** One subscription to `AfterResourcesCreatedEvent`. If any placeholders exist and
@@ -224,6 +235,9 @@ The dialog itself needs a live AppHost and a dashboard client, so the logic is k
   them, and the result reloads through `DeveloperConfigLoader` unchanged.
 - Consumer safety: a resource that references an unconfigured service composes and the
   application starts.
+- State durability: the placeholder's custom state and property are still present after the
+  application has started and DCP has published its own updates — the microsoft/aspire#13647
+  check noted above.
 
 One thin integration test covers that the subscription raises an interaction when placeholders
 exist and raises none when they do not.
