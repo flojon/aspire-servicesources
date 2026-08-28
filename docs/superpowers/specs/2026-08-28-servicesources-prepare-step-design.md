@@ -315,10 +315,17 @@ fails halfway is re-run from the beginning on the next start, against a checkout
 whatever the first attempt managed to produce. A prepare command that cannot tolerate that is
 incorrect under every mode, and the README should say so plainly.
 
-#### Rejected: an `ifMissing` guard, and timestamp guards
+#### Rejected: `ifMissing`, timestamps, and a generic guard command
 
-Two narrower guards were considered and dropped. Both are recorded because the shape of the question
-recurs, and the answer is the same one this section already gives.
+Three narrower guards were considered and dropped. All are recorded because the shape of the question
+recurs, and the answer is the same one this section already gives. Every situation they were meant to
+serve already has one:
+
+| Situation | Answer |
+| --- | --- |
+| the command is yours and should be cheap when there is nothing to do | `always`; the command guards itself |
+| the command is not yours and is expensive | `once` / `oncePerCommit` — the marker *is* the guard |
+| the launcher is slow but the check would be cheap | a guarded mode; coarser, but correct |
 
 **`ifMissing: [...]`** — a list of paths in the catalog, skipping the step when they all exist. It is
 appealing: "is the artifact there" is a more honest question than "has the commit moved", and it
@@ -345,6 +352,22 @@ content instead. Creation time is worse still — `File.GetCreationTimeUtc` is u
 filesystems, where a birth time may not be recorded at all. The one variant that half-works,
 re-running when `prepare.sh` is newer than the jar, is a fragile restatement of what
 `oncePerCommit` already catches robustly through the commit.
+
+**A generic `guard:` command** — a second command run first, whose non-zero exit means "run the
+step". More defensible than `ifMissing`, since it is general and keeps no knowledge in the catalog.
+Dropped on three counts. It does not buy what it appears to: the guard is itself a process launch,
+the same one `always` pays for a command that opens with its own check, so it saves nothing except
+where the *command* is expensive to launch and the guard is not. It doubles the schema — a second
+command needs its own `windows` variant, path confinement, output handling, and interaction with four
+modes. And its failure semantics have no good answer: exit 0 skips and non-zero runs, so a guard
+broken by a typo either silently means "run every time" or is made fatal, in which case a guard can
+fail a service it was only meant to advise. #118 also excludes it by name — "not asking for: a
+general task runner" — and two commands with conditional dispatch is the first move of one.
+
+The cost that would justify any of these is smaller than it looks. `always` launching a shell script
+that exits immediately is single-digit milliseconds; a handful of prepared services is negligible
+against a clone, a build, and DCP startup. It only bites when `always` is paired with a slow
+launcher such as a Maven wrapper, and that pairing is the mistake rather than the mode.
 
 Reading the commit needs one new internal member, `IGitClient.GetHeadCommitSha(string
 repositoryPath)`, returning `null` when it cannot be determined. Documented escape hatch for a forced
