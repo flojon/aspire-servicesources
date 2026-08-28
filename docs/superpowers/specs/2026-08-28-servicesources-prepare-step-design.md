@@ -222,6 +222,41 @@ switches from Linux to Windows and picks up the `windows` variant re-runs rather
 completion recorded for a different command. `mode: always` skips the marker read. `mode: never`
 skips everything.
 
+#### What a changed commit does, and what it costs
+
+On each resolve the marker is read and both fields compared against the current command hash and
+`GetHeadCommitSha(repoRoot)`. Any mismatch runs the step, and success rewrites the marker with the
+new values. Because the step runs after `ReconcileRepoRoot`, the SHA compared is the post-checkout
+one — the commit the step actually ran against — and because the marker lives inside `.git` it
+survives a `git checkout`, so a ref change leaves the old record in place to be invalidated rather
+than losing it.
+
+Four things move the commit, and only two of them are the intent:
+
+| Cause | Re-runs | Wanted |
+| --- | --- | --- |
+| the developer changes `ref` in `servicesources.local.json` | yes | yes — this is #81's staleness case |
+| `defaultRef` advances and is fetched | yes | yes — a jar pinned to the ref may differ |
+| the developer commits their own work in the checkout | yes | no |
+| the developer switches branch in the checkout by hand | yes | usually no |
+
+Row three is the real cost of keying on the commit, and it falls on precisely the developer
+`"local"` exists for: someone editing and committing in that checkout, who now pays a full bootstrap
+for a one-line README commit. It is accepted rather than solved. The commit is a proxy for "this
+step's inputs may have moved", and a coarse one — it over-triggers here and under-triggers when an
+external input changes behind a stable URL. For an expensive, non-incremental bootstrap,
+over-triggering is the safe direction: a stale artifact is a worse failure than a slow start. The
+under-triggering half is answered by `always` (below).
+
+A developer who is bitten by row three sets `"prepare": {"mode": "never"}` in their own config once
+the checkout is prepared — "this one is mine now, leave it alone". That is the third mode doing real
+work, not merely an opt-out from a catalog-declared step.
+
+If `GetHeadCommitSha` cannot determine the commit, the step **runs**. "Cannot verify" must not be
+allowed to mean "assume done". It should not arise for a managed checkout, which is always a real
+clone, but the fail-safe direction is worth fixing in the design rather than in whichever
+implementation gets there first.
+
 #### Change detection belongs to the script
 
 The marker deliberately keys on the commit, not on the content of the working tree. It answers "has
@@ -371,7 +406,9 @@ injection, which `LocalProjectSourceTests` already exercises with a fake. No tes
 process.
 
 - **Marker** — absent, runs; present and matching, skips; command changed, re-runs; commit changed,
-  re-runs; platform variant changed, re-runs; written only on success, so a failed step re-runs.
+  re-runs; platform variant changed, re-runs; written only on success, so a failed step re-runs;
+  an unreadable or malformed marker runs rather than throws; a null commit from `GetHeadCommitSha`
+  runs rather than skips.
 - **Modes** — `once` default when unspecified; `always` ignores a matching marker; `never` runs
   nothing and writes nothing.
 - **Override merge** — each row of the table above, plus a developer block with no catalog block.
