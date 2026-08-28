@@ -113,7 +113,9 @@ services:
     prepare:
       command: ["./prepare.sh"]
       windows: ["pwsh", "-File", "prepare.ps1"]   # optional
-      mode: once                                  # once (default) | always | never
+      mode: once                                  # oncePerCommit (default) | once | always | never
+                                                  # `once` here: the jar version is pinned by the
+                                                  # filename below, not by the repository's commit
     java:
       jarPath: graphhopper-web-11.0.jar
       args: ["server", "gh-config-local.yml"]
@@ -172,9 +174,9 @@ prepare step the catalog never declared. That file is theirs, gitignored, and al
 themselves, running in a checkout on their own machine, raises none of the provenance question that
 the catalog layer does.
 
-`mode: never` is the reason `mode` has three values rather than two. JSON cannot distinguish an
-explicit `null` from an absent key without a nullable wrapper, so disabling is expressed as a value
-rather than as an absence.
+Disabling is expressed as `mode: never` rather than as an absence because JSON cannot distinguish an
+explicit `null` from a missing key without a nullable wrapper, and because a developer overriding
+only the mode is the common case the merge rule above is shaped for.
 
 Two supporting changes: `LocalProjectSource.RelevantFields` becomes `{ "path", "ref", "prepare" }`,
 and `ServiceDeveloperConfigValidator` gains a check for it so `prepare` under a `"container"` source
@@ -216,11 +218,12 @@ deleted-and-recloned checkout re-prepares even at the same commit, which a marke
 checkout would get wrong. For a managed checkout `.git` is always a directory: `PrepareRepoRoot`
 refuses a linked worktree or a `--separate-git-dir` clone before ever getting here.
 
-`mode: once` re-runs when either the command or the commit moves — a jar pinned to the ref is the
-normal case. The hash is over the *resolved* argv for the current platform, so a developer who
-switches from Linux to Windows and picks up the `windows` variant re-runs rather than inheriting a
-completion recorded for a different command. `mode: always` skips the marker read. `mode: never`
-skips everything.
+`mode: oncePerCommit` re-runs when either the command or the commit moves. `mode: once` records and
+compares only the command, so it runs once per checkout and stays satisfied as the commit moves under
+it. Both re-run when the command changes, because a different command is a different step — the hash
+is over the *resolved* argv for the current platform, so a developer who switches from Linux to
+Windows and picks up the `windows` variant re-runs rather than inheriting a completion recorded for a
+different command. `mode: always` skips the marker read. `mode: never` skips everything.
 
 #### What a changed commit does, and what it costs
 
@@ -233,24 +236,33 @@ than losing it.
 
 Four things move the commit, and only two of them are the intent:
 
-| Cause | Re-runs | Wanted |
+| Cause | Re-runs under `oncePerCommit` | Wanted |
 | --- | --- | --- |
 | the developer changes `ref` in `servicesources.local.json` | yes | yes — this is #81's staleness case |
-| `defaultRef` advances and is fetched | yes | yes — a jar pinned to the ref may differ |
+| `defaultRef` advances and is fetched | yes | yes — the repo's own `prepare.sh` may have changed with it |
 | the developer commits their own work in the checkout | yes | no |
 | the developer switches branch in the checkout by hand | yes | usually no |
 
-Row three is the real cost of keying on the commit, and it falls on precisely the developer
-`"local"` exists for: someone editing and committing in that checkout, who now pays a full bootstrap
-for a one-line README commit. It is accepted rather than solved. The commit is a proxy for "this
-step's inputs may have moved", and a coarse one — it over-triggers here and under-triggers when an
-external input changes behind a stable URL. For an expensive, non-incremental bootstrap,
-over-triggering is the safe direction: a stale artifact is a worse failure than a slow start. The
-under-triggering half is answered by `always` (below).
+Rows three and four are why `once` exists as a separate mode rather than as another name for this
+one. The commit is a proxy for "this step's inputs may have moved", and a coarse one: it
+over-triggers there and under-triggers whenever an external input changes behind a stable URL. Which
+proxy is right depends on where the step's definition lives, and only the catalog author knows:
 
-A developer who is bitten by row three sets `"prepare": {"mode": "never"}` in their own config once
-the checkout is prepared — "this one is mine now, leave it alone". That is the third mode doing real
-work, not merely an opt-out from a catalog-declared step.
+- A bootstrap whose behavior is **fixed independently of the repository** wants `once`. The
+  motivating case is exactly this — `graphhopper-web-11.0.jar` is pinned by the filename in the
+  catalog, and a country-sized OSM extract has nothing to do with the repository's commit. A
+  developer committing a one-line README fix should not pay a four-minute graph import, and under
+  `once` they do not.
+- A bootstrap **defined by a script the repository commits** wants `oncePerCommit`. `prepare.sh`
+  lives in the repo; a team bumping it to fetch GraphHopper 12 moves the commit, and under `once`
+  every developer would silently keep running the 11 jar until someone thought to delete a marker
+  they have never heard of.
+
+`oncePerCommit` is the default on which failure is worse for someone who has not read this document.
+Its wrong answer is an unexpected rebuild after their own commit: annoying, immediately visible, and
+fixed by writing `once`. `once`'s wrong answer is running last month's artifact after the team
+updated the bootstrap: invisible, and it surfaces later as a confusing runtime failure. Visible
+slowness beats silent wrongness.
 
 If `GetHeadCommitSha` cannot determine the commit, the step **runs**. "Cannot verify" must not be
 allowed to mean "assume done". It should not arise for a managed checkout, which is always a real
@@ -278,23 +290,30 @@ Incremental rebuild is a solved problem with real dependency graphs behind it: `
 MSBuild, `npm ci`, `go build`. The step should delegate to them rather than approximate them. That is
 what `mode` selects between:
 
-| Mode | Guard | For |
-| --- | --- | --- |
-| `once` (default) | marker: command hash + commit | an expensive, network-bound, non-incremental bootstrap |
-| `always` | none — the command runs every start | an incremental script that decides its own work |
-| `never` | nothing runs | a developer opting out of an inherited step |
+| Mode | Marker records | Re-runs when | For |
+| --- | --- | --- | --- |
+| `oncePerCommit` *(default)* | command + commit | either moves | a bootstrap defined by a script the repository commits |
+| `once` | command | the command changes | an expensive bootstrap independent of the commit |
+| `always` | nothing | every start | an incremental script that decides its own work |
+| `never` | — | — | a developer opting out of an inherited step |
 
-`always` is therefore not a spare value waiting on #81. It is the answer to "re-build when things
-change", and #81's build case lands on it for the same reason: `mvnw package` is already incremental,
-so guarding it with a marker would be the mistake, not the feature. Its cost is a process launch and
-the script's own up-to-date check on every start, serially during composition — a few seconds of JVM
-startup for a Maven wrapper. That is explicit and documented rather than hidden.
+All four answer one question — how often does this run — and the guards nest: `once` is
+`oncePerCommit` minus the commit, `always` is `once` minus the command. Naming the default
+`oncePerCommit` rather than `once` is deliberate: a mode called `once` that silently re-runs whenever
+HEAD moves is a name that lies, and the mode a developer reaches for when they want it to run exactly
+one time should be the one called `once`.
 
-**The command must be safe to re-run.** Under `always` this is self-evident. Under `once` it is
-equally required and less obvious: the marker is written only on success, so a step that fails
-halfway is re-run from the beginning on the next start, against a checkout that already holds
+`always` is not a spare value waiting on #81. It is the answer to "re-build when things change", and
+#81's build case lands on it for the same reason: `mvnw package` is already incremental, so guarding
+it with a marker would be the mistake, not the feature. Its cost is a process launch and the script's
+own up-to-date check on every start, serially during composition — a few seconds of JVM startup for a
+Maven wrapper. That is explicit and documented rather than hidden.
+
+**The command must be safe to re-run.** Under `always` this is self-evident. Under the two guarded
+modes it is equally required and less obvious: the marker is written only on success, so a step that
+fails halfway is re-run from the beginning on the next start, against a checkout that already holds
 whatever the first attempt managed to produce. A prepare command that cannot tolerate that is
-incorrect under either mode, and the README should say so plainly.
+incorrect under every mode, and the README should say so plainly.
 
 Reading the commit needs one new internal member, `IGitClient.GetHeadCommitSha(string
 repositoryPath)`, returning `null` when it cannot be determined. Documented escape hatch for a forced
@@ -388,9 +407,13 @@ worktrees produces. Whether this should change is #123, which records the analys
   for its own prepare — twice the download, twice the disk. Correct rather than merely tolerable
   (see *Once per checkout, not once per repository*), but a developer running both halves of a
   monorepo will notice it.
-- **Nothing detects that a step's outputs are stale.** Only that the checkout moved. A script whose
-  inputs changed without the commit changing must handle that itself, under `mode: always` — see
-  *Change detection belongs to the script*.
+- **Nothing detects that a step's outputs are stale.** At most, that the checkout moved. A script
+  whose inputs changed without the commit changing must handle that itself, under `mode: always` —
+  see *Change detection belongs to the script*.
+- **Choosing between `once` and `oncePerCommit` is on the catalog author**, and the wrong choice is
+  quiet in one direction: `once` on a step the repository defines leaves developers running a stale
+  artifact after the bootstrap script is updated. The default is the safe one, and the README should
+  frame the choice as "does the repository define this step?" rather than as "how often".
 
 ### What this deliberately does not do
 
@@ -409,8 +432,10 @@ process.
   re-runs; platform variant changed, re-runs; written only on success, so a failed step re-runs;
   an unreadable or malformed marker runs rather than throws; a null commit from `GetHeadCommitSha`
   runs rather than skips.
-- **Modes** — `once` default when unspecified; `always` ignores a matching marker; `never` runs
-  nothing and writes nothing.
+- **Modes** — `oncePerCommit` is the default when unspecified; `once` skips on a matching command
+  even when the commit has moved, and re-runs when the command changes; `oncePerCommit` re-runs on a
+  moved commit; `always` ignores a matching marker; `never` runs nothing and writes nothing.
+- **An unknown mode value is rejected** by name, listing the four accepted ones, in both files.
 - **Override merge** — each row of the table above, plus a developer block with no catalog block.
 - **Ordering** — the step runs after the checkout is reconciled and before the kind's `Resolve`;
   a `dotnet` service whose project file is produced by the step resolves.
@@ -424,7 +449,7 @@ process.
   a foreign field.
 
 Documentation: a `prepare` subsection under `"local"` source options in the README, covering the
-schema, the override table, the marker and how to force a re-run, how to choose a mode (`once` for an
-expensive one-shot bootstrap, `always` for a script that decides its own work) and the requirement
-that the command be safe to re-run under either, the `path` skip with a pointer to #123, and the
-silent-typo caveat. `CHANGELOG.md` entry under the open version.
+schema, the override table, the marker and how to force a re-run, the four modes and how to choose
+between them (the `once` vs `oncePerCommit` question is "does the repository define this step?"), the
+requirement that the command be safe to re-run under all of them, the `path` skip with a pointer to
+#123, and the silent-typo caveat. `CHANGELOG.md` entry under the open version.
