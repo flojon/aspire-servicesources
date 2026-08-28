@@ -86,6 +86,22 @@ both complete with zero exceptions. The consumer simply receives no `services__*
 variables for that name and fails on its first call to it — a runtime failure at the point of
 use, not a startup failure.
 
+### Upstream hot reload will make the restart cheap, not unnecessary
+
+Three open upstream issues target restart cost — microsoft/aspire#13839 (AppHost hot reload
+architecture for `aspire run`), #13924 (hot reload like `dotnet watch`) and #7695 (only restart
+impacted resources). #13839 is a worked architecture proposal rather than a wish: it moves DCP and
+dashboard ownership from the AppHost to the CLI so both survive an AppHost restart.
+
+None of them make the app model mutable in place. The AppHost process still restarts and still
+recomposes from scratch; what changes is what survives that restart. The two-phase shape this
+design accepts is therefore not a bet against upstream — it holds either way.
+
+What upstream would change is the appeal of the deferred stop-the-AppHost command: once the
+dashboard session survives a restart, "save, restart, keep looking at the same dashboard" becomes
+a genuinely good interaction rather than the disruptive one it is today. That is the trigger for
+picking the follow-up back up.
+
 ### The AppHost's console is not a channel under `aspire run`
 
 Measured: the CLI captures AppHost stdout and stderr and writes them only to
@@ -215,7 +231,9 @@ exist and raises none when they do not.
 ## Out of scope
 
 - Changing the source of an already-resolved service — the rest of #70.
-- A dashboard command to stop the AppHost after saving.
+- A dashboard command to stop the AppHost after saving. Worth revisiting when upstream hot reload
+  (microsoft/aspire#13839) lands, since a dashboard session that survives the restart is what makes
+  it worth having.
 - Moving persistence onto `IConfiguration` / user secrets — #69.
 - Progress reporting during checkouts, which is a separate concern with its own constraint (the
   CLI does not render AppHost console output).
