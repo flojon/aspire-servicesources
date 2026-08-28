@@ -222,6 +222,45 @@ switches from Linux to Windows and picks up the `windows` variant re-runs rather
 completion recorded for a different command. `mode: always` skips the marker read. `mode: never`
 skips everything.
 
+#### Change detection belongs to the script
+
+The marker deliberately keys on the commit, not on the content of the working tree. It answers "has
+this checkout moved since the step last succeeded", not "are the step's outputs up to date". The
+second question is not answerable from here:
+
+- **The step's inputs are unknowable to us.** Nothing in the catalog says that `prepare.sh` reads
+  `gh-config-local.yml` and an OSM extract fetched from a URL, and writes a jar and `data/`. Any
+  dependency graph this design invented would be a guess.
+- **Hashing the working tree is both expensive and wrong.** Expensive on a large repository, and it
+  answers the wrong question in both directions: an unrelated README edit forces a re-run, while a
+  weekly OSM extract moving under a stable URL does not.
+- **Re-running whenever the tree is dirty is worse.** `IGitClient.HasUncommittedChanges` makes it
+  nearly free to implement, which is the trap. A developer using `"local"` usually *has* a dirty
+  checkout — that is what `"local"` is for — so this would pay the full bootstrap on every start for
+  exactly the developer the feature exists to serve.
+
+Incremental rebuild is a solved problem with real dependency graphs behind it: `make`, Gradle,
+MSBuild, `npm ci`, `go build`. The step should delegate to them rather than approximate them. That is
+what `mode` selects between:
+
+| Mode | Guard | For |
+| --- | --- | --- |
+| `once` (default) | marker: command hash + commit | an expensive, network-bound, non-incremental bootstrap |
+| `always` | none — the command runs every start | an incremental script that decides its own work |
+| `never` | nothing runs | a developer opting out of an inherited step |
+
+`always` is therefore not a spare value waiting on #81. It is the answer to "re-build when things
+change", and #81's build case lands on it for the same reason: `mvnw package` is already incremental,
+so guarding it with a marker would be the mistake, not the feature. Its cost is a process launch and
+the script's own up-to-date check on every start, serially during composition — a few seconds of JVM
+startup for a Maven wrapper. That is explicit and documented rather than hidden.
+
+**The command must be safe to re-run.** Under `always` this is self-evident. Under `once` it is
+equally required and less obvious: the marker is written only on success, so a step that fails
+halfway is re-run from the beginning on the next start, against a checkout that already holds
+whatever the first attempt managed to produce. A prepare command that cannot tolerate that is
+incorrect under either mode, and the README should say so plainly.
+
 Reading the commit needs one new internal member, `IGitClient.GetHeadCommitSha(string
 repositoryPath)`, returning `null` when it cannot be determined. Documented escape hatch for a forced
 re-run: delete the marker file.
@@ -314,8 +353,9 @@ worktrees produces. Whether this should change is #123, which records the analys
   for its own prepare — twice the download, twice the disk. Correct rather than merely tolerable
   (see *Once per checkout, not once per repository*), but a developer running both halves of a
   monorepo will notice it.
-- **`mode: always` has no consumer yet.** It is three lines, and it is where #81's build case lands
-  if that investigation concludes a build step is needed.
+- **Nothing detects that a step's outputs are stale.** Only that the checkout moved. A script whose
+  inputs changed without the commit changing must handle that itself, under `mode: always` — see
+  *Change detection belongs to the script*.
 
 ### What this deliberately does not do
 
@@ -347,5 +387,7 @@ process.
   a foreign field.
 
 Documentation: a `prepare` subsection under `"local"` source options in the README, covering the
-schema, the override table, the marker and how to force a re-run, the `path` skip with a pointer to
-#123, and the silent-typo caveat. `CHANGELOG.md` entry under the open version.
+schema, the override table, the marker and how to force a re-run, how to choose a mode (`once` for an
+expensive one-shot bootstrap, `always` for a script that decides its own work) and the requirement
+that the command be safe to re-run under either, the `path` skip with a pointer to #123, and the
+silent-typo caveat. `CHANGELOG.md` entry under the open version.
