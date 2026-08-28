@@ -315,6 +315,37 @@ fails halfway is re-run from the beginning on the next start, against a checkout
 whatever the first attempt managed to produce. A prepare command that cannot tolerate that is
 incorrect under every mode, and the README should say so plainly.
 
+#### Rejected: an `ifMissing` guard, and timestamp guards
+
+Two narrower guards were considered and dropped. Both are recorded because the shape of the question
+recurs, and the answer is the same one this section already gives.
+
+**`ifMissing: [...]`** — a list of paths in the catalog, skipping the step when they all exist. It is
+appealing: "is the artifact there" is a more honest question than "has the commit moved", and it
+self-heals when a developer deletes `data/` to reclaim disk. It was dropped because a script can
+answer it better than the catalog can:
+
+```sh
+[ -f graphhopper-web-11.0.jar ] && [ -d data ] && exit 0
+```
+
+The script knows its real outputs; the catalog knows only what someone typed into it, and the two
+drift. The script can also do *partial* work when the jar is present but `data/` is not, where a
+guard list is all-or-nothing. `mode: always` with a self-guarding command covers the case, and
+carving an existence-shaped exception into a design that otherwise refuses to approximate build tools
+would be inconsistent. The cost is a process launch on every start — negligible for a shell script,
+seconds of JVM startup for a Maven wrapper, and the answer there is a guarded mode accepting a
+coarser check rather than another knob.
+
+**Timestamps** — re-running when an output is older than its inputs, or than the bootstrap script.
+Dropped because git does not preserve mtimes: a fresh clone stamps every file with the clone time,
+and a `git checkout` rewrites mtimes only for the files it touched. That is the same reason `make`
+has a reputation for spurious rebuilds inside a git working copy, and why Gradle and Bazel hash
+content instead. Creation time is worse still — `File.GetCreationTimeUtc` is unreliable across Linux
+filesystems, where a birth time may not be recorded at all. The one variant that half-works,
+re-running when `prepare.sh` is newer than the jar, is a fragile restatement of what
+`oncePerCommit` already catches robustly through the commit.
+
 Reading the commit needs one new internal member, `IGitClient.GetHeadCommitSha(string
 repositoryPath)`, returning `null` when it cannot be determined. Documented escape hatch for a forced
 re-run: delete the marker file.
