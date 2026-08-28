@@ -82,7 +82,7 @@ internal static class LocalGitCheckout
             return new PreparedCheckout(overridden, NeedsReconciliation: false);
         }
 
-        EnsureGitignore(appHostDirectory);
+        EnsureToolManagedDirectory(appHostDirectory);
         var checkoutsRoot = Path.Combine(appHostDirectory, ".servicesources", "checkouts");
         var repoRoot = Path.Combine(checkoutsRoot, serviceName);
 
@@ -461,12 +461,27 @@ internal static class LocalGitCheckout
         "fill` must resolve them for this host) or the SERVICESOURCES_GIT_USERNAME/" +
         "SERVICESOURCES_GIT_TOKEN environment variables.";
 
-    private static void EnsureGitignore(string appHostDirectory)
+    /// <summary>
+    /// Creates <c>.servicesources/</c> and writes the tool-managed files that live directly in it:
+    /// the <c>.gitignore</c> that keeps the whole tree out of the AppHost's repository, and the
+    /// build-isolation barriers described on <see cref="BuildIsolationBarriers"/>.
+    /// </summary>
+    private static void EnsureToolManagedDirectory(string appHostDirectory)
     {
         var dir = Path.Combine(appHostDirectory, ".servicesources");
         Directory.CreateDirectory(dir);
 
-        var gitignorePath = Path.Combine(dir, ".gitignore");
+        EnsureGitignore(dir);
+
+        foreach (var (fileName, content) in BuildIsolationBarriers)
+        {
+            EnsureBarrierFile(dir, fileName, content);
+        }
+    }
+
+    private static void EnsureGitignore(string toolManagedDirectory)
+    {
+        var gitignorePath = Path.Combine(toolManagedDirectory, ".gitignore");
         try
         {
             // FileMode.CreateNew is atomic: it fails if the file already exists, which makes
@@ -479,6 +494,135 @@ internal static class LocalGitCheckout
         catch (IOException)
         {
             // Already created by a concurrent resolution or a prior run — leave it as-is.
+        }
+    }
+
+    /// <summary>
+    /// The files that stop MSBuild's and NuGet's upward searches at <c>.servicesources/</c>, so a
+    /// checkout is built under its own repository's rules rather than the AppHost repository's.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Checkouts live at <c>&lt;AppHostDirectory&gt;/.servicesources/checkouts/&lt;service&gt;</c>,
+    /// which is *inside* the AppHost's own repository. MSBuild resolves
+    /// <c>Directory.Build.props</c>/<c>.targets</c> and <c>Directory.Packages.props</c>, and NuGet
+    /// resolves <c>nuget.config</c>, by walking up from each project until they find one — so
+    /// without these, the nearest match above a cloned project is a file belonging to a repository
+    /// that has never heard of it. Central package management is the loudest case: a host repo with
+    /// <c>ManagePackageVersionsCentrally=true</c> makes every version-pinned
+    /// <c>PackageReference</c> in the checkout an <c>NU1008</c>, reported against the cloned project
+    /// while the cause sits in the host repo. A <c>packageSourceMapping</c> is the quietest: it is
+    /// not cleared by a <c>&lt;clear /&gt;</c> in the checkout's own <c>packageSources</c>, and a
+    /// warm <c>~/.nuget/packages</c> hides the consequences until a clean machine or CI.
+    /// </para>
+    /// <para>
+    /// Every barrier is permissive: each removes a restriction the checkout never opted into,
+    /// and none adds one. Clearing the mapping drops a restriction rather than a source, so the
+    /// checkout's own <c>nuget.config</c> governs its feeds exactly as it would standalone. A
+    /// checkout that brings its own copy of any of these is unaffected — MSBuild and NuGet stop at
+    /// the *nearest* file, which is the checkout's, not ours.
+    /// </para>
+    /// <para>
+    /// <c>global.json</c> is the subtle one, and it is worth recording why <c>{}</c> is the right
+    /// content rather than a pinned SDK. hostfxr stops at the first global.json *file* it finds; it
+    /// does not keep walking in search of one that carries an <c>sdk</c> section. An empty object
+    /// therefore requests no version at all, which is exactly the behaviour of no global.json
+    /// existing anywhere — neutral, not a pin. Note the asymmetry in what this buys: the
+    /// <c>msbuild-sdks</c> half of global.json is resolved by walking up from the *project*, so it
+    /// is fixed outright, but the <c>sdk.version</c> half is resolved by walking up from the
+    /// *current working directory*. This barrier governs that half only for a build or run launched
+    /// from inside the checkout, which is the working directory Aspire gives a project resource; a
+    /// build launched with the AppHost directory as its working directory still sees the host's
+    /// pin. See the README section on checkout isolation.
+    /// </para>
+    /// </remarks>
+    private static readonly (string FileName, string Content)[] BuildIsolationBarriers =
+    [
+        ("Directory.Build.props", "<Project />\n"),
+        ("Directory.Build.targets", "<Project />\n"),
+        (
+            "Directory.Packages.props",
+            "<Project>\n" +
+            "  <PropertyGroup>\n" +
+            "    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>\n" +
+            "  </PropertyGroup>\n" +
+            "</Project>\n"
+        ),
+        (
+            "nuget.config",
+            "<configuration>\n" +
+            "  <packageSourceMapping>\n" +
+            "    <clear />\n" +
+            "  </packageSourceMapping>\n" +
+            "</configuration>\n"
+        ),
+        ("global.json", "{}\n"),
+    ];
+
+    /// <summary>
+    /// Writes one barrier file if it is absent or its content has drifted, via a uniquely-named
+    /// temporary file and a rename.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately *not* the create-then-swallow policy <see cref="EnsureGitignore"/> uses. The
+    /// gitignore's content is fixed forever, so "already there, leave it" is right for it; barrier
+    /// content can change between versions of this package, and that policy would strand an
+    /// existing <c>.servicesources</c> directory on a stale barrier with nothing reporting it.
+    /// <para>
+    /// The rename is what makes this safe under the parallel prefetch. Writing in place would let
+    /// a concurrent resolution's build read a half-written barrier — an XML parse error against a
+    /// file the developer never wrote. Renaming means the path only ever holds a complete file, and
+    /// because barrier content is deterministic, two writers racing land identical bytes either
+    /// way, so the loser of the race is not a problem to solve.
+    /// </para>
+    /// </remarks>
+    private static void EnsureBarrierFile(string toolManagedDirectory, string fileName, string content)
+    {
+        var path = Path.Combine(toolManagedDirectory, fileName);
+
+        try
+        {
+            if (File.Exists(path) && string.Equals(File.ReadAllText(path), content, StringComparison.Ordinal))
+            {
+                return;
+            }
+        }
+        catch (IOException)
+        {
+            // Being rewritten by a concurrent resolution right now. Its content is identical to
+            // what we would write, so fall through and let the rename below settle it.
+        }
+
+        // Unique per attempt, for the same reason the clone's scratch directory is: two builders
+        // resolving different services concurrently must not share a temporary path.
+        var scratch = Path.Combine(toolManagedDirectory, $".{fileName}-{Guid.NewGuid():N}.tmp");
+
+        try
+        {
+            File.WriteAllText(scratch, content);
+            File.Move(scratch, path, overwrite: true);
+        }
+        catch (IOException)
+        {
+            // A concurrent resolution renamed its own copy onto the destination first (on Windows
+            // that can surface as a sharing violation rather than succeeding silently). Identical
+            // content, so the destination is already correct.
+        }
+        finally
+        {
+            if (File.Exists(scratch))
+            {
+                try
+                {
+                    File.Delete(scratch);
+                }
+                catch (IOException)
+                {
+                    // Best effort: a leaked temporary costs a few bytes inside a gitignored,
+                    // tool-managed directory and can never block a later write, whose name is
+                    // unique per attempt.
+                }
+            }
         }
     }
 

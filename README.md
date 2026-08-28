@@ -236,6 +236,45 @@ up on your machine, which each developer chooses in `servicesources.local.json`:
 Mixing the two is fine: services you're actively editing can share one `path` checkout while
 the rest stay on managed clones.
 
+#### Build isolation: what a managed checkout doesn't inherit
+
+A managed checkout sits at `<AppHostDirectory>/.servicesources/checkouts/<serviceName>/`, which is
+inside the AppHost's own repository. MSBuild and NuGet find `Directory.Build.props`,
+`Directory.Packages.props` and `nuget.config` by walking *up* from each project, so without help a
+cloned service would be built under a repository's rules that has never heard of it — most visibly
+as `NU1008` on every version-pinned `PackageReference`, if the AppHost repo happens to use central
+package management, reported against the *cloned* project while the cause sits in yours.
+
+To stop that, `.servicesources/` is seeded with barrier files that halt those upward searches
+before they leave the tool-managed directory:
+
+| File | Content | Stops |
+| --- | --- | --- |
+| `Directory.Build.props`, `Directory.Build.targets` | `<Project />` | host repo build customisation |
+| `Directory.Packages.props` | `ManagePackageVersionsCentrally=false` | host repo central package management |
+| `nuget.config` | `<packageSourceMapping><clear /></packageSourceMapping>` | host repo package source mapping |
+| `global.json` | `{}` | host repo SDK pin and `msbuild-sdks` versions |
+
+Every one of them only ever *removes* a constraint the checkout never opted into, so a checkout
+builds as it would standalone. They're written on each run and rewritten if their content has
+drifted, and they live in the self-gitignoring `.servicesources/` directory, so there's nothing to
+commit or maintain. **A checkout that brings its own copy of any of these wins** — MSBuild and NuGet
+stop at the nearest file, which is the checkout's, not the barrier.
+
+Two limits are worth knowing:
+
+- **`path` checkouts get none of this.** They're used exactly as found. A `path` checkout that
+  happens to live inside the AppHost's repository has the same inheritance problem, and nothing
+  here reaches it — put a `Directory.Build.props` and the rest at a suitable level yourself.
+- **The `global.json` SDK pin is only half-blocked.** The `msbuild-sdks` half is resolved by walking
+  up from the project, so the barrier settles it outright. The `sdk.version` half is resolved by
+  walking up from the *current working directory* — so it's blocked for a build or run launched from
+  inside the checkout (which is the working directory Aspire gives a project resource), but a build
+  launched with the AppHost directory as its working directory still sees your pin. In practice that
+  means `aspire run` is covered and an IDE that builds the checkout from the AppHost's solution
+  directory may not be. If the checkout needs a specific SDK, commit a `global.json` to the service's
+  own repository — that wins everywhere.
+
 ### Non-.NET local services: `kind`
 
 A `"local"` service is resolved as a .NET project by default. Set `kind` in the catalog to run

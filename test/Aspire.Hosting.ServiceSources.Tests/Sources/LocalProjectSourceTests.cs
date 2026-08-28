@@ -1040,6 +1040,126 @@ public class LocalProjectSourceTests
         Assert.Equal("*\n!.gitignore\n", File.ReadAllText(gitignorePath));
     }
 
+    /// <summary>
+    /// The five files that stop MSBuild's and NuGet's upward walks at the tool-managed directory,
+    /// asserted as literals rather than against the production constants: their exact content is
+    /// the contract with the SDK, so a test that read them from the code under test would pass no
+    /// matter what those strings became.
+    /// </summary>
+    public static TheoryData<string, string> BarrierFiles() => new()
+    {
+        { "Directory.Build.props", "<Project />\n" },
+        { "Directory.Build.targets", "<Project />\n" },
+        {
+            "Directory.Packages.props",
+            "<Project>\n" +
+            "  <PropertyGroup>\n" +
+            "    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>\n" +
+            "  </PropertyGroup>\n" +
+            "</Project>\n"
+        },
+        {
+            "nuget.config",
+            "<configuration>\n" +
+            "  <packageSourceMapping>\n" +
+            "    <clear />\n" +
+            "  </packageSourceMapping>\n" +
+            "</configuration>\n"
+        },
+        { "global.json", "{}\n" },
+    };
+
+    [Theory]
+    [MemberData(nameof(BarrierFiles))]
+    public void ResolveProjectPath_ManagedClone_WritesBarrierFileUnderServiceSourcesDirectory(
+        string fileName, string expectedContent)
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+
+        ResolveProjectPath(
+            ServiceName, Metadata(), DevConfig(), appHostDirectory, new FakeGitClient());
+
+        var barrierPath = Path.Combine(appHostDirectory, ".servicesources", fileName);
+        Assert.True(File.Exists(barrierPath), $"expected a barrier file at '{barrierPath}'");
+        Assert.Equal(expectedContent, File.ReadAllText(barrierPath));
+    }
+
+    [Theory]
+    [MemberData(nameof(BarrierFiles))]
+    public void ResolveProjectPath_ManagedClone_RewritesBarrierFileWhoseContentDiffers(
+        string fileName, string expectedContent)
+    {
+        // Unlike .gitignore, whose content is fixed forever, barrier content can change between
+        // versions of this package. "Already there, leave it" would strand an existing
+        // .servicesources directory on a stale barrier with nothing reporting it.
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var dir = Path.Combine(appHostDirectory, ".servicesources");
+        Directory.CreateDirectory(dir);
+        var barrierPath = Path.Combine(dir, fileName);
+        File.WriteAllText(barrierPath, "<!-- written by an older version -->");
+
+        ResolveProjectPath(
+            ServiceName, Metadata(), DevConfig(), appHostDirectory, new FakeGitClient());
+
+        Assert.Equal(expectedContent, File.ReadAllText(barrierPath));
+    }
+
+    [Fact]
+    public void ResolveProjectPath_ManagedClone_LeavesNoScratchFilesBehindInServiceSourcesDirectory()
+    {
+        // Barriers are written via a uniquely-named temp file plus a rename, so a torn write can
+        // never leave a half-written barrier in place. The scratch names must not survive the call.
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+
+        ResolveProjectPath(
+            ServiceName, Metadata(), DevConfig(), appHostDirectory, new FakeGitClient());
+
+        Assert.Empty(Directory.EnumerateFiles(
+            Path.Combine(appHostDirectory, ".servicesources"), "*.tmp"));
+    }
+
+    [Fact]
+    public void ResolveProjectPath_PathOverride_WritesNoBarrierFiles()
+    {
+        // A `path` checkout is used exactly as it is found, so nothing here creates a
+        // .servicesources directory to put barriers in — see the note in PrepareRepoRoot.
+        var repoDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+
+        ResolveProjectPath(
+            ServiceName,
+            Metadata(project: "Orders.csproj"),
+            DevConfig(path: repoDir),
+            appHostDirectory,
+            new FakeGitClient());
+
+        Assert.False(Directory.Exists(Path.Combine(appHostDirectory, ".servicesources")));
+    }
+
+    [Fact]
+    public void ResolveProjectPath_ConcurrentResolutionsOfDifferentServices_DoNotRaceOnBarrierCreation()
+    {
+        // Every "local" service is prefetched in parallel, so all of them write these files at
+        // once. The content is deterministic, so racing writers land the same bytes — what must
+        // not happen is a reader seeing a partial one, which the rename rules out.
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var serviceNames = Enumerable.Range(0, 8).Select(i => $"service-{i}").ToArray();
+
+        Parallel.ForEach(serviceNames, serviceName =>
+        {
+            ResolveProjectPath(
+                serviceName, Metadata(), DevConfig(), appHostDirectory, new FakeGitClient());
+        });
+
+        foreach (var row in BarrierFiles())
+        {
+            Assert.Equal(
+                (string)row[1],
+                File.ReadAllText(Path.Combine(appHostDirectory, ".servicesources", (string)row[0])));
+        }
+    }
+
     [Fact]
     public void Resolve_ClonesAndRegistersTheRealResourceBeforeReturning()
     {

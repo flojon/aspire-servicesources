@@ -11,6 +11,26 @@ nothing will fail to build to warn you.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Managed checkouts no longer inherit the AppHost repository's MSBuild and NuGet settings.**
+  Checkouts live under `<AppHostDirectory>/.servicesources/checkouts/`, inside the AppHost's own
+  repository, and MSBuild and NuGet find `Directory.Build.props`, `Directory.Packages.props` and
+  `nuget.config` by walking *up* from each project — so a cloned service was built under rules
+  belonging to a repository that has never heard of it. `.servicesources/` is now seeded with
+  barrier files that stop those searches: empty `Directory.Build.props`/`.targets`, a
+  `Directory.Packages.props` setting `ManagePackageVersionsCentrally=false`, a `nuget.config`
+  clearing `packageSourceMapping`, and an empty `global.json`. Each only removes a constraint the
+  checkout never opted into, and a checkout that brings its own copy of any of them still wins.
+  Two failure modes this ends: `NU1008` on every version-pinned `PackageReference` when the AppHost
+  repo uses central package management, and a `packageSourceMapping` silently confining the
+  checkout's packages to the wrong feed — which a warm `~/.nuget/packages` hides until CI. The
+  barriers are written on every run and rewritten when their content drifts, and `.servicesources/`
+  already gitignores itself, so there is nothing to commit. `path` checkouts are used exactly as
+  found and are not covered; neither is the `sdk.version` half of `global.json` for a build launched
+  with a working directory outside the checkout (the `msbuild-sdks` half is fixed outright). See
+  "Build isolation" in the README. ([#119](https://github.com/flojon/aspire-servicesources/issues/119))
+
 ## [0.3.1] - 2026-08-27
 
 Publishes the two satellite packages, which `0.3.0` could not. Core `0.3.0` is on nuget.org
