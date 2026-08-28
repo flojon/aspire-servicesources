@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using LibGit2Sharp;
-using LibGit2Sharp.Handlers;
 
 namespace Aspire.Hosting.ServiceSources.Git;
 
@@ -29,7 +28,7 @@ internal static class GitCredentialResolver
 
     private static readonly GitCredentialHelperCache HelperCache = new(GitCredentialFill);
 
-    public static CredentialsHandler CreateProvider(string repositoryUrl) =>
+    public static GitCredentialProvider CreateProvider(string repositoryUrl) =>
         CreateProvider(repositoryUrl, Environment.GetEnvironmentVariable, HelperCache.Get, ForgetHelperCredentials);
 
     /// <summary>
@@ -47,7 +46,7 @@ internal static class GitCredentialResolver
     /// <c>git credential</c> subprocesses, so the fallback ladder can be exercised without mutating
     /// process-wide state or touching the developer's real credential store.
     /// </summary>
-    internal static CredentialsHandler CreateProvider(
+    internal static GitCredentialProvider CreateProvider(
         string repositoryUrl,
         Func<string, string?> environment,
         Func<GitUrl, HelperCredentials?> credentialHelper,
@@ -59,7 +58,7 @@ internal static class GitCredentialResolver
 
         // libgit2 passes the URL it is actually authenticating against, which need not be the one
         // we were configured with (a redirect, or a submodule remote), so prefer it when supplied.
-        return (url, _, _) =>
+        return new GitCredentialProvider((url, _, _) =>
         {
             var parsed = GitUrl.Parse(string.IsNullOrEmpty(url) ? repositoryUrl : url);
             return ladders
@@ -67,7 +66,7 @@ internal static class GitCredentialResolver
                     $"{parsed.Scheme}://{parsed.Host}",
                     _ => new CredentialLadder(parsed, environment, credentialHelper, forgetHelperCredentials))
                 .Next();
-        };
+        });
     }
 
     /// <summary>

@@ -246,7 +246,8 @@ internal static class LocalGitCheckout
                 throw new ServiceSourcesConfigurationException(
                     AuthFailureMessage(
                         $"Service '{serviceName}': failed to clone repository '{displayRepository}' " +
-                        $"into '{repoRoot}'"),
+                        $"into '{repoRoot}'",
+                        ex.NoCredentialsResolved),
                     ex);
             }
             catch (Exception ex)
@@ -427,7 +428,8 @@ internal static class LocalGitCheckout
             throw new ServiceSourcesConfigurationException(
                 AuthFailureMessage(
                     $"Service '{serviceName}': failed to fetch repository '{displayRepository}' at " +
-                    $"'{repoRoot}' while resolving ref '{reference}'"),
+                    $"'{repoRoot}' while resolving ref '{reference}'",
+                    ex.NoCredentialsResolved),
                 ex);
         }
         catch (Exception ex)
@@ -449,17 +451,36 @@ internal static class LocalGitCheckout
     }
 
     /// <summary>
-    /// Appends the shared authentication remediation to <paramref name="failureDescription"/>.
-    /// Worded to cover both readings of the underlying failure: hosts commonly answer an
-    /// unauthenticated request for a private repository with "not found" rather than "unauthorized"
-    /// (see <see cref="LibGit2SharpGitClient.LooksLikeAuthFailure"/>), so the message must not
-    /// assert that credentials were definitely rejected.
+    /// Appends the authentication remediation to <paramref name="failureDescription"/>.
     /// </summary>
-    private static string AuthFailureMessage(string failureDescription) =>
-        $"{failureDescription} — authentication failed, or the repository is not visible to the " +
-        "credentials in use. Configure credentials via a git credential helper (`git credential " +
-        "fill` must resolve them for this host) or the SERVICESOURCES_GIT_USERNAME/" +
-        "SERVICESOURCES_GIT_TOKEN environment variables.";
+    /// <remarks>
+    /// The rejected-credential wording covers both readings of the underlying failure: hosts
+    /// commonly answer an unauthenticated request for a private repository with "not found" rather
+    /// than "unauthorized" (see <see cref="LibGit2SharpGitClient.LooksLikeAuthFailure"/>), so the
+    /// message must not assert that credentials were definitely rejected. When no credential was
+    /// resolved at all there is no such ambiguity to preserve — libgit2's own message for that case
+    /// ("could not find appropriate mechanism for credentials") describes a client-side dead end
+    /// that never reached the host, and repeating the rejected-credential remediation for it points
+    /// the developer at the wrong half of the problem.
+    /// </remarks>
+    private static string AuthFailureMessage(string failureDescription, bool noCredentialsResolved) =>
+        noCredentialsResolved
+            // Nothing was ever offered, so nothing was refused. Saying "authentication failed" here
+            // sends the developer looking for a rejected or expired token they never had, when the
+            // fix is to make a credential resolvable in the first place — and, since the helper is
+            // consulted in whatever environment the AppHost runs in, it is worth naming that the
+            // helper is where the gap is rather than the credential's contents.
+            ? $"{failureDescription} — no git credentials were resolved for this host, so the request " +
+              "carried only the machine's integrated credential, which a token-authenticated host " +
+              "cannot use. `git credential fill` returned nothing for this host and " +
+              "SERVICESOURCES_GIT_TOKEN is not set. Configure a git credential helper (`git " +
+              "credential fill` must resolve credentials for this host in the environment the " +
+              "AppHost runs in, which is not necessarily your shell) or set the " +
+              "SERVICESOURCES_GIT_USERNAME/SERVICESOURCES_GIT_TOKEN environment variables."
+            : $"{failureDescription} — authentication failed, or the repository is not visible to the " +
+              "credentials in use. Configure credentials via a git credential helper (`git credential " +
+              "fill` must resolve them for this host) or the SERVICESOURCES_GIT_USERNAME/" +
+              "SERVICESOURCES_GIT_TOKEN environment variables.";
 
     private static void EnsureGitignore(string appHostDirectory)
     {

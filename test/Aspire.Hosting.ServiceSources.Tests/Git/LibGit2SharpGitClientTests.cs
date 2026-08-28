@@ -274,13 +274,14 @@ public class LibGit2SharpGitClientTests
         var forgotten = new List<string>();
 
         Assert.Throws<GitAuthenticationFailedException>(() => LibGit2SharpGitClient.WithAuthFailureDetection(
-            "https://example.invalid/org/repo",
+            AuthRepositoryUrl,
+            CredentialProvider(new HelperCredentials("alice", "helper-token")),
             () => throw new LibGit2SharpException("request failed with status code: 401"),
             forgotten.Add));
 
         // Otherwise a token rotated mid-session stays shadowed by the cached one until the AppHost
         // process restarts.
-        Assert.Equal("https://example.invalid/org/repo", Assert.Single(forgotten));
+        Assert.Equal(AuthRepositoryUrl, Assert.Single(forgotten));
     }
 
     [Fact]
@@ -289,7 +290,8 @@ public class LibGit2SharpGitClientTests
         var forgotten = new List<string>();
 
         Assert.Throws<LibGit2SharpException>(() => LibGit2SharpGitClient.WithAuthFailureDetection(
-            "https://example.invalid/org/repo",
+            AuthRepositoryUrl,
+            CredentialProvider(new HelperCredentials("alice", "helper-token")),
             () => throw new LibGit2SharpException("early EOF"),
             forgotten.Add));
 
@@ -302,10 +304,53 @@ public class LibGit2SharpGitClientTests
         var forgotten = new List<string>();
 
         LibGit2SharpGitClient.WithAuthFailureDetection(
-            "https://example.invalid/org/repo",
+            AuthRepositoryUrl,
+            CredentialProvider(new HelperCredentials("alice", "helper-token")),
             () => { },
             forgotten.Add);
 
         Assert.Empty(forgotten);
+    }
+
+    [Fact]
+    public void WithAuthFailureDetection_NoCredentialWasEverResolved_SaysSoOnTheException()
+    {
+        var exception = Assert.Throws<GitAuthenticationFailedException>(
+            () => LibGit2SharpGitClient.WithAuthFailureDetection(
+                AuthRepositoryUrl,
+                CredentialProvider(fromHelper: null),
+                () => throw new LibGit2SharpException("could not find appropriate mechanism for credentials"),
+                _ => { }));
+
+        Assert.True(exception.NoCredentialsResolved);
+    }
+
+    [Fact]
+    public void WithAuthFailureDetection_ACredentialWasResolvedAndRefused_IsNotReportedAsNoneResolved()
+    {
+        var exception = Assert.Throws<GitAuthenticationFailedException>(
+            () => LibGit2SharpGitClient.WithAuthFailureDetection(
+                AuthRepositoryUrl,
+                CredentialProvider(new HelperCredentials("alice", "helper-token")),
+                () => throw new LibGit2SharpException("request failed with status code: 401"),
+                _ => { }));
+
+        Assert.False(exception.NoCredentialsResolved);
+    }
+
+    private const string AuthRepositoryUrl = "https://example.invalid/org/repo";
+
+    /// <summary>
+    /// A provider that has already been asked for a credential once, as libgit2 would have asked it
+    /// before the operation failed.
+    /// </summary>
+    private static GitCredentialProvider CredentialProvider(HelperCredentials? fromHelper)
+    {
+        var provider = GitCredentialResolver.CreateProvider(
+            AuthRepositoryUrl, _ => null, _ => fromHelper, (_, _) => { });
+
+        provider.Handler(AuthRepositoryUrl, null, SupportedCredentialTypes.UsernamePassword);
+
+        return provider;
     }
 }

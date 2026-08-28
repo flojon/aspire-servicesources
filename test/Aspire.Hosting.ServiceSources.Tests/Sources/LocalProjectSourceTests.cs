@@ -752,6 +752,28 @@ public class LocalProjectSourceTests
         Assert.Contains("authentication", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void ResolveProjectPath_CloneFailsAndNoCredentialWasResolved_MessageSaysNoneWereResolved()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var gitClient = new FakeGitClient
+        {
+            CloneException = new GitAuthenticationFailedException(
+                "could not find appropriate mechanism for credentials",
+                new InvalidOperationException(),
+                noCredentialsResolved: true),
+        };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveProjectPath(
+                ServiceName, Metadata(repository: "https://github.com/company/orders"), DevConfig(), appHostDirectory, gitClient));
+
+        // "Authentication failed" would send the developer hunting for a token that was rejected.
+        // Nothing was ever sent: the helper yielded nothing and no environment token was set.
+        Assert.Contains("no git credentials were resolved", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SERVICESOURCES_GIT_TOKEN", ex.Message, StringComparison.Ordinal);
+    }
+
     // A repository URL may legitimately carry a personal access token, and these exception messages
     // travel to the console and every log sink the AppHost is wired to. Each test below covers a
     // different message, because each one formats the URL itself.
