@@ -750,6 +750,10 @@ public class LocalProjectSourceTests
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("https://github.com/company/orders", ex.Message);
         Assert.Contains("authentication", ex.Message, StringComparison.OrdinalIgnoreCase);
+        // A credential was offered, so the failure keeps both readings open: hosts answer an
+        // unauthenticated request for a private repository with "not found" as often as with
+        // "unauthorized". Without this the two branches could collapse into one unnoticed.
+        Assert.Contains("not visible to the credentials in use", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

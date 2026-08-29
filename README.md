@@ -851,10 +851,12 @@ repository is not visible to the credentials in use. Configure credentials via a
 credential fill` must resolve them for this host) or the SERVICESOURCES_GIT_USERNAME/SERVICESOURCES_GIT_TOKEN
 environment variables.
   caused by: unexpected http status code: 404
+  (set SERVICESOURCES_FULL_ERRORS=1 for the full exception detail, including stack traces)
 ```
 
 The stack frames behind it are this package's own plumbing and don't help with a misconfiguration,
-so they're left out. When you need them — you suspect a bug in this package rather than in your
+so they're left out — and the last line says how to get them back, because for a failure this
+package didn't anticipate they are the diagnosis. When you need them — you suspect a bug in this package rather than in your
 configuration, and want to file it — set `SERVICESOURCES_FULL_ERRORS=1` to get the runtime's
 complete dump, type names, inner-exception blocks, stack traces and all.
 

@@ -338,6 +338,24 @@ public class LibGit2SharpGitClientTests
         Assert.False(exception.NoCredentialsResolved);
     }
 
+    [Fact]
+    public void WithAuthFailureDetection_TheCallbackWasNeverAsked_IsNotReportedAsNoneResolved()
+    {
+        // libgit2 asks for a credential only once a host answers with an authentication challenge.
+        // A proxy answering the first unauthenticated request with 403, or a host that serves
+        // anonymously answering a mistyped path with 404, reaches the detection below without the
+        // callback having run — so the developer's credential store is not what failed, and saying
+        // it was would send them to debug a helper and a token that are both fine.
+        var exception = Assert.Throws<GitAuthenticationFailedException>(
+            () => LibGit2SharpGitClient.WithAuthFailureDetection(
+                AuthRepositoryUrl,
+                UnaskedCredentialProvider(),
+                () => throw new LibGit2SharpException("unexpected http status code: 404"),
+                _ => { }));
+
+        Assert.False(exception.NoCredentialsResolved);
+    }
+
     private const string AuthRepositoryUrl = "https://example.invalid/org/repo";
 
     /// <summary>
@@ -346,11 +364,18 @@ public class LibGit2SharpGitClientTests
     /// </summary>
     private static GitCredentialProvider CredentialProvider(HelperCredentials? fromHelper)
     {
-        var provider = GitCredentialResolver.CreateProvider(
-            AuthRepositoryUrl, _ => null, _ => fromHelper, (_, _) => { });
+        var provider = UnaskedCredentialProvider(fromHelper);
 
         provider.Handler(AuthRepositoryUrl, null, SupportedCredentialTypes.UsernamePassword);
 
         return provider;
     }
+
+    /// <summary>
+    /// A provider libgit2 never got as far as consulting — the state after a failure that arrived
+    /// without an authentication challenge in front of it.
+    /// </summary>
+    private static GitCredentialProvider UnaskedCredentialProvider(HelperCredentials? fromHelper = null) =>
+        GitCredentialResolver.CreateProvider(
+            AuthRepositoryUrl, _ => null, _ => fromHelper, (_, _) => { });
 }

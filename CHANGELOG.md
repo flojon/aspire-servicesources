@@ -20,8 +20,10 @@ nothing will fail to build to warn you.
   name, three nested inner-exception blocks and a stack trace per level; a failed private clone
   ran to about thirty lines. It now prints the message followed by one `caused by:` line per
   underlying cause, with adjacent duplicate causes collapsed (a wrapper that only reclassifies its
-  inner exception repeats its message verbatim). Set `SERVICESOURCES_FULL_ERRORS=1` for the
-  runtime's complete dump when diagnosing this package itself.
+  inner exception repeats its message verbatim), and a closing line naming
+  `SERVICESOURCES_FULL_ERRORS=1` whenever something was wrapped — for a failure this package didn't
+  anticipate the dropped frames are the diagnosis, so the summary has to say where they went. Set
+  that variable for the runtime's complete dump when diagnosing this package itself.
 
   This changes `ToString()`, so anything logging one of these exceptions logs the summary instead
   of the frames unless that variable is set. The `Message`, `InnerException` chain and
@@ -37,6 +39,12 @@ nothing will fail to build to warn you.
   helper that resolves in the developer's shell but not in the environment the AppHost process
   inherits. The request is still made with the machine's integrated credential, so Negotiate/NTLM
   hosts are unaffected.
+
+  This wording is used only when libgit2 actually asked for a credential, which it does only once a
+  host answers with an authentication challenge. A failure that arrives without one — a proxy
+  answering the first unauthenticated request with 403, or a host serving anonymously answering a
+  mistyped repository path with 404 — keeps the existing wording, which leaves open that the
+  repository simply isn't visible.
 
 ## [0.3.1] - 2026-08-27
 

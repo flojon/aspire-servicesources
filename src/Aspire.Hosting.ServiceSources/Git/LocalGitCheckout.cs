@@ -461,7 +461,10 @@ internal static class LocalGitCheckout
     /// resolved at all there is no such ambiguity to preserve — libgit2's own message for that case
     /// ("could not find appropriate mechanism for credentials") describes a client-side dead end
     /// that never reached the host, and repeating the rejected-credential remediation for it points
-    /// the developer at the wrong half of the problem.
+    /// the developer at the wrong half of the problem. That branch is reached only when libgit2
+    /// actually asked for a credential (see
+    /// <see cref="GitCredentialProvider.ResolvedNoCredentials"/>), so it can state what the ladder
+    /// found without having to hedge about whether the host was ever contacted.
     /// </remarks>
     private static string AuthFailureMessage(string failureDescription, bool noCredentialsResolved) =>
         noCredentialsResolved
@@ -473,7 +476,7 @@ internal static class LocalGitCheckout
             ? $"{failureDescription} — no git credentials were resolved for this host, so the request " +
               "carried only the machine's integrated credential, which a token-authenticated host " +
               "cannot use. `git credential fill` returned nothing for this host and " +
-              "SERVICESOURCES_GIT_TOKEN is not set. Configure a git credential helper (`git " +
+              "SERVICESOURCES_GIT_TOKEN is unset or empty. Configure a git credential helper (`git " +
               "credential fill` must resolve credentials for this host in the environment the " +
               "AppHost runs in, which is not necessarily your shell) or set the " +
               "SERVICESOURCES_GIT_USERNAME/SERVICESOURCES_GIT_TOKEN environment variables."
