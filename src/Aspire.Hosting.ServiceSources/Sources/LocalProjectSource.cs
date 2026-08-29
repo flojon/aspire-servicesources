@@ -37,9 +37,24 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
 
             // Aspire's own AddProject, with a path that exists — so the project picks up every
             // default it normally would (launch-profile endpoints, OTLP exporter, certificate
-            // trust, debugging support). Those come from an internal WithProjectDefaults that
-            // can't be reproduced from outside the assembly, which is why resolution waits for a
-            // real path rather than registering the resource early and filling the path in later.
+            // trust, debugging support).
+            //
+            // Resolution waits for a real path rather than registering the resource early and
+            // filling the path in later, for two independent reasons.
+            //
+            // AddProject reads the launch profile during composition: WithProjectDefaults calls
+            // GetEffectiveLaunchProfile(throwIfNotFound: true), which throws
+            // DistributedApplicationException unless the .csproj is on disk. That one is
+            // avoidable — passing launchProfileName: null sets ExcludeLaunchProfile and skips the
+            // lookup — but it costs the endpoints Aspire synthesises from the profile's
+            // applicationUrl, because those are created here during composition and there is
+            // nothing to read them from afterwards. A service registered that way has to declare
+            // its endpoints instead.
+            //
+            // The path itself is frozen regardless: DCP bakes it into the executable's working
+            // directory and its "--project" argument while preparing the model, which happens
+            // before the dashboard is up. Mutating ProjectPath afterwards changes nothing, so the
+            // absolute path has to be settled before Build() whatever the launch profile does.
             return ResolvedService.Tag(builder.AddProject(serviceName, projectPath), serviceName, "local");
         }
 
