@@ -1,0 +1,21 @@
+// THROWAWAY SPIKE probe: does a host->guest callback that CREATES a resource work over ATS?
+import { createBuilder } from './.aspire/modules/aspire.mjs';
+
+const builder = await createBuilder();
+
+console.log('[probe] calling probeFuncReturnsHandle');
+
+const db = await builder.probeFuncReturnsHandle('probe-db', async () => {
+  console.log('[probe] >>> guest callback INVOKED by host');
+  const inner = await builder.addConnectionString('inner-db');
+  console.log('[probe] >>> guest callback created inner resource, returning handle');
+  return inner;
+});
+
+console.log('[probe] probeFuncReturnsHandle RETURNED, handle =', db ? 'present' : 'missing');
+
+const probeScript = 'console.log("[probe] app started"); process.exit(0);';
+await builder.addExecutable('probe-exe', process.execPath, '.', ['-e', probeScript]);
+
+console.log('[probe] building + running');
+await builder.build().run();
