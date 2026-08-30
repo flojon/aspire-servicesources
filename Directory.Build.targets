@@ -185,28 +185,32 @@ Full changelog: $(ChangelogUrl)</PackageReleaseNotes>
     interface to break while the version is below 1.0. A core patch still reaches consumers
     without republishing every satellite, which an exact pin would forbid.
 
-    The upper bound carries a -0 suffix on prerelease builds only, and the difference is not
-    cosmetic - it is which feed the package is going to.
+    The shape of the constraint differs between a stable build and a prerelease one, and the
+    difference is not cosmetic.
 
-    A bare major.(minor+1).0 bound admits every major.(minor+1).0-* version, because a
-    prerelease sorts below the release it precedes. That is not theoretical: preview.yml
-    publishes 0.x.y-alpha.0.N builds of all three packages, and a satellite preview's floor is
-    its own prerelease version, which turns prerelease resolution on for the whole range. So a
-    0.2.x satellite preview would happily take core 0.3.0-alpha.0.N - the next-minor pairing
-    this range exists to forbid. -0 is the lowest prerelease label there is, so it closes the
-    bound below all of them.
+    A stable build gets a range: [X.Y.Z, X.(Y+1).0), so a consumer picks up a later patch of
+    core within the minor the satellite was built against, but never the next minor.
 
-    nuget.org rejects that bound outright. Its gallery validation fails the *push* with "The
-    package manifest contains an invalid Version: '0.4.0-0'", though the NuGet client, pack,
-    and GitHub Packages all accept it - so a satellite carrying it packs and restores clean
-    everywhere except the one feed releases go to (NuGetGallery#6948, open and unresolved).
-    That is exactly how it got here: 0.3.0 tagged, core published, both satellites rejected at
-    the push step, because nothing before that step had ever packed a *stable* version.
+    A prerelease build pins core exactly: [X.Y.Z-label]. Two reasons, and either alone is
+    enough. A prerelease satellite is only meaningful with the core built from the same
+    commit - the three packages are versioned lockstep from one tag, and a prerelease stream
+    is disposable, so there is no later patch within it to float onto. And the range form
+    cannot be written at all for a prerelease without a bound nuget.org refuses: a bare
+    X.(Y+1).0 upper bound admits every X.(Y+1).0-* version, because a prerelease sorts below
+    the release it precedes and a prerelease floor turns prerelease resolution on for the
+    whole range - so a 0.2.x satellite preview would take core 0.3.0-alpha.0.N, the
+    next-minor pairing this range exists to forbid. Excluding those needs the lowest
+    prerelease label there is, -0, and nuget.org's gallery validation fails the *push* with
+    "The package manifest contains an invalid Version: '0.4.0-0'" while pack, restore, the
+    NuGet client and GitHub Packages all accept it (NuGetGallery#6948, open and unresolved).
+    An exact pin has no upper bound to express, so it carries no numeric prerelease
+    identifier and both feeds accept it.
 
-    A stable build therefore gets the plain bound, and loses nothing by it: nuget.org only
-    ever holds stable versions of these packages - every prerelease goes to GitHub Packages -
-    so there is no major.(minor+1).0-* on that feed for the plain bound to let in. Each feed
-    gets the tightest bound it will accept.
+    That is what makes a prerelease publishable to nuget.org at all. Before this, the two
+    shapes were split by which feed the build was headed for - prereleases went only to
+    GitHub Packages, which accepts -0 - and a prerelease pushed to nuget.org would have
+    failed the same way v0.3.0 did, where core published and both satellites were rejected
+    at the push step.
 
     Both bounds come from %(ProjectVersion) - the version NuGet computed for the referenced
     project - rather than this project's own $(PackageVersion), so the range describes core
@@ -232,24 +236,26 @@ Full changelog: $(ChangelogUrl)</PackageReleaseNotes>
       <_ProjectReferencesWithVersions>
         <_Major>$([System.Text.RegularExpressions.Regex]::Replace('%(ProjectVersion)', '^([0-9]+)\..*$', '$1'))</_Major>
         <_Minor>$([System.Text.RegularExpressions.Regex]::Replace('%(ProjectVersion)', '^[0-9]+\.([0-9]+).*$', '$1'))</_Minor>
-        <!-- A '-' anywhere in the version is a prerelease label, which is what says this build
-             is bound for the preview feed rather than nuget.org. Computed here, in the same
-             pass as the numeric split, so the assignment below reads one piece of metadata
-             instead of re-testing the version it is in the middle of overwriting.
+        <!-- A '-' anywhere in the version is a prerelease label. Computed here, in the same
+             pass as the numeric split, so the assignments below read one piece of metadata
+             instead of re-testing the version they are in the middle of overwriting.
 
-             Declared empty first rather than only under the condition: referencing metadata
+             Declared false first rather than only under the condition: referencing metadata
              that some item in the list does not define at all is MSB4096, so the stable case
-             has to be an explicit empty value, not an absent one. -->
-        <_UpperBoundSuffix></_UpperBoundSuffix>
-        <_UpperBoundSuffix Condition="$([System.String]::Copy('%(ProjectVersion)').Contains('-'))">-0</_UpperBoundSuffix>
+             has to be an explicit value, not an absent one. -->
+        <_IsPrerelease>false</_IsPrerelease>
+        <_IsPrerelease Condition="$([System.String]::Copy('%(ProjectVersion)').Contains('-'))">true</_IsPrerelease>
       </_ProjectReferencesWithVersions>
     </ItemGroup>
     <!-- Every in-repo project reference is to an in-repo package released from the same tag,
-         so this deliberately matches on all of them rather than on core's project filename,
+         so these deliberately match on all of them rather than on core's project filename,
          which a rename would silently stop matching. -->
     <ItemGroup>
-      <_ProjectReferencesWithVersions>
-        <ProjectVersion>[%(ProjectVersion), %(_Major).$([MSBuild]::Add('%(_Minor)', 1)).0%(_UpperBoundSuffix))</ProjectVersion>
+      <_ProjectReferencesWithVersions Condition="'%(_IsPrerelease)' == 'true'">
+        <ProjectVersion>[%(ProjectVersion)]</ProjectVersion>
+      </_ProjectReferencesWithVersions>
+      <_ProjectReferencesWithVersions Condition="'%(_IsPrerelease)' == 'false'">
+        <ProjectVersion>[%(ProjectVersion), %(_Major).$([MSBuild]::Add('%(_Minor)', 1)).0)</ProjectVersion>
       </_ProjectReferencesWithVersions>
     </ItemGroup>
   </Target>

@@ -83,9 +83,19 @@ while the version is below `1.0.0`, a breaking change can ship in a minor releas
 ### Preview builds
 
 Every push to `main` publishes a prerelease build (`0.x.y-alpha.0.N`) to GitHub Packages.
-Stable releases go to nuget.org only — use those unless you specifically need an unreleased
-fix. Previews are pruned after each release — only the five most recent are kept — so treat
-them as disposable and never pin one in a long-lived project.
+Previews are pruned after each release — only the five most recent are kept — so treat them as
+disposable and never pin one in a long-lived project.
+
+Occasionally a *named* prerelease (`0.x.y-rc.N`) goes to nuget.org instead, when there is a
+build worth putting in front of people — a release candidate, or a preview of work that has
+not merged yet. Those need no token and no extra feed:
+
+```bash
+dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript --prerelease
+```
+
+Use a stable release unless you specifically need an unreleased fix. The rest of this section
+is the GitHub Packages feed, which is where the per-commit builds live.
 
 GitHub's NuGet registry requires authentication for every download, even for public
 packages — unlike the container registry, it has no anonymous access. This is *not* a grant

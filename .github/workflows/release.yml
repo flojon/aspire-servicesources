@@ -50,8 +50,14 @@ jobs:
 
   # main publishes a preview per commit; a release makes the ones behind it obsolete. Pruned
   # on release rather than on every preview push so previews stay installable in between.
+  #
+  # Skipped for a prerelease release. A GitHub release marked pre-release fires the same
+  # "published" event, which is how an rc reaches nuget.org, but it supersedes nothing: the
+  # previews behind it are still the newest builds of unreleased work, and pruning them would
+  # delete the stream this job exists to bound rather than trim it.
   prune-previews:
     needs: publish
+    if: ${{ !github.event.release.prerelease }}
     runs-on: ubuntu-latest
     permissions:
       packages: write
