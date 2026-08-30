@@ -731,9 +731,10 @@ rather than throwing.
 > correctly on earlier CLIs, but the TypeScript SDK the CLI generates from it does not compile on
 > them - see [the compatibility note](#sample) under the sample for what fails and why.
 
-`Configure<T>` is generic, and Aspire's Type System projects a generic method with its type
-parameter erased — so guest languages get a set of non-generic equivalents instead, one per shape
-(overloads don't survive codegen either):
+`Configure<T>` is generic, and Aspire's Type System erases a generic method's type parameter to its
+constraint — which for `Configure<T>` erases the capability being requested, since that is all `T`
+says. So guest languages get a set of non-generic equivalents instead, one per shape, each with its
+own name (two exports that project to the same generated name collide, and only one survives):
 
 ```typescript
 const payments = await builder

@@ -191,10 +191,11 @@ authoring format, and #71 is right that it should not be smuggled into this deci
 4. **Do not build a code-authoring API now.** ATS no longer blocks it, but no use case yet requires
    it that yaml cannot serve. Revisit if #6 produces one. If it is ever built, it should be an
    *additional* catalog provider alongside yaml, with the duplicate-declaration error above.
-5. **Correct the two overstated ATS constraints** in `ServiceConfigurationExports.cs` and the README.
+5. **Correct the two overstated ATS constraints** in `ServiceConfigurationExports.cs`, its tests and
+   the README — applied alongside this finding, since the shims they justify are unchanged.
 
-Follow-ups to file: the kind-options nesting (3) and the doc corrections (5). #71 itself can be
-closed with this finding as the recorded decision not to proceed.
+Follow-up filed: the kind-options nesting (3). #71 itself can be closed with this finding as the
+recorded decision not to proceed.
 
 ## Appendix — reproducing
 

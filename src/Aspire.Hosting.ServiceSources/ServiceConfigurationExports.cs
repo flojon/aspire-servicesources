@@ -18,21 +18,27 @@ namespace Aspire.Hosting.ServiceSources;
 /// up on every resource builder in the AppHost.
 /// </para>
 /// <para>
-/// Two codegen constraints shape this API, both established by generating against Aspire CLI
-/// 13.6.0 and reading the output:
+/// Two codegen constraints shape this API, both established by generating against the Aspire CLI
+/// and reading the output (13.6.0 originally, re-measured on 13.5.1 — see
+/// <c>docs/superpowers/specs/2026-08-30-typed-catalog-ats-findings.md</c>):
 /// </para>
 /// <list type="bullet">
 ///   <item>
 ///     <description>
-///     <b>Generic methods lose their type parameter.</b> <c>Configure&lt;T&gt;</c> projects as
-///     <c>configure(...)</c> with no <c>T</c> — and <c>T</c> is the whole point of it, since it
-///     names the capability being requested. Hence non-generic shims.
+///     <b>A generic method cannot carry its type parameter.</b> ATS erases <c>T</c> to its
+///     constraint, so <c>Configure&lt;T&gt;</c> would project as <c>configure(obj: Resource)</c> —
+///     and <c>T</c> is the whole point of it, since it names the capability being requested, which
+///     is exactly what erasure destroys. A generic whose constraint ATS cannot resolve is dropped
+///     from the generated SDK outright. Hence non-generic shims.
 ///     </description>
 ///   </item>
 ///   <item>
 ///     <description>
-///     <b>Overloads are silently dropped.</b> Only the first overload of a name reaches the
-///     generated SDK, so each shape gets its own name rather than sharing one.
+///     <b>Two exports cannot share a generated name.</b> When they collide only one reaches the
+///     generated SDK, so each shape gets its own name. <c>[AspireExport("id")]</c> and its
+///     <c>MethodName</c> property can project C# overloads under distinct generated names, but a
+///     distinct name is required either way — naming the shapes apart in C# too keeps both
+///     languages reading the same.
 ///     </description>
 ///   </item>
 /// </list>
