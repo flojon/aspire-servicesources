@@ -23,9 +23,12 @@ const payments = await builder
   .withServiceReference(inventory);
 
 // addService()'s declared return type is a bare Aspire interface, IResourceBuilder<
-// IResourceWithServiceDiscovery>, rather than a concrete resource class — the shape whose codegen
-// microsoft/aspire#19577 fixed, and the reason this sample compiles at all on 13.6.0+. With the
-// wrapper types emitted, the resolved handle also flows into Aspire's *own* withReference(),
+// IResourceWithServiceDiscovery>, rather than a concrete resource class — a shape the TypeScript
+// generator emits no *Promise/*PromiseImpl wrapper pair for on its own (microsoft/aspire#19507).
+// What supplies the pair here is the eight [AspireExport] configuration shims behind the
+// withService* calls above: the generator emits it when the bare interface appears as an
+// extension-method receiver, which those shims declare, so they carry it for addService too. With
+// the wrapper types emitted, the resolved handle also flows into Aspire's *own* withReference(),
 // distinct from payments' withServiceReference() above, which is this package's ATS export.
 //
 // probe prints the discovery variable withReference() injected and then exits, so it shows as

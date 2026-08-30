@@ -806,10 +806,6 @@ rather than throwing.
 
 ### From a guest-language AppHost
 
-> **Requires Aspire CLI 13.6.0 or newer**, which is not released yet. Everything below registers
-> correctly on earlier CLIs, but the TypeScript SDK the CLI generates from it does not compile on
-> them - see [the compatibility note](#sample) under the sample for what fails and why.
-
 `Configure<T>` is generic, and Aspire's Type System erases a generic method's type parameter to its
 constraint — which for `Configure<T>` erases the capability being requested, since that is all `T`
 says. So guest languages get a set of non-generic equivalents instead, one per shape, each with its
@@ -872,7 +868,7 @@ container consumer of one is [rejected up front](#url-source). A third resource,
 executable, hands the same `inventory` handle to Aspire's *own* `withReference()` and prints the
 `services__inventory__http__0` variable that injects — so it shows as *Exited*, not Running, and
 that single log line is where you see the native service-discovery path working. (**Note:** this
-sample requires Aspire CLI 13.6.0 or newer — see the compatibility note below the code block.)
+sample needs Aspire CLI 13.5.3 or newer — see the compatibility note below the code block.)
 
 ```bash
 cd samples/DemoAppHostTypeScript
@@ -882,25 +878,29 @@ aspire restore
 aspire run
 ```
 
-**Requires Aspire CLI 13.6.0+:** on every CLI released so far - 13.4.6 through 13.5.3 -
-`aspire restore`/`aspire add` correctly registers `addService(name: string)` in the generated
-TypeScript SDK (`.aspire/modules/aspire.mts`) with no diagnostics — confirming the
-`[AspireExport]` on `AddService` works — but the generated SDK fails to compile
-(`TS2552: Cannot find name 'ResourceWithServiceDiscoveryPromise'`, six errors) because the Aspire
-CLI's TypeScript codegen didn't emit a `*Promise`/`*PromiseImpl` wrapper pair for extension methods
-returning a bare Aspire interface type (`IResourceBuilder<IResourceWithServiceDiscovery>`) rather
-than a concrete resource class.
+**Requires Aspire CLI 13.5.3+:** the CLI pins its own Aspire version for the host project it
+generates, so a CLI older than this package's Aspire floor (13.5.2) fails `aspire restore` with
+`NU1605: Detected package downgrade: Aspire.Hosting from 13.5.2 to 13.5.1` before codegen even runs.
+13.5.3 is the first release that pins high enough. On it, the generated SDK type-checks clean under
+strict `tsc` and the sample runs end-to-end — `withReference()` on the `addService()` result injects
+the resolved service's discovery variables into the consuming resource, e.g.
+`services__inventory__http__0=http://inventory.dev.internal:80` pointing at the running `inventory`
+container.
 
-This was reported as [microsoft/aspire#19507](https://github.com/microsoft/aspire/issues/19507) and
-fixed by [microsoft/aspire#19577](https://github.com/microsoft/aspire/pull/19577), which merged to
-`main` on 2026-08-22 under the **13.6** milestone. No released CLI carries it, 13.5.3 included.
+This sample used to require an unreleased 13.6.0, and that requirement is gone. Aspire's TypeScript
+codegen does not emit a `*Promise`/`*PromiseImpl` wrapper pair for a bare Aspire interface
+(`IResourceBuilder<IResourceWithServiceDiscovery>`, which is what `AddService` returns), so the
+generated SDK referenced an undeclared `ResourceWithServiceDiscoveryPromise` and failed with six
+`TS2552` errors — reported as
+[microsoft/aspire#19507](https://github.com/microsoft/aspire/issues/19507) and fixed upstream by
+[microsoft/aspire#19577](https://github.com/microsoft/aspire/pull/19577) under the 13.6 milestone.
 
-Verified against a build of that PR (`13.6.0-pr.19577.gfa0aea2c`): the generated SDK type-checks
-clean under strict `tsc`, and the sample runs end-to-end — `withReference()` on the
-`addService()` result injects the resolved service's discovery variables into the consuming
-resource, e.g. `services__inventory__http__0=http://localhost:<port>` pointing at the running
-`inventory` container. The same sample regenerated with 13.5.1 still reproduces all six
-`TS2552` errors.
+That upstream fix is no longer what makes this work. The generator emits the wrapper pair when the
+bare interface appears as an extension-method **receiver** rather than only as a return type, and
+the eight `[AspireExport]` configuration shims above declare exactly that receiver — so they carry
+the wrapper pair for `addService` too. Removing `[AspireExport]` from those eight shims brings all
+six errors back on a current CLI, which is how the cause was isolated; the measurement is in
+[`docs/superpowers/specs/2026-08-30-19507-already-fixed-findings.md`](docs/superpowers/specs/2026-08-30-19507-already-fixed-findings.md).
 
 Switching between CLI builds can leave a stale code generator under `.aspire/`, so remove that
 directory before regenerating:

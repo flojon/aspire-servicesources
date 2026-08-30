@@ -110,6 +110,22 @@ nothing will fail to build to warn you.
   project resource. A build launched with the AppHost directory as its working directory still sees
   the host's pin. That half is documented in the README rather than papered over.
 
+- **The TypeScript AppHost sample no longer needs an unreleased Aspire CLI** ([#88]). The README
+  said `samples/DemoAppHostTypeScript` required CLI **13.6.0**, which is not released. Measured
+  against released **13.5.3**: the generated SDK type-checks clean under strict `tsc` and the
+  sample runs end-to-end. Nothing in the package changed — the requirement was already stale.
+
+  Aspire's TypeScript codegen omits the `*Promise`/`*PromiseImpl` wrapper pair for a bare Aspire
+  interface return ([microsoft/aspire#19507]), which is what `AddService` returns. It emits that
+  pair when the interface appears as an extension-method *receiver* rather than only as a return
+  type, and the eight `[AspireExport]` configuration shims added in `0.3.0` declare exactly that
+  receiver — so they carry the wrapper for `addService` as well. Dropping `[AspireExport]` from
+  those eight shims brings all six `TS2552` errors back, which is how the cause was isolated.
+
+  The real CLI floor is **13.5.3**, for an unrelated reason: the CLI pins its own Aspire version
+  for the host project it generates, so anything older than this package's 13.5.2 floor fails
+  `aspire restore` with `NU1605` before codegen runs.
+
 ## [0.3.1] - 2026-08-27
 
 Publishes the two satellite packages, which `0.3.0` could not. Core `0.3.0` is on nuget.org
@@ -434,9 +450,11 @@ Targets `net10.0`.
 [#72]: https://github.com/flojon/aspire-servicesources/issues/72
 [#79]: https://github.com/flojon/aspire-servicesources/issues/79
 [#80]: https://github.com/flojon/aspire-servicesources/issues/80
+[#88]: https://github.com/flojon/aspire-servicesources/issues/88
 [#89]: https://github.com/flojon/aspire-servicesources/issues/89
 [#112]: https://github.com/flojon/aspire-servicesources/pull/112
 [#117]: https://github.com/flojon/aspire-servicesources/pull/117
 [#119]: https://github.com/flojon/aspire-servicesources/issues/119
 [#125]: https://github.com/flojon/aspire-servicesources/issues/125
+[microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
