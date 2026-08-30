@@ -11,6 +11,37 @@ nothing will fail to build to warn you.
 
 ## [Unreleased]
 
+### Added
+
+- `builder.UseDeferredCheckout()`, which moves a **cold** `"local"` checkout past AppHost
+  startup ([#130]). Opt-in, off by default. A `dotnet`-kind service whose managed checkout does
+  not exist yet is registered against the path that checkout will have, held back with Aspire's
+  explicit-start behaviour, cloned while the AppHost runs, and started when its checkout lands.
+  The dashboard comes up immediately instead of after every clone, checkout progress and failure
+  become visible resource state, and a clone that fails costs one service rather than the whole
+  AppHost.
+
+  A deferred service must declare its endpoints in the AppHost, because a project's endpoints
+  come from its launch profile and Aspire reads that during composition, before the repository
+  is on disk:
+
+  ```csharp
+  builder.UseDeferredCheckout();
+
+  var orders = builder.AddService("orders").WithHttpEndpoint();
+  ```
+
+  That line is correct on a warm checkout too — `WithHttpEndpoint` updates an endpoint of the
+  same name using its non-null arguments only, and it has none — so there is one call, not one
+  per path. A deferred service that declares none fails the run with a message naming it. The
+  flip side is that an AppHost whose checkouts are all warm cannot tell you the line is missing;
+  the next fresh clone will.
+
+  Nothing else about a run changes. The clones still start on the first `AddService()` call, in
+  parallel, at the same moment as before — only who waits for them moves. A checkout that
+  already exists takes the eager path unchanged, with full launch-profile fidelity, as do
+  `path` overrides and the non-`dotnet` kinds. The blast radius is first-run-only.
+
 ## [0.3.1] - 2026-08-27
 
 Publishes the two satellite packages, which `0.3.0` could not. Core `0.3.0` is on nuget.org
@@ -338,4 +369,5 @@ Targets `net10.0`.
 [#89]: https://github.com/flojon/aspire-servicesources/issues/89
 [#112]: https://github.com/flojon/aspire-servicesources/pull/112
 [#117]: https://github.com/flojon/aspire-servicesources/pull/117
+[#130]: https://github.com/flojon/aspire-servicesources/issues/130
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

@@ -76,6 +76,49 @@ public static class ServiceSourcesBuilderExtensions
     }
 
     /// <summary>
+    /// Opts this AppHost into deferring a <c>"local"</c> service's <em>first</em> checkout past
+    /// startup: a <c>dotnet</c>-kind service whose package-managed clone does not exist yet is
+    /// registered stopped, cloned while the AppHost runs, and started when its checkout lands —
+    /// so the dashboard comes up immediately, checkout progress and failure show as resource state,
+    /// and one failed clone costs one service rather than the whole AppHost.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Must be called before the first <see cref="AddService"/>, which is where the decision is
+    /// made. Nothing else about the run changes: the clones start at exactly the same moment they
+    /// always did, and a service whose checkout already exists — every service on every run after
+    /// the first — resolves eagerly, with full launch-profile fidelity, exactly as it does without
+    /// this call. Services with a <c>path</c> override are never deferred either; that directory is
+    /// the developer's own and there is nothing to clone.
+    /// </para>
+    /// <para>
+    /// A deferred service must declare its own endpoints in the AppHost, because a project's
+    /// endpoints come from its launch profile and Aspire reads that while composing — before the
+    /// repository is on disk:
+    /// </para>
+    /// <code lang="csharp">
+    /// builder.UseDeferredCheckout();
+    ///
+    /// var orders = builder.AddService("orders").WithHttpEndpoint();
+    /// </code>
+    /// <para>
+    /// That line is correct on a warm checkout too — <c>WithHttpEndpoint</c> updates an endpoint of
+    /// the same name using its non-null arguments only, and it has none — so there is one call, not
+    /// one per path. A deferred service that declares none fails the run with a message naming it.
+    /// </para>
+    /// <para>
+    /// Off by default: a service that used to be running by the time <c>Build()</c> returned is
+    /// started after it instead, which is visible to anything in the AppHost that assumed otherwise.
+    /// </para>
+    /// </remarks>
+    [AspireExportIgnore]
+    public static IDistributedApplicationBuilder UseDeferredCheckout(this IDistributedApplicationBuilder builder)
+    {
+        DeferredCheckout.For(builder).Enable();
+        return builder;
+    }
+
+    /// <summary>
     /// Registers <paramref name="handler"/> as the resolver for local-sourced services whose
     /// <c>servicesources.yaml</c> entry declares <c>kind: &lt;paramref name="kind"/&gt;</c>.
     /// Called by a satellite package's own registration method (e.g. a hypothetical

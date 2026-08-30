@@ -188,6 +188,52 @@ a project reference would be.
   AppHost logs which ones those were at startup — and warns if one of them failed, since nothing
   else would ever tell you — so you know what to drop.
 
+#### First run: `UseDeferredCheckout()`
+
+On a cold clone, `AddService()` blocks until the checkout it needs is on disk. Composition
+hasn't finished, so the AppHost hasn't started, so there is no dashboard to look at while
+several repositories clone — and a checkout that fails throws out of composition and takes the
+whole AppHost down with it, including the services that were fine.
+
+`builder.UseDeferredCheckout()` moves that wait past startup for the case where it hurts: a
+`dotnet`-kind `"local"` service whose *managed* checkout doesn't exist yet. The project is
+registered against the path its checkout will have, held back with Aspire's own explicit-start
+behaviour, cloned while the AppHost runs, and started when its checkout lands:
+
+```csharp
+var builder = DistributedApplication.CreateBuilder(args);
+
+builder.UseDeferredCheckout();
+
+var orders = builder.AddService("orders").WithHttpEndpoint();
+```
+
+The dashboard comes up immediately, checkout progress and failure become resource state you can
+see, and one bad clone costs one service instead of the run. The clones themselves start at
+exactly the same moment they always did — the first `AddService()` call — so nothing gets
+slower; only who waits for them changes.
+
+**Declare the service's endpoints in the AppHost.** A project's endpoints normally come from
+the `applicationUrl` of its launch profile, which Aspire reads while composing — before the
+repository is on disk. A deferred service that declares none fails the run with a message
+naming it. `WithHttpEndpoint()` with no arguments is the whole fix, and it is correct on both
+paths: it updates an endpoint of the same name using its non-null arguments only, so on a warm
+checkout, where the launch profile has already created `http`, it changes nothing. Because of
+that, an AppHost whose checkouts are all warm can't tell you the line is missing — you'll hear
+about it on the next fresh clone.
+
+Scoped deliberately narrowly, so the blast radius is first-run-only:
+
+- Only a checkout that doesn't exist yet. A warm checkout — every run after the first — takes
+  the existing eager path unchanged, with full launch-profile fidelity.
+- Only managed checkouts. A `path` override is your own directory; there is nothing to clone.
+- Only the `dotnet` kind. The `java` and `javascript` kinds carry their own `port` in the kind
+  block and resolve eagerly either way.
+
+Off by default: a service that used to be running by the time `Build()` returned is started
+after it instead, which is visible to anything in your AppHost that assumed otherwise. Call it
+before your first `AddService()`, which is where the decision is made.
+
 #### Several services from one repository
 
 A catalog entry maps one service to one thing to run, so a repository holding several services
