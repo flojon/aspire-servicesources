@@ -1,10 +1,11 @@
 # Aspire.Hosting.ServiceSources — The `prepare` Step
 
 **Date:** 2026-08-28
-**Status:** Design — ready for implementation planning.
+**Status:** Design — ready for implementation planning. Amended 2026-08-30 to settle #123.
 **Resolves:** GitHub issue #118 (a `"local"` checkout whose runnable artifact is produced by a
 script the repository commits and then gitignores).
-**Defers:** #123 (whether the step should run for a self-managed `path` checkout).
+**Also resolves:** #123 (whether the step should run for a self-managed `path` checkout — it
+does, but only when the developer declares it themselves; see [`path` checkouts](#path-checkouts)).
 **Leaves a seam for:** #81 (whether a fresh checkout is ever built before its resource starts) —
 since closed, confirming this step is that seam and needs nothing added here. See
 [the checkout-build findings](2026-08-30-servicesources-checkout-build-findings.md).
@@ -188,7 +189,8 @@ A developer block with no catalog block behind it stands on its own: a developer
 prepare step the catalog never declared. That file is theirs, gitignored, and already the place where
 `path` points a service at a checkout the catalog knows nothing about — a command they wrote
 themselves, running in a checkout on their own machine, raises none of the provenance question that
-the catalog layer does.
+the catalog layer does. For a `path` checkout it is the *only* shape a prepare step can take, since
+such a service never inherits the catalog's block at all — see [`path` checkouts](#path-checkouts).
 
 Disabling is expressed as `mode: never` rather than as an absence because JSON cannot distinguish an
 explicit `null` from a missing key without a nullable wrapper, and because a developer overriding
@@ -249,7 +251,9 @@ In `LocalProjectSource.Resolve`, between `GetRepoRoot(...)` and the kind dispatc
 placement is doing work:
 
 - **After `GetRepoRoot`** — the checkout exists and has been reconciled to its configured ref, so the
-  commit the marker keys on is the commit the step actually ran against.
+  commit the marker keys on is the commit the step actually ran against. That holds for every
+  checkout resolved during composition; a checkout deliberately *not* resolved there is the one
+  exception, and is dealt with under *Deferred checkouts* below.
 - **Before the dispatch** — it covers `kind: dotnet` (whose `ResolveProjectFile` checks the project
   file exists) and every registered kind identically, without any kind knowing it exists.
 - **Not in the prefetch** — see finding 1. `AddService()` is serial, so prepare steps are serial
@@ -267,12 +271,34 @@ The block is *parsed and validated* earlier — alongside the existing `handler?
 pre-flight, before `GetRepoRoot` — so a malformed `prepare` block is reported without first paying
 for a cold clone, matching the reasoning already documented on that call.
 
+#### Deferred checkouts
+
+`builder.UseDeferredCheckout()` (#130, PR #136 — opt-in, off by default, and unmerged as this is
+written) removes the assumption the placement above rests on. It registers a managed `dotnet`
+service against the path its checkout *will* have, holds the resource back with
+`WithExplicitStart()`, and clones in a background task that releases it from
+`AfterResourcesCreatedEvent`. During composition that checkout does not exist, so a step wired
+between `GetRepoRoot` and the kind dispatch would run against a missing directory or not run at all.
+
+The step therefore follows the checkout rather than the composition: for a deferred service it runs
+in that same background task, after the clone lands and before the resource is released to start.
+Nothing else changes — same marker, same modes, same failure text — except where a failure surfaces,
+which is wherever #136 puts a failed clone: resource state, not an exception on a task nobody awaits.
+
+This is not a corner case dressed up as one. Finding 3 singles out `kind: dotnet` as the kind whose
+`ResolveProjectFile` does `File.Exists`, which is the whole reason the ordering constraint is real —
+and `dotnet` is exactly the kind #136 defers. A repository that generates its own `.csproj` is a
+service both features are aimed at. Every other resolution path is untouched: #136 leaves a `path`
+override, a warm checkout and all non-`dotnet` kinds on the eager path, so nothing in
+[`path` checkouts](#path-checkouts) interacts with it.
+
 ### Once-ness and the marker
 
-Marker file, written only on success:
+Marker file, written only on success. Where it lives depends on who owns the directory:
 
 ```
-<repoRoot>/.git/servicesources-prepare.json
+managed:  <repoRoot>/.git/servicesources-prepare.json
+path:     <AppHostDirectory>/.servicesources/prepare/<service>.json
 ```
 
 ```json
@@ -284,6 +310,34 @@ mistaken for the developer's own file or accidentally committed, and it dies wit
 deleted-and-recloned checkout re-prepares even at the same commit, which a marker stored beside the
 checkout would get wrong. For a managed checkout `.git` is always a directory: `PrepareRepoRoot`
 refuses a linked worktree or a `--separate-git-dir` clone before ever getting here.
+
+For a `path` checkout none of that is available, and the part that is would be unwelcome. `.git`
+is a *file* rather than a directory for a linked worktree and for a `--separate-git-dir` clone —
+the two shapes `CloneIntoPlace` refuses for managed checkouts, telling the developer to "point the
+service at it with the 'path' override", so the tool's own documented remedy produces exactly the
+shape a `.git` marker cannot handle. And writing into a directory the tool does not own is the one
+thing `path` exists to promise it will never do. The marker therefore goes in the tool's own tree,
+keyed on the **resolved absolute path** alongside the command hash and the commit: re-pointing
+`path` at a different directory invalidates it, and two services sharing one directory — the
+monorepo pattern the README documents — keep independent markers, which is correct when their
+commands differ. Two supporting details for the implementation.
+
+First, the directory has to exist, and for a `path` service it does not.
+`LocalGitCheckout.EnsureGitignore` creates `<AppHostDirectory>/.servicesources/` and writes the
+`.gitignore` (`*`, then `!.gitignore`) that keeps everything under it out of the AppHost
+repository's status — but it is called *after* the `path` branch of `PrepareRepoRoot` has already
+returned, so a `path` service never reaches it. Hoisting that call above the `path` branch is the
+obvious move and the wrong one: it edits `PrepareRepoRoot`, against the rule that `LocalGitCheckout`
+stays purely about git (see *Where the step runs*), and it creates `.servicesources/` for every
+AppHost that uses `path` at all — including the ones with no `prepare` block anywhere. That
+housekeeping instead moves out of `LocalGitCheckout` into a shared internal helper both callers use,
+and the prepare step invokes it when it writes a marker. Creating a directory and writing a
+`.gitignore` is not git logic; it is tool-directory logic, and lazily is the only point at which a
+`path`-only AppHost should acquire the directory at all. Writing that `.gitignore` on this path is
+not optional: without it the marker becomes the one tool-managed file a developer would see listed
+as untracked in their own repository.
+
+Second, the absolute path is normalized before it enters the key.
 
 `mode: oncePerCommit` re-runs when either the command or the commit moves. `mode: once` records and
 compares only the command, so it runs once per checkout and stays satisfied as the commit moves under
@@ -335,6 +389,21 @@ If `GetHeadCommitSha` cannot determine the commit, the step **runs**. "Cannot ve
 allowed to mean "assume done". It should not arise for a managed checkout, which is always a real
 clone, but the fail-safe direction is worth fixing in the design rather than in whichever
 implementation gets there first.
+
+For a `path` checkout it arises routinely, because `path` validates only `Directory.Exists` and
+need not name a git repository at all. Pointing `path` at a plain unpacked directory therefore stays
+**supported rather than refused** — #123's fourth open question, settled here by the modes degrading
+predictably rather than by a new restriction. The consequence is worth stating plainly, because the
+two modes fork rather than degrading toward each other: under `once` the commit is never consulted,
+so the step runs once and stays satisfied forever; under `oncePerCommit` the commit can never be
+verified, so the rule above makes it run on **every start**. Neither is "once per commit".
+
+That is not treated as a degradation to warn about. A command that is expensive when there is
+nothing to do is a command that wants a guard, and writing that guard is the script's job under
+every mode — see *Change detection belongs to the script*. What the tool owes the developer here is
+not advice but visibility: every decision to run is reported with the reason for it (see *Execution
+and output*), so "the commit could not be resolved" shows up as a fact about this start rather than
+as a warning bolted onto a mode choice.
 
 #### Change detection belongs to the script
 
@@ -474,6 +543,13 @@ rather than executed. A bare name goes through `PATH`, so `make`, `bash` and `np
 Relative resolution is done explicitly rather than left to `WorkingDirectory`, because a relative
 `FileName` is resolved against the *process's* working directory, not the one in `ProcessStartInfo`.
 
+Every run is preceded by the reason it is running — there was no marker, the command changed, the
+commit moved, the commit could not be resolved, or the mode is `always`. That single uniform line is
+the whole of what this design says about telling a developer why their start is slow: one report per
+decision to run, rather than a warning special-cased to a mode or to a shape of checkout. A decision
+to *skip* is not reported; skipping is the ordinary case, and the marker file already records it.
+It goes to the console, like everything else this step emits and for the same reason (finding 6).
+
 The full resolved command is logged before it runs — the "log it loudly" half of #118's trust
 discussion. Provenance is otherwise unchanged from what the tool already does: `mavenGoal` and
 `gradleTask` already run the checkout's own wrapper script, and `kind: dotnet` builds and runs the
@@ -506,11 +582,67 @@ likely cause. Per finding 2, both fail the AppHost.
 
 ### `path` checkouts
 
-Skipped, with a notice buffered to `BeforeStartEvent` naming the service and the command that was not
-run. This is consistent with how `path` is treated everywhere else — nothing is cloned, fetched or
-checked out on a developer's behalf there — and it avoids both writing a marker into a directory the
-tool does not own and the `.git`-is-a-file problem that the tool's own documented remedy for
-worktrees produces. Whether this should change is #123, which records the analysis in full.
+The step runs for a `path` checkout, but such a service **never inherits the catalog's `prepare`
+block**. The developer declares it in full in `servicesources.local.json` — command included — or no
+step runs. #123 records the analysis this settles.
+
+This is the rule `path` already follows for `ref`, which `PrepareRepoRoot` refuses outright on the
+grounds that it "only applies when this tool manages the clone". `prepare` is the same kind of
+field: a catalog instruction about a checkout the developer has taken over. Two things make
+inheritance the wrong default rather than merely the incautious one.
+
+**Nothing establishes that `path` points at the catalog's repository.** `GetOriginUrl` exists but the
+`path` branch never calls it; the directory is validated by `Directory.Exists` and by nothing else. A
+catalog command like `["make", "bootstrap"]` or `["npm", "ci"]` would run perfectly happily in a tree
+that has nothing to do with the repository the catalog names. `./prepare.sh` fails safe by not
+existing; a bare command name does not.
+
+**It is the developer's working tree, holding their in-flight work.** A managed checkout is a clone
+this tool made seconds ago and nobody would miss. A `path` checkout is not, and nothing stops a
+repository's own bootstrap script from running `git clean`. Under this rule the command that runs
+there was written by whoever chose the directory, which is the only arrangement that makes that
+exposure theirs to accept.
+
+A catalog `prepare` block on a service resolved through `path` is therefore **ignored, not
+rejected** — with the notice buffered to `BeforeStartEvent` naming the service and the command that
+was not run. It is deliberately not the hard error that `ref` + `path` is: `ref` and `path` are both
+the developer's own fields, so combining them is the developer contradicting themselves in a single
+file, whereas a catalog `prepare` block is the team's and applies correctly to every developer on a
+managed checkout. One developer's local override must not turn a shared catalog field into a
+failure. The notice carries the resolved command verbatim, so it can be copied into the local file;
+that is what keeps the duplication cheap enough to be the right trade. It repeats on every start
+until the developer does something about it, and `{"mode": "never"}` is that something — see below.
+
+`prepare.mode` set with no `prepare.command` on a `path` service is **rejected by name**, with one
+exception — `mode: never`. The developer has otherwise written the half of the block that cannot
+stand alone, and the catalog's command is not there to attach it to, so the alternative is silence
+where they expected a step. For a managed checkout the same block is the designed way to disable or
+force an inherited step (see the override table above), so the restriction is scoped to `path`
+rather than general.
+
+`never` is exempt because that argument inverts for it. It is the one mode that means something
+without a command — *run nothing* — so silence is not the failure it would be under the other three;
+it is exactly what was asked for. It is also the only way to switch off the ignored-catalog-block
+notice above, which otherwise repeats on every start with nothing the developer can do to
+acknowledge it: someone who took the checkout over deliberately and wants the team's bootstrap
+nowhere near it would be told so indefinitely, while a managed checkout has `mode: never` for
+precisely this. So on a `path` service `mode: never` stands alone, means "run nothing", and
+suppresses the notice.
+
+The mode default is unchanged and deliberately uniform: `oncePerCommit`, exactly as for a managed
+checkout. A `path` checkout is the one a developer switches branches in all day, so the default
+re-runs far more often here than it does for a managed checkout, where the commit moves only when
+`ref` does. That cost is accepted rather than overlooked — one default stated once beats a default
+plus a `path`-shaped exception, and the mode that errs toward visible slowness rather than silent
+staleness is the right one to state (see *What a changed commit does, and what it costs*). The
+remedy for the extra runs is the one this design points at everywhere else: a command that is cheap
+when there is nothing to do. Here that is more available than usual rather than less — the developer
+wrote this command themselves, which for `path` is the whole rule, so unlike an inherited catalog
+step the guard is entirely theirs to add.
+
+**Accepted:** the developer's copy of a command can drift from the catalog's, silently. For `path`
+that is arguably correct rather than merely tolerable — their directory may not be the catalog's
+repository at all, so tracking the catalog's command is a questionable default to begin with.
 
 ### Consequences accepted
 
@@ -538,6 +670,14 @@ worktrees produces. Whether this should change is #123, which records the analys
   quiet in one direction: `once` on a step the repository defines leaves developers running a stale
   artifact after the bootstrap script is updated. The default is the safe one, and the README should
   frame the choice as "does the repository define this step?" rather than as "how often".
+- **A `path` marker outlives the directory it describes.** A managed checkout's marker dies with it,
+  which is what makes a deleted-and-recloned checkout re-prepare. A `path` marker lives in the
+  AppHost's tree instead, so a developer who deletes their own checkout and re-creates it at the same
+  commit keeps a marker saying the step is done, and it is skipped against a directory that no longer
+  holds its outputs. This is the unavoidable half of not writing into a directory the tool does not
+  own. It fails loudly rather than quietly — the kind's own existence check reports the missing
+  artifact, which is precisely the failure #118 exists to describe — and one run under `mode: always`,
+  or deleting the marker, clears it.
 
 ### What this deliberately does not do
 
@@ -569,7 +709,24 @@ process.
 - **Override merge** — each row of the table above, plus a developer block with no catalog block.
 - **Ordering** — the step runs after the checkout is reconciled and before the kind's `Resolve`;
   a `dotnet` service whose project file is produced by the step resolves.
-- **Skipped for `path`**, with the notice emitted.
+- **`path` does not inherit** — a catalog `prepare` block on a service resolved through `path` runs
+  nothing and emits the notice, naming the command; a developer block on the same service runs;
+  a developer block with `mode` and no `command` is rejected by name, while the same block on a
+  managed service is accepted as an override; `{"mode": "never"}` alone is the exception — accepted
+  on a `path` service, runs nothing, and suppresses the notice the ignored catalog block would
+  otherwise emit on every start.
+- **`path` marker location** — written under `<AppHostDirectory>/.servicesources/prepare/`, not
+  into the checkout; re-pointing `path` elsewhere re-runs; two services sharing one directory
+  with different commands keep independent markers; `.servicesources/` and its `.gitignore` are
+  created by the prepare step for a `path`-only AppHost that never clones anything, and are *not*
+  created for an AppHost whose services declare no prepare step at all.
+- **No resolvable HEAD** — `once` runs once and then skips; `oncePerCommit` runs every time, and
+  every run reports the reason it ran rather than warning about the mode.
+- **The decision to run is reported** — with the reason, for each of no marker, changed command,
+  moved commit, unresolvable commit and `mode: always`; a skip reports nothing.
+- **Deferred checkout** — a `dotnet` service registered through `UseDeferredCheckout()` runs its
+  step in the background task after the clone lands and before the resource is released, not during
+  composition; its failure surfaces as resource state.
 - **Failure** — non-zero exit names service, command and exit code; a command that cannot be launched
   is distinguished.
 - **Confinement** — a first element climbing out of the checkout is rejected; a bare name is left for
@@ -581,5 +738,6 @@ process.
 Documentation: a `prepare` subsection under `"local"` source options in the README, covering the
 schema, the override table, the marker and how to force a re-run, the four modes and how to choose
 between them (the `once` vs `oncePerCommit` question is "does the repository define this step?"), the
-requirement that the command be safe to re-run under all of them, the `path` skip with a pointer to
-#123, and the silent-typo caveat. `CHANGELOG.md` entry under the open version.
+requirement that the command be safe to re-run under all of them, the rule that a `path` checkout
+declares its own step rather than inheriting the catalog's (and `{"mode": "never"}` as the way to
+silence the resulting notice), and the silent-typo caveat. `CHANGELOG.md` entry under the open version.
