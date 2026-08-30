@@ -196,6 +196,51 @@ Two supporting changes: `LocalProjectSource.RelevantFields` becomes `{ "path", "
 and `ServiceDeveloperConfigValidator` gains a check for it so `prepare` under a `"container"` source
 is rejected as a foreign field like `port` under `"local"` already is.
 
+### Relationship to #134 (the code-authored catalog)
+
+#134 makes `servicesources.yaml` *optional*, not obsolete: the catalog becomes authorable in the
+AppHost's own language, and the yaml loader stays. The schema above is therefore correct as written
+for the format that ships today, and stays correct after #134 lands. What does not survive unchanged
+is one of the arguments made for it.
+
+The catalog schema calls the typed nested block "load-bearing rather than stylistic" because two
+mechanisms pick it up for free. Both are affordances of the yaml loader specifically, not of the
+design:
+
+- `ServiceCatalogLoader.KnownNestedProperties` is built by reflecting `YamlPropertyNames` over
+  `ServiceMetadata` properties that `IsNestedBlock`, which is what rejects `comand:` inside the
+  block.
+- `IsReservedKindName` is `KnownTopLevelProperties.Contains(kind)`, itself
+  `YamlPropertyNames(typeof(ServiceMetadata))`, which is what stops `LocalKindRegistry.Register`
+  taking the name `prepare`.
+
+A catalog authored in code has neither, and needs neither: a `WithPrepare(...)` builder method makes
+a misspelled field a compile error rather than a load-time one, and makes the kind collision
+unrepresentable rather than caught. The affordances are replaced by something stricter, so nothing
+is lost — but the reasoning above should be read as "this is the right shape for a yaml document",
+not as a claim that holds for every catalog surface.
+
+The consequence for implementation: when the code catalog lands, `prepare` needs a fluent
+counterpart alongside the kind methods, carrying the same fields the yaml block does.
+
+```csharp
+catalog.AddService("routing")
+    .FromRepository("https://github.com/example/planning-routing")
+    .WithPrepare(["./prepare.sh"], windowsCommand: ["pwsh", "-File", "prepare.ps1"], mode: PrepareMode.Once)
+    .WithJava(jarPath: "graphhopper-web-11.0.jar", port: 8989);
+```
+
+That method is out of scope here and is not designed by this document; it is named so that #134's
+implementation does not have to rediscover that this block exists. Everything downstream of the
+schema — where the step runs, the marker, once-ness, failure handling — is expressed against
+`PrepareMetadata` after binding and is indifferent to which surface produced it.
+
+Two parts of this design are unaffected. The developer config is `servicesources.local.json`, which
+is JSON before #134 and JSON after it, so the override rule stands as written whatever the catalog
+is written in. And the reason `windowsCommand` exists — one catalog is committed and shared by a
+team across platforms, so each value can only be spelled one way — is a property of the catalog
+being shared, not of it being yaml, and holds identically for a committed `.cs` file.
+
 ### Where the step runs
 
 In `LocalProjectSource.Resolve`, between `GetRepoRoot(...)` and the kind dispatch. Every part of that
