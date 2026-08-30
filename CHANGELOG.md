@@ -13,17 +13,17 @@ nothing will fail to build to warn you.
 
 ### Added
 
-- `builder.UseDeferredCheckout()`, which moves a **cold** `"local"` checkout past AppHost
-  startup ([#130]). Opt-in, off by default. A `dotnet`-kind service whose managed checkout does
-  not exist yet is registered against the path that checkout will have, held back with Aspire's
-  explicit-start behaviour, cloned while the AppHost runs, and started when its checkout lands.
+- **`builder.UseDeferredCheckout()` moves a cold `"local"` checkout past AppHost startup**
+  ([#130]). Opt-in, off by default. A `dotnet`-kind service whose managed checkout does not exist
+  yet is registered against the path that checkout will have, held back with Aspire's
+  explicit-start behaviour, cloned while the AppHost runs, and started once its checkout lands.
   The dashboard comes up immediately instead of after every clone, checkout progress and failure
   become visible resource state, and a clone that fails costs one service rather than the whole
   AppHost.
 
-  A deferred service must declare its endpoints in the AppHost, because a project's endpoints
-  come from its launch profile and Aspire reads that during composition, before the repository
-  is on disk:
+  **A deferred service must declare its endpoints in the AppHost**, because a project's endpoints
+  come from its launch profile and Aspire reads that during composition, before the repository is
+  on disk:
 
   ```csharp
   builder.UseDeferredCheckout();
@@ -31,16 +31,62 @@ nothing will fail to build to warn you.
   var orders = builder.AddService("orders").WithHttpEndpoint();
   ```
 
-  That line is correct on a warm checkout too — `WithHttpEndpoint` updates an endpoint of the
-  same name using its non-null arguments only, and it has none — so there is one call, not one
-  per path. A deferred service that declares none fails the run with a message naming it. The
-  flip side is that an AppHost whose checkouts are all warm cannot tell you the line is missing;
-  the next fresh clone will.
+  That line is correct on a warm checkout too, so there is one call, not one per path. A deferred
+  service that declares none fails the run with a message naming it — but an AppHost whose
+  checkouts are all warm cannot tell you the line is missing, and the next fresh clone will.
 
   Nothing else about a run changes. The clones still start on the first `AddService()` call, in
-  parallel, at the same moment as before — only who waits for them moves. A checkout that
-  already exists takes the eager path unchanged, with full launch-profile fidelity, as do
-  `path` overrides and the non-`dotnet` kinds. The blast radius is first-run-only.
+  parallel, at the same moment as before — only who waits for them moves. A checkout that already
+  exists takes the eager path unchanged, as do `path` overrides and the non-`dotnet` kinds.
+
+### Changed
+
+- **`ServiceSourcesConfigurationException` prints as its message, not as a stack dump**
+  ([#125]). These are raised from `AddService()` and normally end the AppHost unhandled, so the
+  runtime's rendering of them *is* the error output — and it buried the sentence naming the fix
+  under three nested inner-exception blocks and a stack trace per level, about thirty lines for a
+  failed private clone. `ToString()` now prints the message plus one `caused by:` line per cause,
+  and names `SERVICESOURCES_FULL_ERRORS=1` whenever it dropped anything; set that for the
+  runtime's complete dump. `Message`, the `InnerException` chain and `StackTrace` are untouched,
+  but anything logging one of these exceptions logs the summary unless that variable is set.
+
+- **A clone or fetch that never resolved a credential says so** ([#125]), instead of reporting
+  authentication as the likely cause. When `git credential fill` yields nothing and neither
+  `SERVICESOURCES_GIT_TOKEN` nor `SERVICESOURCES_GIT_USERNAME` is set, libgit2 fails against a
+  token-authenticated host with `could not find appropriate mechanism for credentials` — a
+  client-side dead end that never reached the host, so blaming a rejected token sent developers
+  hunting for one they never had. The usual real cause is a credential helper that resolves in
+  your shell but not in the environment the AppHost process inherits. Negotiate/NTLM hosts are
+  unaffected; the request still carries the machine's integrated credential. A failure arriving
+  without an authentication challenge — a proxy answering 403, a 404 from a host serving
+  anonymously — keeps the old wording.
+
+### Fixed
+
+- **Managed checkouts no longer inherit the AppHost repository's MSBuild and NuGet settings**
+  ([#119]). A checkout is cloned into `<AppHostDirectory>/.servicesources/checkouts/<service>/`,
+  and MSBuild, NuGet, the .NET SDK host and analyzer configuration all find their settings by
+  walking *up* — so another team's repository was built under rules written for yours. Central
+  package management failed a checkout's restore with `NU1008`; a `packageSourceMapping` could
+  silently confine it to the wrong feeds; an `.editorconfig` could raise its analyzers to errors;
+  a `global.json` applied your SDK pin. `.servicesources/` now carries six tool-managed files that
+  stop those walks, refreshed on upgrade. A checkout bringing its own keeps its own.
+
+  **Read before upgrading:** package source mapping is now *off* inside checkouts, including
+  mappings from your user- and machine-level `nuget.config`, because NuGet's `<clear />` discards
+  everything accumulated above it. Set `SERVICESOURCES_KEEP_PACKAGE_SOURCE_MAPPING=1` to keep it
+  enforced. The README documents each barrier and where its coverage stops.
+
+- **The TypeScript AppHost sample no longer needs an unreleased Aspire CLI** ([#88]). The README
+  put the floor for `samples/DemoAppHostTypeScript` at CLI **13.6.0**, which is not released.
+  Measured against released **13.5.3**: the generated SDK type-checks clean under strict `tsc` and
+  the sample runs end-to-end. Nothing in the package changed — the requirement was stale. Aspire's
+  codegen omits the `*Promise`/`*PromiseImpl` wrapper pair for a bare Aspire interface return
+  ([microsoft/aspire#19507]) — the six `TS2552` errors the README warned about — but emits it when
+  the interface appears as an extension-method *receiver*, which the eight `[AspireExport]` shims
+  added in `0.3.0` declare, so they carry it for `addService` too. The real floor is **13.5.3**, for an unrelated reason: an older CLI pins
+  its generated host project below this package's 13.5.2 Aspire floor and fails `aspire restore`
+  with `NU1605`.
 
 ## [0.3.1] - 2026-08-27
 
@@ -56,34 +102,17 @@ move a core-only AppHost off it.
   `0.3.0` core package published normally in the same run, so a `0.3.0` AppHost using only
   core is unaffected.
 
-  The cause was the upper bound introduced in `0.3.0` to stop a satellite pairing with a
-  next-minor core ([#79]). It closed the range with a prerelease bound so that the next minor's
-  *prereleases* were excluded along with its release:
+  The cause was the prerelease upper bound `0.3.0` introduced to stop a satellite pairing with a
+  next-minor core ([#79]). nuget.org's gallery refuses one at push time — `The package manifest
+  contains an invalid Version: '0.4.0-0'`, HTTP 400 — while the NuGet client, `dotnet pack`,
+  `restore` and GitHub Packages all accept it ([NuGetGallery#6948], open), and `pack` emits only
+  NU5104, a warning. The bound was correct on every surface the repository could observe and wrong
+  on the one a release touches.
 
-  ```xml
-  <dependency id="KoalaSoft.Aspire.Hosting.ServiceSources" version="[0.3.0, 0.4.0-0)" />
-  ```
-
-  nuget.org's gallery refuses that at push time — `The package manifest contains an invalid
-  Version: '0.4.0-0'`, HTTP 400 — while the NuGet client, `dotnet pack`, `restore` and GitHub
-  Packages all accept it ([NuGetGallery#6948], open). `pack` emits only NU5104, a warning. So
-  the bound was correct on every surface the repository could observe, and wrong on the single
-  surface a release touches.
-
-  The bound is now chosen per build: `-0` on a prerelease build, which is what the GitHub
-  Packages preview feed receives, and a plain `0.4.0` on a stable one, which is what nuget.org
-  receives:
-
-  ```xml
-  <!-- release build, pushed to nuget.org -->
-  <dependency id="KoalaSoft.Aspire.Hosting.ServiceSources" version="[0.3.1, 0.4.0)" />
-  <!-- preview build, pushed to GitHub Packages -->
-  <dependency id="KoalaSoft.Aspire.Hosting.ServiceSources" version="[0.3.1-alpha.0.7, 0.4.0-0)" />
-  ```
-
-  Nothing is lost by the plain bound on nuget.org: every prerelease of these packages goes to
-  GitHub Packages, so there is no `0.4.0-*` on nuget.org for it to admit. The pairing guarantee
-  `0.3.0` documented still holds on both feeds.
+  It is now chosen per build: `[0.3.1, 0.4.0)` on a stable build for nuget.org,
+  `[0.3.1-alpha.0.7, 0.4.0-0)` on a prerelease build for GitHub Packages. Nothing is lost — every
+  prerelease of these packages goes to GitHub Packages, so nuget.org has no `0.4.0-*` for the
+  plain bound to admit, and `0.3.0`'s pairing guarantee holds on both feeds.
 
 ### Changed
 
@@ -96,16 +125,13 @@ move a core-only AppHost off it.
 
 ### Breaking
 
-- **Removed the public `ServiceResource` type** ([#62]). `AddService()` used to return a
-  builder over a `ServiceResource` facade that was deliberately never added to
-  `builder.Resources`. It now returns a builder over the resource Aspire actually runs — a
-  `ProjectResource` for `local`, an Aspire container or executable resource for `container`
-  and `kubernetes`, or whatever an `ILocalResourceKind` returns.
-
-  `AddService()`'s declared return type is unchanged,
-  `IResourceBuilder<IResourceWithServiceDiscovery>` before and after, so call sites that
-  only pass the result to `WithReference(...)` or `GetEndpoint(...)` keep compiling. What
-  breaks is code that *names* the type:
+- **Removed the public `ServiceResource` type** ([#62]). `AddService()` used to return a builder
+  over a `ServiceResource` facade that was never added to `builder.Resources`. It now returns a
+  builder over the resource Aspire actually runs — a `ProjectResource` for `local`, a container or
+  executable resource for `container` and `kubernetes`, or whatever an `ILocalResourceKind`
+  returns. The declared return type is unchanged, `IResourceBuilder<IResourceWithServiceDiscovery>`
+  before and after, so call sites that only pass the result to `WithReference(...)` or
+  `GetEndpoint(...)` keep compiling. What breaks is code that *names* the type:
 
   ```csharp
   // No longer compiles - the type is gone:
@@ -127,11 +153,8 @@ move a core-only AppHost off it.
   IResourceBuilder<ProjectResource> web = builder.AddService("web").As<ProjectResource>();
   ```
 
-  These exist because most of Aspire's configuration extensions cannot bind to
-  `IResourceBuilder<IResourceWithServiceDiscovery>` at all, facade or not: `WithEnvironment`
-  is constrained to `IResourceWithEnvironment`, which `IResourceWithServiceDiscovery` does
-  not extend, so `service.WithEnvironment(...)` has never compiled — before or after — and
-  fails with `CS0311`. Reaching that API is what `Configure<T>` is for.
+  `Configure<T>` is how you reach an extension constrained to a capability interface: calling
+  `service.WithEnvironment(...)` directly fails with `CS0311`, before this release and after.
 
   See **Changed** below for two things that keep compiling and change behavior: calls on the
   returned builder that used to no-op, and the `kubernetes` resource rename.
@@ -148,21 +171,15 @@ move a core-only AppHost off it.
   <dependency id="KoalaSoft.Aspire.Hosting.ServiceSources" version="[0.3.0, 0.4.0-0)" />
   ```
 
-  The `-0` on the upper bound keeps the next minor's prereleases out as well as its release:
-  `0.4.0-alpha.0.1` sorts *below* `0.4.0`, so a plain `0.4.0` bound would still admit it. That
-  matters on the GitHub Packages preview feed, where every package is published as a
-  prerelease.
+  A satellite implements core's `ILocalResourceKind`, so a mismatched pair failed at run time with
+  `MissingMethodException`/`TypeLoadException` rather than at restore. The minor is the boundary
+  because that is where a breaking change ships below `1.0.0`; a core patch still resolves, so core
+  can be serviced without republishing every satellite.
 
-  A satellite implements core's `ILocalResourceKind`, so a mismatched pair failed at run time
-  with `MissingMethodException`/`TypeLoadException` rather than at restore. The minor is the
-  boundary because that is where a breaking change ships while the version is below `1.0.0`.
-  A core patch still resolves, so core can be serviced without republishing every satellite.
-
-  If your AppHost references core and a satellite separately, moving core alone to the next
-  minor now fails restore with `NU1107` rather than building and throwing at startup. Move
-  both together, or drop the core reference and let the satellite bring core in for you —
-  which is what the README's install section now recommends, since one reference has no
-  second version to keep in step.
+  If your AppHost references core and a satellite separately, moving core alone to the next minor
+  now fails restore with `NU1107` rather than building and throwing at startup. Move both
+  together, or drop the core reference and let the satellite bring core in for you — which is what
+  the README's install section now recommends.
 
 ### Added
 
@@ -175,18 +192,16 @@ move a core-only AppHost off it.
   ([#55], closes [#41]).
 - A `javascript` kind for the `local` source, in the satellite package
   `KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript` ([#59], closes [#44]). After
-  `builder.UseJavaScript()`, a `local` service with `kind: javascript` is cloned like any
-  other and then run through `Aspire.Hosting.JavaScript`. Its `javascript:` block picks the
-  integration — `javascript`, `vite`, `nextjs`, `node` or `bun` — plus the package manager,
-  the app directory within the checkout, and the HTTP endpoint a consumer's
-  `WithReference(...)` resolves against.
+  `builder.UseJavaScript()`, a `local` service with `kind: javascript` is cloned like any other
+  and run through `Aspire.Hosting.JavaScript`. Its `javascript:` block picks the integration —
+  `javascript`, `vite`, `nextjs`, `node` or `bun` — plus the package manager, the app directory,
+  and the HTTP endpoint a consumer's `WithReference(...)` resolves against.
 - A `java` kind for the `local` source, in the satellite package
   `KoalaSoft.Aspire.Hosting.ServiceSources.Java` ([#60], closes [#45]). After
   `builder.UseJava()`, a `local` service with `kind: java` runs through the Aspire Community
-  Toolkit's Java integration. Its `java:` block selects exactly one run mode — a Maven goal,
-  a Gradle task, or a pre-built jar — and `mavenGoal`/`gradleTask` execute the repository's
-  own `mvnw`/`gradlew` wrapper, so a JDK is required on the machine but Maven or Gradle
-  itself is not.
+  Toolkit's Java integration. Its `java:` block selects exactly one run mode — a Maven goal, a
+  Gradle task, or a pre-built jar — and `mavenGoal`/`gradleTask` run the repository's own
+  `mvnw`/`gradlew`, so a JDK is required but Maven or Gradle itself is not.
 - Authentication for private git repositories, resolved through the developer's existing
   git credential helpers ([#56]).
 - `AddService()` is exported to Aspire's Type System, so TypeScript AppHosts can call
@@ -202,19 +217,14 @@ move a core-only AppHost off it.
   `WithGradleTask` and `WithWrapperPath` all first ship in
   `CommunityToolkit.Aspire.Hosting.Java` **13.3.0**, so the floor moves from 13.4.0 to that.
 
-  Nothing changes for consumers on a newer version: NuGet takes the lowest version that
-  satisfies every constraint in the graph, so a floor only decides how far *back* a consumer
-  may go. The test suite runs against the floor rather than latest, for the same reason.
-
-  The JavaScript satellite's `Aspire.Hosting.JavaScript` floor was left alone by this change,
-  because it is part of the Aspire package family and has to move in step with core's
-  `Aspire.Hosting` rather than on its own. Both moved together later in this same release -
+  Nothing changes for consumers on a newer version: NuGet takes the lowest version satisfying
+  every constraint, so a floor only decides how far *back* a consumer may go. The JavaScript
+  satellite's floor was left alone here, since it moves in step with core's `Aspire.Hosting` —
   see **The Aspire floor moves from 13.4.6 to 13.5.2** ([#112]) below.
 
 - **Calls on an `AddService()` result that used to do nothing now take effect** ([#62]).
   `IResourceWithServiceDiscovery` extends `IResourceWithEndpoints` and `IResource`, so every
-  Aspire extension constrained to those already bound to `AddService()`'s return type and
-  compiled:
+  Aspire extension constrained to those already compiled against `AddService()`'s return type:
 
   ```csharp
   IResourceBuilder<IResourceWithServiceDiscovery> service = builder.AddService("orders");
@@ -226,10 +236,9 @@ move a core-only AppHost off it.
   ```
 
   Against the old facade these silently did nothing, because it was never in
-  `builder.Resources`. They now land on the real, registered resource and actually happen.
-  Nothing here stops compiling, so an AppHost carrying one of these calls changes behavior on
-  upgrade with no diagnostic: re-read any such call on an `AddService()` result as live
-  rather than inert.
+  `builder.Resources`; they now land on the real, registered resource. Nothing stops compiling,
+  so an AppHost carrying one changes behavior on upgrade with no diagnostic — re-read any such
+  call as live rather than inert.
 - **`kubernetes`-sourced resources are renamed from `{service}-portforward` to `{service}`**
   ([#62]). Aspire keys service discovery off the resource name, so the old name published the
   endpoint as `services__orders-portforward__…` and a consumer resolving `orders` never found
@@ -241,53 +250,38 @@ move a core-only AppHost off it.
   `ServiceSourcesConfigurationException` naming every offending field, instead of being
   silently ignored ([#43], fixes [#24]).
 - `local` services resolve eagerly during `AddService()` rather than at `BeforeStartEvent`,
-  because a real resource has to exist by the time `AddService()` returns ([#62]). Cold
-  checkouts still run in parallel — the first `AddService()` starts a prefetch for every
-  `local` service in the catalog — so wall-clock is unchanged. Consequences: a checkout
-  failure now throws from the failing `AddService()` call rather than being aggregated
-  across services, `ILocalResourceKind.Validate` no longer runs before any service has
-  touched the app model, and `AddLocalKind(...)` must be called before the first
-  `AddService()`.
+  because a real resource has to exist by the time `AddService()` returns ([#62]). Wall-clock is
+  unchanged — the first `AddService()` prefetches every `local` service in the catalog in
+  parallel. But a checkout failure now throws from the failing `AddService()` rather than being
+  aggregated, and `AddLocalKind(...)` must be called before the first `AddService()`.
 - Superseded preview packages are pruned from the GitHub Packages feed after each release,
   keeping the five most recent ([#68]).
 - **The Aspire floor moves from 13.4.6 to 13.5.2** ([#112], fixes [#89]). `Aspire.Hosting` and
-  `Aspire.Hosting.JavaScript` move together as one matched set — deliberately, because
-  `Aspire.Hosting.JavaScript` 13.4.6 is the half of the pair that breaks once `Aspire.Hosting`
-  reaches 13.5.x.
+  `Aspire.Hosting.JavaScript` move together as one matched set, because the latter at 13.4.6 is
+  the half that breaks once `Aspire.Hosting` reaches 13.5.x.
 
   **Move your AppHost's own Aspire version with it.** In an AppHost still on 13.4.x this lifts
-  `Aspire.Hosting` to 13.5.2 on its own, while `Aspire.AppHost.Sdk`, `Aspire.Hosting.AppHost`
-  and the DCP and dashboard packages the SDK pins to it stay behind — a mixed Aspire family
-  that restore reports nothing about. Raise `Aspire.AppHost.Sdk` and
-  `Aspire.Hosting.AppHost` to 13.5.2 or later at the same time.
+  `Aspire.Hosting` alone, leaving `Aspire.AppHost.Sdk`, `Aspire.Hosting.AppHost` and the DCP and
+  dashboard packages behind — a mixed Aspire family that restore reports nothing about. Raise
+  `Aspire.AppHost.Sdk` and `Aspire.Hosting.AppHost` to 13.5.2 or later at the same time.
 
 ### Fixed
 
-- **The published packages now carry the `polyglot` NuGet tag** ([#112]). It is what `aspire
-  add` reads to surface a package to non-C# AppHosts — the audience the Aspire Type System
-  exports elsewhere in this release exist for. Aspire's own targets append the tag, but
-  `obj/*.nuget.g.targets` imports those only in the per-framework inner builds, while `pack`
-  generates the nuspec from the cross-targeting outer pass: the tag was appended once per
-  inner build, each time to a property no nuspec was generated from, and all three packages
-  packed without it. Appended in `Directory.Build.targets` instead, under Aspire's own
-  condition so the two cannot both add it.
+- **The published packages now carry the `polyglot` NuGet tag** ([#112]). It is what `aspire add`
+  reads to surface a package to non-C# AppHosts — the audience this release's Type System exports
+  exist for. Aspire's own targets append it only in the per-framework inner builds, while `pack`
+  generates the nuspec from the cross-targeting outer pass, so all three packages packed without
+  it. Appended in `Directory.Build.targets` instead, under Aspire's own condition so the two
+  cannot both add it.
 
 - **A `kind: javascript` service no longer throws `MethodAccessException` when Aspire resolves
-  above the JavaScript integration** ([#112], fixes [#89]). Both Aspire references are floors,
-  and NuGet resolves the highest floor in the graph: an AppHost on Aspire 13.5.x pulled
-  `Aspire.Hosting` up with it — transitively, through the `Aspire.Hosting.AppHost` reference
-  `Aspire.AppHost.Sdk` adds implicitly — while nothing lifted `Aspire.Hosting.JavaScript`
-  above the floor this package declared. 13.4.6 of it reaches into two of `Aspire.Hosting`'s
-  internal types across a friend-assembly boundary, and 13.5.x removes one and revokes access
-  to the other, so the pair restored and compiled clean and then threw the first time a
-  `javascript` service resolved.
-
-  Raising the floor settles it, and Aspire closed the coupling from its own side in 13.5.0:
-  from that release on, `Aspire.Hosting.JavaScript` references no `Aspire.Hosting` internals at
-  all, so a mismatched pair above it is ordinary API drift rather than a guaranteed crash.
-
-  The Java satellite was never affected — `CommunityToolkit.Aspire.Hosting.Java` carries its
-  own copy of the helper involved and reaches into no `Aspire.Hosting` internals either.
+  above the JavaScript integration** ([#112], fixes [#89]). An AppHost on Aspire 13.5.x pulled
+  `Aspire.Hosting` up with it while nothing lifted `Aspire.Hosting.JavaScript` above the floor
+  this package declared. 13.4.6 of it reaches into `Aspire.Hosting` internals across a
+  friend-assembly boundary that 13.5.x revokes, so the pair restored and compiled clean and then
+  threw the first time a `javascript` service resolved. Raising the floor settles it, and from
+  Aspire 13.5.0 on `Aspire.Hosting.JavaScript` references no `Aspire.Hosting` internals at all.
+  The Java satellite was never affected.
 
 - A service consumed by a *container* now works for every source except `url` ([#62], fixes
   [#58]). The resource returned by `AddService()` is registered with the app model, so DCP
@@ -366,8 +360,12 @@ Targets `net10.0`.
 [#72]: https://github.com/flojon/aspire-servicesources/issues/72
 [#79]: https://github.com/flojon/aspire-servicesources/issues/79
 [#80]: https://github.com/flojon/aspire-servicesources/issues/80
+[#88]: https://github.com/flojon/aspire-servicesources/issues/88
 [#89]: https://github.com/flojon/aspire-servicesources/issues/89
 [#112]: https://github.com/flojon/aspire-servicesources/pull/112
 [#117]: https://github.com/flojon/aspire-servicesources/pull/117
+[#119]: https://github.com/flojon/aspire-servicesources/issues/119
+[#125]: https://github.com/flojon/aspire-servicesources/issues/125
 [#130]: https://github.com/flojon/aspire-servicesources/issues/130
+[microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

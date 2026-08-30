@@ -174,7 +174,8 @@ a project reference would be.
   than replaced; point at it with `path` instead. A directory there with no `.git` entry at all is
   treated as debris from an interrupted clone and **deleted**, so don't hand-place a plain directory
   as a quick override — use `path` for that too. The `.servicesources/` directory gitignores itself
-  on first use — no need to add it to your own `.gitignore`.
+  on first use — no need to add it to your own `.gitignore` — and shields what it holds from your
+  AppHost repository's build settings (see below).
 - Set `path` to point at a checkout you manage yourself (e.g. an existing local clone). It's
   used as-is — no clone, no checkout, no fetch, ever. A relative `path` is anchored to the
   AppHost directory, and must name a directory that already exists. `ref` cannot be combined
@@ -233,6 +234,74 @@ Scoped deliberately narrowly, so the blast radius is first-run-only:
 Off by default: a service that used to be running by the time `Build()` returned is started
 after it instead, which is visible to anything in your AppHost that assumed otherwise. Call it
 before your first `AddService()`, which is where the decision is made.
+#### Managed checkouts don't inherit your AppHost repository's build settings
+
+A managed checkout is cloned *inside* your AppHost's repository, and MSBuild, NuGet, the .NET SDK
+host and the compiler's analyzer configuration all find their settings by walking **up** from each
+project or source file. Left alone, that means another team's repository gets built under rules
+written for yours — most visibly as `NU1008` on every pinned `PackageReference` when your
+repository turns on central package management, and least visibly as your `packageSourceMapping`
+confining that repository's restores to your feeds (a leak that hides behind a warm
+`~/.nuget/packages` and only surfaces on a clean machine or in CI).
+
+So alongside the `.gitignore`, `.servicesources/` gets six tool-managed files that end those walks
+there:
+
+| File | Content | Stops |
+| --- | --- | --- |
+| `Directory.Build.props`, `Directory.Build.targets` | `<Project />` | your repository's build customisation |
+| `Directory.Packages.props` | `ManagePackageVersionsCentrally=false` | your repository's central package management |
+| `nuget.config` | `<packageSourceMapping><clear /></packageSourceMapping>` | your repository's package source mapping (see the note below) |
+| `.editorconfig` | `root = true` | your repository's code style and analyzer severities |
+| `global.json` | `{}` | your repository's SDK pin and `msbuild-sdks` versions |
+
+Each is written with a comment saying what it is and why it's there, since you'll find them on disk
+with no git history to explain them, and all are rewritten whenever their content is out of date,
+so upgrading the package updates them.
+
+Each barrier drops a constraint the checkout never opted into, and only supplies what a checkout
+lacks. A checkout carrying its own `Directory.Build.props`, `Directory.Packages.props`,
+`.editorconfig` or `global.json` is found first and keeps its own settings, including central
+package management if that's how that repository builds.
+
+Four of these are worth a note:
+
+- **`.editorconfig` needs its own barrier** rather than riding on the `Directory.Build.props` one,
+  because analyzer severity written as `dotnet_diagnostic.<id>.severity = error` comes from the
+  `.editorconfig` itself — not from `EnforceCodeStyleInBuild` or `TreatWarningsAsErrors`. Without
+  it, your repository's code style raises the checkout's own analyzers to errors.
+- **`global.json` has two halves that resolve from different anchors**, so the barrier covers one
+  of them completely and the other conditionally. `msbuild-sdks` resolves by walking up from the
+  *project*, so it is stopped outright. `sdk.version` resolves by walking up from the *current
+  working directory*, so it is stopped only for a build or run launched from inside the checkout —
+  which is the working directory Aspire gives a project resource. A build you launch with the
+  AppHost directory as its working directory still sees your repository's SDK pin.
+- **`nuget.config` is the one barrier that isn't purely permissive, and the one that doesn't stop
+  the walk.** NuGet merges every config from the drive root down rather than stopping at the
+  nearest, so this file can only override the section it names. It names `packageSourceMapping`,
+  and NuGet's `<clear />` discards *every* mapping accumulated before it — your user-level
+  `~/.nuget/NuGet.Config` and machine-level ones included, not just your repository's. Inside a
+  checkout, package source mapping is therefore off unless the checkout brings its own, while every
+  inherited source stays reachable; a package that reaches your global packages folder that way is
+  then served from it to restores that *do* have mapping in force, including your AppHost's own,
+  because that folder isn't itself subject to mapping.
+
+  The default is this way round because a mapping the checkout was never written against fails its
+  restore outright, naming a source rather than the inherited rule behind it. If you'd rather keep
+  the mapping enforced inside checkouts and deal with those failures, set
+  `SERVICESOURCES_KEEP_PACKAGE_SOURCE_MAPPING=1`: the file isn't written, an existing one is
+  removed, and the other five barriers are unaffected.
+- **The rest of your `nuget.config` still reaches checkouts** for the same merging reason — your
+  `packageSources`, `disabledPackageSources`, `packageSourceCredentials` and `config` sections
+  among them. A repository that clears `packageSources` and adds only its own feed — the most
+  common customisation there is — therefore still restricts what a checkout can restore, and like
+  the mapping leak it hides behind a warm `~/.nuget/packages`. Clearing `packageSources` from here
+  isn't the answer: a checkout that legitimately needs your private feed would stop building.
+
+Two upward searches are deliberately left alone, because neither has a neutral value that isn't
+also a decision: `Directory.Build.rsp` (MSBuild takes the first one found walking up from the
+project, so your repository's response-file arguments still apply) and `.config/dotnet-tools.json`
+(which affects `dotnet tool` run inside a checkout). Open an issue if either bites you.
 
 #### Several services from one repository
 
@@ -561,6 +630,15 @@ the credentials in use can't see. A rate-limited response is deliberately left o
 hosts answer it with the same `403` as a token that's missing a scope: there the credential is
 fine and the fix is to wait, so it's reported as the transport failure it is.
 
+When the ladder resolves *nothing* — the helper yields no credential and neither environment
+variable is set — the error says so specifically instead of blaming authentication, because
+nothing was ever offered for the host to refuse. Watch for this when the helper works in your
+shell but not under the AppHost: the helper runs in whatever environment the AppHost process
+inherits, which is not necessarily your interactive one, and `git` missing from that `PATH` is
+enough to empty the ladder. (The request is still made with the machine's integrated credential,
+which is what Negotiate/NTLM hosts such as an on-prem Azure DevOps Server need, so integrated
+auth keeps working — it just can't help against a token-authenticated host like GitHub.)
+
 **SSH is not supported.** LibGit2Sharp's bundled native binaries don't include an SSH transport,
 so a `repository` written as `git@host:org/repo`, `host:org/repo` or `ssh://...` fails fast at
 resolution time with a message pointing at the HTTPS equivalent — use `https://host/org/repo`
@@ -773,13 +851,10 @@ rather than throwing.
 
 ### From a guest-language AppHost
 
-> **Requires Aspire CLI 13.6.0 or newer**, which is not released yet. Everything below registers
-> correctly on earlier CLIs, but the TypeScript SDK the CLI generates from it does not compile on
-> them - see [the compatibility note](#sample) under the sample for what fails and why.
-
-`Configure<T>` is generic, and Aspire's Type System projects a generic method with its type
-parameter erased — so guest languages get a set of non-generic equivalents instead, one per shape
-(overloads don't survive codegen either):
+`Configure<T>` is generic, and Aspire's Type System erases a generic method's type parameter to its
+constraint — which for `Configure<T>` erases the capability being requested, since that is all `T`
+says. So guest languages get a set of non-generic equivalents instead, one per shape, each with its
+own name (two exports that project to the same generated name collide, and only one survives):
 
 ```typescript
 const payments = await builder
@@ -838,7 +913,7 @@ container consumer of one is [rejected up front](#url-source). A third resource,
 executable, hands the same `inventory` handle to Aspire's *own* `withReference()` and prints the
 `services__inventory__http__0` variable that injects — so it shows as *Exited*, not Running, and
 that single log line is where you see the native service-discovery path working. (**Note:** this
-sample requires Aspire CLI 13.6.0 or newer — see the compatibility note below the code block.)
+sample needs Aspire CLI 13.5.3 or newer — see the compatibility note below the code block.)
 
 ```bash
 cd samples/DemoAppHostTypeScript
@@ -848,29 +923,58 @@ aspire restore
 aspire run
 ```
 
-**Requires Aspire CLI 13.6.0+:** on every CLI released so far - 13.4.6 through 13.5.3 -
-`aspire restore`/`aspire add` correctly registers `addService(name: string)` in the generated
-TypeScript SDK (`.aspire/modules/aspire.mts`) with no diagnostics — confirming the
-`[AspireExport]` on `AddService` works — but the generated SDK fails to compile
-(`TS2552: Cannot find name 'ResourceWithServiceDiscoveryPromise'`, six errors) because the Aspire
-CLI's TypeScript codegen didn't emit a `*Promise`/`*PromiseImpl` wrapper pair for extension methods
-returning a bare Aspire interface type (`IResourceBuilder<IResourceWithServiceDiscovery>`) rather
-than a concrete resource class.
+**Requires Aspire CLI 13.5.3+:** the CLI pins its own Aspire version for the host project it
+generates, so a CLI older than this package's Aspire floor (13.5.2) fails `aspire restore` with
+`NU1605: Detected package downgrade: Aspire.Hosting from 13.5.2 to 13.5.1` before codegen even runs.
+13.5.3 is the first release that pins high enough. On it, the generated SDK type-checks clean under
+strict `tsc` and the sample runs end-to-end — `withReference()` on the `addService()` result injects
+the resolved service's discovery variables into the consuming resource, e.g.
+`services__inventory__http__0=http://inventory.dev.internal:80` pointing at the running `inventory`
+container.
 
-This was reported as [microsoft/aspire#19507](https://github.com/microsoft/aspire/issues/19507) and
-fixed by [microsoft/aspire#19577](https://github.com/microsoft/aspire/pull/19577), which merged to
-`main` on 2026-08-22 under the **13.6** milestone. No released CLI carries it, 13.5.3 included.
+This sample used to require an unreleased 13.6.0, and that requirement is gone. Aspire's TypeScript
+codegen does not emit a `*Promise`/`*PromiseImpl` wrapper pair for a bare Aspire interface
+(`IResourceBuilder<IResourceWithServiceDiscovery>`, which is what `AddService` returns), so the
+generated SDK referenced an undeclared `ResourceWithServiceDiscoveryPromise` and failed with six
+`TS2552` errors — reported as
+[microsoft/aspire#19507](https://github.com/microsoft/aspire/issues/19507) and fixed upstream by
+[microsoft/aspire#19577](https://github.com/microsoft/aspire/pull/19577) under the 13.6 milestone.
 
-Verified against a build of that PR (`13.6.0-pr.19577.gfa0aea2c`): the generated SDK type-checks
-clean under strict `tsc`, and the sample runs end-to-end — `withReference()` on the
-`addService()` result injects the resolved service's discovery variables into the consuming
-resource, e.g. `services__inventory__http__0=http://localhost:<port>` pointing at the running
-`inventory` container. The same sample regenerated with 13.5.1 still reproduces all six
-`TS2552` errors.
+That upstream fix is no longer what makes this work. The generator emits the wrapper pair when the
+bare interface appears as an extension-method **receiver** rather than only as a return type, and
+the eight `[AspireExport]` configuration shims above declare exactly that receiver — so they carry
+the wrapper pair for `addService` too. Removing `[AspireExport]` from those eight shims brings all
+six errors back on a current CLI, which is how the cause was isolated; the measurement is in
+[`docs/superpowers/specs/2026-08-30-19507-already-fixed-findings.md`](docs/superpowers/specs/2026-08-30-19507-already-fixed-findings.md).
 
 Switching between CLI builds can leave a stale code generator under `.aspire/`, so remove that
 directory before regenerating:
 [microsoft/aspire#19603](https://github.com/microsoft/aspire/issues/19603).
+
+## When configuration is wrong
+
+Every problem this package detects — a missing project file, an unregistered `kind`, a checkout it
+won't overwrite, a clone it can't authenticate — is raised as a `ServiceSourcesConfigurationException`
+whose message names the service, what failed, and what to do about it. Because these are raised
+from `AddService()`, they usually reach you as an unhandled exception that takes the AppHost down
+before Aspire starts, so that message *is* the error output. It prints as the message plus one
+line per underlying cause:
+
+```
+Unhandled exception. Service 'reportdata': failed to clone repository 'https://github.com/acme/planning' into
+'/src/report-service/src/Report.AppHost/.servicesources/checkouts/reportdata' — authentication failed, or the
+repository is not visible to the credentials in use. Configure credentials via a git credential helper (`git
+credential fill` must resolve them for this host) or the SERVICESOURCES_GIT_USERNAME/SERVICESOURCES_GIT_TOKEN
+environment variables.
+  caused by: unexpected http status code: 404
+  (set SERVICESOURCES_FULL_ERRORS=1 for the full exception detail, including stack traces)
+```
+
+The stack frames behind it are this package's own plumbing and don't help with a misconfiguration,
+so they're left out — and the last line says how to get them back, because for a failure this
+package didn't anticipate they are the diagnosis. When you need them — you suspect a bug in this package rather than in your
+configuration, and want to file it — set `SERVICESOURCES_FULL_ERRORS=1` to get the runtime's
+complete dump, type names, inner-exception blocks, stack traces and all.
 
 ## Status
 

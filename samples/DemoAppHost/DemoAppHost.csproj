@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- Central Package Management does not cover MSBuild SDK versions, so this one is written
-       out and moves by hand with the Aspire floors in src/Directory.Packages.props. -->
+       out and moves by hand, level with the Aspire.Hosting.AppHost version in the root
+       Directory.Packages.props. ci.yml's `verify repo invariants` job compares the two. -->
   <Sdk Name="Aspire.AppHost.Sdk" Version="13.5.2" />
 
   <PropertyGroup>

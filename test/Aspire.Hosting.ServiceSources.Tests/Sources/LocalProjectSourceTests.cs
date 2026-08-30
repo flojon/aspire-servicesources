@@ -750,6 +750,32 @@ public class LocalProjectSourceTests
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("https://github.com/company/orders", ex.Message);
         Assert.Contains("authentication", ex.Message, StringComparison.OrdinalIgnoreCase);
+        // A credential was offered, so the failure keeps both readings open: hosts answer an
+        // unauthenticated request for a private repository with "not found" as often as with
+        // "unauthorized". Without this the two branches could collapse into one unnoticed.
+        Assert.Contains("not visible to the credentials in use", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_CloneFailsAndNoCredentialWasResolved_MessageSaysNoneWereResolved()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var gitClient = new FakeGitClient
+        {
+            CloneException = new GitAuthenticationFailedException(
+                "could not find appropriate mechanism for credentials",
+                new InvalidOperationException(),
+                noCredentialsResolved: true),
+        };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveProjectPath(
+                ServiceName, Metadata(repository: "https://github.com/company/orders"), DevConfig(), appHostDirectory, gitClient));
+
+        // "Authentication failed" would send the developer hunting for a token that was rejected.
+        // Nothing was ever sent: the helper yielded nothing and no environment token was set.
+        Assert.Contains("no git credentials were resolved", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SERVICESOURCES_GIT_TOKEN", ex.Message, StringComparison.Ordinal);
     }
 
     // A repository URL may legitimately carry a personal access token, and these exception messages
@@ -1006,6 +1032,49 @@ public class LocalProjectSourceTests
         var gitignorePath = Path.Combine(appHostDirectory, ".servicesources", ".gitignore");
         Assert.True(File.Exists(gitignorePath));
         Assert.Equal("*\n!.gitignore\n", File.ReadAllText(gitignorePath));
+    }
+
+    [Fact]
+    public void ResolveProjectPath_ManagedClone_WritesBuildBarrierUnderServiceSourcesDirectory()
+    {
+        // The checkout lives inside the AppHost's own repository, so without these MSBuild and
+        // NuGet walk past .servicesources and apply the host repository's build settings to it.
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var gitClient = new FakeGitClient();
+
+        ResolveProjectPath(
+            ServiceName, Metadata(), DevConfig(), appHostDirectory, gitClient);
+
+        var dir = Path.Combine(appHostDirectory, ".servicesources");
+        Assert.True(File.Exists(Path.Combine(dir, "Directory.Build.props")));
+        Assert.True(File.Exists(Path.Combine(dir, "Directory.Build.targets")));
+        Assert.True(File.Exists(Path.Combine(dir, "Directory.Packages.props")));
+        Assert.True(File.Exists(Path.Combine(dir, "nuget.config")));
+        Assert.True(File.Exists(Path.Combine(dir, ".editorconfig")));
+        Assert.True(File.Exists(Path.Combine(dir, "global.json")));
+    }
+
+    [Fact]
+    public void ResolveProjectPath_PathOverride_WritesNoBuildBarrier()
+    {
+        // A 'path' override points at a checkout the developer manages, wherever they keep it —
+        // often inside a repository of their own. Nothing is cloned, nothing is placed under
+        // .servicesources, and writing tool-owned files into someone else's tree would be
+        // overreach: that tree's own MSBuild and NuGet settings are the ones that should apply.
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var overridePath = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(overridePath, "Orders.csproj"), "<Project />");
+
+        ResolveProjectPath(
+            ServiceName,
+            Metadata(project: "Orders.csproj"),
+            DevConfig(path: overridePath),
+            appHostDirectory,
+            new FakeGitClient());
+
+        Assert.False(Directory.Exists(Path.Combine(appHostDirectory, ".servicesources")));
+        Assert.False(File.Exists(Path.Combine(overridePath, "Directory.Build.props")));
+        Assert.False(File.Exists(Path.Combine(overridePath, "nuget.config")));
     }
 
     [Fact]
