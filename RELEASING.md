@@ -40,8 +40,11 @@ Two feeds receive them:
 matching the version being packed into `PackageReleaseNotes`, so what is written here is what
 appears on the nuget.org listing. Open a PR that:
 
-- renames `## [Unreleased]` to `## [X.Y.Z] - <date>` and adds a fresh empty `## [Unreleased]`
-  above it,
+- renames `## [Unreleased]` to `## [X.Y.Z] - <date>` and adds a fresh `## [Unreleased]` above
+  it carrying the same pre-seeded, empty section headings,
+- deletes every section heading left empty in the section being closed — they are pre-seeded to
+  keep concurrent PRs from conflicting, and an empty one would otherwise reach the nuget.org
+  listing through `PackageReleaseNotes`,
 - adds the `[X.Y.Z]:` compare link and repoints `[Unreleased]:` at the new version,
 - adds link definitions for any `[#N]` references used in the new section.
 

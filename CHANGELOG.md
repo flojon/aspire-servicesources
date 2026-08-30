@@ -11,6 +11,14 @@ nothing will fail to build to warn you.
 
 ## [Unreleased]
 
+<!-- Add entries under the heading that fits and leave the rest empty; closing a release
+     deletes whatever is still empty. The headings are pre-seeded so that two PRs writing to
+     different sections edit different regions of this file and merge without a conflict. -->
+
+### Breaking
+
+### Added
+
 ### Changed
 
 - **`ServiceSourcesConfigurationException` prints as its message, not as a stack dump**
@@ -59,6 +67,8 @@ nothing will fail to build to warn you.
   added in `0.3.0` declare, so they carry it for `addService` too. The real floor is **13.5.3**, for an unrelated reason: an older CLI pins
   its generated host project below this package's 13.5.2 Aspire floor and fails `aspire restore`
   with `NU1605`.
+
+### Documentation
 
 ## [0.3.1] - 2026-08-27
 
