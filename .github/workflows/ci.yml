@@ -369,6 +369,16 @@ jobs:
           with open(FLOORS) as f:
               declared = set(re.findall(r'<PackageVersion\s+Include="([^"]+)"', f.read()))
 
+          # Nothing matched means the file moved or stopped declaring versions this way, not
+          # that there is nothing to check: without this the comparison below is empty against
+          # empty and passes for as long as it keeps being wrong.
+          if not declared:
+              print(
+                  f"::error file={FLOORS}::no PackageVersion found here - this check is not "
+                  f"reading what it thinks it is, and would pass whatever the ignore list said"
+              )
+              failed = True
+
           for package in sorted(declared - ignored):
               print(
                   f"::error file={FLOORS}::{package} is declared here, so its version is a "
