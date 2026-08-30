@@ -308,11 +308,12 @@ jobs:
       # Pinned rather than floating, because this job compiles generated code: a CLI release
       # that changed codegen would redden whichever PR ran next, for a break no PR caused.
       #
-      # 13.5.3 is also the oldest that works. The CLI pins its own Aspire version into the host
-      # project it generates, so a CLI older than $(AspireVersion) in Directory.Build.props
-      # fails `aspire restore` with NU1605 (package downgrade) before codegen runs; 13.5.3 is
-      # the first release pinning 13.5.2 or newer. `verify repo invariants` fails if this pin
-      # and that floor part company.
+      # The CLI pins its own version into the host project it generates - measured, 13.5.2
+      # emits Aspire.Hosting 13.5.2 and 13.5.3 emits 13.5.3 - so a CLI below $(AspireVersion)
+      # in Directory.Build.props fails `aspire restore` with NU1605 (package downgrade) before
+      # codegen runs. That makes 13.5.2 the oldest CLI clearing today's floor; this pins the
+      # newest release instead, so the surface is checked against the generator a contributor
+      # gets. `verify repo invariants` fails if this pin and that floor part company.
       ASPIRE_CLI_VERSION: '13.5.3'
 
     steps:
@@ -631,6 +632,9 @@ jobs:
           floor = floors[0].strip()
 
           def components(version, where):
+              # str() because an unquoted `13.5` is a YAML float and `13` an int, and this
+              # check owes a future editor its own error message rather than a traceback.
+              version = str(version)
               if not re.fullmatch(r"\d+(\.\d+)*", version):
                   print(
                       f"::error file={where}::'{version}' is not a plain numeric version; this "
