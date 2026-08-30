@@ -232,16 +232,30 @@ internal sealed class LocalCheckoutPrefetch
         "reports it — remove the entry if you don't use it, or fix what the failure names.";
 
     /// <summary>
+    /// Records that the AppHost really does add <paramref name="serviceName"/>, without waiting for
+    /// its checkout.
+    /// </summary>
+    /// <remarks>
+    /// For a service whose checkout is deferred past startup (see <see cref="DeferredCheckout"/>):
+    /// its <see cref="GetRepoRoot"/> call happens after <c>BeforeStartEvent</c> has already decided
+    /// what to report, so without this it would be named as speculative work nobody asked for.
+    /// </remarks>
+    public void MarkRequested(string serviceName)
+    {
+        lock (_gate)
+        {
+            _requested.Add(serviceName);
+        }
+    }
+
+    /// <summary>
     /// The checkout directory for <paramref name="serviceName"/>, re-throwing the failure the
     /// parallel phase recorded for it.
     /// </summary>
     public string GetRepoRoot(string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config,
         string appHostDirectory, IGitClient gitClient)
     {
-        lock (_gate)
-        {
-            _requested.Add(serviceName);
-        }
+        MarkRequested(serviceName);
 
         if (!_checkouts.TryGetValue(serviceName, out var checkout))
         {
