@@ -60,6 +60,16 @@ nothing will fail to build to warn you.
   its generated host project below this package's 13.5.2 Aspire floor and fails `aspire restore`
   with `NU1605`.
 
+### Documentation
+
+- **Who builds a `"local"` checkout, and when** ([#81]). Aspire does, on every start: a `dotnet`
+  service is launched with `dotnet run` from inside the checkout, so a cold clone compiles on
+  first use and a checkout whose `ref` moved is recompiled rather than served from the previous
+  ref's binaries. Measured, along with the two things to know when it goes wrong — the compiler's
+  output goes to the resource's console in the dashboard rather than the AppHost's, and two `path`
+  services sharing a `ProjectReference` inside one repository can collide over that project's
+  build output. Nothing in the package changed.
+
 ## [0.3.1] - 2026-08-27
 
 Publishes the two satellite packages, which `0.3.0` could not. Core `0.3.0` is on nuget.org
@@ -332,6 +342,7 @@ Targets `net10.0`.
 [#72]: https://github.com/flojon/aspire-servicesources/issues/72
 [#79]: https://github.com/flojon/aspire-servicesources/issues/79
 [#80]: https://github.com/flojon/aspire-servicesources/issues/80
+[#81]: https://github.com/flojon/aspire-servicesources/issues/81
 [#88]: https://github.com/flojon/aspire-servicesources/issues/88
 [#89]: https://github.com/flojon/aspire-servicesources/issues/89
 [#112]: https://github.com/flojon/aspire-servicesources/pull/112
