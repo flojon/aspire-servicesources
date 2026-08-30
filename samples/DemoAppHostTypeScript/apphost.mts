@@ -11,8 +11,8 @@ const builder = await createBuilder();
 // servicesources.yaml also describes a "url" source for inventory, and flipping it there is a
 // one-line config edit that this file doesn't see. Don't do it for this sample, though: a
 // "url" service runs out of band with no resource for Aspire to run, so a *container* consumer
-// like payments can't reference it (issue #58) and the AppHost would refuse to start. A project
-// or executable consumer can.
+// like payments can't reference it (#72) and the AppHost would refuse to start. A project or
+// executable consumer can.
 const inventory = await builder.addService('inventory');
 
 // Each configuration shape has its own method name: ATS drops overloads, and a generic method
