@@ -64,7 +64,16 @@
        how a version other than the floor gets exercised at all.
 
        The condition leaves the value overridable; the default is the floor, since what a
-       consumer who pins nothing gets is what the default build should be testing against. -->
+       consumer who pins nothing gets is what the default build should be testing against.
+
+       One member of the family is out of this property's reach: the Aspire.AppHost.Sdk MSBuild
+       SDK the sample AppHost loads. An <Sdk> reference is resolved before properties are
+       evaluated, so its version cannot be a property and has to be stated in global.json -
+       which cannot read a property either. So the floor below and the version in global.json
+       are two literals that have to move together by hand, and ci.yml's `verify repo
+       invariants` job is what fails when they part. aspire-matrix.yml moves both per leg;
+       before it did, this property floated while global.json's version stayed put, and the
+       matrix built a mixed-version family (#116). -->
   <PropertyGroup>
     <AspireVersion Condition="'$(AspireVersion)' == ''">13.5.2</AspireVersion>
   </PropertyGroup>

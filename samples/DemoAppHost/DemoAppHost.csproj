@@ -1,9 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- Central Package Management does not cover MSBuild SDK versions, so this one is written
-       out and moves by hand, level with the Aspire.Hosting.AppHost version in the root
-       Directory.Packages.props. ci.yml's `verify repo invariants` job compares the two. -->
-  <Sdk Name="Aspire.AppHost.Sdk" Version="13.5.2" />
+  <!-- No Version here, deliberately: it lives in global.json's `msbuild-sdks`, which is the
+       only place an MSBuild SDK version can be stated from outside the project. Central
+       Package Management does not cover MSBuild SDKs, and a `Version` attribute cannot read
+       $(AspireVersion) either - an <Sdk> reference is resolved before properties are
+       evaluated.
+
+       A Version here would also be worse than redundant. The inline attribute outranks
+       global.json and does so silently - no warning, no MSB4241 - so aspire-matrix.yml's
+       per-leg override would look effective while changing nothing, which is how that
+       workflow came to build a mixed-version Aspire family (#116). ci.yml's `verify repo
+       invariants` job fails if a version reappears here. -->
+  <Sdk Name="Aspire.AppHost.Sdk" />
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
