@@ -42,9 +42,11 @@ public class ServiceConfigurationExportsTests
     [Fact]
     public void EveryExportedMethodIsNonGeneric()
     {
-        // Aspire's TypeScript generator projects a generic method with its type parameter erased —
-        // `configure<T>(...)` becomes `configure(...)`, dropping the capability being requested. A
-        // generic export would therefore reach guest languages broken rather than absent.
+        // Aspire's TypeScript generator erases a generic method's type parameter to its constraint,
+        // so `configure<T>(...)` becomes `configure(obj: Resource)` — dropping the capability being
+        // requested, which is the entire content of T. (A generic whose constraint ATS cannot
+        // resolve is dropped from the SDK outright instead.) Either way a generic export would
+        // reach guest languages broken rather than absent.
         var generic = ExportedMethods().Where(m => m.IsGenericMethodDefinition).Select(m => m.Name).ToArray();
 
         Assert.Empty(generic);
@@ -53,8 +55,10 @@ public class ServiceConfigurationExportsTests
     [Fact]
     public void NoTwoExportedMethodsShareAName()
     {
-        // Only the first overload of a name survives codegen; the rest are dropped silently, so a
-        // shared name would mean a shape that exists in C# but not in TypeScript.
+        // Exports that project to the same generated name collide, and only one survives codegen —
+        // so a shared name would mean a shape that exists in C# but not in TypeScript. Overloads
+        // can be projected under distinct names via [AspireExport("id")]/MethodName, but keeping
+        // the C# names distinct as well means both languages see the same set of shapes.
         var duplicated = ExportedMethods()
             .GroupBy(m => m.Name, StringComparer.Ordinal)
             .Where(g => g.Count() > 1)

@@ -247,7 +247,50 @@ public class GitCredentialResolverTests
         Assert.Equal("a=b=c", credentials?.Password);
     }
 
+    [Fact]
+    public void ResolvedNoCredentials_NoHelperAndNoEnvironmentVariables_IsTrue()
+    {
+        var provider = CreateCredentialProvider();
+
+        provider.Handler(RepositoryUrl, null, SupportedCredentialTypes.UsernamePassword);
+
+        // Nothing was ever offered to authenticate with: the request carries only the operating
+        // system's integrated credential, which no Basic-auth host can use. Reporting that as a
+        // refused credential sends the developer looking for a bad token they never had.
+        Assert.True(provider.ResolvedNoCredentials);
+    }
+
+    [Fact]
+    public void ResolvedNoCredentials_HelperResolvedACredential_IsFalse()
+    {
+        var provider = CreateCredentialProvider(helper: _ => new HelperCredentials("alice", "helper-token"));
+
+        provider.Handler(RepositoryUrl, null, SupportedCredentialTypes.UsernamePassword);
+
+        Assert.False(provider.ResolvedNoCredentials);
+    }
+
+    [Fact]
+    public void ResolvedNoCredentials_LadderExhaustedAfterOfferingACredential_StaysFalse()
+    {
+        var provider = CreateCredentialProvider(token: "s3cr3t");
+
+        provider.Handler(RepositoryUrl, null, SupportedCredentialTypes.UsernamePassword);
+        // The retry falls through to DefaultCredentials, but a real credential was already refused,
+        // so this is an authentication failure rather than an absent credential.
+        provider.Handler(RepositoryUrl, null, SupportedCredentialTypes.UsernamePassword);
+
+        Assert.False(provider.ResolvedNoCredentials);
+    }
+
     private static LibGit2Sharp.Handlers.CredentialsHandler CreateProvider(
+        string? username = null,
+        string? token = null,
+        Func<GitUrl, HelperCredentials?>? helper = null,
+        Action<GitUrl, HelperCredentials>? forget = null) =>
+        CreateCredentialProvider(username, token, helper, forget).Handler;
+
+    private static GitCredentialProvider CreateCredentialProvider(
         string? username = null,
         string? token = null,
         Func<GitUrl, HelperCredentials?>? helper = null,

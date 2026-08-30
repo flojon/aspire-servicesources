@@ -585,6 +585,15 @@ the credentials in use can't see. A rate-limited response is deliberately left o
 hosts answer it with the same `403` as a token that's missing a scope: there the credential is
 fine and the fix is to wait, so it's reported as the transport failure it is.
 
+When the ladder resolves *nothing* — the helper yields no credential and neither environment
+variable is set — the error says so specifically instead of blaming authentication, because
+nothing was ever offered for the host to refuse. Watch for this when the helper works in your
+shell but not under the AppHost: the helper runs in whatever environment the AppHost process
+inherits, which is not necessarily your interactive one, and `git` missing from that `PATH` is
+enough to empty the ladder. (The request is still made with the machine's integrated credential,
+which is what Negotiate/NTLM hosts such as an on-prem Azure DevOps Server need, so integrated
+auth keeps working — it just can't help against a token-authenticated host like GitHub.)
+
 **SSH is not supported.** LibGit2Sharp's bundled native binaries don't include an SSH transport,
 so a `repository` written as `git@host:org/repo`, `host:org/repo` or `ssh://...` fails fast at
 resolution time with a message pointing at the HTTPS equivalent — use `https://host/org/repo`
@@ -797,9 +806,10 @@ rather than throwing.
 
 ### From a guest-language AppHost
 
-`Configure<T>` is generic, and Aspire's Type System projects a generic method with its type
-parameter erased — so guest languages get a set of non-generic equivalents instead, one per shape
-(overloads don't survive codegen either):
+`Configure<T>` is generic, and Aspire's Type System erases a generic method's type parameter to its
+constraint — which for `Configure<T>` erases the capability being requested, since that is all `T`
+says. So guest languages get a set of non-generic equivalents instead, one per shape, each with its
+own name (two exports that project to the same generated name collide, and only one survives):
 
 ```typescript
 const payments = await builder
@@ -895,6 +905,31 @@ six errors back on a current CLI, which is how the cause was isolated; the measu
 Switching between CLI builds can leave a stale code generator under `.aspire/`, so remove that
 directory before regenerating:
 [microsoft/aspire#19603](https://github.com/microsoft/aspire/issues/19603).
+
+## When configuration is wrong
+
+Every problem this package detects — a missing project file, an unregistered `kind`, a checkout it
+won't overwrite, a clone it can't authenticate — is raised as a `ServiceSourcesConfigurationException`
+whose message names the service, what failed, and what to do about it. Because these are raised
+from `AddService()`, they usually reach you as an unhandled exception that takes the AppHost down
+before Aspire starts, so that message *is* the error output. It prints as the message plus one
+line per underlying cause:
+
+```
+Unhandled exception. Service 'reportdata': failed to clone repository 'https://github.com/acme/planning' into
+'/src/report-service/src/Report.AppHost/.servicesources/checkouts/reportdata' — authentication failed, or the
+repository is not visible to the credentials in use. Configure credentials via a git credential helper (`git
+credential fill` must resolve them for this host) or the SERVICESOURCES_GIT_USERNAME/SERVICESOURCES_GIT_TOKEN
+environment variables.
+  caused by: unexpected http status code: 404
+  (set SERVICESOURCES_FULL_ERRORS=1 for the full exception detail, including stack traces)
+```
+
+The stack frames behind it are this package's own plumbing and don't help with a misconfiguration,
+so they're left out — and the last line says how to get them back, because for a failure this
+package didn't anticipate they are the diagnosis. When you need them — you suspect a bug in this package rather than in your
+configuration, and want to file it — set `SERVICESOURCES_FULL_ERRORS=1` to get the runtime's
+complete dump, type names, inner-exception blocks, stack traces and all.
 
 ## Status
 

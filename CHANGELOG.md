@@ -11,6 +11,41 @@ nothing will fail to build to warn you.
 
 ## [Unreleased]
 
+### Changed
+
+- **`ServiceSourcesConfigurationException` prints as its message, not as a stack dump**
+  ([#125]). These exceptions are raised from `AddService()`, so they normally reach the developer
+  as an unhandled exception that ends the AppHost — which means the runtime's rendering of them
+  *is* the error output. The default rendering buried a sentence naming the fix under the type
+  name, three nested inner-exception blocks and a stack trace per level; a failed private clone
+  ran to about thirty lines. It now prints the message followed by one `caused by:` line per
+  underlying cause, with adjacent duplicate causes collapsed (a wrapper that only reclassifies its
+  inner exception repeats its message verbatim), and a closing line naming
+  `SERVICESOURCES_FULL_ERRORS=1` whenever something was wrapped — for a failure this package didn't
+  anticipate the dropped frames are the diagnosis, so the summary has to say where they went. Set
+  that variable for the runtime's complete dump when diagnosing this package itself.
+
+  This changes `ToString()`, so anything logging one of these exceptions logs the summary instead
+  of the frames unless that variable is set. The `Message`, `InnerException` chain and
+  `StackTrace` are untouched.
+
+- **A clone or fetch that never resolved a credential says so** ([#125]), instead of reporting
+  authentication as the likely cause. When `git credential fill` yields nothing and neither
+  `SERVICESOURCES_GIT_TOKEN` nor `SERVICESOURCES_GIT_USERNAME` is set, the ladder has nothing to
+  offer, and libgit2 fails against a token-authenticated host with `could not find appropriate
+  mechanism for credentials` — a client-side dead end that never reached the host. Calling that
+  "authentication failed, or the repository is not visible to the credentials in use" sent
+  developers hunting for a rejected token they never had; the common real cause is a credential
+  helper that resolves in the developer's shell but not in the environment the AppHost process
+  inherits. The request is still made with the machine's integrated credential, so Negotiate/NTLM
+  hosts are unaffected.
+
+  This wording is used only when libgit2 actually asked for a credential, which it does only once a
+  host answers with an authentication challenge. A failure that arrives without one — a proxy
+  answering the first unauthenticated request with 403, or a host serving anonymously answering a
+  mistyped repository path with 404 — keeps the existing wording, which leaves open that the
+  repository simply isn't visible.
+
 ### Fixed
 
 - **Managed checkouts no longer inherit the AppHost repository's MSBuild and NuGet settings**
@@ -420,5 +455,6 @@ Targets `net10.0`.
 [#112]: https://github.com/flojon/aspire-servicesources/pull/112
 [#117]: https://github.com/flojon/aspire-servicesources/pull/117
 [#119]: https://github.com/flojon/aspire-servicesources/issues/119
+[#125]: https://github.com/flojon/aspire-servicesources/issues/125
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
