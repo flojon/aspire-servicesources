@@ -285,6 +285,131 @@ jobs:
           path: .smoketest-cache/apphost.log
           if-no-files-found: ignore
 
+  typecheck-typescript:
+    # samples/DemoAppHostTypeScript is the only thing in this repository that compiles what these
+    # packages export to Aspire's Type System, so it is the only thing that can say whether that
+    # export survives codegen. AddService_IsExportedToAts asserts the [AspireExport] attribute is
+    # present on the method; it cannot see what Aspire's TypeScript generator makes of it, and the
+    # generator is where the surface actually breaks - a signature it cannot project emits
+    # TypeScript referencing types it never declared. EnableAspireIntegrationAnalyzers in
+    # Directory.Build.props covers the ASPIREEXPORT* rules over the declarations; again, not the
+    # emitted output.
+    #
+    # Runs alongside `build` for the reason smoketest-container gives: its restore, its npm tree
+    # and its toolchain are its own, so serialising it would only add its runtime to the critical
+    # path.
+    #
+    # Deliberately not filtered by `paths`. The export surface is reachable from most of src/, and
+    # a required status check that a path filter skips never reports at all - it sits pending and
+    # blocks the merge. aspire-matrix.yml documents the same trap from the other side, where a
+    # filter is safe precisely because that workflow is not required.
+    name: 📘 typescript export surface
+    runs-on: ubuntu-latest
+    # Nothing here starts an AppHost; this only caps a hung restore or codegen.
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    env:
+      # Pinned rather than floating, because this job compiles generated code: a CLI release that
+      # changed codegen would surface as a red check on whichever PR happened to run next, for a
+      # break no PR caused. Adopting a new CLI is then a deliberate bump here, in a PR that shows
+      # what the new generator emits.
+      #
+      # 13.5.3 is the oldest that works, and the bound is this repository's own Aspire floor: the
+      # CLI pins its own Aspire version into the host project it generates, so a CLI older than
+      # $(AspireVersion) in Directory.Build.props fails `aspire restore` with NU1605 (package
+      # downgrade) before codegen runs at all. 13.5.3 is the first release pinning 13.5.2 or
+      # newer. The `verify repo invariants` job fails if this and that floor part company.
+      ASPIRE_CLI_VERSION: '13.5.3'
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # aspire.config.json resolves this package from ../../src, so codegen builds it and
+          # MinVer reads tags to version it; without full history MinVer falls back to a
+          # placeholder version and warns while doing it.
+          fetch-depth: 0
+
+      # The package project the sample points at multi-targets net8.0/9.0/10.0 and codegen
+      # restores it, so all three SDKs are installed rather than relying on which target framework
+      # MSBuild settles on.
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - uses: actions/setup-node@v7
+        with:
+          # Matches the @types/node major the sample declares. Those types are what strict tsc
+          # checks the AppHost's own Node usage against, so a runner default drifting from them
+          # would check this against a different standard library than a contributor gets.
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: samples/DemoAppHostTypeScript/package-lock.json
+
+      # Keyed apart from the other jobs' caches, for the reason spelled out on smoketest-container:
+      # these run concurrently, and this one restores only what codegen pulls in, so a shared key
+      # would have it save a cache `build` then restores incomplete.
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          # Directory.Build.props is hashed alongside the project and central package files
+          # because $(AspireVersion) states the Aspire floor this restores against, and it lives
+          # in neither.
+          key: nuget-typescript-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props', 'Directory.Build.props') }}
+          restore-keys: nuget-typescript-${{ runner.os }}-
+
+      # As a dotnet tool rather than through aspire.dev's install script: the version then
+      # resolves from nuget.org like every other dependency here, and a tool path keeps it out of
+      # the runner's global state.
+      - name: Install the Aspire CLI
+        run: |
+          dotnet tool install --tool-path "$RUNNER_TEMP/aspire-cli" aspire.cli --version "$ASPIRE_CLI_VERSION"
+          echo "$RUNNER_TEMP/aspire-cli" >> "$GITHUB_PATH"
+
+      - name: Install the sample's npm dependencies
+        working-directory: samples/DemoAppHostTypeScript
+        run: npm ci
+
+      # aspire.config.json points at ../../src/Aspire.Hosting.ServiceSources.csproj rather than at
+      # a published version, so what this generates is the export surface of the commit under test.
+      #
+      # No `rm -rf .aspire` first: that directory is gitignored and a runner starts without one.
+      # It matters when reproducing this by hand - `aspire restore` rewrites the pinned version in
+      # the IntegrationRestore.csproj it generates without rebuilding it, so a previous CLI's
+      # generator survives in that project's bin/ and keeps emitting its old output while
+      # reporting success (microsoft/aspire#19603). Deleting .aspire/modules is not enough; the
+      # whole .aspire/ directory has to go.
+      - name: Generate the TypeScript SDK
+        working-directory: samples/DemoAppHostTypeScript
+        run: aspire restore --non-interactive --nologo
+
+      # The step that actually gates the surface. `aspire restore` above exits 0 even when the
+      # TypeScript it just wrote does not compile - it reports having generated the SDK, not the
+      # SDK being valid - so a broken export reaches this step looking like a clean run.
+      #
+      # tsconfig.apphost.json includes .aspire/modules/**/*.mts deliberately: those generated
+      # modules are the exported surface, so excluding them to get a green check would typecheck
+      # everything except the thing under test.
+      - name: Typecheck the generated SDK
+        working-directory: samples/DemoAppHostTypeScript
+        run: npx tsc --noEmit -p tsconfig.apphost.json
+
+      # A failure above is a compiler diagnostic pointing by line into two megabytes of
+      # machine-written TypeScript that exists only on the runner, which is not actionable
+      # without the file it points into.
+      - name: Upload the generated SDK
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: generated-typescript-sdk
+          path: samples/DemoAppHostTypeScript/.aspire/modules
+          if-no-files-found: ignore
+
   verify-invariants:
     # Its own job: these read files and need neither a restore nor a compile, so they report
     # in seconds instead of behind the build they would otherwise queue against.
@@ -467,4 +592,77 @@ jobs:
                   print(f"{path}: {SDK} {sdk_version} matches {PACKAGE} {version}")
 
           sys.exit(1 if failed else 0)
+          EOF
+
+      # A fourth invariant, this one over ci.yml itself. The Aspire CLI pins its own Aspire
+      # version into the host project it generates for a guest-language AppHost, so the CLI the
+      # `typescript export surface` job installs has to be at least this repository's Aspire
+      # floor. Below it, `aspire restore` fails with NU1605 (package downgrade) before codegen
+      # runs, and that job reports a version-resolution error rather than anything about the
+      # export surface it exists to check. Raising $(AspireVersion) and leaving the pin behind is
+      # how that happens - a floor bump breaking a job that never mentions the floor.
+      - name: Verify the pinned Aspire CLI covers the Aspire floor
+        run: |
+          python3 - <<'EOF'
+          import re, sys, yaml
+
+          WORKFLOW = ".github/workflows/ci.yml"
+          PROPS = "Directory.Build.props"
+          JOB = "typecheck-typescript"
+
+          with open(WORKFLOW) as f:
+              workflow = yaml.safe_load(f)
+
+          # Read off the parsed job rather than grepped out of the text: the pin is a job-level
+          # env entry, and a grep would match it just as happily after it stopped being one.
+          job = workflow.get("jobs", {}).get(JOB)
+          if job is None:
+              print(
+                  f"::error file={WORKFLOW}::no '{JOB}' job here - this check compares that "
+                  f"job's pinned CLI against the Aspire floor and has nothing to read"
+              )
+              sys.exit(1)
+
+          pinned = (job.get("env") or {}).get("ASPIRE_CLI_VERSION")
+          if pinned is None:
+              print(
+                  f"::error file={WORKFLOW}::the '{JOB}' job declares no ASPIRE_CLI_VERSION, so "
+                  f"the CLI it installs is no longer pinned where this check can see it"
+              )
+              sys.exit(1)
+
+          with open(PROPS) as f:
+              floors = re.findall(r"<AspireVersion[^>]*>([^<]+)</AspireVersion>", f.read())
+
+          # Exactly one, not "the first": the property is written with a Condition so an override
+          # wins, and a second declaration would make which value is the floor a matter of
+          # evaluation order this check does not model.
+          if len(floors) != 1:
+              print(
+                  f"::error file={PROPS}::expected exactly one AspireVersion here, found "
+                  f"{len(floors)} - so this check cannot say what the floor is"
+              )
+              sys.exit(1)
+
+          floor = floors[0].strip()
+
+          def components(version, where):
+              if not re.fullmatch(r"\d+(\.\d+)*", version):
+                  print(
+                      f"::error file={where}::'{version}' is not a plain numeric version; this "
+                      f"check orders versions componentwise and cannot place a prerelease"
+                  )
+                  sys.exit(1)
+              return tuple(int(part) for part in version.split("."))
+
+          if components(pinned, WORKFLOW) < components(floor, PROPS):
+              print(
+                  f"::error file={WORKFLOW}::the '{JOB}' job installs Aspire CLI {pinned}, older "
+                  f"than the {floor} Aspire floor in {PROPS}. The CLI pins its own version into "
+                  f"the host project it generates, so `aspire restore` fails with NU1605 before "
+                  f"codegen runs. Raise ASPIRE_CLI_VERSION to {floor} or newer."
+              )
+              sys.exit(1)
+
+          print(f"Aspire CLI pinned to {pinned}, at or above the {floor} floor in {PROPS}")
           EOF
