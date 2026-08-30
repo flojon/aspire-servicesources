@@ -253,6 +253,12 @@ placement is doing work:
 - **Not in the prefetch** — see finding 1. `AddService()` is serial, so prepare steps are serial
   across services. That is also the answer to #81's concern about parallel builds thrashing DLL
   locks (microsoft/aspire#15190): anything routed through this seam is serialized by construction.
+
+  Narrowed by measurement after this design was written: serial *here* is not serial everywhere.
+  Aspire launches project resources concurrently, so the builds `dotnet run` performs are parallel
+  whatever this seam does, and that contention reproduces — for services sharing build output.
+  See [the checkout-build findings](2026-08-30-servicesources-checkout-build-findings.md). The
+  sentence above holds for prepare steps and only for them.
 - **`LocalGitCheckout` is untouched** and stays purely about git.
 
 The block is *parsed and validated* earlier — alongside the existing `handler?.Validate(...)`
