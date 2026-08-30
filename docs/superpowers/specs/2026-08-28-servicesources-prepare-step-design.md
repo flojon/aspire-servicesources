@@ -5,7 +5,9 @@
 **Resolves:** GitHub issue #118 (a `"local"` checkout whose runnable artifact is produced by a
 script the repository commits and then gitignores).
 **Defers:** #123 (whether the step should run for a self-managed `path` checkout).
-**Leaves a seam for:** #81 (whether a fresh checkout is ever built before its resource starts).
+**Leaves a seam for:** #81 (whether a fresh checkout is ever built before its resource starts) —
+since closed, confirming this step is that seam and needs nothing added here. See
+[the checkout-build findings](2026-08-30-servicesources-checkout-build-findings.md).
 **Surfaced:** #122 (`servicesources.local.json` silently ignores unknown properties).
 
 ## Motivation
@@ -515,8 +517,11 @@ worktrees produces. Whether this should change is #123, which records the analys
 - **No `ILocalResourceKind` change.** Per finding 5 there is no non-null default to supply today, and
   adding a member every implementation opts out of is speculative public API on a published
   interface. Adding a default-implemented member later is source-compatible — `Validate` is the
-  precedent — so this stays one small, reversible step away if #81 or a compiled-language satellite
-  (#45–#50) produces a real default.
+  precedent — so this stays one small, reversible step away if a compiled-language satellite
+  (#45–#50) produces a real default. #81 was the other candidate and has since closed without
+  producing one: a `kind: dotnet` resource is launched with `dotnet run` from inside the checkout,
+  so it is built on every start and needs no default at all. See
+  [the checkout-build findings](2026-08-30-servicesources-checkout-build-findings.md).
 - **A typo in the developer config's `prepare` block is silent** (finding 8, #122). The catalog side
   is validated; the local side is not, and fixing that asymmetry is its own change. The README should
   say so.
