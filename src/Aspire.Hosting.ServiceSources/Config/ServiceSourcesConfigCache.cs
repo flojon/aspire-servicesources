@@ -4,7 +4,7 @@ namespace Aspire.Hosting.ServiceSources.Config;
 
 internal static class ServiceSourcesConfigCache
 {
-    private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, LoadedConfig> Cache = new();
+    private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, ConfigLoader> Cache = new();
 
     /// <summary>
     /// The whole loaded configuration, for callers that work across services rather than resolving
@@ -12,7 +12,14 @@ internal static class ServiceSourcesConfigCache
     /// before any of them has been asked for by name.
     /// </summary>
     public static LoadedConfig LoadedFor(IDistributedApplicationBuilder builder) =>
-        Cache.GetValue(builder, static b => LoadedConfig.Load(b));
+        // The factory has to stay free of side effects. ConditionalWeakTable.GetValue may run it
+        // concurrently for the same key and keep only one of the results, and loading is not a pure
+        // read: it registers servicesources.local.json on the builder's own ConfigurationManager, so
+        // a discarded instance would leave a duplicate source behind — inserted from a second thread
+        // into a list the surviving instance is mutating, each insert disposing and rebuilding every
+        // provider on it. Loading behind a lock on the instance that actually won is the shape
+        // LocalCheckoutPrefetch uses, for the same reason.
+        Cache.GetValue(builder, static _ => new ConfigLoader()).Load(builder);
 
     public static (ServiceMetadata Metadata, ServiceDeveloperConfig DeveloperConfig) ResolveService(
         IDistributedApplicationBuilder builder, string serviceName)
@@ -33,6 +40,31 @@ internal static class ServiceSourcesConfigCache
         return (metadata, developerConfig);
     }
 
+    /// <summary>
+    /// One builder's slot in <see cref="Cache"/>. Holding the load behind this rather than in the
+    /// table's factory is what makes it happen exactly once per builder.
+    /// </summary>
+    private sealed class ConfigLoader
+    {
+        // Plain object rather than System.Threading.Lock: this package still targets net8.0.
+        private readonly object _gate = new();
+
+        private LoadedConfig? _loaded;
+
+        /// <summary>
+        /// A load that throws leaves the slot empty, so the next caller tries again and fails the
+        /// same way — a configuration error has to keep being reported to whoever asks, rather than
+        /// being cached as a success that never happened or silently swallowed after the first call.
+        /// </summary>
+        public LoadedConfig Load(IDistributedApplicationBuilder builder)
+        {
+            lock (_gate)
+            {
+                return _loaded ??= LoadedConfig.Load(builder);
+            }
+        }
+    }
+
     internal sealed class LoadedConfig
     {
         public required ServiceCatalog Catalog { get; init; }
@@ -42,7 +74,14 @@ internal static class ServiceSourcesConfigCache
         public static LoadedConfig Load(IDistributedApplicationBuilder builder)
         {
             var catalog = ServiceCatalogLoader.Load(Path.Combine(builder.AppHostDirectory, "servicesources.yaml"));
-            return new LoadedConfig { Catalog = catalog, DeveloperConfig = DeveloperConfiguration.ReadFrom(builder) };
+
+            // The catalog first, and its names handed over: it decides how a service is spelled, and
+            // the developer config's keys arrive from providers that may spell it differently.
+            return new LoadedConfig
+            {
+                Catalog = catalog,
+                DeveloperConfig = DeveloperConfiguration.ReadFrom(builder, catalog.Services.Keys),
+            };
         }
     }
 }

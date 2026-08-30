@@ -98,6 +98,7 @@ public class DeveloperConfigurationTests
             () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
 
         Assert.Contains("ServiceSources:Services:orders:source", ex.Message);
+        Assert.Contains("under \"services\" in", ex.Message);
         Assert.Contains(Path.Combine(dir, "servicesources.local.json"), ex.Message);
     }
 
@@ -261,4 +262,94 @@ public class DeveloperConfigurationTests
             Environment.SetEnvironmentVariable("ServiceSources__Services__EnvOverride__Source", null);
         }
     }
+
+    /// <remarks>
+    /// Resolving the service is only half of it. The entry is also enumerated against the catalog by
+    /// key — by the checkout prefetch, which matches names ordinally — so the key itself has to be
+    /// the catalog's spelling and not whichever one the winning provider happened to use.
+    /// </remarks>
+    [Fact]
+    public void ReadFrom_ConfigurationSpellsTheServiceDifferently_KeysTheEntryByTheCatalogSpelling()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """{ "services": { "Orders": { "source": "local" } } }""");
+
+        var builder = CreateBuilder(dir);
+
+        var loaded = ServiceSourcesConfigCache.LoadedFor(builder);
+
+        Assert.Equal(["orders"], loaded.DeveloperConfig.Services.Keys.ToArray());
+    }
+
+    /// <remarks>
+    /// A service the catalog doesn't describe has no spelling to adopt and keeps its own, so the
+    /// failure still comes from the catalog lookup — which can name the file that would fix it —
+    /// rather than from the entry going missing here.
+    /// </remarks>
+    [Fact]
+    public void ReadFrom_ServiceNotInTheCatalog_KeepsTheCasingConfigurationGaveIt()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """{ "services": { "Payments": { "source": "url" } } }""");
+
+        var builder = CreateBuilder(dir);
+
+        var loaded = ServiceSourcesConfigCache.LoadedFor(builder);
+
+        Assert.Equal(["Payments"], loaded.DeveloperConfig.Services.Keys.ToArray());
+    }
+
+    /// <remarks>
+    /// The file is re-rooted under our own prefix as it joins the chain, which would otherwise make
+    /// it a route for anything else in the file to reach the AppHost's live configuration.
+    /// </remarks>
+    [Fact]
+    public void ReadFrom_FileCarriesOtherTopLevelKeys_LeavesThemOutOfTheAppHostConfiguration()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """
+            {
+              "services": { "orders": { "source": "local" } },
+              "ConnectionStrings": { "db": "Server=somewhere" }
+            }
+            """);
+
+        var builder = CreateBuilder(dir);
+
+        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+
+        Assert.Equal("local", config.Source);
+        Assert.Null(builder.Configuration["ServiceSources:ConnectionStrings:db"]);
+    }
+
+    /// <remarks>
+    /// Some service being configured no longer implies the file exists — CI pins services from the
+    /// environment and ships none — so the advice can't send the developer to edit a path that
+    /// holds nothing.
+    /// </remarks>
+    [Fact]
+    public void ResolveService_ConfiguredOnlyFromTheEnvironmentAndNoFile_TellsTheDeveloperToCreateIt()
+    {
+        var dir = CreateAppHostDirectory(OrdersCatalog);
+
+        Environment.SetEnvironmentVariable("ServiceSources__Services__nofilepayments__Source", "url");
+        try
+        {
+            var builder = CreateBuilder(dir);
+
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+                () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+            Assert.Contains($"create '{Path.Combine(dir, "servicesources.local.json")}'", ex.Message);
+            Assert.DoesNotContain("under \"services\" in", ex.Message);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ServiceSources__Services__nofilepayments__Source", null);
+        }
+    }
+
 }
