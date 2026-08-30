@@ -37,10 +37,19 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
-          # Package versions live in Directory.Packages.props under central package
-          # management, so hashing only the project files would keep serving a stale cache
-          # across a version change.
-          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props') }}
+          # Hashes every file that can change which packages restore downloads. The list has
+          # to be complete rather than representative: on an exact primary-key hit
+          # actions/cache skips the save, so a file left out of the key does not merely serve
+          # a stale entry once - it serves the pre-bump entry and then never stores the
+          # post-bump downloads, and every later run re-downloads them.
+          #   - Directory.Packages.props, because central package management is where package
+          #     versions live and a csproj-only hash would miss a bump
+          #   - Directory.Build.props, because $(AspireVersion) is the number the Aspire
+          #     entries there resolve to: Directory.Packages.props holds the property
+          #     reference, whose text does not change when the version does
+          #   - global.json, because the Aspire.AppHost.Sdk version cannot be an MSBuild
+          #     property and so appears in no props file at all
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props', '**/Directory.Build.props', 'global.json') }}
           restore-keys: nuget-${{ runner.os }}-
 
       - name: Restore
@@ -263,10 +272,10 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
-          # Package versions live in Directory.Packages.props under central package
-          # management, so hashing only the project files would keep serving a stale cache
-          # across a version change.
-          key: nuget-smoketest-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props') }}
+          # Same file list, and the same reason for it, as the build job's cache above: every
+          # file that can change what restore downloads has to be in the key, because
+          # actions/cache skips the save on an exact primary-key hit.
+          key: nuget-smoketest-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props', '**/Directory.Build.props', 'global.json') }}
           restore-keys: nuget-smoketest-${{ runner.os }}-
 
       # Docker is preinstalled and running on ubuntu-latest, which is the script's only
@@ -391,22 +400,38 @@ jobs:
           EOF
 
       # A third invariant, and the reason Aspire.Hosting.AppHost is in that ignore list at all
-      # rather than being a floor. An AppHost states its Aspire version twice - as the
-      # Aspire.Hosting.AppHost package, central in the root Directory.Packages.props, and as an
-      # MSBuild SDK reference in the csproj, which central package management does not reach.
-      # Split, they mix one Aspire version's hosting assemblies with another's orchestrator:
-      # green at build time, broken when the AppHost runs. See dependabot.yml on that id.
-      - name: Verify the AppHost package and SDK versions match
+      # rather than being a floor. An AppHost states its Aspire version twice, and only one of
+      # the two can be an MSBuild property: the Aspire.Hosting.AppHost package reads
+      # $(AspireVersion) through central package management, while the Aspire.AppHost.Sdk
+      # MSBuild SDK is resolved before any property is evaluated and so has to be a literal in
+      # global.json. Split, they mix one Aspire version's hosting assemblies with another's
+      # orchestrator: green at build time, broken when the AppHost runs (#89).
+      #
+      # Three checks rather than a comparison of two literals, because the shapes that split
+      # the pair are not only "the numbers differ":
+      #
+      #   - the package still reads the property, rather than having been re-pinned to a
+      #     literal that a -p:AspireVersion override cannot reach (#116)
+      #   - global.json states the same version the property defaults to
+      #   - no csproj carries an inline `<Sdk Version="..." />`, which outranks global.json
+      #     with no warning and no MSB4241 - the silence that let #116 go unnoticed
+      - name: Verify the AppHost's two Aspire versions move together
         run: |
           python3 - <<'EOF'
-          import glob, sys, xml.etree.ElementTree as ET
+          import glob, json, sys, xml.etree.ElementTree as ET
 
           CENTRAL = "Directory.Packages.props"
+          BUILD = "Directory.Build.props"
+          GLOBAL = "global.json"
           PACKAGE = "Aspire.Hosting.AppHost"
           SDK = "Aspire.AppHost.Sdk"
+          PROPERTY = "AspireVersion"
 
-          # ElementTree rather than a regex like the check above: this reads two attributes off
-          # one element and MSBuild fixes no order between them. No xmlns, so tags are plain.
+          failed = False
+
+          # ElementTree rather than a regex like the check above: these read attributes and
+          # element text off MSBuild XML, which fixes no order between attributes. No xmlns
+          # in either file, so tags are plain.
           declared = [
               e.get("Version")
               for e in ET.parse(CENTRAL).getroot().iter("PackageVersion")
@@ -416,12 +441,82 @@ jobs:
           if len(declared) != 1:
               print(
                   f"::error file={CENTRAL}::expected exactly one PackageVersion for {PACKAGE} "
-                  f"here, found {len(declared)} - so this check cannot say what the SDK is "
-                  f"supposed to match"
+                  f"here, found {len(declared)} - so this check cannot say which version the "
+                  f"SDK is supposed to match"
               )
               sys.exit(1)
 
-          version = declared[0]
+          # The package's half has to stay a property reference rather than a literal that
+          # happens to agree today: aspire-matrix.yml moves the family by overriding that
+          # property, and a literal here is invisible to the override however correct it looks.
+          if declared[0] != f"$({PROPERTY})":
+              print(
+                  f"::error file={CENTRAL}::{PACKAGE} is set to '{declared[0]}' here, but it has "
+                  f"to read $({PROPERTY}) so that overriding that property moves it with the "
+                  f"rest of the Aspire family. A literal here is what had aspire-matrix.yml "
+                  f"building a mixed-version family (#116)."
+              )
+              failed = True
+
+          # The property's default: the floor every build that overrides nothing resolves.
+          defaults = [
+              e.text.strip()
+              for e in ET.parse(BUILD).getroot().iter(PROPERTY)
+              if e.text and e.text.strip()
+          ]
+
+          if len(defaults) != 1:
+              print(
+                  f"::error file={BUILD}::expected exactly one <{PROPERTY}> default here, found "
+                  f"{len(defaults)} - so this check cannot say what {GLOBAL} is supposed to "
+                  f"match, and would pass whatever {GLOBAL} said"
+              )
+              sys.exit(1)
+
+          version = defaults[0]
+
+          # Read the file before asking what is in it, so that "someone deleted or broke
+          # global.json" reaches the annotation below rather than failing the step with a
+          # traceback - the deleted case being exactly what the missing-key message further
+          # down is written to explain. ValueError rather than json.JSONDecodeError, because
+          # it also catches the UnicodeDecodeError from a file saved as UTF-16, which is a
+          # ValueError but not an OSError and so would otherwise escape.
+          try:
+              global_json = json.load(open(GLOBAL))
+          except (OSError, ValueError) as error:
+              print(
+                  f"::error file={GLOBAL}::cannot be read as JSON ({error}). This is where the "
+                  f"{SDK} version has to live, since an <Sdk> version cannot be an MSBuild "
+                  f"property, so without it the sample AppHost has no version for the SDK and "
+                  f"restore fails with MSB4236."
+              )
+              sys.exit(1)
+
+          # Checked for shape rather than trusted to be a mapping: `null`, a list and a bare
+          # string are all valid JSON that json.load accepts and .get does not survive, so
+          # duck-typing this would trade the annotation for an AttributeError. Anything that
+          # is not a mapping of msbuild-sdks holding this SDK leaves the version unfound,
+          # which the missing-key arm below already has the message for.
+          sdk_versions = global_json.get("msbuild-sdks") if isinstance(global_json, dict) else None
+          sdk_version = sdk_versions.get(SDK) if isinstance(sdk_versions, dict) else None
+
+          if sdk_version is None:
+              print(
+                  f"::error file={GLOBAL}::msbuild-sdks does not name {SDK}, so the sample "
+                  f"AppHost has no version for it and restore fails with MSB4236. It belongs "
+                  f"here because an <Sdk> version cannot be an MSBuild property."
+              )
+              failed = True
+          elif sdk_version != version:
+              print(
+                  f"::error file={GLOBAL}::{SDK} is {sdk_version} here, but ${PROPERTY} defaults "
+                  f"to {version} in {BUILD}. These are the two literals that have to move "
+                  f"together by hand - split, the build stays green and the AppHost mixes "
+                  f"Aspire versions at run time (#89)."
+              )
+              failed = True
+          else:
+              print(f"{GLOBAL}: {SDK} {sdk_version} matches ${PROPERTY} {version}")
 
           # Found by the SDK reference rather than by path, so a second AppHost inherits the
           # check instead of quietly falling outside it. Both spellings count: the `<Sdk />`
@@ -437,34 +532,26 @@ jobs:
                   if name == SDK:
                       apphosts.append((path, inline or None))
 
-          # Not "the versions agree": the loop below would run zero times and pass for as long
-          # as this kept looking in the wrong place.
+          # Not "every project agrees": the loop below would run zero times and pass for as
+          # long as this kept looking in the wrong place.
           if not apphosts:
               print(
                   f"::error::no project in this repository references the {SDK} MSBuild SDK - "
-                  f"this check has nothing to compare and would pass whatever {CENTRAL} said"
+                  f"this check has nothing to hold and would pass whatever {GLOBAL} said"
               )
               sys.exit(1)
 
-          failed = False
-
-          for path, sdk_version in apphosts:
-              if sdk_version is None:
+          for path, inline in apphosts:
+              if inline is not None:
                   print(
-                      f"::error file={path}::this project references {SDK} without a version, "
-                      f"so the SDK resolves from global.json rather than from the project. "
-                      f"Pin it to {version}, matching {PACKAGE}."
-                  )
-                  failed = True
-              elif sdk_version != version:
-                  print(
-                      f"::error file={path}::{SDK} is pinned to {sdk_version} here, but "
-                      f"{PACKAGE} is {version} in {CENTRAL}. These move together - split, the "
-                      f"build stays green and the AppHost mixes Aspire versions at run time."
+                      f'::error file={path}::{SDK} carries Version="{inline}" here. An inline '
+                      f"version outranks {GLOBAL} silently - no warning, no MSB4241 - so "
+                      f"aspire-matrix.yml's per-leg override would look effective while "
+                      f"changing nothing (#116). Drop it; the version lives in {GLOBAL}."
                   )
                   failed = True
               else:
-                  print(f"{path}: {SDK} {sdk_version} matches {PACKAGE} {version}")
+                  print(f"{path}: {SDK} takes its version from {GLOBAL}")
 
           sys.exit(1 if failed else 0)
           EOF

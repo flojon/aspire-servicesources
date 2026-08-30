@@ -52,12 +52,19 @@
          Aspire version, and it has to reach both of these lines at once for the pair to stay
          matched under an override.
 
-         A NuGet floating version (AspireVersion=*, which is how that workflow's `latest` leg
-         asks for the newest release) additionally needs CentralPackageFloatingVersionsEnabled:
-         CPM rejects a floating PackageVersion outright with NU1011 otherwise, on the grounds
-         that a floor pinned centrally and floating underneath every consumer is rarely what was
-         meant. aspire-matrix.yml passes both; nothing else sets either, so an ordinary build
-         here resolves the literal floor above. -->
+         That workflow's `latest` leg asked for the newest release as the NuGet floating version
+         `*` until #116, which additionally needed CentralPackageFloatingVersionsEnabled: CPM
+         rejects a floating PackageVersion outright with NU1011 otherwise, on the grounds that a
+         floor pinned centrally and floating underneath every consumer is rarely what was meant.
+
+         It now resolves "newest" against nuget.org itself and passes the version it got, so
+         neither a floating version nor that property appears anywhere. The reason is the one
+         family member this property cannot reach: Aspire.AppHost.Sdk is an MSBuild SDK, its
+         version has to live in global.json, and global.json takes only an exact version. Once
+         one member needs a number, letting the others float independently is what put the
+         sample's AppHost a patch behind the rest of the family (#116). Every restore here
+         therefore resolves an exact version - the floor above by default, or whatever
+         aspire-matrix.yml passed. -->
     <PackageVersion Include="Aspire.Hosting" Version="$(AspireVersion)" />
     <PackageVersion Include="Aspire.Hosting.JavaScript" Version="$(AspireVersion)" />
 

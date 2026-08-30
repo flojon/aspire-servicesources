@@ -58,14 +58,18 @@ updates:
     ignore:
       - dependency-name: "Aspire.Hosting"
       - dependency-name: "Aspire.Hosting.JavaScript"
-      # Not a floor - this one is the sample AppHost's own version, and it is here because
-      # Dependabot cannot move it on its own. The version has a partner it must stay level
-      # with, `<Sdk Name="Aspire.AppHost.Sdk" Version="..." />` in DemoAppHost.csproj, and an
-      # MSBuild SDK reference is not a package reference for Dependabot to edit. A bump here
-      # would raise the AppHost package - and with it the DCP and dashboard packages the SDK
-      # pins to whatever version the project *declares* - while leaving the SDK itself behind:
-      # the split Aspire family this repository warns consumers about, in its own sample. Move
-      # both by hand, together - ci.yml's `verify repo invariants` job fails if they part.
+      # Not a floor - this is the sample AppHost's own version, and it is here because
+      # Dependabot cannot move it correctly on its own. Since #116 the root
+      # Directory.Packages.props states it as $(AspireVersion) rather than a literal, so there
+      # is no version here for the updater to rewrite in the first place; the id stays listed
+      # because the property it reads has a partner Dependabot cannot see either. That partner
+      # is `<Sdk Name="Aspire.AppHost.Sdk" />` in DemoAppHost.csproj, whose version lives in
+      # global.json, and an MSBuild SDK reference is not a package reference for Dependabot to
+      # edit. Raising one without the other gives the AppHost package - and with it the DCP and
+      # dashboard packages the SDK pins to whatever version it resolves - a different version
+      # from the SDK itself: the split Aspire family this repository warns consumers about, in
+      # its own sample. Move $(AspireVersion) and global.json by hand, together - ci.yml's
+      # `verify repo invariants` job fails if they part.
       - dependency-name: "Aspire.Hosting.AppHost"
       - dependency-name: "CommunityToolkit.Aspire.Hosting.Java"
       - dependency-name: "LibGit2Sharp"

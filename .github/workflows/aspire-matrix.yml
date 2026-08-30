@@ -17,10 +17,12 @@ on:
       - 'Directory.Build.props'
       # Both central package files, spelled out rather than globbed: src/ carries the
       # Aspire.Hosting and Aspire.Hosting.JavaScript floors this matrix overrides, and the root
-      # one carries Aspire.Hosting.AppHost for the sample - which is in dependabot.yml's scope,
-      # so a bump lands there touching no csproj at all.
+      # one carries Aspire.Hosting.AppHost for the sample.
       - 'Directory.Packages.props'
       - 'src/Directory.Packages.props'
+      # The one member of the Aspire family that cannot read $(AspireVersion): the
+      # Aspire.AppHost.Sdk MSBuild SDK version, which this workflow rewrites per leg.
+      - 'global.json'
       - '**/*.csproj'
       - '.github/workflows/aspire-matrix.yml'
 
@@ -30,7 +32,7 @@ concurrency:
 
 jobs:
   test:
-    name: 🧭 aspire ${{ matrix.aspire.label }}
+    name: 🧭 aspire ${{ matrix.aspire }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -41,21 +43,28 @@ jobs:
       # `latest` failure apart from a break that is this repo's own.
       fail-fast: false
       matrix:
-        aspire:
-          # The floor the packages declare, and what every other workflow already builds.
-          # Its inputs only change when a tracked file does, so the content hash alone keys
-          # the cache correctly - salt stays empty.
-          - label: floor
-            version: '13.5.2'
-            salt: ''
-          # A NuGet floating version, so this leg follows new Aspire releases with no edit.
-          # What it resolves changes without any tracked file changing, so the hash alone would
-          # hit on an unchanged commit and actions/cache would skip the save - leaving the
-          # cache holding the first run's packages forever. The run id makes every run a miss
-          # that then saves, with restore-keys still serving the previous run as a base.
-          - label: latest
-            version: '*'
-            salt: ${{ github.run_id }}
+        # Each leg names what to test; the step below turns that name into a version. Neither
+        # name is a version literal, deliberately.
+        #
+        # `floor` is not spelled '13.5.2' here because the floor already exists as a literal in
+        # Directory.Build.props, and ci.yml only holds that one against global.json. A copy here
+        # would be a third literal that nothing checks: bumped correctly in both guarded places,
+        # a stale copy would leave CI green while the leg named `floor` went on building a
+        # version that is no longer the floor - so the floor itself would stop being tested.
+        #
+        # `latest` is resolved against nuget.org at run time rather than stated as the NuGet
+        # floating version `*`. Two reasons, both from #116:
+        #
+        # The Aspire.AppHost.Sdk half of the family cannot float at all. An <Sdk> version is
+        # resolved before any property is evaluated, so it lives in global.json, and global.json
+        # takes only an exact version. Something has to turn "newest" into a number before
+        # restore, and once that number exists, using it for the packages too is what keeps the
+        # whole family on one version.
+        #
+        # A floating `*` also made the leg's own cache pathological: what it resolved changed
+        # without any tracked file changing, so the run id had to be salted into the key to
+        # force a miss every run. A resolved version keys the cache honestly instead.
+        aspire: [floor, latest]
 
     steps:
       - uses: actions/checkout@v7
@@ -70,53 +79,217 @@ jobs:
             9.0.x
             10.0.x
 
+      # `floor` reads the $(AspireVersion) default out of Directory.Build.props, so this leg
+      # builds the same floor ci.yml holds against global.json instead of a copy of it. Parsed as
+      # XML rather than matched with a regex, for the reason ci.yml gives: MSBuild fixes no order
+      # between attributes, so `<AspireVersion Condition="...">` is not a shape a pattern can
+      # rely on. More than one default and it fails rather than guessing which is the floor.
+      #
+      # `latest` reads Aspire.AppHost.Sdk rather than Aspire.Hosting because the SDK is the
+      # constrained half - global.json cannot float - and every stable 13.x release exists under
+      # all four ids this repo declares, so the SDK's newest is a version the packages have too.
+      # Should Aspire ever stop shipping the family in lockstep, restore fails naming the id it
+      # could not find, which is the right way to hear that.
+      #
+      # Asked of the search service rather than the flatcontainer index, because flatcontainer
+      # enumerates every version ever pushed and the search index carries only listed ones.
+      # Should Aspire publish a bad release and unlist it, flatcontainer would go on offering it
+      # and an exact unlisted version still restores - so this leg would pin the whole family to
+      # a release no consumer can resolve, pass, and report on a combination nobody runs. The
+      # endpoint is looked up in the service index rather than hardcoded, since the ones
+      # nuget.org advertises are regional instances. The id is re-checked in the response because
+      # this is a search: `packageid:` narrows it, but nothing in the protocol promises it
+      # narrowed to exactly one package.
+      #
+      # Pre-releases excluded: `latest` here means what a consumer who pins nothing would get.
+      # The version is compared as numbers rather than by taking the last element of the list,
+      # since nuget.org does not document either listing as sorted - a non-numeric component
+      # fails `tonumber` and so fails the step rather than picking a wrong answer.
+      - name: Resolve the Aspire version
+        id: aspire
+        run: |
+          set -euo pipefail
+          case "$REQUESTED" in
+            floor)
+              resolved=$(python3 -c 'import xml.etree.ElementTree as ET, sys; v=[e.text.strip() for e in ET.parse("Directory.Build.props").getroot().iter("AspireVersion") if e.text and e.text.strip()]; sys.exit("expected exactly one <AspireVersion> default in Directory.Build.props, found %d" % len(v)) if len(v) != 1 else print(v[0])')
+              ;;
+            latest)
+              search=$(curl -fsS https://api.nuget.org/v3/index.json \
+                | jq -er 'first(.resources[] | select(."@type" == "SearchQueryService") | ."@id")')
+              resolved=$(curl -fsS --get "$search" \
+                  --data-urlencode 'q=packageid:aspire.apphost.sdk' \
+                  --data-urlencode 'prerelease=false' \
+                  --data-urlencode 'semVerLevel=2.0.0' \
+                | jq -er '[.data[] | select(.id | ascii_downcase == "aspire.apphost.sdk")
+                           | .versions[].version | select(contains("-") | not)]
+                          | if length == 0 then
+                              error("nuget.org lists no stable version of Aspire.AppHost.Sdk")
+                            else . end
+                          | map(split(".") | map(tonumber))
+                          | max | map(tostring) | join(".")')
+              ;;
+            *)
+              echo "::error::unknown matrix leg '$REQUESTED' - expected 'floor' or 'latest'"
+              exit 1
+              ;;
+          esac
+          # Guards the interpolation below as much as the resolution: this value goes on to key a
+          # cache and to be written into global.json.
+          case "$resolved" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::resolved Aspire version '$resolved' is not a version"; exit 1 ;;
+          esac
+          echo "Requested '$REQUESTED', resolved $resolved"
+          echo "version=$resolved" >> "$GITHUB_OUTPUT"
+        env:
+          REQUESTED: ${{ matrix.aspire }}
+
       - name: Cache NuGet packages
         uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
-          # Keyed by leg as well: the two legs restore different Aspire versions, and sharing
-          # one key would have them overwrite each other's cache on every run. Hashes
+          # Keyed by the resolved version rather than by leg label: that is what the restore
+          # actually depends on, so the two legs never share an entry and `latest` stops
+          # thrashing its own cache once Aspire's newest release settles. Hashes
           # Directory.Packages.props alongside the csprojs, since CPM moved package versions
           # there - a csproj-only hash would miss a version bump and serve a stale cache - and
           # Directory.Build.props, which is where $(AspireVersion) states the floor.
-          # See the salt on each leg above for why the hash alone is not enough.
-          key: nuget-${{ runner.os }}-aspire-${{ matrix.aspire.label }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props', 'Directory.Build.props') }}-${{ matrix.aspire.salt }}
-          restore-keys: nuget-${{ runner.os }}-aspire-${{ matrix.aspire.label }}-
+          #
+          # restore-keys keeps the resolved version and drops only the file hash, so a fallback
+          # can cross a csproj edit but never an Aspire version. That bound is the point:
+          # actions/cache saves the whole directory under the new key, so a fallback that
+          # reached across versions would carry the packages of every version it had ever seen
+          # into each new entry. That is not a small carry - restoring this solution pulls
+          # aspire.hosting.orchestration.linux-x64 and aspire.dashboard.sdk.linux-x64 for the
+          # AppHost, around 250 MB per Aspire version - so the `latest` entry would put on that
+          # much per release against a 10 GB budget shared with every other workflow here.
+          # Keyed this way each entry holds exactly one version, and the entries for superseded
+          # versions age out on their own: GitHub evicts a cache nothing has read in 7 days,
+          # which is something it can only do to an entry that is not being carried forward.
+          #
+          # The cost is one cold restore per Aspire release on the `latest` leg, since no entry
+          # for a version exists until that leg has built it once. The `floor` leg pays nothing:
+          # its resolved version only moves when the floor itself does.
+          key: nuget-${{ runner.os }}-aspire-${{ matrix.aspire }}-${{ steps.aspire.outputs.version }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props', 'Directory.Build.props') }}
+          restore-keys: nuget-${{ runner.os }}-aspire-${{ matrix.aspire }}-${{ steps.aspire.outputs.version }}-
+
+      # The committed global.json holds the floor, and rewriting it is the only way to move the
+      # AppHost SDK: there is no command-line property that reaches an MSBuild SDK version, and
+      # DemoAppHost.csproj deliberately carries no `Version` attribute for this to be outranked
+      # by. Verified in #116 that an inline attribute wins over global.json silently - no
+      # warning, no MSB4241 - which is why ci.yml fails if one reappears.
+      #
+      # jq rather than a sed or a heredoc that overwrites the file: it parses the JSON, so a key
+      # that has been renamed or removed errors here instead of leaving the version untouched
+      # and the leg looking like it tested something it did not.
+      - name: Pin the AppHost SDK to the resolved version
+        run: |
+          set -euo pipefail
+          jq -er --arg v "$ASPIRE_VERSION" '
+            if (."msbuild-sdks"."Aspire.AppHost.Sdk" // null) == null then
+              error("global.json declares no msbuild-sdks entry for Aspire.AppHost.Sdk, so this workflow has no SDK version to override")
+            else
+              ."msbuild-sdks"."Aspire.AppHost.Sdk" = $v
+            end
+          ' global.json > global.json.resolved
+          mv global.json.resolved global.json
+          cat global.json
+        env:
+          ASPIRE_VERSION: ${{ steps.aspire.outputs.version }}
 
       # AspireVersion has to be passed to every command: restore resolves with it, and a build
-      # or test that did not see it would look for assets that restore never wrote.
-      #
-      # CentralPackageFloatingVersionsEnabled likewise has to be set on every command, for a
-      # different reason: CPM's PackageVersion items reject a floating version outright
-      # (NU1011) unless this is set, since a floor pinned in Directory.Packages.props floating
-      # underneath every consumer is rarely intended. It only changes behavior when a floating
-      # version is actually resolved, so it is harmless to pass on the `floor` leg too - kept
-      # on both rather than made leg-conditional so one PropertyGroup covers every command
-      # without threading the label through as well.
+      # or test that did not see it would look for assets that restore never wrote. It carries
+      # the Aspire.Hosting and Aspire.Hosting.JavaScript floors in src/Directory.Packages.props
+      # and, since #116, the sample's Aspire.Hosting.AppHost in the root one - the three
+      # packages that have to land on the same version as the SDK pinned above.
       - name: Restore
-        run: dotnet restore -p:AspireVersion='${{ matrix.aspire.version }}' -p:CentralPackageFloatingVersionsEnabled=true
+        run: dotnet restore -p:AspireVersion="$ASPIRE_VERSION"
+        env:
+          ASPIRE_VERSION: ${{ steps.aspire.outputs.version }}
+
+      # What #116 was, asserted rather than left to a reader: this leg exists to prove the Aspire
+      # family still works in step, and it was itself resolving Aspire.Hosting 13.5.3 against
+      # Aspire.Hosting.AppHost 13.5.2 - printed in the log since #92, and green regardless.
+      # Placed before the build so a split family fails in seconds instead of after a test run.
+      #
+      # Only the ids this repository declares a version for. Asserting across the whole Aspire.*
+      # namespace would make one of Aspire's own internal version choices fail this leg.
+      - name: Verify the Aspire family resolved in step
+        run: |
+          python3 - <<'EOF'
+          import glob, json, os, sys
+
+          expected = os.environ["ASPIRE_VERSION"]
+          family = {"Aspire.Hosting", "Aspire.Hosting.JavaScript", "Aspire.Hosting.AppHost"}
+
+          # Every project, not just src/: the sample AppHost and the test projects resolve Aspire
+          # too, and the AppHost is where a split within the family showed up.
+          assets = sorted(glob.glob("*/*/obj/project.assets.json"))
+          found = {}
+
+          for path in assets:
+              with open(path) as f:
+                  libraries = json.load(f).get("libraries", {})
+              for key in libraries:
+                  name, _, version = key.partition("/")
+                  if name in family:
+                      found.setdefault(name, {}).setdefault(version, []).append(path)
+
+          # Not "they all agree": an empty result compares clean against anything, so without
+          # this the step passes for as long as it reads the wrong files.
+          missing = family - found.keys()
+          if missing or not assets:
+              print(
+                  f"::error::resolved no version for {', '.join(sorted(missing)) or 'the Aspire family'} "
+                  f"across {len(assets)} project.assets.json file(s) - this check is not reading "
+                  f"what it thinks it is and would pass whatever was restored"
+              )
+              sys.exit(1)
+
+          failed = False
+
+          for name in sorted(family):
+              for version, paths in sorted(found[name].items()):
+                  if version == expected:
+                      print(f"{name}/{version}")
+                  else:
+                      print(
+                          f"::error::{name} resolved to {version}, but this leg is testing "
+                          f"{expected}. The Aspire family is only shipped and tested in lockstep, "
+                          f"so a leg that mixes versions is not testing a combination anyone "
+                          f"runs (#89, #116). In: {', '.join(paths)}"
+                      )
+                      failed = True
+
+          sys.exit(1 if failed else 0)
+          EOF
+        env:
+          ASPIRE_VERSION: ${{ steps.aspire.outputs.version }}
 
       # No -warnaserror here, unlike ci.yml: a newer Aspire is free to add obsoletions, and
       # failing on those would report a deprecation as a compatibility break.
       - name: Build
-        run: dotnet build -c Release --no-restore -p:AspireVersion='${{ matrix.aspire.version }}' -p:CentralPackageFloatingVersionsEnabled=true
+        run: dotnet build -c Release --no-restore -p:AspireVersion="$ASPIRE_VERSION"
+        env:
+          ASPIRE_VERSION: ${{ steps.aspire.outputs.version }}
 
       - name: Test
-        run: dotnet test -c Release --no-build -p:AspireVersion='${{ matrix.aspire.version }}' -p:CentralPackageFloatingVersionsEnabled=true --logger "trx;LogFilePrefix=results" --results-directory ./artifacts/test-results
+        run: dotnet test -c Release --no-build -p:AspireVersion="$ASPIRE_VERSION" --logger "trx;LogFilePrefix=results" --results-directory ./artifacts/test-results
+        env:
+          ASPIRE_VERSION: ${{ steps.aspire.outputs.version }}
 
-      # `latest` resolves to whatever was newest at the time, so a failure months from now can
-      # only be tied to a version if the run recorded what it actually tested.
-      - name: Report resolved Aspire version
+      # The check above only runs when restore succeeded, and only over the ids this repo
+      # declares. This records everything Aspire actually landed in the graph, so a failure
+      # months from now can be tied to a version - including the ids the check deliberately
+      # leaves alone.
+      - name: Report resolved Aspire versions
         if: always()
         run: |
           set -o pipefail
-          echo "Requested: ${{ matrix.aspire.version }}"
-          # Every project directory, not just src/: the sample AppHost and the test projects
-          # resolve Aspire too, and the AppHost is where a mismatch within the family would
-          # show up. The id pattern allows more than one dotted segment for the same reason -
-          # Aspire.Hosting.AppHost has two, and a stricter pattern silently omits it.
-          # pipefail so that a report matching nothing fails the step rather than logging
-          # an empty list that reads like a clean run.
+          echo "Requested '${{ matrix.aspire }}', tested ${{ steps.aspire.outputs.version }}"
+          # The id pattern allows more than one dotted segment because Aspire.Hosting.AppHost has
+          # two, and a stricter pattern silently omits it. pipefail so that a report matching
+          # nothing fails the step rather than logging an empty list that reads like a clean run.
           grep -ohE '"Aspire\.[A-Za-z.]+/[0-9][^"]*"' */*/obj/project.assets.json \
             | tr -d '"' | sort -u
 
@@ -124,6 +297,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: test-results-aspire-${{ matrix.aspire.label }}
+          name: test-results-aspire-${{ matrix.aspire }}
           path: ./artifacts/test-results
           if-no-files-found: warn
