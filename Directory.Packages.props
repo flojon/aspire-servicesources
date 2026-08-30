@@ -44,7 +44,8 @@
          It has to be moved by hand, and this line is only half of it - `<Sdk Name=
          "Aspire.AppHost.Sdk" Version="..." />` in DemoAppHost.csproj carries the same version
          and has to move with it. .github/dependabot.yml ignores this id for that reason: an
-         automated bump can only reach the half it can parse. -->
+         automated bump can only reach the half it can parse. ci.yml's `verify repo invariants`
+         job fails if they part. -->
     <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.5.2" />
     <PackageVersion Include="coverlet.collector" Version="10.0.1" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />

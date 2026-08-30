@@ -284,3 +284,187 @@ jobs:
           name: smoketest-container-apphost-log
           path: .smoketest-cache/apphost.log
           if-no-files-found: ignore
+
+  verify-invariants:
+    # Its own job: these read files and need neither a restore nor a compile, so they report
+    # in seconds instead of behind the build they would otherwise queue against.
+    name: 🤖 verify repo invariants
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+
+      # grep answers neither dependabot.yml question below: both are about YAML structure -
+      # which keys are siblings, and which of them survive parsing.
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+
+      # Two invariants dependabot.yml states in prose and nothing enforces.
+      #
+      # That the nuget `ignore` list covers every floor in src/Directory.Packages.props:
+      # directory scoping does not keep the updater out of src/ (that file's header, #80,
+      # #89), so the per-id list is what actually holds - maintained by hand, since there is
+      # no wildcard for "whatever that file declares". A satellite taking on a new dependency
+      # is one edit away from a floor Dependabot may raise, silently.
+      #
+      # And that no key is duplicated. Two `ignore` keys in one mapping has happened here:
+      # YAML keeps the last, so the earlier list parsed and was discarded while still reading
+      # as authoritative.
+      - name: Verify Dependabot ignores every floor in src/
+        run: |
+          python3 - <<'EOF'
+          import re, sys, yaml
+
+          DEPENDABOT = ".github/dependabot.yml"
+          FLOORS = "src/Directory.Packages.props"
+
+          duplicates = []
+
+          class Loader(yaml.SafeLoader):
+              pass
+
+          def keep_duplicates(loader, node, deep=False):
+              mapping = {}
+              for key_node, value_node in node.value:
+                  key = loader.construct_object(key_node, deep=deep)
+                  if key in mapping:
+                      duplicates.append((key, key_node.start_mark.line + 1))
+                  mapping[key] = loader.construct_object(value_node, deep=deep)
+              return mapping
+
+          Loader.add_constructor(
+              yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, keep_duplicates
+          )
+
+          with open(DEPENDABOT) as f:
+              config = yaml.load(f, Loader=Loader)
+
+          failed = False
+
+          for key, line in duplicates:
+              print(
+                  f"::error file={DEPENDABOT},line={line}::duplicate key '{key}': YAML keeps "
+                  f"the last one, so an earlier block with this key is parsed and discarded"
+              )
+              failed = True
+
+          ignored = set()
+          for update in config["updates"]:
+              if update.get("package-ecosystem") == "nuget":
+                  ignored |= {e["dependency-name"] for e in update.get("ignore", [])}
+
+          with open(FLOORS) as f:
+              declared = set(re.findall(r'<PackageVersion\s+Include="([^"]+)"', f.read()))
+
+          # Not "nothing to check": an empty set compares clean against anything, so without
+          # this the step passes for as long as it keeps reading the wrong file.
+          if not declared:
+              print(
+                  f"::error file={FLOORS}::no PackageVersion found here - this check is not "
+                  f"reading what it thinks it is, and would pass whatever the ignore list said"
+              )
+              failed = True
+
+          for package in sorted(declared - ignored):
+              print(
+                  f"::error file={FLOORS}::{package} is declared here, so its version is a "
+                  f"floor consumers inherit, but {DEPENDABOT} does not ignore it - Dependabot "
+                  f"is free to raise it on a schedule. Add it to the ignore list."
+              )
+              failed = True
+
+          print(f"{len(declared)} floors declared in {FLOORS}, {len(ignored)} ids ignored:")
+          for package in sorted(declared & ignored):
+              print(f"  floor, ignored: {package}")
+          for package in sorted(declared - ignored):
+              print(f"  floor, NOT ignored: {package}")
+          for package in sorted(ignored - declared):
+              print(f"  ignored, not a floor: {package}")
+
+          sys.exit(1 if failed else 0)
+          EOF
+
+      # A third invariant, and the reason Aspire.Hosting.AppHost is in that ignore list at all
+      # rather than being a floor. An AppHost states its Aspire version twice - as the
+      # Aspire.Hosting.AppHost package, central in the root Directory.Packages.props, and as an
+      # MSBuild SDK reference in the csproj, which central package management does not reach.
+      # Split, they mix one Aspire version's hosting assemblies with another's orchestrator:
+      # green at build time, broken when the AppHost runs. See dependabot.yml on that id.
+      - name: Verify the AppHost package and SDK versions match
+        run: |
+          python3 - <<'EOF'
+          import glob, sys, xml.etree.ElementTree as ET
+
+          CENTRAL = "Directory.Packages.props"
+          PACKAGE = "Aspire.Hosting.AppHost"
+          SDK = "Aspire.AppHost.Sdk"
+
+          # ElementTree rather than a regex like the check above: this reads two attributes off
+          # one element and MSBuild fixes no order between them. No xmlns, so tags are plain.
+          declared = [
+              e.get("Version")
+              for e in ET.parse(CENTRAL).getroot().iter("PackageVersion")
+              if e.get("Include") == PACKAGE
+          ]
+
+          if len(declared) != 1:
+              print(
+                  f"::error file={CENTRAL}::expected exactly one PackageVersion for {PACKAGE} "
+                  f"here, found {len(declared)} - so this check cannot say what the SDK is "
+                  f"supposed to match"
+              )
+              sys.exit(1)
+
+          version = declared[0]
+
+          # Found by the SDK reference rather than by path, so a second AppHost inherits the
+          # check instead of quietly falling outside it. Both spellings count: the `<Sdk />`
+          # element used here, and the equivalent `Sdk="Name/Version"` attribute on <Project>.
+          apphosts = []
+          for path in sorted(glob.glob("**/*.csproj", recursive=True)):
+              project = ET.parse(path).getroot()
+              for sdk in project.iter("Sdk"):
+                  if sdk.get("Name") == SDK:
+                      apphosts.append((path, sdk.get("Version")))
+              for entry in (project.get("Sdk") or "").split(";"):
+                  name, _, inline = entry.strip().partition("/")
+                  if name == SDK:
+                      apphosts.append((path, inline or None))
+
+          # Not "the versions agree": the loop below would run zero times and pass for as long
+          # as this kept looking in the wrong place.
+          if not apphosts:
+              print(
+                  f"::error::no project in this repository references the {SDK} MSBuild SDK - "
+                  f"this check has nothing to compare and would pass whatever {CENTRAL} said"
+              )
+              sys.exit(1)
+
+          failed = False
+
+          for path, sdk_version in apphosts:
+              if sdk_version is None:
+                  print(
+                      f"::error file={path}::this project references {SDK} without a version, "
+                      f"so the SDK resolves from global.json rather than from the project. "
+                      f"Pin it to {version}, matching {PACKAGE}."
+                  )
+                  failed = True
+              elif sdk_version != version:
+                  print(
+                      f"::error file={path}::{SDK} is pinned to {sdk_version} here, but "
+                      f"{PACKAGE} is {version} in {CENTRAL}. These move together - split, the "
+                      f"build stays green and the AppHost mixes Aspire versions at run time."
+                  )
+                  failed = True
+              else:
+                  print(f"{path}: {SDK} {sdk_version} matches {PACKAGE} {version}")
+
+          sys.exit(1 if failed else 0)
+          EOF
