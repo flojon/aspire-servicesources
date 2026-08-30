@@ -1,18 +1,26 @@
 # Aspire.Hosting.ServiceSources — Backing Service Source Design
 
-**Status:** Draft — revised 2026-08-22 against `main` at #62, which removed the `ServiceResource` facade and shipped `Configure<T>`/`As<T>`; the proposed `AddService(configure:)` parameter and `WaitFor` shim are withdrawn as a result, and `AddBackingService` is now the design's only new public surface. Revised again 2026-08-30, when the supposed guest-language gap turned out not to exist. Earlier questions were settled by prototype and against a `kind` cluster; what remains is two team decisions. See Revision Notes.
+**Status:** Accepted — ready to implement. Revised 2026-08-22 against `main` at #62, which removed the `ServiceResource` facade and shipped `Configure<T>`/`As<T>`; the proposed `AddService(configure:)` parameter and `WaitFor` shim are withdrawn as a result, and `AddBackingService` is now the design's only new public surface. Revised again 2026-08-30, when the supposed guest-language gap turned out not to exist. Earlier questions were settled by prototype and against a `kind` cluster, and the three team decisions that remained were all made on 2026-08-30. See Revision Notes.
 **Date:** 2026-08-15 (revised 2026-08-21, 2026-08-22, 2026-08-30)
 **Scope:** Extends the local-vs-kubernetes source-switching model from services to the backing resources a service connects to: databases (Postgres, SQL Server) and, on exactly the same mechanism, message brokers and caches (RabbitMQ, Redis, …). The mechanism is connection-string-based and backend-agnostic — see [Generalization](#generalization-beyond-databases), where this is verified rather than assumed. Closes out the "Database/queue source switching" item from the [phase 2 reference doc](2026-08-09-servicesources-phase2-future-work.md) and [issue #10](https://github.com/flojon/aspire-servicesources/issues/10).
 
 ## Revision Notes
 
-### 2026-08-30 (later) — the direct-connection source key is settled
+### 2026-08-30 (later) — every open question is settled
 
-The first draft's `"external"` becomes **`"direct"`**, and the open question about it is closed. The
-reasoning, including the candidates that lost and the house-style inconsistency the choice accepts,
-is in [The direct-connection source key](#the-direct-connection-source-key). Two team decisions
-remain: whether the catalog carries any backing-service config, and whether `"direct"` gets an
-opt-in connectivity health check.
+The three questions this design was carrying were team decisions rather than unknowns, and all three
+are now made. Nothing in the mechanism changed; what was a draft carrying open decisions is
+implementable as written.
+
+- **The direct-connection source key is `"direct"`**, not `"external"` — see
+  [The direct-connection source key](#the-direct-connection-source-key) for the candidates that lost
+  and the house-style inconsistency the choice accepts.
+- **Backing-service config stays in `servicesources.local.json`.** `servicesources.yaml` is not
+  touched by this design.
+- **`"direct"` gets no connectivity health check in this pass**, where the `"kubernetes"` branch's
+  check is required.
+
+Both config decisions, with their reasoning, are in [Decisions](#decisions).
 
 ### 2026-08-30 — the guest-language gap was never real
 
@@ -219,7 +227,7 @@ All four compile against Aspire 13.4.2. The `"direct"` and `"kubernetes"` branch
 
 Two caveats, neither structural:
 
-- **Connection-string syntax varies**, so the whole-string-rewrite option in Open Questions gets *worse* the more backends are in scope (ADO.NET `Host=`/`Port=` vs. AMQP/Redis URI authority sections). This argues for the per-field-placeholder approach.
+- **Connection-string syntax varies**, so *parsing and rewriting* a whole connection string gets worse the more backends are in scope (ADO.NET `Host=`/`Port=` vs. AMQP/Redis URI authority sections). This argues for the per-field-placeholder approach, and is why the whole-string mode adopted in [Resolved Against a Real Cluster](#whole-string-mode-same-port-forwarding-host-token-rewrite) replaces the host token rather than parsing the string.
 - **Multi-port backends** (RabbitMQ's AMQP 5672 plus management 15672) need one port-forward per port if both are wanted. The current shape allocates one `{port}` per backing service; a second entry is the workaround, or `{port:<name>}` if this turns out to matter.
 
 The practical consequence is naming, not architecture: hence `AddBackingService` over `AddDatabase`, and `backingServices:` over `databases:` in config.
@@ -284,7 +292,7 @@ Verified behavior against Aspire 13.4.2:
 
 Consequences for the rest of the design: the connection string is assembled at `AddBackingService()` time as a `ReferenceExpression` (structure fixed early, values late), `{port}` stays an eager literal substitution (the port is known synchronously), and secret-fetch failures surface at start time as a failed parameter resolution rather than as a constructor throw. The `IKubernetesSecretReader` seam is synchronous (`Func<string>` is the only callback shape `AddParameter` offers), so a fetch blocks one start-time resolution; that is acceptable, but the reader should carry its own timeout rather than inheriting `kubectl`'s default.
 
-This mechanism reuses one path for both "just the password is secret" (`Password={secret:orders-creds:password}`) and, for `"direct"`, "the whole connection string is one secret value" (`connectionString: "{secret:orders-full-cs:connectionString}"`). See Open Questions for why the whole-string case doesn't extend cleanly to `"kubernetes"`.
+This mechanism reuses one path for both "just the password is secret" (`Password={secret:orders-creds:password}`) and, for `"direct"`, "the whole connection string is one secret value" (`connectionString: "{secret:orders-full-cs:connectionString}"`). The whole-string case needs one extra mechanism to reach `"kubernetes"` — same-port forwarding plus a host-token rewrite — described in [Resolved Against a Real Cluster](#whole-string-mode-same-port-forwarding-host-token-rewrite).
 
 ## Error Handling
 
@@ -334,7 +342,7 @@ var backingService = builder.AddConnectionString(name, expr)
 
 With the health check attached, the same consumer reached `Running` at 11.5s — i.e. it genuinely waited for the tunnel. `WaitFor` waits for Running *and* healthy, so this makes `.WaitFor(ordersDb)` mean what an AppHost author expects.
 
-**This makes the health check a required part of the `"kubernetes"` branch, not an optional nicety** — without it, `WaitFor` on a kubernetes-sourced backing service is decorative. It should be added to the Architecture section's `"kubernetes"` bullet and covered by a test that asserts the health check annotation is present. The `"direct"` branch has the same gap in principle (nothing is being waited on), but there the developer is pointing at something they already run, so a connectivity check is a convenience rather than a correctness fix; making it opt-in via a config flag is probably right, and is left open.
+**This makes the health check a required part of the `"kubernetes"` branch, not an optional nicety** — without it, `WaitFor` on a kubernetes-sourced backing service is decorative. It should be added to the Architecture section's `"kubernetes"` bullet and covered by a test that asserts the health check annotation is present. The `"direct"` branch has the same gap in principle (nothing is being waited on), but there the developer is pointing at something they already run, so a connectivity check is a convenience rather than a correctness fix. It is therefore deferred rather than designed here — see [Decisions](#decisions).
 
 ## Resolved Against a Real Cluster
 
@@ -402,8 +410,16 @@ The single-port form stays the common case and keeps `{port}` as a shorthand for
 
 Port-forwarding the operator-created `orders-pg-rw` Service to a local port and TCP-connecting to it succeeded, confirming that the health-check gating fix from the previous section works against a real Kubernetes Service and not just the `nc` stand-in it was developed against.
 
-## Open Questions
+## Decisions
 
-**Whether `servicesources.yaml` should be involved at all.** This draft keeps all backing-service config in local.json, reasoning that catalog data would only ever matter for `"kubernetes"` and be thin (`service`/`port`). But since `connectionString` can be secret-backed via `{secret:name:key}` placeholders rather than embedding literal credentials, the *template itself* may contain no actual secret material. If so, it (along with `service`/`port`) could live in the catalog as shared, committed, team-wide data instead of being hand-copied into every developer's local.json, mirroring the services split (catalog = shared identity, local.json = per-developer environment choice) more closely than this draft does. Worth revisiting once it's clear how often a team's `connectionString` template really is secret-free versus genuinely varying per developer (e.g. a personal username). This is now a question about config ergonomics alone: the guest-language pressure that used to push a declarative local spec into the catalog is gone.
+The three questions this design left open were settled on 2026-08-30. None was an unknown — each was a call about config ergonomics or scope.
 
-**Whether `"direct"` should get an opt-in connectivity health check.** The `"kubernetes"` branch now requires one (see Resolved by Prototype). `"direct"` points at something the developer already runs, so a check there is a convenience — it turns "connection refused, deep in your app's startup" into "this backing service is unhealthy" on the dashboard. Probably a `"healthCheck": true` config flag; not designed here.
+**The catalog carries no backing-service config: `servicesources.local.json` only.** The alternative was to put the `connectionString` template — which may hold no literal secret material, since credentials can come from `{secret:name:key}` placeholders — along with `service`/`port` into `servicesources.yaml` as shared, committed, team-wide data, mirroring the services split of *catalog = shared identity, local.json = per-developer environment choice*.
+
+Rejected because #134 is moving the catalog **out** of yaml and into the AppHost's own language, on the grounds that removing yaml is a goal of Aspire itself. Adding a new yaml section here would work against that direction and then have to be migrated back out. If a shared connection-string template proves worth having, it belongs in the code catalog #134 builds, not in yaml.
+
+This does leave a deliberate divergence from the service side, which reads `kubernetes.service` from the catalog while a backing service reads `service`/`port` from local.json. Reconciling the two is naturally #134's work, not this design's; it is recorded here so that it is an accepted trade rather than a silent inconsistency.
+
+**`"direct"` gets no connectivity health check in this pass.** The `"kubernetes"` branch requires one, because without it `WaitFor` on a tunnelled backing service is decorative — a correctness fix, and a measured one (see [Resolved by Prototype](#resolved-by-prototype)). `"direct"` points at something the developer already runs, so a check there only improves the diagnosis: "this backing service is unhealthy" on the dashboard instead of "connection refused" deep inside the app's startup. That is a convenience, and it is deferred to a follow-up. A `"healthCheck": true` config flag is the likely shape when it lands.
+
+**The direct-connection source key is `"direct"`.** Recorded in full under [The direct-connection source key](#the-direct-connection-source-key).
