@@ -13,6 +13,15 @@ nothing will fail to build to warn you.
 
 ### Changed
 
+- **A prerelease package pins core exactly instead of ranging over the minor** ([#147]). A
+  satellite built off a tag declared `[X.Y.Z-label, X.(Y+1).0-0)`; it now declares
+  `[X.Y.Z-label]`, so a prerelease satellite resolves precisely the core built from the same
+  commit. Stable releases are unaffected and keep the `[X.Y.Z, X.(Y+1).0)` range. The old bound
+  carried a numeric prerelease identifier, which nuget.org's gallery rejects at push time
+  ([NuGetGallery#6948]) though every other tool accepts it — so prereleases could only ever be
+  published to GitHub Packages. Named prereleases can now go to nuget.org, where they need no
+  token to install.
+
 - **`ServiceSourcesConfigurationException` prints as its message, not as a stack dump**
   ([#125]). These are raised from `AddService()` and normally end the AppHost unhandled, so the
   runtime's rendering of them *is* the error output — and it buried the sentence naming the fix
@@ -338,5 +347,6 @@ Targets `net10.0`.
 [#117]: https://github.com/flojon/aspire-servicesources/pull/117
 [#119]: https://github.com/flojon/aspire-servicesources/issues/119
 [#125]: https://github.com/flojon/aspire-servicesources/issues/125
+[#147]: https://github.com/flojon/aspire-servicesources/pull/147
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
