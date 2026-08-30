@@ -44,23 +44,17 @@ updates:
     directories:
       - "/test/**/*"
       - "/samples/**/*"
-    # Belt-and-braces alongside `directories` above, not a substitute for it: this is what
-    # actually keeps src/'s floors from moving, since `directories` alone does not (see the
-    # header comment). Every id declared in src/Directory.Packages.props, kept in sync with
-    # it by hand - there is no wildcard that means "whatever that file declares" here.
-    ignore:
-      - dependency-name: "Aspire.Hosting"
-      - dependency-name: "Aspire.Hosting.JavaScript"
-      - dependency-name: "CommunityToolkit.Aspire.Hosting.Java"
-      - dependency-name: "LibGit2Sharp"
-      - dependency-name: "YamlDotNet"
-    schedule:
-      interval: "weekly"
-    # `directories` above only picks scan entry points. CPM plus the test/sample projects'
-    # own ProjectReference into src/ let Dependabot reach src/Directory.Packages.props
-    # anyway and edit it directly. All five ids below are floors regardless of publisher,
-    # not just the Aspire ones - see the file header. `ignore` only blocks version updates,
-    # so the security exception above still applies to each of these.
+    # Belt-and-braces alongside `directories` above, not a substitute for it. `directories`
+    # only picks scan entry points; central package management plus the test and sample
+    # projects' own ProjectReference into src/ let Dependabot reach src/Directory.Packages.props
+    # anyway and edit it directly, whichever directory triggered the scan (see the file
+    # header). This list is enforced per package id instead, so it holds regardless of the
+    # graph Dependabot walked to get there.
+    #
+    # Every id declared in src/Directory.Packages.props is here, kept in sync with that file
+    # by hand - there is no wildcard meaning "whatever that file declares". Those five are
+    # floors regardless of publisher, not just the Aspire ones. `ignore` blocks only version
+    # updates, so the header's security exception still applies to each.
     ignore:
       - dependency-name: "Aspire.Hosting"
       - dependency-name: "Aspire.Hosting.JavaScript"
@@ -76,6 +70,8 @@ updates:
       - dependency-name: "CommunityToolkit.Aspire.Hosting.Java"
       - dependency-name: "LibGit2Sharp"
       - dependency-name: "YamlDotNet"
+    schedule:
+      interval: "weekly"
     # One PR per decision rather than one per package id. Ungrouped, the versions under
     # central package management fan out into a PR each, against a default cap of five open
     # at once - past which further updates are not opened at all, so the noisiest week is
