@@ -37,10 +37,19 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
-          # Package versions live in Directory.Packages.props under central package
-          # management, so hashing only the project files would keep serving a stale cache
-          # across a version change.
-          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props') }}
+          # Hashes every file that can change which packages restore downloads. The list has
+          # to be complete rather than representative: on an exact primary-key hit
+          # actions/cache skips the save, so a file left out of the key does not merely serve
+          # a stale entry once - it serves the pre-bump entry and then never stores the
+          # post-bump downloads, and every later run re-downloads them.
+          #   - Directory.Packages.props, because central package management is where package
+          #     versions live and a csproj-only hash would miss a bump
+          #   - Directory.Build.props, because $(AspireVersion) is the number the Aspire
+          #     entries there resolve to: Directory.Packages.props holds the property
+          #     reference, whose text does not change when the version does
+          #   - global.json, because the Aspire.AppHost.Sdk version cannot be an MSBuild
+          #     property and so appears in no props file at all
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props', '**/Directory.Build.props', 'global.json') }}
           restore-keys: nuget-${{ runner.os }}-
 
       - name: Restore
@@ -263,10 +272,10 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
-          # Package versions live in Directory.Packages.props under central package
-          # management, so hashing only the project files would keep serving a stale cache
-          # across a version change.
-          key: nuget-smoketest-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props') }}
+          # Same file list, and the same reason for it, as the build job's cache above: every
+          # file that can change what restore downloads has to be in the key, because
+          # actions/cache skips the save on an exact primary-key hit.
+          key: nuget-smoketest-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props', '**/Directory.Build.props', 'global.json') }}
           restore-keys: nuget-smoketest-${{ runner.os }}-
 
       # Docker is preinstalled and running on ubuntu-latest, which is the script's only
@@ -466,7 +475,30 @@ jobs:
 
           version = defaults[0]
 
-          sdk_version = json.load(open(GLOBAL)).get("msbuild-sdks", {}).get(SDK)
+          # Read the file before asking what is in it, so that "someone deleted or broke
+          # global.json" reaches the annotation below rather than failing the step with a
+          # traceback - the deleted case being exactly what the missing-key message further
+          # down is written to explain. ValueError rather than json.JSONDecodeError, because
+          # it also catches the UnicodeDecodeError from a file saved as UTF-16, which is a
+          # ValueError but not an OSError and so would otherwise escape.
+          try:
+              global_json = json.load(open(GLOBAL))
+          except (OSError, ValueError) as error:
+              print(
+                  f"::error file={GLOBAL}::cannot be read as JSON ({error}). This is where the "
+                  f"{SDK} version has to live, since an <Sdk> version cannot be an MSBuild "
+                  f"property, so without it the sample AppHost has no version for the SDK and "
+                  f"restore fails with MSB4236."
+              )
+              sys.exit(1)
+
+          # Checked for shape rather than trusted to be a mapping: `null`, a list and a bare
+          # string are all valid JSON that json.load accepts and .get does not survive, so
+          # duck-typing this would trade the annotation for an AttributeError. Anything that
+          # is not a mapping of msbuild-sdks holding this SDK leaves the version unfound,
+          # which the missing-key arm below already has the message for.
+          sdk_versions = global_json.get("msbuild-sdks") if isinstance(global_json, dict) else None
+          sdk_version = sdk_versions.get(SDK) if isinstance(sdk_versions, dict) else None
 
           if sdk_version is None:
               print(
