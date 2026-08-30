@@ -33,6 +33,13 @@ nothing will fail to build to warn you.
   without an authentication challenge — a proxy answering 403, a 404 from a host serving
   anonymously — keeps the old wording.
 
+- CI type-checks the TypeScript export surface on every PR ([#88]). `samples/DemoAppHostTypeScript`
+  regenerates its Aspire Type System SDK from the branch's own source tree — `aspire.config.json`
+  resolves this package from `src/`, not from a published version — and compiles it under strict
+  `tsc`, against a pinned Aspire CLI. Nothing else here compiles what these packages export to
+  guest languages: the export test asserts the `[AspireExport]` attribute is *present*, and
+  `aspire restore` exits 0 even when the TypeScript it just wrote does not compile.
+
 ### Fixed
 
 - **Managed checkouts no longer inherit the AppHost repository's MSBuild and NuGet settings**
