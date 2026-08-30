@@ -29,7 +29,7 @@ Two feeds receive them:
 
 | Feed | What lands there | Published by |
 | --- | --- | --- |
-| [nuget.org] | stable versions only | `release.yml`, on a published GitHub release |
+| [nuget.org] | stable versions, and named prereleases cut on demand | `release.yml`, on a published GitHub release |
 | GitHub Packages | a prerelease per commit to `main` | `preview.yml`, on push |
 
 ## Steps
@@ -104,9 +104,10 @@ so until the tag exists, nothing has packed a stable version. In `0.3.0` this sh
 release: `PinCoreDependency` closed the satellites' core range with a prerelease upper bound,
 `[0.3.0, 0.4.0-0)`, which nuget.org rejects at push time with `The package manifest contains an
 invalid Version` ([NuGetGallery#6948]) while `pack`, `restore`, the client and GitHub Packages
-all accept it. Core published; both satellites did not. The bound is now chosen per build and CI
-packs the release shape too — but the general hazard remains, so prefer a fix that makes CI
-exercise the release shape over one that only corrects the symptom.
+all accept it. Core published; both satellites did not. A prerelease build now pins core exactly
+(`[0.4.0-rc.1]`), which has no upper bound to express and so carries no `-0` for the gallery to
+reject, and CI packs the release shape too — but the general hazard remains, so prefer a fix that
+makes CI exercise the release shape over one that only corrects the symptom.
 
 **A partly-failed release cannot be re-run.** `release.yml` pushes all three packages in one
 step, so once core is on nuget.org, re-running the workflow for that tag fails on core's 409
@@ -118,10 +119,41 @@ permanent; the tag is the only record of what commit they were built from.
 
 ## Prereleases
 
-There is no manual prerelease step. Every commit to `main` publishes one to GitHub Packages
-automatically, versioned `X.Y.Z-alpha.0.N`, with release notes taken from the `[Unreleased]`
-changelog section. Installing from that feed needs a token with `read:packages` — the README's
-Preview builds section has the details.
+Two kinds, and they are for different audiences.
+
+**The automatic stream.** Every commit to `main` publishes a prerelease to GitHub Packages,
+versioned `X.Y.Z-alpha.0.N`, with release notes taken from the `[Unreleased]` changelog section.
+Nothing to do by hand. Installing from that feed needs a classic token with `read:packages` — the
+README's Preview builds section has the details — which makes it a poor thing to hand to someone
+you are asking for feedback.
+
+**A named prerelease on nuget.org.** For a build you want people to actually reach — an rc before
+a release, or a preview of unmerged work you want tried — cut it the same way as a release, with
+a prerelease tag:
+
+```bash
+git tag v0.4.0-rc.1
+git push origin v0.4.0-rc.1
+gh release create v0.4.0-rc.1 --title "v0.4.0-rc.1" --notes-file <notes> --verify-tag --prerelease
+```
+
+MinVer takes the tag verbatim, so the packages are `0.4.0-rc.1`. A pre-release GitHub release
+fires the same `published` event, so `release.yml` runs unchanged and pushes to nuget.org over the
+existing trusted-publishing policy — the policy is keyed on the workflow file, not the branch or
+tag, so nothing needs registering. `prune-previews` is skipped for a prerelease: the previews
+behind it are still the newest builds of unreleased work. Consumers install it with
+`--prerelease` and no token at all.
+
+Two things worth knowing before you cut one:
+
+- **The tag does not have to be on `main`.** Tagging a merge of `main` and an open PR branch is a
+  legitimate way to get that PR in front of people. The tag is then the only record of what was
+  built, which is reason enough not to delete it.
+- **A prerelease version is as permanent as a stable one.** nuget.org has no deletion, only
+  unlisting, and the version can never be reused. Prereleases are cheap in that they do not
+  consume the stable version — `0.4.0-rc.1` does not block `0.4.0` — but each one is a public
+  version for good. That is why the per-commit `alpha` stream stays on GitHub Packages, where
+  `prune-previews` can bound it.
 
 [MinVer]: https://github.com/adamralph/minver
 [nuget.org]: https://www.nuget.org/profiles/flojon
