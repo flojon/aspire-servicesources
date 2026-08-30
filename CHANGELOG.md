@@ -97,16 +97,13 @@ move a core-only AppHost off it.
 
 ### Breaking
 
-- **Removed the public `ServiceResource` type** ([#62]). `AddService()` used to return a
-  builder over a `ServiceResource` facade that was deliberately never added to
-  `builder.Resources`. It now returns a builder over the resource Aspire actually runs — a
-  `ProjectResource` for `local`, an Aspire container or executable resource for `container`
-  and `kubernetes`, or whatever an `ILocalResourceKind` returns.
-
-  `AddService()`'s declared return type is unchanged,
-  `IResourceBuilder<IResourceWithServiceDiscovery>` before and after, so call sites that
-  only pass the result to `WithReference(...)` or `GetEndpoint(...)` keep compiling. What
-  breaks is code that *names* the type:
+- **Removed the public `ServiceResource` type** ([#62]). `AddService()` used to return a builder
+  over a `ServiceResource` facade that was never added to `builder.Resources`. It now returns a
+  builder over the resource Aspire actually runs — a `ProjectResource` for `local`, a container or
+  executable resource for `container` and `kubernetes`, or whatever an `ILocalResourceKind`
+  returns. The declared return type is unchanged, `IResourceBuilder<IResourceWithServiceDiscovery>`
+  before and after, so call sites that only pass the result to `WithReference(...)` or
+  `GetEndpoint(...)` keep compiling. What breaks is code that *names* the type:
 
   ```csharp
   // No longer compiles - the type is gone:
@@ -128,11 +125,8 @@ move a core-only AppHost off it.
   IResourceBuilder<ProjectResource> web = builder.AddService("web").As<ProjectResource>();
   ```
 
-  These exist because most of Aspire's configuration extensions cannot bind to
-  `IResourceBuilder<IResourceWithServiceDiscovery>` at all, facade or not: `WithEnvironment`
-  is constrained to `IResourceWithEnvironment`, which `IResourceWithServiceDiscovery` does
-  not extend, so `service.WithEnvironment(...)` has never compiled — before or after — and
-  fails with `CS0311`. Reaching that API is what `Configure<T>` is for.
+  `Configure<T>` is how you reach an extension constrained to a capability interface: calling
+  `service.WithEnvironment(...)` directly fails with `CS0311`, before this release and after.
 
   See **Changed** below for two things that keep compiling and change behavior: calls on the
   returned builder that used to no-op, and the `kubernetes` resource rename.
@@ -149,21 +143,15 @@ move a core-only AppHost off it.
   <dependency id="KoalaSoft.Aspire.Hosting.ServiceSources" version="[0.3.0, 0.4.0-0)" />
   ```
 
-  The `-0` on the upper bound keeps the next minor's prereleases out as well as its release:
-  `0.4.0-alpha.0.1` sorts *below* `0.4.0`, so a plain `0.4.0` bound would still admit it. That
-  matters on the GitHub Packages preview feed, where every package is published as a
-  prerelease.
+  A satellite implements core's `ILocalResourceKind`, so a mismatched pair failed at run time with
+  `MissingMethodException`/`TypeLoadException` rather than at restore. The minor is the boundary
+  because that is where a breaking change ships below `1.0.0`; a core patch still resolves, so core
+  can be serviced without republishing every satellite.
 
-  A satellite implements core's `ILocalResourceKind`, so a mismatched pair failed at run time
-  with `MissingMethodException`/`TypeLoadException` rather than at restore. The minor is the
-  boundary because that is where a breaking change ships while the version is below `1.0.0`.
-  A core patch still resolves, so core can be serviced without republishing every satellite.
-
-  If your AppHost references core and a satellite separately, moving core alone to the next
-  minor now fails restore with `NU1107` rather than building and throwing at startup. Move
-  both together, or drop the core reference and let the satellite bring core in for you —
-  which is what the README's install section now recommends, since one reference has no
-  second version to keep in step.
+  If your AppHost references core and a satellite separately, moving core alone to the next minor
+  now fails restore with `NU1107` rather than building and throwing at startup. Move both
+  together, or drop the core reference and let the satellite bring core in for you — which is what
+  the README's install section now recommends.
 
 ### Added
 
