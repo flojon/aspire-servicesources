@@ -18,8 +18,19 @@ never a version gap. #71 generalised two narrow, correct measurements from PR #6
 claim ("a fluent or lambda-based catalog API very likely cannot cross that boundary") that is
 false. #71 itself flagged that generalisation as unverified and asked for a measurement; this is it.
 
-So the ATS constraint should be **struck from the decision entirely**. What remains is the
-sharing/registry argument, which is untouched by any of this and is now the only real argument.
+So the ATS constraint should be **struck from the decision entirely**.
+
+**And the decision goes the other way: the catalog should become authorable in code.** Removing the
+need for yaml is a goal of Aspire itself — the app model is code in the AppHost's own language,
+which is what `AddProject`/`AddContainer` are for and what ATS extends to TypeScript and Python.
+A yaml catalog in the middle of that works against the framework this package extends. With the
+technical objection measured away, alignment with that direction is the deciding argument.
+
+The sharing argument that was left standing does not survive examination either. `servicesources.yaml`
+is not shared today — every AppHost repository carries its own copy, so it is *duplicated*, not
+shared, and a second AppHost wanting the same service re-types it. Real cross-repository sharing is
+what #11's registry is for, and a registry fetch is asynchronous — which also crosses ATS cleanly
+(shapes 7a/7b). The yaml was not buying the property it was credited with.
 
 ## What was measured
 
@@ -178,24 +189,62 @@ authoring format, and #71 is right that it should not be smuggled into this deci
 
 ## Recommendation
 
-1. **Keep `servicesources.yaml` as the storage format.** The reason is the sharing argument — the
-   catalog is committed, language-neutral, and consumed by several AppHosts and eventually #11 —
-   *not* the ATS argument, which is now measured false and should stop being cited.
-2. **Do not do the DTO/domain split for the reasons #71 gives.** Its headline benefit — deleting
-   `IsReservedKindName` and the reflection validation — does not follow from it. The split may still
-   be worth doing for clarity, but it is a small cleanup with no user-visible payoff, and should be
-   priced that way rather than as "most of the value for a fraction of the cost".
-3. **File the kind-options nesting as its own issue.** This is the change that actually frees kind
-   names, and it is independent of everything else here. It is a breaking format change, so it wants
-   a deprecation window: accept both layouts, warn on the flat one.
-4. **Do not build a code-authoring API now.** ATS no longer blocks it, but no use case yet requires
-   it that yaml cannot serve. Revisit if #6 produces one. If it is ever built, it should be an
-   *additional* catalog provider alongside yaml, with the duplicate-declaration error above.
-5. **Correct the two overstated ATS constraints** in `ServiceConfigurationExports.cs`, its tests and
+**Make the catalog authorable in code, and make yaml optional.** "Optional" rather than "deleted":
+the goal is removing the *need* for yaml, which is what Aspire's own no-yaml positioning means. The
+loader stays for AppHosts that already have a `servicesources.yaml`, and for the case yaml genuinely
+serves — editing the catalog without rebuilding the AppHost.
+
+1. **Add a code-authoring API as the primary surface**, in the AppHost's own language. Measured to
+   work from both C# and TypeScript; sketch below.
+2. **Keep the yaml loader as one catalog provider**, not the definition of the format. A service
+   declared in both is an **error naming both sources** — not a merge, not silent precedence.
+   Per-developer source selection stays where it is, in `servicesources.local.json` (#69).
+3. **Let #11's registry be the sharing story**, which is what it was always for. Async fetch crosses
+   ATS, so guest AppHosts are not excluded from it.
+4. **Re-scope #133 (kind-options nesting) in light of this.** Kind options authored in code have no
+   name collision at all — there are no yaml keys to collide with — so #133 shrinks to "stop the
+   flat layout getting worse" rather than a full deprecation window with a migration. If code
+   authoring lands first, the cheapest resolution may be to freeze the flat form and let
+   `IsReservedKindName` apply only to yaml-declared kinds.
+5. **The DTO/domain split** still does not deliver what #71 claims for it (see above), but a code
+   API needs a domain type that is not a yaml DTO — so the split now happens as a *consequence* of
+   (1) rather than as a standalone cleanup. That is the right order: build the domain type the code
+   API needs, and let the yaml DTO become one way to populate it.
+6. **Correct the two overstated ATS constraints** in `ServiceConfigurationExports.cs`, its tests and
    the README — applied alongside this finding, since the shims they justify are unchanged.
 
-Follow-up filed: the kind-options nesting (3). #71 itself can be closed with this finding as the
-recorded decision not to proceed.
+### Sketch, for the implementation issue to argue with
+
+```csharp
+builder.AddServiceCatalog(catalog =>
+{
+    catalog.AddService("orders")
+        .FromRepository("https://github.com/dotnet/aspire-samples", defaultRef: "main")
+        .WithProject("samples/health-checks-ui/HealthChecksUI.ApiService/HealthChecksUI.ApiService.csproj");
+
+    catalog.AddService("inventory").FromUrl("https://httpbin.org");
+    catalog.AddService("payments").FromContainer("nginxdemos/hello", port: 80);
+});
+```
+
+The satellite packages extend the same builder, which is where the kind-name problem disappears —
+`.FromRepository(...).AsJava(o => o.MavenGoal("spring-boot:run"))` has no namespace to collide with.
+
+The TypeScript equivalent is the shape measured end to end above:
+
+```typescript
+await builder.addServiceCatalog(async (catalog) => {
+  await catalog.addService('payments').fromContainer('nginxdemos/hello', 80);
+});
+```
+
+Open questions for that issue: whether `AddServiceCatalog` is separate from `AddService` or whether
+`AddService` grows an optional inline definition; whether the catalog must be declared before the
+first `AddService` (it must, given eager resolution — see #62); and whether yaml is targeted for
+removal at 1.0 or kept indefinitely.
+
+Follow-ups: the kind-options nesting is filed as #133 and wants re-scoping per (4). #71 stays open as
+the parent of the code-authoring work rather than being closed as "not proceeding".
 
 ## Appendix — reproducing
 
