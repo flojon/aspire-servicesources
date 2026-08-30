@@ -284,3 +284,106 @@ jobs:
           name: smoketest-container-apphost-log
           path: .smoketest-cache/apphost.log
           if-no-files-found: ignore
+
+  verify-dependabot:
+    # Its own job rather than a step on the build: this reads two files and needs neither a
+    # restore nor a compile, so it reports in seconds instead of behind the build it would
+    # otherwise queue against.
+    name: 🤖 verify dependabot config
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+
+      # PyYAML rather than grep: both checks below are about YAML structure - which keys are
+      # siblings, and which of them survive parsing - and neither is answerable by matching
+      # lines.
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+
+      # Two invariants that dependabot.yml states in prose and nothing enforces.
+      #
+      # The first is that the `ignore` list covers every floor in src/Directory.Packages.props.
+      # Directory scoping does not keep Dependabot out of src/ - the test projects carry a
+      # ProjectReference into it, and the NuGet updater walks that graph and edits whatever
+      # Directory.Packages.props declares the id it decided to bump (#80, #89). The per-id
+      # `ignore` list is what actually holds, and it is maintained by hand because there is no
+      # wildcard for "whatever that file declares". So a satellite that takes on a new
+      # dependency is one edit away from a floor Dependabot is free to raise, and the failure
+      # is silent: a green PR that moves a version consumers inherit.
+      #
+      # The second is that no key in the file is duplicated. Two `ignore` keys landed in the
+      # same mapping once already, one from each fix for the problem above; YAML keeps the
+      # last, so the earlier list parsed and was discarded while still reading as authoritative
+      # and still instructing the reader to maintain it. That cost nothing only because the
+      # surviving list happened to be a superset of the discarded one.
+      - name: Verify Dependabot ignores every floor in src/
+        run: |
+          python3 - <<'EOF'
+          import re, sys, yaml
+
+          DEPENDABOT = ".github/dependabot.yml"
+          FLOORS = "src/Directory.Packages.props"
+
+          duplicates = []
+
+          class Loader(yaml.SafeLoader):
+              pass
+
+          def keep_duplicates(loader, node, deep=False):
+              mapping = {}
+              for key_node, value_node in node.value:
+                  key = loader.construct_object(key_node, deep=deep)
+                  if key in mapping:
+                      duplicates.append((key, key_node.start_mark.line + 1))
+                  mapping[key] = loader.construct_object(value_node, deep=deep)
+              return mapping
+
+          Loader.add_constructor(
+              yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, keep_duplicates
+          )
+
+          with open(DEPENDABOT) as f:
+              config = yaml.load(f, Loader=Loader)
+
+          failed = False
+
+          for key, line in duplicates:
+              print(
+                  f"::error file={DEPENDABOT},line={line}::duplicate key '{key}': YAML keeps "
+                  f"the last one, so an earlier block with this key is parsed and discarded"
+              )
+              failed = True
+
+          ignored = set()
+          for update in config["updates"]:
+              if update.get("package-ecosystem") == "nuget":
+                  ignored |= {e["dependency-name"] for e in update.get("ignore", [])}
+
+          with open(FLOORS) as f:
+              declared = set(re.findall(r'<PackageVersion\s+Include="([^"]+)"', f.read()))
+
+          for package in sorted(declared - ignored):
+              print(
+                  f"::error file={FLOORS}::{package} is declared here, so its version is a "
+                  f"floor consumers inherit, but {DEPENDABOT} does not ignore it - Dependabot "
+                  f"is free to raise it on a schedule. Add it to the ignore list."
+              )
+              failed = True
+
+          print(f"{len(declared)} floors declared in {FLOORS}, {len(ignored)} ids ignored:")
+          for package in sorted(declared & ignored):
+              print(f"  floor, ignored: {package}")
+          for package in sorted(declared - ignored):
+              print(f"  floor, NOT ignored: {package}")
+          for package in sorted(ignored - declared):
+              print(f"  ignored, not a floor: {package}")
+
+          sys.exit(1 if failed else 0)
+          EOF
