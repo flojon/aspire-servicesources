@@ -488,9 +488,14 @@ internal static class LocalGitCheckout
             using var writer = new StreamWriter(stream);
             writer.Write("*\n!.gitignore\n");
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // Already created by a concurrent resolution or a prior run — leave it as-is.
+            // Already created by a concurrent resolution or a prior run — leave it as-is. A
+            // directory that cannot be written to at all reaches here as UnauthorizedAccessException
+            // rather than IOException, and it must be tolerated for the same reason
+            // CheckoutBuildBarrier tolerates it: what these files buy is a checkout kept out of the
+            // AppHost's git status and out of its build settings, and neither is worth failing
+            // service resolution over.
         }
     }
 

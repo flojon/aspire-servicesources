@@ -49,12 +49,22 @@ nothing will fail to build to warn you.
   writes, so an upgrade refreshes existing checkout roots rather than stranding them on a stale
   copy.
 
-  Every barrier only supplies what a checkout lacks, and every one of them is permissive — each
-  drops a constraint the checkout never opted into, none adds one. A checkout bringing its own
+  Every barrier only supplies what a checkout lacks. A checkout bringing its own
   `Directory.Build.props`, `Directory.Packages.props`, `.editorconfig` or `global.json` is found
-  first and keeps its own settings, central package management included; clearing the source
-  *mapping* lifts a restriction rather than removing a feed, so each checkout's `nuget.config`
-  governs its sources as it would standalone.
+  first and keeps its own settings, central package management included.
+
+  `nuget.config` is the exception on both counts, and the one to read before upgrading. NuGet merges
+  every config from the drive root down instead of stopping at the nearest, so this barrier can only
+  override the section it names, and NuGet's `<clear />` discards every `packageSourceMapping`
+  accumulated before it — your user-level and machine-level ones included, not only the AppHost
+  repository's. Inside a checkout, package source mapping is therefore off unless the checkout
+  brings its own, while every inherited source stays reachable, and a package that reaches the
+  shared global packages folder that way is later served from it to restores that do have mapping in
+  force. The default is this way round because an inherited mapping fails a checkout's restore
+  outright; set `SERVICESOURCES_KEEP_PACKAGE_SOURCE_MAPPING=1` to keep the mapping enforced inside
+  checkouts instead, which suppresses this one file and leaves the other five in place. The rest of
+  an AppHost repository's `nuget.config` — `packageSources` above all — still reaches checkouts. The
+  README documents both gaps.
 
   `{}` is a genuinely neutral `global.json`, contrary to what [#119] assumed: hostfxr stops at the
   first `global.json` *file* it finds and does not keep walking in search of one carrying an `sdk`

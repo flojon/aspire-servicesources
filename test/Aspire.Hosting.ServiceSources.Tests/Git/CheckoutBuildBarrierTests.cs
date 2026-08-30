@@ -65,8 +65,9 @@ public class CheckoutBuildBarrierTests
     [Fact]
     public void Ensure_WritesANuGetConfigThatLeavesInheritedPackageSourcesAlone()
     {
-        // Clearing the mapping is permissive — it lifts a restriction. Clearing the *sources* would
-        // remove feeds the checkout may need, so the barrier must not do it.
+        // Clearing the mapping already costs a supply-chain control (see the barrier's own remarks).
+        // Clearing the *sources* on top of that would remove feeds the checkout may need and buy
+        // nothing, so the barrier must not do it.
         var dir = NewToolDirectory();
 
         CheckoutBuildBarrier.Ensure(dir);
@@ -104,8 +105,10 @@ public class CheckoutBuildBarrierTests
 
         CheckoutBuildBarrier.Ensure(dir);
 
-        // Comments are skipped rather than rejected: verified against the real toolchain that both
-        // readers of this file tolerate one — hostfxr, and MSBuild's own msbuild-sdks reader.
+        // Parsed with comments skipped because the file carries a banner. That both real readers of
+        // this file tolerate one — hostfxr, and MSBuild's own msbuild-sdks reader — is what makes
+        // the banner safe, and is checked against the installed SDK by the manual procedure in
+        // docs/superpowers/, not here: this assertion only pins the shape of what is written.
         using var document = JsonDocument.Parse(
             File.ReadAllText(Path.Combine(dir, "global.json")),
             new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip });
@@ -151,6 +154,138 @@ public class CheckoutBuildBarrierTests
             document.Root!.Elements("PropertyGroup").Elements("ManagePackageVersionsCentrally").Single().Value);
     }
 
+    [Theory]
+    [InlineData("Directory.Build.props")]
+    [InlineData("Directory.Build.targets")]
+    [InlineData("Directory.Packages.props")]
+    [InlineData("nuget.config")]
+    [InlineData(".editorconfig")]
+    [InlineData("global.json")]
+    public void Ensure_StaleContentInAnyOfTheSix_IsReplaced(string name)
+    {
+        // Every file, not just one: the two that build their banner through a comment marker
+        // (.editorconfig and global.json) are where a content bug is likeliest, and were the two
+        // the single-file test above did not reach.
+        var dir = NewToolDirectory();
+        CheckoutBuildBarrier.Ensure(dir);
+        var path = Path.Combine(dir, name);
+        var current = File.ReadAllText(path);
+        File.WriteAllText(path, "stale");
+
+        CheckoutBuildBarrier.Ensure(dir);
+
+        Assert.Equal(current, File.ReadAllText(path));
+    }
+
+    [Fact]
+    public void Ensure_LeavesTheSixBarriersAndNothingElse()
+    {
+        // The scratch file each write renames into place is deleted in a finally, so a leftover
+        // here means a write path that loses one. Asserted by exact set rather than by presence,
+        // because that is the only way a leak shows up.
+        var dir = NewToolDirectory();
+
+        CheckoutBuildBarrier.Ensure(dir);
+
+        Assert.Equal(
+            [
+                ".editorconfig",
+                "Directory.Build.props",
+                "Directory.Build.targets",
+                "Directory.Packages.props",
+                "global.json",
+                "nuget.config",
+            ],
+            Directory.GetFiles(dir).Select(Path.GetFileName).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void Ensure_AbandonedScratchFileFromAKilledRun_IsSweptOnceItIsOldEnough()
+    {
+        // WriteIfDifferent removes its own scratch in a finally, which a killed process never runs.
+        // Nothing else in the tree would ever remove one.
+        var dir = NewToolDirectory();
+        var abandoned = Path.Combine(dir, ".incoming-global.json-deadbeef");
+        File.WriteAllText(abandoned, "half a file");
+        File.SetLastWriteTimeUtc(abandoned, DateTime.UtcNow - TimeSpan.FromDays(2));
+
+        CheckoutBuildBarrier.Ensure(dir);
+
+        Assert.False(File.Exists(abandoned));
+    }
+
+    [Fact]
+    public void Ensure_ScratchFileFromAConcurrentRun_IsLeftAlone()
+    {
+        // A scratch file being written right now belongs to another AppHost mid-rename; sweeping it
+        // would delete the content it is about to move into place.
+        var dir = NewToolDirectory();
+        var inFlight = Path.Combine(dir, ".incoming-global.json-deadbeef");
+        File.WriteAllText(inFlight, "half a file");
+
+        CheckoutBuildBarrier.Ensure(dir);
+
+        Assert.True(File.Exists(inFlight));
+    }
+
+    [Theory]
+    [InlineData("1", true)]
+    [InlineData("true", true)]
+    [InlineData("TRUE", true)]
+    [InlineData("0", false)]
+    [InlineData("no", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void Enabled_ReadsTheEnvironmentVariable(string? value, bool expected) =>
+        Assert.Equal(expected, CheckoutBuildBarrier.Enabled(value));
+
+    [Fact]
+    public void Ensure_KeepPackageSourceMappingRequested_WritesTheOtherFiveButNotTheNuGetConfig()
+    {
+        // The mapping barrier is the one that costs a supply-chain control, so a host that would
+        // rather keep the control can turn off that file alone.
+        var dir = NewToolDirectory();
+
+        CheckoutBuildBarrier.Ensure(dir, KeepPackageSourceMapping);
+
+        Assert.False(File.Exists(Path.Combine(dir, "nuget.config")));
+        Assert.True(File.Exists(Path.Combine(dir, "Directory.Build.props")));
+        Assert.True(File.Exists(Path.Combine(dir, "Directory.Build.targets")));
+        Assert.True(File.Exists(Path.Combine(dir, "Directory.Packages.props")));
+        Assert.True(File.Exists(Path.Combine(dir, ".editorconfig")));
+        Assert.True(File.Exists(Path.Combine(dir, "global.json")));
+    }
+
+    [Fact]
+    public void Ensure_KeepPackageSourceMappingRequestedAfterAnEarlierRunWroteIt_RemovesTheBarrier()
+    {
+        // Set after the AppHost has already run once, the switch has to undo what that run wrote:
+        // a file left on disk goes on clearing the mapping regardless of the switch.
+        var dir = NewToolDirectory();
+        CheckoutBuildBarrier.Ensure(dir);
+
+        CheckoutBuildBarrier.Ensure(dir, KeepPackageSourceMapping);
+
+        Assert.False(File.Exists(Path.Combine(dir, "nuget.config")));
+    }
+
+    [Fact]
+    public void Ensure_KeepPackageSourceMappingRequested_LeavesAHandWrittenNuGetConfigAlone()
+    {
+        // The directory is tool-owned, but content this tool did not write was put there by someone
+        // who meant it. Removing the barrier must not become a way to delete that.
+        var dir = NewToolDirectory();
+        var path = Path.Combine(dir, "nuget.config");
+        File.WriteAllText(path, "<configuration />");
+
+        CheckoutBuildBarrier.Ensure(dir, KeepPackageSourceMapping);
+
+        Assert.Equal("<configuration />", File.ReadAllText(path));
+    }
+
+    private static string? KeepPackageSourceMapping(string variable) =>
+        variable == CheckoutBuildBarrier.KeepPackageSourceMappingEnvironmentVariable ? "1" : null;
+
     [Fact]
     public void Ensure_ConcurrentCalls_AllLeaveCompleteAndReadableFiles()
     {
@@ -175,5 +310,9 @@ public class CheckoutBuildBarrierTests
             new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip });
         Assert.Equal(JsonValueKind.Object, globalJson.RootElement.ValueKind);
         Assert.Contains("root = true", File.ReadAllText(Path.Combine(dir, ".editorconfig")));
+
+        // Sixteen racing writers each create a uniquely named scratch file; every one of them has
+        // to be gone, or the race leaks a file per losing write.
+        Assert.Empty(Directory.GetFiles(dir, ".incoming-*"));
     }
 }

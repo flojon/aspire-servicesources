@@ -206,7 +206,7 @@ there:
 | --- | --- | --- |
 | `Directory.Build.props`, `Directory.Build.targets` | `<Project />` | your repository's build customisation |
 | `Directory.Packages.props` | `ManagePackageVersionsCentrally=false` | your repository's central package management |
-| `nuget.config` | `<packageSourceMapping><clear /></packageSourceMapping>` | your repository's package source mapping |
+| `nuget.config` | `<packageSourceMapping><clear /></packageSourceMapping>` | your repository's package source mapping (see the note below) |
 | `.editorconfig` | `root = true` | your repository's code style and analyzer severities |
 | `global.json` | `{}` | your repository's SDK pin and `msbuild-sdks` versions |
 
@@ -214,14 +214,12 @@ Each is written with a comment saying what it is and why it's there, since you'l
 with no git history to explain them, and all are rewritten whenever their content is out of date,
 so upgrading the package updates them.
 
-Every barrier is permissive — each drops a constraint the checkout never opted into, none adds one
-— and this only supplies what a checkout lacks. A checkout carrying its own `Directory.Build.props`,
-`Directory.Packages.props`, `.editorconfig` or `global.json` is found first and keeps its own
-settings, including central package management if that's how that repository builds. Clearing the
-source *mapping* is likewise permissive: it lifts a restriction rather than removing a feed, so
-each checkout's `nuget.config` governs its sources exactly as it would standalone.
+Each barrier drops a constraint the checkout never opted into, and only supplies what a checkout
+lacks. A checkout carrying its own `Directory.Build.props`, `Directory.Packages.props`,
+`.editorconfig` or `global.json` is found first and keeps its own settings, including central
+package management if that's how that repository builds.
 
-Two of these are worth a note:
+Four of these are worth a note:
 
 - **`.editorconfig` needs its own barrier** rather than riding on the `Directory.Build.props` one,
   because analyzer severity written as `dotnet_diagnostic.<id>.severity = error` comes from the
@@ -233,6 +231,32 @@ Two of these are worth a note:
   working directory*, so it is stopped only for a build or run launched from inside the checkout —
   which is the working directory Aspire gives a project resource. A build you launch with the
   AppHost directory as its working directory still sees your repository's SDK pin.
+- **`nuget.config` is the one barrier that isn't purely permissive, and the one that doesn't stop
+  the walk.** NuGet merges every config from the drive root down rather than stopping at the
+  nearest, so this file can only override the section it names. It names `packageSourceMapping`,
+  and NuGet's `<clear />` discards *every* mapping accumulated before it — your user-level
+  `~/.nuget/NuGet.Config` and machine-level ones included, not just your repository's. Inside a
+  checkout, package source mapping is therefore off unless the checkout brings its own, while every
+  inherited source stays reachable; a package that reaches your global packages folder that way is
+  then served from it to restores that *do* have mapping in force, including your AppHost's own,
+  because that folder isn't itself subject to mapping.
+
+  The default is this way round because a mapping the checkout was never written against fails its
+  restore outright, naming a source rather than the inherited rule behind it. If you'd rather keep
+  the mapping enforced inside checkouts and deal with those failures, set
+  `SERVICESOURCES_KEEP_PACKAGE_SOURCE_MAPPING=1`: the file isn't written, an existing one is
+  removed, and the other five barriers are unaffected.
+- **The rest of your `nuget.config` still reaches checkouts** for the same merging reason — your
+  `packageSources`, `disabledPackageSources`, `packageSourceCredentials` and `config` sections
+  among them. A repository that clears `packageSources` and adds only its own feed — the most
+  common customisation there is — therefore still restricts what a checkout can restore, and like
+  the mapping leak it hides behind a warm `~/.nuget/packages`. Clearing `packageSources` from here
+  isn't the answer: a checkout that legitimately needs your private feed would stop building.
+
+Two upward searches are deliberately left alone, because neither has a neutral value that isn't
+also a decision: `Directory.Build.rsp` (MSBuild takes the first one found walking up from the
+project, so your repository's response-file arguments still apply) and `.config/dotnet-tools.json`
+(which affects `dotnet tool` run inside a checkout). Open an issue if either bites you.
 
 #### Several services from one repository
 
