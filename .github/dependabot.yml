@@ -64,8 +64,8 @@ updates:
       # MSBuild SDK reference is not a package reference for Dependabot to edit. A bump here
       # would raise the AppHost package - and with it the DCP and dashboard packages the SDK
       # pins to whatever version the project *declares* - while leaving the SDK itself behind:
-      # the split Aspire family this repository warns consumers about, in its own sample, with
-      # nothing in CI that would fail. Move both by hand, together.
+      # the split Aspire family this repository warns consumers about, in its own sample. Move
+      # both by hand, together - ci.yml's `verify repo invariants` job fails if they part.
       - dependency-name: "Aspire.Hosting.AppHost"
       - dependency-name: "CommunityToolkit.Aspire.Hosting.Java"
       - dependency-name: "LibGit2Sharp"
