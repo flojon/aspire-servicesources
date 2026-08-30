@@ -212,6 +212,19 @@ serves — editing the catalog without rebuilding the AppHost.
    API needs, and let the yaml DTO become one way to populate it.
 6. **Correct the two overstated ATS constraints** in `ServiceConfigurationExports.cs`, its tests and
    the README — applied alongside this finding, since the shims they justify are unchanged.
+7. **Keep `AddServiceCatalog` separate from `AddService`**, rather than growing an optional inline
+   definition on the latter. This refines (1). "What a service *is*" and "I depend on this service"
+   being distinct statements is the seam this package exists to provide: `AddProject<T>()` conflates
+   them, and that conflation is precisely why it cannot express a service in another repository. An
+   inline form would re-couple the two at the one point the package is built to separate. Three
+   consequences follow. A second AppHost consuming the same service would have nowhere to put a
+   shared definition, making the per-repository duplication structural rather than incidental — and
+   leaving #11's registry with no catalog object to return. Ordering becomes per-service rather than
+   one rule about one call, so the "declared after the first `AddService`" error gets harder to
+   phrase and easier to trip. And the costs are asymmetric: inline sugar can be layered over a
+   separate catalog later without a break, while inline-only to separate cannot. The ergonomic
+   objection — two calls to declare one service in the single-AppHost case — is real, and is exactly
+   what that later sugar can address if the friction proves real rather than theoretical.
 
 ### Sketch, for the implementation issue to argue with
 
@@ -238,10 +251,18 @@ await builder.addServiceCatalog(async (catalog) => {
 });
 ```
 
-Open questions for that issue: whether `AddServiceCatalog` is separate from `AddService` or whether
-`AddService` grows an optional inline definition; whether the catalog must be declared before the
-first `AddService` (it must, given eager resolution — see #62); and whether yaml is targeted for
-removal at 1.0 or kept indefinitely.
+Open questions for that issue: whether the catalog must be declared before the first `AddService`
+(it must, given eager resolution — see #62), and whether yaml is targeted for removal at 1.0 or kept
+indefinitely.
+
+Separate-versus-inline is answered in (7) above, with one caveat about the evidence for it: **every
+shape measured in this finding uses the separate form.** `builder.addServiceCatalog(async (catalog)
+=> ...)` is what ran end to end. An inline `AddService("payments", s => s.FromContainer(...))` would
+put a configuration lambda in the same exported method as `AddService`'s bare-interface
+`IResourceBuilder<T>` return, and that combination is not among the eleven shapes probed here. (7)
+argues against inline on design grounds that stand on their own, but if it is revisited on
+ergonomics, that combination needs measuring first — to the same standard as the rest of this
+document.
 
 Follow-ups: the kind-options nesting is filed as #133 and wants re-scoping per (4). #71 stays open as
 the parent of the code-authoring work rather than being closed as "not proceeding".
