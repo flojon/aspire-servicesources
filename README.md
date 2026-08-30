@@ -174,7 +174,8 @@ a project reference would be.
   than replaced; point at it with `path` instead. A directory there with no `.git` entry at all is
   treated as debris from an interrupted clone and **deleted**, so don't hand-place a plain directory
   as a quick override — use `path` for that too. The `.servicesources/` directory gitignores itself
-  on first use — no need to add it to your own `.gitignore`.
+  on first use — no need to add it to your own `.gitignore` — and shields what it holds from your
+  AppHost repository's build settings (see below).
 - Set `path` to point at a checkout you manage yourself (e.g. an existing local clone). It's
   used as-is — no clone, no checkout, no fetch, ever. A relative `path` is anchored to the
   AppHost directory, and must name a directory that already exists. `ref` cannot be combined
@@ -187,6 +188,75 @@ a project reference would be.
   branch there is safe. Entries you never add still cost network and disk for that first clone. The
   AppHost logs which ones those were at startup — and warns if one of them failed, since nothing
   else would ever tell you — so you know what to drop.
+
+#### Managed checkouts don't inherit your AppHost repository's build settings
+
+A managed checkout is cloned *inside* your AppHost's repository, and MSBuild, NuGet, the .NET SDK
+host and the compiler's analyzer configuration all find their settings by walking **up** from each
+project or source file. Left alone, that means another team's repository gets built under rules
+written for yours — most visibly as `NU1008` on every pinned `PackageReference` when your
+repository turns on central package management, and least visibly as your `packageSourceMapping`
+confining that repository's restores to your feeds (a leak that hides behind a warm
+`~/.nuget/packages` and only surfaces on a clean machine or in CI).
+
+So alongside the `.gitignore`, `.servicesources/` gets six tool-managed files that end those walks
+there:
+
+| File | Content | Stops |
+| --- | --- | --- |
+| `Directory.Build.props`, `Directory.Build.targets` | `<Project />` | your repository's build customisation |
+| `Directory.Packages.props` | `ManagePackageVersionsCentrally=false` | your repository's central package management |
+| `nuget.config` | `<packageSourceMapping><clear /></packageSourceMapping>` | your repository's package source mapping (see the note below) |
+| `.editorconfig` | `root = true` | your repository's code style and analyzer severities |
+| `global.json` | `{}` | your repository's SDK pin and `msbuild-sdks` versions |
+
+Each is written with a comment saying what it is and why it's there, since you'll find them on disk
+with no git history to explain them, and all are rewritten whenever their content is out of date,
+so upgrading the package updates them.
+
+Each barrier drops a constraint the checkout never opted into, and only supplies what a checkout
+lacks. A checkout carrying its own `Directory.Build.props`, `Directory.Packages.props`,
+`.editorconfig` or `global.json` is found first and keeps its own settings, including central
+package management if that's how that repository builds.
+
+Four of these are worth a note:
+
+- **`.editorconfig` needs its own barrier** rather than riding on the `Directory.Build.props` one,
+  because analyzer severity written as `dotnet_diagnostic.<id>.severity = error` comes from the
+  `.editorconfig` itself — not from `EnforceCodeStyleInBuild` or `TreatWarningsAsErrors`. Without
+  it, your repository's code style raises the checkout's own analyzers to errors.
+- **`global.json` has two halves that resolve from different anchors**, so the barrier covers one
+  of them completely and the other conditionally. `msbuild-sdks` resolves by walking up from the
+  *project*, so it is stopped outright. `sdk.version` resolves by walking up from the *current
+  working directory*, so it is stopped only for a build or run launched from inside the checkout —
+  which is the working directory Aspire gives a project resource. A build you launch with the
+  AppHost directory as its working directory still sees your repository's SDK pin.
+- **`nuget.config` is the one barrier that isn't purely permissive, and the one that doesn't stop
+  the walk.** NuGet merges every config from the drive root down rather than stopping at the
+  nearest, so this file can only override the section it names. It names `packageSourceMapping`,
+  and NuGet's `<clear />` discards *every* mapping accumulated before it — your user-level
+  `~/.nuget/NuGet.Config` and machine-level ones included, not just your repository's. Inside a
+  checkout, package source mapping is therefore off unless the checkout brings its own, while every
+  inherited source stays reachable; a package that reaches your global packages folder that way is
+  then served from it to restores that *do* have mapping in force, including your AppHost's own,
+  because that folder isn't itself subject to mapping.
+
+  The default is this way round because a mapping the checkout was never written against fails its
+  restore outright, naming a source rather than the inherited rule behind it. If you'd rather keep
+  the mapping enforced inside checkouts and deal with those failures, set
+  `SERVICESOURCES_KEEP_PACKAGE_SOURCE_MAPPING=1`: the file isn't written, an existing one is
+  removed, and the other five barriers are unaffected.
+- **The rest of your `nuget.config` still reaches checkouts** for the same merging reason — your
+  `packageSources`, `disabledPackageSources`, `packageSourceCredentials` and `config` sections
+  among them. A repository that clears `packageSources` and adds only its own feed — the most
+  common customisation there is — therefore still restricts what a checkout can restore, and like
+  the mapping leak it hides behind a warm `~/.nuget/packages`. Clearing `packageSources` from here
+  isn't the answer: a checkout that legitimately needs your private feed would stop building.
+
+Two upward searches are deliberately left alone, because neither has a neutral value that isn't
+also a decision: `Directory.Build.rsp` (MSBuild takes the first one found walking up from the
+project, so your repository's response-file arguments still apply) and `.config/dotnet-tools.json`
+(which affects `dotnet tool` run inside a checkout). Open an issue if either bites you.
 
 #### Several services from one repository
 

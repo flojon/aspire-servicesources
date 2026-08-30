@@ -46,6 +46,70 @@ nothing will fail to build to warn you.
   mistyped repository path with 404 — keeps the existing wording, which leaves open that the
   repository simply isn't visible.
 
+### Fixed
+
+- **Managed checkouts no longer inherit the AppHost repository's MSBuild and NuGet settings**
+  ([#119]). A checkout is cloned into `<AppHostDirectory>/.servicesources/checkouts/<service>/`,
+  which is inside the AppHost's own repository, and MSBuild, NuGet, the .NET SDK host and the
+  compiler's analyzer configuration all find their settings by walking *up* from each project or
+  source file. Nothing stopped those walks at `.servicesources/`, so another team's repository was
+  built under rules written for yours.
+
+  Ways it showed up:
+
+  - An AppHost repository with `ManagePackageVersionsCentrally=true` failed a checkout's restore
+    with `NU1008` for every version pinned on a `PackageReference`. The diagnostic names the cloned
+    project while the cause is a file in the host repository, and the service resolves fine before
+    going `Running -> Finished` with the build failure only in its own console log.
+  - A `packageSourceMapping` in the AppHost repository applied to the checkout and could confine
+    its restores to the wrong feeds. A `<clear />` inside `<packageSources>` in the checkout's own
+    `nuget.config` does not clear a mapping defined further up. This one is silent: a warm
+    `~/.nuget/packages` satisfies the restore without contacting a source, so it passes locally and
+    fails on a clean machine or in CI.
+  - An `.editorconfig` in the AppHost repository applied its code style to the checkout. Where that
+    style is written as `dotnet_diagnostic.<id>.severity = error`, it raised the checkout's own
+    analyzers to errors. Severity comes from the `.editorconfig` itself rather than from
+    `EnforceCodeStyleInBuild` or `TreatWarningsAsErrors`, so neutralizing the MSBuild side does not
+    neutralize this one.
+  - A `global.json` in the AppHost repository applied its SDK pin and its `msbuild-sdks` versions
+    to the checkout.
+
+  `.servicesources/` now carries six tool-managed files that end those walks there, written next to
+  the `.gitignore` it already creates: an empty `Directory.Build.props` and
+  `Directory.Build.targets`, a `Directory.Packages.props` setting
+  `ManagePackageVersionsCentrally=false`, a `nuget.config` containing only
+  `<packageSourceMapping><clear /></packageSourceMapping>`, an `.editorconfig` containing only
+  `root = true`, and a `global.json` containing an empty object. Unlike the `.gitignore`, whose
+  content is fixed, these are rewritten whenever they differ from what the installed version
+  writes, so an upgrade refreshes existing checkout roots rather than stranding them on a stale
+  copy.
+
+  Every barrier only supplies what a checkout lacks. A checkout bringing its own
+  `Directory.Build.props`, `Directory.Packages.props`, `.editorconfig` or `global.json` is found
+  first and keeps its own settings, central package management included.
+
+  `nuget.config` is the exception on both counts, and the one to read before upgrading. NuGet merges
+  every config from the drive root down instead of stopping at the nearest, so this barrier can only
+  override the section it names, and NuGet's `<clear />` discards every `packageSourceMapping`
+  accumulated before it — your user-level and machine-level ones included, not only the AppHost
+  repository's. Inside a checkout, package source mapping is therefore off unless the checkout
+  brings its own, while every inherited source stays reachable, and a package that reaches the
+  shared global packages folder that way is later served from it to restores that do have mapping in
+  force. The default is this way round because an inherited mapping fails a checkout's restore
+  outright; set `SERVICESOURCES_KEEP_PACKAGE_SOURCE_MAPPING=1` to keep the mapping enforced inside
+  checkouts instead, which suppresses this one file and leaves the other five in place. The rest of
+  an AppHost repository's `nuget.config` — `packageSources` above all — still reaches checkouts. The
+  README documents both gaps.
+
+  `{}` is a genuinely neutral `global.json`, contrary to what [#119] assumed: hostfxr stops at the
+  first `global.json` *file* it finds and does not keep walking in search of one carrying an `sdk`
+  section, so an empty object requests no version at all. Note one asymmetry in what that buys.
+  `msbuild-sdks` resolves by walking up from the *project* directory and is stopped outright;
+  `sdk.version` resolves by walking up from the *current working directory*, so it is stopped only
+  for a build or run launched from inside the checkout — the working directory Aspire gives a
+  project resource. A build launched with the AppHost directory as its working directory still sees
+  the host's pin. That half is documented in the README rather than papered over.
+
 ## [0.3.1] - 2026-08-27
 
 Publishes the two satellite packages, which `0.3.0` could not. Core `0.3.0` is on nuget.org
@@ -373,5 +437,6 @@ Targets `net10.0`.
 [#89]: https://github.com/flojon/aspire-servicesources/issues/89
 [#112]: https://github.com/flojon/aspire-servicesources/pull/112
 [#117]: https://github.com/flojon/aspire-servicesources/pull/117
+[#119]: https://github.com/flojon/aspire-servicesources/issues/119
 [#125]: https://github.com/flojon/aspire-servicesources/issues/125
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

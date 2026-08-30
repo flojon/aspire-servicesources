@@ -1035,6 +1035,49 @@ public class LocalProjectSourceTests
     }
 
     [Fact]
+    public void ResolveProjectPath_ManagedClone_WritesBuildBarrierUnderServiceSourcesDirectory()
+    {
+        // The checkout lives inside the AppHost's own repository, so without these MSBuild and
+        // NuGet walk past .servicesources and apply the host repository's build settings to it.
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var gitClient = new FakeGitClient();
+
+        ResolveProjectPath(
+            ServiceName, Metadata(), DevConfig(), appHostDirectory, gitClient);
+
+        var dir = Path.Combine(appHostDirectory, ".servicesources");
+        Assert.True(File.Exists(Path.Combine(dir, "Directory.Build.props")));
+        Assert.True(File.Exists(Path.Combine(dir, "Directory.Build.targets")));
+        Assert.True(File.Exists(Path.Combine(dir, "Directory.Packages.props")));
+        Assert.True(File.Exists(Path.Combine(dir, "nuget.config")));
+        Assert.True(File.Exists(Path.Combine(dir, ".editorconfig")));
+        Assert.True(File.Exists(Path.Combine(dir, "global.json")));
+    }
+
+    [Fact]
+    public void ResolveProjectPath_PathOverride_WritesNoBuildBarrier()
+    {
+        // A 'path' override points at a checkout the developer manages, wherever they keep it —
+        // often inside a repository of their own. Nothing is cloned, nothing is placed under
+        // .servicesources, and writing tool-owned files into someone else's tree would be
+        // overreach: that tree's own MSBuild and NuGet settings are the ones that should apply.
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var overridePath = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(overridePath, "Orders.csproj"), "<Project />");
+
+        ResolveProjectPath(
+            ServiceName,
+            Metadata(project: "Orders.csproj"),
+            DevConfig(path: overridePath),
+            appHostDirectory,
+            new FakeGitClient());
+
+        Assert.False(Directory.Exists(Path.Combine(appHostDirectory, ".servicesources")));
+        Assert.False(File.Exists(Path.Combine(overridePath, "Directory.Build.props")));
+        Assert.False(File.Exists(Path.Combine(overridePath, "nuget.config")));
+    }
+
+    [Fact]
     public void ResolveProjectPath_ManagedClone_DoesNotOverwriteExistingGitignore()
     {
         var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
