@@ -5,12 +5,11 @@ using System.Text;
 namespace Aspire.Hosting.ServiceSources.Tests.Git;
 
 /// <summary>
-/// The smallest HTTP server that makes libgit2 run its authentication handshake: it demands Basic
-/// auth, then either refuses what it is given or advertises a single branch. The advertisement names
-/// a commit no stub can actually serve, so a clone against one always ends in a
-/// <see cref="LibGit2Sharp.LibGit2SharpException"/> whatever the credentials — but it ends there
-/// having made both requests of a real clone, the ref advertisement and the pack POST, which is what
-/// lets a credential re-challenge on the second request be observed at all.
+/// The smallest HTTP server that makes git run its authentication handshake: it demands Basic auth,
+/// then either refuses what it is given or advertises a single branch. The advertisement names a
+/// commit no stub can actually serve, so a clone against one always fails whatever the credentials
+/// — but it fails having made both requests of a real clone, the ref advertisement and the pack
+/// POST, which is what lets a credential re-challenge on the second request be observed at all.
 /// </summary>
 internal sealed class StubGitServer : IDisposable
 {
@@ -147,7 +146,7 @@ internal sealed class StubGitServer : IDisposable
 
     /// <summary>
     /// A ref advertisement for a single branch, with the <c>HEAD</c> symref a clone needs to pick a
-    /// default branch — without it libgit2 gives up before asking for the pack, and the second
+    /// default branch — without it the client gives up before asking for the pack, and the second
     /// request would never be made.
     /// </summary>
     private static byte[] UploadPackAdvertisement()
