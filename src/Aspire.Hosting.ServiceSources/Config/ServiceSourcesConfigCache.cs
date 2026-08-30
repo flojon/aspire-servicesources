@@ -12,7 +12,7 @@ internal static class ServiceSourcesConfigCache
     /// before any of them has been asked for by name.
     /// </summary>
     public static LoadedConfig LoadedFor(IDistributedApplicationBuilder builder) =>
-        Cache.GetValue(builder, static b => LoadedConfig.Load(b.AppHostDirectory));
+        Cache.GetValue(builder, static b => LoadedConfig.Load(b));
 
     public static (ServiceMetadata Metadata, ServiceDeveloperConfig DeveloperConfig) ResolveService(
         IDistributedApplicationBuilder builder, string serviceName)
@@ -27,8 +27,7 @@ internal static class ServiceSourcesConfigCache
 
         if (!loaded.DeveloperConfig.Services.TryGetValue(serviceName, out var developerConfig))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}' was not found in 'servicesources.local.json'.");
+            throw loaded.DeveloperConfig.NotConfiguredError(serviceName);
         }
 
         return (metadata, developerConfig);
@@ -38,13 +37,12 @@ internal static class ServiceSourcesConfigCache
     {
         public required ServiceCatalog Catalog { get; init; }
 
-        public required DeveloperConfigFile DeveloperConfig { get; init; }
+        public required DeveloperConfiguration DeveloperConfig { get; init; }
 
-        public static LoadedConfig Load(string appHostDirectory)
+        public static LoadedConfig Load(IDistributedApplicationBuilder builder)
         {
-            var catalog = ServiceCatalogLoader.Load(Path.Combine(appHostDirectory, "servicesources.yaml"));
-            var developerConfig = DeveloperConfigLoader.Load(Path.Combine(appHostDirectory, "servicesources.local.json"));
-            return new LoadedConfig { Catalog = catalog, DeveloperConfig = developerConfig };
+            var catalog = ServiceCatalogLoader.Load(Path.Combine(builder.AppHostDirectory, "servicesources.yaml"));
+            return new LoadedConfig { Catalog = catalog, DeveloperConfig = DeveloperConfiguration.ReadFrom(builder) };
         }
     }
 }

@@ -11,7 +11,30 @@ nothing will fail to build to warn you.
 
 ## [Unreleased]
 
+### Added
+
+- **`servicesources.local.json` can be overridden without editing it** ([#69]). The per-developer
+  source selection is now read through the AppHost's own `IConfiguration` rather than by a loader
+  of ours, with the file registered as the *lowest*-precedence source in the standard chain under
+  the key `ServiceSources:Services:<service>`. `appsettings.json`,
+  `appsettings.{Environment}.json`, user secrets, environment variables and the command line all
+  override it, so a single run can pick a different source —
+  `ServiceSources__Services__orders__Source=url dotnet run` — and CI can pin every service from the
+  environment with no file present at all. Named profiles come from the same mechanism:
+  `appsettings.Cluster.json` plus `--environment Cluster`. The file's shape on disk is unchanged,
+  and nothing about how a .NET or TypeScript AppHost authors it has changed.
+
 ### Changed
+
+- **A missing `servicesources.local.json` is no longer an error by itself** ([#69]). It used to
+  fail immediately, naming the path. Now that the file is one layer of a chain, its absence is
+  ordinary — the environment may carry the whole configuration — so the failure moved to the point
+  where a service genuinely has no source. Two errors are raised there instead of one: "nothing is
+  configured anywhere", which names the key, the file path it looked for and every source
+  consulted, and "this service has no source", which names
+  `ServiceSources:Services:<service>:source` and the environment variable that would set it. The
+  distinction is deliberate — a mistyped key yields an empty section rather than a failure, so
+  "nothing configured" has to be reported as its own condition.
 
 - **`ServiceSourcesConfigurationException` prints as its message, not as a stack dump**
   ([#125]). These are raised from `AddService()` and normally end the AppHost unhandled, so the
@@ -347,6 +370,7 @@ Targets `net10.0`.
 [#89]: https://github.com/flojon/aspire-servicesources/issues/89
 [#112]: https://github.com/flojon/aspire-servicesources/pull/112
 [#117]: https://github.com/flojon/aspire-servicesources/pull/117
+[#69]: https://github.com/flojon/aspire-servicesources/issues/69
 [#119]: https://github.com/flojon/aspire-servicesources/issues/119
 [#125]: https://github.com/flojon/aspire-servicesources/issues/125
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507

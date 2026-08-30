@@ -36,7 +36,8 @@ internal static class ServiceDeveloperConfigValidator
             var isAre = foreignFields.Count > 1 ? "are" : "is";
             var themIt = foreignFields.Count > 1 ? "them" : "it";
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': {fieldList} {isAre} not valid for source '{source}' — remove {themIt} from servicesources.local.json.");
+                $"Service '{serviceName}': {fieldList} {isAre} not valid for source '{source}' — remove {themIt} from "
+                + $"'{DeveloperConfiguration.ServicesKey}:{serviceName}', usually the service's entry in {DeveloperConfiguration.FileName}.");
         }
     }
 }

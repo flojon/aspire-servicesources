@@ -145,6 +145,10 @@ per-developer):**
 }
 ```
 
+That file is the base layer of the AppHost's own configuration — an environment variable or an
+`appsettings.json` entry can override any of it for a single run, without an edit. See
+[Overriding `servicesources.local.json`](#overriding-servicesourceslocaljson).
+
 That's it — running the AppHost now clones `orders` into
 `<AppHostDirectory>/.servicesources/checkouts/orders/`, checks out `main`, and runs it via
 Aspire's own project orchestration, wired up to `api` through service discovery exactly like
@@ -779,6 +783,72 @@ or just needing it reachable, not caring how:
 ```json
 { "services": { "orders": { "source": "url" } } }
 ```
+
+### Overriding `servicesources.local.json`
+
+The file is read through the AppHost's own `IConfiguration`, as the **lowest**-precedence source in
+the standard provider chain, under the key `ServiceSources:Services:<service>`. Its shape on disk is
+unchanged — it is still the place a developer normally writes a source selection, and a `.NET` or
+TypeScript AppHost authors it identically — but every provider above it can now override an entry
+without the file being touched:
+
+| Layer | Overrides the file? |
+| --- | --- |
+| `servicesources.local.json` | — (the base) |
+| `appsettings.json` | yes |
+| `appsettings.{Environment}.json` | yes |
+| User secrets | yes (requires a `UserSecretsId` in the AppHost csproj; without one the layer is simply absent) |
+| Environment variables | yes |
+| Command-line arguments | yes |
+
+The immediate payoff is a **single run** with a different source and no edit to a file you'd have to
+remember to change back:
+
+```bash
+ServiceSources__Services__orders__Source=url dotnet run
+```
+
+Any field works the same way, not just `source` — `ServiceSources__Services__orders__Ref`,
+`ServiceSources__Services__orders__Tag`, and so on. (`__` is the .NET configuration separator for
+`:`, and is what you want on every platform.)
+
+CI is the other case. A build agent has no developer to pick sources for it, and cloning every
+service to run one test is waste, so pin them from the environment and ship no file at all:
+
+```yaml
+env:
+  ServiceSources__Services__orders__Source: container
+  ServiceSources__Services__payments__Source: container
+```
+
+**Named profiles** fall out of the same mechanism. Put the cluster-facing selection in
+`appsettings.Cluster.json` next to the AppHost:
+
+```json
+{
+  "ServiceSources": {
+    "Services": {
+      "orders": { "source": "kubernetes", "context": "dev-west", "namespace": "orders", "port": 8080 }
+    }
+  }
+}
+```
+
+and choose it per run with `dotnet run -- --environment Cluster`, or by setting
+`DOTNET_ENVIRONMENT=Cluster`. Note the extra `ServiceSources` root: inside the AppHost's shared
+configuration the entries are namespaced, while `servicesources.local.json` keeps its bare
+`services` root because it is a file of ours, read from the AppHost directory and re-keyed as it
+joins the chain.
+
+Two failures are reported differently on purpose, because a typo in a configuration key produces an
+empty section rather than an error:
+
+- **Nothing configured anywhere** — `ServiceSources:Services` is empty in every source. The message
+  says so, names the `servicesources.local.json` path it looked for and whether it was found, and
+  lists every source consulted.
+- **This one service isn't configured** — other services resolved, this one has no entry. The
+  message names `ServiceSources:Services:<service>:source` and the environment variable that would
+  set it.
 
 ## Configuring a resolved service
 

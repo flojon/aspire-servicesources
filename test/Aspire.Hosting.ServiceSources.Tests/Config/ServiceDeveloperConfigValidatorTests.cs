@@ -172,4 +172,20 @@ public class ServiceDeveloperConfigValidatorTests
     }
 
     private static string ForeignValue(string field) => field == "port" ? "8080" : "some-value";
+
+    /// <remarks>
+    /// A foreign field no longer necessarily comes from the file — an environment variable or an
+    /// appsettings entry can put one there too — so the message names the configuration key the
+    /// value actually lives under, not only the file a developer usually writes it in.
+    /// </remarks>
+    [Fact]
+    public void Validate_ForeignField_MessageNamesTheConfigurationKey()
+    {
+        var config = ConfigWith("local", "port", ForeignValue("port"));
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ServiceDeveloperConfigValidator.Validate(ServiceName, "local", RelevantFieldsBySource["local"], config));
+
+        Assert.Contains($"ServiceSources:Services:{ServiceName}", ex.Message);
+    }
 }
