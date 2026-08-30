@@ -80,7 +80,7 @@ public class GitCredentialLadderOverHttpTests
             Repository.Clone(
                 server.RepositoryUrl,
                 destination,
-                new CloneOptions { FetchOptions = { CredentialsProvider = provider } });
+                new CloneOptions { FetchOptions = { CredentialsProvider = provider.Handler } });
         }
         catch (LibGit2SharpException)
         {

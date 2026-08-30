@@ -10,12 +10,14 @@ internal sealed class LibGit2SharpGitClient : IGitClient
         // rather than relying on every caller to remember the check.
         GitUrlValidator.EnsureSupported(repositoryUrl);
 
+        var credentials = GitCredentialResolver.CreateProvider(repositoryUrl);
         var options = new CloneOptions
         {
-            FetchOptions = { CredentialsProvider = GitCredentialResolver.CreateProvider(repositoryUrl) },
+            FetchOptions = { CredentialsProvider = credentials.Handler },
         };
 
-        WithAuthFailureDetection(repositoryUrl, () => Repository.Clone(repositoryUrl, destinationPath, options));
+        WithAuthFailureDetection(
+            repositoryUrl, credentials, () => Repository.Clone(repositoryUrl, destinationPath, options));
     }
 
     public void Checkout(string repositoryPath, string reference)
@@ -68,12 +70,14 @@ internal sealed class LibGit2SharpGitClient : IGitClient
         GitUrlValidator.EnsureSupported(remote.Url);
 
         var refSpecs = remote.FetchRefSpecs.Select(r => r.Specification);
+        var credentials = GitCredentialResolver.CreateProvider(remote.Url);
         var fetchOptions = new FetchOptions
         {
-            CredentialsProvider = GitCredentialResolver.CreateProvider(remote.Url),
+            CredentialsProvider = credentials.Handler,
         };
 
-        WithAuthFailureDetection(remote.Url, () => Commands.Fetch(repo, remote.Name, refSpecs, fetchOptions, null));
+        WithAuthFailureDetection(
+            remote.Url, credentials, () => Commands.Fetch(repo, remote.Name, refSpecs, fetchOptions, null));
     }
 
     /// <summary>
@@ -81,8 +85,10 @@ internal sealed class LibGit2SharpGitClient : IGitClient
     /// <see cref="GitAuthenticationFailedException"/> so callers can name authentication as the
     /// likely cause instead of reporting a generic clone/fetch failure.
     /// </summary>
-    private static void WithAuthFailureDetection(string repositoryUrl, Action operation) =>
-        WithAuthFailureDetection(repositoryUrl, operation, GitCredentialResolver.ForgetCachedCredentials);
+    private static void WithAuthFailureDetection(
+        string repositoryUrl, GitCredentialProvider credentials, Action operation) =>
+        WithAuthFailureDetection(
+            repositoryUrl, credentials, operation, GitCredentialResolver.ForgetCachedCredentials);
 
     /// <summary>
     /// Test seam: takes the credential-cache eviction as a parameter, so what a failure does to the
@@ -90,6 +96,7 @@ internal sealed class LibGit2SharpGitClient : IGitClient
     /// </summary>
     internal static void WithAuthFailureDetection(
         string repositoryUrl,
+        GitCredentialProvider credentials,
         Action operation,
         Action<string> forgetCachedCredentials)
     {
@@ -106,7 +113,7 @@ internal sealed class LibGit2SharpGitClient : IGitClient
             // repository this credential genuinely can't see as a bad credential, and erasing a
             // working entry over that would be worse than keeping it.
             forgetCachedCredentials(repositoryUrl);
-            throw new GitAuthenticationFailedException(ex.Message, ex);
+            throw new GitAuthenticationFailedException(ex.Message, ex, credentials.ResolvedNoCredentials);
         }
     }
 
