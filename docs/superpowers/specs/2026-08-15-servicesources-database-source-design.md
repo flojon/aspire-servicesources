@@ -1,10 +1,18 @@
 # Aspire.Hosting.ServiceSources — Backing Service Source Design
 
-**Status:** Draft — revised 2026-08-22 against `main` at #62, which removed the `ServiceResource` facade and shipped `Configure<T>`/`As<T>`; the proposed `AddService(configure:)` parameter and `WaitFor` shim are withdrawn as a result, and `AddBackingService` is now the design's only new public surface. Revised again 2026-08-30, when the supposed guest-language gap turned out not to exist. Earlier questions were settled by prototype and against a `kind` cluster; what remains is three team decisions. See Revision Notes.
+**Status:** Draft — revised 2026-08-22 against `main` at #62, which removed the `ServiceResource` facade and shipped `Configure<T>`/`As<T>`; the proposed `AddService(configure:)` parameter and `WaitFor` shim are withdrawn as a result, and `AddBackingService` is now the design's only new public surface. Revised again 2026-08-30, when the supposed guest-language gap turned out not to exist. Earlier questions were settled by prototype and against a `kind` cluster; what remains is two team decisions. See Revision Notes.
 **Date:** 2026-08-15 (revised 2026-08-21, 2026-08-22, 2026-08-30)
 **Scope:** Extends the local-vs-kubernetes source-switching model from services to the backing resources a service connects to: databases (Postgres, SQL Server) and, on exactly the same mechanism, message brokers and caches (RabbitMQ, Redis, …). The mechanism is connection-string-based and backend-agnostic — see [Generalization](#generalization-beyond-databases), where this is verified rather than assumed. Closes out the "Database/queue source switching" item from the [phase 2 reference doc](2026-08-09-servicesources-phase2-future-work.md) and [issue #10](https://github.com/flojon/aspire-servicesources/issues/10).
 
 ## Revision Notes
+
+### 2026-08-30 (later) — the direct-connection source key is settled
+
+The first draft's `"external"` becomes **`"direct"`**, and the open question about it is closed. The
+reasoning, including the candidates that lost and the house-style inconsistency the choice accepts,
+is in [The direct-connection source key](#the-direct-connection-source-key). Two team decisions
+remain: whether the catalog carries any backing-service config, and whether `"direct"` gets an
+opt-in connectivity health check.
 
 ### 2026-08-30 — the guest-language gap was never real
 
@@ -70,8 +78,8 @@ public static IResourceBuilder<IResourceWithConnectionString> AddBackingService(
 Resolves `name`'s developer config (local.json only — see Config Schema) and dispatches on `source`:
 
 - **`"local"`** (default when no entry, or `"source": "local"`) — invokes the caller-supplied `local` factory as-is and returns its result. No catalog, no provisioning logic of our own — this is exactly `builder.AddPostgres("orders-pg").AddDatabase("orders")` or similar, written by the AppHost author like any other Aspire resource.
-- **`"external"`** — builds a `ReferenceExpression` from the config's `connectionString` (after placeholder substitution — see Templating) and calls Aspire's own `ConnectionStringBuilderExtensions.AddConnectionString(builder, name, expression)`, which returns a real `IResourceBuilder<ConnectionStringResource>`. Covers both a manually-run local instance and a cluster database reachable directly through an ingress/gateway — from Aspire's perspective these are identical: "connect to this host:port," no process to manage.
-- **`"kubernetes"`** — same `AddConnectionString(...)` mechanism as `"external"`, but first allocates a local port (`IPortAllocator`, existing seam) and adds a `kubectl port-forward` `AddExecutable(...)` (same shape as `KubernetesSource`), then substitutes `{port}` in the connection-string template with the allocated port before building the expression. **It must also attach a TCP health check on that local port via `.WithHealthCheck(...)`** — without it a consumer's `.WaitFor(...)` does not actually wait for the tunnel, which was measured, not assumed (see [Resolved by Prototype](#resolved-by-prototype)).
+- **`"direct"`** — builds a `ReferenceExpression` from the config's `connectionString` (after placeholder substitution — see Templating) and calls Aspire's own `ConnectionStringBuilderExtensions.AddConnectionString(builder, name, expression)`, which returns a real `IResourceBuilder<ConnectionStringResource>`. Covers both a manually-run local instance and a cluster database reachable directly through an ingress/gateway — from Aspire's perspective these are identical: "connect to this host:port," no process to manage.
+- **`"kubernetes"`** — same `AddConnectionString(...)` mechanism as `"direct"`, but first allocates a local port (`IPortAllocator`, existing seam) and adds a `kubectl port-forward` `AddExecutable(...)` (same shape as `KubernetesSource`), then substitutes `{port}` in the connection-string template with the allocated port before building the expression. **It must also attach a TCP health check on that local port via `.WithHealthCheck(...)`** — without it a consumer's `.WaitFor(...)` does not actually wait for the tunnel, which was measured, not assumed (see [Resolved by Prototype](#resolved-by-prototype)).
 
 Called once per logical backing service; the returned builder is reused across every consumer, exactly like vanilla Aspire (`var db = builder.AddPostgres(...); a.WithReference(db); b.WithReference(db);`) — no caching/memoization needed on our side.
 
@@ -149,7 +157,29 @@ So the decision is entirely about readability, and the meaningful axis is how ba
 
 **Caveat on the chosen name.** `Service` already means something specific in this package — `AddService()` is the source-switched *application* resource, and `servicesources.yaml` / the `services:` config section are about those. `AddBackingService` deliberately borrows that word for a different kind of thing, relying on the "backing" qualifier to separate them. This is accepted as a readability trade: the qualifier is doing real work in prose ("a service and the backing services it connects to"), and the two never appear as competing overloads. It does mean documentation should avoid the bare word "service" where either could be meant.
 
-This document uses `AddBackingService` throughout, with `backingServices:` as the matching local.json section. The `"external"` source *key* is worth a second look for the same reason the `AddExternalService` row is: Aspire already uses "external" for something narrower, and the service-side equivalent of this source is already called `"url"`.
+This document uses `AddBackingService` throughout, with `backingServices:` as the matching local.json section and `"direct"` as the source key for a backing service the developer points the AppHost at.
+
+### The direct-connection source key
+
+**`"direct"`**, decided 2026-08-30, replacing the first draft's `"external"`.
+
+The schema has three keys, and the axis they divide is *who manages the backing service and how the AppHost reaches it* — not where it physically runs:
+
+- `"local"` — Aspire provisions and runs it, through the `local` factory.
+- `"kubernetes"` — it runs in the cluster; the AppHost opens a `kubectl port-forward` tunnel and connects through that.
+- `"direct"` — it is already running at an address the developer supplies, and the AppHost connects straight to it.
+
+| Key | Verdict |
+|---|---|
+| `direct` | **Chosen.** Names the one thing that actually differs from `"kubernetes"`: no tunnel in the way. A single lowercase word, like every existing key. |
+| `external` | Withdrawn, for the reason the `AddExternalService` row above gives — Aspire already uses "external" for an external *HTTP* service, while this source most often points at a Postgres on `localhost`. The service-side source meaning the same thing is called `"url"`, so "external" is not this package's vocabulary either. |
+| `connectionString` | The strongest runner-up. It mirrors the service side's rule of naming a source after the address field the developer supplies — `UrlSource.RelevantFields` is exactly `{ "url" }`. It lost because the parallel is not exact: `"kubernetes"` requires a `connectionString` too, so the key would name a field two of the three sources share, where `url` is unique to `UrlSource`. It is also by some distance the longest key in the schema. |
+| `connection` | The shorter form of the above without its benefit: it stops matching the field name, which was the entire argument for it. |
+| `remote` | Rejected. `"local"` here means *Aspire runs it*, not *on this machine*, so a `local`/`remote` pairing advertises a location axis the schema does not use. The common case for this source is a hand-started Postgres on `localhost`, where `"source": "remote"` sitting above `Host=localhost` contradicts itself — and the cluster database is remote as well, so the name does not separate this source from `"kubernetes"` either. |
+| `existing` | Accurate, and free of collisions, but the weakest discriminator of the set: the `"kubernetes"` database already exists too. |
+| `url` | Maximum consistency with the service-side vocabulary, but it misdescribes an ADO.NET-style `Host=…;Port=…` string. |
+
+**The trade-off this accepts.** Every other source key names *what or where the thing is* — `local`, `container`, `url`, `kubernetes` — whereas `direct` names *how the AppHost reaches it*. The inconsistency is accepted deliberately: the alternatives that follow the house rule all fail to separate this source from `"kubernetes"`, and that is the distinction a developer editing `servicesources.local.json` actually has to make.
 
 ### Guest-language exports
 
@@ -185,7 +215,7 @@ Func<IResourceBuilder<IResourceWithConnectionString>> rabbit = () => b.AddRabbit
 Func<IResourceBuilder<IResourceWithConnectionString>> redis  = () => b.AddRedis("cache");
 ```
 
-All four compile against Aspire 13.4.2. The `"external"` and `"kubernetes"` branches are equally indifferent — `amqp://user:pass@localhost:{port}/` and `localhost:{port},password=…` are just connection-string templates like any other.
+All four compile against Aspire 13.4.2. The `"direct"` and `"kubernetes"` branches are equally indifferent — `amqp://user:pass@localhost:{port}/` and `localhost:{port},password=…` are just connection-string templates like any other.
 
 Two caveats, neither structural:
 
@@ -215,10 +245,10 @@ The practical consequence is naming, not architecture: hence `AddBackingService`
 }
 ```
 
-- `source`: `"local"` (default if the entry or field is omitted), `"external"`, or `"kubernetes"`.
+- `source`: `"local"` (default if the entry or field is omitted), `"direct"`, or `"kubernetes"`.
 - `service`, `port`: the k8s Service name and remote port to forward to. `"kubernetes"` only.
-- `context`, `namespace`: same meaning as the existing service kubernetes source. Required for `"kubernetes"`; also usable by `"external"` purely for secret lookups (see Templating) even without port-forwarding.
-- `connectionString`: required for `"external"` and `"kubernetes"`. A literal connection string, optionally containing placeholders resolved as described below.
+- `context`, `namespace`: same meaning as the existing service kubernetes source. Required for `"kubernetes"`; also usable by `"direct"` purely for secret lookups (see Templating) even without port-forwarding.
+- `connectionString`: required for `"direct"` and `"kubernetes"`. A literal connection string, optionally containing placeholders resolved as described below.
 
 New config model classes: `BackingServiceDeveloperConfig` (`Source`, `Service`, `Port`, `Context`, `Namespace`, `ConnectionString`), loaded through the existing `ServiceSourcesConfigCache` alongside `services:`. Field validation should reuse the `ServiceDeveloperConfigValidator` pattern (per-source `RelevantFields`, reject leftovers) that `main` already applies to services.
 
@@ -227,7 +257,7 @@ New config model classes: `BackingServiceDeveloperConfig` (`Source`, `Service`, 
 Two placeholder kinds inside `connectionString`:
 
 - **`{port}`** — the locally-allocated port from `IPortAllocator`, substituted as a literal during `AddBackingService()`. Meaningful (and required) only for `"kubernetes"`.
-- **`{secret:<name>:<key>}`** — a Kubernetes secret value, fetched via `kubectl get secret <name> -n <namespace> --context <context> -o jsonpath='{.data.<key>}'` and base64-decoded, through a new `IKubernetesSecretReader` seam (mirrors `IGitClient`/`IPortAllocator` — fake-able in unit tests, no real `kubectl` invocation there). Usable by both `"external"` and `"kubernetes"`.
+- **`{secret:<name>:<key>}`** — a Kubernetes secret value, fetched via `kubectl get secret <name> -n <namespace> --context <context> -o jsonpath='{.data.<key>}'` and base64-decoded, through a new `IKubernetesSecretReader` seam (mirrors `IGitClient`/`IPortAllocator` — fake-able in unit tests, no real `kubectl` invocation there). Usable by both `"direct"` and `"kubernetes"`.
 
 ### Secret fetches are deferred, not synchronous
 
@@ -254,14 +284,14 @@ Verified behavior against Aspire 13.4.2:
 
 Consequences for the rest of the design: the connection string is assembled at `AddBackingService()` time as a `ReferenceExpression` (structure fixed early, values late), `{port}` stays an eager literal substitution (the port is known synchronously), and secret-fetch failures surface at start time as a failed parameter resolution rather than as a constructor throw. The `IKubernetesSecretReader` seam is synchronous (`Func<string>` is the only callback shape `AddParameter` offers), so a fetch blocks one start-time resolution; that is acceptable, but the reader should carry its own timeout rather than inheriting `kubectl`'s default.
 
-This mechanism reuses one path for both "just the password is secret" (`Password={secret:orders-creds:password}`) and, for `"external"`, "the whole connection string is one secret value" (`connectionString: "{secret:orders-full-cs:connectionString}"`). See Open Questions for why the whole-string case doesn't extend cleanly to `"kubernetes"`.
+This mechanism reuses one path for both "just the password is secret" (`Password={secret:orders-creds:password}`) and, for `"direct"`, "the whole connection string is one secret value" (`connectionString: "{secret:orders-full-cs:connectionString}"`). See Open Questions for why the whole-string case doesn't extend cleanly to `"kubernetes"`.
 
 ## Error Handling
 
 Fail fast at `AddBackingService()`-call time, naming the backing service and the missing field — same philosophy as the existing service sources:
 
 - `"kubernetes"` missing `service`, `port`, `context`, or `connectionString`.
-- `"external"` missing `connectionString`.
+- `"direct"` missing `connectionString`.
 - A `{port}` placeholder present for a source where it isn't resolvable, or a `{secret:...}` placeholder with no `context`/`namespace` to resolve it against.
 - A malformed placeholder (e.g. `{secret:name}` with no key) — caught by parsing at `Add`-time even though the *fetch* is deferred.
 - Whole-string mode selected but the local port matching the configured remote `port` is already in use — named explicitly, since this mode deliberately bypasses `IPortAllocator`.
@@ -273,7 +303,7 @@ Runtime errors (`kubectl` not on `PATH`, secret not found, invalid context) surf
 - Config parsing: new `backingServices:` section, each fail-fast path, leftover-field rejection.
 - Placeholder handling: `{port}` literal substitution and `{secret:name:key}` → `ParameterResource` wiring, including multiple placeholders and mixed use, via fake `IPortAllocator`/`IKubernetesSecretReader` — no real socket or `kubectl` calls.
 - **Deferral:** assert the fake secret reader is *not* called during `AddBackingService()`, is called on first expression resolution, and is called exactly once across repeated resolutions.
-- Source dispatch: `"local"` invokes the given factory and nothing else; `"external"`/`"kubernetes"` build the expected `ConnectionStringResource`; `"kubernetes"` additionally builds the expected port-forward `AddExecutable` args (reusing `KubernetesSource.BuildPortForwardArgs`-style coverage).
+- Source dispatch: `"local"` invokes the given factory and nothing else; `"direct"`/`"kubernetes"` build the expected `ConnectionStringResource`; `"kubernetes"` additionally builds the expected port-forward `AddExecutable` args (reusing `KubernetesSource.BuildPortForwardArgs`-style coverage).
 - Consumption through the shipped `Configure<T>`: `Configure<IResourceWithEnvironment>(r => r.WithReference(db))` reaches a `"local"`- and a `"container"`-sourced service, and is skipped-and-warned for `"kubernetes"`/`"url"`; `Configure<IResourceWithWaitSupport>(r => r.WaitFor(db))` is additionally honoured for `"kubernetes"`. These assert existing behaviour against a backing-service argument rather than testing new code, and exist to catch a regression in the interaction.
 - The `WaitFor` shim: exercised through both a project-sourced and a container-sourced service, asserting the cast never throws.
 - `"kubernetes"` attaches a health check annotation to the returned resource (regression guard for the `WaitFor` gap found by prototype).
@@ -304,7 +334,7 @@ var backingService = builder.AddConnectionString(name, expr)
 
 With the health check attached, the same consumer reached `Running` at 11.5s — i.e. it genuinely waited for the tunnel. `WaitFor` waits for Running *and* healthy, so this makes `.WaitFor(ordersDb)` mean what an AppHost author expects.
 
-**This makes the health check a required part of the `"kubernetes"` branch, not an optional nicety** — without it, `WaitFor` on a kubernetes-sourced backing service is decorative. It should be added to the Architecture section's `"kubernetes"` bullet and covered by a test that asserts the health check annotation is present. The `"external"` branch has the same gap in principle (nothing is being waited on), but there the developer is pointing at something they already run, so a connectivity check is a convenience rather than a correctness fix; making it opt-in via a config flag is probably right, and is left open.
+**This makes the health check a required part of the `"kubernetes"` branch, not an optional nicety** — without it, `WaitFor` on a kubernetes-sourced backing service is decorative. It should be added to the Architecture section's `"kubernetes"` bullet and covered by a test that asserts the health check annotation is present. The `"direct"` branch has the same gap in principle (nothing is being waited on), but there the developer is pointing at something they already run, so a connectivity check is a convenience rather than a correctness fix; making it opt-in via a config flag is probably right, and is left open.
 
 ## Resolved Against a Real Cluster
 
@@ -376,6 +406,4 @@ Port-forwarding the operator-created `orders-pg-rw` Service to a local port and 
 
 **Whether `servicesources.yaml` should be involved at all.** This draft keeps all backing-service config in local.json, reasoning that catalog data would only ever matter for `"kubernetes"` and be thin (`service`/`port`). But since `connectionString` can be secret-backed via `{secret:name:key}` placeholders rather than embedding literal credentials, the *template itself* may contain no actual secret material. If so, it (along with `service`/`port`) could live in the catalog as shared, committed, team-wide data instead of being hand-copied into every developer's local.json, mirroring the services split (catalog = shared identity, local.json = per-developer environment choice) more closely than this draft does. Worth revisiting once it's clear how often a team's `connectionString` template really is secret-free versus genuinely varying per developer (e.g. a personal username). This is now a question about config ergonomics alone: the guest-language pressure that used to push a declarative local spec into the catalog is gone.
 
-**Whether `"external"` should get an opt-in connectivity health check.** The `"kubernetes"` branch now requires one (see Resolved by Prototype). `"external"` points at something the developer already runs, so a check there is a convenience — it turns "connection refused, deep in your app's startup" into "this backing service is unhealthy" on the dashboard. Probably a `"healthCheck": true` config flag; not designed here.
-
-**The name of the direct-connection source.** Currently `"external"`, which is the weakest name in the schema: Aspire already uses "external" for `AddExternalService` (an external *HTTP* service), and the service-side source meaning the same thing — "a fixed address of something already running that we do not manage" — is called `"url"`. Reusing `"url"` would maximise consistency but misdescribes an ADO.NET-style `Host=…;Port=…` string; `"existing"` or `"connectionString"` are accurate but break the parallel with the service-side vocabulary. Not settled.
+**Whether `"direct"` should get an opt-in connectivity health check.** The `"kubernetes"` branch now requires one (see Resolved by Prototype). `"direct"` points at something the developer already runs, so a check there is a convenience — it turns "connection refused, deep in your app's startup" into "this backing service is unhealthy" on the dashboard. Probably a `"healthCheck": true` config flag; not designed here.
