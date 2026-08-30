@@ -1,10 +1,23 @@
 # Aspire.Hosting.ServiceSources — Backing Service Source Design
 
-**Status:** Draft — revised 2026-08-22 against `main` at #62, which removed the `ServiceResource` facade and shipped `Configure<T>`/`As<T>`; the proposed `AddService(configure:)` parameter and `WaitFor` shim are withdrawn as a result, and `AddBackingService` is now the design's only new public surface. Earlier questions were settled by prototype and against a `kind` cluster; the open items are a guest-language gap introduced by #51 and two team decisions. See Revision Notes.
-**Date:** 2026-08-15 (revised 2026-08-21, 2026-08-22)
+**Status:** Draft — revised 2026-08-22 against `main` at #62, which removed the `ServiceResource` facade and shipped `Configure<T>`/`As<T>`; the proposed `AddService(configure:)` parameter and `WaitFor` shim are withdrawn as a result, and `AddBackingService` is now the design's only new public surface. Revised again 2026-08-30, when the supposed guest-language gap turned out not to exist. Earlier questions were settled by prototype and against a `kind` cluster; what remains is three team decisions. See Revision Notes.
+**Date:** 2026-08-15 (revised 2026-08-21, 2026-08-22, 2026-08-30)
 **Scope:** Extends the local-vs-kubernetes source-switching model from services to the backing resources a service connects to: databases (Postgres, SQL Server) and, on exactly the same mechanism, message brokers and caches (RabbitMQ, Redis, …). The mechanism is connection-string-based and backend-agnostic — see [Generalization](#generalization-beyond-databases), where this is verified rather than assumed. Closes out the "Database/queue source switching" item from the [phase 2 reference doc](2026-08-09-servicesources-phase2-future-work.md) and [issue #10](https://github.com/flojon/aspire-servicesources/issues/10).
 
 ## Revision Notes
+
+### 2026-08-30 — the guest-language gap was never real
+
+The 2026-08-22 revision introduced one new open question and called it the design's largest piece of unfinished work: that `AddBackingService`'s `local` callback could not cross the ATS boundary, leaving the `"local"` source C#-only. It was reasoned from two *measured* ATS limits (generics lose their type parameter, overloads are silently dropped) rather than measured itself.
+
+A prototype disproved it. Callbacks are a first-class ATS category, the exact proposed signature generates working TypeScript, and a guest lambda can call back into the host and return a resource handle. Changes here:
+
+- `[AspireExportIgnore]` is dropped from `AddBackingService` in favour of `[AspireExport(RunSyncOnBackgroundThread = true)]`.
+- [Guest-language exports](#guest-language-exports) is rewritten around what was measured.
+- The guest-language open question is removed, and the catalog question loses the pressure it was exerting.
+- A new implementation constraint takes its place: the delegate must not be invoked synchronously on the RPC thread, which `ASPIREEXPORT010` enforces at build time.
+
+The general lesson is worth keeping: this document's ATS claims have twice been extrapolations from adjacent limits, and both times a probe was cheaper than the reasoning. Prototype the boundary rather than inferring it.
 
 ### 2026-08-22 — rebased onto #62 and the work merged with it
 
@@ -15,7 +28,7 @@
 - **Reachability is per capability *and* source**, via `IsUnreachable<T>` and `ServiceSourceAnnotation`, with skip-and-log rather than silent loss. Notably `Configure<IResourceWithWaitSupport>` **is** honoured for `"kubernetes"`, which contradicts this design's earlier claim that backing-service wiring only ever matters for locally-running services.
 - **Local resolution is synchronous again.** `PendingLocalResolutions` is gone, replaced by `LocalCheckoutPrefetch`: clones for every `"local"` service start together on the first `AddService`, but `Resolve()` blocks on its own checkout and calls `builder.AddProject(...)` inline. The `BeforeStartEvent` ordering analysis below is therefore moot — retained only as a record of what was measured.
 - **`ILocalResourceKind` (#41/#55)** means a `"local"` service can resolve to a resource type this package has never heard of. Anything this design says about "the two resource types the callback may see" no longer holds; capability-based `Configure<T>` handles it.
-- **Guest-language AppHosts (#51, and `ServiceConfigurationExports`)** consume this package through ATS, where generic methods lose their type parameter and overloads are silently dropped. That is a new constraint on `AddBackingService`'s surface — see [Guest-language exports](#guest-language-exports).
+- **Guest-language AppHosts (#51, and `ServiceConfigurationExports`)** consume this package through ATS, where generic methods lose their type parameter and overloads are silently dropped. This revision took that to constrain `AddBackingService`'s surface; the 2026-08-30 revision above found the constraint it inferred was not real — see [Guest-language exports](#guest-language-exports).
 
 ### Earlier — corrections against the tree at PR #12
 
@@ -41,7 +54,7 @@ This is a different shape of problem than the service case, for three reasons:
 ### `AddBackingService()`
 
 ```csharp
-[AspireExportIgnore]   // the `local` callback cannot cross ATS — see Guest-language exports
+[AspireExport(RunSyncOnBackgroundThread = true)]   // see Guest-language exports
 public static IResourceBuilder<IResourceWithConnectionString> AddBackingService(
     this IDistributedApplicationBuilder builder,
     [ResourceName] string name,
@@ -49,6 +62,8 @@ public static IResourceBuilder<IResourceWithConnectionString> AddBackingService(
 ```
 
 `[ResourceName]` matches `AddService` and lets Aspire's own naming analyzers (enabled package-wide in #61) validate call sites.
+
+`RunSyncOnBackgroundThread = true` is load-bearing, not decoration. `AddBackingService` invokes `local` synchronously, and for a guest-language AppHost that invoke travels back over JSON-RPC while the host is still inside the capability call — which deadlocks unless the dispatcher moves it off the RPC thread. Aspire's `ASPIREEXPORT010` analyzer catches the omission at build time. See [Guest-language exports](#guest-language-exports) for the measurement.
 
 (On the method name, and why it isn't `AddDatabase`, see [Naming](#naming).)
 
@@ -138,15 +153,26 @@ This document uses `AddBackingService` throughout, with `backingServices:` as th
 
 ### Guest-language exports
 
-#51 exports `AddService` to TypeScript AppHosts through ATS, and #62 had to add non-generic `ServiceConfigurationExports` shims because ATS drops a generic method's type parameter and silently keeps only the first overload of a name. `AddBackingService` inherits a harder version of that problem: **its `local` parameter is a `Func<>` returning a resource builder, and a callback cannot cross the ATS boundary at all.**
+#51 exports `AddService` to TypeScript AppHosts through ATS, and #62 had to add non-generic `ServiceConfigurationExports` shims because ATS drops a generic method's type parameter and silently keeps only the first overload of a name. Those two limits are real and measured. A previous revision of this section extrapolated from them to a third — that `AddBackingService`'s `local` parameter, being a `Func<>` returning a resource builder, could not cross the ATS boundary at all — and called it the largest piece of unfinished work in the design.
 
-The consequences, none of which have been prototyped:
+**That extrapolation was wrong, and prototyping it is what showed so.** Callbacks are a first-class ATS category, and the exact proposed signature works end to end.
 
-- The `"external"` and `"kubernetes"` branches are fine — they need no callback, only config, and produce a `ConnectionStringResource` like any other.
-- The `"local"` branch has no guest-language equivalent as designed. A TypeScript AppHost cannot pass a lambda that calls `builder.AddPostgres(...)`.
-- The obvious answer is to make the local case *declarative for guest languages only* — image, tag, port in the catalog, the way the `"container"` service source already works — which reopens the [config-schema question](#config-schema) this design deliberately closed by keeping the catalog untouched.
+- **ATS models delegates deliberately.** `AtsTypeCategory.Callback` is documented as "callback types (delegates) that are registered and invoked by ID," and `AtsParameterInfo` carries `IsCallback`, `CallbackParameters` and `CallbackReturnType`, with callbacks "inferred from delegate types (Func, Action, custom delegates)."
+- **The signature exports and generates TypeScript.** A probe method with `AddBackingService`'s exact shape compiles under `[AspireExport]` and generates `probeFuncReturnsHandle(name: string, local: () => Promise<ResourceWithConnectionString>): ResourceWithConnectionStringPromise`, whose implementation registers the guest lambda (`registerCallback`) and passes its id across the wire. Aspire's own `addHealthCheck(name, check: () => Promise<HealthCheckResult>)` sits in the same generated interface, so this is a supported path rather than an accident.
+- **It runs, including reentrantly.** Under `aspire run`, the host invoked the guest lambda, the lambda called *back* into the host to create a resource while the host was still awaiting it, and the resulting handle round-tripped as the callback's return value — about 54 ms end to end, after which the app started normally.
 
-This is a genuinely new constraint introduced after the design was written, and it is the largest piece of unfinished work remaining. Left as an open question rather than answered here.
+So the `"local"` source has a guest-language equivalent, and it is the natural one:
+
+```ts
+const ordersDb = await builder.addBackingService('orders-db',
+    async () => builder.addPostgres('orders-pg').addDatabase('orders'));
+```
+
+`[AspireExportIgnore]` is therefore unnecessary, and no declarative local spec has to be invented for guest languages.
+
+**One genuine constraint replaces it.** Invoking the delegate synchronously from the exported method deadlocks the JSON-RPC channel: the first probe run hung and the host logged `ConnectionLostException` against the capability. This is not a surprise so much as a documented rule — Aspire's `ASPIREEXPORT010` analyzer had already flagged it at build time ("directly or transitively invokes synchronous delegate parameter … defer the callback, expose an async delegate, or set `RunSyncOnBackgroundThread = true` to avoid polyglot deadlocks"). Setting `RunSyncOnBackgroundThread = true` was the only change between the deadlocking run and the passing one. Any of the three remedies would do; this design takes the attribute because `AddBackingService` wants `local`'s result synchronously, and the analyzer enforces the choice at build time either way.
+
+Measured on Aspire 13.5.1 (the CLI available locally, below this repo's 13.5.2 floor), with the callback returning a `ConnectionStringResource` from `addConnectionString` rather than a real `addPostgres(...).addDatabase(...)` — the same handle marshalling, but the fuller shape and the floor/latest matrix legs are worth re-checking during implementation. Full write-up and reproduction steps: `2026-08-30-ats-callback-spike-findings.md`.
 
 ## Generalization Beyond Databases
 
@@ -253,6 +279,7 @@ Runtime errors (`kubectl` not on `PATH`, secret not found, invalid context) surf
 - `"kubernetes"` attaches a health check annotation to the returned resource (regression guard for the `WaitFor` gap found by prototype).
 - Whole-string mode: a template that is exactly one `{secret:...}` placeholder selects same-port forwarding; the resolved value has every in-cluster host form (`<service>`, `.<namespace>`, `.svc`, `.svc.cluster.local`) replaced and the port left untouched; a mixed template does not select the mode; an occupied local port fails fast with the backing service and port named.
 - End-to-end, in the style of `AddServiceIntegrationTests`: a `"local"`-sourced service configured with `.Configure<IResourceWithEnvironment>(r => r.WithReference(db))` has `ConnectionStrings__<name>` in its materialised environment.
+- The ATS export shape: a build-time assertion that `AddBackingService` raises no `ASPIREEXPORT010`, since dropping `RunSyncOnBackgroundThread` deadlocks guest-language AppHosts at run time rather than failing anything C# — the same class of silent gap #88 exists to close for the rest of the export surface. Whether this belongs in CI alongside #88 or as a warnings-as-errors setting is an implementation call.
 
 ## Resolved by Prototype
 
@@ -347,9 +374,7 @@ Port-forwarding the operator-created `orders-pg-rw` Service to a local port and 
 
 ## Open Questions
 
-**How guest-language AppHosts declare a `"local"` backing service.** The `local` factory is a C# callback and cannot cross ATS, so as designed `AddBackingService` is C#-only for that source. See [Guest-language exports](#guest-language-exports). This is the largest open item and it interacts with the catalog question below: a declarative local spec would most naturally live in `servicesources.yaml`.
-
-**Whether `servicesources.yaml` should be involved at all.** This draft keeps all backing-service config in local.json, reasoning that catalog data would only ever matter for `"kubernetes"` and be thin (`service`/`port`). But since `connectionString` can be secret-backed via `{secret:name:key}` placeholders rather than embedding literal credentials, the *template itself* may contain no actual secret material. If so, it (along with `service`/`port`) could live in the catalog as shared, committed, team-wide data instead of being hand-copied into every developer's local.json, mirroring the services split (catalog = shared identity, local.json = per-developer environment choice) more closely than this draft does. Worth revisiting once it's clear how often a team's `connectionString` template really is secret-free versus genuinely varying per developer (e.g. a personal username).
+**Whether `servicesources.yaml` should be involved at all.** This draft keeps all backing-service config in local.json, reasoning that catalog data would only ever matter for `"kubernetes"` and be thin (`service`/`port`). But since `connectionString` can be secret-backed via `{secret:name:key}` placeholders rather than embedding literal credentials, the *template itself* may contain no actual secret material. If so, it (along with `service`/`port`) could live in the catalog as shared, committed, team-wide data instead of being hand-copied into every developer's local.json, mirroring the services split (catalog = shared identity, local.json = per-developer environment choice) more closely than this draft does. Worth revisiting once it's clear how often a team's `connectionString` template really is secret-free versus genuinely varying per developer (e.g. a personal username). This is now a question about config ergonomics alone: the guest-language pressure that used to push a declarative local spec into the catalog is gone.
 
 **Whether `"external"` should get an opt-in connectivity health check.** The `"kubernetes"` branch now requires one (see Resolved by Prototype). `"external"` points at something the developer already runs, so a check there is a convenience — it turns "connection refused, deep in your app's startup" into "this backing service is unhealthy" on the dashboard. Probably a `"healthCheck": true` config flag; not designed here.
 
