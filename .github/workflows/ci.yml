@@ -286,9 +286,8 @@ jobs:
           if-no-files-found: ignore
 
   verify-invariants:
-    # Its own job rather than steps on the build: these read files and need neither a restore
-    # nor a compile, so they report in seconds instead of behind the build they would
-    # otherwise queue against.
+    # Its own job: these read files and need neither a restore nor a compile, so they report
+    # in seconds instead of behind the build they would otherwise queue against.
     name: 🤖 verify repo invariants
     runs-on: ubuntu-latest
     permissions:
@@ -301,28 +300,22 @@ jobs:
         with:
           python-version: "3.x"
 
-      # PyYAML rather than grep: the two dependabot.yml checks below are about YAML structure
-      # - which keys are siblings, and which of them survive parsing - and neither is
-      # answerable by matching lines.
+      # grep answers neither dependabot.yml question below: both are about YAML structure -
+      # which keys are siblings, and which of them survive parsing.
       - name: Install PyYAML
         run: pip install --quiet pyyaml
 
-      # Two invariants that dependabot.yml states in prose and nothing enforces.
+      # Two invariants dependabot.yml states in prose and nothing enforces.
       #
-      # The first is that the `ignore` list covers every floor in src/Directory.Packages.props.
-      # Directory scoping does not keep Dependabot out of src/ - the test projects carry a
-      # ProjectReference into it, and the NuGet updater walks that graph and edits whatever
-      # Directory.Packages.props declares the id it decided to bump (#80, #89). The per-id
-      # `ignore` list is what actually holds, and it is maintained by hand because there is no
-      # wildcard for "whatever that file declares". So a satellite that takes on a new
-      # dependency is one edit away from a floor Dependabot is free to raise, and the failure
-      # is silent: a green PR that moves a version consumers inherit.
+      # That the nuget `ignore` list covers every floor in src/Directory.Packages.props:
+      # directory scoping does not keep the updater out of src/ (that file's header, #80,
+      # #89), so the per-id list is what actually holds - maintained by hand, since there is
+      # no wildcard for "whatever that file declares". A satellite taking on a new dependency
+      # is one edit away from a floor Dependabot may raise, silently.
       #
-      # The second is that no key in the file is duplicated. Two `ignore` keys landed in the
-      # same mapping once already, one from each fix for the problem above; YAML keeps the
-      # last, so the earlier list parsed and was discarded while still reading as authoritative
-      # and still instructing the reader to maintain it. That cost nothing only because the
-      # surviving list happened to be a superset of the discarded one.
+      # And that no key is duplicated. Two `ignore` keys in one mapping has happened here:
+      # YAML keeps the last, so the earlier list parsed and was discarded while still reading
+      # as authoritative.
       - name: Verify Dependabot ignores every floor in src/
         run: |
           python3 - <<'EOF'
@@ -369,9 +362,8 @@ jobs:
           with open(FLOORS) as f:
               declared = set(re.findall(r'<PackageVersion\s+Include="([^"]+)"', f.read()))
 
-          # Nothing matched means the file moved or stopped declaring versions this way, not
-          # that there is nothing to check: without this the comparison below is empty against
-          # empty and passes for as long as it keeps being wrong.
+          # Not "nothing to check": an empty set compares clean against anything, so without
+          # this the step passes for as long as it keeps reading the wrong file.
           if not declared:
               print(
                   f"::error file={FLOORS}::no PackageVersion found here - this check is not "
@@ -398,21 +390,12 @@ jobs:
           sys.exit(1 if failed else 0)
           EOF
 
-      # A third invariant, about a different file pair - and the reason Aspire.Hosting.AppHost
-      # sits in that ignore list at all, since it is the one id there that is not a floor.
-      #
-      # An AppHost states its Aspire version twice. Once as the Aspire.Hosting.AppHost package,
-      # which under central package management means the root Directory.Packages.props; and
-      # once as `<Sdk Name="Aspire.AppHost.Sdk" Version="..." />` in the csproj, which central
-      # package management does not reach because an MSBuild SDK reference is not a
-      # PackageReference. Nothing ties the two together.
-      #
-      # Letting them drift is the split Aspire family this repository warns consumers about,
-      # reproduced in its own sample: the SDK pins the DCP and dashboard packages to the
-      # version the *project* declares, so a raised package version with the SDK left behind
-      # mixes one Aspire version's hosting assemblies with another's orchestrator. That builds
-      # green - the mismatch is between packages, not against the compiler - and surfaces when
-      # the AppHost is run, which is only the smoke tests and only for the sources they cover.
+      # A third invariant, and the reason Aspire.Hosting.AppHost is in that ignore list at all
+      # rather than being a floor. An AppHost states its Aspire version twice - as the
+      # Aspire.Hosting.AppHost package, central in the root Directory.Packages.props, and as an
+      # MSBuild SDK reference in the csproj, which central package management does not reach.
+      # Split, they mix one Aspire version's hosting assemblies with another's orchestrator:
+      # green at build time, broken when the AppHost runs. See dependabot.yml on that id.
       - name: Verify the AppHost package and SDK versions match
         run: |
           python3 - <<'EOF'
@@ -423,9 +406,7 @@ jobs:
           SDK = "Aspire.AppHost.Sdk"
 
           # ElementTree rather than a regex like the check above: this reads two attributes off
-          # one element, and MSBuild fixes no order between them, so a pattern anchored on
-          # whichever comes first here would miss an equally valid file. These project files
-          # declare no xmlns, so the tags come back unqualified.
+          # one element and MSBuild fixes no order between them. No xmlns, so tags are plain.
           declared = [
               e.get("Version")
               for e in ET.parse(CENTRAL).getroot().iter("PackageVersion")
@@ -435,18 +416,16 @@ jobs:
           if len(declared) != 1:
               print(
                   f"::error file={CENTRAL}::expected exactly one PackageVersion for {PACKAGE} "
-                  f"here, found {len(declared)} - this check is not reading what it thinks it "
-                  f"is, and cannot say what the SDK is supposed to match"
+                  f"here, found {len(declared)} - so this check cannot say what the SDK is "
+                  f"supposed to match"
               )
               sys.exit(1)
 
           version = declared[0]
 
-          # Found by the SDK reference itself rather than by a hardcoded path: a second AppHost
-          # project inherits the check instead of quietly falling outside it. Both spellings
-          # count - the `<Sdk Name=... Version=... />` element this repository uses, and the
-          # `Sdk="Name/Version"` attribute on <Project> that is the same reference written
-          # inline.
+          # Found by the SDK reference rather than by path, so a second AppHost inherits the
+          # check instead of quietly falling outside it. Both spellings count: the `<Sdk />`
+          # element used here, and the equivalent `Sdk="Name/Version"` attribute on <Project>.
           apphosts = []
           for path in sorted(glob.glob("**/*.csproj", recursive=True)):
               project = ET.parse(path).getroot()
@@ -458,9 +437,8 @@ jobs:
                   if name == SDK:
                       apphosts.append((path, inline or None))
 
-          # No AppHost at all means the sample moved or changed shape, not that the versions
-          # agree: without this the loop below runs zero times and the step passes for as long
-          # as it keeps looking in the wrong place.
+          # Not "the versions agree": the loop below would run zero times and pass for as long
+          # as this kept looking in the wrong place.
           if not apphosts:
               print(
                   f"::error::no project in this repository references the {SDK} MSBuild SDK - "
@@ -474,16 +452,15 @@ jobs:
               if sdk_version is None:
                   print(
                       f"::error file={path}::this project references {SDK} without a version, "
-                      f"so the SDK resolves from global.json rather than from the version the "
-                      f"project declares. Pin it to {version}, matching {PACKAGE}."
+                      f"so the SDK resolves from global.json rather than from the project. "
+                      f"Pin it to {version}, matching {PACKAGE}."
                   )
                   failed = True
               elif sdk_version != version:
                   print(
                       f"::error file={path}::{SDK} is pinned to {sdk_version} here, but "
-                      f"{PACKAGE} is {version} in {CENTRAL}. The SDK pins the DCP and dashboard "
-                      f"packages to the version the project declares, so these two have to move "
-                      f"together - split, they build green and mix Aspire versions at run time."
+                      f"{PACKAGE} is {version} in {CENTRAL}. These move together - split, the "
+                      f"build stays green and the AppHost mixes Aspire versions at run time."
                   )
                   failed = True
               else:
