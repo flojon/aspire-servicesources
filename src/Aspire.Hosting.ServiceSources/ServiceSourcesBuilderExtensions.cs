@@ -89,7 +89,15 @@ public static class ServiceSourcesBuilderExtensions
     /// always did, and a service whose checkout already exists — every service on every run after
     /// the first — resolves eagerly, with full launch-profile fidelity, exactly as it does without
     /// this call. Services with a <c>path</c> override are never deferred either; that directory is
-    /// the developer's own and there is nothing to clone.
+    /// the developer's own and there is nothing to clone. Neither is anything outside run mode:
+    /// <c>aspire publish</c> and manifest generation clone first as they always have, because a
+    /// manifest written from a repository that is not on disk would describe a project without its
+    /// endpoints or its profile environment.
+    /// </para>
+    /// <para>
+    /// The launch profile's environment is put back once the clone lands, and only where the
+    /// AppHost has not already set the same key — expanded, and alongside
+    /// <c>DOTNET_LAUNCH_PROFILE</c>, exactly as a warm run applies it.
     /// </para>
     /// <para>
     /// A deferred service should declare its own endpoints in the AppHost, because a project's

@@ -258,6 +258,11 @@ key, so `WithEnvironment` and `WithReference` still win. That matters more than 
 repositories set in the launch profile and nowhere else, so without this a deferred service runs
 as `Production` while every warm run of it runs as `Development`.
 
+Values are expanded and `DOTNET_LAUNCH_PROFILE` is set, both as Aspire does them on a warm run,
+and the profile read is the one Aspire itself will select — the one `DOTNET_LAUNCH_PROFILE` names
+if it names one, otherwise the first launchable profile in the file. So the process never ends up
+with one profile's environment and another's arguments.
+
 Endpoints can't be, because ports are allocated during composition and the spec is frozen. So a
 deferred service carries only the endpoints you declare:
 
@@ -282,6 +287,9 @@ Scoped deliberately narrowly, so the blast radius is first-run-only:
 - Only managed checkouts. A `path` override is your own directory; there is nothing to clone.
 - Only the `dotnet` kind. The `java` and `javascript` kinds carry their own `port` in the kind
   block and resolve eagerly either way.
+- Only run mode. `aspire publish` and manifest generation clone first as they always have; a
+  manifest written from a repository that isn't on disk would describe a project without its
+  endpoints or its profile environment.
 
 Off by default: a service that used to be running by the time `Build()` returned is started
 after it instead, which is visible to anything in your AppHost that assumed otherwise. Call it

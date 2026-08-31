@@ -317,12 +317,18 @@ internal sealed class DeferredCheckout
             }
         }));
 
+        // Counted from what the callback above sets, DOTNET_LAUNCH_PROFILE included — a profile
+        // with no environmentVariables of its own still restores that one, and a log saying
+        // nothing was applied would send a developer looking for a bug that isn't there.
+        var applied = new List<string>(profile.EnvironmentVariables.Count + 1) { "DOTNET_LAUNCH_PROFILE" };
+        applied.AddRange(profile.EnvironmentVariables.Keys);
+
         logger.LogInformation(
             "Applied {Count} environment variable(s) from the checkout's launch profile '{Profile}' ({Names}), "
             + "which Aspire could not read while composing the AppHost.",
-            profile.EnvironmentVariables.Count,
+            applied.Count,
             profileName,
-            string.Join(", ", profile.EnvironmentVariables.Keys));
+            string.Join(", ", applied));
     }
 
     /// <summary>
