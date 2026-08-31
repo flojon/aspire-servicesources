@@ -801,6 +801,17 @@ without the file being touched:
 | Environment variables | yes |
 | Command-line arguments | yes |
 
+> **The `appsettings` layers need the file in the AppHost's output directory.** An AppHost project
+> ships no `appsettings.json`, so unlike a web project it has no item copying that pattern to
+> `bin/`, and a file placed beside the `.csproj` is silently never found — there is no error,
+> the layer is simply absent. Add it explicitly:
+>
+> ```xml
+> <ItemGroup>
+>   <Content Include="appsettings*.json" CopyToOutputDirectory="PreserveNewest" />
+> </ItemGroup>
+> ```
+
 The immediate payoff is a **single run** with a different source and no edit to a file you'd have to
 remember to change back:
 
@@ -834,9 +845,21 @@ env:
 }
 ```
 
-and choose it per run with `dotnet run -- --environment Cluster`, or by setting
-`DOTNET_ENVIRONMENT=Cluster`. Note the extra `ServiceSources` root: inside the AppHost's shared
-configuration the entries are namespaced, while `servicesources.local.json` keeps its bare
+and choose it per run by passing the environment as an argument to the AppHost:
+
+```bash
+aspire run -- --environment Cluster     # everything after -- goes to the AppHost
+dotnet run -- --environment Cluster     # or launching the AppHost directly
+```
+
+**`DOTNET_ENVIRONMENT=Cluster` does not work under `aspire run`.** The CLI sets
+`ASPNETCORE_ENVIRONMENT` and `DOTNET_ENVIRONMENT` to `Development` itself when it launches the
+AppHost, so a value exported in your shell is overwritten and the profile is silently not
+selected — you get the base file's selection with no indication that the profile was ignored.
+The variable route only works when you run the AppHost yourself with `dotnet run`. The
+command-line form above works in both.
+
+Note the extra `ServiceSources` root: inside the AppHost's shared configuration the entries are namespaced, while `servicesources.local.json` keeps its bare
 `services` root because it is a file of ours, read from the AppHost directory and re-keyed as it
 joins the chain.
 
