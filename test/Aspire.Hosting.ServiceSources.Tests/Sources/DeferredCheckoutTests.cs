@@ -1,3 +1,4 @@
+using System.Net.Sockets;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Git;
@@ -214,7 +215,7 @@ public class DeferredCheckoutTests
     }
 
     [Fact]
-    public async Task DeferredServiceWithoutDeclaredEndpoints_FailsAtBeforeStartEventNamingTheFix()
+    public async Task DeferredServiceWithoutDeclaredEndpoints_IsNotRefused()
     {
         var dir = CreateAppHostDirectory("orders");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
@@ -224,36 +225,156 @@ public class DeferredCheckoutTests
         var gate = git.BlockFor("https://example.com/orders.git");
         new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
 
-        var ex = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(
-            () => TestHelpers.PublishBeforeStartEventAsync(builder));
-
-        // A deferred project has no launch profile to take endpoints from, and nothing re-runs that
-        // step after the checkout lands, so a service that declares none would come up unreachable.
-        Assert.Contains("orders", ex.Message);
-        Assert.Contains("WithHttpEndpoint", ex.Message);
+        // A run-to-completion worker has no applicationUrl on either path, so it cannot declare an
+        // endpoint honestly and must not have to. Whether the project actually wanted one is a
+        // question the landed checkout answers — see the LaunchProfileEndpointWarning tests — not a
+        // reason to refuse the run before the repository is even on disk.
+        await TestHelpers.PublishBeforeStartEventAsync(builder);
 
         gate.Set();
     }
 
     [Fact]
-    public async Task DeferredServiceWithDeclaredEndpoint_PassesBeforeStartEvent()
+    public void LaunchProfileEndpointWarning_ProfileDeclaresNoApplicationUrl_SaysNothing()
     {
-        var dir = CreateAppHostDirectory("orders");
-        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        var projectFile = WriteProjectWithLaunchProfile(applicationUrl: null);
 
-        var git = new FakeGitClient();
-        var gate = git.BlockFor("https://example.com/orders.git");
+        // The worker case: no endpoints declared, none wanted, nothing diverges from the warm path.
+        Assert.Null(DeferredCheckout.LaunchProfileEndpointWarning(
+            "orders", LandedLaunchProfile.Read(projectFile), new ProjectResource("orders")));
+    }
 
-        // The line an AppHost adds to opt a service into deferral — and the same line is correct on
-        // a warm checkout, where every argument is null and the existing endpoint is left alone.
-        new LocalProjectSource(git)
-            .Resolve(builder, "orders", Metadata("orders"), DevConfig())
-            .WithHttpEndpoint();
+    [Fact]
+    public void LaunchProfileEndpointWarning_ProfileDeclaresOne_NamesTheUrlAndTheFix()
+    {
+        var projectFile = WriteProjectWithLaunchProfile("http://localhost:8081");
 
-        await TestHelpers.PublishBeforeStartEventAsync(builder);
+        var warning = DeferredCheckout.LaunchProfileEndpointWarning(
+            "orders", LandedLaunchProfile.Read(projectFile), new ProjectResource("orders"));
 
-        gate.Set();
+        // Reported at the only moment the real URL is knowable, which is why it can quote it.
+        Assert.NotNull(warning);
+        Assert.Contains("http://localhost:8081", warning);
+        Assert.Contains("orders", warning);
+        Assert.Contains("WithHttpEndpoint", warning);
+    }
+
+    [Fact]
+    public void LaunchProfileEndpointWarning_EndpointDeclaredInTheAppHost_SaysNothing()
+    {
+        var projectFile = WriteProjectWithLaunchProfile("http://localhost:8081");
+
+        var resource = new ProjectResource("orders");
+        resource.Annotations.Add(new EndpointAnnotation(ProtocolType.Tcp, name: "http"));
+
+        Assert.Null(DeferredCheckout.LaunchProfileEndpointWarning(
+            "orders", LandedLaunchProfile.Read(projectFile), resource));
+    }
+
+    [Fact]
+    public void LaunchProfileEndpointWarning_NoLaunchSettingsAtAll_SaysNothing()
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        var projectFile = Path.Combine(dir, "Service.csproj");
+        File.WriteAllText(projectFile, "<Project />");
+
+        Assert.Null(DeferredCheckout.LaunchProfileEndpointWarning(
+            "orders", LandedLaunchProfile.Read(projectFile), new ProjectResource("orders")));
+    }
+
+    [Fact]
+    public void LandedLaunchProfile_RecoversTheEnvironmentCompositionCouldNotRead()
+    {
+        var projectFile = WriteProjectWithLaunchProfile(
+            "http://localhost:8081;https://localhost:8443",
+            environmentVariables: "\"DOTNET_ENVIRONMENT\": \"Development\", \"FOO\": \"bar\"");
+
+        var profile = LandedLaunchProfile.Read(projectFile);
+
+        // DOTNET_ENVIRONMENT is the one that matters: Host.CreateDefaultBuilder takes the
+        // environment name from it, and most repositories set it in the launch profile and nowhere
+        // else — so losing it runs a deferred service as Production while every warm run is
+        // Development.
+        Assert.Equal("Development", profile.EnvironmentVariables["DOTNET_ENVIRONMENT"]);
+        Assert.Equal("bar", profile.EnvironmentVariables["FOO"]);
+
+        // applicationUrl is a semicolon-separated list, the shape --urls takes.
+        Assert.Equal(["http://localhost:8081", "https://localhost:8443"], profile.ApplicationUrls);
+    }
+
+    [Fact]
+    public void LandedLaunchProfile_NoLaunchSettings_IsEmptyRatherThanThrowing()
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        var projectFile = Path.Combine(dir, "Service.csproj");
+        File.WriteAllText(projectFile, "<Project />");
+
+        var profile = LandedLaunchProfile.Read(projectFile);
+
+        Assert.Empty(profile.ApplicationUrls);
+        Assert.Empty(profile.EnvironmentVariables);
+    }
+
+    [Fact]
+    public void LandedLaunchProfile_UnparseableFile_IsEmptyRatherThanThrowing()
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        var projectFile = Path.Combine(dir, "Service.csproj");
+        File.WriteAllText(projectFile, "<Project />");
+        var properties = Directory.CreateDirectory(Path.Combine(dir, "Properties")).FullName;
+        File.WriteAllText(Path.Combine(properties, "launchSettings.json"), "{ not json");
+
+        // This recovers fidelity that would otherwise be silently lost, so failing to recover it
+        // must leave the run as it would have been rather than break it.
+        var profile = LandedLaunchProfile.Read(projectFile);
+
+        Assert.Empty(profile.ApplicationUrls);
+        Assert.Empty(profile.EnvironmentVariables);
+    }
+
+    [Fact]
+    public void LandedLaunchProfile_SkipsProfilesThatAreNotProjectProfiles()
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        var projectFile = Path.Combine(dir, "Service.csproj");
+        File.WriteAllText(projectFile, "<Project />");
+        var properties = Directory.CreateDirectory(Path.Combine(dir, "Properties")).FullName;
+        File.WriteAllText(
+            Path.Combine(properties, "launchSettings.json"),
+            """
+            {
+              "profiles": {
+                "IIS Express": { "commandName": "IISExpress", "applicationUrl": "http://localhost:1111" },
+                "Service": { "commandName": "Project", "applicationUrl": "http://localhost:2222" }
+              }
+            }
+            """);
+
+        Assert.Equal(["http://localhost:2222"], LandedLaunchProfile.Read(projectFile).ApplicationUrls);
+    }
+
+    private static string WriteProjectWithLaunchProfile(
+        string? applicationUrl, string? environmentVariables = null)
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        var projectFile = Path.Combine(dir, "Service.csproj");
+        File.WriteAllText(projectFile, "<Project />");
+
+        var properties = Directory.CreateDirectory(Path.Combine(dir, "Properties")).FullName;
+
+        var url = applicationUrl is null
+            ? ""
+            : ", \"applicationUrl\": \"" + applicationUrl + "\"";
+
+        var env = environmentVariables is null
+            ? ""
+            : ", \"environmentVariables\": { " + environmentVariables + " }";
+
+        File.WriteAllText(
+            Path.Combine(properties, "launchSettings.json"),
+            "{ \"profiles\": { \"Service\": { \"commandName\": \"Project\"" + url + env + " } } }");
+
+        return projectFile;
     }
 
     [Fact]
@@ -276,7 +397,7 @@ public class DeferredCheckoutTests
     }
 
     [Fact]
-    public async Task AfterResourcesCreated_RunsTheCheckoutThatCompositionSkipped()
+    public async Task BeforeStart_RunsTheCheckoutThatCompositionSkipped()
     {
         var dir = CreateAppHostDirectory("orders");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
@@ -284,19 +405,51 @@ public class DeferredCheckoutTests
 
         var git = new FakeGitClient();
         var gate = git.BlockFor("https://example.com/orders.git");
-        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig()).WithHttpEndpoint();
+        var orders = new LocalProjectSource(git)
+            .Resolve(builder, "orders", Metadata("orders"), DevConfig())
+            .WithHttpEndpoint();
 
         var repoRoot = ExpectedRepoRoot(dir, "orders");
         Assert.False(Directory.Exists(repoRoot));
 
         var services = builder.Services.BuildServiceProvider();
         await builder.Eventing.PublishAsync(
-            new AfterResourcesCreatedEvent(services, new DistributedApplicationModel(builder.Resources)));
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
 
         // The event handler hands the wait to a background task and returns, so the host is not held
         // while the clone runs — releasing the gate only now is what proves it.
+        await PublishNotStartedAsync(services, orders.Resource);
         gate.Set();
 
+        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.True(File.Exists(Path.Combine(repoRoot, "Service.csproj")));
+    }
+
+    [Fact]
+    public async Task StartPath_DoesNotDependOnAfterResourcesCreated()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.UseDeferredCheckout();
+
+        var git = new FakeGitClient();
+        var orders = new LocalProjectSource(git)
+            .Resolve(builder, "orders", Metadata("orders"), DevConfig())
+            .WithHttpEndpoint();
+
+        var repoRoot = ExpectedRepoRoot(dir, "orders");
+
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+        await PublishNotStartedAsync(services, orders.Resource);
+
+        // AfterResourcesCreatedEvent is deliberately never published here, because in a real host it
+        // may never be: it fires only once every resource has been created, and a resource with an
+        // unsatisfied WaitFor annotation is not created until that wait resolves. Anything that
+        // WaitFors a deferred service is therefore in front of the event that would start it, and
+        // hanging the start off that event deadlocks the graph. Each task waits for its own resource.
         await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
 
         Assert.True(File.Exists(Path.Combine(repoRoot, "Service.csproj")));
@@ -311,17 +464,31 @@ public class DeferredCheckoutTests
 
         var git = new FakeGitClient();
         git.FailFor("https://example.com/orders.git", new InvalidOperationException("no such repo"));
-        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig()).WithHttpEndpoint();
+        var orders = new LocalProjectSource(git)
+            .Resolve(builder, "orders", Metadata("orders"), DevConfig())
+            .WithHttpEndpoint();
 
         var services = builder.Services.BuildServiceProvider();
         await builder.Eventing.PublishAsync(
-            new AfterResourcesCreatedEvent(services, new DistributedApplicationModel(builder.Resources)));
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+        await PublishNotStartedAsync(services, orders.Resource);
 
         // A clone that fails after startup costs one service. Reported as resource state and
         // resource logs — never as an exception on a task nobody awaits, which would take the host
         // down and undo the isolation deferral exists for.
         await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
     }
+
+    /// <summary>
+    /// Stands in for DCP, which publishes <c>NotStarted</c> when it withholds an explicit-start
+    /// executable. That state is what each deferred task waits for before it touches the resource.
+    /// </summary>
+    private static Task PublishNotStartedAsync(IServiceProvider services, IResource resource) =>
+        services.GetRequiredService<ResourceNotificationService>()
+            .PublishUpdateAsync(resource, snapshot => snapshot with
+            {
+                State = new ResourceStateSnapshot(KnownResourceStates.NotStarted, null),
+            });
 
     [Fact]
     public void DeferredProjectMetadata_MissingCheckout_ReportsEmptyLaunchSettingsRatherThanReadingTheFile()

@@ -214,14 +214,34 @@ see, and one bad clone costs one service instead of the run. The clones themselv
 exactly the same moment they always did — the first `AddService()` call — so nothing gets
 slower; only who waits for them changes.
 
-**Declare the service's endpoints in the AppHost.** A project's endpoints normally come from
-the `applicationUrl` of its launch profile, which Aspire reads while composing — before the
-repository is on disk. A deferred service that declares none fails the run with a message
-naming it. `WithHttpEndpoint()` with no arguments is the whole fix, and it is correct on both
-paths: it updates an endpoint of the same name using its non-null arguments only, so on a warm
-checkout, where the launch profile has already created `http`, it changes nothing. Because of
-that, an AppHost whose checkouts are all warm can't tell you the line is missing — you'll hear
-about it on the next fresh clone.
+**What a cold checkout costs, and what it doesn't.** Aspire reads a project's launch profile
+while composing the AppHost and turns it into endpoints, environment variables and command-line
+arguments there and then. A deferred service has no repository on disk at that point, so all
+three come out empty — and nothing re-runs the step.
+
+Environment is put back for you. Once the clone lands, the profile's `environmentVariables` are
+applied to the resource before it starts, and only where the AppHost hasn't already set the same
+key, so `WithEnvironment` and `WithReference` still win. That matters more than it sounds:
+`Host.CreateDefaultBuilder` takes the environment name from `DOTNET_ENVIRONMENT`, which most
+repositories set in the launch profile and nowhere else, so without this a deferred service runs
+as `Production` while every warm run of it runs as `Development`.
+
+Endpoints can't be, because ports are allocated during composition and the spec is frozen. So a
+deferred service carries only the endpoints you declare:
+
+```csharp
+var orders = builder.AddService("orders").WithHttpEndpoint();
+```
+
+You are not asked for that line up front, and a service that doesn't need it isn't refused — a
+run-to-completion worker has no `applicationUrl` on either path, so demanding one would mean
+declaring an endpoint it never listens on. Instead the real launch profile is read once the
+checkout lands and the shortfall is reported then, quoting the `applicationUrl` it actually
+found: the project still binds that URL itself and runs, but Aspire allocated no endpoint, so
+the port isn't moved off a collision, nothing proxies it, service discovery can't resolve the
+service and the dashboard won't link it. Add the line and the next run is whole; it is correct
+on a warm checkout too, where it updates the endpoint the profile already created rather than
+adding one.
 
 Scoped deliberately narrowly, so the blast radius is first-run-only:
 

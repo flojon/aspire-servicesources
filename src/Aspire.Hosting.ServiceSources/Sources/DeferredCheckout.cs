@@ -20,8 +20,8 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// </para>
 /// <para>
 /// Deferring turns that into ordinary resource lifecycle. The project is registered at the path its
-/// checkout <em>will</em> have, marked <c>WithExplicitStart()</c>, and started from
-/// <c>AfterResourcesCreatedEvent</c> once the clone finishes. DCP withholds an explicit-start
+/// checkout <em>will</em> have, marked <c>WithExplicitStart()</c>, and started from a background
+/// task once the clone finishes. DCP withholds an explicit-start
 /// executable entirely rather than creating it stopped
 /// (<c>ExecutableCreator.IsReadyToCreate</c>), so working directory, certificates and execution
 /// configuration are all resolved on demand in <c>CreateObjectAsync</c> — after the checkout —
@@ -43,8 +43,12 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// catalog with no network access.
 /// </para>
 /// <para>
-/// Endpoints are the one thing deferral cannot preserve, so they are required instead — see
-/// <see cref="ValidateEndpoints"/>.
+/// Endpoints are the one thing deferral cannot preserve: they are synthesised from the launch
+/// profile's <c>applicationUrl</c> while composing, and nothing re-runs that step later. Rather
+/// than demand a declaration up front and refuse to run without one — which a run-to-completion
+/// worker, whose profile has no <c>applicationUrl</c> on either path, cannot satisfy honestly —
+/// the divergence is checked against the repository's real launch profile once the checkout has
+/// landed, and reported then. See <see cref="LaunchProfileEndpointWarning"/>.
 /// </para>
 /// </remarks>
 internal sealed class DeferredCheckout
@@ -178,13 +182,14 @@ internal sealed class DeferredCheckout
             _subscribed = true;
         }
 
-        builder.Eventing.Subscribe<BeforeStartEvent>((_, _) =>
-        {
-            ValidateEndpoints();
-            return Task.CompletedTask;
-        });
-
-        builder.Eventing.Subscribe<AfterResourcesCreatedEvent>((@event, cancellationToken) =>
+        // BeforeStartEvent, not AfterResourcesCreatedEvent. "After resources created" sounds like
+        // the right moment and is not: a resource with an unsatisfied WaitFor annotation is not
+        // created until that wait resolves, so the event sits behind the whole wait graph — and
+        // anything that waits on a deferred service is itself part of that graph. Subscribing there
+        // deadlocks the common case, because the event that would start the service cannot fire
+        // until the service that is waiting to be started has started. Each task waits for its own
+        // resource instead, in StartDeferredAsync, which needs nothing from the rest of the graph.
+        builder.Eventing.Subscribe<BeforeStartEvent>((@event, cancellationToken) =>
         {
             StartAll(@event.Services, cancellationToken);
             return Task.CompletedTask;
@@ -192,67 +197,99 @@ internal sealed class DeferredCheckout
     }
 
     /// <summary>
-    /// The message for a deferred service that declares no endpoints, or <see langword="null"/>
-    /// when every deferred service declares at least one. Exposed for tests.
+    /// The warning for a deferred service whose landed launch profile declares an
+    /// <c>applicationUrl</c> that the AppHost did not mirror as an endpoint, or
+    /// <see langword="null"/> when there is nothing to say. Exposed for tests.
     /// </summary>
-    public string? MissingEndpointsMessage
+    /// <remarks>
+    /// <para>
+    /// This is the whole of what deferral costs, stated at the only moment it can be stated
+    /// accurately. Endpoints are synthesised from <c>applicationUrl</c> while composing, when the
+    /// repository is not on disk; nothing re-runs that step, so a deferred resource carries only
+    /// the endpoints the AppHost declared. If the project turns out to declare none either, that
+    /// agrees with the warm path exactly and there is nothing wrong — which is the case a
+    /// run-to-completion worker is in, and the case the earlier pre-flight check could not tell
+    /// apart from a mistake.
+    /// </para>
+    /// <para>
+    /// When the profile <em>does</em> declare one, the consequence is worth a sentence: the project
+    /// still binds that URL itself, because <c>dotnet run</c> applies its own launch profile, but
+    /// Aspire allocated no endpoint for it — so the port is not reassigned away from a collision,
+    /// no proxy fronts it, service discovery cannot resolve it and the dashboard does not link it.
+    /// The message can quote the real URL, which is why it is worth waiting for the checkout to
+    /// produce it rather than guessing at composition time.
+    /// </para>
+    /// </remarks>
+    public static string? LaunchProfileEndpointWarning(
+        string serviceName, LandedLaunchProfile profile, IResource resource)
     {
-        get
+        if (resource.Annotations.OfType<EndpointAnnotation>().Any())
         {
-            Deferred[] snapshot;
-            lock (_gate)
-            {
-                snapshot = [.. _deferred];
-            }
-
-            var missing = snapshot
-                .Where(deferred => !deferred.Resource.Annotations.OfType<EndpointAnnotation>().Any())
-                .Select(deferred => deferred.ServiceName)
-                .OrderBy(name => name, StringComparer.Ordinal)
-                .ToArray();
-
-            if (missing.Length == 0)
-            {
-                return null;
-            }
-
-            var subject = missing.Length == 1
-                ? $"Service '{missing[0]}' declares no endpoints"
-                : $"Services {string.Join(", ", missing.Select(name => $"'{name}'"))} declare no endpoints";
-
-            return $"{subject}, and its checkout is being cloned during this run rather than before it. " +
-                   "A project's endpoints come from the 'applicationUrl' of its launch profile, which Aspire " +
-                   "reads while composing the AppHost — before the repository is on disk — so there is nothing " +
-                   "to read and the service would come up unreachable. Declare them in the AppHost instead: " +
-                   $"builder.AddService(\"{missing[0]}\").WithHttpEndpoint(). The same line is correct on a warm " +
-                   "checkout too — WithHttpEndpoint updates an existing endpoint of the same name with its " +
-                   "non-null arguments only, and it has none — so there is no second code path to maintain.";
+            return null;
         }
+
+        var declared = profile.ApplicationUrls;
+        if (declared.Count == 0)
+        {
+            return null;
+        }
+
+        return $"Service '{serviceName}' was started from a checkout cloned during this run, and its launch " +
+               $"profile declares applicationUrl '{string.Join(", ", declared)}' — but a project's endpoints are " +
+               "read while the AppHost composes, before the repository was on disk, so Aspire allocated none. " +
+               "The project will bind that URL itself and run, but the port is outside Aspire's management: it " +
+               "is not moved off a collision, nothing proxies it, service discovery cannot resolve this service " +
+               $"and the dashboard will not link it. Declare it in the AppHost — builder.AddService(\"{serviceName}\")" +
+               ".WithHttpEndpoint() — which also takes effect on every later run, where the checkout is warm and " +
+               "the endpoint comes from the profile as usual. This is reported after the clone rather than " +
+               "refused before it, so a service that has no endpoints on either path costs you nothing.";
     }
 
     /// <summary>
-    /// Fails the run when a deferred service declares no endpoints of its own.
+    /// Puts the landed launch profile's <c>environmentVariables</c> back onto the resource, which
+    /// Aspire would have applied during composition had the repository been on disk.
     /// </summary>
     /// <remarks>
-    /// The alternative was to synthesise a default <c>http</c> endpoint on the cold path. An
-    /// endpoint invented here silently disagrees with whatever the repository's own
-    /// <c>launchSettings.json</c> says the moment the checkout is warm, which is a subtler bug than
-    /// a named error — and this one is a one-time cost paid when opting in, not a surprise on
-    /// somebody's first run.
     /// <para>
-    /// It does mean an AppHost can pass on a machine where every checkout is warm and fail on a
-    /// fresh clone, because a warm resource's endpoints come from the launch profile and are
-    /// indistinguishable here from declared ones — <c>WithHttpEndpoint</c> updates the annotation
-    /// the launch profile already created rather than leaving a mark of its own. The error names
-    /// the fix, and the fix is correct on both paths.
+    /// This is not a nicety. <c>Host.CreateDefaultBuilder</c> takes the environment name from
+    /// <c>DOTNET_ENVIRONMENT</c>, which for most repositories is set by the launch profile and
+    /// nowhere else — so without this a deferred service runs as <c>Production</c> while every warm
+    /// run of the same service runs as <c>Development</c>. That is the kind of divergence that
+    /// either crashes immediately on a missing <c>appsettings.Development.json</c> or, worse, does
+    /// not.
+    /// </para>
+    /// <para>
+    /// Added last and only where the key is absent, so anything the AppHost set — <c>WithEnvironment</c>,
+    /// <c>WithReference</c>, a resolved connection string — wins over the profile, which is the
+    /// precedence Aspire itself applies. Command-line arguments from <c>commandLineArgs</c> are not
+    /// restored: unlike environment, they are positional, so appending them after whatever the
+    /// AppHost added can change their meaning.
     /// </para>
     /// </remarks>
-    private void ValidateEndpoints()
+    private static void RestoreLaunchProfileEnvironment(
+        Deferred deferred, LandedLaunchProfile profile, ILogger logger)
     {
-        if (MissingEndpointsMessage is { } message)
+        if (profile.EnvironmentVariables.Count == 0)
         {
-            throw new ServiceSourcesConfigurationException(message);
+            return;
         }
+
+        deferred.Resource.Annotations.Add(new EnvironmentCallbackAnnotation(context =>
+        {
+            foreach (var variable in profile.EnvironmentVariables)
+            {
+                if (!context.EnvironmentVariables.ContainsKey(variable.Key))
+                {
+                    context.EnvironmentVariables[variable.Key] = variable.Value;
+                }
+            }
+        }));
+
+        logger.LogInformation(
+            "Applied {Count} environment variable(s) from the checkout's launch profile ({Names}), which "
+            + "Aspire could not read while composing the AppHost.",
+            profile.EnvironmentVariables.Count,
+            string.Join(", ", profile.EnvironmentVariables.Keys));
     }
 
     /// <summary>
@@ -316,6 +353,15 @@ internal sealed class DeferredCheckout
             var notifications = services.GetRequiredService<ResourceNotificationService>();
             var logger = services.GetRequiredService<ResourceLoggerService>().GetLogger(deferred.Resource);
 
+            // This runs from BeforeStartEvent, so the resource is not in the notification service
+            // yet — a state published now would be overwritten by the NotStarted that DCP publishes
+            // when it withholds the explicit-start executable, and the start command below would
+            // have nothing to act on. Waiting for that NotStarted is the whole synchronisation this
+            // needs, and it depends on nothing but this one resource.
+            await notifications.WaitForResourceAsync(
+                deferred.Resource.Name, KnownResourceStates.NotStarted, cancellationToken)
+                .ConfigureAwait(false);
+
             await notifications.PublishUpdateAsync(deferred.Resource, snapshot => snapshot with
             {
                 State = new ResourceStateSnapshot("Checking out", KnownResourceStateStyles.Info),
@@ -346,7 +392,22 @@ internal sealed class DeferredCheckout
                     "cannot be changed afterwards.");
             }
 
-            LocalProjectSource.ResolveProjectFile(deferred.ServiceName, repoRoot, deferred.Metadata.Project);
+            var projectFile = LocalProjectSource.ResolveProjectFile(
+                deferred.ServiceName, repoRoot, deferred.Metadata.Project);
+
+            // The repository is on disk now, so everything Aspire read from the launch profile while
+            // composing — and got nothing for — is finally readable.
+            var profile = LandedLaunchProfile.Read(projectFile);
+
+            RestoreLaunchProfileEnvironment(deferred, profile, logger);
+
+            // Endpoints are the one part that cannot be put back, so the shortfall is reported
+            // rather than enforced: refusing to start a service that would have run fine is worse
+            // than telling the developer their port is not Aspire's to manage.
+            if (LaunchProfileEndpointWarning(deferred.ServiceName, profile, deferred.Resource) is { } warning)
+            {
+                logger.LogWarning("{Warning}", warning);
+            }
 
             logger.LogInformation("Checkout ready at {RepoRoot}. Starting.", repoRoot);
 

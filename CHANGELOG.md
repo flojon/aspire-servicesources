@@ -21,9 +21,17 @@ nothing will fail to build to warn you.
   become visible resource state, and a clone that fails costs one service rather than the whole
   AppHost.
 
-  **A deferred service must declare its endpoints in the AppHost**, because a project's endpoints
-  come from its launch profile and Aspire reads that during composition, before the repository is
-  on disk:
+  Aspire reads a project's launch profile during composition and turns it into endpoints,
+  environment variables and command-line arguments there and then, so a deferred service — whose
+  repository is not on disk yet — gets none of the three, and nothing re-runs the step.
+  **Environment is restored**: once the clone lands, the profile's `environmentVariables` are
+  applied before the resource starts, and only where the AppHost has not already set the same key.
+  Without that a deferred service runs as `Production` while every warm run of it runs as
+  `Development`, because `Host.CreateDefaultBuilder` takes the environment name from
+  `DOTNET_ENVIRONMENT` and most repositories set it in the launch profile and nowhere else.
+
+  **Endpoints cannot be restored**, since ports are allocated during composition, so declare any
+  you need:
 
   ```csharp
   builder.UseDeferredCheckout();
@@ -31,9 +39,11 @@ nothing will fail to build to warn you.
   var orders = builder.AddService("orders").WithHttpEndpoint();
   ```
 
-  That line is correct on a warm checkout too, so there is one call, not one per path. A deferred
-  service that declares none fails the run with a message naming it — but an AppHost whose
-  checkouts are all warm cannot tell you the line is missing, and the next fresh clone will.
+  A service that declares none is *not* refused — a run-to-completion worker has no
+  `applicationUrl` on either path and would have to declare an endpoint it never listens on.
+  Instead the landed launch profile is read after the clone and a shortfall is reported then,
+  quoting the `applicationUrl` it actually found and what to add. The line above is correct on a
+  warm checkout too, where it updates the endpoint the profile already created.
 
   Nothing else about a run changes. The clones still start on the first `AddService()` call, in
   parallel, at the same moment as before — only who waits for them moves. A checkout that already
