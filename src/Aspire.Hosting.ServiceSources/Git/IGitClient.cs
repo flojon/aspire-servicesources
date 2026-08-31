@@ -3,20 +3,30 @@ namespace Aspire.Hosting.ServiceSources.Git;
 internal interface IGitClient
 {
     /// <summary>
+    /// Fails with a <see cref="ServiceSourcesConfigurationException"/> naming what is missing if
+    /// this client cannot work on this machine. Called as a pre-flight, before any network work, so
+    /// an unusable git is reported once and up front rather than as a clone failure per service.
+    /// </summary>
+    /// <remarks>
+    /// Cheap and idempotent — it runs on every <c>"local"</c> resolution. Defaulted to a no-op so
+    /// the test doubles that stand in for a real git don't each have to say they need nothing.
+    /// </remarks>
+    void EnsureAvailable()
+    {
+    }
+
+    /// <summary>
     /// Clones <paramref name="repositoryUrl"/> into <paramref name="destinationPath"/>.
     /// </summary>
     /// <remarks>
     /// Implementations are responsible for authenticating the request so that private
     /// repositories work without per-repository configuration: resolve credentials from the local
     /// git installation's own credential helper first, then fall back to the
-    /// <c>SERVICESOURCES_GIT_USERNAME</c>/<c>SERVICESOURCES_GIT_TOKEN</c> environment variables
-    /// (see <see cref="GitCredentialResolver"/>, which implements exactly that order and is the
-    /// intended way to satisfy this).
+    /// <c>SERVICESOURCES_GIT_USERNAME</c>/<c>SERVICESOURCES_GIT_TOKEN</c> environment variables.
     /// <para>
     /// A failure that looks like a rejected or missing credential must be reported as
     /// <see cref="GitAuthenticationFailedException"/> so callers can name authentication as the
-    /// likely cause; any other transport that the implementation cannot support must be rejected
-    /// via <see cref="GitUrlValidator"/> rather than surfacing an opaque native error.
+    /// likely cause.
     /// </para>
     /// </remarks>
     void Clone(string repositoryUrl, string destinationPath);

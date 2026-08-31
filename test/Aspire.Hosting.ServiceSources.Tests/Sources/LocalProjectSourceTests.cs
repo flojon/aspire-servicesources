@@ -617,31 +617,29 @@ public class LocalProjectSourceTests
     }
 
     [Fact]
-    public void ResolveProjectPath_CacheHit_SshOriginNeedingFetch_ThrowsWithoutAttemptingFetch()
+    public void ResolveProjectPath_CacheHit_SshOriginNeedingFetch_FetchesIt()
     {
         var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
         var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
         Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
         File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
-        // The checkout's origin is SSH, which LibGit2Sharp cannot fetch over. The clone path's
-        // up-front check never ran for this pre-existing checkout, so the fetch path must catch it.
+        // An SSH origin is fetched like any other: git carries the developer's own SSH agent and
+        // config, so there is no transport here this package has to rule out in advance.
         var gitClient = new FakeGitClient
         {
             OriginUrl = "git@github.com:company/orders.git",
             FailFirstCheckoutOnly = true,
         };
 
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            ResolveProjectPath(
-                ServiceName,
-                Metadata(repository: "https://github.com/company/orders", defaultRef: "feature/late"),
-                DevConfig(),
-                appHostDirectory,
-                gitClient));
+        var projectPath = ResolveProjectPath(
+            ServiceName,
+            Metadata(repository: "https://github.com/company/orders", defaultRef: "feature/late"),
+            DevConfig(),
+            appHostDirectory,
+            gitClient);
 
-        Assert.Contains(ServiceName, ex.Message);
-        Assert.Contains("SSH", ex.Message);
-        Assert.Empty(gitClient.FetchedRepos);
+        Assert.Equal(Path.Combine(repoDir, "Orders.csproj"), projectPath);
+        Assert.Equal(repoDir, Assert.Single(gitClient.FetchedRepos));
     }
 
     [Fact]
@@ -883,26 +881,28 @@ public class LocalProjectSourceTests
         Assert.Contains("company/orders", ex.Message);
     }
 
-    [Fact]
-    public void ResolveProjectPath_SshRepositoryUrl_ThrowsWithoutAttemptingClone()
+    [Theory]
+    [InlineData("git@github.com:company/orders.git")]
+    [InlineData("ssh://git@github.com/company/orders.git")]
+    [InlineData("gitserver:company/orders.git")]
+    public void ResolveProjectPath_SshRepositoryUrl_IsClonedLikeAnyOther(string repository)
     {
         var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
         var gitClient = new FakeGitClient();
 
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            ResolveProjectPath(
-                ServiceName, Metadata(repository: "git@github.com:company/orders.git"), DevConfig(), appHostDirectory, gitClient));
+        // Handed to git as written, in every form git accepts: the developer's SSH agent and
+        // ~/.ssh/config are what resolve it, and this package has no reason to second-guess them.
+        ResolveProjectPath(
+            ServiceName, Metadata(repository: repository), DevConfig(), appHostDirectory, gitClient);
 
-        Assert.Contains(ServiceName, ex.Message);
-        Assert.Contains("SSH", ex.Message);
-        Assert.Empty(gitClient.ClonedRepos);
+        Assert.Equal(repository, Assert.Single(gitClient.ClonedRepos).RepositoryUrl);
     }
 
     [Fact]
-    public void ResolveProjectPath_SshRepositoryUrlWithEmbeddedCredentials_DoesNotEchoThem()
+    public void ResolveProjectPath_SshRepositoryUrlWithEmbeddedCredentials_DoesNotEchoThemWhenTheCloneFails()
     {
         var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
-        var gitClient = new FakeGitClient();
+        var gitClient = new FakeGitClient { CloneException = new InvalidOperationException("clone failed") };
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
@@ -913,7 +913,7 @@ public class LocalProjectSourceTests
                 gitClient));
 
         Assert.DoesNotContain(EmbeddedToken, ex.Message);
-        Assert.Contains("SSH", ex.Message);
+        Assert.Contains("github.com/company/orders", ex.Message);
     }
 
     [Fact]
