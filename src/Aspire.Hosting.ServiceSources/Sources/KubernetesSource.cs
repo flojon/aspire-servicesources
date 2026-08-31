@@ -6,12 +6,16 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 
 internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceSource
 {
-    public IReadOnlySet<string> RelevantFields { get; } = new HashSet<string> { "context", "namespace", "port" };
+    public IReadOnlySet<string> RelevantFields { get; } = new HashSet<string> { "context", "namespace", "port", "scheme" };
 
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)
     {
         var args = BuildPortForwardArgs(serviceName, metadata, config, portAllocator, out var localPort, out var remotePort);
+
+        // After BuildPortForwardArgs, so a missing kubernetes block is reported as that rather than
+        // as a scheme problem.
+        var scheme = EndpointScheme.Resolve(serviceName, "kubernetes", config.Scheme, metadata.Kubernetes?.Scheme);
 
         // Built by hand rather than via AddExecutable so the resource can be a
         // ServiceExecutableResource, which adds the IResourceWithServiceDiscovery that
@@ -23,7 +27,10 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
         var executableBuilder = builder
             .AddResource(new ServiceExecutableResource(serviceName, "kubectl", builder.AppHostDirectory))
             .WithArgs(args)
-            .WithHttpEndpoint(port: localPort, targetPort: localPort, isProxied: false);
+            // Named for the scheme rather than always "http": the tunnel is byte-transparent, so a
+            // pod serving TLS is reachable as https://localhost:<localPort> and consumers must be
+            // able to ask for it under that name (#160). See EndpointScheme.
+            .WithEndpoint(port: localPort, targetPort: localPort, scheme: scheme, name: scheme, isProxied: false);
 
         return ResolvedService.Tag(executableBuilder, serviceName, "kubernetes");
     }
