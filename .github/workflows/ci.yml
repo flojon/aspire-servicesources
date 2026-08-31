@@ -1,8 +1,13 @@
 name: CI
 
+# Deliberately unfiltered by base branch. A `branches: [main]` filter looks harmless until a PR
+# is stacked on another PR's branch, which is normal here: that PR then matches no trigger, runs
+# no job, and shows a check list that looks complete because the checks that would have failed
+# never reported. workflow_dispatch is the escape hatch for that, but it only helps whoever
+# already knows the gap exists, so the filter is gone instead. The cost is running CI on PRs
+# targeting branches that are not main, which is exactly what was missing.
 on:
   pull_request:
-    branches: [main]
   workflow_dispatch:
 
 # A PR that gets a second push doesn't need the first run's result any more.
