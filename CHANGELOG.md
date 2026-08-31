@@ -71,6 +71,13 @@ nothing will fail to build to warn you.
   without an authentication challenge — a proxy answering 403, a 404 from a host serving
   anonymously — keeps the old wording.
 
+- CI type-checks the TypeScript export surface on every PR ([#88]). `samples/DemoAppHostTypeScript`
+  regenerates its Aspire Type System SDK from the branch's own source tree — `aspire.config.json`
+  resolves this package from `src/`, not from a published version — and compiles it under strict
+  `tsc`, against a pinned Aspire CLI. Nothing else here compiles what these packages export to
+  guest languages: the export test asserts the `[AspireExport]` attribute is *present*, and
+  `aspire restore` exits 0 even when the TypeScript it just wrote does not compile.
+
 ### Fixed
 
 - **Managed checkouts no longer inherit the AppHost repository's MSBuild and NuGet settings**
@@ -97,6 +104,16 @@ nothing will fail to build to warn you.
   added in `0.3.0` declare, so they carry it for `addService` too. The real floor is **13.5.3**, for an unrelated reason: an older CLI pins
   its generated host project below this package's 13.5.2 Aspire floor and fails `aspire restore`
   with `NU1605`.
+
+### Documentation
+
+- **Who builds a `"local"` checkout, and when** ([#81]). Aspire does, on every start: a `dotnet`
+  service is launched with `dotnet run` from inside the checkout, so a cold clone compiles on
+  first use and a checkout whose `ref` moved is recompiled rather than served from the previous
+  ref's binaries. Measured, along with the two things to know when it goes wrong — the compiler's
+  output goes to the resource's console in the dashboard rather than the AppHost's, and two `path`
+  services sharing a `ProjectReference` inside one repository can collide over that project's
+  build output. Nothing in the package changed.
 
 ## [0.3.1] - 2026-08-27
 
@@ -370,6 +387,7 @@ Targets `net10.0`.
 [#72]: https://github.com/flojon/aspire-servicesources/issues/72
 [#79]: https://github.com/flojon/aspire-servicesources/issues/79
 [#80]: https://github.com/flojon/aspire-servicesources/issues/80
+[#81]: https://github.com/flojon/aspire-servicesources/issues/81
 [#88]: https://github.com/flojon/aspire-servicesources/issues/88
 [#89]: https://github.com/flojon/aspire-servicesources/issues/89
 [#112]: https://github.com/flojon/aspire-servicesources/pull/112

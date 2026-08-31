@@ -39,14 +39,18 @@
   <ItemGroup>
     <!-- The sample AppHost is a consumer of the packages, so its Aspire version moves with the
          floors in src/Directory.Packages.props rather than on its own: mixing versions within
-         the Aspire family is exactly what #89 was about.
+         the Aspire family is exactly what #89 was about. Reading $(AspireVersion)
+         (Directory.Build.props) is what makes that automatic rather than a literal someone has
+         to remember, and it is what lets aspire-matrix.yml move this line with the floors it
+         already overrides - as a literal, it stayed on 13.5.2 while those floated (#116).
 
-         It has to be moved by hand, and this line is only half of it - `<Sdk Name=
-         "Aspire.AppHost.Sdk" Version="..." />` in DemoAppHost.csproj carries the same version
-         and has to move with it. .github/dependabot.yml ignores this id for that reason: an
-         automated bump can only reach the half it can parse. ci.yml's `verify repo invariants`
-         job fails if they part. -->
-    <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.5.2" />
+         This is still only half of the AppHost's Aspire version. The other half is `<Sdk
+         Name="Aspire.AppHost.Sdk" />` in DemoAppHost.csproj, whose version lives in global.json
+         because neither Central Package Management nor an MSBuild property reaches an MSBuild
+         SDK. That one does have to be moved by hand alongside $(AspireVersion);
+         .github/dependabot.yml ignores this id for that reason, and ci.yml's `verify repo
+         invariants` job fails if the two part. -->
+    <PackageVersion Include="Aspire.Hosting.AppHost" Version="$(AspireVersion)" />
     <PackageVersion Include="coverlet.collector" Version="10.0.1" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />

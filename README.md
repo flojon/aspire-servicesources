@@ -189,6 +189,38 @@ a project reference would be.
   AppHost logs which ones those were at startup — and warns if one of them failed, since nothing
   else would ever tell you — so you know what to drop.
 
+#### Aspire builds a checkout, on every start
+
+Nothing in this package compiles a checkout, and nothing needs to. A `dotnet` service is
+registered with Aspire's own `AddProject`, and Aspire launches that resource with `dotnet run`,
+whose working directory is the checkout itself. The build you would otherwise have to arrange is
+that command's own implicit incremental build.
+
+So a checkout cloned for the first time compiles when the resource starts — a cold clone with no
+`bin/` needs nothing done to it first — and a checkout whose `ref` you change is recompiled on the
+next run rather than served from the previous ref's binaries. That last one is worth stating
+outright, because the failure it *doesn't* have would be a quiet one: a service answering with
+code you moved away from.
+
+Two things to know when it goes wrong:
+
+- **The compiler's output isn't in the AppHost's console.** It goes to that resource's console in
+  the dashboard, like any other project resource. A checkout that fails to compile therefore looks
+  like a resource that never starts, and the reason is one click away rather than in the terminal
+  you launched from.
+- **Two `path` services in one repository can collide.** If both point into the same repository
+  and their projects share a `ProjectReference`, Aspire starts both at once, and two builds write
+  that shared project's `bin/`/`obj/` simultaneously — which fails intermittently, with an
+  `MSB4018` or `CS2012` naming a file "being used by another process"
+  ([microsoft/aspire#15190](https://github.com/microsoft/aspire/issues/15190)). Managed checkouts
+  can't hit this: each service gets its own clone under `.servicesources/checkouts/<serviceName>/`,
+  so there is no shared output directory even when two services come from one repository.
+
+Launching the AppHost from an IDE is the one case this doesn't cover. An IDE that starts project
+resources itself, to attach a debugger, builds them the way it builds anything else — and a
+project reached by a path isn't in your solution, so it may not be built at all
+([microsoft/aspire#2154](https://github.com/microsoft/aspire/issues/2154), open upstream).
+
 #### First run: `UseDeferredCheckout()`
 
 On a cold clone, `AddService()` blocks until the checkout it needs is on disk. Composition
@@ -254,6 +286,7 @@ Scoped deliberately narrowly, so the blast radius is first-run-only:
 Off by default: a service that used to be running by the time `Build()` returned is started
 after it instead, which is visible to anything in your AppHost that assumed otherwise. Call it
 before your first `AddService()`, which is where the decision is made.
+
 #### Managed checkouts don't inherit your AppHost repository's build settings
 
 A managed checkout is cloned *inside* your AppHost's repository, and MSBuild, NuGet, the .NET SDK
