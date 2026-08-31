@@ -76,6 +76,39 @@ nothing will fail to build to warn you.
 
 ### Changed
 
+- **`git` on `PATH` is now required for a managed `"local"` checkout** ([#85]), and
+  `LibGit2Sharp` is gone from the package. Clone, fetch and checkout shell out to the `git`
+  executable, the same "a tool you already have" trade the `"kubernetes"` source makes with
+  `kubectl`. `git` 2.7 or newer; a service pointed at your own directory with `path` needs none.
+
+  This removes the only source-specific external dependency the package had, and by far the
+  heaviest thing it shipped. `LibGit2Sharp.NativeBinaries` carries a native libgit2 for all
+  thirteen RIDs it supports in one package, and an Aspire AppHost is a portable build by default,
+  so every consumer's build output got **all** of them — about **23 MB of `runtimes/`**, roughly
+  half of a sample AppHost's `bin`, all but one of them for a platform that machine will never
+  run. Plus 32 MB in `~/.nuget/packages`. There is no per-RID variant to reference instead and
+  the native assets can't be pruned, so the dependency had to go rather than be trimmed.
+
+  Nothing in `servicesources.yaml`, `servicesources.local.json` or the public API changes.
+
+- **SSH repository URLs now work** ([#85]). `git@host:org/repo`, `host:org/repo` and `ssh://...`
+  were previously refused at resolution time with a message pointing at the HTTPS equivalent,
+  because LibGit2Sharp's bundled binaries had no SSH transport. They are now handed to `git` as
+  written and resolved by your SSH agent and `~/.ssh/config`. Because nothing may block the
+  AppHost on a prompt, SSH runs with `BatchMode=yes` unless you set your own `GIT_SSH_COMMAND`:
+  an un-agented passphrase-protected key, or a host not yet in `known_hosts`, fails immediately
+  rather than waiting. Connect once by hand to settle either.
+
+- **Credential resolution is `git`'s own** ([#85]). Every `credential.helper` you have configured
+  is consulted by git exactly as it is for a `git clone` you type yourself, rather than this
+  package running `git credential fill` and passing the result to libgit2 — so helper ordering,
+  per-URL config and `credential reject` on a refused credential all behave as git documents them.
+  `SERVICESOURCES_GIT_USERNAME`/`SERVICESOURCES_GIT_TOKEN` still apply as a last resort, supplied
+  as a helper of last resort so they never override one you configured; if a configured helper's
+  credential is refused, the command is re-run once with those helpers cleared so the environment
+  token still gets its turn. The per-process credential cache is gone with the plumbing that
+  needed it, so a rotated token takes effect on the next resolution with nothing to clear.
+
 - **`ServiceSourcesConfigurationException` prints as its message, not as a stack dump**
   ([#125]). These are raised from `AddService()` and normally end the AppHost unhandled, so the
   runtime's rendering of them *is* the error output — and it buried the sentence naming the fix
@@ -86,15 +119,13 @@ nothing will fail to build to warn you.
   but anything logging one of these exceptions logs the summary unless that variable is set.
 
 - **A clone or fetch that never resolved a credential says so** ([#125]), instead of reporting
-  authentication as the likely cause. When `git credential fill` yields nothing and neither
-  `SERVICESOURCES_GIT_TOKEN` nor `SERVICESOURCES_GIT_USERNAME` is set, libgit2 fails against a
-  token-authenticated host with `could not find appropriate mechanism for credentials` — a
-  client-side dead end that never reached the host, so blaming a rejected token sent developers
-  hunting for one they never had. The usual real cause is a credential helper that resolves in
-  your shell but not in the environment the AppHost process inherits. Negotiate/NTLM hosts are
-  unaffected; the request still carries the machine's integrated credential. A failure arriving
-  without an authentication challenge — a proxy answering 403, a 404 from a host serving
-  anonymously — keeps the old wording.
+  authentication as the likely cause. When no credential helper yields anything and neither
+  `SERVICESOURCES_GIT_TOKEN` nor `SERVICESOURCES_GIT_USERNAME` is set, `git` falls through to
+  asking a human and finds prompting disabled (`could not read Username for '<host>': terminal
+  prompts disabled`) — a client-side dead end that never reached the host, so blaming a rejected
+  token sent developers hunting for one they never had. The usual real cause is a credential
+  helper that resolves in your shell but not in the environment the AppHost process inherits. A
+  failure that did carry a credential keeps the old wording.
 
 - CI type-checks the TypeScript export surface on every PR ([#88]). `samples/DemoAppHostTypeScript`
   regenerates its Aspire Type System SDK from the branch's own source tree — `aspire.config.json`
@@ -413,6 +444,7 @@ Targets `net10.0`.
 [#79]: https://github.com/flojon/aspire-servicesources/issues/79
 [#80]: https://github.com/flojon/aspire-servicesources/issues/80
 [#81]: https://github.com/flojon/aspire-servicesources/issues/81
+[#85]: https://github.com/flojon/aspire-servicesources/issues/85
 [#88]: https://github.com/flojon/aspire-servicesources/issues/88
 [#89]: https://github.com/flojon/aspire-servicesources/issues/89
 [#112]: https://github.com/flojon/aspire-servicesources/pull/112

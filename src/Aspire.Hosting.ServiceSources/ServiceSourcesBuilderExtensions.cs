@@ -11,7 +11,7 @@ public static class ServiceSourcesBuilderExtensions
 {
     private static readonly Dictionary<string, IServiceSource> Sources = new()
     {
-        ["local"] = new LocalProjectSource(new LibGit2SharpGitClient()),
+        ["local"] = new LocalProjectSource(new GitCliClient()),
         ["kubernetes"] = new KubernetesSource(new SocketPortAllocator()),
         ["url"] = new UrlSource(),
         ["container"] = new ContainerSource(),

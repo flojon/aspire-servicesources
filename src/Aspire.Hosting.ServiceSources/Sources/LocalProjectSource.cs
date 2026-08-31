@@ -11,6 +11,12 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)
     {
+        // Before any network work: a machine without a usable git can't clone anything, and
+        // finding that out once here beats finding it out as an identical clone failure on every
+        // service the catalog holds. Cheap after the first call, which is why it sits on the hot
+        // path rather than behind a one-shot flag of its own.
+        gitClient.EnsureAvailable();
+
         var isDotnetKind = string.Equals(metadata.Kind, LocalKinds.Dotnet, StringComparison.Ordinal);
 
         // Settle everything configuration alone can settle before paying for a checkout. Looking

@@ -11,8 +11,9 @@ on:
   # Also on PRs that touch where the version is declared. Safe to filter by path only while this
   # workflow is not a required status check: a required check that a path filter skips never
   # reports, and blocks the merge while it waits.
+  # No base-branch filter, for the reason spelled out in ci.yml: a PR stacked on another PR's
+  # branch would otherwise match nothing and quietly skip this.
   pull_request:
-    branches: [main]
     paths:
       - 'Directory.Build.props'
       # Both central package files, spelled out rather than globbed: src/ carries the
