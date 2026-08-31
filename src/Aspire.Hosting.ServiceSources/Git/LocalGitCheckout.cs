@@ -24,6 +24,21 @@ internal static class LocalGitCheckout
     public readonly record struct PreparedCheckout(string RepoRoot, bool NeedsReconciliation);
 
     /// <summary>
+    /// Where a package-managed checkout of <paramref name="serviceName"/> lives. A pure function of
+    /// the service name and the AppHost directory — no filesystem access, no network — so a caller
+    /// can name the path before the clone that fills it has happened.
+    /// </summary>
+    /// <remarks>
+    /// That property is what makes deferral possible at all: DCP freezes a project resource's path
+    /// into its executable spec at startup, before the dashboard exists, so the path has to be
+    /// final before the checkout is. See <see cref="Sources.DeferredCheckout"/>. It does not apply
+    /// to a <c>path</c> override, which is the developer's own directory rather than one this
+    /// package places.
+    /// </remarks>
+    public static string ManagedRepoRoot(string appHostDirectory, string serviceName) =>
+        Path.Combine(appHostDirectory, ".servicesources", "checkouts", serviceName);
+
+    /// <summary>
     /// The fully resolved checkout directory: prepared, then reconciled. For callers already
     /// resolving a service the AppHost asked for, so there is nothing to defer.
     /// </summary>
@@ -83,8 +98,8 @@ internal static class LocalGitCheckout
         }
 
         EnsureToolDirectory(appHostDirectory);
-        var checkoutsRoot = Path.Combine(appHostDirectory, ".servicesources", "checkouts");
-        var repoRoot = Path.Combine(checkoutsRoot, serviceName);
+        var repoRoot = ManagedRepoRoot(appHostDirectory, serviceName);
+        var checkoutsRoot = Path.GetDirectoryName(repoRoot)!;
 
         if (Directory.Exists(Path.Combine(repoRoot, ".git")))
         {

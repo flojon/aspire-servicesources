@@ -31,11 +31,24 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         var handler = isDotnetKind ? null : ResolveKindHandler(builder, serviceName, metadata);
         handler?.Validate(serviceName, metadata.KindConfig);
 
+        // Starts every "local" service's checkout at once, on background threads, and returns
+        // without waiting for any of them. See LocalCheckoutPrefetch.
+        var prefetch = LocalCheckoutPrefetch.For(builder, gitClient);
+
+        var deferred = DeferredCheckout.For(builder);
+
+        if (isDotnetKind && deferred.ShouldDefer(builder, serviceName, config))
+        {
+            // Nothing is on disk for this service yet, so registering the project against the path
+            // its checkout will have — and starting it once the clone lands — costs the AppHost
+            // nothing it would otherwise have had, and buys it a dashboard while the clone runs.
+            return deferred.Register(builder, serviceName, metadata, config, prefetch, gitClient);
+        }
+
         // Blocks on this service's checkout, but every "local" service's checkout was started
         // together on the first AddService call, so the wait is for the slowest one overall rather
-        // than for this one in turn. See LocalCheckoutPrefetch.
-        var repoRoot = LocalCheckoutPrefetch.For(builder, gitClient)
-            .GetRepoRoot(serviceName, metadata, config, builder.AppHostDirectory, gitClient);
+        // than for this one in turn.
+        var repoRoot = prefetch.GetRepoRoot(serviceName, metadata, config, builder.AppHostDirectory, gitClient);
 
         if (isDotnetKind)
         {
@@ -45,17 +58,19 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
             // default it normally would (launch-profile endpoints, OTLP exporter, certificate
             // trust, debugging support).
             //
-            // Resolution waits for a real path rather than registering the resource early and
+            // This path waits for a real path rather than registering the resource early and
             // filling the path in later, for two independent reasons.
             //
             // AddProject reads the launch profile during composition: WithProjectDefaults calls
             // GetEffectiveLaunchProfile(throwIfNotFound: true), which throws
             // DistributedApplicationException unless the .csproj is on disk. That one is
-            // avoidable — passing launchProfileName: null sets ExcludeLaunchProfile and skips the
-            // lookup — but it costs the endpoints Aspire synthesises from the profile's
-            // applicationUrl, because those are created here during composition and there is
-            // nothing to read them from afterwards. A service registered that way has to declare
-            // its endpoints instead.
+            // avoidable — either by passing launchProfileName: null, which sets
+            // ExcludeLaunchProfile and skips the lookup, or by supplying an IProjectMetadata that
+            // answers LaunchSettings itself — but it costs the endpoints Aspire synthesises from
+            // the profile's applicationUrl, because those are created here during composition and
+            // there is nothing to read them from afterwards. A service registered that way has to
+            // declare its endpoints instead. DeferredCheckout takes exactly that trade for a
+            // checkout that does not exist yet, where there is no launch profile to lose.
             //
             // The path itself is frozen regardless: DCP bakes it into the executable's working
             // directory and its "--project" argument while preparing the model, which happens

@@ -226,6 +226,82 @@ resources itself, to attach a debugger, builds them the way it builds anything e
 project reached by a path isn't in your solution, so it may not be built at all
 ([microsoft/aspire#2154](https://github.com/microsoft/aspire/issues/2154), open upstream).
 
+#### First run: `UseDeferredCheckout()`
+
+On a cold clone, `AddService()` blocks until the checkout it needs is on disk. Composition
+hasn't finished, so the AppHost hasn't started, so there is no dashboard to look at while
+several repositories clone — and a checkout that fails throws out of composition and takes the
+whole AppHost down with it, including the services that were fine.
+
+`builder.UseDeferredCheckout()` moves that wait past startup for the case where it hurts: a
+`dotnet`-kind `"local"` service whose *managed* checkout doesn't exist yet. The project is
+registered against the path its checkout will have, held back with Aspire's own explicit-start
+behaviour, cloned while the AppHost runs, and started when its checkout lands:
+
+```csharp
+var builder = DistributedApplication.CreateBuilder(args);
+
+builder.UseDeferredCheckout();
+
+var orders = builder.AddService("orders").WithHttpEndpoint();
+```
+
+The dashboard comes up immediately, checkout progress and failure become resource state you can
+see, and one bad clone costs one service instead of the run. The clones themselves start at
+exactly the same moment they always did — the first `AddService()` call — so nothing gets
+slower; only who waits for them changes.
+
+**What a cold checkout costs, and what it doesn't.** Aspire reads a project's launch profile
+while composing the AppHost and turns it into endpoints, environment variables and command-line
+arguments there and then. A deferred service has no repository on disk at that point, so all
+three come out empty — and nothing re-runs the step.
+
+Environment is put back for you. Once the clone lands, the profile's `environmentVariables` are
+applied to the resource before it starts, and only where the AppHost hasn't already set the same
+key, so `WithEnvironment` and `WithReference` still win. That matters more than it sounds:
+`Host.CreateDefaultBuilder` takes the environment name from `DOTNET_ENVIRONMENT`, which most
+repositories set in the launch profile and nowhere else, so without this a deferred service runs
+as `Production` while every warm run of it runs as `Development`.
+
+Values are expanded, and the service's own `DOTNET_LAUNCH_PROFILE` is set to the profile it was
+started under — both as Aspire does them on a warm run. The profile read is whichever one Aspire
+itself will select, which is the same selection it makes for the service's command-line arguments
+once the checkout has landed: the profile your AppHost was launched under, when the service has
+one by that name, and otherwise the first launchable profile in the file. So the process never
+ends up with one profile's environment and another's arguments.
+
+Endpoints can't be, because ports are allocated during composition and the spec is frozen. So a
+deferred service carries only the endpoints you declare:
+
+```csharp
+var orders = builder.AddService("orders").WithHttpEndpoint();
+```
+
+You are not asked for that line up front, and a service that doesn't need it isn't refused — a
+run-to-completion worker has no `applicationUrl` on either path, so demanding one would mean
+declaring an endpoint it never listens on. Instead the real launch profile is read once the
+checkout lands and the shortfall is reported then, quoting the `applicationUrl` it actually
+found: the project still binds that URL itself and runs, but Aspire allocated no endpoint, so
+the port isn't moved off a collision, nothing proxies it, service discovery can't resolve the
+service and the dashboard won't link it. Add the line and the next run is whole; it is correct
+on a warm checkout too, where it updates the endpoint the profile already created rather than
+adding one.
+
+Scoped deliberately narrowly, so the blast radius is first-run-only:
+
+- Only a checkout that doesn't exist yet. A warm checkout — every run after the first — takes
+  the existing eager path unchanged, with full launch-profile fidelity.
+- Only managed checkouts. A `path` override is your own directory; there is nothing to clone.
+- Only the `dotnet` kind. The `java` and `javascript` kinds carry their own `port` in the kind
+  block and resolve eagerly either way.
+- Only run mode. `aspire publish` and manifest generation clone first as they always have; a
+  manifest written from a repository that isn't on disk would describe a project without its
+  endpoints or its profile environment.
+
+Off by default: a service that used to be running by the time `Build()` returned is started
+after it instead, which is visible to anything in your AppHost that assumed otherwise. Call it
+before your first `AddService()`, which is where the decision is made.
+
 #### Managed checkouts don't inherit your AppHost repository's build settings
 
 A managed checkout is cloned *inside* your AppHost's repository, and MSBuild, NuGet, the .NET SDK

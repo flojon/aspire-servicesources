@@ -11,6 +11,51 @@ nothing will fail to build to warn you.
 
 ## [Unreleased]
 
+### Added
+
+- **`builder.UseDeferredCheckout()` moves a cold `"local"` checkout past AppHost startup**
+  ([#130]). Opt-in, off by default. A `dotnet`-kind service whose managed checkout does not exist
+  yet is registered against the path that checkout will have, held back with Aspire's
+  explicit-start behaviour, cloned while the AppHost runs, and started once its checkout lands.
+  The dashboard comes up immediately instead of after every clone, checkout progress and failure
+  become visible resource state, and a clone that fails costs one service rather than the whole
+  AppHost.
+
+  Aspire reads a project's launch profile during composition and turns it into endpoints,
+  environment variables and command-line arguments there and then, so a deferred service — whose
+  repository is not on disk yet — gets none of the three, and nothing re-runs the step.
+  **Environment is restored**: once the clone lands, the profile's `environmentVariables` are
+  applied before the resource starts, and only where the AppHost has not already set the same key.
+  Without that a deferred service runs as `Production` while every warm run of it runs as
+  `Development`, because `Host.CreateDefaultBuilder` takes the environment name from
+  `DOTNET_ENVIRONMENT` and most repositories set it in the launch profile and nowhere else. Values
+  are expanded and `DOTNET_LAUNCH_PROFILE` is set, both as Aspire does them on a warm run, and the
+  profile is the one Aspire itself will select — including a profile named by
+  `DOTNET_LAUNCH_PROFILE` or one whose `commandName` is `Executable` or absent — so the process
+  never gets one profile's environment and another's arguments.
+
+  **Endpoints cannot be restored**, since ports are allocated during composition, so declare any
+  you need:
+
+  ```csharp
+  builder.UseDeferredCheckout();
+
+  var orders = builder.AddService("orders").WithHttpEndpoint();
+  ```
+
+  A service that declares none is *not* refused — a run-to-completion worker has no
+  `applicationUrl` on either path and would have to declare an endpoint it never listens on.
+  Instead the landed launch profile is read after the clone and a shortfall is reported then,
+  quoting the `applicationUrl` it actually found and what to add. The line above is correct on a
+  warm checkout too, where it updates the endpoint the profile already created.
+
+  Nothing else about a run changes. The clones still start on the first `AddService()` call, in
+  parallel, at the same moment as before — only who waits for them moves. A checkout that already
+  exists takes the eager path unchanged, as do `path` overrides and the non-`dotnet` kinds. So does
+  everything outside run mode: `aspire publish` and manifest generation clone first as they always
+  have, because a manifest written from a repository that is not on disk would describe a project
+  without its endpoints or its profile environment.
+
 ### Changed
 
 - **`git` on `PATH` is now required for a managed `"local"` checkout** ([#85]), and
@@ -388,5 +433,6 @@ Targets `net10.0`.
 [#117]: https://github.com/flojon/aspire-servicesources/pull/117
 [#119]: https://github.com/flojon/aspire-servicesources/issues/119
 [#125]: https://github.com/flojon/aspire-servicesources/issues/125
+[#130]: https://github.com/flojon/aspire-servicesources/issues/130
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
