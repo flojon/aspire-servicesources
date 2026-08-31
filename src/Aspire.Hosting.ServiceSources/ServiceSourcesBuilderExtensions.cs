@@ -11,7 +11,7 @@ public static class ServiceSourcesBuilderExtensions
 {
     private static readonly Dictionary<string, IServiceSource> Sources = new()
     {
-        ["local"] = new LocalProjectSource(new LibGit2SharpGitClient()),
+        ["local"] = new LocalProjectSource(new GitCliClient()),
         ["kubernetes"] = new KubernetesSource(new SocketPortAllocator()),
         ["url"] = new UrlSource(),
         ["container"] = new ContainerSource(),
@@ -75,6 +75,61 @@ public static class ServiceSourcesBuilderExtensions
         ServiceDeveloperConfigValidator.Validate(name, developerConfig.Source, source.RelevantFields, developerConfig);
 
         return source.Resolve(builder, name, metadata, developerConfig);
+    }
+
+    /// <summary>
+    /// Opts this AppHost into deferring a <c>"local"</c> service's <em>first</em> checkout past
+    /// startup: a <c>dotnet</c>-kind service whose package-managed clone does not exist yet is
+    /// registered stopped, cloned while the AppHost runs, and started when its checkout lands —
+    /// so the dashboard comes up immediately, checkout progress and failure show as resource state,
+    /// and one failed clone costs one service rather than the whole AppHost.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Must be called before the first <see cref="AddService"/>, which is where the decision is
+    /// made. Nothing else about the run changes: the clones start at exactly the same moment they
+    /// always did, and a service whose checkout already exists — every service on every run after
+    /// the first — resolves eagerly, with full launch-profile fidelity, exactly as it does without
+    /// this call. Services with a <c>path</c> override are never deferred either; that directory is
+    /// the developer's own and there is nothing to clone. Neither is anything outside run mode:
+    /// <c>aspire publish</c> and manifest generation clone first as they always have, because a
+    /// manifest written from a repository that is not on disk would describe a project without its
+    /// endpoints or its profile environment.
+    /// </para>
+    /// <para>
+    /// The launch profile's environment is put back once the clone lands, and only where the
+    /// AppHost has not already set the same key — expanded, and alongside
+    /// <c>DOTNET_LAUNCH_PROFILE</c>, exactly as a warm run applies it.
+    /// </para>
+    /// <para>
+    /// A deferred service should declare its own endpoints in the AppHost, because a project's
+    /// endpoints come from its launch profile and Aspire reads that while composing — before the
+    /// repository is on disk:
+    /// </para>
+    /// <code lang="csharp">
+    /// builder.UseDeferredCheckout();
+    ///
+    /// var orders = builder.AddService("orders").WithHttpEndpoint();
+    /// </code>
+    /// <para>
+    /// That line is correct on a warm checkout too — <c>WithHttpEndpoint</c> updates an endpoint of
+    /// the same name using its non-null arguments only, and it has none — so there is one call, not
+    /// one per path. A service that declares none still runs: once the checkout has landed its real
+    /// launch profile is read, and only a profile that declares an <c>applicationUrl</c> the AppHost
+    /// did not mirror produces a warning naming the service and the URL. A service with no
+    /// <c>applicationUrl</c> on either path — a run-to-completion worker — costs nothing and is
+    /// never reported.
+    /// </para>
+    /// <para>
+    /// Off by default: a service that used to be running by the time <c>Build()</c> returned is
+    /// started after it instead, which is visible to anything in the AppHost that assumed otherwise.
+    /// </para>
+    /// </remarks>
+    [AspireExportIgnore]
+    public static IDistributedApplicationBuilder UseDeferredCheckout(this IDistributedApplicationBuilder builder)
+    {
+        DeferredCheckout.For(builder).Enable();
+        return builder;
     }
 
     /// <summary>
