@@ -77,10 +77,10 @@ public static class ServiceSourcesBuilderExtensions
 
     /// <summary>
     /// Opts this AppHost into deferring a <c>"local"</c> service's <em>first</em> checkout past
-    /// startup: a <c>dotnet</c>-kind service whose package-managed clone does not exist yet is
-    /// registered stopped, cloned while the AppHost runs, and started when its checkout lands —
-    /// so the dashboard comes up immediately, checkout progress and failure show as resource state,
-    /// and one failed clone costs one service rather than the whole AppHost.
+    /// startup: a service whose package-managed clone does not exist yet is registered stopped,
+    /// cloned while the AppHost runs, and started when its checkout lands — so the dashboard comes
+    /// up immediately, checkout progress and failure show as resource state, and one failed clone
+    /// costs one service rather than the whole AppHost.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -92,9 +92,16 @@ public static class ServiceSourcesBuilderExtensions
     /// the developer's own and there is nothing to clone.
     /// </para>
     /// <para>
-    /// A deferred service must declare its own endpoints in the AppHost, because a project's
-    /// endpoints come from its launch profile and Aspire reads that while composing — before the
-    /// repository is on disk:
+    /// Applies to the <c>"local"</c> kinds that own a managed checkout — <c>dotnet</c>, <c>java</c>
+    /// and <c>javascript</c>. The satellite kinds pay none of the cost below: neither has a launch
+    /// profile, and both take their endpoints from the committed catalog, so a deferred one is
+    /// identical to a warm one and only their post-clone checks move. <c>url</c>, <c>kubernetes</c>
+    /// and <c>container</c> clone nothing, so there is nothing to defer.
+    /// </para>
+    /// <para>
+    /// A deferred <c>dotnet</c> service should declare its own endpoints in the AppHost, because a
+    /// project's endpoints come from its launch profile and Aspire reads that while composing —
+    /// before the repository is on disk:
     /// </para>
     /// <code lang="csharp">
     /// builder.UseDeferredCheckout();
@@ -104,7 +111,10 @@ public static class ServiceSourcesBuilderExtensions
     /// <para>
     /// That line is correct on a warm checkout too — <c>WithHttpEndpoint</c> updates an endpoint of
     /// the same name using its non-null arguments only, and it has none — so there is one call, not
-    /// one per path. A deferred service that declares none fails the run with a message naming it.
+    /// one per path. It is not demanded up front: a service that declares none is started anyway,
+    /// and the shortfall is reported against the landed checkout's real launch profile, so a
+    /// run-to-completion worker that never wanted an endpoint costs nothing. See
+    /// <c>DeferredCheckout.LaunchProfileEndpointWarning</c>.
     /// </para>
     /// <para>
     /// Off by default: a service that used to be running by the time <c>Build()</c> returned is

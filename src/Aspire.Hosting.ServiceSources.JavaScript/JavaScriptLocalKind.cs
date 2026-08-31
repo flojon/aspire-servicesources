@@ -24,6 +24,48 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig)
     {
+        var plan = Plan(serviceName, repoRoot, rawConfig);
+
+        // Checked before anything reaches the app model, so an appDirectory that names nothing is
+        // reported from here rather than as an npm failure from a resource much later.
+        plan.RequireCheckout();
+
+        return plan.Add(builder);
+    }
+
+    /// <summary>
+    /// Deferral costs this kind nothing, so it is supported unconditionally. The resource is built
+    /// entirely from the committed catalog: <c>port</c>/<c>targetPort</c> are optional and Aspire
+    /// allocates them when unset, the service always gets an <c>http</c> endpoint, and nothing is
+    /// read out of the repository at composition time — so a deferred javascript service is
+    /// identical to a warm one, and only the checks below move.
+    /// </summary>
+    /// <remarks>
+    /// <c>AddViteApp</c> and friends also add a separate installer resource to run
+    /// <c>npm install</c>, which the app already waits for. Holding that back is core's job, not
+    /// this handler's: core withholds every resource this call adds and starts them in order, so the
+    /// installer runs against a checkout that exists and the app's wait resolves the way it does on
+    /// a warm run.
+    /// </remarks>
+    public DeferredLocalResource? ResolveDeferred(
+        IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig)
+    {
+        var plan = Plan(serviceName, repoRoot, rawConfig);
+
+        return new DeferredLocalResource
+        {
+            Service = plan.Add(builder),
+            ValidateCheckout = plan.RequireCheckout,
+        };
+    }
+
+    /// <summary>
+    /// Everything decidable without the repository on disk: the options block, and the absolute
+    /// paths the resource will run from — including the containment checks, which are pure path
+    /// arithmetic and so belong on this side of the split, before a cold clone is paid for.
+    /// </summary>
+    private static JavaScriptPlan Plan(string serviceName, string repoRoot, object? rawConfig)
+    {
         var options = ResolveOptions(serviceName, rawConfig);
 
         // Trailing separators are trimmed once here: Path.GetFullPath preserves them, and a
@@ -32,34 +74,84 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
         // below compare against "root//" and reject even the default appDirectory ".".
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(repoRoot));
 
-        var appDirectory = ResolveAppDirectory(serviceName, root, options.AppDirectory);
+        var appDirectory = RequireInsideCheckout(serviceName, "appDirectory", root, root, options.AppDirectory);
 
-        if (options.ScriptPath is not null)
+        // Anchored to appDirectory, which is the working directory the integration runs it from, but
+        // still confined to the checkout — a sibling app directory is a legitimate target, anything
+        // outside the repository is not.
+        var scriptPath = options.ScriptPath is null
+            ? null
+            : RequireInsideCheckout(serviceName, "scriptPath", root, appDirectory, options.ScriptPath);
+
+        return new JavaScriptPlan(serviceName, options, root, appDirectory, scriptPath);
+    }
+
+    /// <summary>
+    /// A resolved javascript service: the paths it will run from, the checks that need those paths
+    /// to exist, and the resource itself. Split that way because the two callers need the halves in
+    /// different orders — the eager path checks then builds, the deferred path builds now and checks
+    /// once the clone has landed.
+    /// </summary>
+    private sealed record JavaScriptPlan(
+        string ServiceName,
+        ResolvedOptions Options,
+        string Root,
+        string AppDirectory,
+        string? ScriptPath)
+    {
+        /// <summary>
+        /// The checks that need the repository on disk. On the eager path these run before anything
+        /// reaches the app model; on the deferred path core runs them after the clone, where they
+        /// surface as the service's resource state rather than as an exception out of composition.
+        /// </summary>
+        /// <remarks>
+        /// These cannot move into <see cref="ILocalResourceKind.Validate"/>, which is deliberately
+        /// not given the checkout path — core calls it before resolving the repo root so that a
+        /// malformed options block fails without first paying for a cold clone.
+        /// </remarks>
+        public void RequireCheckout()
         {
-            RequireScriptPath(serviceName, root, appDirectory, options.ScriptPath);
+            if (!Directory.Exists(AppDirectory))
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Service '{ServiceName}': javascript appDirectory '{Options.AppDirectory}' was not found " +
+                    $"under '{Root}'.");
+            }
+
+            // Without the existence check a typo reaches the developer as "node: cannot find module"
+            // at run time rather than as a named config error.
+            if (ScriptPath is not null && !File.Exists(ScriptPath))
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Service '{ServiceName}': javascript scriptPath '{Options.ScriptPath}' was not found under " +
+                    $"'{AppDirectory}'.");
+            }
+
+            RequirePackageJsonIfOneIsNeeded(ServiceName, AppDirectory, Options);
         }
 
-        RequirePackageJsonIfOneIsNeeded(serviceName, appDirectory, options);
-
-        var app = AddApp(builder, serviceName, appDirectory, options);
-
-        ApplyPackageManager(app, options.PackageManager);
-
-        // For node/bun the run script is an override on top of the script file the integration is
-        // already told to execute, so it can only be applied afterwards. The other app types took
-        // it as the AddXxx argument above.
-        if (JavaScriptAppTypes.RunsAScriptFile(options.AppType) && options.RunScript is not null)
+        public IResourceBuilder<IResourceWithServiceDiscovery> Add(IDistributedApplicationBuilder builder)
         {
-            app.WithRunScript(options.RunScript);
-        }
+            var app = AddApp(builder, ServiceName, AppDirectory, Options);
 
-        // AddViteApp/AddNextJsApp already added an "http" endpoint, which this call updates in
-        // place with whatever was configured (a null argument leaves the existing value alone); for
-        // the other app types nothing added one, and without an endpoint the facade AddService
-        // hands back would carry nothing for a consumer's WithReference to resolve.
-        return JavaScriptAppTypes.BindsItsOwnPort(options.AppType)
-            ? app.WithHttpEndpoint(port: options.Port, targetPort: options.TargetPort)
-            : app.WithHttpEndpoint(port: options.Port, targetPort: options.TargetPort, env: options.PortEnv);
+            ApplyPackageManager(app, Options.PackageManager);
+
+            // For node/bun the run script is an override on top of the script file the integration is
+            // already told to execute, so it can only be applied afterwards. The other app types took
+            // it as the AddXxx argument above.
+            if (JavaScriptAppTypes.RunsAScriptFile(Options.AppType) && Options.RunScript is not null)
+            {
+                app.WithRunScript(Options.RunScript);
+            }
+
+            // AddViteApp/AddNextJsApp already added an "http" endpoint, which this call updates in
+            // place with whatever was configured (a null argument leaves the existing value alone); for
+            // the other app types nothing added one, and without an endpoint the facade AddService
+            // hands back would carry nothing for a consumer's WithReference to resolve.
+            return JavaScriptAppTypes.BindsItsOwnPort(Options.AppType)
+                ? app.WithHttpEndpoint(port: Options.Port, targetPort: Options.TargetPort)
+                : app.WithHttpEndpoint(port: Options.Port, targetPort: Options.TargetPort, env: Options.PortEnv);
+        }
     }
 
     private static IResourceBuilder<JavaScriptAppResource> AddApp(
@@ -101,43 +193,6 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
                 app.WithBun();
                 break;
             // Unset: leave whichever package manager the integration picked for this app type.
-        }
-    }
-
-    /// <summary>
-    /// Anchors <paramref name="appDirectory"/> to the checkout and checks it exists. Runs in
-    /// <see cref="Resolve"/> rather than <see cref="Validate"/> because these are the only checks
-    /// here that need the repository on disk, and <see cref="ILocalResourceKind.Validate"/> is
-    /// deliberately not given the checkout path.
-    /// </summary>
-    private static string ResolveAppDirectory(string serviceName, string root, string appDirectory)
-    {
-        var resolved = RequireInsideCheckout(serviceName, "appDirectory", root, root, appDirectory);
-
-        if (!Directory.Exists(resolved))
-        {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': javascript appDirectory '{appDirectory}' was not found under '{root}'.");
-        }
-
-        return resolved;
-    }
-
-    /// <summary>
-    /// The same pair of checks for the file node/bun are handed to execute. Anchored to
-    /// <paramref name="appDirectory"/>, which is the working directory the integration runs it from,
-    /// but still confined to the checkout — a sibling app directory is a legitimate target, anything
-    /// outside the repository is not. Without the existence check a typo reaches the developer as
-    /// <c>node: cannot find module</c> at run time rather than as a named config error.
-    /// </summary>
-    private static void RequireScriptPath(string serviceName, string root, string appDirectory, string scriptPath)
-    {
-        var resolved = RequireInsideCheckout(serviceName, "scriptPath", root, appDirectory, scriptPath);
-
-        if (!File.Exists(resolved))
-        {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': javascript scriptPath '{scriptPath}' was not found under '{appDirectory}'.");
         }
     }
 

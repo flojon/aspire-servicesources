@@ -64,15 +64,28 @@ internal sealed class DeferredCheckout
 
     private bool _subscribed;
 
+    /// <summary>
+    /// One held-back service. <c>Resource</c> is what <c>AddService()</c> handed the AppHost;
+    /// <c>HeldBack</c> is everything else registering it added to the app model — empty for
+    /// <c>dotnet</c>, the <c>npm install</c> installer for <c>javascript</c> — which has to be
+    /// withheld and started alongside it, in the order it was added. <c>OnCheckoutLanded</c> is the
+    /// kind's own post-clone work, run once the repository is on disk and before anything starts.
+    /// </summary>
     private sealed record Deferred(
         string ServiceName,
-        ProjectResource Resource,
+        IResource Resource,
+        IReadOnlyList<IResource> HeldBack,
         string RepoRoot,
         ServiceMetadata Metadata,
         ServiceDeveloperConfig Config,
         string AppHostDirectory,
         LocalCheckoutPrefetch Prefetch,
-        IGitClient GitClient);
+        IGitClient GitClient,
+        Action<IResource, string, ILogger> OnCheckoutLanded)
+    {
+        /// <summary>Everything withheld for this service, in the order it must be started.</summary>
+        public IEnumerable<IResource> AllResources => HeldBack.Append(Resource);
+    }
 
     public static DeferredCheckout For(IDistributedApplicationBuilder builder)
     {
@@ -154,6 +167,142 @@ internal sealed class DeferredCheckout
             .WithExplicitStart();
 #pragma warning restore ASPIREPROJECTS001
 
+        Add(
+            builder, serviceName, resource, [], repoRoot, metadata, config, prefetch, gitClient,
+            (deferredResource, checkoutRoot, logger) =>
+                RestoreLaunchProfile(deferredResource, metadata.Project, checkoutRoot, logger));
+
+        return ResolvedService.Tag(resourceBuilder, serviceName, "local");
+    }
+
+    /// <summary>
+    /// The same for a non-dotnet kind, whose resource only the kind's own
+    /// <see cref="ILocalResourceKind"/> knows how to build. <paramref name="resolveDeferred"/> is
+    /// handed the path the checkout will have and returns <see langword="null"/> if the kind does
+    /// not support deferral, in which case so does this — nothing has been registered and the caller
+    /// falls back to the eager path.
+    /// </summary>
+    /// <remarks>
+    /// Withholding is applied here rather than by the handler, and to every resource the handler
+    /// added rather than only the one it returned. A satellite integration is entitled to add
+    /// helpers of its own next to the service — <c>Aspire.Hosting.JavaScript</c> adds the
+    /// <c>npm install</c> installer the app waits on — and every one of them would otherwise be
+    /// started by DCP against a directory that does not exist yet. Making that core's job also keeps
+    /// it off the list of things a handler author can get wrong.
+    /// </remarks>
+    public IResourceBuilder<IResourceWithServiceDiscovery>? RegisterKind(
+        IDistributedApplicationBuilder builder,
+        string serviceName,
+        ServiceMetadata metadata,
+        ServiceDeveloperConfig config,
+        LocalCheckoutPrefetch prefetch,
+        IGitClient gitClient,
+        Func<string, DeferredLocalResource?> resolveDeferred)
+    {
+        var repoRoot = LocalGitCheckout.ManagedRepoRoot(builder.AppHostDirectory, serviceName);
+
+        // Resources are only ever appended to the collection, so everything from here on is this
+        // handler's doing. Taken by index rather than by set difference so a handler that adds a
+        // resource named like one already in the model is still accounted for correctly.
+        var before = builder.Resources.Count;
+
+        var registration = resolveDeferred(repoRoot);
+        if (registration is null)
+        {
+            return null;
+        }
+
+        var resource = registration.Service.Resource;
+        var heldBack = builder.Resources.Skip(before).Where(added => !ReferenceEquals(added, resource)).ToArray();
+
+        foreach (var withheld in heldBack.Append(resource))
+        {
+            // WithExplicitStart() needs an IResourceBuilder<T>, and the resources the handler added
+            // alongside its own are only reachable as IResource. The annotation is all that call
+            // adds, so it is added directly — and guarded, because the handler is free to have
+            // marked its own resource already.
+            if (!withheld.Annotations.OfType<ExplicitStartupAnnotation>().Any())
+            {
+                withheld.Annotations.Add(new ExplicitStartupAnnotation());
+            }
+        }
+
+        Add(
+            builder, serviceName, resource, heldBack, repoRoot, metadata, config, prefetch, gitClient,
+            (_, checkoutRoot, logger) =>
+                RunCheckoutValidation(registration, serviceName, metadata.Kind, checkoutRoot, logger));
+
+        return ResolvedService.Tag(registration.Service, serviceName, "local");
+    }
+
+    /// <summary>
+    /// Runs the kind's post-clone checks, the ones <see cref="ILocalResourceKind.Resolve"/> makes
+    /// against the working tree and <see cref="ILocalResourceKind.ResolveDeferred"/> could not.
+    /// </summary>
+    /// <remarks>
+    /// A handler that reports a problem any other way than
+    /// <see cref="ServiceSourcesConfigurationException"/> is wrapped in one, for the same reason
+    /// <c>LocalProjectSource.InvokeKindHandler</c> wraps the eager path: the exception is about to
+    /// become this service's failure state, and "the handler for kind 'java' failed" is a more
+    /// useful thing to read there than a bare <c>IOException</c>.
+    /// </remarks>
+    private static void RunCheckoutValidation(
+        DeferredLocalResource registration, string serviceName, string kind, string repoRoot, ILogger logger)
+    {
+        if (registration.ValidateCheckout is not { } validate)
+        {
+            return;
+        }
+
+        logger.LogInformation(
+            "Checking the landed checkout at {RepoRoot} against the service's configuration.", repoRoot);
+
+        try
+        {
+            validate();
+        }
+        catch (Exception ex) when (ex is not ServiceSourcesConfigurationException)
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': the handler for kind '{kind}' failed while checking the checkout that " +
+                "had just landed.", ex);
+        }
+    }
+
+    /// <summary>The dotnet kind's post-clone work: everything the missing launch profile cost it.</summary>
+    private static void RestoreLaunchProfile(
+        IResource resource, string relativeProject, string repoRoot, ILogger logger)
+    {
+        // The repository is on disk now, so everything Aspire read from the launch profile while
+        // composing — and got nothing for — is finally readable. ResolveProjectFile is the same
+        // check the eager path makes; it is what reports a 'project' that names nothing.
+        var projectFile = LocalProjectSource.ResolveProjectFile(resource.Name, repoRoot, relativeProject);
+
+        var profile = LandedLaunchProfile.Read(projectFile);
+
+        RestoreLaunchProfileEnvironment(resource, profile, logger);
+
+        // Endpoints are the one part that cannot be put back, so the shortfall is reported
+        // rather than enforced: refusing to start a service that would have run fine is worse
+        // than telling the developer their port is not Aspire's to manage.
+        if (LaunchProfileEndpointWarning(resource.Name, profile, resource) is { } warning)
+        {
+            logger.LogWarning("{Warning}", warning);
+        }
+    }
+
+    private void Add(
+        IDistributedApplicationBuilder builder,
+        string serviceName,
+        IResource resource,
+        IReadOnlyList<IResource> heldBack,
+        string repoRoot,
+        ServiceMetadata metadata,
+        ServiceDeveloperConfig config,
+        LocalCheckoutPrefetch prefetch,
+        IGitClient gitClient,
+        Action<IResource, string, ILogger> onCheckoutLanded)
+    {
         // The prefetch reports every checkout it started that no AddService() call asked for, at
         // BeforeStartEvent. This service was asked for; it just won't be waited on until later, so
         // it has to say so now or it would be reported as speculative work nobody wanted.
@@ -162,12 +311,11 @@ internal sealed class DeferredCheckout
         lock (_gate)
         {
             _deferred.Add(new Deferred(
-                serviceName, resource, repoRoot, metadata, config, builder.AppHostDirectory, prefetch, gitClient));
+                serviceName, resource, heldBack, repoRoot, metadata, config, builder.AppHostDirectory, prefetch,
+                gitClient, onCheckoutLanded));
         }
 
         EnsureSubscribed(builder);
-
-        return ResolvedService.Tag(resourceBuilder, serviceName, "local");
     }
 
     private void EnsureSubscribed(IDistributedApplicationBuilder builder)
@@ -267,14 +415,14 @@ internal sealed class DeferredCheckout
     /// </para>
     /// </remarks>
     private static void RestoreLaunchProfileEnvironment(
-        Deferred deferred, LandedLaunchProfile profile, ILogger logger)
+        IResource resource, LandedLaunchProfile profile, ILogger logger)
     {
         if (profile.EnvironmentVariables.Count == 0)
         {
             return;
         }
 
-        deferred.Resource.Annotations.Add(new EnvironmentCallbackAnnotation(context =>
+        resource.Annotations.Add(new EnvironmentCallbackAnnotation(context =>
         {
             foreach (var variable in profile.EnvironmentVariables)
             {
@@ -353,14 +501,17 @@ internal sealed class DeferredCheckout
             var notifications = services.GetRequiredService<ResourceNotificationService>();
             var logger = services.GetRequiredService<ResourceLoggerService>().GetLogger(deferred.Resource);
 
-            // This runs from BeforeStartEvent, so the resource is not in the notification service
+            // This runs from BeforeStartEvent, so the resources are not in the notification service
             // yet — a state published now would be overwritten by the NotStarted that DCP publishes
-            // when it withholds the explicit-start executable, and the start command below would
+            // when it withholds each explicit-start executable, and the start commands below would
             // have nothing to act on. Waiting for that NotStarted is the whole synchronisation this
-            // needs, and it depends on nothing but this one resource.
-            await notifications.WaitForResourceAsync(
-                deferred.Resource.Name, KnownResourceStates.NotStarted, cancellationToken)
-                .ConfigureAwait(false);
+            // needs, and it depends on nothing outside this service's own resources.
+            foreach (var withheld in deferred.AllResources)
+            {
+                await notifications.WaitForResourceAsync(
+                    withheld.Name, KnownResourceStates.NotStarted, cancellationToken)
+                    .ConfigureAwait(false);
+            }
 
             await notifications.PublishUpdateAsync(deferred.Resource, snapshot => snapshot with
             {
@@ -392,34 +543,31 @@ internal sealed class DeferredCheckout
                     "cannot be changed afterwards.");
             }
 
-            var projectFile = LocalProjectSource.ResolveProjectFile(
-                deferred.ServiceName, repoRoot, deferred.Metadata.Project);
-
-            // The repository is on disk now, so everything Aspire read from the launch profile while
-            // composing — and got nothing for — is finally readable.
-            var profile = LandedLaunchProfile.Read(projectFile);
-
-            RestoreLaunchProfileEnvironment(deferred, profile, logger);
-
-            // Endpoints are the one part that cannot be put back, so the shortfall is reported
-            // rather than enforced: refusing to start a service that would have run fine is worse
-            // than telling the developer their port is not Aspire's to manage.
-            if (LaunchProfileEndpointWarning(deferred.ServiceName, profile, deferred.Resource) is { } warning)
-            {
-                logger.LogWarning("{Warning}", warning);
-            }
+            // Whatever this kind could only settle against a real working tree: the dotnet kind's
+            // launch profile, a satellite kind's DeferredLocalResource.ValidateCheckout.
+            deferred.OnCheckoutLanded(deferred.Resource, repoRoot, logger);
 
             logger.LogInformation("Checkout ready at {RepoRoot}. Starting.", repoRoot);
 
-            var result = await services.GetRequiredService<ResourceCommandService>()
-                .ExecuteCommandAsync(deferred.Resource, KnownResourceCommands.StartCommand, cancellationToken)
-                .ConfigureAwait(false);
+            var commands = services.GetRequiredService<ResourceCommandService>();
 
-            if (!result.Success && !result.Canceled)
+            // Held-back helpers first, then the service. They are not merely ordered but dependent:
+            // Aspire.Hosting.JavaScript's app already carries a WaitFor on its installer, so starting
+            // the app while the installer is still withheld would leave it waiting on a resource
+            // nothing was ever going to create. Starting the installer first makes that wait resolve
+            // the way it does on a warm run; DCP does the sequencing from there.
+            foreach (var withheld in deferred.AllResources)
             {
-                throw new ServiceSourcesConfigurationException(
-                    $"Service '{deferred.ServiceName}': the checkout completed but starting the resource failed. " +
-                    (result.Message ?? "No further detail was reported."));
+                var result = await commands
+                    .ExecuteCommandAsync(withheld, KnownResourceCommands.StartCommand, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (!result.Success && !result.Canceled)
+                {
+                    throw new ServiceSourcesConfigurationException(
+                        $"Service '{deferred.ServiceName}': the checkout completed but starting resource " +
+                        $"'{withheld.Name}' failed. " + (result.Message ?? "No further detail was reported."));
+                }
             }
         }
         catch (OperationCanceledException)
@@ -448,10 +596,17 @@ internal sealed class DeferredCheckout
                 deferred.ServiceName,
                 exception.Message);
 
-            await notifications.PublishUpdateAsync(deferred.Resource, snapshot => snapshot with
+            // Every resource withheld for this service, not just the service's own: a held-back
+            // helper left sitting in NotStarted reads as "still waiting" rather than as the casualty
+            // of a clone that is never going to land.
+            foreach (var withheld in deferred.AllResources)
             {
-                State = new ResourceStateSnapshot(KnownResourceStates.FailedToStart, KnownResourceStateStyles.Error),
-            }).ConfigureAwait(false);
+                await notifications.PublishUpdateAsync(withheld, snapshot => snapshot with
+                {
+                    State = new ResourceStateSnapshot(
+                        KnownResourceStates.FailedToStart, KnownResourceStateStyles.Error),
+                }).ConfigureAwait(false);
+            }
         }
         catch (Exception)
         {

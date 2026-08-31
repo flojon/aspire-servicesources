@@ -39,4 +39,31 @@ public interface ILocalResourceKind
     void Validate(string serviceName, object? rawConfig)
     {
     }
+
+    /// <summary>
+    /// <see cref="Resolve"/> for a checkout that has not happened yet: <paramref name="repoRoot"/>
+    /// is the directory the clone <em>will</em> land in, and nothing is there. Return
+    /// <see langword="null"/> — the default — to say this kind does not support deferral, in which
+    /// case core falls back to waiting for the checkout and calling <see cref="Resolve"/> as usual.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Called only when the AppHost opted in with <c>UseDeferredCheckout()</c> and this service's
+    /// managed checkout is genuinely cold. Build the resource exactly as <see cref="Resolve"/>
+    /// would, but touch no file under <paramref name="repoRoot"/>: hand the checks that need the
+    /// working tree back as <see cref="DeferredLocalResource.ValidateCheckout"/> and core will run
+    /// them after the clone. Everything else is unchanged, including the endpoints — those cannot be
+    /// added later, so a kind that can only learn its endpoints by reading the repository should
+    /// return <see langword="null"/> rather than register a service nothing can resolve.
+    /// </para>
+    /// <para>
+    /// Holding the resource back and starting it is core's job, not the handler's, and it covers
+    /// every resource this call adds to the app model — see <see cref="DeferredLocalResource"/>.
+    /// </para>
+    /// </remarks>
+    DeferredLocalResource? ResolveDeferred(
+        IDistributedApplicationBuilder builder,
+        string serviceName,
+        string repoRoot,
+        object? rawConfig) => null;
 }
