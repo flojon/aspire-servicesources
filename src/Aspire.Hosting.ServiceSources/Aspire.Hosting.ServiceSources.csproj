@@ -16,7 +16,6 @@
 
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting" />
-    <PackageReference Include="LibGit2Sharp" />
     <PackageReference Include="YamlDotNet" />
   </ItemGroup>
 

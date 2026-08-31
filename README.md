@@ -152,6 +152,11 @@ a project reference would be.
 
 ### `"local"` source options
 
+Requires `git` (2.7 or newer) on `PATH` for a managed checkout — the same "a tool you already
+have" trade the `"kubernetes"` source makes with `kubectl`. Every git operation runs under your own
+git, so your credential helper, SSH agent, `~/.gitconfig` and proxy settings apply unchanged. A
+service pointed at your own directory with `path` needs no git at all.
+
 ```json
 {
   "services": {
@@ -575,30 +580,35 @@ property rather than as the kind's options.
 
 Clone and fetch for a managed checkout (no `path` override) authenticate the same way, in order:
 
-1. **Your `git` credential helper.** The managed checkout shells out to `git credential fill` for
-   the repository's host, so whatever you already have configured — Git Credential Manager,
-   `osxkeychain`, `libsecret`, a cached PAT, a `.netrc`-backed helper — is reused automatically.
-   Nothing to configure here beyond having `git` on `PATH` with a working credential helper (run
-   `git credential fill` yourself against the same host to confirm it resolves before wiring it
-   up here).
+1. **Whatever your `git` already does.** Clone and fetch run the `git` on your `PATH`, so every
+   `credential.helper` you have configured — Git Credential Manager, `osxkeychain`, `libsecret`, a
+   cached PAT, a `.netrc`-backed helper — is consulted exactly as it is for a `git clone` you type
+   yourself. For an SSH remote that means your SSH agent and `~/.ssh/config`. Nothing to configure
+   here: if `git clone <repository>` works in the environment the AppHost runs in, so does this.
 2. **`SERVICESOURCES_GIT_USERNAME`/`SERVICESOURCES_GIT_TOKEN` environment variables**, if the
-   helper above yields nothing (e.g. no helper configured, or `git` isn't on `PATH`) — or if what
-   it yielded was refused, see below. `SERVICESOURCES_GIT_TOKEN` alone is enough for hosts that
-   accept any username alongside a personal access token (GitHub, GitLab, Azure DevOps); set
-   `SERVICESOURCES_GIT_USERNAME` too if your host requires a specific one.
+   helpers above yield nothing (e.g. no helper configured) — or if what they yielded was refused,
+   see below. `SERVICESOURCES_GIT_TOKEN` alone is enough for hosts that accept any username
+   alongside a personal access token (GitHub, GitLab, Azure DevOps); set
+   `SERVICESOURCES_GIT_USERNAME` too if your host requires a specific one. Supplied to git as a
+   credential helper of last resort, so it never overrides a helper you configured yourself, and
+   the token is read from the environment rather than passed on a command line where other users
+   on the machine could read it.
 
-The order is a ladder, not a one-shot choice: if the host refuses the credential your helper
-supplied, the environment variables are tried next, and only then the request is left
-unauthenticated. Each credential is offered once per clone or fetch — a refused one is never
-replayed.
+The order is a ladder, not a one-shot choice. `git` stops at the first helper that answers, so if
+the host refuses that credential the clone would normally fail there — with the environment token
+never offered. It is therefore re-run once with the configured helpers cleared, giving
+`SERVICESOURCES_GIT_TOKEN` its turn. Only after that does the failure stand.
 
-A credential the host actually refuses is also reported back to your helper with
-`git credential reject`, exactly as `git` itself does, so Git Credential Manager, `osxkeychain`,
+A credential the host actually refuses is reported back to your helper with `git credential
+reject` — by `git` itself, as part of failing — so Git Credential Manager, `osxkeychain`,
 `libsecret` and friends erase their stored copy and resolve afresh next time instead of serving the
-same dead token on every run. That only happens on an outright rejection of the credential
-(HTTP 401); a "not found" answer never erases anything, since a repository your credential simply
-can't see is at least as likely an explanation as a bad credential. Rotating a token therefore
-takes effect on the next resolution — there's no need to restart the AppHost to clear a cached one.
+same dead token on every run. Rotating a token therefore takes effect on the next resolution;
+nothing is cached inside the AppHost process for a restart to clear.
+
+Nothing ever prompts. `GIT_TERMINAL_PROMPT=0` is set on every invocation, and SSH runs with
+`BatchMode=yes` unless you've set your own `GIT_SSH_COMMAND`, so a repository whose credentials
+don't resolve fails immediately instead of hanging `builder.AddService()` on a prompt nobody is
+there to answer.
 
 Credentials are never read from `servicesources.yaml` (committed) or `servicesources.local.json`
 — there's no field for them in either file, by design, so a secret can't accidentally end up in
@@ -617,20 +627,18 @@ the credentials in use can't see. A rate-limited response is deliberately left o
 hosts answer it with the same `403` as a token that's missing a scope: there the credential is
 fine and the fix is to wait, so it's reported as the transport failure it is.
 
-When the ladder resolves *nothing* — the helper yields no credential and neither environment
+When the ladder resolves *nothing* — no helper yields a credential and neither environment
 variable is set — the error says so specifically instead of blaming authentication, because
 nothing was ever offered for the host to refuse. Watch for this when the helper works in your
-shell but not under the AppHost: the helper runs in whatever environment the AppHost process
-inherits, which is not necessarily your interactive one, and `git` missing from that `PATH` is
-enough to empty the ladder. (The request is still made with the machine's integrated credential,
-which is what Negotiate/NTLM hosts such as an on-prem Azure DevOps Server need, so integrated
-auth keeps working — it just can't help against a token-authenticated host like GitHub.)
+shell but not under the AppHost: helpers run in whatever environment the AppHost process
+inherits, which is not necessarily your interactive one.
 
-**SSH is not supported.** LibGit2Sharp's bundled native binaries don't include an SSH transport,
-so a `repository` written as `git@host:org/repo`, `host:org/repo` or `ssh://...` fails fast at
-resolution time with a message pointing at the HTTPS equivalent — use `https://host/org/repo`
-instead. The same check covers an existing checkout whose `origin` is an SSH remote, before any
-fetch is attempted against it.
+**SSH works.** A `repository` written as `git@host:org/repo`, `host:org/repo` or `ssh://...` is
+handed to `git` as written and resolved by your SSH agent and `~/.ssh/config`, the same as any
+other clone. Because nothing may block on a prompt, SSH runs with `BatchMode=yes`: a key whose
+passphrase isn't already held by an agent, and a host that isn't in `known_hosts` yet, fail
+immediately rather than waiting. Connect to the host once by hand to settle either, or set your own
+`GIT_SSH_COMMAND`, which is left untouched if you do.
 
 ### `"kubernetes"` source
 

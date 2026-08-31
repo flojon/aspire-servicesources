@@ -92,10 +92,6 @@ internal static class LocalGitCheckout
             return new PreparedCheckout(repoRoot, NeedsReconciliation: true);
         }
 
-        // Validated before any work is done, so an unsupported URL fails fast rather
-        // than after a sweep and a directory create.
-        GitUrlValidator.EnsureSupported(serviceName, metadata.Repository);
-
         // A clone that loses the race to a concurrent AppHost leaves us using *their*
         // checkout, not one we just made, so it gets the same treatment as a checkout found
         // there on a later run: theirs may be a clone of another repository, and may hold
@@ -413,12 +409,6 @@ internal static class LocalGitCheckout
                 $"Service '{serviceName}': failed to checkout ref '{reference}' of repository '{displayRepository}' at '{repoRoot}'.", ex);
         }
 
-        // The fetch talks to the checkout's own origin, which need not be the configured
-        // `repository` (a pre-existing checkout, or a `repository` edited after the initial clone),
-        // so validate the URL actually about to be used — the clone path's check upfront doesn't
-        // cover it, and an SSH remote would otherwise fail with an opaque native error.
-        GitUrlValidator.EnsureSupported(serviceName, gitClient.GetOriginUrl(repoRoot) ?? metadata.Repository);
-
         try
         {
             gitClient.Fetch(repoRoot);
@@ -456,15 +446,15 @@ internal static class LocalGitCheckout
     /// <remarks>
     /// The rejected-credential wording covers both readings of the underlying failure: hosts
     /// commonly answer an unauthenticated request for a private repository with "not found" rather
-    /// than "unauthorized" (see <see cref="LibGit2SharpGitClient.LooksLikeAuthFailure"/>), so the
+    /// than "unauthorized" (see <see cref="GitCliClient.LooksLikeAuthFailure"/>), so the
     /// message must not assert that credentials were definitely rejected. When no credential was
-    /// resolved at all there is no such ambiguity to preserve — libgit2's own message for that case
-    /// ("could not find appropriate mechanism for credentials") describes a client-side dead end
-    /// that never reached the host, and repeating the rejected-credential remediation for it points
-    /// the developer at the wrong half of the problem. That branch is reached only when libgit2
-    /// actually asked for a credential (see
-    /// <see cref="GitCredentialProvider.ResolvedNoCredentials"/>), so it can state what the ladder
-    /// found without having to hedge about whether the host was ever contacted.
+    /// resolved at all there is no such ambiguity to preserve — git's own message for that case
+    /// ("could not read Username for '<host>': terminal prompts disabled") describes a client-side
+    /// dead end that never reached the host, and repeating the rejected-credential remediation for
+    /// it points the developer at the wrong half of the problem. That branch is reached only when
+    /// git got as far as needing a credential and had none (see
+    /// <see cref="GitCliClient.ResolvedNoCredentials"/>), so it can state what the ladder found
+    /// without having to hedge about whether the host was ever contacted.
     /// </remarks>
     private static string AuthFailureMessage(string failureDescription, bool noCredentialsResolved) =>
         noCredentialsResolved
