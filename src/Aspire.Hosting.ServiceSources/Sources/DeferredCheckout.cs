@@ -3,6 +3,7 @@ using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Git;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
@@ -114,7 +115,8 @@ internal sealed class DeferredCheckout
     /// eagerly. Scoped tightly on purpose: a warm checkout keeps today's path exactly, with full
     /// launch-profile fidelity, so the blast radius is first-run-only.
     /// </summary>
-    public bool ShouldDefer(string appHostDirectory, string serviceName, ServiceDeveloperConfig config)
+    public bool ShouldDefer(
+        IDistributedApplicationBuilder builder, string serviceName, ServiceDeveloperConfig config)
     {
         lock (_gate)
         {
@@ -122,6 +124,22 @@ internal sealed class DeferredCheckout
             {
                 return false;
             }
+        }
+
+        // Run mode only. Deferral buys a dashboard to look at while the clone runs, and publish mode
+        // has no dashboard, no DCP and no resource lifecycle — it composes the model, writes the
+        // manifest and exits. Deferring there would trade the whole point of the manifest for
+        // nothing: the resource would be described from a .csproj that is not on disk, so it would
+        // carry no launch-profile endpoints and no profile environment, where the eager path clones
+        // first and describes the real project. The start task would strand too, waiting on a
+        // NotStarted that only DCP publishes.
+        //
+        // BeforeStartEvent does not distinguish the two — DistributedApplication publishes it in
+        // every mode but 'inspect' — so the mode has to be checked here, before anything is
+        // registered deferred.
+        if (!builder.ExecutionContext.IsRunMode)
+        {
+            return false;
         }
 
         // A 'path' override points at a checkout the developer manages themselves. There is nothing
@@ -135,7 +153,7 @@ internal sealed class DeferredCheckout
         // Anything already on disk — a complete checkout, or debris from an interrupted clone —
         // goes down the eager path, which is the one that knows how to tell those apart and what to
         // do about each. Deferral only claims the case where there is nothing there at all.
-        return !Directory.Exists(LocalGitCheckout.ManagedRepoRoot(appHostDirectory, serviceName));
+        return !Directory.Exists(LocalGitCheckout.ManagedRepoRoot(builder.AppHostDirectory, serviceName));
     }
 
     /// <summary>
@@ -278,7 +296,7 @@ internal sealed class DeferredCheckout
         // check the eager path makes; it is what reports a 'project' that names nothing.
         var projectFile = LocalProjectSource.ResolveProjectFile(resource.Name, repoRoot, relativeProject);
 
-        var profile = LandedLaunchProfile.Read(projectFile);
+        var profile = LandedLaunchProfile.Read(projectFile, resource);
 
         RestoreLaunchProfileEnvironment(resource, profile, logger);
 
@@ -410,34 +428,55 @@ internal sealed class DeferredCheckout
     /// Added last and only where the key is absent, so anything the AppHost set — <c>WithEnvironment</c>,
     /// <c>WithReference</c>, a resolved connection string — wins over the profile, which is the
     /// precedence Aspire itself applies. Command-line arguments from <c>commandLineArgs</c> are not
-    /// restored: unlike environment, they are positional, so appending them after whatever the
-    /// AppHost added can change their meaning.
+    /// restored here: unlike environment, they are positional, so appending them after whatever the
+    /// AppHost added can change their meaning — and they need no restoring anyway, because Aspire
+    /// reads the profile again when it builds the executable, after the clone.
+    /// </para>
+    /// <para>
+    /// Values are expanded and <c>DOTNET_LAUNCH_PROFILE</c> is set, both of which
+    /// <c>WithProjectDefaults</c> does on the warm path. Skipping either would leave a difference
+    /// that only shows up on the first run: a profile value such as <c>%USERPROFILE%\certs</c> would
+    /// reach the process literally now and expanded on every run after.
     /// </para>
     /// </remarks>
     private static void RestoreLaunchProfileEnvironment(
         IResource resource, LandedLaunchProfile profile, ILogger logger)
     {
-        if (profile.EnvironmentVariables.Count == 0)
+        // Keyed off the profile rather than off its variable count: a profile with no
+        // environmentVariables still names itself in DOTNET_LAUNCH_PROFILE on the warm path.
+        if (profile.Name is not { } profileName)
         {
             return;
         }
 
         resource.Annotations.Add(new EnvironmentCallbackAnnotation(context =>
         {
+            if (!context.EnvironmentVariables.ContainsKey("DOTNET_LAUNCH_PROFILE"))
+            {
+                context.EnvironmentVariables["DOTNET_LAUNCH_PROFILE"] = profileName;
+            }
+
             foreach (var variable in profile.EnvironmentVariables)
             {
                 if (!context.EnvironmentVariables.ContainsKey(variable.Key))
                 {
-                    context.EnvironmentVariables[variable.Key] = variable.Value;
+                    context.EnvironmentVariables[variable.Key] = Environment.ExpandEnvironmentVariables(variable.Value);
                 }
             }
         }));
 
+        // Counted from what the callback above sets, DOTNET_LAUNCH_PROFILE included — a profile
+        // with no environmentVariables of its own still restores that one, and a log saying
+        // nothing was applied would send a developer looking for a bug that isn't there.
+        var applied = new List<string>(profile.EnvironmentVariables.Count + 1) { "DOTNET_LAUNCH_PROFILE" };
+        applied.AddRange(profile.EnvironmentVariables.Keys);
+
         logger.LogInformation(
-            "Applied {Count} environment variable(s) from the checkout's launch profile ({Names}), which "
-            + "Aspire could not read while composing the AppHost.",
-            profile.EnvironmentVariables.Count,
-            string.Join(", ", profile.EnvironmentVariables.Keys));
+            "Applied {Count} environment variable(s) from the checkout's launch profile '{Profile}' ({Names}), "
+            + "which Aspire could not read while composing the AppHost.",
+            applied.Count,
+            profileName,
+            string.Join(", ", applied));
     }
 
     /// <summary>
@@ -501,6 +540,19 @@ internal sealed class DeferredCheckout
             var notifications = services.GetRequiredService<ResourceNotificationService>();
             var logger = services.GetRequiredService<ResourceLoggerService>().GetLogger(deferred.Resource);
 
+            // BeforeStartEvent carries whatever token was handed to RunAsync, and the token an
+            // AppHost actually supplies is none: the template ends in Run(), which is
+            // RunAsync().Wait() with the default. Ctrl-C would leave this task waiting on a
+            // NotStarted that is no longer coming, and if the clone landed mid-teardown it would go
+            // on to start a resource on a stopping host and report the resulting failure as the
+            // service's own. ApplicationStopping is the signal that does fire; the event's token is
+            // kept alongside it because a host that was given a real one means it.
+            using var shutdown = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken,
+                services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping);
+
+            var stoppingToken = shutdown.Token;
+
             // This runs from BeforeStartEvent, so the resources are not in the notification service
             // yet — a state published now would be overwritten by the NotStarted that DCP publishes
             // when it withholds each explicit-start executable, and the start commands below would
@@ -509,7 +561,7 @@ internal sealed class DeferredCheckout
             foreach (var withheld in deferred.AllResources)
             {
                 await notifications.WaitForResourceAsync(
-                    withheld.Name, KnownResourceStates.NotStarted, cancellationToken)
+                    withheld.Name, KnownResourceStates.NotStarted, stoppingToken)
                     .ConfigureAwait(false);
             }
 
@@ -559,7 +611,7 @@ internal sealed class DeferredCheckout
             foreach (var withheld in deferred.AllResources)
             {
                 var result = await commands
-                    .ExecuteCommandAsync(withheld, KnownResourceCommands.StartCommand, cancellationToken)
+                    .ExecuteCommandAsync(withheld, KnownResourceCommands.StartCommand, stoppingToken)
                     .ConfigureAwait(false);
 
                 if (!result.Success && !result.Canceled)

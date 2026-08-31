@@ -89,7 +89,10 @@ public static class ServiceSourcesBuilderExtensions
     /// always did, and a service whose checkout already exists — every service on every run after
     /// the first — resolves eagerly, with full launch-profile fidelity, exactly as it does without
     /// this call. Services with a <c>path</c> override are never deferred either; that directory is
-    /// the developer's own and there is nothing to clone.
+    /// the developer's own and there is nothing to clone. Neither is anything outside run mode:
+    /// <c>aspire publish</c> and manifest generation clone first as they always have, because a
+    /// manifest written from a repository that is not on disk would describe a project without its
+    /// endpoints or its profile environment.
     /// </para>
     /// <para>
     /// Applies to the <c>"local"</c> kinds that own a managed checkout — <c>dotnet</c>, <c>java</c>
@@ -97,6 +100,11 @@ public static class ServiceSourcesBuilderExtensions
     /// profile, and both take their endpoints from the committed catalog, so a deferred one is
     /// identical to a warm one and only their post-clone checks move. <c>url</c>, <c>kubernetes</c>
     /// and <c>container</c> clone nothing, so there is nothing to defer.
+    /// </para>
+    /// <para>
+    /// A deferred <c>dotnet</c> service's launch profile environment is put back once the clone
+    /// lands, and only where the AppHost has not already set the same key — expanded, and alongside
+    /// <c>DOTNET_LAUNCH_PROFILE</c>, exactly as a warm run applies it.
     /// </para>
     /// <para>
     /// A deferred <c>dotnet</c> service should declare its own endpoints in the AppHost, because a
@@ -111,10 +119,11 @@ public static class ServiceSourcesBuilderExtensions
     /// <para>
     /// That line is correct on a warm checkout too — <c>WithHttpEndpoint</c> updates an endpoint of
     /// the same name using its non-null arguments only, and it has none — so there is one call, not
-    /// one per path. It is not demanded up front: a service that declares none is started anyway,
-    /// and the shortfall is reported against the landed checkout's real launch profile, so a
-    /// run-to-completion worker that never wanted an endpoint costs nothing. See
-    /// <c>DeferredCheckout.LaunchProfileEndpointWarning</c>.
+    /// one per path. A service that declares none still runs: once the checkout has landed its real
+    /// launch profile is read, and only a profile that declares an <c>applicationUrl</c> the AppHost
+    /// did not mirror produces a warning naming the service and the URL. A service with no
+    /// <c>applicationUrl</c> on either path — a run-to-completion worker — costs nothing and is
+    /// never reported. See <c>DeferredCheckout.LaunchProfileEndpointWarning</c>.
     /// </para>
     /// <para>
     /// Off by default: a service that used to be running by the time <c>Build()</c> returned is
