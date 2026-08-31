@@ -39,8 +39,10 @@ const payments = await builder
 // name a resolved service's endpoint (#160). getServiceEndpoint() asks for "the endpoint this
 // service exposes" and survives inventory being switched between the sources servicesources.yaml
 // describes; the discovery variable spells a scheme into its own name, so it is only defined while
-// inventory resolves to a source that produces an http endpoint — flip it to the "url" source with
-// its https URL and that variable is undefined while INVENTORY_URL still resolves.
+// inventory resolves to a source that produces an http endpoint. Were inventory on the "url" source
+// with its https URL, that variable would be undefined while INVENTORY_URL still resolved — which
+// is a contrast to reason about rather than run here, since payments references inventory and the
+// AppHost would refuse to start for the reason noted above.
 const probeScript =
   'console.log("INVENTORY_URL=" + process.env.INVENTORY_URL);' +
   'console.log("services__inventory__http__0=" + process.env.services__inventory__http__0);';

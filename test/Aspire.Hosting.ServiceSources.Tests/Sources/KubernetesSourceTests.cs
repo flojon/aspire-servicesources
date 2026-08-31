@@ -246,6 +246,21 @@ public class KubernetesSourceTests
     }
 
     [Fact]
+    public void Resolve_UnsupportedScheme_DoesNotAllocatePort()
+    {
+        // The scheme is config validation like every check inside BuildPortForwardArgs, so it is
+        // resolved before that call reaches its port allocation rather than after it.
+        var builder = TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+        var allocatorCalled = false;
+        var allocator = new TrackingPortAllocator(() => allocatorCalled = true, 54321);
+
+        Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new KubernetesSource(allocator).Resolve(builder, ServiceName, Metadata(scheme: "grpc"), DevConfig()));
+
+        Assert.False(allocatorCalled);
+    }
+
+    [Fact]
     public void Resolve_MissingKubernetesBlock_ReportsThatRatherThanTheScheme()
     {
         // Scheme resolution must not run ahead of the checks that name a missing kubernetes block:

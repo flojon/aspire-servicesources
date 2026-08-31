@@ -429,7 +429,7 @@ Every option is optional:
 
 The service always gets an `http` endpoint, so the builder `AddService()` returns can be passed to
 a consumer's `WithReference(...)` like any other — or to `GetServiceEndpoint()`, which is how a
-consumer names that endpoint without knowing the source produced it
+consumer names that endpoint without knowing which source produced it
 ([naming a service's endpoint](#naming-a-services-endpoint)). Node and Bun must be on `PATH` for the app types
 that use them.
 
