@@ -30,15 +30,38 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
         // reported from here rather than as an npm failure from a resource much later.
         plan.RequireCheckout();
 
-        return plan.Add(builder);
+        return plan.Add(builder, deferred: false);
     }
 
     /// <summary>
-    /// Deferral costs this kind nothing, so it is supported unconditionally. The resource is built
-    /// entirely from the committed catalog: <c>port</c>/<c>targetPort</c> are optional and Aspire
-    /// allocates them when unset, the service always gets an <c>http</c> endpoint, and nothing is
-    /// read out of the repository at composition time — so a deferred javascript service is
-    /// identical to a warm one, and only the checks below move.
+    /// Answered from the options block alone, and without touching the checkout — see
+    /// <c>ResolvedOptions.SupportsDeferral</c> for which blocks can be built cold and why.
+    /// </summary>
+    /// <remarks>
+    /// A block that will not parse answers <see langword="false"/> rather than throwing. This is
+    /// probed for services that may never be added, so it is not this call's place to report a
+    /// malformed block; the eager path it falls back to raises the same parse failure from
+    /// <see cref="Validate"/>, naming the service.
+    /// </remarks>
+    public bool SupportsDeferredCheckout(object? rawConfig)
+    {
+        try
+        {
+            // The service name is only ever used to build messages, and nothing here reports one.
+            return ResolveOptions("?", rawConfig).SupportsDeferral();
+        }
+        catch (ServiceSourcesConfigurationException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The resource is built entirely from the committed catalog: <c>port</c>/<c>targetPort</c> are
+    /// optional and Aspire allocates them when unset, the service always gets an <c>http</c>
+    /// endpoint, and nothing is read out of the repository at composition time — so for the app
+    /// types <see cref="SupportsDeferredCheckout"/> admits, a deferred javascript service is
+    /// identical to a warm one and only the checks below move.
     /// </summary>
     /// <remarks>
     /// <c>AddViteApp</c> and friends also add a separate installer resource to run
@@ -52,9 +75,17 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
     {
         var plan = Plan(serviceName, repoRoot, rawConfig);
 
+        // Core asks SupportsDeferredCheckout first, so this is belt-and-braces — but it is the last
+        // point at which registering the wrong resource is still avoidable, and the cost of being
+        // wrong here is a service that runs without its installer.
+        if (!plan.Options.SupportsDeferral())
+        {
+            return null;
+        }
+
         return new DeferredLocalResource
         {
-            Service = plan.Add(builder),
+            Service = plan.Add(builder, deferred: true),
             ValidateCheckout = plan.RequireCheckout,
         };
     }
@@ -130,9 +161,27 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
             RequirePackageJsonIfOneIsNeeded(ServiceName, AppDirectory, Options);
         }
 
-        public IResourceBuilder<IResourceWithServiceDiscovery> Add(IDistributedApplicationBuilder builder)
+        /// <param name="deferred">
+        /// Whether this is being built against a checkout that has not landed yet, which changes
+        /// what <c>AddNodeApp</c>/<c>AddBunApp</c> managed to attach on their own.
+        /// </param>
+        public IResourceBuilder<IResourceWithServiceDiscovery> Add(
+            IDistributedApplicationBuilder builder, bool deferred)
         {
             var app = AddApp(builder, ServiceName, AppDirectory, Options);
+
+            // AddNodeApp/AddBunApp attach their package manager only when they can see a
+            // package.json in the app directory, and on the deferred path there is no directory yet
+            // to see one in — so they attach nothing, and everything hanging off that annotation
+            // goes with it: the npm install resource, the app's wait for it, and the rewrite that
+            // turns runScript into 'npm run <script>' instead of running scriptPath directly.
+            // Attaching it here is what makes the deferred resource the one a warm run builds.
+            // Only reached for an options block SupportsDeferral has already established a
+            // package.json is coming for.
+            if (deferred)
+            {
+                ApplyPackageManager(app, Options.PackageManagerForColdCheckout());
+            }
 
             ApplyPackageManager(app, Options.PackageManager);
 
@@ -391,5 +440,49 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
         string? PackageManager,
         int? Port,
         int? TargetPort,
-        string PortEnv);
+        string PortEnv)
+    {
+        /// <summary>
+        /// Whether the resource built for this options block without the checkout on disk is the
+        /// one a warm run builds.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <c>vite</c>, <c>nextjs</c> and <c>javascript</c> always are: their builder calls attach a
+        /// package manager unconditionally, so the installer resource and the app's wait for it are
+        /// there either way.
+        /// </para>
+        /// <para>
+        /// <c>node</c> and <c>bun</c> are the exception. <c>AddNodeApp</c>/<c>AddBunApp</c> attach
+        /// one only if they can see a <c>package.json</c> in the app directory, so what a warm run
+        /// produces depends on the repository's contents — an installer and a wait when the file is
+        /// there, neither when it is not — and a cold checkout cannot be looked at. Deferring on a
+        /// guess is not harmless either way round: guessing "present" puts an <c>npm install</c> in
+        /// front of a repository that holds a single entry-point file, and guessing "absent" is
+        /// worse, because the service then starts against a checkout with no <c>node_modules</c> and
+        /// a <see cref="RunScript"/> silently downgraded to running <c>scriptPath</c> directly.
+        /// </para>
+        /// <para>
+        /// So they are admitted only where the answer is already known without looking:
+        /// <see cref="PackageManager"/> names one, which is attached on both paths regardless of
+        /// what is on disk; or <see cref="RunScript"/> is set, which
+        /// <c>RequirePackageJsonIfOneIsNeeded</c> demands a <c>package.json</c> for and fails the
+        /// service after the clone if it is missing. Otherwise the honest answer is "resolve me
+        /// eagerly", which costs this one service its dashboard-during-clone and nothing else.
+        /// </para>
+        /// </remarks>
+        public bool SupportsDeferral() =>
+            !JavaScriptAppTypes.RunsAScriptFile(AppType) || PackageManager is not null || RunScript is not null;
+
+        /// <summary>
+        /// The package manager <c>AddNodeApp</c>/<c>AddBunApp</c> would have attached had the
+        /// checkout been on disk, for the deferred path to attach in its place, or
+        /// <see langword="null"/> when nothing needs attaching by hand — either the app type
+        /// attaches its own, or the catalog named one and <c>ApplyPackageManager</c> attaches it.
+        /// </summary>
+        public string? PackageManagerForColdCheckout() =>
+            !JavaScriptAppTypes.RunsAScriptFile(AppType) || PackageManager is not null
+                ? null
+                : AppType == JavaScriptAppTypes.Bun ? JavaScriptPackageManagers.Bun : JavaScriptPackageManagers.Npm;
+    }
 }

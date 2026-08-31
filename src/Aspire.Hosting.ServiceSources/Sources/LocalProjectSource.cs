@@ -44,15 +44,19 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
             // nothing it would otherwise have had, and buys it a dashboard while the clone runs.
             //
             // A satellite kind gets the same treatment when it can build its resource without
-            // reading the repository, which java and javascript both can: their endpoints come from
-            // the committed catalog rather than from anything in the checkout. One that cannot says
-            // so by returning null from ResolveDeferred, and falls through to the eager path below
-            // having added nothing.
+            // reading the repository, which java always can and javascript can for most of its app
+            // types: their endpoints come from the committed catalog rather than from anything in
+            // the checkout. SupportsDeferredCheckout is asked first because it is the form of the
+            // question that can be asked without registering anything — see ILocalResourceKind —
+            // and ResolveDeferred returning null is still honoured for a kind that can only decide
+            // once it has looked at everything.
             var registered = isDotnetKind
                 ? deferred.Register(builder, serviceName, metadata, config, prefetch, gitClient)
-                : deferred.RegisterKind(
-                    builder, serviceName, metadata, config, prefetch, gitClient,
-                    repoRoot => ResolveDeferredKind(builder, serviceName, metadata, repoRoot, handler!));
+                : handler!.SupportsDeferredCheckout(metadata.KindConfig)
+                    ? deferred.RegisterKind(
+                        builder, serviceName, metadata, config, prefetch, gitClient,
+                        repoRoot => ResolveDeferredKind(builder, serviceName, metadata, repoRoot, handler))
+                    : null;
 
             if (registered is not null)
             {

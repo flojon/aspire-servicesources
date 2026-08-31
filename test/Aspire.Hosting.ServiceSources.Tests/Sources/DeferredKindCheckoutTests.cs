@@ -72,9 +72,23 @@ public class DeferredKindCheckoutTests
     /// service, which is the shape <c>Aspire.Hosting.JavaScript</c>'s <c>npm install</c> installer
     /// puts core in.
     /// </summary>
-    private sealed class StandInKind(bool supportsDeferral = true, bool withHelper = false) : ILocalResourceKind
+    private sealed class StandInKind(
+        bool supportsDeferral = true,
+        bool withHelper = false,
+        bool deferralReturnsNull = false,
+        bool helperWaitsForService = false) : ILocalResourceKind
     {
         public string? DeferredRepoRoot { get; private set; }
+
+        public int SupportsDeferredCheckoutCalls { get; private set; }
+
+        public int ResolveDeferredCalls { get; private set; }
+
+        public bool SupportsDeferredCheckout(object? rawConfig)
+        {
+            SupportsDeferredCheckoutCalls++;
+            return supportsDeferral;
+        }
 
         public int ValidateCheckoutCalls { get; private set; }
 
@@ -93,7 +107,9 @@ public class DeferredKindCheckoutTests
         public DeferredLocalResource? ResolveDeferred(
             IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig)
         {
-            if (!supportsDeferral)
+            ResolveDeferredCalls++;
+
+            if (!supportsDeferral || deferralReturnsNull)
             {
                 return null;
             }
@@ -119,14 +135,22 @@ public class DeferredKindCheckoutTests
         private IResourceBuilder<IResourceWithServiceDiscovery> Add(
             IDistributedApplicationBuilder builder, string serviceName, string repoRoot)
         {
-            if (withHelper)
-            {
-                builder.AddExecutable($"{serviceName}-helper", "install", repoRoot);
-            }
+            var helper = withHelper
+                ? builder.AddExecutable($"{serviceName}-helper", "install", repoRoot)
+                : null;
 
-            return builder
+            var service = builder
                 .AddResource(new StandInResource(serviceName, Path.Combine(repoRoot, "app")))
                 .WithHttpEndpoint(targetPort: 8080);
+
+            // The inverted shape: a helper waiting on the service it sits next to, which core
+            // cannot start in any order that works.
+            if (helper is not null && helperWaitsForService)
+            {
+                helper.WaitFor(service);
+            }
+
+            return service;
         }
     }
 
@@ -423,8 +447,103 @@ public class DeferredKindCheckoutTests
         Assert.Contains(nameof(ILocalResourceKind.Validate), exception.Message);
     }
 
+    [Fact]
+    public void KindThatDeclaresNoDeferralSupport_IsNeverAskedToResolveDeferred()
+    {
+        var dir = CreateAppHostDirectory("frontend");
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.UseDeferredCheckout();
+
+        var kind = new StandInKind(supportsDeferral: false);
+        builder.AddLocalKind(KindName, kind);
+
+        new LocalProjectSource(new FakeGitClient()).Resolve(builder, "frontend", Metadata("frontend"), DevConfig());
+
+        // The whole point of the cheap question: it is answerable without the expensive one being
+        // asked, because the expensive one adds resources to the app model as a side effect.
+        Assert.Equal(1, kind.SupportsDeferredCheckoutCalls);
+        Assert.Equal(0, kind.ResolveDeferredCalls);
+        Assert.True(kind.ResolvedEagerly);
+    }
+
+    [Fact]
+    public void KindThatDeclaresSupportThenDeclines_StillFallsBackToTheEagerPath()
+    {
+        var dir = CreateAppHostDirectory("frontend");
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.UseDeferredCheckout();
+
+        var kind = new StandInKind(deferralReturnsNull: true);
+        builder.AddLocalKind(KindName, kind);
+
+        var service = new LocalProjectSource(new FakeGitClient())
+            .Resolve(builder, "frontend", Metadata("frontend"), DevConfig());
+
+        // A kind may only be able to decide once it has looked at everything, so null out of
+        // ResolveDeferred stays honoured even after the cheap probe said yes — and still costs
+        // nothing but the eager path.
+        Assert.Equal(1, kind.ResolveDeferredCalls);
+        Assert.True(kind.ResolvedEagerly);
+        Assert.False(IsHeldBack(service.Resource));
+        Assert.Single(builder.Resources, r => r.Name == "frontend");
+    }
+
+    [Fact]
+    public void HelperThatWaitsForTheServiceItSitsBeside_IsRefusedRatherThanLeftToHang()
+    {
+        var dir = CreateAppHostDirectory("frontend");
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.UseDeferredCheckout();
+        builder.AddLocalKind(KindName, new StandInKind(withHelper: true, helperWaitsForService: true));
+
+        var exception = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new FakeGitClient()).Resolve(builder, "frontend", Metadata("frontend"), DevConfig()));
+
+        // Helpers are started before the service, so a helper waiting on the service can never be
+        // satisfied — and the start loop awaits each in turn, so it would hang rather than fail.
+        // A deadlocked task nobody awaits shows up as a service that simply never starts, which is
+        // why this is named at registration instead.
+        Assert.Contains("frontend-helper", exception.Message);
+        Assert.Contains("WaitFor", exception.Message);
+    }
+
+    [Fact]
+    public async Task CloneThatNeverLands_PaintsTheServiceAndItsHeldBackHelper()
+    {
+        var dir = CreateAppHostDirectory("frontend");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.UseDeferredCheckout();
+        builder.AddLocalKind(KindName, new StandInKind(withHelper: true));
+
+        var git = new FakeGitClient();
+        var gate = git.BlockFor("https://example.com/frontend.git");
+        git.FailFor("https://example.com/frontend.git", new InvalidOperationException("no such repo"));
+        var service = new LocalProjectSource(git).Resolve(builder, "frontend", Metadata("frontend"), DevConfig());
+        var helper = Named(builder, "frontend-helper");
+
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+
+        await PublishNotStartedAsync(services, helper);
+        await PublishNotStartedAsync(services, service.Resource);
+
+        gate.Set();
+
+        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Nothing was started, so both are the casualty: a held-back helper left sitting in
+        // NotStarted reads as "still waiting" rather than as a resource nothing is coming for. The
+        // service is painted too, even though this package moved it to "Checking out" itself —
+        // which is why the skip below is keyed on what started, not on the state text.
+        Assert.Equal(KnownResourceStates.FailedToStart, await StateOfAsync(services, service.Resource));
+        Assert.Equal(KnownResourceStates.FailedToStart, await StateOfAsync(services, helper));
+    }
+
     private sealed class ThrowingKind : ILocalResourceKind
     {
+        public bool SupportsDeferredCheckout(object? rawConfig) => true;
+
         public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
             IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) =>
             throw new NotSupportedException("never reached");
@@ -439,9 +558,52 @@ public class DeferredKindCheckoutTests
     /// executable. That state is what each deferred task waits for before it touches the resource.
     /// </summary>
     private static Task PublishNotStartedAsync(IServiceProvider services, IResource resource) =>
+        PublishStateAsync(services, resource, KnownResourceStates.NotStarted);
+
+    private static Task PublishStateAsync(IServiceProvider services, IResource resource, string state) =>
         services.GetRequiredService<ResourceNotificationService>()
             .PublishUpdateAsync(resource, snapshot => snapshot with
             {
-                State = new ResourceStateSnapshot(KnownResourceStates.NotStarted, null),
+                State = new ResourceStateSnapshot(state, null),
             });
+
+    /// <summary>
+    /// Spins until <paramref name="resource"/> reports <paramref name="state"/>, so a test can line
+    /// itself up behind a step of the deferred task rather than racing it.
+    /// </summary>
+    private static async Task WaitForStateAsync(IServiceProvider services, IResource resource, string state)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+
+        while (DateTime.UtcNow < deadline)
+        {
+            if (await StateOfAsync(services, resource) == state)
+            {
+                return;
+            }
+
+            await Task.Delay(10);
+        }
+
+        Assert.Fail($"'{resource.Name}' never reached '{state}'.");
+    }
+
+    /// <summary>
+    /// Reads a resource's current state through the only door the notification service opens: an
+    /// update that captures the snapshot and hands the identical one back, so the read publishes
+    /// nothing new.
+    /// </summary>
+    private static async Task<string?> StateOfAsync(IServiceProvider services, IResource resource)
+    {
+        string? state = null;
+
+        await services.GetRequiredService<ResourceNotificationService>()
+            .PublishUpdateAsync(resource, snapshot =>
+            {
+                state = snapshot.State?.Text;
+                return snapshot;
+            });
+
+        return state;
+    }
 }

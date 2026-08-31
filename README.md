@@ -254,6 +254,8 @@ slower; only who waits for them changes.
 **What a cold checkout costs, and what it doesn't.** This part is about the `dotnet` kind. The
 `java` and `javascript` kinds have no launch profile and read nothing out of the repository while
 composing, so deferral costs them nothing at all — skip to *Scoped deliberately narrowly* below.
+(One `javascript` exception, covered there: `appType: node` and `appType: bun` are deferred only
+when the catalog guarantees a `package.json`.)
 
 Aspire reads a project's launch profile
 while composing the AppHost and turns it into endpoints, environment variables and command-line
@@ -310,6 +312,15 @@ checks that do need the working tree — `workingDirectory` and the `mvnw`/`grad
 `java`, `appDirectory`/`package.json`/`scriptPath` for `javascript` — simply move to just after
 the clone, which is where the docs already said they happened. For `javascript`, the separate
 resource that runs `npm install` is held back with the app and started ahead of it.
+
+`appType: node` and `appType: bun` are the one exception, and they opt out rather than guess.
+Aspire's `AddNodeApp`/`AddBunApp` attach a package manager — and with it the `npm install`
+resource the app waits on — only if they can see a `package.json` in the app directory, so what a
+warm run builds depends on what the repository holds, and a checkout that hasn't landed can't be
+looked at. They are deferred only where the answer is already known: `runScript` is set (which
+requires a `package.json` anyway), or `packageManager` names one. Otherwise that one service
+resolves eagerly, exactly as it does without `UseDeferredCheckout()`. Every other `appType` runs a
+`package.json` script by definition and is deferred unconditionally.
 
 Off by default: a service that used to be running by the time `Build()` returned is started
 after it instead, which is visible to anything in your AppHost that assumed otherwise. Call it

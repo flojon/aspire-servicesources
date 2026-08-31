@@ -41,6 +41,29 @@ public interface ILocalResourceKind
     }
 
     /// <summary>
+    /// Whether <see cref="ResolveDeferred"/> can build this service's resource without reading its
+    /// checkout. Defaults to <see langword="false"/>, which is what keeps an existing handler on the
+    /// eager path without changing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The point of asking separately is that this is answerable <em>before</em> anything is
+    /// registered, which <see cref="ResolveDeferred"/> is not: that call adds resources to the app
+    /// model, so it cannot be used to ask a speculative question. Core needs the speculative form to
+    /// decide which services to clone ahead of demand.
+    /// </para>
+    /// <para>
+    /// Must therefore touch no filesystem and add nothing to the app model — it is called for
+    /// services that may never be added. <paramref name="rawConfig"/> is the same opaque per-kind
+    /// block <see cref="Resolve"/> gets, because the answer can legitimately depend on it: a kind
+    /// may build some of its options blocks without the checkout and not others. Must not throw
+    /// either; a block too malformed to answer for is <see langword="false"/>, which routes it to
+    /// the eager path where <see cref="Validate"/> reports it properly.
+    /// </para>
+    /// </remarks>
+    bool SupportsDeferredCheckout(object? rawConfig) => false;
+
+    /// <summary>
     /// <see cref="Resolve"/> for a checkout that has not happened yet: <paramref name="repoRoot"/>
     /// is the directory the clone <em>will</em> land in, and nothing is there. Return
     /// <see langword="null"/> — the default — to say this kind does not support deferral, in which
@@ -48,8 +71,12 @@ public interface ILocalResourceKind
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Called only when the AppHost opted in with <c>UseDeferredCheckout()</c> and this service's
-    /// managed checkout is genuinely cold. Build the resource exactly as <see cref="Resolve"/>
+    /// Called only when the AppHost opted in with <c>UseDeferredCheckout()</c>, this service's
+    /// managed checkout is genuinely cold, and <see cref="SupportsDeferredCheckout"/> answered
+    /// <see langword="true"/> for this same <paramref name="rawConfig"/>. Returning
+    /// <see langword="null"/> anyway is still honoured — it costs only the eager path — but a kind
+    /// that can decide in advance should say so there, where asking is free.
+    /// Build the resource exactly as <see cref="Resolve"/>
     /// would, but touch no file under <paramref name="repoRoot"/>: hand the checks that need the
     /// working tree back as <see cref="DeferredLocalResource.ValidateCheckout"/> and core will run
     /// them after the clone. Everything else is unchanged, including the endpoints — those cannot be

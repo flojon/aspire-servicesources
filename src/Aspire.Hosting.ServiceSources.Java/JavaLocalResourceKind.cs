@@ -36,6 +36,12 @@ internal sealed class JavaLocalResourceKind : ILocalResourceKind
     }
 
     /// <summary>
+    /// Unconditional: every java options block builds the same resource cold as warm, for the
+    /// reasons on <see cref="ResolveDeferred"/>. Nothing here reads the checkout or the config.
+    /// </summary>
+    public bool SupportsDeferredCheckout(object? rawConfig) => true;
+
+    /// <summary>
     /// Deferral costs this kind nothing, so it is supported unconditionally. Everything the resource
     /// needs is in the committed catalog: the working directory and wrapper are paths under a repo
     /// root that is a pure function of the service name, and <c>java.port</c> is required, so the

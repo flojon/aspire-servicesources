@@ -72,7 +72,18 @@ nothing will fail to build to warn you.
   `ILocalResourceKind.ResolveDeferred()`, which is handed the path the clone will land in and
   returns the resource plus a `ValidateCheckout` callback for the checks that need the working
   tree. It defaults to returning `null`, meaning "resolve me eagerly", so an existing handler
-  keeps its current behaviour without changing.
+  keeps its current behaviour without changing. Its companion
+  `ILocalResourceKind.SupportsDeferredCheckout(rawConfig)` answers the same question without
+  registering anything — `ResolveDeferred` adds resources to the app model, so it cannot be used to
+  ask speculatively — and also defaults to declining.
+
+  `appType: node` and `appType: bun` are deferred only when the catalog guarantees a `package.json`
+  — `runScript` is set, or `packageManager` names one. Aspire's `AddNodeApp`/`AddBunApp` attach a
+  package manager, and with it the `npm install` resource the app waits on, only when they can see
+  a `package.json` in the app directory; what a warm run builds therefore depends on the
+  repository's contents, which a checkout that has not landed cannot be read for. Rather than
+  guess, those services resolve eagerly. Every other `appType` runs a `package.json` script by
+  definition and is deferred unconditionally.
 
 ### Changed
 

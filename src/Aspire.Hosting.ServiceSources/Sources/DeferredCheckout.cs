@@ -239,6 +239,26 @@ internal sealed class DeferredCheckout
         var resource = registration.Service.Resource;
         var heldBack = builder.Resources.Skip(before).Where(added => !ReferenceEquals(added, resource)).ToArray();
 
+        // Helpers are started before the service, which is what Aspire.Hosting.JavaScript's installer
+        // needs — the app carries a WaitFor on it, so the reverse order would leave the app waiting
+        // on a resource still withheld. A helper that waits on the service instead inverts that, and
+        // the start loop would sit on it forever: it is awaited in turn, and the thing it waits for
+        // has not been released yet. There is no order that satisfies both, so it is refused here.
+        // Named rather than left to hang, because a deadlocked background task nobody awaits shows
+        // up as a service that simply never starts.
+        foreach (var helper in heldBack)
+        {
+            if (helper.Annotations.OfType<WaitAnnotation>().Any(wait => ReferenceEquals(wait.Resource, resource)))
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Service '{serviceName}': the handler for kind '{metadata.Kind}' added resource " +
+                    $"'{helper.Name}' alongside the service and gave it a WaitFor on the service itself. A " +
+                    "deferred checkout starts the resources a handler added before the service they belong to, " +
+                    "so that wait could never be satisfied. Have the service wait on the helper rather than the " +
+                    "other way round, or return null from ResolveDeferred to opt this kind out of deferral.");
+            }
+        }
+
         foreach (var withheld in heldBack.Append(resource))
         {
             // WithExplicitStart() needs an IResourceBuilder<T>, and the resources the handler added
@@ -547,6 +567,9 @@ internal sealed class DeferredCheckout
     private static async Task StartDeferredAsync(
         Deferred deferred, IServiceProvider services, CancellationToken cancellationToken)
     {
+        // Declared out here so the failure report can tell what this failure is not about.
+        var started = new List<IResource>();
+
         try
         {
             var notifications = services.GetRequiredService<ResourceNotificationService>();
@@ -632,6 +655,8 @@ internal sealed class DeferredCheckout
                         $"Service '{deferred.ServiceName}': the checkout completed but starting resource " +
                         $"'{withheld.Name}' failed. " + (result.Message ?? "No further detail was reported."));
                 }
+
+                started.Add(withheld);
             }
         }
         catch (OperationCanceledException)
@@ -644,12 +669,16 @@ internal sealed class DeferredCheckout
         }
         catch (Exception ex)
         {
-            await ReportFailureAsync(deferred, services, ex).ConfigureAwait(false);
+            await ReportFailureAsync(deferred, services, ex, started).ConfigureAwait(false);
         }
     }
 
+    /// <param name="started">
+    /// The resources whose start command already succeeded, which this failure is therefore not
+    /// about.
+    /// </param>
     private static async Task ReportFailureAsync(
-        Deferred deferred, IServiceProvider services, Exception exception)
+        Deferred deferred, IServiceProvider services, Exception exception, IReadOnlyList<IResource> started)
     {
         try
         {
@@ -666,7 +695,15 @@ internal sealed class DeferredCheckout
             // Every resource withheld for this service, not just the service's own: a held-back
             // helper left sitting in NotStarted reads as "still waiting" rather than as the casualty
             // of a clone that is never going to land.
-            foreach (var withheld in deferred.AllResources)
+            //
+            // Except the ones that did start. Helpers are started ahead of the service, so a failure
+            // between the two — the service's own start command reporting failure — is reached with
+            // the installer already running or Finished. Painting that red would report a successful
+            // npm install as the thing that failed, and republishing over a terminal state churns it
+            // under anything still watching. Keyed on what was actually started rather than on the
+            // state text, because the service is in this package's own "Checking out" by then and
+            // has to be painted.
+            foreach (var withheld in deferred.AllResources.Except(started))
             {
                 await notifications.PublishUpdateAsync(withheld, snapshot => snapshot with
                 {

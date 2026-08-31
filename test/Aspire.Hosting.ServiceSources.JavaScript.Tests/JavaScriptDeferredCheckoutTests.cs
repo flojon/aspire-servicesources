@@ -86,6 +86,79 @@ public class JavaScriptDeferredCheckoutTests
         Assert.Contains(waits, w => ReferenceEquals(w.Resource, installer));
     }
 
+    [Theory]
+    [InlineData("appType: node\nscriptPath: server.js")]
+    [InlineData("appType: bun\nscriptPath: server.js")]
+    public void ResolveDeferred_NodeWithoutAGuaranteedPackageJson_DeclinesDeferral(string optionsYaml)
+    {
+        var builder = CreateBuilder();
+        var options = TestHelpers.ParseOptionsBlock(optionsYaml);
+        var kind = new JavaScriptLocalKind();
+
+        // AddNodeApp/AddBunApp attach their package manager only when they can see a package.json in
+        // the app directory, so what a warm run builds depends on what the repository holds — and a
+        // cold checkout cannot be looked at. Rather than guess, the kind declines and takes the
+        // eager path, which is the "resolve me eagerly" the null return exists for.
+        Assert.False(kind.SupportsDeferredCheckout(options));
+        Assert.Null(kind.ResolveDeferred(builder, "frontend", PlannedRepoRoot(), options));
+
+        // Declining has to cost nothing: core falls back to the eager path, so anything registered
+        // here would be a duplicate.
+        Assert.Empty(builder.Resources);
+    }
+
+    [Theory]
+    [InlineData("appType: node\nscriptPath: server.js\nrunScript: dev", "npm")]
+    [InlineData("appType: bun\nscriptPath: server.js\nrunScript: dev", "bun")]
+    [InlineData("appType: node\nscriptPath: server.js\npackageManager: pnpm", "pnpm")]
+    public void ResolveDeferred_NodeWithAGuaranteedPackageJson_StillGetsItsInstaller(
+        string optionsYaml, string expectedPackageManager)
+    {
+        var builder = CreateBuilder();
+        var options = TestHelpers.ParseOptionsBlock(optionsYaml);
+        var kind = new JavaScriptLocalKind();
+
+        Assert.True(kind.SupportsDeferredCheckout(options));
+
+        var registration = Assert.IsType<DeferredLocalResource>(
+            kind.ResolveDeferred(builder, "frontend", PlannedRepoRoot(), options));
+
+        // The defect this guards: on a cold checkout AddNodeApp/AddBunApp see no package.json and
+        // attach nothing, and everything hanging off that annotation goes with it — the installer,
+        // the app's wait for it, and the rewrite that makes runScript mean "npm run dev" rather than
+        // running scriptPath directly. A first run would exec the entry point against a checkout
+        // with no node_modules. Attaching it by hand is what makes the deferred resource the one a
+        // warm run builds.
+        var installer = Assert.Single(builder.Resources.OfType<JavaScriptInstallerResource>());
+        var waits = registration.Service.Resource.Annotations.OfType<WaitAnnotation>();
+        Assert.Contains(waits, w => ReferenceEquals(w.Resource, installer));
+
+        var packageManager = Assert.Single(
+            registration.Service.Resource.Annotations.OfType<JavaScriptPackageManagerAnnotation>());
+        Assert.Equal(expectedPackageManager, packageManager.ExecutableName);
+    }
+
+    [Theory]
+    [InlineData("appType: vite")]
+    [InlineData("appType: nextjs")]
+    [InlineData("appType: javascript")]
+    public void ResolveDeferred_AppTypesThatAlwaysRunAPackageScript_DeferUnconditionally(string optionsYaml)
+    {
+        // These three reach a builder call that attaches a package manager whatever is on disk, so
+        // cold and warm produce the same resource and there is nothing to decline for.
+        Assert.True(new JavaScriptLocalKind().SupportsDeferredCheckout(TestHelpers.ParseOptionsBlock(optionsYaml)));
+    }
+
+    [Fact]
+    public void SupportsDeferredCheckout_MalformedBlock_AnswersFalseRatherThanThrowing()
+    {
+        // Probed for services that may never be added, so it is not this call's place to report a
+        // bad block: answering false routes it to the eager path, where Validate raises the same
+        // parse failure with the service named.
+        Assert.False(new JavaScriptLocalKind().SupportsDeferredCheckout(
+            TestHelpers.ParseOptionsBlock("appType: not-a-real-app-type")));
+    }
+
     [Fact]
     public void ValidateCheckout_MissingAppDirectory_ReportsIt()
     {
@@ -108,7 +181,10 @@ public class JavaScriptDeferredCheckoutTests
         var repoRoot = TestHelpers.CreateRepo(withPackageJson: false);
         File.Delete(Path.Combine(repoRoot, "server.js"));
 
-        var registration = ResolveDeferred(builder, repoRoot, "appType: node\nscriptPath: server.js");
+        // packageManager, because a bare node block is not deferrable at all — see
+        // ResolveDeferred_NodeWithoutAGuaranteedPackageJson_DeclinesDeferral.
+        var registration = ResolveDeferred(
+            builder, repoRoot, "appType: node\nscriptPath: server.js\npackageManager: npm");
 
         // The app directory landed but the entry point did not — otherwise a "node: cannot find
         // module" at run time, detached from the entry that named it.
