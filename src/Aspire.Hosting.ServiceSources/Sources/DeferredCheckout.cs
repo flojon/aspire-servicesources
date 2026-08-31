@@ -370,9 +370,9 @@ internal sealed class DeferredCheckout
 
         foreach (var deferred in snapshot)
         {
-            // Deliberately not awaited: AfterResourcesCreatedEvent is awaited by host startup, and
-            // waiting for the checkout here would put the block back exactly where this class exists
-            // to take it out of. StartDeferredAsync never throws, so nothing is left unobserved.
+            // Deliberately not awaited: BeforeStartEvent is awaited by host startup, and waiting
+            // for the checkout here would put the block back exactly where this class exists to
+            // take it out of. StartDeferredAsync never throws, so nothing is left unobserved.
             //
             // Task.Run rather than a bare call because the first thing past the await is
             // GetRepoRoot, which blocks the calling thread on the clone.
