@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Aspire.Hosting.ApplicationModel;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
 
@@ -22,25 +23,49 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// gap where it can be closed, and to let the one remaining gap be reported precisely rather than
 /// guessed at.
 /// </para>
+/// <para>
+/// Arguments are the reason profile <em>selection</em> here has to agree with Aspire's rather than
+/// merely resemble it. Aspire picks the profile again at start time to build the executable's
+/// arguments (<c>ExecutableLaunchRecipe</c> calls <c>GetEffectiveLaunchProfile</c>), by which point
+/// the checkout has landed and the real file is readable. Picking a different profile here would
+/// hand the process one profile's environment and another's arguments and URLs.
+/// </para>
 /// </remarks>
 internal sealed record LandedLaunchProfile(
+    string? Name,
     IReadOnlyList<string> ApplicationUrls,
     IReadOnlyDictionary<string, string> EnvironmentVariables)
 {
-    private static readonly LandedLaunchProfile Empty = new([], new Dictionary<string, string>(StringComparer.Ordinal));
+    private static readonly LandedLaunchProfile Empty =
+        new(null, [], new Dictionary<string, string>(StringComparer.Ordinal));
 
     /// <summary>
-    /// Reads the effective launch profile beside <paramref name="projectFile"/>, or an empty result
-    /// when there is no <c>launchSettings.json</c>, no <c>"commandName": "Project"</c> profile in it,
-    /// or it cannot be parsed.
+    /// The <c>commandName</c> values Aspire will launch, from
+    /// <c>LaunchProfileExtensions.s_allowedCommandNames</c>. A profile with no <c>commandName</c> at
+    /// all is allowed too, which is why this list is only half the test.
+    /// </summary>
+    private static readonly string[] AllowedCommandNames = ["Project", "Executable"];
+
+    /// <summary>
+    /// Reads the launch profile Aspire will select for <paramref name="resource"/> from the
+    /// <c>launchSettings.json</c> beside <paramref name="projectFile"/>, or an empty result when
+    /// there is no such file, no profile Aspire would select in it, or it cannot be parsed.
     /// </summary>
     /// <remarks>
     /// Unreadable is treated as absent throughout. This recovers fidelity that would otherwise be
     /// silently lost, so failing to recover it must leave the run exactly as it would have been
     /// rather than break it — the caller's warning is what makes the shortfall visible.
     /// </remarks>
-    public static LandedLaunchProfile Read(string projectFile)
+    public static LandedLaunchProfile Read(string projectFile, IResource resource)
     {
+        // ExcludeLaunchProfileAnnotation short-circuits every selector in Aspire, and means the
+        // profile is deliberately discarded rather than not found. Nothing to restore, and
+        // restoring it anyway would defeat the annotation.
+        if (resource.Annotations.OfType<ExcludeLaunchProfileAnnotation>().Any())
+        {
+            return Empty;
+        }
+
         var settingsPath = Path.Combine(
             Path.GetDirectoryName(projectFile) ?? ".", "Properties", "launchSettings.json");
 
@@ -61,28 +86,87 @@ internal sealed record LandedLaunchProfile(
                 return Empty;
             }
 
-            // The first "Project" profile, which is what Aspire falls back to when nothing names one.
-            foreach (var profile in profiles.EnumerateObject())
+            if (SelectProfileName(resource, profiles) is not { } name
+                || !profiles.TryGetProperty(name, out var profile)
+                || profile.ValueKind != JsonValueKind.Object)
             {
-                if (profile.Value.ValueKind != JsonValueKind.Object
-                    || !profile.Value.TryGetProperty("commandName", out var commandName)
-                    || commandName.ValueKind != JsonValueKind.String
-                    || !string.Equals(commandName.GetString(), "Project", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                return new LandedLaunchProfile(
-                    ReadApplicationUrls(profile.Value),
-                    ReadEnvironmentVariables(profile.Value));
+                // A named profile that is not in the file leaves Aspire with no effective profile
+                // either — GetLaunchProfile returns null and the selection does not fall through to
+                // the next selector — so an empty result is the faithful answer, not a near miss.
+                return Empty;
             }
+
+            return new LandedLaunchProfile(
+                name,
+                ReadApplicationUrls(profile),
+                ReadEnvironmentVariables(profile));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             return Empty;
         }
+    }
 
-        return Empty;
+    /// <summary>
+    /// The profile name Aspire's <c>SelectLaunchProfileName</c> would return for this resource,
+    /// or <see langword="null"/> when it would select none.
+    /// </summary>
+    /// <remarks>
+    /// The three selectors Aspire runs, in its order and with its semantics. Reimplemented rather
+    /// than called because they are internal to Aspire.Hosting, and reimplemented faithfully because
+    /// the cost of disagreeing is silent: the service would get one profile's environment and
+    /// another's arguments, or — for a profile Aspire accepts and a stricter rule here does not —
+    /// no environment at all, which is the <c>DOTNET_ENVIRONMENT</c> loss the restore exists to
+    /// prevent.
+    /// </remarks>
+    private static string? SelectProfileName(IResource resource, JsonElement profiles)
+    {
+        // An explicitly named profile wins outright, and is returned whether or not the file has
+        // it — Aspire looks it up afterwards and ends with no profile when it is missing, rather
+        // than trying the next selector.
+        if (resource.Annotations.OfType<LaunchProfileAnnotation>().LastOrDefault() is { } named)
+        {
+            return named.LaunchProfileName;
+        }
+
+        // The AppHost's own profile name, propagated to its projects by WithProjectDefaults from
+        // AppHost:DefaultLaunchProfileName or DOTNET_LAUNCH_PROFILE. Unlike the annotation above it
+        // does fall through when the file has no such profile.
+        if (resource.Annotations.OfType<DefaultLaunchProfileAnnotation>().LastOrDefault() is { } fallback
+            && profiles.TryGetProperty(fallback.LaunchProfileName, out var fallbackProfile)
+            && fallbackProfile.ValueKind == JsonValueKind.Object)
+        {
+            return fallback.LaunchProfileName;
+        }
+
+        // Otherwise the first launchable profile in file order, which is the order Aspire sees too:
+        // it enumerates the dictionary its deserializer filled from this same JSON.
+        foreach (var profile in profiles.EnumerateObject())
+        {
+            if (profile.Value.ValueKind == JsonValueKind.Object && IsLaunchable(profile.Value))
+            {
+                return profile.Name;
+            }
+        }
+
+        return null;
+    }
+
+    /// <remarks>
+    /// A missing or empty <c>commandName</c> counts as launchable: Aspire tests
+    /// <c>string.IsNullOrEmpty</c> before the allow list, and a profile that omits the property
+    /// deserializes to a null one.
+    /// </remarks>
+    private static bool IsLaunchable(JsonElement profile)
+    {
+        if (!profile.TryGetProperty("commandName", out var commandName)
+            || commandName.ValueKind != JsonValueKind.String
+            || commandName.GetString() is not { Length: > 0 } value)
+        {
+            return true;
+        }
+
+        return Array.Exists(AllowedCommandNames, name => string.Equals(name, value, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <remarks>

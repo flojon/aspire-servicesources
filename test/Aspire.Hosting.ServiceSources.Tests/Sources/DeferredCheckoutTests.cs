@@ -4,6 +4,7 @@ using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Sources;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 
@@ -19,6 +20,8 @@ public class DeferredCheckoutTests
 
         private readonly Dictionary<string, Exception> _failFor = new(StringComparer.Ordinal);
 
+        private readonly Dictionary<string, string> _launchSettings = new(StringComparer.Ordinal);
+
         public List<string> Cloned { get; } = [];
 
         /// <summary>Holds this repository's clone open until the returned gate is set.</summary>
@@ -26,6 +29,12 @@ public class DeferredCheckoutTests
             _blockUntil[repositoryUrl] = new ManualResetEventSlim(false);
 
         public void FailFor(string repositoryUrl, Exception exception) => _failFor[repositoryUrl] = exception;
+
+        /// <summary>
+        /// Gives the cloned repository a <c>Properties/launchSettings.json</c>, which is the file the
+        /// AppHost could not read while composing and the whole reason the landed checkout is re-read.
+        /// </summary>
+        public void WithLaunchSettings(string repositoryUrl, string json) => _launchSettings[repositoryUrl] = json;
 
         public void Clone(string repositoryUrl, string destinationPath)
         {
@@ -46,6 +55,12 @@ public class DeferredCheckoutTests
 
             Directory.CreateDirectory(destinationPath);
             File.WriteAllText(Path.Combine(destinationPath, "Service.csproj"), "<Project />");
+
+            if (_launchSettings.TryGetValue(repositoryUrl, out var settings))
+            {
+                var properties = Directory.CreateDirectory(Path.Combine(destinationPath, "Properties")).FullName;
+                File.WriteAllText(Path.Combine(properties, "launchSettings.json"), settings);
+            }
         }
 
         public void Checkout(string repositoryPath, string reference)
@@ -178,6 +193,25 @@ public class DeferredCheckoutTests
     }
 
     [Fact]
+    public void OptedIn_PublishMode_ColdCheckout_ResolvesEagerly()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreatePublishingBuilder(dir);
+        builder.UseDeferredCheckout();
+
+        var git = new FakeGitClient();
+        var service = new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+
+        // Publish mode writes a manifest and exits: no dashboard to reach early, no DCP, no resource
+        // lifecycle. A deferred resource there would be described from a .csproj that is not on disk
+        // — no launch-profile endpoints, no profile environment — and its start task would wait
+        // forever for a NotStarted that only DCP publishes. The clone is worth paying for here.
+        Assert.False(builder.ExecutionContext.IsRunMode);
+        Assert.False(IsDeferred(service.Resource));
+        Assert.True(File.Exists(Path.Combine(ExpectedRepoRoot(dir, "orders"), "Service.csproj")));
+    }
+
+    [Fact]
     public void AspiresOwnAddProject_StillRejectsAProjectFileThatDoesNotExist()
     {
         var dir = CreateAppHostDirectory("orders");
@@ -241,7 +275,7 @@ public class DeferredCheckoutTests
 
         // The worker case: no endpoints declared, none wanted, nothing diverges from the warm path.
         Assert.Null(DeferredCheckout.LaunchProfileEndpointWarning(
-            "orders", LandedLaunchProfile.Read(projectFile), new ProjectResource("orders")));
+            "orders", LandedLaunchProfile.Read(projectFile, new ProjectResource("orders")), new ProjectResource("orders")));
     }
 
     [Fact]
@@ -250,7 +284,7 @@ public class DeferredCheckoutTests
         var projectFile = WriteProjectWithLaunchProfile("http://localhost:8081");
 
         var warning = DeferredCheckout.LaunchProfileEndpointWarning(
-            "orders", LandedLaunchProfile.Read(projectFile), new ProjectResource("orders"));
+            "orders", LandedLaunchProfile.Read(projectFile, new ProjectResource("orders")), new ProjectResource("orders"));
 
         // Reported at the only moment the real URL is knowable, which is why it can quote it.
         Assert.NotNull(warning);
@@ -268,7 +302,7 @@ public class DeferredCheckoutTests
         resource.Annotations.Add(new EndpointAnnotation(ProtocolType.Tcp, name: "http"));
 
         Assert.Null(DeferredCheckout.LaunchProfileEndpointWarning(
-            "orders", LandedLaunchProfile.Read(projectFile), resource));
+            "orders", LandedLaunchProfile.Read(projectFile, resource), resource));
     }
 
     [Fact]
@@ -279,7 +313,7 @@ public class DeferredCheckoutTests
         File.WriteAllText(projectFile, "<Project />");
 
         Assert.Null(DeferredCheckout.LaunchProfileEndpointWarning(
-            "orders", LandedLaunchProfile.Read(projectFile), new ProjectResource("orders")));
+            "orders", LandedLaunchProfile.Read(projectFile, new ProjectResource("orders")), new ProjectResource("orders")));
     }
 
     [Fact]
@@ -289,7 +323,7 @@ public class DeferredCheckoutTests
             "http://localhost:8081;https://localhost:8443",
             environmentVariables: "\"DOTNET_ENVIRONMENT\": \"Development\", \"FOO\": \"bar\"");
 
-        var profile = LandedLaunchProfile.Read(projectFile);
+        var profile = LandedLaunchProfile.Read(projectFile, new ProjectResource("orders"));
 
         // DOTNET_ENVIRONMENT is the one that matters: Host.CreateDefaultBuilder takes the
         // environment name from it, and most repositories set it in the launch profile and nowhere
@@ -309,7 +343,7 @@ public class DeferredCheckoutTests
         var projectFile = Path.Combine(dir, "Service.csproj");
         File.WriteAllText(projectFile, "<Project />");
 
-        var profile = LandedLaunchProfile.Read(projectFile);
+        var profile = LandedLaunchProfile.Read(projectFile, new ProjectResource("orders"));
 
         Assert.Empty(profile.ApplicationUrls);
         Assert.Empty(profile.EnvironmentVariables);
@@ -326,7 +360,7 @@ public class DeferredCheckoutTests
 
         // This recovers fidelity that would otherwise be silently lost, so failing to recover it
         // must leave the run as it would have been rather than break it.
-        var profile = LandedLaunchProfile.Read(projectFile);
+        var profile = LandedLaunchProfile.Read(projectFile, new ProjectResource("orders"));
 
         Assert.Empty(profile.ApplicationUrls);
         Assert.Empty(profile.EnvironmentVariables);
@@ -350,7 +384,151 @@ public class DeferredCheckoutTests
             }
             """);
 
-        Assert.Equal(["http://localhost:2222"], LandedLaunchProfile.Read(projectFile).ApplicationUrls);
+        Assert.Equal(["http://localhost:2222"], LandedLaunchProfile.Read(projectFile, new ProjectResource("orders")).ApplicationUrls);
+    }
+
+    [Fact]
+    public void LandedLaunchProfile_ProfileWithNoCommandName_IsStillSelected()
+    {
+        var projectFile = WriteLaunchSettings(
+            """
+            { "profiles": { "Service": { "applicationUrl": "http://localhost:2222" } } }
+            """);
+
+        // Aspire's order selector tests string.IsNullOrEmpty(CommandName) before its allow list, so
+        // a profile that omits the property is launchable. Refusing it here would restore no
+        // environment at all for a project Aspire runs perfectly well — silently reinstating the
+        // DOTNET_ENVIRONMENT loss this whole path exists to prevent.
+        var profile = LandedLaunchProfile.Read(projectFile, new ProjectResource("orders"));
+
+        Assert.Equal("Service", profile.Name);
+        Assert.Equal(["http://localhost:2222"], profile.ApplicationUrls);
+    }
+
+    [Fact]
+    public void LandedLaunchProfile_ExecutableProfile_IsStillSelected()
+    {
+        var projectFile = WriteLaunchSettings(
+            """
+            { "profiles": { "Service": { "commandName": "Executable", "applicationUrl": "http://localhost:2222" } } }
+            """);
+
+        // "Executable" is the other half of Aspire's allow list.
+        Assert.Equal("Service", LandedLaunchProfile.Read(projectFile, new ProjectResource("orders")).Name);
+    }
+
+    [Fact]
+    public void LandedLaunchProfile_DefaultLaunchProfileAnnotation_SelectsThatProfileRatherThanTheFirst()
+    {
+        var projectFile = WriteLaunchSettings(
+            """
+            {
+              "profiles": {
+                "http": { "commandName": "Project", "environmentVariables": { "WHICH": "http" } },
+                "https": { "commandName": "Project", "environmentVariables": { "WHICH": "https" } }
+              }
+            }
+            """);
+
+        var resource = new ProjectResource("orders");
+        resource.Annotations.Add(new DefaultLaunchProfileAnnotation("https"));
+
+        // WithProjectDefaults stamps this from AppHost:DefaultLaunchProfileName or
+        // DOTNET_LAUNCH_PROFILE, which is set whenever the AppHost itself was launched with a
+        // profile — the Aspire template's normal case. Aspire selects the named profile when it
+        // builds the executable's arguments, after the clone, so taking the first "Project" profile
+        // here would hand the process one profile's environment and another's arguments and URLs.
+        var profile = LandedLaunchProfile.Read(projectFile, resource);
+
+        Assert.Equal("https", profile.Name);
+        Assert.Equal("https", profile.EnvironmentVariables["WHICH"]);
+    }
+
+    [Fact]
+    public void LandedLaunchProfile_DefaultLaunchProfileAnnotationNamingNothing_FallsBackToOrder()
+    {
+        var projectFile = WriteLaunchSettings(
+            """
+            { "profiles": { "Service": { "commandName": "Project", "environmentVariables": { "WHICH": "first" } } } }
+            """);
+
+        var resource = new ProjectResource("orders");
+        resource.Annotations.Add(new DefaultLaunchProfileAnnotation("no-such-profile"));
+
+        // The default-annotation selector declines when the file has no such profile, and Aspire
+        // moves on to the next selector rather than ending with none.
+        var profile = LandedLaunchProfile.Read(projectFile, resource);
+
+        Assert.Equal("Service", profile.Name);
+        Assert.Equal("first", profile.EnvironmentVariables["WHICH"]);
+    }
+
+    [Fact]
+    public void LandedLaunchProfile_LaunchProfileAnnotation_WinsOverEverything()
+    {
+        var projectFile = WriteLaunchSettings(
+            """
+            {
+              "profiles": {
+                "http": { "commandName": "Project", "environmentVariables": { "WHICH": "http" } },
+                "named": { "commandName": "Project", "environmentVariables": { "WHICH": "named" } }
+              }
+            }
+            """);
+
+        var resource = new ProjectResource("orders");
+        resource.Annotations.Add(new DefaultLaunchProfileAnnotation("http"));
+        resource.Annotations.Add(new LaunchProfileAnnotation("named"));
+
+        Assert.Equal("named", LandedLaunchProfile.Read(projectFile, resource).EnvironmentVariables["WHICH"]);
+    }
+
+    [Fact]
+    public void LandedLaunchProfile_LaunchProfileAnnotationNamingNothing_SelectsNothing()
+    {
+        var projectFile = WriteLaunchSettings(
+            """
+            { "profiles": { "Service": { "commandName": "Project", "environmentVariables": { "WHICH": "first" } } } }
+            """);
+
+        var resource = new ProjectResource("orders");
+        resource.Annotations.Add(new LaunchProfileAnnotation("no-such-profile"));
+
+        // Unlike the default annotation, an explicitly named profile does not fall through: Aspire
+        // returns the name, fails to find it and ends with no effective profile. Quietly using the
+        // first profile instead would apply an environment the warm path never would.
+        var profile = LandedLaunchProfile.Read(projectFile, resource);
+
+        Assert.Null(profile.Name);
+        Assert.Empty(profile.EnvironmentVariables);
+    }
+
+    [Fact]
+    public void LandedLaunchProfile_ExcludeLaunchProfileAnnotation_SelectsNothing()
+    {
+        var projectFile = WriteLaunchSettings(
+            """
+            { "profiles": { "Service": { "commandName": "Project", "environmentVariables": { "WHICH": "first" } } } }
+            """);
+
+        var resource = new ProjectResource("orders");
+        resource.Annotations.Add(new ExcludeLaunchProfileAnnotation());
+
+        // The profile is deliberately discarded here, not merely unfound — restoring it anyway
+        // would defeat the annotation.
+        Assert.Null(LandedLaunchProfile.Read(projectFile, resource).Name);
+    }
+
+    private static string WriteLaunchSettings(string json)
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        var projectFile = Path.Combine(dir, "Service.csproj");
+        File.WriteAllText(projectFile, "<Project />");
+
+        var properties = Directory.CreateDirectory(Path.Combine(dir, "Properties")).FullName;
+        File.WriteAllText(Path.Combine(properties, "launchSettings.json"), json);
+
+        return projectFile;
     }
 
     private static string WriteProjectWithLaunchProfile(
@@ -477,6 +655,149 @@ public class DeferredCheckoutTests
         // resource logs — never as an exception on a task nobody awaits, which would take the host
         // down and undo the isolation deferral exists for.
         await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+    }
+
+    [Fact]
+    public async Task HostShutdownWhileWaitingForDcp_EndsTheStartTaskRatherThanWaitingForever()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.UseDeferredCheckout();
+
+        var git = new FakeGitClient();
+        new LocalProjectSource(git)
+            .Resolve(builder, "orders", Metadata("orders"), DevConfig())
+            .WithHttpEndpoint();
+
+        var services = builder.Services.BuildServiceProvider();
+
+        // No token, which is the token a real AppHost supplies: the template ends in Run(), and
+        // that is RunAsync().Wait() with the default. Anything hanging off BeforeStartEvent's own
+        // token would never be cancelled at all.
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)),
+            CancellationToken.None);
+
+        // Ctrl-C before DCP ever published NotStarted, so the state the task is waiting for is now
+        // never coming. ApplicationStopping is the only signal that says so.
+        services.GetRequiredService<IHostApplicationLifetime>().StopApplication();
+
+        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+    }
+
+    [Fact]
+    public async Task LandedProfileEnvironment_IsRestoredExpanded_AlongsideTheProfileName()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.UseDeferredCheckout();
+
+        // A real variable to expand against, named uniquely so parallel tests cannot collide on it.
+        var marker = "SERVICESOURCES_TEST_" + Guid.NewGuid().ToString("N");
+        Environment.SetEnvironmentVariable(marker, "expanded");
+
+        try
+        {
+            var git = new FakeGitClient();
+            git.WithLaunchSettings(
+                "https://example.com/orders.git",
+                $$"""
+                {
+                  "profiles": {
+                    "http": {
+                      "commandName": "Project",
+                      "environmentVariables": {
+                        "DOTNET_ENVIRONMENT": "Development",
+                        "CERT_PATH": "%{{marker}}%/certs"
+                      }
+                    }
+                  }
+                }
+                """);
+
+            var orders = new LocalProjectSource(git)
+                .Resolve(builder, "orders", Metadata("orders"), DevConfig())
+                .WithHttpEndpoint();
+
+            var services = builder.Services.BuildServiceProvider();
+            await builder.Eventing.PublishAsync(
+                new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+            await PublishNotStartedAsync(services, orders.Resource);
+
+            await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+            // The restore appends its callback after the clone, so it is the last one on the
+            // resource — and the only one under test here. The rest belong to WithProjectDefaults.
+            var restore = Assert.IsType<EnvironmentCallbackAnnotation>(
+                orders.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>().Last());
+
+            var context = new EnvironmentCallbackContext(
+                new DistributedApplicationExecutionContext(DistributedApplicationOperation.Run), orders.Resource);
+            await restore.Callback(context);
+
+            // The environment Aspire could not read while composing, put back the way
+            // WithProjectDefaults puts it back on every warm run.
+            Assert.Equal("Development", context.EnvironmentVariables["DOTNET_ENVIRONMENT"]);
+
+            // Expanded, not literal. Aspire runs every profile value through
+            // Environment.ExpandEnvironmentVariables, so leaving it raw here would send the child
+            // process a different value on the first run than on every run after it.
+            Assert.Equal("expanded/certs", context.EnvironmentVariables["CERT_PATH"]);
+
+            // Set for consistency with "dotnet run" and "dotnet watch", as WithProjectDefaults does.
+            Assert.Equal("http", context.EnvironmentVariables["DOTNET_LAUNCH_PROFILE"]);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(marker, null);
+        }
+    }
+
+    [Fact]
+    public async Task LandedProfileEnvironment_NeverOverridesWhatTheAppHostSet()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.UseDeferredCheckout();
+
+        var git = new FakeGitClient();
+        git.WithLaunchSettings(
+            "https://example.com/orders.git",
+            """
+            {
+              "profiles": {
+                "http": {
+                  "commandName": "Project",
+                  "environmentVariables": { "DOTNET_ENVIRONMENT": "Development" }
+                }
+              }
+            }
+            """);
+
+        var orders = new LocalProjectSource(git)
+            .Resolve(builder, "orders", Metadata("orders"), DevConfig())
+            .WithHttpEndpoint();
+
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+        await PublishNotStartedAsync(services, orders.Resource);
+
+        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+        var restore = orders.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>().Last();
+
+        var context = new EnvironmentCallbackContext(
+            new DistributedApplicationExecutionContext(DistributedApplicationOperation.Run), orders.Resource);
+        context.EnvironmentVariables["DOTNET_ENVIRONMENT"] = "Staging";
+        context.EnvironmentVariables["DOTNET_LAUNCH_PROFILE"] = "chosen-by-the-apphost";
+
+        await restore.Callback(context);
+
+        // The profile is the lowest precedence, which is the precedence Aspire gives it: anything
+        // the AppHost set explicitly stands.
+        Assert.Equal("Staging", context.EnvironmentVariables["DOTNET_ENVIRONMENT"]);
+        Assert.Equal("chosen-by-the-apphost", context.EnvironmentVariables["DOTNET_LAUNCH_PROFILE"]);
     }
 
     /// <summary>

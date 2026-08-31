@@ -92,7 +92,7 @@ public static class ServiceSourcesBuilderExtensions
     /// the developer's own and there is nothing to clone.
     /// </para>
     /// <para>
-    /// A deferred service must declare its own endpoints in the AppHost, because a project's
+    /// A deferred service should declare its own endpoints in the AppHost, because a project's
     /// endpoints come from its launch profile and Aspire reads that while composing — before the
     /// repository is on disk:
     /// </para>
@@ -104,7 +104,11 @@ public static class ServiceSourcesBuilderExtensions
     /// <para>
     /// That line is correct on a warm checkout too — <c>WithHttpEndpoint</c> updates an endpoint of
     /// the same name using its non-null arguments only, and it has none — so there is one call, not
-    /// one per path. A deferred service that declares none fails the run with a message naming it.
+    /// one per path. A service that declares none still runs: once the checkout has landed its real
+    /// launch profile is read, and only a profile that declares an <c>applicationUrl</c> the AppHost
+    /// did not mirror produces a warning naming the service and the URL. A service with no
+    /// <c>applicationUrl</c> on either path — a run-to-completion worker — costs nothing and is
+    /// never reported.
     /// </para>
     /// <para>
     /// Off by default: a service that used to be running by the time <c>Build()</c> returned is

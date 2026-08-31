@@ -31,8 +31,9 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// <para>
 /// What is lost either way is endpoints. Those are synthesised from <c>applicationUrl</c> during
 /// composition, when the repository is not on disk, and nothing re-runs that step later — which is
-/// why <see cref="DeferredCheckout"/> requires a deferred service to declare its endpoints in the
-/// AppHost.
+/// why <see cref="DeferredCheckout"/> compares the landed launch profile against the endpoints the
+/// AppHost declared and warns about the difference, rather than refusing a service that declared
+/// none.
 /// </para>
 /// </remarks>
 internal sealed class DeferredProjectMetadata(string projectPath) : IProjectMetadata

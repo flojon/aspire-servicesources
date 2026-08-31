@@ -28,7 +28,11 @@ nothing will fail to build to warn you.
   applied before the resource starts, and only where the AppHost has not already set the same key.
   Without that a deferred service runs as `Production` while every warm run of it runs as
   `Development`, because `Host.CreateDefaultBuilder` takes the environment name from
-  `DOTNET_ENVIRONMENT` and most repositories set it in the launch profile and nowhere else.
+  `DOTNET_ENVIRONMENT` and most repositories set it in the launch profile and nowhere else. Values
+  are expanded and `DOTNET_LAUNCH_PROFILE` is set, both as Aspire does them on a warm run, and the
+  profile is the one Aspire itself will select — including a profile named by
+  `DOTNET_LAUNCH_PROFILE` or one whose `commandName` is `Executable` or absent — so the process
+  never gets one profile's environment and another's arguments.
 
   **Endpoints cannot be restored**, since ports are allocated during composition, so declare any
   you need:
@@ -47,7 +51,10 @@ nothing will fail to build to warn you.
 
   Nothing else about a run changes. The clones still start on the first `AddService()` call, in
   parallel, at the same moment as before — only who waits for them moves. A checkout that already
-  exists takes the eager path unchanged, as do `path` overrides and the non-`dotnet` kinds.
+  exists takes the eager path unchanged, as do `path` overrides and the non-`dotnet` kinds. So does
+  everything outside run mode: `aspire publish` and manifest generation clone first as they always
+  have, because a manifest written from a repository that is not on disk would describe a project
+  without its endpoints or its profile environment.
 
 ### Changed
 
