@@ -800,6 +800,51 @@ public class DeferredCheckoutTests
         Assert.Equal("chosen-by-the-apphost", context.EnvironmentVariables["DOTNET_LAUNCH_PROFILE"]);
     }
 
+    [Fact]
+    public async Task LandedProfileDeclaringItsOwnLaunchProfileName_LosesToTheSelectedProfile()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.UseDeferredCheckout();
+
+        var git = new FakeGitClient();
+        git.WithLaunchSettings(
+            "https://example.com/orders.git",
+            """
+            {
+              "profiles": {
+                "http": {
+                  "commandName": "Project",
+                  "environmentVariables": { "DOTNET_LAUNCH_PROFILE": "legacy" }
+                }
+              }
+            }
+            """);
+
+        var orders = new LocalProjectSource(git)
+            .Resolve(builder, "orders", Metadata("orders"), DevConfig())
+            .WithHttpEndpoint();
+
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+        await PublishNotStartedAsync(services, orders.Resource);
+
+        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+        var restore = orders.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>().Last();
+
+        var context = new EnvironmentCallbackContext(
+            new DistributedApplicationExecutionContext(DistributedApplicationOperation.Run), orders.Resource);
+        await restore.Callback(context);
+
+        // WithProjectDefaults writes the selected profile's name before it writes the profile's own
+        // variables, and both writes are TryAdd — so the name wins and the profile's own value for
+        // the same key is dropped. Restoring it the other way round would tell the process it was
+        // launched under a profile that was not selected.
+        Assert.Equal("http", context.EnvironmentVariables["DOTNET_LAUNCH_PROFILE"]);
+    }
+
     /// <summary>
     /// Stands in for DCP, which publishes <c>NotStarted</c> when it withholds an explicit-start
     /// executable. That state is what each deferred task waits for before it touches the resource.

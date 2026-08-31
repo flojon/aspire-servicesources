@@ -56,6 +56,12 @@ internal sealed class DeferredCheckout
 {
     private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, DeferredCheckout> Cache = new();
 
+    /// <summary>
+    /// The variable <c>dotnet run</c> and <c>dotnet watch</c> report the active profile in, which
+    /// <c>WithProjectDefaults</c> sets on the warm path and the restore has to set here.
+    /// </summary>
+    private const string LaunchProfileNameVariable = "DOTNET_LAUNCH_PROFILE";
+
     // Plain object rather than System.Threading.Lock: this package still targets net8.0.
     private readonly object _gate = new();
 
@@ -303,9 +309,12 @@ internal sealed class DeferredCheckout
 
         deferred.Resource.Annotations.Add(new EnvironmentCallbackAnnotation(context =>
         {
-            if (!context.EnvironmentVariables.ContainsKey("DOTNET_LAUNCH_PROFILE"))
+            // Written before the profile's own variables, which is the order Aspire writes them
+            // in: the selected profile's name wins over a DOTNET_LAUNCH_PROFILE the profile
+            // happens to declare for itself.
+            if (!context.EnvironmentVariables.ContainsKey(LaunchProfileNameVariable))
             {
-                context.EnvironmentVariables["DOTNET_LAUNCH_PROFILE"] = profileName;
+                context.EnvironmentVariables[LaunchProfileNameVariable] = profileName;
             }
 
             foreach (var variable in profile.EnvironmentVariables)
@@ -319,9 +328,12 @@ internal sealed class DeferredCheckout
 
         // Counted from what the callback above sets, DOTNET_LAUNCH_PROFILE included — a profile
         // with no environmentVariables of its own still restores that one, and a log saying
-        // nothing was applied would send a developer looking for a bug that isn't there.
-        var applied = new List<string>(profile.EnvironmentVariables.Count + 1) { "DOTNET_LAUNCH_PROFILE" };
-        applied.AddRange(profile.EnvironmentVariables.Keys);
+        // nothing was applied would send a developer looking for a bug that isn't there. A profile
+        // that declares the name variable itself is not counted twice, because the callback drops
+        // its value for the profile name.
+        var applied = new List<string>(profile.EnvironmentVariables.Count + 1) { LaunchProfileNameVariable };
+        applied.AddRange(profile.EnvironmentVariables.Keys.Where(
+            key => !string.Equals(key, LaunchProfileNameVariable, StringComparison.Ordinal)));
 
         logger.LogInformation(
             "Applied {Count} environment variable(s) from the checkout's launch profile '{Profile}' ({Names}), "
@@ -476,8 +488,11 @@ internal sealed class DeferredCheckout
         }
         catch (OperationCanceledException)
         {
-            // The host is shutting down while the clone was still running. There is nothing to
-            // start and nobody to tell.
+            // The host is shutting down. This is reached from the wait for NotStarted or from the
+            // start command, never from the clone in between: LocalCheckoutPrefetch takes no
+            // cancellation token, so a shutdown that arrives mid-clone is not noticed until that
+            // clone has finished on its own. Either way there is nothing left to start and nobody
+            // to tell.
         }
         catch (Exception ex)
         {

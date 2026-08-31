@@ -258,10 +258,12 @@ key, so `WithEnvironment` and `WithReference` still win. That matters more than 
 repositories set in the launch profile and nowhere else, so without this a deferred service runs
 as `Production` while every warm run of it runs as `Development`.
 
-Values are expanded and `DOTNET_LAUNCH_PROFILE` is set, both as Aspire does them on a warm run,
-and the profile read is the one Aspire itself will select — the one `DOTNET_LAUNCH_PROFILE` names
-if it names one, otherwise the first launchable profile in the file. So the process never ends up
-with one profile's environment and another's arguments.
+Values are expanded, and the service's own `DOTNET_LAUNCH_PROFILE` is set to the profile it was
+started under — both as Aspire does them on a warm run. The profile read is whichever one Aspire
+itself will select, which is the same selection it makes for the service's command-line arguments
+once the checkout has landed: the profile your AppHost was launched under, when the service has
+one by that name, and otherwise the first launchable profile in the file. So the process never
+ends up with one profile's environment and another's arguments.
 
 Endpoints can't be, because ports are allocated during composition and the spec is frozen. So a
 deferred service carries only the endpoints you declare:
