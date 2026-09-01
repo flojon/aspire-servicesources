@@ -52,7 +52,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
             // once it has looked at everything.
             var registered = isDotnetKind
                 ? deferred.Register(builder, serviceName, metadata, config, prefetch, gitClient)
-                : handler!.SupportsDeferredCheckout(metadata.KindConfig)
+                : SupportsDeferredKind(serviceName, metadata, handler!)
                     ? deferred.RegisterKind(
                         builder, serviceName, metadata, config, prefetch, gitClient,
                         repoRoot => ResolveDeferredKind(builder, serviceName, metadata, repoRoot, handler))
@@ -150,6 +150,28 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         }
 
         return registration;
+    }
+
+    /// <summary>
+    /// Asks the handler whether it can defer this service at all. Documented as never throwing, but
+    /// nothing enforces that — and this runs for a service the developer did not ask a question
+    /// about, so a handler dereferencing something on an odd config block would otherwise take the
+    /// AppHost down with a bare exception naming neither the service nor the kind.
+    /// </summary>
+    private static bool SupportsDeferredKind(
+        string serviceName, ServiceMetadata metadata, ILocalResourceKind handler)
+    {
+        try
+        {
+            return handler.SupportsDeferredCheckout(metadata.KindConfig);
+        }
+        catch (Exception ex) when (ex is not ServiceSourcesConfigurationException)
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': the handler for kind '{metadata.Kind}' failed while being asked whether " +
+                "it supports a deferred checkout. That call is documented as answering rather than throwing — a " +
+                "block it cannot judge should answer false and let the eager path report it.", ex);
+        }
     }
 
     private static string HandlerFailedMessage(string serviceName, string kind) =>

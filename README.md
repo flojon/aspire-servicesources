@@ -298,8 +298,9 @@ Scoped deliberately narrowly, so the blast radius is first-run-only:
 - Only a checkout that doesn't exist yet. A warm checkout — every run after the first — takes
   the existing eager path unchanged, with full launch-profile fidelity.
 - Only managed checkouts. A `path` override is your own directory; there is nothing to clone.
-- Only the `"local"` kinds that own a managed checkout: `dotnet`, `java` and `javascript`. `url`
-  and `kubernetes` clone nothing and `container` pulls an image, so there is nothing to defer.
+- Only the `"local"` source, and within it only the kinds that own a managed checkout: `dotnet`,
+  `java` and `javascript`. The other sources — `url`, `kubernetes` and `container` — never clone a
+  repository, so they have nothing to defer.
 - Only run mode. `aspire publish` and manifest generation clone first as they always have; a
   manifest written from a repository that isn't on disk would describe a project without its
   endpoints or its profile environment.

@@ -22,8 +22,8 @@ nothing will fail to build to warn you.
   AppHost.
 
   All three `"local"` kinds that own a managed checkout are covered — `dotnet`, `java` and
-  `javascript`. (`url` and `kubernetes` clone nothing and `container` pulls an image, so there is
-  nothing to defer.) The launch-profile caveat below is the `dotnet` kind's alone: neither
+  `javascript`. (The other *sources* — `url`, `kubernetes` and `container` — never clone a
+  repository, so they have nothing to defer.) The launch-profile caveat below is the `dotnet` kind's alone: neither
   satellite kind has a launch profile, and both take their endpoints from the committed catalog —
   `java` requires `port` in its kind block, and a `javascript` service always gets an `http`
   endpoint whose port Aspire allocates when the block does not name one — so a deferred `java` or

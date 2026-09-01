@@ -76,7 +76,9 @@ public class DeferredKindCheckoutTests
         bool supportsDeferral = true,
         bool withHelper = false,
         bool deferralReturnsNull = false,
-        bool helperWaitsForService = false) : ILocalResourceKind
+        bool helperWaitsForService = false,
+        bool declineAfterAdding = false,
+        bool withParameter = false) : ILocalResourceKind
     {
         public string? DeferredRepoRoot { get; private set; }
 
@@ -111,6 +113,12 @@ public class DeferredKindCheckoutTests
 
             if (!supportsDeferral || deferralReturnsNull)
             {
+                // A handler getting the contract wrong: registering first, deciding afterwards.
+                if (declineAfterAdding)
+                {
+                    Add(builder, serviceName, repoRoot);
+                }
+
                 return null;
             }
 
@@ -138,6 +146,13 @@ public class DeferredKindCheckoutTests
             var helper = withHelper
                 ? builder.AddExecutable($"{serviceName}-helper", "install", repoRoot)
                 : null;
+
+            // A resource with no lifetime, which a handler is equally entitled to add beside its
+            // service and which DCP never creates.
+            if (withParameter)
+            {
+                builder.AddParameter($"{serviceName}-token", "secret");
+            }
 
             var service = builder
                 .AddResource(new StandInResource(serviceName, Path.Combine(repoRoot, "app")))
@@ -489,6 +504,55 @@ public class DeferredKindCheckoutTests
     }
 
     [Fact]
+    public async Task LifetimeLessResourceTheHandlerAdded_IsNotHeldBackAndDoesNotStallTheStart()
+    {
+        var dir = CreateAppHostDirectory("frontend");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.UseDeferredCheckout();
+        builder.AddLocalKind(KindName, new StandInKind(withParameter: true));
+
+        var git = new FakeGitClient();
+        var service = new LocalProjectSource(git).Resolve(builder, "frontend", Metadata("frontend"), DevConfig());
+        var parameter = Named(builder, "frontend-token");
+
+        // DCP never creates a parameter, so it never publishes the NotStarted the start task waits
+        // for. Withholding one would leave that task waiting for a state that is not coming, and the
+        // service would silently never start — so it is excluded rather than held back.
+        Assert.False(IsHeldBack(parameter));
+        Assert.True(IsHeldBack(service.Resource));
+
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+
+        // Only the service's own NotStarted is published; the run completes anyway.
+        await PublishNotStartedAsync(services, service.Resource);
+
+        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.True(Directory.Exists(Path.Combine(ExpectedRepoRoot(dir, "frontend"), "app")));
+    }
+
+    [Fact]
+    public void KindThatRegistersAndThenDeclines_IsNamedRatherThanLeavingOrphans()
+    {
+        var dir = CreateAppHostDirectory("frontend");
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.UseDeferredCheckout();
+        builder.AddLocalKind(KindName, new StandInKind(deferralReturnsNull: true, declineAfterAdding: true));
+
+        var exception = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new FakeGitClient()).Resolve(builder, "frontend", Metadata("frontend"), DevConfig()));
+
+        // Nothing can come back out of the app model, so a handler that registers before deciding
+        // leaves resources behind that then collide with the eager retry registering the same
+        // service again. The handler is the only one who can fix it, so it is named.
+        Assert.Contains("frontend", exception.Message);
+        Assert.Contains(KindName, exception.Message);
+        Assert.Contains(nameof(ILocalResourceKind.SupportsDeferredCheckout), exception.Message);
+    }
+
+    [Fact]
     public void HelperThatWaitsForTheServiceItSitsBeside_IsRefusedRatherThanLeftToHang()
     {
         var dir = CreateAppHostDirectory("frontend");
@@ -566,27 +630,6 @@ public class DeferredKindCheckoutTests
             {
                 State = new ResourceStateSnapshot(state, null),
             });
-
-    /// <summary>
-    /// Spins until <paramref name="resource"/> reports <paramref name="state"/>, so a test can line
-    /// itself up behind a step of the deferred task rather than racing it.
-    /// </summary>
-    private static async Task WaitForStateAsync(IServiceProvider services, IResource resource, string state)
-    {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
-
-        while (DateTime.UtcNow < deadline)
-        {
-            if (await StateOfAsync(services, resource) == state)
-            {
-                return;
-            }
-
-            await Task.Delay(10);
-        }
-
-        Assert.Fail($"'{resource.Name}' never reached '{state}'.");
-    }
 
     /// <summary>
     /// Reads a resource's current state through the only door the notification service opens: an

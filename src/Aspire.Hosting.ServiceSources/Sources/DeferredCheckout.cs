@@ -225,19 +225,45 @@ internal sealed class DeferredCheckout
     {
         var repoRoot = LocalGitCheckout.ManagedRepoRoot(builder.AppHostDirectory, serviceName);
 
-        // Resources are only ever appended to the collection, so everything from here on is this
-        // handler's doing. Taken by index rather than by set difference so a handler that adds a
-        // resource named like one already in the model is still accounted for correctly.
-        var before = builder.Resources.Count;
+        // Everything the handler adds from here on, identified by reference rather than by index:
+        // IResourceCollection supports removal, and a handler that removed one would shift every
+        // index after it, so a positional read could withhold and start-command an unrelated
+        // resource that was already in the model. Reference identity also keeps a handler free to
+        // add a resource named like an existing one, which is what the index was chosen for.
+        var before = new HashSet<object>(builder.Resources, ReferenceEqualityComparer.Instance);
 
         var registration = resolveDeferred(repoRoot);
         if (registration is null)
         {
+            // Declining has to be free, and it is only free before anything is registered: nothing
+            // can take a resource back out of the app model, so whatever was added would be left
+            // orphaned and then collide with the eager retry, which adds the same service again
+            // under the same name. The handler is the only one that can fix that, so it is named.
+            if (builder.Resources.Any(added => !before.Contains(added)))
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Service '{serviceName}': the handler for kind '{metadata.Kind}' added resources to the app " +
+                    "model and then declined deferral by returning null from ResolveDeferred. Decide before " +
+                    "adding anything — SupportsDeferredCheckout is the side-effect-free place to decline — " +
+                    "because resources cannot be removed once added, and the eager path registers this service " +
+                    "again.");
+            }
+
             return null;
         }
 
         var resource = registration.Service.Resource;
-        var heldBack = builder.Resources.Skip(before).Where(added => !ReferenceEquals(added, resource)).ToArray();
+
+        // Only what DCP actually creates. A handler is equally entitled to add a parameter or a
+        // connection string beside its service, and DCP never creates one of those — so it never
+        // publishes the NotStarted this class waits for, and one in this list would leave the start
+        // task waiting for a state that is not coming. The service would then silently never start,
+        // on a task nobody awaits, which is the same failure the WaitFor check below exists to
+        // prevent. They also have nothing to withhold, having nothing to start.
+        var heldBack = builder.Resources
+            .Where(added => !before.Contains(added))
+            .Where(added => !ReferenceEquals(added, resource) && DcpCreates(added))
+            .ToArray();
 
         // Helpers are started before the service, which is what Aspire.Hosting.JavaScript's installer
         // needs — the app carries a WaitFor on it, so the reverse order would leave the app waiting
@@ -278,6 +304,23 @@ internal sealed class DeferredCheckout
 
         return ResolvedService.Tag(registration.Service, serviceName, "local");
     }
+
+    /// <summary>
+    /// Whether DCP turns <paramref name="resource"/> into something it starts, and therefore whether
+    /// withholding it means anything.
+    /// </summary>
+    /// <remarks>
+    /// Keyed on the resource kinds DCP materialises rather than on
+    /// <see cref="IResourceWithoutLifetime"/>: that marker is not on <c>ParameterResource</c> in the
+    /// Aspire versions this package supports, so testing for it would let a parameter through. Both
+    /// resources the shipped handlers add — a <c>JavaAppExecutableResource</c>, and the
+    /// <c>JavaScriptInstallerResource</c> beside a <c>ViteAppResource</c> — are
+    /// <see cref="ExecutableResource"/>s. Projects are named separately because
+    /// <c>ProjectResource</c> is not one; DCP builds its executable while preparing the model.
+    /// </remarks>
+    private static bool DcpCreates(IResource resource) =>
+        resource is ExecutableResource or ContainerResource
+        || resource.Annotations.OfType<IProjectMetadata>().Any();
 
     /// <summary>
     /// Runs the kind's post-clone checks, the ones <see cref="ILocalResourceKind.Resolve"/> makes
