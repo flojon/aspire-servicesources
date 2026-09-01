@@ -72,7 +72,6 @@ updates:
       # `verify repo invariants` job fails if they part.
       - dependency-name: "Aspire.Hosting.AppHost"
       - dependency-name: "CommunityToolkit.Aspire.Hosting.Java"
-      - dependency-name: "LibGit2Sharp"
       - dependency-name: "YamlDotNet"
     schedule:
       interval: "weekly"

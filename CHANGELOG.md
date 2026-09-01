@@ -24,6 +24,103 @@ nothing will fail to build to warn you.
   `appsettings.Cluster.json` plus `--environment Cluster`. The file's shape on disk is unchanged,
   and nothing about how a .NET or TypeScript AppHost authors it has changed.
 
+- **`builder.UseDeferredCheckout()` moves a cold `"local"` checkout past AppHost startup**
+  ([#130], [#159]). Opt-in, off by default. A `"local"` service whose managed checkout does not
+  exist yet is registered against the path that checkout will have, held back with Aspire's
+  explicit-start behaviour, cloned while the AppHost runs, and started once its checkout lands.
+  The dashboard comes up immediately instead of after every clone, checkout progress and failure
+  become visible resource state, and a clone that fails costs one service rather than the whole
+  AppHost.
+
+  All three `"local"` kinds that own a managed checkout are covered — `dotnet`, `java` and
+  `javascript`. (The other *sources* — `url`, `kubernetes` and `container` — never clone a
+  repository, so they have nothing to defer.) The launch-profile caveat below is the `dotnet` kind's alone: neither
+  satellite kind has a launch profile, and both take their endpoints from the committed catalog —
+  `java` requires `port` in its kind block, and a `javascript` service always gets an `http`
+  endpoint whose port Aspire allocates when the block does not name one — so a deferred `java` or
+  `javascript` service is identical to a warm one. Their checks against the working tree
+  (`workingDirectory` and the `mvnw`/`gradlew` wrapper; `appDirectory`, `package.json` and
+  `scriptPath`) run just after the clone, reported as that service's resource state. For
+  `javascript`, the separate resource that runs `npm install` is held back with the app and
+  started ahead of it.
+
+  Aspire reads a project's launch profile during composition and turns it into endpoints,
+  environment variables and command-line arguments there and then, so a deferred service — whose
+  repository is not on disk yet — gets none of the three, and nothing re-runs the step.
+  **Environment is restored**: once the clone lands, the profile's `environmentVariables` are
+  applied before the resource starts, and only where the AppHost has not already set the same key.
+  Without that a deferred service runs as `Production` while every warm run of it runs as
+  `Development`, because `Host.CreateDefaultBuilder` takes the environment name from
+  `DOTNET_ENVIRONMENT` and most repositories set it in the launch profile and nowhere else. Values
+  are expanded and `DOTNET_LAUNCH_PROFILE` is set, both as Aspire does them on a warm run, and the
+  profile is the one Aspire itself will select — including a profile named by
+  `DOTNET_LAUNCH_PROFILE` or one whose `commandName` is `Executable` or absent — so the process
+  never gets one profile's environment and another's arguments.
+
+  **Endpoints cannot be restored**, since ports are allocated during composition, so declare any
+  you need:
+
+  ```csharp
+  builder.UseDeferredCheckout();
+
+  var orders = builder.AddService("orders").WithHttpEndpoint();
+  ```
+
+  A service that declares none is *not* refused — a run-to-completion worker has no
+  `applicationUrl` on either path and would have to declare an endpoint it never listens on.
+  Instead the landed launch profile is read after the clone and a shortfall is reported then,
+  quoting the `applicationUrl` it actually found and what to add. The line above is correct on a
+  warm checkout too, where it updates the endpoint the profile already created.
+
+  Nothing else about a run changes. The clones still start on the first `AddService()` call, in
+  parallel, at the same moment as before — only who waits for them moves. A checkout that already
+  exists takes the eager path unchanged, as do `path` overrides. So does everything outside run
+  mode: `aspire publish` and manifest generation clone first as they always have, because a
+  manifest written from a repository that is not on disk would describe a project without its
+  endpoints or its profile environment.
+
+  A satellite package registering its own kind through `AddLocalKind()` opts in by implementing
+  `ILocalResourceKind.ResolveDeferred()`, which is handed the path the clone will land in and
+  returns the resource plus a `ValidateCheckout` callback for the checks that need the working
+  tree. It defaults to returning `null`, meaning "resolve me eagerly", so an existing handler
+  keeps its current behaviour without changing. Its companion
+  `ILocalResourceKind.SupportsDeferredCheckout(rawConfig)` answers the same question without
+  registering anything — `ResolveDeferred` adds resources to the app model, so it cannot be used to
+  ask speculatively — and also defaults to declining.
+
+  `appType: node` and `appType: bun` are deferred only when the catalog guarantees a `package.json`
+  — `runScript` is set, or `packageManager` names one. Aspire's `AddNodeApp`/`AddBunApp` attach a
+  package manager, and with it the `npm install` resource the app waits on, only when they can see
+  a `package.json` in the app directory; what a warm run builds therefore depends on the
+  repository's contents, which a checkout that has not landed cannot be read for. Rather than
+  guess, those services resolve eagerly. Every other `appType` runs a `package.json` script by
+  definition and is deferred unconditionally.
+
+- **`GetServiceEndpoint()`, a portable way for a consumer to name a resolved service's endpoint**
+  ([#160]). The endpoint *name* a service exposes was decided by whichever source resolved it — a
+  `"local"` dotnet project takes its endpoints from its launch profile, a `"url"` service is named
+  for the URL's scheme, and every other source produced `http` — so a consumer's
+  `GetEndpoint("https")` resolved only while that service happened to sit on a source that produced
+  an `https` endpoint. Switching one service from `"local"` to `"kubernetes"` therefore broke an
+  unrelated consumer, and broke it late: composition succeeded and Aspire's `ExpressionResolver`
+  threw while gathering the consumer's environment, surfacing as a `FailedToStart` on the
+  **consumer**, naming a service the consumer never changed. `GetServiceEndpoint()` asks for *the*
+  endpoint the service exposes — `https` if there is one, else `http`, else its only endpoint — and
+  survives a source switch. It is exported to Aspire's Type System as `getServiceEndpoint()`, so a
+  guest-language AppHost has the same spelling. `GetEndpoint("<scheme>")` keeps working and stays
+  the right call for an endpoint you added yourself; the README says which to reach for.
+
+- **`scheme` on the `kubernetes` and `container` config blocks** ([#160]). Both hardcoded `http`,
+  which was not merely a naming choice: `kubectl port-forward` is a byte-transparent TCP tunnel, so
+  a pod serving TLS is genuinely reachable at `https://localhost:<port>` and a consumer handed an
+  `http://` URL for it cannot connect at all. Set `scheme: https` in `servicesources.yaml` and the
+  service exposes an endpoint named `https` whose URL says so. It defaults to `http`, so nothing
+  changes for a service that does not set it. For `"kubernetes"` a developer can override it in
+  `servicesources.local.json` alongside a `port` override; for `"container"` it is catalog-only,
+  exactly as `container.port` is, since the image decides what it serves. Certificate hostname
+  validation is the one thing a tunnel cannot fix — the client connects to `localhost` while the
+  certificate names the in-cluster service — and the README says so.
+
 ### Changed
 
 - **A missing `servicesources.local.json` is no longer an error by itself** ([#69]). It used to
@@ -36,6 +133,39 @@ nothing will fail to build to warn you.
   distinction is deliberate — a mistyped key yields an empty section rather than a failure, so
   "nothing configured" has to be reported as its own condition.
 
+- **`git` on `PATH` is now required for a managed `"local"` checkout** ([#85]), and
+  `LibGit2Sharp` is gone from the package. Clone, fetch and checkout shell out to the `git`
+  executable, the same "a tool you already have" trade the `"kubernetes"` source makes with
+  `kubectl`. `git` 2.7 or newer; a service pointed at your own directory with `path` needs none.
+
+  This removes the only source-specific external dependency the package had, and by far the
+  heaviest thing it shipped. `LibGit2Sharp.NativeBinaries` carries a native libgit2 for all
+  thirteen RIDs it supports in one package, and an Aspire AppHost is a portable build by default,
+  so every consumer's build output got **all** of them — about **23 MB of `runtimes/`**, roughly
+  half of a sample AppHost's `bin`, all but one of them for a platform that machine will never
+  run. Plus 32 MB in `~/.nuget/packages`. There is no per-RID variant to reference instead and
+  the native assets can't be pruned, so the dependency had to go rather than be trimmed.
+
+  Nothing in `servicesources.yaml`, `servicesources.local.json` or the public API changes.
+
+- **SSH repository URLs now work** ([#85]). `git@host:org/repo`, `host:org/repo` and `ssh://...`
+  were previously refused at resolution time with a message pointing at the HTTPS equivalent,
+  because LibGit2Sharp's bundled binaries had no SSH transport. They are now handed to `git` as
+  written and resolved by your SSH agent and `~/.ssh/config`. Because nothing may block the
+  AppHost on a prompt, SSH runs with `BatchMode=yes` unless you set your own `GIT_SSH_COMMAND`:
+  an un-agented passphrase-protected key, or a host not yet in `known_hosts`, fails immediately
+  rather than waiting. Connect once by hand to settle either.
+
+- **Credential resolution is `git`'s own** ([#85]). Every `credential.helper` you have configured
+  is consulted by git exactly as it is for a `git clone` you type yourself, rather than this
+  package running `git credential fill` and passing the result to libgit2 — so helper ordering,
+  per-URL config and `credential reject` on a refused credential all behave as git documents them.
+  `SERVICESOURCES_GIT_USERNAME`/`SERVICESOURCES_GIT_TOKEN` still apply as a last resort, supplied
+  as a helper of last resort so they never override one you configured; if a configured helper's
+  credential is refused, the command is re-run once with those helpers cleared so the environment
+  token still gets its turn. The per-process credential cache is gone with the plumbing that
+  needed it, so a rotated token takes effect on the next resolution with nothing to clear.
+
 - **`ServiceSourcesConfigurationException` prints as its message, not as a stack dump**
   ([#125]). These are raised from `AddService()` and normally end the AppHost unhandled, so the
   runtime's rendering of them *is* the error output — and it buried the sentence naming the fix
@@ -46,15 +176,20 @@ nothing will fail to build to warn you.
   but anything logging one of these exceptions logs the summary unless that variable is set.
 
 - **A clone or fetch that never resolved a credential says so** ([#125]), instead of reporting
-  authentication as the likely cause. When `git credential fill` yields nothing and neither
-  `SERVICESOURCES_GIT_TOKEN` nor `SERVICESOURCES_GIT_USERNAME` is set, libgit2 fails against a
-  token-authenticated host with `could not find appropriate mechanism for credentials` — a
-  client-side dead end that never reached the host, so blaming a rejected token sent developers
-  hunting for one they never had. The usual real cause is a credential helper that resolves in
-  your shell but not in the environment the AppHost process inherits. Negotiate/NTLM hosts are
-  unaffected; the request still carries the machine's integrated credential. A failure arriving
-  without an authentication challenge — a proxy answering 403, a 404 from a host serving
-  anonymously — keeps the old wording.
+  authentication as the likely cause. When no credential helper yields anything and neither
+  `SERVICESOURCES_GIT_TOKEN` nor `SERVICESOURCES_GIT_USERNAME` is set, `git` falls through to
+  asking a human and finds prompting disabled (`could not read Username for '<host>': terminal
+  prompts disabled`) — a client-side dead end that never reached the host, so blaming a rejected
+  token sent developers hunting for one they never had. The usual real cause is a credential
+  helper that resolves in your shell but not in the environment the AppHost process inherits. A
+  failure that did carry a credential keeps the old wording.
+
+- CI type-checks the TypeScript export surface on every PR ([#88]). `samples/DemoAppHostTypeScript`
+  regenerates its Aspire Type System SDK from the branch's own source tree — `aspire.config.json`
+  resolves this package from `src/`, not from a published version — and compiles it under strict
+  `tsc`, against a pinned Aspire CLI. Nothing else here compiles what these packages export to
+  guest languages: the export test asserts the `[AspireExport]` attribute is *present*, and
+  `aspire restore` exits 0 even when the TypeScript it just wrote does not compile.
 
 ### Fixed
 
@@ -366,6 +501,7 @@ Targets `net10.0`.
 [#79]: https://github.com/flojon/aspire-servicesources/issues/79
 [#80]: https://github.com/flojon/aspire-servicesources/issues/80
 [#81]: https://github.com/flojon/aspire-servicesources/issues/81
+[#85]: https://github.com/flojon/aspire-servicesources/issues/85
 [#88]: https://github.com/flojon/aspire-servicesources/issues/88
 [#89]: https://github.com/flojon/aspire-servicesources/issues/89
 [#112]: https://github.com/flojon/aspire-servicesources/pull/112
@@ -373,5 +509,8 @@ Targets `net10.0`.
 [#69]: https://github.com/flojon/aspire-servicesources/issues/69
 [#119]: https://github.com/flojon/aspire-servicesources/issues/119
 [#125]: https://github.com/flojon/aspire-servicesources/issues/125
+[#130]: https://github.com/flojon/aspire-servicesources/issues/130
+[#159]: https://github.com/flojon/aspire-servicesources/issues/159
+[#160]: https://github.com/flojon/aspire-servicesources/issues/160
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

@@ -29,6 +29,7 @@ internal static class ServiceDeveloperConfigValidator
         CheckField(config.Port?.ToString(), "port");
         CheckField(config.Url, "url");
         CheckField(config.Tag, "tag");
+        CheckField(config.Scheme, "scheme");
 
         if (foreignFields.Count > 0)
         {

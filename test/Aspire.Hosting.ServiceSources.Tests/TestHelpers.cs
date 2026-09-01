@@ -15,6 +15,18 @@ internal static class TestHelpers
         });
 
     /// <summary>
+    /// A builder in publish mode — the mode <c>aspire publish</c> and manifest generation run in,
+    /// where the AppHost composes the model, writes the manifest and exits without ever starting a
+    /// resource.
+    /// </summary>
+    public static IDistributedApplicationBuilder CreatePublishingBuilder(string appHostDirectory) =>
+        DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            ProjectDirectory = appHostDirectory,
+            Args = ["--operation", "publish"],
+        });
+
+    /// <summary>
     /// A builder that can actually publish <c>BeforeStartEvent</c>. Aspire's own
     /// <c>InitializeDcpAnnotations</c> handler runs first and validates DCP options, which a plain
     /// test builder doesn't have — harmless in a real AppHost, fatal here.

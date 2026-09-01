@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace Aspire.Hosting.ServiceSources.Git;
 
 /// <summary>
@@ -5,7 +7,7 @@ namespace Aspire.Hosting.ServiceSources.Git;
 /// host lookup, and repository-identity comparison all read from it, so they can't drift apart on
 /// the edge cases (scp-like syntax, userinfo, explicit ports, Windows drive paths).
 /// </summary>
-internal sealed record GitUrl
+internal sealed partial record GitUrl
 {
     private GitUrl(string? scheme, string? host, string path, bool isScpSyntax)
     {
@@ -75,6 +77,29 @@ internal sealed record GitUrl
                 repositoryUrl.AsSpan(0, authorityStart),
                 repositoryUrl.AsSpan(authorityStart + atIndex + 1));
     }
+
+    /// <summary>
+    /// <see cref="Redact"/> applied to every URL embedded in a block of text, for git's own error
+    /// output.
+    /// </summary>
+    /// <remarks>
+    /// A failing remote operation names the URL it was working on ("fatal: unable to access
+    /// 'https://user:token@host/org/repo/'"), and that text becomes an exception message, which
+    /// reaches the console and every log sink the AppHost is wired to. Without this, a token
+    /// embedded in a <c>repository</c> URL would travel out of the catalog the moment a clone
+    /// failed — which is exactly when a token is most likely to be wrong, and most likely to be
+    /// pasted into a bug report.
+    /// </remarks>
+    public static string RedactAll(string text) => UserInfoInText().Replace(text, "${scheme}");
+
+    /// <summary>
+    /// The userinfo of a URL appearing anywhere in a block of text. The authority runs to the first
+    /// '/' or whitespace, and the greedy match takes the last '@' within it, so a token containing
+    /// '@' is removed whole — the same rule <see cref="Redact"/> and <see cref="StripUserInfo"/>
+    /// use.
+    /// </summary>
+    [GeneratedRegex(@"(?<scheme>[A-Za-z][A-Za-z0-9+.\-]*://)[^/\s]*@")]
+    private static partial Regex UserInfoInText();
 
     public static GitUrl Parse(string repositoryUrl)
     {

@@ -156,6 +156,11 @@ a project reference would be.
 
 ### `"local"` source options
 
+Requires `git` (2.7 or newer) on `PATH` for a managed checkout — the same "a tool you already
+have" trade the `"kubernetes"` source makes with `kubectl`. Every git operation runs under your own
+git, so your credential helper, SSH agent, `~/.gitconfig` and proxy settings apply unchanged. A
+service pointed at your own directory with `path` needs no git at all.
+
 ```json
 {
   "services": {
@@ -224,6 +229,107 @@ Launching the AppHost from an IDE is the one case this doesn't cover. An IDE tha
 resources itself, to attach a debugger, builds them the way it builds anything else — and a
 project reached by a path isn't in your solution, so it may not be built at all
 ([microsoft/aspire#2154](https://github.com/microsoft/aspire/issues/2154), open upstream).
+
+#### First run: `UseDeferredCheckout()`
+
+On a cold clone, `AddService()` blocks until the checkout it needs is on disk. Composition
+hasn't finished, so the AppHost hasn't started, so there is no dashboard to look at while
+several repositories clone — and a checkout that fails throws out of composition and takes the
+whole AppHost down with it, including the services that were fine.
+
+`builder.UseDeferredCheckout()` moves that wait past startup for the case where it hurts: a
+`"local"` service whose *managed* checkout doesn't exist yet. The resource is registered against
+the path its checkout will have, held back with Aspire's own explicit-start behaviour, cloned
+while the AppHost runs, and started when its checkout lands:
+
+```csharp
+var builder = DistributedApplication.CreateBuilder(args);
+
+builder.UseDeferredCheckout();
+
+var orders = builder.AddService("orders").WithHttpEndpoint();
+```
+
+The dashboard comes up immediately, checkout progress and failure become resource state you can
+see, and one bad clone costs one service instead of the run. The clones themselves start at
+exactly the same moment they always did — the first `AddService()` call — so nothing gets
+slower; only who waits for them changes.
+
+**What a cold checkout costs, and what it doesn't.** This part is about the `dotnet` kind. The
+`java` and `javascript` kinds have no launch profile and read nothing out of the repository while
+composing, so deferral costs them nothing at all — skip to *Scoped deliberately narrowly* below.
+(One `javascript` exception, covered there: `appType: node` and `appType: bun` are deferred only
+when the catalog guarantees a `package.json`.)
+
+Aspire reads a project's launch profile
+while composing the AppHost and turns it into endpoints, environment variables and command-line
+arguments there and then. A deferred service has no repository on disk at that point, so all
+three come out empty — and nothing re-runs the step.
+
+Environment is put back for you. Once the clone lands, the profile's `environmentVariables` are
+applied to the resource before it starts, and only where the AppHost hasn't already set the same
+key, so `WithEnvironment` and `WithReference` still win. That matters more than it sounds:
+`Host.CreateDefaultBuilder` takes the environment name from `DOTNET_ENVIRONMENT`, which most
+repositories set in the launch profile and nowhere else, so without this a deferred service runs
+as `Production` while every warm run of it runs as `Development`.
+
+Values are expanded, and the service's own `DOTNET_LAUNCH_PROFILE` is set to the profile it was
+started under — both as Aspire does them on a warm run. The profile read is whichever one Aspire
+itself will select, which is the same selection it makes for the service's command-line arguments
+once the checkout has landed: the profile your AppHost was launched under, when the service has
+one by that name, and otherwise the first launchable profile in the file. So the process never
+ends up with one profile's environment and another's arguments.
+
+Endpoints can't be, because ports are allocated during composition and the spec is frozen. So a
+deferred service carries only the endpoints you declare:
+
+```csharp
+var orders = builder.AddService("orders").WithHttpEndpoint();
+```
+
+You are not asked for that line up front, and a service that doesn't need it isn't refused — a
+run-to-completion worker has no `applicationUrl` on either path, so demanding one would mean
+declaring an endpoint it never listens on. Instead the real launch profile is read once the
+checkout lands and the shortfall is reported then, quoting the `applicationUrl` it actually
+found: the project still binds that URL itself and runs, but Aspire allocated no endpoint, so
+the port isn't moved off a collision, nothing proxies it, service discovery can't resolve the
+service and the dashboard won't link it. Add the line and the next run is whole; it is correct
+on a warm checkout too, where it updates the endpoint the profile already created rather than
+adding one.
+
+Scoped deliberately narrowly, so the blast radius is first-run-only:
+
+- Only a checkout that doesn't exist yet. A warm checkout — every run after the first — takes
+  the existing eager path unchanged, with full launch-profile fidelity.
+- Only managed checkouts. A `path` override is your own directory; there is nothing to clone.
+- Only the `"local"` source, and within it only the kinds that own a managed checkout: `dotnet`,
+  `java` and `javascript`. The other sources — `url`, `kubernetes` and `container` — never clone a
+  repository, so they have nothing to defer.
+- Only run mode. `aspire publish` and manifest generation clone first as they always have; a
+  manifest written from a repository that isn't on disk would describe a project without its
+  endpoints or its profile environment.
+
+The `java` and `javascript` kinds get the same treatment for free, and without the endpoint
+caveat above: `java` requires `port` in its kind block, and a `javascript` service always gets an
+`http` endpoint with a port Aspire allocates when the block doesn't name one. Both come from the
+committed catalog, so a deferred `java` or `javascript` service is identical to a warm one. The
+checks that do need the working tree — `workingDirectory` and the `mvnw`/`gradlew` wrapper for
+`java`, `appDirectory`/`package.json`/`scriptPath` for `javascript` — simply move to just after
+the clone, which is where the docs already said they happened. For `javascript`, the separate
+resource that runs `npm install` is held back with the app and started ahead of it.
+
+`appType: node` and `appType: bun` are the one exception, and they opt out rather than guess.
+Aspire's `AddNodeApp`/`AddBunApp` attach a package manager — and with it the `npm install`
+resource the app waits on — only if they can see a `package.json` in the app directory, so what a
+warm run builds depends on what the repository holds, and a checkout that hasn't landed can't be
+looked at. They are deferred only where the answer is already known: `runScript` is set (which
+requires a `package.json` anyway), or `packageManager` names one. Otherwise that one service
+resolves eagerly, exactly as it does without `UseDeferredCheckout()`. Every other `appType` runs a
+`package.json` script by definition and is deferred unconditionally.
+
+Off by default: a service that used to be running by the time `Build()` returned is started
+after it instead, which is visible to anything in your AppHost that assumed otherwise. Call it
+before your first `AddService()`, which is where the decision is made.
 
 #### Managed checkouts don't inherit your AppHost repository's build settings
 
@@ -432,7 +538,9 @@ Every option is optional:
   Rejected for `vite`/`nextjs`, whose integrations bind the dev server's port themselves.
 
 The service always gets an `http` endpoint, so the builder `AddService()` returns can be passed to
-a consumer's `WithReference(...)` like any other. Node and Bun must be on `PATH` for the app types
+a consumer's `WithReference(...)` like any other — or to `GetServiceEndpoint()`, which is how a
+consumer names that endpoint without knowing which source produced it
+([naming a service's endpoint](#naming-a-services-endpoint)). Node and Bun must be on `PATH` for the app types
 that use them.
 
 #### Java: `kind: java`
@@ -474,7 +582,7 @@ The checkout is cloned exactly as for any other `"local"` service (`path`, `ref`
 | `mavenGoal` | one of these three | Run via the Maven wrapper, e.g. `spring-boot:run`. |
 | `gradleTask` | one of these three | Run via the Gradle wrapper, e.g. `bootRun`. |
 | `jarPath` | one of these three | Run a pre-built jar with `java -jar`, relative to `workingDirectory`. May climb out of it — a monorepo's shared build output directory — but must stay inside the checkout. |
-| `port` | yes | The port the app listens on. Becomes the service's HTTP endpoint, so consumers can `WithReference(...)` it. |
+| `port` | yes | The port the app listens on. Becomes the service's HTTP endpoint, so consumers can `WithReference(...)` or `GetServiceEndpoint()` it. |
 | `workingDirectory` | no (defaults to the repository root) | Where in the checkout the project lives — the directory holding `pom.xml` / `build.gradle`, and by default the `mvnw`/`gradlew` wrapper too. Must stay inside the checkout. |
 | `wrapperPath` | no (defaults to the wrapper in `workingDirectory`) | Where the `mvnw`/`gradlew` wrapper script lives, relative to the **repository root** — for the monorepo that commits a single wrapper at its root while the service itself sits further down. Name it without an extension (`gradlew`, not `gradlew.bat`) and it works for the whole team: on Windows the `.cmd`/`.bat` wrapper beside it is the one run. Only meaningful with `mavenGoal` or `gradleTask`. |
 | `args` | no | Extra arguments for whichever run mode is configured — passed to the Maven wrapper, the Gradle wrapper, or the jar. |
@@ -512,7 +620,10 @@ mode or more than one, a `workingDirectory`, `wrapperPath` or `jarPath` escaping
 before the service has added anything to the app model. The two exceptions are a `workingDirectory`
 that doesn't exist in the checkout and a wrapper script that isn't there: both need the checkout on
 disk, which isn't cloned until the block itself has been checked, so they are reported a moment
-later, once the resource is being created.
+later, once the resource is being created. Under
+[`UseDeferredCheckout()`](#first-run-usedeferredcheckout) that moment is later still — after the
+clone lands, as this service's resource state — but it is the same two checks saying the same two
+things.
 
 **Reaching the rest of the Java integration.** The `java:` block covers how to start the app; it
 deliberately doesn't mirror every modifier the Community Toolkit offers. Anything else is reachable
@@ -579,30 +690,35 @@ property rather than as the kind's options.
 
 Clone and fetch for a managed checkout (no `path` override) authenticate the same way, in order:
 
-1. **Your `git` credential helper.** The managed checkout shells out to `git credential fill` for
-   the repository's host, so whatever you already have configured — Git Credential Manager,
-   `osxkeychain`, `libsecret`, a cached PAT, a `.netrc`-backed helper — is reused automatically.
-   Nothing to configure here beyond having `git` on `PATH` with a working credential helper (run
-   `git credential fill` yourself against the same host to confirm it resolves before wiring it
-   up here).
+1. **Whatever your `git` already does.** Clone and fetch run the `git` on your `PATH`, so every
+   `credential.helper` you have configured — Git Credential Manager, `osxkeychain`, `libsecret`, a
+   cached PAT, a `.netrc`-backed helper — is consulted exactly as it is for a `git clone` you type
+   yourself. For an SSH remote that means your SSH agent and `~/.ssh/config`. Nothing to configure
+   here: if `git clone <repository>` works in the environment the AppHost runs in, so does this.
 2. **`SERVICESOURCES_GIT_USERNAME`/`SERVICESOURCES_GIT_TOKEN` environment variables**, if the
-   helper above yields nothing (e.g. no helper configured, or `git` isn't on `PATH`) — or if what
-   it yielded was refused, see below. `SERVICESOURCES_GIT_TOKEN` alone is enough for hosts that
-   accept any username alongside a personal access token (GitHub, GitLab, Azure DevOps); set
-   `SERVICESOURCES_GIT_USERNAME` too if your host requires a specific one.
+   helpers above yield nothing (e.g. no helper configured) — or if what they yielded was refused,
+   see below. `SERVICESOURCES_GIT_TOKEN` alone is enough for hosts that accept any username
+   alongside a personal access token (GitHub, GitLab, Azure DevOps); set
+   `SERVICESOURCES_GIT_USERNAME` too if your host requires a specific one. Supplied to git as a
+   credential helper of last resort, so it never overrides a helper you configured yourself, and
+   the token is read from the environment rather than passed on a command line where other users
+   on the machine could read it.
 
-The order is a ladder, not a one-shot choice: if the host refuses the credential your helper
-supplied, the environment variables are tried next, and only then the request is left
-unauthenticated. Each credential is offered once per clone or fetch — a refused one is never
-replayed.
+The order is a ladder, not a one-shot choice. `git` stops at the first helper that answers, so if
+the host refuses that credential the clone would normally fail there — with the environment token
+never offered. It is therefore re-run once with the configured helpers cleared, giving
+`SERVICESOURCES_GIT_TOKEN` its turn. Only after that does the failure stand.
 
-A credential the host actually refuses is also reported back to your helper with
-`git credential reject`, exactly as `git` itself does, so Git Credential Manager, `osxkeychain`,
+A credential the host actually refuses is reported back to your helper with `git credential
+reject` — by `git` itself, as part of failing — so Git Credential Manager, `osxkeychain`,
 `libsecret` and friends erase their stored copy and resolve afresh next time instead of serving the
-same dead token on every run. That only happens on an outright rejection of the credential
-(HTTP 401); a "not found" answer never erases anything, since a repository your credential simply
-can't see is at least as likely an explanation as a bad credential. Rotating a token therefore
-takes effect on the next resolution — there's no need to restart the AppHost to clear a cached one.
+same dead token on every run. Rotating a token therefore takes effect on the next resolution;
+nothing is cached inside the AppHost process for a restart to clear.
+
+Nothing ever prompts. `GIT_TERMINAL_PROMPT=0` is set on every invocation, and SSH runs with
+`BatchMode=yes` unless you've set your own `GIT_SSH_COMMAND`, so a repository whose credentials
+don't resolve fails immediately instead of hanging `builder.AddService()` on a prompt nobody is
+there to answer.
 
 Credentials are never read from `servicesources.yaml` (committed) or `servicesources.local.json`
 — there's no field for them in either file, by design, so a secret can't accidentally end up in
@@ -621,20 +737,18 @@ the credentials in use can't see. A rate-limited response is deliberately left o
 hosts answer it with the same `403` as a token that's missing a scope: there the credential is
 fine and the fix is to wait, so it's reported as the transport failure it is.
 
-When the ladder resolves *nothing* — the helper yields no credential and neither environment
+When the ladder resolves *nothing* — no helper yields a credential and neither environment
 variable is set — the error says so specifically instead of blaming authentication, because
 nothing was ever offered for the host to refuse. Watch for this when the helper works in your
-shell but not under the AppHost: the helper runs in whatever environment the AppHost process
-inherits, which is not necessarily your interactive one, and `git` missing from that `PATH` is
-enough to empty the ladder. (The request is still made with the machine's integrated credential,
-which is what Negotiate/NTLM hosts such as an on-prem Azure DevOps Server need, so integrated
-auth keeps working — it just can't help against a token-authenticated host like GitHub.)
+shell but not under the AppHost: helpers run in whatever environment the AppHost process
+inherits, which is not necessarily your interactive one.
 
-**SSH is not supported.** LibGit2Sharp's bundled native binaries don't include an SSH transport,
-so a `repository` written as `git@host:org/repo`, `host:org/repo` or `ssh://...` fails fast at
-resolution time with a message pointing at the HTTPS equivalent — use `https://host/org/repo`
-instead. The same check covers an existing checkout whose `origin` is an SSH remote, before any
-fetch is attempted against it.
+**SSH works.** A `repository` written as `git@host:org/repo`, `host:org/repo` or `ssh://...` is
+handed to `git` as written and resolved by your SSH agent and `~/.ssh/config`, the same as any
+other clone. Because nothing may block on a prompt, SSH runs with `BatchMode=yes`: a key whose
+passphrase isn't already held by an agent, and a host that isn't in `known_hosts` yet, fail
+immediately rather than waiting. Connect to the host once by hand to settle either, or set your own
+`GIT_SSH_COMMAND`, which is left untouched if you do.
 
 ### `"kubernetes"` source
 
@@ -665,6 +779,39 @@ services:
 ```
 
 Requires `kubectl` on `PATH`, authenticated against the named `context`.
+
+Add `scheme: https` if the pod behind that port serves TLS:
+
+```yaml
+services:
+  orders:
+    kubernetes:
+      service: orders-svc
+      port: 8443
+      scheme: https
+```
+
+`kubectl port-forward` is a byte-transparent TCP tunnel, so the TLS handshake terminates at the
+pod and `https://localhost:<port>` is the URL that actually works — the scheme is what the service
+speaks, not a claim about the tunnel. It defaults to `http`, and names the endpoint consumers
+reference: with `scheme: https` the service exposes an endpoint named `https`, so
+`orders.GetEndpoint("https")` resolves. See
+[naming a service's endpoint](#naming-a-services-endpoint).
+
+What the tunnel can't fix is certificate hostname validation — the client connects to `localhost`
+while the certificate names the in-cluster service — so a consumer that validates certificates
+needs the usual dev-certificate handling for that.
+
+Set `scheme` in the developer config to override the catalog for just that developer, alongside a
+`port` override:
+
+```json
+{
+  "services": {
+    "orders": { "source": "kubernetes", "context": "dev-west", "port": 8443, "scheme": "https" }
+  }
+}
+```
 
 ### `"url"` source
 
@@ -738,6 +885,18 @@ developer:
     "orders": { "source": "container", "tag": "v1.4.2" }
   }
 }
+```
+
+Add `scheme: https` if the image serves TLS on `port`. Like `port`, it's catalog-only — the image
+decides what it serves, so there's nothing per-developer to override — and it defaults to `http`:
+
+```yaml
+services:
+  orders:
+    container:
+      image: ghcr.io/company/orders
+      port: 8443
+      scheme: https
 ```
 
 ### Combining sources on one catalog entry
@@ -889,7 +1048,7 @@ var backend = builder.AddService("backend")
         .WithReference(planningDb)
         .WithEnvironment("DBPASSWORD", postgres.Resource.PasswordParameter)
         .WithEnvironment("ENCRYPTIONKEY", builder.AddParameter("EncryptionKey", new GenerateParameterDefault(), secret: true))
-        .WithEnvironment("Services__CommonAuth", commonAuth.GetEndpoint("https")))
+        .WithEnvironment("Services__CommonAuth", commonAuth.GetServiceEndpoint()))
     .Configure<IResourceWithWaitSupport>(r => r.WaitForCompletion(migrationService));
 ```
 
@@ -959,6 +1118,69 @@ including the wait-ordering exception, which `waitForService` and `waitForServic
 In C# they're hidden from IntelliSense — use `Configure<T>`, which reaches every Aspire extension
 method rather than just these.
 
+## Naming a service's endpoint
+
+A consumer that wants the service's URL asks for an endpoint. Aspire names endpoints, and
+`GetEndpoint("https")` looks like the obvious spelling — but the endpoint *name* a resolved service
+exposes is decided by whichever source resolved it:
+
+| Source | Endpoint name |
+|---|---|
+| `"local"`, `kind: dotnet` | whatever the launch profile's `applicationUrl` declares (`http`, `https`, or both) |
+| `"local"`, satellite kinds (`javascript`, `java`) | `http` |
+| `"url"` | the configured URL's scheme |
+| `"kubernetes"`, `"container"` | the configured `scheme`, `http` unless set |
+
+So naming a scheme resolves only while the service happens to be on a source that produces it.
+Switch that service and the consumer breaks — and it breaks *late*: composition succeeds, and the
+throw comes from Aspire's `ExpressionResolver` when the consumer's environment is gathered, so it
+surfaces as a `FailedToStart` on the **consumer** naming a service the consumer never changed:
+
+```
+System.InvalidOperationException: The endpoint `https` is not defined for the resource
+`common-auth`. Available endpoints: `http`.
+```
+
+`GetServiceEndpoint()` is the portable spelling. It asks for *the* endpoint the service exposes and
+survives a source switch:
+
+```csharp
+var commonAuth = builder.AddService("common-auth");
+
+builder.AddProject<Projects.Core>("planning-core")
+    .WithEnvironment("Services__CommonAuth", commonAuth.GetServiceEndpoint());
+```
+
+It resolves to the endpoint named `https` if there is one, else `http`, else the service's only
+endpoint whatever it's named — the same order Aspire's own service discovery resolves
+`"https+http://"` in, so a service exposing both hands back the endpoint Aspire would have picked
+itself. It throws at composition time, naming the service and its source, if the service exposes no
+endpoint at all or exposes several with none named `http` or `https`; in that last case there's no
+single endpoint to mean, so name the one you want with `GetEndpoint("<name>")`.
+
+The endpoint is chosen when you call it, so call it after any `Configure` that adds one. The
+`EndpointReference` it returns is lazy in the usual way — the URL resolves once Aspire has allocated
+the port.
+
+`WithReference(service)` plus service discovery is portable too, and is the better fit when the
+consumer speaks service discovery: it injects every endpoint the service has under
+`services__<name>__<scheme>__<index>`, and a client resolving `https+http://common-auth` picks
+whichever is there. `GetServiceEndpoint()` is for the case a plain URL in a plain environment
+variable is what the consumer reads.
+
+`GetEndpoint("<scheme>")` still has its place — a service you know will never move off `"local"`,
+or an endpoint you added yourself through `Configure<IResourceWithEndpoints>`. Just don't reach for
+it across a service whose source a developer chooses.
+
+From a guest-language AppHost it's `getServiceEndpoint()`, and the value flows into Aspire's own
+`withEnvironment`:
+
+```typescript
+await builder
+  .addExecutable('probe', process.execPath, '.', ['-e', probeScript])
+  .withEnvironment('INVENTORY_URL', inventory.getServiceEndpoint());
+```
+
 ## Sample
 
 `samples/DemoAppHost` is a minimal working AppHost demonstrating all three easily-runnable
@@ -990,9 +1212,10 @@ Aspire's Type System from a guest language, and that a resolved service can be
 `samples/DemoAppHostTypeScript`. Both of its services use the `"container"` source so that
 `payments` can `withServiceReference(inventory)`: a `"url"` service runs out of band, and a
 container consumer of one is [rejected up front](#url-source). A third resource, the `probe`
-executable, hands the same `inventory` handle to Aspire's *own* `withReference()` and prints the
-`services__inventory__http__0` variable that injects — so it shows as *Exited*, not Running, and
-that single log line is where you see the native service-discovery path working. (**Note:** this
+executable, hands the same `inventory` handle to Aspire's *own* `withReference()` and to
+`getServiceEndpoint()`, and prints what each injected — so it shows as *Exited*, not Running, and
+those two log lines are where you see both the native service-discovery path and the
+[portable endpoint accessor](#naming-a-services-endpoint) working. (**Note:** this
 sample needs Aspire CLI 13.5.3 or newer — see the compatibility note below the code block.)
 
 ```bash

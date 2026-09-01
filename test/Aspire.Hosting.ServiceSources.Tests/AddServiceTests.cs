@@ -386,4 +386,135 @@ public class AddServiceTests
         Assert.Contains("port", ex.Message);
         Assert.Contains("container", ex.Message);
     }
+
+    [Fact]
+    public void AddService_KubernetesSourceWithHttpsSchemeInCatalog_ExposesAnHttpsEndpoint()
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+                kubernetes:
+                  service: orders-svc
+                  port: 8443
+                  scheme: https
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "kubernetes", "context": "dev-west" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var service = builder.AddService("orders");
+
+        // The whole point of #160: a consumer's GetEndpoint("https") now resolves for a
+        // kubernetes-sourced service too, and the URL it hands out says https.
+        Assert.Equal("https", service.GetEndpoint("https").EndpointName);
+        Assert.Equal("https", service.GetServiceEndpoint().EndpointName);
+    }
+
+    [Fact]
+    public void AddService_KubernetesSourceWithSchemeOverrideInDeveloperConfig_TakesPrecedence()
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+                kubernetes:
+                  service: orders-svc
+                  port: 8080
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "kubernetes", "context": "dev-west", "port": 8443, "scheme": "https" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var service = builder.AddService("orders");
+
+        // Scheme travels with port: a developer forwarding a different port is the one who knows
+        // what that port speaks, so the override lives in the same file as the port override.
+        Assert.Equal("https", service.GetServiceEndpoint().EndpointName);
+    }
+
+    [Fact]
+    public void AddService_LocalSourceWithForeignSchemeField_ThrowsNamingServiceFieldAndSource()
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "local", "path": "/tmp/orders", "scheme": "https" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
+
+        Assert.Contains("orders", ex.Message);
+        Assert.Contains("scheme", ex.Message);
+        Assert.Contains("local", ex.Message);
+    }
+
+    [Fact]
+    public void AddService_ContainerSourceWithForeignSchemeField_ThrowsNamingServiceFieldAndSource()
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+                container:
+                  image: ghcr.io/company/orders
+                  port: 8080
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "container", "scheme": "https" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        // Scheme is catalog-only for "container", exactly as port is: the image decides what it
+        // serves, so there is nothing per-developer to override.
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
+
+        Assert.Contains("orders", ex.Message);
+        Assert.Contains("scheme", ex.Message);
+        Assert.Contains("container", ex.Message);
+    }
+
+    [Fact]
+    public void AddService_MisspelledSchemeInsideKubernetesBlock_ThrowsNamingTheUnknownProperty()
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+                kubernetes:
+                  service: orders-svc
+                  port: 8080
+                  schema: https
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "kubernetes", "context": "dev-west" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
+
+        Assert.Contains("schema", ex.Message);
+        Assert.Contains("scheme", ex.Message);
+    }
 }
