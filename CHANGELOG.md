@@ -14,12 +14,24 @@ nothing will fail to build to warn you.
 ### Added
 
 - **`builder.UseDeferredCheckout()` moves a cold `"local"` checkout past AppHost startup**
-  ([#130]). Opt-in, off by default. A `dotnet`-kind service whose managed checkout does not exist
-  yet is registered against the path that checkout will have, held back with Aspire's
+  ([#130], [#159]). Opt-in, off by default. A `"local"` service whose managed checkout does not
+  exist yet is registered against the path that checkout will have, held back with Aspire's
   explicit-start behaviour, cloned while the AppHost runs, and started once its checkout lands.
   The dashboard comes up immediately instead of after every clone, checkout progress and failure
   become visible resource state, and a clone that fails costs one service rather than the whole
   AppHost.
+
+  All three `"local"` kinds that own a managed checkout are covered — `dotnet`, `java` and
+  `javascript`. (The other *sources* — `url`, `kubernetes` and `container` — never clone a
+  repository, so they have nothing to defer.) The launch-profile caveat below is the `dotnet` kind's alone: neither
+  satellite kind has a launch profile, and both take their endpoints from the committed catalog —
+  `java` requires `port` in its kind block, and a `javascript` service always gets an `http`
+  endpoint whose port Aspire allocates when the block does not name one — so a deferred `java` or
+  `javascript` service is identical to a warm one. Their checks against the working tree
+  (`workingDirectory` and the `mvnw`/`gradlew` wrapper; `appDirectory`, `package.json` and
+  `scriptPath`) run just after the clone, reported as that service's resource state. For
+  `javascript`, the separate resource that runs `npm install` is held back with the app and
+  started ahead of it.
 
   Aspire reads a project's launch profile during composition and turns it into endpoints,
   environment variables and command-line arguments there and then, so a deferred service — whose
@@ -51,10 +63,27 @@ nothing will fail to build to warn you.
 
   Nothing else about a run changes. The clones still start on the first `AddService()` call, in
   parallel, at the same moment as before — only who waits for them moves. A checkout that already
-  exists takes the eager path unchanged, as do `path` overrides and the non-`dotnet` kinds. So does
-  everything outside run mode: `aspire publish` and manifest generation clone first as they always
-  have, because a manifest written from a repository that is not on disk would describe a project
-  without its endpoints or its profile environment.
+  exists takes the eager path unchanged, as do `path` overrides. So does everything outside run
+  mode: `aspire publish` and manifest generation clone first as they always have, because a
+  manifest written from a repository that is not on disk would describe a project without its
+  endpoints or its profile environment.
+
+  A satellite package registering its own kind through `AddLocalKind()` opts in by implementing
+  `ILocalResourceKind.ResolveDeferred()`, which is handed the path the clone will land in and
+  returns the resource plus a `ValidateCheckout` callback for the checks that need the working
+  tree. It defaults to returning `null`, meaning "resolve me eagerly", so an existing handler
+  keeps its current behaviour without changing. Its companion
+  `ILocalResourceKind.SupportsDeferredCheckout(rawConfig)` answers the same question without
+  registering anything — `ResolveDeferred` adds resources to the app model, so it cannot be used to
+  ask speculatively — and also defaults to declining.
+
+  `appType: node` and `appType: bun` are deferred only when the catalog guarantees a `package.json`
+  — `runScript` is set, or `packageManager` names one. Aspire's `AddNodeApp`/`AddBunApp` attach a
+  package manager, and with it the `npm install` resource the app waits on, only when they can see
+  a `package.json` in the app directory; what a warm run builds therefore depends on the
+  repository's contents, which a checkout that has not landed cannot be read for. Rather than
+  guess, those services resolve eagerly. Every other `appType` runs a `package.json` script by
+  definition and is deferred unconditionally.
 
 ### Changed
 
@@ -434,5 +463,6 @@ Targets `net10.0`.
 [#119]: https://github.com/flojon/aspire-servicesources/issues/119
 [#125]: https://github.com/flojon/aspire-servicesources/issues/125
 [#130]: https://github.com/flojon/aspire-servicesources/issues/130
+[#159]: https://github.com/flojon/aspire-servicesources/issues/159
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

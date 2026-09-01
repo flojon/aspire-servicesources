@@ -37,12 +37,31 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
 
         var deferred = DeferredCheckout.For(builder);
 
-        if (isDotnetKind && deferred.ShouldDefer(builder, serviceName, config))
+        if (deferred.ShouldDefer(builder, serviceName, config))
         {
-            // Nothing is on disk for this service yet, so registering the project against the path
+            // Nothing is on disk for this service yet, so registering the resource against the path
             // its checkout will have — and starting it once the clone lands — costs the AppHost
             // nothing it would otherwise have had, and buys it a dashboard while the clone runs.
-            return deferred.Register(builder, serviceName, metadata, config, prefetch, gitClient);
+            //
+            // A satellite kind gets the same treatment when it can build its resource without
+            // reading the repository, which java always can and javascript can for most of its app
+            // types: their endpoints come from the committed catalog rather than from anything in
+            // the checkout. SupportsDeferredCheckout is asked first because it is the form of the
+            // question that can be asked without registering anything — see ILocalResourceKind —
+            // and ResolveDeferred returning null is still honoured for a kind that can only decide
+            // once it has looked at everything.
+            var registered = isDotnetKind
+                ? deferred.Register(builder, serviceName, metadata, config, prefetch, gitClient)
+                : SupportsDeferredKind(serviceName, metadata, handler!)
+                    ? deferred.RegisterKind(
+                        builder, serviceName, metadata, config, prefetch, gitClient,
+                        repoRoot => ResolveDeferredKind(builder, serviceName, metadata, repoRoot, handler!))
+                    : null;
+
+            if (registered is not null)
+            {
+                return registered;
+            }
         }
 
         // Blocks on this service's checkout, but every "local" service's checkout was started
@@ -103,6 +122,63 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         return handler;
     }
 
+    /// <summary>
+    /// The deferred counterpart of <see cref="InvokeKindHandler"/>: asks the handler to build its
+    /// resource against a <paramref name="repoRoot"/> that does not exist yet. A
+    /// <see langword="null"/> result is the handler declining deferral, not a failure, so — unlike
+    /// the eager path — it is passed through rather than reported.
+    /// </summary>
+    private static DeferredLocalResource? ResolveDeferredKind(
+        IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, string repoRoot,
+        ILocalResourceKind handler)
+    {
+        DeferredLocalResource? registration;
+        try
+        {
+            registration = handler.ResolveDeferred(builder, serviceName, repoRoot, metadata.KindConfig);
+        }
+        catch (Exception ex) when (ex is not ServiceSourcesConfigurationException)
+        {
+            throw new ServiceSourcesConfigurationException(HandlerFailedMessage(serviceName, metadata.Kind), ex);
+        }
+
+        if (registration is not null && registration.Service is null)
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': the handler for kind '{metadata.Kind}' returned a " +
+                $"{nameof(DeferredLocalResource)} with no resource. Return null to decline deferral instead.");
+        }
+
+        return registration;
+    }
+
+    /// <summary>
+    /// Asks the handler whether it can defer this service at all. Documented as never throwing, but
+    /// nothing enforces that — and this runs for a service the developer did not ask a question
+    /// about, so a handler dereferencing something on an odd config block would otherwise take the
+    /// AppHost down with a bare exception naming neither the service nor the kind.
+    /// </summary>
+    private static bool SupportsDeferredKind(
+        string serviceName, ServiceMetadata metadata, ILocalResourceKind handler)
+    {
+        try
+        {
+            return handler.SupportsDeferredCheckout(metadata.KindConfig);
+        }
+        catch (Exception ex) when (ex is not ServiceSourcesConfigurationException)
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': the handler for kind '{metadata.Kind}' failed while being asked whether " +
+                "it supports a deferred checkout. That call is documented as answering rather than throwing — a " +
+                "block it cannot judge should answer false and let the eager path report it.", ex);
+        }
+    }
+
+    private static string HandlerFailedMessage(string serviceName, string kind) =>
+        $"Service '{serviceName}': the handler for kind '{kind}' failed while creating its " +
+        $"resource. If this is a configuration problem, report it from " +
+        $"{nameof(ILocalResourceKind)}.{nameof(ILocalResourceKind.Validate)} instead, which runs first.";
+
     private static IResourceBuilder<IResourceWithServiceDiscovery> InvokeKindHandler(
         IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, string repoRoot,
         ILocalResourceKind handler)
@@ -114,10 +190,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         }
         catch (Exception ex) when (ex is not ServiceSourcesConfigurationException)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': the handler for kind '{metadata.Kind}' failed while creating its " +
-                $"resource. If this is a configuration problem, report it from " +
-                $"{nameof(ILocalResourceKind)}.{nameof(ILocalResourceKind.Validate)} instead, which runs first.", ex);
+            throw new ServiceSourcesConfigurationException(HandlerFailedMessage(serviceName, metadata.Kind), ex);
         }
 
         if (resourceBuilder is null)
