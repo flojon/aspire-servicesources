@@ -29,6 +29,14 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// <c>ExternalServiceResource</c> (option 2) is the route that would work, and is what the upstream
 /// issue blocks. See <see cref="ServiceUrlResource"/> for both.
 /// </para>
+/// <para>
+/// The other consequence of leaving the resource unregistered is that nothing ever publishes a
+/// state for it, so a consumer's <c>WaitFor</c> on one waited for the life of the run (#170). That
+/// one is fixed rather than pre-flighted, in two halves: <see cref="ServiceUrlResource"/> declares
+/// <see cref="IResourceWithoutLifetime"/>, which Aspire's wait machinery filters on, and
+/// <see cref="DropWaitsOnUrlServices"/> removes the now-inert annotation before start, because
+/// Aspire also reads it as a dependency and a container consumer fails on that.
+/// </para>
 /// </remarks>
 internal sealed class UrlSource : IServiceSource
 {
@@ -112,8 +120,49 @@ internal sealed class UrlSource : IServiceSource
                     "Tracked as issue #72; it depends on microsoft/aspire#9965.");
             }
 
+            DropWaitsOnUrlServices(@event.Model);
+
             return Task.CompletedTask;
         });
+    }
+
+    /// <summary>
+    /// Removes every <see cref="WaitAnnotation"/> in the model that waits on a url-sourced service,
+    /// after the check above has had its say about references.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ServiceUrlResource"/> declaring <see cref="IResourceWithoutLifetime"/> is what
+    /// makes such a wait resolve instead of hanging (#170), and for a project or executable consumer
+    /// that is the whole of it — Aspire's wait machinery filters the annotation out and the resource
+    /// starts. The annotation is still <i>there</i>, though, and Aspire reads it in a second place
+    /// that has nothing to do with waiting: <c>GetResourceDependenciesAsync</c> counts a wait target
+    /// as a dependency of the waiter. For a <b>container</b> consumer that puts the url service back
+    /// into the set DCP plumbs container-to-host networking for, and it fails to start for the same
+    /// reason a <c>WithReference</c> would — except silently, with no error naming a cause, because
+    /// nothing was referenced. Measured: with the annotation left in place the container reaches
+    /// <c>FailedToStart</c> and nothing is logged; with it removed it runs.
+    /// <para>
+    /// Removed for every consumer rather than only containers, so that one rule holds everywhere: a
+    /// wait on a url-sourced service is dropped, because there is no lifetime to order against. The
+    /// <c>"WaitFor"</c> relationship <c>WaitFor()</c> also records is left alone — it is dashboard
+    /// grouping, carries no dependency, and a container consumer of one starts fine with it.
+    /// </para>
+    /// </remarks>
+    private static void DropWaitsOnUrlServices(DistributedApplicationModel model)
+    {
+        foreach (var resource in model.Resources)
+        {
+            // Materialised before removing: Annotations is the live collection being mutated.
+            var waitsOnUrlServices = resource.Annotations
+                .OfType<WaitAnnotation>()
+                .Where(wait => wait.Resource is ServiceUrlResource)
+                .ToArray();
+
+            foreach (var wait in waitsOnUrlServices)
+            {
+                resource.Annotations.Remove(wait);
+            }
+        }
     }
 
     /// <summary>

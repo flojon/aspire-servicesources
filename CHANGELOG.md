@@ -172,6 +172,31 @@ nothing will fail to build to warn you.
 
 ### Fixed
 
+- **A `WaitFor` on a `"url"`-sourced service no longer hangs the consumer forever** ([#170]).
+  Aspire honours a wait by watching the waited-on resource until it reports `Running`, and a
+  `"url"` service has no resource for Aspire to run — so nothing ever published a state, and a
+  consumer that wrote `.WaitFor(service)` sat in `Waiting` for the life of the run. No error, no
+  timeout, and the service missing from the resource list that would have explained the stall. It
+  hit whoever set `Source=url` in their own `servicesources.local.json`, on an AppHost that works
+  for everyone else — the same shape as [#160], and harder to diagnose because nothing threw.
+
+  The resource now declares Aspire's `IResourceWithoutLifetime`, which Aspire's wait machinery
+  filters on, so the wait is **dropped rather than satisfied** — the honest answer for a fixed,
+  pre-known URL that is already up as far as this AppHost is concerned. `WaitFor`,
+  `WaitForStart` and `WaitForCompletion` are all covered, as is the `WaitForStart` that
+  `AddConnectionString` adds on the AppHost's behalf for each resource its expression references.
+  The annotation is also removed from the model before start, because Aspire reads it in a second
+  place that has nothing to do with waiting — a wait target counts as a *dependency* of the waiter —
+  and that put the url service back into the set DCP plumbs container networking for, failing a
+  **container** consumer with a bare `FailedToStart` and nothing logged. A container that only waits
+  on a url-sourced service now starts; one that `WithReference`s it is still refused up front, as
+  before ([#58]).
+
+  **Read before upgrading:** a `WaitFor` on a service that resolves `"url"` now starts the
+  consumer immediately, and does not check that the URL is reachable. It regains its full meaning
+  the moment the service is switched back to a source that runs locally. Every other source is
+  unchanged — they resolve to a resource Aspire actually runs, so a wait on one still waits.
+
 - **Managed checkouts no longer inherit the AppHost repository's MSBuild and NuGet settings**
   ([#119]). A checkout is cloned into `<AppHostDirectory>/.servicesources/checkouts/<service>/`,
   and MSBuild, NuGet, the .NET SDK host and analyzer configuration all find their settings by
@@ -490,5 +515,6 @@ Targets `net10.0`.
 [#130]: https://github.com/flojon/aspire-servicesources/issues/130
 [#159]: https://github.com/flojon/aspire-servicesources/issues/159
 [#160]: https://github.com/flojon/aspire-servicesources/issues/160
+[#170]: https://github.com/flojon/aspire-servicesources/issues/170
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
