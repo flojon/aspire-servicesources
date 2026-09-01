@@ -78,8 +78,11 @@ public class AddServiceTests
         Assert.Contains(builder.Resources, r => r.Name == "orders");
     }
 
+    // A source name that is present but unrecognised must reach "not implemented yet", not the
+    // "no source configured" report reserved for a blank or absent source. The two live on the
+    // same code path, so the message kind is asserted, not just the names it interpolates.
     [Fact]
-    public void AddService_UnknownSource_ThrowsNamingServiceAndSource()
+    public void AddService_UnknownSource_ThrowsNamingServiceAndSourceAsNotImplemented()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
@@ -98,6 +101,7 @@ public class AddServiceTests
 
         Assert.Contains("orders", ex.Message);
         Assert.Contains("docker", ex.Message);
+        Assert.Contains("not implemented", ex.Message);
     }
 
     [Fact]
