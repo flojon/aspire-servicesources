@@ -85,6 +85,31 @@ nothing will fail to build to warn you.
   guess, those services resolve eagerly. Every other `appType` runs a `package.json` script by
   definition and is deferred unconditionally.
 
+- **`GetServiceEndpoint()`, a portable way for a consumer to name a resolved service's endpoint**
+  ([#160]). The endpoint *name* a service exposes was decided by whichever source resolved it — a
+  `"local"` dotnet project takes its endpoints from its launch profile, a `"url"` service is named
+  for the URL's scheme, and every other source produced `http` — so a consumer's
+  `GetEndpoint("https")` resolved only while that service happened to sit on a source that produced
+  an `https` endpoint. Switching one service from `"local"` to `"kubernetes"` therefore broke an
+  unrelated consumer, and broke it late: composition succeeded and Aspire's `ExpressionResolver`
+  threw while gathering the consumer's environment, surfacing as a `FailedToStart` on the
+  **consumer**, naming a service the consumer never changed. `GetServiceEndpoint()` asks for *the*
+  endpoint the service exposes — `https` if there is one, else `http`, else its only endpoint — and
+  survives a source switch. It is exported to Aspire's Type System as `getServiceEndpoint()`, so a
+  guest-language AppHost has the same spelling. `GetEndpoint("<scheme>")` keeps working and stays
+  the right call for an endpoint you added yourself; the README says which to reach for.
+
+- **`scheme` on the `kubernetes` and `container` config blocks** ([#160]). Both hardcoded `http`,
+  which was not merely a naming choice: `kubectl port-forward` is a byte-transparent TCP tunnel, so
+  a pod serving TLS is genuinely reachable at `https://localhost:<port>` and a consumer handed an
+  `http://` URL for it cannot connect at all. Set `scheme: https` in `servicesources.yaml` and the
+  service exposes an endpoint named `https` whose URL says so. It defaults to `http`, so nothing
+  changes for a service that does not set it. For `"kubernetes"` a developer can override it in
+  `servicesources.local.json` alongside a `port` override; for `"container"` it is catalog-only,
+  exactly as `container.port` is, since the image decides what it serves. Certificate hostname
+  validation is the one thing a tunnel cannot fix — the client connects to `localhost` while the
+  certificate names the in-cluster service — and the README says so.
+
 ### Changed
 
 - **`git` on `PATH` is now required for a managed `"local"` checkout** ([#85]), and
@@ -464,5 +489,6 @@ Targets `net10.0`.
 [#125]: https://github.com/flojon/aspire-servicesources/issues/125
 [#130]: https://github.com/flojon/aspire-servicesources/issues/130
 [#159]: https://github.com/flojon/aspire-servicesources/issues/159
+[#160]: https://github.com/flojon/aspire-servicesources/issues/160
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

@@ -17,4 +17,6 @@ internal sealed class ServiceDeveloperConfig
     public string? Url { get; set; }
 
     public string? Tag { get; set; }
+
+    public string? Scheme { get; set; }
 }

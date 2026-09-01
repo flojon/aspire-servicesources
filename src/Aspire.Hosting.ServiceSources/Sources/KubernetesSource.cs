@@ -6,12 +6,19 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 
 internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceSource
 {
-    public IReadOnlySet<string> RelevantFields { get; } = new HashSet<string> { "context", "namespace", "port" };
+    public IReadOnlySet<string> RelevantFields { get; } = new HashSet<string> { "context", "namespace", "port", "scheme" };
 
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)
     {
-        var args = BuildPortForwardArgs(serviceName, metadata, config, portAllocator, out var localPort, out var remotePort);
+        // The block is checked first so a missing one is reported as that rather than as a scheme
+        // problem, and the scheme ahead of BuildPortForwardArgs, whose last act is to allocate a
+        // port: an unsupported scheme is config validation like the rest and shouldn't burn an
+        // allocation on its way to throwing.
+        var kubernetes = RequireKubernetesBlock(serviceName, metadata);
+        var scheme = EndpointScheme.Resolve(serviceName, "kubernetes", config.Scheme, kubernetes.Scheme);
+
+        var args = BuildPortForwardArgs(serviceName, metadata, config, portAllocator, out var localPort, out _);
 
         // Built by hand rather than via AddExecutable so the resource can be a
         // ServiceExecutableResource, which adds the IResourceWithServiceDiscovery that
@@ -23,7 +30,10 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
         var executableBuilder = builder
             .AddResource(new ServiceExecutableResource(serviceName, "kubectl", builder.AppHostDirectory))
             .WithArgs(args)
-            .WithHttpEndpoint(port: localPort, targetPort: localPort, isProxied: false);
+            // Named for the scheme rather than always "http": the tunnel is byte-transparent, so a
+            // pod serving TLS is reachable as https://localhost:<localPort> and consumers must be
+            // able to ask for it under that name (#160). See EndpointScheme.
+            .WithEndpoint(port: localPort, targetPort: localPort, scheme: scheme, name: scheme, isProxied: false);
 
         return ResolvedService.Tag(executableBuilder, serviceName, "kubernetes");
     }
@@ -36,11 +46,7 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
         out int localPort,
         out int remotePort)
     {
-        if (metadata.Kubernetes is null || string.IsNullOrWhiteSpace(metadata.Kubernetes.Service))
-        {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}' source is 'kubernetes' but servicesources.yaml has no kubernetes.service entry.");
-        }
+        var kubernetes = RequireKubernetesBlock(serviceName, metadata);
 
         if (string.IsNullOrWhiteSpace(config.Context))
         {
@@ -48,7 +54,7 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
                 $"Service '{serviceName}': source 'kubernetes' requires 'context' in servicesources.local.json.");
         }
 
-        remotePort = config.Port ?? metadata.Kubernetes.Port ?? throw new ServiceSourcesConfigurationException(
+        remotePort = config.Port ?? kubernetes.Port ?? throw new ServiceSourcesConfigurationException(
             $"Service '{serviceName}': no 'port' configured for source 'kubernetes' — set it in " +
             "servicesources.local.json or servicesources.yaml's kubernetes.port.");
 
@@ -65,12 +71,27 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
         return
         [
             "port-forward",
-            $"svc/{metadata.Kubernetes.Service}",
+            $"svc/{kubernetes.Service}",
             $"{localPort}:{remotePort}",
             "--context",
             config.Context,
             "--namespace",
             @namespace,
         ];
+    }
+
+    /// <summary>
+    /// The service's <c>kubernetes</c> block, which both the port-forward arguments and the endpoint
+    /// scheme are read from, so its absence is the first thing either reports.
+    /// </summary>
+    private static KubernetesMetadata RequireKubernetesBlock(string serviceName, ServiceMetadata metadata)
+    {
+        if (metadata.Kubernetes is null || string.IsNullOrWhiteSpace(metadata.Kubernetes.Service))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}' source is 'kubernetes' but servicesources.yaml has no kubernetes.service entry.");
+        }
+
+        return metadata.Kubernetes;
     }
 }

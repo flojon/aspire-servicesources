@@ -1,3 +1,4 @@
+using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Sources;
@@ -8,12 +9,15 @@ public class ContainerSourceTests
 {
     private const string ServiceName = "orders";
 
-    private static ServiceMetadata Metadata(string? image = "ghcr.io/company/orders", int? port = 8080, string? defaultTag = null) =>
+    private static ServiceMetadata Metadata(
+        string? image = "ghcr.io/company/orders", int? port = 8080, string? defaultTag = null, string? scheme = null) =>
         new()
         {
             Repository = "https://github.com/company/orders",
             Project = "Orders.csproj",
-            Container = image is null ? null : new ContainerMetadata { Image = image, Port = port, DefaultTag = defaultTag },
+            Container = image is null
+                ? null
+                : new ContainerMetadata { Image = image, Port = port, DefaultTag = defaultTag, Scheme = scheme },
         };
 
     private static ServiceDeveloperConfig DevConfig(string? tag = null) =>
@@ -124,5 +128,45 @@ public class ContainerSourceTests
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("port", ex.Message);
+    }
+
+    [Fact]
+    public void Resolve_NoScheme_NamesTheEndpointHttp()
+    {
+        var builder = TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+
+        var service = new ContainerSource().Resolve(builder, ServiceName, Metadata(), DevConfig());
+
+        var endpoint = Assert.Single(service.Resource.Annotations.OfType<EndpointAnnotation>());
+        Assert.Equal("http", endpoint.Name);
+        Assert.Equal("http", endpoint.UriScheme);
+    }
+
+    [Fact]
+    public void Resolve_HttpsScheme_NamesTheEndpointHttps()
+    {
+        // An image that serves TLS on its port needs the endpoint named for what it actually
+        // speaks, or a consumer is handed an http:// URL the listener rejects (#160).
+        var builder = TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+
+        var service = new ContainerSource().Resolve(builder, ServiceName, Metadata(scheme: "https"), DevConfig());
+
+        var endpoint = Assert.Single(service.Resource.Annotations.OfType<EndpointAnnotation>());
+        Assert.Equal("https", endpoint.Name);
+        Assert.Equal("https", endpoint.UriScheme);
+        Assert.Equal(8080, endpoint.TargetPort);
+    }
+
+    [Fact]
+    public void Resolve_UnsupportedScheme_ThrowsNamingServiceAndScheme()
+    {
+        var builder = TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new ContainerSource().Resolve(builder, ServiceName, Metadata(scheme: "grpc"), DevConfig()));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("grpc", ex.Message);
+        Assert.Contains("container.scheme", ex.Message);
     }
 }

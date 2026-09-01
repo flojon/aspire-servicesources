@@ -31,14 +31,25 @@ const payments = await builder
 // the wrapper types emitted, the resolved handle also flows into Aspire's *own* withReference(),
 // distinct from payments' withServiceReference() above, which is this package's ATS export.
 //
-// probe prints the discovery variable withReference() injected and then exits, so it shows as
-// Exited (not Running) next to the two containers — that one log line is the whole point. node is
-// the interpreter already running this AppHost, so process.execPath keeps it portable to Windows.
+// probe prints what the AppHost injected for inventory and then exits, so it shows as Exited (not
+// Running) next to the two containers — those two log lines are the whole point. node is the
+// interpreter already running this AppHost, so process.execPath keeps it portable to Windows.
+//
+// The two lines are the point in a second sense: they are the portable and the non-portable way to
+// name a resolved service's endpoint (#160). getServiceEndpoint() asks for "the endpoint this
+// service exposes" and survives inventory being switched between the sources servicesources.yaml
+// describes; the discovery variable spells a scheme into its own name, so it is only defined while
+// inventory resolves to a source that produces an http endpoint. Were inventory on the "url" source
+// with its https URL, that variable would be undefined while INVENTORY_URL still resolved — which
+// is a contrast to reason about rather than run here, since payments references inventory and the
+// AppHost would refuse to start for the reason noted above.
 const probeScript =
+  'console.log("INVENTORY_URL=" + process.env.INVENTORY_URL);' +
   'console.log("services__inventory__http__0=" + process.env.services__inventory__http__0);';
 
 await builder
   .addExecutable('probe', process.execPath, '.', ['-e', probeScript])
+  .withEnvironment('INVENTORY_URL', inventory.getServiceEndpoint())
   .withReference(inventory);
 
 await builder.build().run();

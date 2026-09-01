@@ -35,9 +35,11 @@ public static class ServiceSourcesBuilderExtensions
     /// </summary>
     /// <returns>
     /// An <see cref="IResourceBuilder{T}"/> over the <b>real</b> resource Aspire runs. Pass it to a
-    /// consumer's <c>WithReference(...)</c>, call <c>GetEndpoint(...)</c> on it, or apply this
-    /// AppHost's own configuration with <see cref="ServiceConfigurationExtensions.Configure{T}"/>
-    /// and <see cref="ServiceConfigurationExtensions.As{T}"/>.
+    /// consumer's <c>WithReference(...)</c>, name its endpoint with
+    /// <see cref="ServiceEndpointExtensions.GetServiceEndpoint"/> (or <c>GetEndpoint(...)</c>, which
+    /// ties the consumer to one source's endpoint naming), or apply this AppHost's own configuration
+    /// with <see cref="ServiceConfigurationExtensions.Configure{T}"/> and
+    /// <see cref="ServiceConfigurationExtensions.As{T}"/>.
     /// </returns>
     /// <remarks>
     /// <para>
