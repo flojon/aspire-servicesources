@@ -234,9 +234,9 @@ several repositories clone — and a checkout that fails throws out of compositi
 whole AppHost down with it, including the services that were fine.
 
 `builder.UseDeferredCheckout()` moves that wait past startup for the case where it hurts: a
-`dotnet`-kind `"local"` service whose *managed* checkout doesn't exist yet. The project is
-registered against the path its checkout will have, held back with Aspire's own explicit-start
-behaviour, cloned while the AppHost runs, and started when its checkout lands:
+`"local"` service whose *managed* checkout doesn't exist yet. The resource is registered against
+the path its checkout will have, held back with Aspire's own explicit-start behaviour, cloned
+while the AppHost runs, and started when its checkout lands:
 
 ```csharp
 var builder = DistributedApplication.CreateBuilder(args);
@@ -251,7 +251,13 @@ see, and one bad clone costs one service instead of the run. The clones themselv
 exactly the same moment they always did — the first `AddService()` call — so nothing gets
 slower; only who waits for them changes.
 
-**What a cold checkout costs, and what it doesn't.** Aspire reads a project's launch profile
+**What a cold checkout costs, and what it doesn't.** This part is about the `dotnet` kind. The
+`java` and `javascript` kinds have no launch profile and read nothing out of the repository while
+composing, so deferral costs them nothing at all — skip to *Scoped deliberately narrowly* below.
+(One `javascript` exception, covered there: `appType: node` and `appType: bun` are deferred only
+when the catalog guarantees a `package.json`.)
+
+Aspire reads a project's launch profile
 while composing the AppHost and turns it into endpoints, environment variables and command-line
 arguments there and then. A deferred service has no repository on disk at that point, so all
 three come out empty — and nothing re-runs the step.
@@ -292,11 +298,30 @@ Scoped deliberately narrowly, so the blast radius is first-run-only:
 - Only a checkout that doesn't exist yet. A warm checkout — every run after the first — takes
   the existing eager path unchanged, with full launch-profile fidelity.
 - Only managed checkouts. A `path` override is your own directory; there is nothing to clone.
-- Only the `dotnet` kind. The `java` and `javascript` kinds carry their own `port` in the kind
-  block and resolve eagerly either way.
+- Only the `"local"` source, and within it only the kinds that own a managed checkout: `dotnet`,
+  `java` and `javascript`. The other sources — `url`, `kubernetes` and `container` — never clone a
+  repository, so they have nothing to defer.
 - Only run mode. `aspire publish` and manifest generation clone first as they always have; a
   manifest written from a repository that isn't on disk would describe a project without its
   endpoints or its profile environment.
+
+The `java` and `javascript` kinds get the same treatment for free, and without the endpoint
+caveat above: `java` requires `port` in its kind block, and a `javascript` service always gets an
+`http` endpoint with a port Aspire allocates when the block doesn't name one. Both come from the
+committed catalog, so a deferred `java` or `javascript` service is identical to a warm one. The
+checks that do need the working tree — `workingDirectory` and the `mvnw`/`gradlew` wrapper for
+`java`, `appDirectory`/`package.json`/`scriptPath` for `javascript` — simply move to just after
+the clone, which is where the docs already said they happened. For `javascript`, the separate
+resource that runs `npm install` is held back with the app and started ahead of it.
+
+`appType: node` and `appType: bun` are the one exception, and they opt out rather than guess.
+Aspire's `AddNodeApp`/`AddBunApp` attach a package manager — and with it the `npm install`
+resource the app waits on — only if they can see a `package.json` in the app directory, so what a
+warm run builds depends on what the repository holds, and a checkout that hasn't landed can't be
+looked at. They are deferred only where the answer is already known: `runScript` is set (which
+requires a `package.json` anyway), or `packageManager` names one. Otherwise that one service
+resolves eagerly, exactly as it does without `UseDeferredCheckout()`. Every other `appType` runs a
+`package.json` script by definition and is deferred unconditionally.
 
 Off by default: a service that used to be running by the time `Build()` returned is started
 after it instead, which is visible to anything in your AppHost that assumed otherwise. Call it
@@ -591,7 +616,10 @@ mode or more than one, a `workingDirectory`, `wrapperPath` or `jarPath` escaping
 before the service has added anything to the app model. The two exceptions are a `workingDirectory`
 that doesn't exist in the checkout and a wrapper script that isn't there: both need the checkout on
 disk, which isn't cloned until the block itself has been checked, so they are reported a moment
-later, once the resource is being created.
+later, once the resource is being created. Under
+[`UseDeferredCheckout()`](#first-run-usedeferredcheckout) that moment is later still — after the
+clone lands, as this service's resource state — but it is the same two checks saying the same two
+things.
 
 **Reaching the rest of the Java integration.** The `java:` block covers how to start the app; it
 deliberately doesn't mirror every modifier the Community Toolkit offers. Anything else is reachable

@@ -79,10 +79,10 @@ public static class ServiceSourcesBuilderExtensions
 
     /// <summary>
     /// Opts this AppHost into deferring a <c>"local"</c> service's <em>first</em> checkout past
-    /// startup: a <c>dotnet</c>-kind service whose package-managed clone does not exist yet is
-    /// registered stopped, cloned while the AppHost runs, and started when its checkout lands —
-    /// so the dashboard comes up immediately, checkout progress and failure show as resource state,
-    /// and one failed clone costs one service rather than the whole AppHost.
+    /// startup: a service whose package-managed clone does not exist yet is registered stopped,
+    /// cloned while the AppHost runs, and started when its checkout lands — so the dashboard comes
+    /// up immediately, checkout progress and failure show as resource state, and one failed clone
+    /// costs one service rather than the whole AppHost.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -97,14 +97,21 @@ public static class ServiceSourcesBuilderExtensions
     /// endpoints or its profile environment.
     /// </para>
     /// <para>
-    /// The launch profile's environment is put back once the clone lands, and only where the
-    /// AppHost has not already set the same key — expanded, and alongside
+    /// Applies to the <c>"local"</c> kinds that own a managed checkout — <c>dotnet</c>, <c>java</c>
+    /// and <c>javascript</c>. The satellite kinds pay none of the cost below: neither has a launch
+    /// profile, and both take their endpoints from the committed catalog, so a deferred one is
+    /// identical to a warm one and only their post-clone checks move. <c>url</c>, <c>kubernetes</c>
+    /// and <c>container</c> clone nothing, so there is nothing to defer.
+    /// </para>
+    /// <para>
+    /// A deferred <c>dotnet</c> service's launch profile environment is put back once the clone
+    /// lands, and only where the AppHost has not already set the same key — expanded, and alongside
     /// <c>DOTNET_LAUNCH_PROFILE</c>, exactly as a warm run applies it.
     /// </para>
     /// <para>
-    /// A deferred service should declare its own endpoints in the AppHost, because a project's
-    /// endpoints come from its launch profile and Aspire reads that while composing — before the
-    /// repository is on disk:
+    /// A deferred <c>dotnet</c> service should declare its own endpoints in the AppHost, because a
+    /// project's endpoints come from its launch profile and Aspire reads that while composing —
+    /// before the repository is on disk:
     /// </para>
     /// <code lang="csharp">
     /// builder.UseDeferredCheckout();
@@ -118,7 +125,7 @@ public static class ServiceSourcesBuilderExtensions
     /// launch profile is read, and only a profile that declares an <c>applicationUrl</c> the AppHost
     /// did not mirror produces a warning naming the service and the URL. A service with no
     /// <c>applicationUrl</c> on either path — a run-to-completion worker — costs nothing and is
-    /// never reported.
+    /// never reported. See <c>DeferredCheckout.LaunchProfileEndpointWarning</c>.
     /// </para>
     /// <para>
     /// Off by default: a service that used to be running by the time <c>Build()</c> returned is
