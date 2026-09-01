@@ -9,7 +9,21 @@ namespace Aspire.Hosting.ServiceSources;
 
 public static class ServiceSourcesBuilderExtensions
 {
-    private static readonly Dictionary<string, IServiceSource> Sources = new()
+    /// <summary>
+    /// The <c>source</c> value a service's developer config names, mapped to the implementation
+    /// that resolves it.
+    /// </summary>
+    /// <remarks>
+    /// Matched case-insensitively, because the value arrives from configuration — where keys
+    /// already are — and <c>Source=Local</c> in an environment variable is how a developer would
+    /// naturally capitalise it, not a mistake. That is the opposite of the deliberate
+    /// case-sensitivity of <c>kind</c> names (see
+    /// <see cref="Sources.LocalKindRegistry.DescribeNearMatch"/>), and for a reason: kinds are an
+    /// open registry that satellite packages contribute names to, where folding case could collide
+    /// two packages' registrations, while these four names are a closed set this package owns and
+    /// nothing else can add to.
+    /// </remarks>
+    private static readonly Dictionary<string, IServiceSource> Sources = new(StringComparer.OrdinalIgnoreCase)
     {
         ["local"] = new LocalProjectSource(new GitCliClient()),
         ["kubernetes"] = new KubernetesSource(new SocketPortAllocator()),
@@ -66,8 +80,13 @@ public static class ServiceSourcesBuilderExtensions
 
         if (!Sources.TryGetValue(developerConfig.Source, out var source))
         {
+            // Names the alternatives rather than saying "not implemented yet": the lookup folds
+            // case, so reaching here means the name itself is unknown — not that the source exists
+            // under a different spelling, which is what the old wording sent readers looking for.
+            var known = string.Join(", ", Sources.Keys.Order(StringComparer.Ordinal).Select(s => $"'{s}'"));
             throw new ServiceSourcesConfigurationException(
-                $"Service '{name}' has source '{developerConfig.Source}', which is not implemented yet.");
+                $"Service '{name}' has unknown source '{developerConfig.Source}'. Valid sources are {known} " +
+                "— correct the service's entry in servicesources.local.json.");
         }
 
         ServiceDeveloperConfigValidator.Validate(name, developerConfig.Source, source.RelevantFields, developerConfig);

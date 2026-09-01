@@ -864,6 +864,12 @@ or just needing it reachable, not caring how:
 { "services": { "orders": { "source": "url" } } }
 ```
 
+The `source` value is matched without regard to case, so `"local"`, `"Local"` and `"LOCAL"` all
+name the same source. A name none of the four has is refused at composition time, naming the ones
+that exist. (The `kind` names in `servicesources.yaml` are the exception — those *are*
+case-sensitive, because satellite packages register them and two packages must not be able to
+collide by spelling.)
+
 ## Configuring a resolved service
 
 `AddService()` returns a builder over the **real** resource Aspire runs, so the AppHost can inject

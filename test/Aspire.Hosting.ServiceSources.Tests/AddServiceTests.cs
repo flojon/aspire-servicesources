@@ -78,6 +78,104 @@ public class AddServiceTests
         Assert.Contains(builder.Resources, r => r.Name == "orders");
     }
 
+    /// <summary>
+    /// A source <em>value</em> spelled with different casing than the source's own name still
+    /// resolves. Configuration keys are case-insensitive everywhere, so a developer who capitalises
+    /// a value the way they would capitalise anything else — especially in an environment variable —
+    /// has not made a mistake, and used to be told the source was not implemented (#167).
+    /// </summary>
+    [Fact]
+    public void AddService_SourceValueSpelledWithACapital_ResolvesTheSameSource()
+    {
+        var projectDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(projectDir, "Orders.csproj"), """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+              </PropertyGroup>
+            </Project>
+            """);
+
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), $$"""
+            { "services": { "orders": { "source": "Local", "path": "{{projectDir.Replace("\\", "\\\\")}}" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var service = builder.AddService("orders");
+
+        Assert.Contains(builder.Resources, r => ReferenceEquals(r, service.Resource));
+    }
+
+    /// <summary>
+    /// Casing carries no meaning for any source, not just <c>"local"</c>: the lookup is
+    /// case-insensitive, and the field validation that follows runs against the resolved source's
+    /// relevant fields exactly as it does for the canonical spelling.
+    /// </summary>
+    [Fact]
+    public void AddService_UppercaseSourceValue_StillValidatesAgainstThatSourcesFields()
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+                url:
+                  url: https://orders.example.com
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "URL", "port": 8080 } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
+
+        // The "not valid for source" complaint, not the unknown-source one: the source resolved,
+        // and 'port' simply isn't one of its fields.
+        Assert.Contains("'port'", ex.Message);
+        Assert.Contains("not valid for source", ex.Message);
+    }
+
+    /// <summary>
+    /// The message for a source nobody implements has to say that, and only that: with
+    /// case-insensitive matching it can no longer fire for a source that exists under another
+    /// spelling, so it names the sources that do exist rather than hinting the feature is pending
+    /// (#167).
+    /// </summary>
+    [Fact]
+    public void AddService_UnknownSource_NamesTheSourcesThatDoExist()
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "docker" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
+
+        Assert.Contains("'local'", ex.Message);
+        Assert.Contains("'kubernetes'", ex.Message);
+        Assert.Contains("'url'", ex.Message);
+        Assert.Contains("'container'", ex.Message);
+        Assert.DoesNotContain("not implemented yet", ex.Message);
+    }
+
     [Fact]
     public void AddService_UnknownSource_ThrowsNamingServiceAndSource()
     {

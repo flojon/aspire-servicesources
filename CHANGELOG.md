@@ -143,6 +143,23 @@ nothing will fail to build to warn you.
   its generated host project below this package's 13.5.2 Aspire floor and fails `aspire restore`
   with `NU1605`.
 
+- **A service's `source` value is matched case-insensitively** ([#167]). `{ "source": "Local" }`
+  failed the run with `Service 'orders' has source 'Local', which is not implemented yet.` — a
+  message that sent the reader looking for an unbuilt feature when the only difference was the
+  capital. Configuration keys have always been case-insensitive, so a value that is not reads as a
+  bug rather than a rule, and it bites hardest through an environment variable, where capitalising
+  `Source=Local` is the natural thing to write. All four source names now match in any casing.
+
+  The parallel checkout prefetch had a quieter version of the same problem: a service spelled
+  `"Local"` was dropped from the set of clones to start, so its checkout ran alone on the
+  `AddService()` thread instead of alongside the others. No error, just a slower first start.
+
+  The unknown-source message is reworded to name the sources that do exist, since with case folded
+  it can now only fire for a name none of them has. `kind` names stay case-sensitive with their
+  "did you mean" hint — those are an open registry satellite packages contribute to, where folding
+  case could collide two packages' registrations, while the four source names are a closed set this
+  package owns.
+
 ### Documentation
 
 - **Who builds a `"local"` checkout, and when** ([#81]). Aspire does, on every start: a `dotnet`
@@ -434,5 +451,6 @@ Targets `net10.0`.
 [#119]: https://github.com/flojon/aspire-servicesources/issues/119
 [#125]: https://github.com/flojon/aspire-servicesources/issues/125
 [#130]: https://github.com/flojon/aspire-servicesources/issues/130
+[#167]: https://github.com/flojon/aspire-servicesources/issues/167
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
