@@ -55,7 +55,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
                 : SupportsDeferredKind(serviceName, metadata, handler!)
                     ? deferred.RegisterKind(
                         builder, serviceName, metadata, config, prefetch, gitClient,
-                        repoRoot => ResolveDeferredKind(builder, serviceName, metadata, repoRoot, handler))
+                        repoRoot => ResolveDeferredKind(builder, serviceName, metadata, repoRoot, handler!))
                     : null;
 
             if (registered is not null)
