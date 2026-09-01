@@ -22,7 +22,11 @@ nothing will fail to build to warn you.
   `ServiceSources__Services__orders__Source=url dotnet run` — and CI can pin every service from the
   environment with no file present at all. Named profiles come from the same mechanism:
   `appsettings.Cluster.json` plus `--environment Cluster`. The file's shape on disk is unchanged,
-  and nothing about how a .NET or TypeScript AppHost authors it has changed.
+  and nothing about how a .NET or TypeScript AppHost authors it has changed. The keys are in the
+  AppHost's own configuration, so an AppHost can read them as well; the file joins the chain on the
+  first ServiceSources call the AppHost makes — a `UseX()` registration, or the first
+  `AddService()` — rather than on the first read of ours, so such a read does not depend on how many
+  services precede it ([#171]).
 
 - **`builder.UseDeferredCheckout()` moves a cold `"local"` checkout past AppHost startup**
   ([#130], [#159]). Opt-in, off by default. A `"local"` service whose managed checkout does not
@@ -514,3 +518,4 @@ Targets `net10.0`.
 [#160]: https://github.com/flojon/aspire-servicesources/issues/160
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
+[#171]: https://github.com/flojon/aspire-servicesources/issues/171

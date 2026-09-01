@@ -971,6 +971,27 @@ without the file being touched:
 > </ItemGroup>
 > ```
 
+> **The `ServiceSources:*` keys reach the AppHost's own `IConfiguration` on its first ServiceSources
+> call, not before.** `servicesources.local.json` is a file of ours, read from the AppHost directory
+> and re-keyed into the chain by whichever ServiceSources method the AppHost calls first — a
+> `UseX()` registration, or the first `AddService()`. A read placed *above* all of them sees the
+> chain without that layer, so a selection written only in the file comes back `null`, silently,
+> since a missing key is not an error:
+>
+> ```csharp
+> // null — nothing of ours has been called yet, so the file is not in the chain.
+> var source = builder.Configuration["ServiceSources:Services:orders:source"];
+>
+> builder.UseJavaScript();
+>
+> // "local" — the file joined the chain on the line above.
+> source = builder.Configuration["ServiceSources:Services:orders:source"];
+> ```
+>
+> Reading these keys from an AppHost should be rare. Scoping a declaration to one source is what
+> sends an AppHost looking for them, and
+> [`Configure<T>`](#configuring-a-resolved-service) already does that scoping for you.
+
 The immediate payoff is a **single run** with a different source and no edit to a file you'd have to
 remember to change back:
 

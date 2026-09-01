@@ -64,6 +64,11 @@ public static class ServiceSourcesBuilderExtensions
     public static IResourceBuilder<IResourceWithServiceDiscovery> AddService(
         this IDistributedApplicationBuilder builder, [ResourceName] string name)
     {
+        // Before the resolution below, and before anything that can fail: this is the layer the
+        // AppHost's own IConfiguration reads back, so it has to be present from this line on rather
+        // than from whichever line first resolved a service successfully.
+        DeveloperConfigFileSource.EnsureRegistered(builder);
+
         var (metadata, developerConfig) = ServiceSourcesConfigCache.ResolveService(builder, name);
 
         if (!Sources.TryGetValue(developerConfig.Source, out var source))
@@ -135,6 +140,11 @@ public static class ServiceSourcesBuilderExtensions
     [AspireExportIgnore]
     public static IDistributedApplicationBuilder UseDeferredCheckout(this IDistributedApplicationBuilder builder)
     {
+        // The call an AppHost using deferred checkouts makes first of all, and the one whose own
+        // guidance — declare a deferred service's endpoints yourself — is most likely to be followed
+        // by a line that reads our configuration back.
+        DeveloperConfigFileSource.EnsureRegistered(builder);
+
         DeferredCheckout.For(builder).Enable();
         return builder;
     }
@@ -149,6 +159,11 @@ public static class ServiceSourcesBuilderExtensions
     public static IDistributedApplicationBuilder AddLocalKind(
         this IDistributedApplicationBuilder builder, string kind, ILocalResourceKind handler)
     {
+        // A satellite's UseJavaScript()/UseJava() lands here, and an AppHost calls one of those
+        // before its first AddService() — so this is usually the call that completes the AppHost's
+        // configuration chain, ahead of any line of theirs that reads it.
+        DeveloperConfigFileSource.EnsureRegistered(builder);
+
         LocalKindRegistry.For(builder).Register(kind, handler);
         return builder;
     }
