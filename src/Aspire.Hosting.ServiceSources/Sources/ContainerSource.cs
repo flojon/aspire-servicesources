@@ -12,12 +12,16 @@ internal sealed class ContainerSource : IServiceSource
     {
         var (image, tag, port) = ResolveContainerConfig(serviceName, metadata, config);
 
+        // Catalog-only, exactly as container.port is: the image decides what it serves on that
+        // port, so there is nothing per-developer to override.
+        var scheme = EndpointScheme.Resolve(serviceName, "container", developerScheme: null, metadata.Container?.Scheme);
+
         // Built by hand rather than via AddContainer so the resource can be a
         // ServiceContainerResource, which adds the IResourceWithServiceDiscovery that
         // ContainerResource lacks. WithImage/WithImageTag are what AddContainer itself uses.
         var containerBuilder = builder.AddResource(new ServiceContainerResource(serviceName))
             .WithImage(image)
-            .WithHttpEndpoint(targetPort: port);
+            .WithEndpoint(targetPort: port, scheme: scheme, name: scheme);
 
         if (tag is not null)
         {
