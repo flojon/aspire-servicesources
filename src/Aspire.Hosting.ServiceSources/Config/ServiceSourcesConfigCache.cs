@@ -12,13 +12,13 @@ internal static class ServiceSourcesConfigCache
     /// before any of them has been asked for by name.
     /// </summary>
     public static LoadedConfig LoadedFor(IDistributedApplicationBuilder builder) =>
-        // The factory has to stay free of side effects. ConditionalWeakTable.GetValue may run it
-        // concurrently for the same key and keep only one of the results, and loading is not a pure
-        // read: it registers servicesources.local.json on the builder's own ConfigurationManager, so
-        // a discarded instance would leave a duplicate source behind — inserted from a second thread
-        // into a list the surviving instance is mutating, each insert disposing and rebuilding every
-        // provider on it. Loading behind a lock on the instance that actually won is the shape
-        // LocalCheckoutPrefetch uses, for the same reason.
+        // The factory has to stay free of side effects: ConditionalWeakTable.GetValue may run it
+        // concurrently for the same key and keep only one of the results, so anything it did on the
+        // builder would be done twice while only one instance survived to say it had happened.
+        // Loading behind a lock on the instance that actually won is the shape LocalCheckoutPrefetch
+        // uses, for the same reason. Registering servicesources.local.json is guarded that way
+        // too — see DeveloperConfigFileSource, which owns it because an entry point registers it
+        // before any of this runs.
         Cache.GetValue(builder, static _ => new ConfigLoader()).Load(builder);
 
     public static (ServiceMetadata Metadata, ServiceDeveloperConfig DeveloperConfig) ResolveService(
