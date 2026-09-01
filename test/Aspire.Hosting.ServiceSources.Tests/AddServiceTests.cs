@@ -151,33 +151,15 @@ public class AddServiceTests
     /// spelling, so it names the sources that do exist rather than hinting the feature is pending
     /// (#167).
     /// </summary>
+    /// <remarks>
+    /// The kind of report is pinned, not just the names it interpolates. A source name that is
+    /// present but unrecognised has to reach the unknown-source complaint and never the "no source
+    /// configured" report reserved for a blank or absent source, since the two would sit on this
+    /// same code path — and a variant of that message that still quoted the service and the source
+    /// would satisfy every other assertion here (#168).
+    /// </remarks>
     [Fact]
-    public void AddService_UnknownSource_NamesTheSourcesThatDoExist()
-    {
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
-        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
-            services:
-              orders:
-                repository: https://github.com/company/orders
-                project: Orders.csproj
-            """);
-        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
-            { "services": { "orders": { "source": "docker" } } }
-            """);
-
-        var builder = CreateBuilder(appHostDir);
-
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
-
-        Assert.Contains("'local'", ex.Message);
-        Assert.Contains("'kubernetes'", ex.Message);
-        Assert.Contains("'url'", ex.Message);
-        Assert.Contains("'container'", ex.Message);
-        Assert.DoesNotContain("not implemented yet", ex.Message);
-    }
-
-    [Fact]
-    public void AddService_UnknownSource_ThrowsNamingServiceAndSource()
+    public void AddService_UnknownSource_ReportsItAsUnknownAndNamesTheSourcesThatDoExist()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
@@ -196,6 +178,12 @@ public class AddServiceTests
 
         Assert.Contains("orders", ex.Message);
         Assert.Contains("docker", ex.Message);
+        Assert.Contains("unknown source", ex.Message);
+        Assert.Contains("'local'", ex.Message);
+        Assert.Contains("'kubernetes'", ex.Message);
+        Assert.Contains("'url'", ex.Message);
+        Assert.Contains("'container'", ex.Message);
+        Assert.DoesNotContain("not implemented yet", ex.Message);
     }
 
     [Fact]
