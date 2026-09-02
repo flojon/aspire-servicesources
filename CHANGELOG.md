@@ -330,10 +330,11 @@ nothing will fail to build to warn you.
   surfaced as `InvalidOperationException: Failed to convert configuration value at '…' to type
   'System.Int32'` — from a layer nothing treats as a configuration problem, and naming a CLR type
   rather than the field. It is now refused with the rest of the entry's checks, at read time,
-  saying what the field takes; a whitespace value is additionally told that an empty one is what
-  unsets a field. That answer covers a string field too, which the binder would have accepted: a
-  whitespace `local.path` was read as absent and sent the service to its managed checkout instead
-  of the developer's directory, with nothing said about it.
+  saying what the field takes. A value of one or more spaces gets an answer of its own, since it is
+  not a value of the wrong type but the gesture that unsets a field missed by a character, and it is
+  refused for a string field as well as a numeric one: a whitespace `local.path` was read as absent
+  and sent the service to its managed checkout instead of the developer's directory, with nothing
+  said about it.
 
 - **A rejected key is named by its configuration key path, not by a file** ([#161]). Entries are
   validated across the whole configuration chain, so the key a message is about may have been

@@ -46,10 +46,11 @@ internal sealed class DeveloperConfiguration
         // service is resolved, including entries for services no AddService call ever names, so a
         // malformed one would otherwise pay for a checkout before anything looked at it. The keys
         // are checked as the developer spelled them, ahead of the canonicalization below.
-        foreach (var entry in section.GetChildren())
-        {
-            ServiceDeveloperConfigValidator.Validate(entry.Key, entry);
-        }
+        //
+        // Every entry in one call, so that a file still to be moved onto the block shape is
+        // reported once rather than a service at a time: checking them in a loop here threw on the
+        // first faulted entry, which cost a startup per misconfigured service.
+        ServiceDeveloperConfigValidator.ValidateAll(section.GetChildren());
 
         var bound = section.Get<Dictionary<string, ServiceDeveloperConfig>>() ?? [];
 

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using System.ComponentModel;
+using System.Text;
 
 namespace Aspire.Hosting.ServiceSources.Config;
 
@@ -12,36 +13,76 @@ namespace Aspire.Hosting.ServiceSources.Config;
 internal static class ServiceDeveloperConfigValidator
 {
     /// <summary>
-    /// Checks one service's entry. Every block is checked, not only the one <c>source</c> names: a
-    /// block for a source this entry is not currently using is legitimate and left alone, but a
-    /// typo inside it would otherwise lie in wait until the day the source is switched to it.
+    /// Checks every service entry and reports all of their problems together.
     /// </summary>
     /// <remarks>
-    /// Every problem with the entry is collected and reported together rather than thrown at the
-    /// first one found. Moving an entry off the flat shape misplaces keys in bunches — an entry
-    /// carrying <c>path</c>, <c>ref</c> and <c>context</c> at its root has three — and reporting
-    /// one per run costs a failed startup per key. Nor was the order they surface in stable enough
-    /// to make that a predictable march: it is <see cref="IConfigurationSection.GetChildren"/>'s,
-    /// which is the provider's, so a file and a set of environment variables carrying the same
-    /// mistakes need not agree on which one is named first.
+    /// Across entries as well as within one. This is the release that moves every existing file
+    /// into blocks, so a file with five still-flat services is five faulted entries: stopping at
+    /// the first would cost a startup per service, which is the same objection that makes the walk
+    /// over one entry collect rather than throw at its first bad key.
     /// </remarks>
-    public static void Validate(string serviceName, IConfigurationSection entry)
+    public static void ValidateAll(IEnumerable<IConfigurationSection> entries)
     {
-        // The entry itself, before its keys: an entry written as a value has no children, so the
-        // walk below would find nothing to object to. It is the flat shape's shortest entry — a
-        // source and nothing else — written without the key that used to carry it, and the binder
-        // answers a scalar where an object goes with null, which the dictionary binder then drops.
-        // Left unchecked it is the one wrong shape reported as no shape at all: the service reads
-        // downstream as one nobody configured, out of a file that plainly names it.
-        //
-        // Reported alone rather than collected with others, because it is the whole entry that is
-        // wrong: it has no keys to walk, so there is nothing else to find.
-        if (entry.Value is not null)
+        List<(string Service, IReadOnlyList<string> Problems)>? faulted = null;
+
+        foreach (var entry in entries)
         {
-            throw Failure(serviceName, [EntryExpected(serviceName, entry)]);
+            var problems = Collect(entry.Key, entry);
+
+            if (problems.Count > 0)
+            {
+                (faulted ??= []).Add((entry.Key, problems));
+            }
         }
 
+        if (faulted is null)
+        {
+            return;
+        }
+
+        // A single faulted entry reads exactly as it did when entries were checked one at a time,
+        // so the ordinary case — one service, one mistake — pays nothing for the collecting.
+        throw faulted.Count == 1
+            ? Failure(faulted[0].Service, faulted[0].Problems)
+            : CombinedFailure(faulted);
+    }
+
+    /// <summary>
+    /// Every problem with one service's entry. Every block is checked, not only the one
+    /// <c>source</c> names: a block for a source this entry is not currently using is legitimate
+    /// and left alone, but a typo inside it would otherwise lie in wait until the day the source is
+    /// switched to it.
+    /// </summary>
+    /// <remarks>
+    /// Collected rather than thrown at the first problem found. Moving an entry off the flat shape
+    /// misplaces keys in bunches — an entry carrying <c>path</c>, <c>ref</c> and <c>context</c> at
+    /// its root has three — and reporting one per run costs a failed startup per key. Nor was the
+    /// order they surface in stable enough to make that a predictable march: it is
+    /// <see cref="IConfigurationSection.GetChildren"/>'s, which is the provider's, so a file and a
+    /// set of environment variables carrying the same mistakes need not agree on which one is
+    /// named first.
+    /// </remarks>
+    private static IReadOnlyList<string> Collect(string serviceName, IConfigurationSection entry)
+    {
         var problems = new List<string>();
+
+        // The entry itself, before its keys. An entry written as a value is the flat shape's
+        // shortest entry — a source and nothing else — written without the key that used to carry
+        // it, and the binder answers a scalar where an object goes with null, which the dictionary
+        // binder then drops. Left unchecked it is the one wrong shape reported as no shape at all:
+        // the service reads downstream as one nobody configured, out of a file that plainly names
+        // it.
+        //
+        // Collected rather than thrown, because a value here does not mean there are no keys to
+        // walk. Configuration merges per key, so a block in the file underneath a higher layer's
+        // scalar — ServiceSources__Services__orders=local over an entry in local.json — yields a
+        // section carrying a value *and* children. Reporting only the value would hide every
+        // misplaced key inside it behind a complaint about a shape the developer's own file has
+        // not got.
+        if (entry.Value is not null)
+        {
+            problems.Add(EntryExpected(serviceName, entry));
+        }
 
         foreach (var key in entry.GetChildren())
         {
@@ -92,31 +133,30 @@ internal static class ServiceDeveloperConfigValidator
                     continue;
                 }
 
-                // A value of one or more spaces is refused whatever type the field takes, which a
-                // string field would otherwise not be: it binds, and the blank-to-absent walk in
-                // DeveloperConfiguration then drops it, so a whitespace `local.path` sent the
-                // service to its managed checkout rather than the developer's directory and said
-                // nothing about it. It is the same mistake for a string as for a number — reaching
-                // for the empty value that unsets a field and missing by a character — so it gets
-                // the same answer, which already names the spelling that works.
-                var blank = field.Value is { Length: > 0 } spaces && string.IsNullOrWhiteSpace(spaces);
+                // A value of one or more spaces, whatever type the field takes. Refused rather than
+                // read as absent — which is what a string field would otherwise become, since it
+                // binds and the blank-to-absent walk in DeveloperConfiguration then drops it, so a
+                // whitespace `local.path` sent the service to its managed checkout instead of the
+                // developer's directory and said nothing about it.
+                if (field.Value is { Length: > 0 } spaces && string.IsNullOrWhiteSpace(spaces))
+                {
+                    problems.Add(Blank(field, key.Key.ToLowerInvariant()));
+                    continue;
+                }
 
-                if (field.Value is { } value && (blank || !BindsTo(fieldType, value)))
+                if (field.Value is { } value && !BindsTo(fieldType, value))
                 {
                     problems.Add(NotBindable(field, key.Key.ToLowerInvariant(), fieldType, value));
                 }
             }
         }
 
-        if (problems.Count > 0)
-        {
-            throw Failure(serviceName, problems);
-        }
+        return problems;
     }
 
     /// <summary>
-    /// One exception for however many problems an entry turned out to have, naming the service once
-    /// rather than once per problem.
+    /// One exception for however many problems one entry turned out to have, naming the service
+    /// once rather than once per problem.
     /// </summary>
     /// <remarks>
     /// A lone problem reads exactly as it did when each was thrown where it was found, so the
@@ -132,6 +172,34 @@ internal static class ServiceDeveloperConfigValidator
               + string.Concat(problems.Select(p => $"{Environment.NewLine}  - {p}")));
 
     /// <summary>
+    /// One exception for problems spread across several service entries.
+    /// </summary>
+    /// <remarks>
+    /// Grouped by service rather than flattened into one list: the entries are independent of each
+    /// other, and a developer migrating a file works through it a service at a time.
+    /// </remarks>
+    private static ServiceSourcesConfigurationException CombinedFailure(
+        IReadOnlyList<(string Service, IReadOnlyList<string> Problems)> faulted)
+    {
+        var total = faulted.Sum(entry => entry.Problems.Count);
+
+        var message = new StringBuilder()
+            .Append($"{total} problems across {faulted.Count} service entries:");
+
+        foreach (var (service, problems) in faulted)
+        {
+            message.Append(Environment.NewLine).Append($"  Service '{service}':");
+
+            foreach (var problem in problems)
+            {
+                message.Append(Environment.NewLine).Append($"    - {problem}");
+            }
+        }
+
+        return new ServiceSourcesConfigurationException(message.ToString());
+    }
+
+    /// <summary>
     /// Whether <paramref name="section"/> holds an object or an array rather than a value.
     /// </summary>
     private static bool HasChildren(IConfigurationSection section) => section.GetChildren().Any();
@@ -144,8 +212,7 @@ internal static class ServiceDeveloperConfigValidator
     /// An empty value is bindable for a nullable field and means the field is unset: a higher
     /// configuration layer can set a key but has no way to remove one, so blanking it is the only
     /// gesture there is for dropping a value the layer below supplied. Whitespace is not that
-    /// gesture, and is refused alongside this check rather than by it, since for a string field the
-    /// binder would take it.
+    /// gesture, and never reaches this check — <see cref="Blank"/> refuses it first.
     /// </remarks>
     private static bool BindsTo(Type type, string value)
     {
@@ -258,15 +325,28 @@ internal static class ServiceDeveloperConfigValidator
     /// Worth its own check rather than being left to the binder, which reports it as a failure to
     /// convert a value at a key path into a CLR type, from a plain
     /// <see cref="InvalidOperationException"/> that no handler upstream treats as a configuration
-    /// problem. The empty spelling is named for a whitespace value because that is someone reaching
-    /// for the gesture that unsets a field and missing by one character — the reason a whitespace
-    /// value is routed here for a string field too, which the binder itself would have accepted.
+    /// problem. A value of one or more spaces never arrives here: <see cref="Blank"/> takes it
+    /// first, for every field type rather than only the ones the binder chokes on.
     /// </remarks>
     private static string NotBindable(
         IConfigurationSection field, string block, Type type, string value) =>
         $"'{field.Key}' in the '{block}' block takes a {Described(type)}, "
         + $"but is set to '{value}'."
-        + (string.IsNullOrWhiteSpace(value) ? " Set it to an empty value to leave the field unset." : "")
+        + SetAt(field);
+
+    /// <summary>
+    /// The error for a value of one or more spaces, whatever type the field takes.
+    /// </summary>
+    /// <remarks>
+    /// Kept apart from <see cref="NotBindable"/>, which says what the field takes and what it was
+    /// given. That pairing reads as a contradiction for a string field — a space *is* a string —
+    /// and the field's type is beside the point in any case: what is wrong is that spaces are
+    /// neither a value nor the empty spelling that unsets a field, and the empty spelling is what
+    /// this is nearly always someone reaching for.
+    /// </remarks>
+    private static string Blank(IConfigurationSection field, string block) =>
+        $"'{field.Key}' in the '{block}' block is set to '{field.Value}', which is one or more "
+        + "spaces rather than a value. Set it to an empty value to leave the field unset."
         + SetAt(field);
 
     private static string Described(Type type)

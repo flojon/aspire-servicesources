@@ -1,6 +1,7 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
+using Microsoft.Extensions.Configuration;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Config;
 
@@ -261,7 +262,8 @@ public class ServiceDeveloperConfigValidatorTests
                 "kubernetes": { "port": " " } } } }
             """);
 
-        Assert.Contains("takes a whole number", ex.Message);
+        Assert.Contains("'port' in the 'kubernetes' block", ex.Message);
+        Assert.Contains("one or more spaces rather than a value", ex.Message);
         Assert.Contains("empty value", ex.Message);
     }
 
@@ -373,7 +375,12 @@ public class ServiceDeveloperConfigValidatorTests
             """);
 
         Assert.Contains("'path' in the 'local' block", ex.Message);
+        Assert.Contains("one or more spaces rather than a value", ex.Message);
         Assert.Contains("empty value", ex.Message);
+
+        // Not the "takes a <type>" phrasing a bind failure gets: a space *is* a string, so
+        // reporting what the field takes against what it was given contradicts itself here.
+        Assert.DoesNotContain("takes a string", ex.Message);
     }
 
     /// <remarks>
@@ -401,5 +408,56 @@ public class ServiceDeveloperConfigValidatorTests
         var ex = Load("""{ "services": { "orders": "local" } }""");
 
         Assert.Contains("ServiceSources__Services__orders__Source", ex.Message);
+    }
+
+    /// <remarks>
+    /// A value at the entry key does not mean the entry has no keys to walk. Configuration merges
+    /// per key, so a block in the file underneath a higher layer's scalar — the environment setting
+    /// ServiceSources__Services__orders over an entry in local.json — yields a section carrying a
+    /// value *and* children. Reporting only the shape complaint would hide the misplaced key behind
+    /// a description of a shape the developer's own file has not got.
+    /// </remarks>
+    [Fact]
+    public void Validate_EntryCarryingBothAValueAndKeys_ReportsBoth()
+    {
+        var dir = CreateAppHostDirectory("""
+            { "services": { "orders": { "source": "local", "path": "/src/orders" } } }
+            """);
+
+        var builder = TestHelpers.CreateBuilder(dir);
+
+        // A higher layer than the file, which the package registers lowest of all.
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ServiceSources:Services:orders"] = "local",
+        });
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.Contains("2 problems with the entry", ex.Message);
+        Assert.Contains("the entry takes a block of settings", ex.Message);
+        Assert.Contains("'path' is not a valid key here", ex.Message);
+    }
+
+    /// <remarks>
+    /// The collecting spans entries, not only the keys within one. A file still to be moved onto
+    /// the block shape has every service wrong at once, and reporting a service at a time costs a
+    /// failed startup each — the same objection that makes the walk over one entry collect.
+    /// </remarks>
+    [Fact]
+    public void Validate_ProblemsInSeveralEntries_ReportsThemAllTogether()
+    {
+        var ex = Load("""
+            { "services": {
+                "orders":   { "source": "local", "path": "/src/orders" },
+                "payments": { "source": "local", "ref": "main" } } }
+            """);
+
+        Assert.Contains("2 service entries", ex.Message);
+        Assert.Contains("Service 'orders'", ex.Message);
+        Assert.Contains("Service 'payments'", ex.Message);
+        Assert.Contains("'path' is not a valid key here", ex.Message);
+        Assert.Contains("'ref' is not a valid key here", ex.Message);
     }
 }
