@@ -283,6 +283,67 @@ public class DeveloperConfigurationTests
     }
 
     /// <remarks>
+    /// Two catalog names differing only by case have no configuration key that reaches one and not
+    /// the other, so an entry naming them would silently give both the same source while only one
+    /// of the two spellings is the key anything enumerating the catalog matches on. The catalog is
+    /// what has to change, and nothing else in the pipeline is in a position to say so.
+    /// </remarks>
+    [Fact]
+    public void ReadFrom_CatalogSpellsTwoServicesTheSameWayApartFromCase_ReportsTheCatalog()
+    {
+        var dir = CreateAppHostDirectory(
+            """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+              Orders:
+                repository: https://github.com/company/orders-two
+                project: src/Orders.Two/Orders.Two.csproj
+            """,
+            """{ "services": { "orders": { "source": "local" } } }""");
+
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.LoadedFor(builder));
+
+        Assert.Contains("'orders'", ex.Message);
+        Assert.Contains("'Orders'", ex.Message);
+        Assert.Contains("servicesources.yaml", ex.Message);
+    }
+
+    /// <remarks>
+    /// The ambiguity is only a problem for a name someone configures. A catalog nobody has selected
+    /// a source for still loads, so the report above stays about the entry that cannot be honoured
+    /// rather than becoming a second catalog validation rule.
+    /// </remarks>
+    [Fact]
+    public void ReadFrom_CatalogSpellingIsAmbiguousButUnconfigured_Loads()
+    {
+        var dir = CreateAppHostDirectory(
+            """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+              Orders:
+                repository: https://github.com/company/orders-two
+                project: src/Orders.Two/Orders.Two.csproj
+              payments:
+                repository: https://github.com/company/payments
+                project: src/Payments.Api/Payments.Api.csproj
+            """,
+            """{ "services": { "payments": { "source": "local" } } }""");
+
+        var builder = CreateBuilder(dir);
+
+        var loaded = ServiceSourcesConfigCache.LoadedFor(builder);
+
+        Assert.Equal(["payments"], loaded.DeveloperConfig.Services.Keys.ToArray());
+    }
+
+    /// <remarks>
     /// A service the catalog doesn't describe has no spelling to adopt and keeps its own, so the
     /// failure still comes from the catalog lookup — which can name the file that would fix it —
     /// rather than from the entry going missing here.

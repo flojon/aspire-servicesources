@@ -73,8 +73,8 @@ internal sealed class DeveloperConfiguration
         foreach (var name in catalogNames)
         {
             // Two catalog names differing only by case cannot be told apart through configuration at
-            // all, so neither of them is canonical. Recording the collision as null leaves such an
-            // entry on its own casing instead of binding it to whichever name was enumerated first.
+            // all, so neither of them is canonical. Recording the collision as null marks the name
+            // as one no entry can be bound to; configuring it is reported below.
             if (!catalogSpelling.TryAdd(name, name))
             {
                 catalogSpelling[name] = null;
@@ -87,10 +87,45 @@ internal sealed class DeveloperConfiguration
         var canonical = new Dictionary<string, ServiceDeveloperConfig>(StringComparer.OrdinalIgnoreCase);
         foreach (var (name, config) in bound)
         {
-            canonical[catalogSpelling.GetValueOrDefault(name) ?? name] = config;
+            if (!catalogSpelling.TryGetValue(name, out var spelling))
+            {
+                canonical[name] = config;
+                continue;
+            }
+
+            if (spelling is null)
+            {
+                throw AmbiguousCatalogSpellingError(name, catalogNames);
+            }
+
+            canonical[spelling] = config;
         }
 
         return canonical;
+    }
+
+    /// <summary>
+    /// The error for an entry naming a service the catalog spells two ways.
+    /// </summary>
+    /// <remarks>
+    /// The alternative is to leave the entry on its own casing, which silently gives both catalog
+    /// services the same source — <see cref="Services"/> compares case-insensitively, so each of
+    /// them finds it — while only one of the two is the spelling anything enumerating the catalog
+    /// matches on. Neither service can then be configured on its own, and nothing says so. The
+    /// catalog is what has to change, so the catalog is what the message names.
+    /// </remarks>
+    private static ServiceSourcesConfigurationException AmbiguousCatalogSpellingError(
+        string configuredName, IEnumerable<string> catalogNames)
+    {
+        var spellings = catalogNames
+            .Where(name => string.Equals(name, configuredName, StringComparison.OrdinalIgnoreCase))
+            .Select(name => $"'{name}'");
+
+        return new ServiceSourcesConfigurationException(
+            $"Configuration names service '{configuredName}', which 'servicesources.yaml' declares more than "
+            + $"once under names differing only by case ({string.Join(", ", spellings)}). Configuration keys are "
+            + "case-insensitive, so there is no key that reaches one of them and not the other — rename them in "
+            + "'servicesources.yaml' so they differ by more than case.");
     }
 
     /// <summary>

@@ -1003,6 +1003,15 @@ Any field works the same way, not just `source` — `ServiceSources__Services__o
 `ServiceSources__Services__orders__Tag`, and so on. (`__` is the .NET configuration separator for
 `:`, and is what you want on every platform.)
 
+A service whose name contains a hyphen — `order-service`, say — makes a variable name a shell won't
+accept as an inline assignment, so pass it through `env` instead:
+
+```bash
+env 'ServiceSources__Services__order-service__Source=url' dotnet run
+```
+
+The key itself is fine either way; it's only the one-line `NAME=value command` form that needs this.
+
 CI is the other case. A build agent has no developer to pick sources for it, and cloning every
 service to run one test is waste, so pin them from the environment and ship no file at all:
 

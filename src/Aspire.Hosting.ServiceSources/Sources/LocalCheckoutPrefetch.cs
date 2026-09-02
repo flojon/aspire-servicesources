@@ -21,9 +21,9 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// <c>max(checkout)</c>, and every later call finds its checkout already done.
 /// </para>
 /// <para>
-/// The prefetch set comes from <c>servicesources.local.json</c>, which must already list every
-/// service the AppHost adds. The converse does not hold — the file may mark services <c>"local"</c>
-/// that this AppHost never calls <c>AddService()</c> for — so the prefetch is <b>speculative</b> in
+/// The prefetch set comes from the developer configuration, which must already name every service
+/// the AppHost adds. The converse does not hold — it may mark services <c>"local"</c> that this
+/// AppHost never calls <c>AddService()</c> for — so the prefetch is <b>speculative</b> in
 /// both what it does and what it reports. It must never invent a failure: a service missing from the
 /// catalog is skipped, and a checkout that throws has its exception stored, re-thrown only if that
 /// service is actually requested, and merely logged when it is not.
@@ -120,7 +120,7 @@ internal sealed class LocalCheckoutPrefetch
 
     /// <summary>
     /// The notice for checkouts that were prefetched but never asked for, or <see langword="null"/>
-    /// when the AppHost used everything <c>servicesources.local.json</c> marks <c>"local"</c>.
+    /// when the AppHost used every service configured as <c>"local"</c>.
     /// Exposed for tests — the log itself isn't observable in-process.
     /// </summary>
     public string? UnusedCheckoutsMessage
@@ -134,13 +134,18 @@ internal sealed class LocalCheckoutPrefetch
                 return null;
             }
 
-            return $"servicesources.local.json marks {unused.Length} " +
-                   $"{(unused.Length == 1 ? "service" : "services")} as 'local' that this AppHost never " +
-                   $"adds ({string.Join(", ", unused)}). Cloning them was paid for anyway: AddService() has to " +
-                   "hand back the real resource, so every 'local' entry is prefetched in parallel before the " +
-                   "AppHost says which ones it wants. Only the services this AppHost adds are reconciled to " +
-                   "their configured ref. Remove the entries you don't call AddService() for to stop paying " +
-                   "for them.";
+            // Named by configuration key rather than by file: the entry can equally have arrived
+            // from appsettings, user secrets, an environment variable or the command line, and
+            // sending a developer to a file that holds nothing — or doesn't exist — leaves them
+            // nothing to act on.
+            return $"{unused.Length} {(unused.Length == 1 ? "service is" : "services are")} configured as " +
+                   $"'local' that this AppHost never adds ({string.Join(", ", unused)}). Cloning them was paid " +
+                   "for anyway: AddService() has to hand back the real resource, so every 'local' entry is " +
+                   "prefetched in parallel before the AppHost says which ones it wants. Only the services this " +
+                   "AppHost adds are reconciled to their configured ref. Clear " +
+                   $"'{DeveloperConfiguration.ServicesKey}:<service>:source' for the ones you don't call " +
+                   $"AddService() for — usually their entries in {DeveloperConfiguration.FileName} — to stop " +
+                   "paying for them.";
         }
     }
 
@@ -227,9 +232,10 @@ internal sealed class LocalCheckoutPrefetch
     }
 
     private static string FailedCheckoutMessage(string serviceName, Exception exception) =>
-        $"servicesources.local.json marks '{serviceName}' as 'local', so its git checkout was prefetched, and " +
-        $"the prefetch failed: {exception.Message} This AppHost never adds '{serviceName}', so nothing else " +
-        "reports it — remove the entry if you don't use it, or fix what the failure names.";
+        $"'{serviceName}' is configured as 'local', so its git checkout was prefetched, and the prefetch " +
+        $"failed: {exception.Message} This AppHost never adds '{serviceName}', so nothing else reports it — " +
+        $"clear '{DeveloperConfiguration.ServicesKey}:{serviceName}:source' if you don't use it, usually the " +
+        $"service's entry in {DeveloperConfiguration.FileName}, or fix what the failure names.";
 
     /// <summary>
     /// Records that the AppHost really does add <paramref name="serviceName"/>, without waiting for

@@ -69,8 +69,18 @@ internal static class DeveloperConfigFileSource
                     return;
                 }
 
-                AddFileSource(builder, Path.Combine(builder.AppHostDirectory, DeveloperConfiguration.FileName));
+                // Reading the file is the part that can fail on the file's own account, and it
+                // touches nothing on the builder, so a malformed file throws with the slot still
+                // unset and the chain still untouched.
+                var source = ReadFileSource(Path.Combine(builder.AppHostDirectory, DeveloperConfiguration.FileName));
+
+                // Set before the insert rather than after. Inserting mutates the source list and
+                // then rebuilds every provider on it, so a fault raised by some unrelated provider's
+                // reload surfaces here with ours already in the chain; a retry after that would add
+                // a second copy, which is the one outcome this slot exists to prevent.
                 _registered = true;
+
+                builder.Configuration.Sources.Insert(0, source);
             }
         }
     }
@@ -85,7 +95,7 @@ internal static class DeveloperConfigFileSource
     /// the file's own business, and re-rooting it wholesale would make this the route by which an
     /// unrelated key reaches the AppHost's live configuration under our prefix.
     /// </remarks>
-    private static void AddFileSource(IDistributedApplicationBuilder builder, string path)
+    private static MemoryConfigurationSource ReadFileSource(string path)
     {
         var file = new ConfigurationBuilder().AddJsonFile(path, optional: true).Build();
 
@@ -93,11 +103,17 @@ internal static class DeveloperConfigFileSource
         // Every value is copied out below, so nothing needs any of that after this call returns.
         using (file as IDisposable)
         {
-            var reRooted = file.GetSection(FileServicesKey).AsEnumerable()
+            // Relative paths, so each entry is named the way it sits under the file's own root and
+            // the key it lands on is built from ServicesKey itself. Spelling the destination prefix
+            // out here instead would be a second place that has to agree with the key the reader
+            // asks for, and disagreeing costs nothing at build time and nothing at run time: the
+            // section simply comes back empty, and every service reports that it is configured
+            // nowhere while the file sits there fully populated.
+            var reRooted = file.GetSection(FileServicesKey).AsEnumerable(makePathsRelative: true)
                 .Where(entry => entry.Value is not null)
-                .ToDictionary(entry => $"ServiceSources:{entry.Key}", entry => entry.Value);
+                .ToDictionary(entry => $"{DeveloperConfiguration.ServicesKey}:{entry.Key}", entry => entry.Value);
 
-            builder.Configuration.Sources.Insert(0, new MemoryConfigurationSource { InitialData = reRooted });
+            return new MemoryConfigurationSource { InitialData = reRooted };
         }
     }
 }

@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
+using Microsoft.Extensions.Configuration;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Config;
 
@@ -132,6 +133,50 @@ public class DeveloperConfigFileSourceTests
 
         Assert.Equal(sourcesAfterTheFirstRegistration, builder.Configuration.Sources.Count);
         Assert.Equal("local", builder.Configuration[SourceKey]);
+    }
+
+    /// <summary>
+    /// A configuration source that loads once and then faults, which is what an unrelated provider
+    /// on the chain looks like to the rebuild our insert triggers.
+    /// </summary>
+    private sealed class FaultsOnReloadSource : IConfigurationSource
+    {
+        // On the source rather than the provider: reloading rebuilds every provider from its
+        // source, so a provider instance never sees its own second load.
+        private int _builds;
+
+        public IConfigurationProvider Build(IConfigurationBuilder builder) => new Provider(++_builds > 1);
+
+        private sealed class Provider(bool faults) : ConfigurationProvider
+        {
+            public override void Load()
+            {
+                if (faults)
+                {
+                    throw new InvalidOperationException("This provider cannot be reloaded.");
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Inserting mutates the source list and then rebuilds every provider on it, so a fault raised
+    /// by someone else's reload surfaces after ours is already in the chain. The registration has
+    /// to count as done at that point: retrying it is what would put a duplicate in the chain,
+    /// which is the outcome the whole slot exists to prevent.
+    /// </summary>
+    [Fact]
+    public void EntryPointAfterAnotherProviderFaultsOnTheRebuild_DoesNotInsertASecondCopy()
+    {
+        var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory());
+        builder.Configuration.Sources.Add(new FaultsOnReloadSource());
+
+        Assert.Throws<InvalidOperationException>(() => builder.AddLocalKind(KindUnderTest, new FakeKind()));
+        var sourcesAfterTheFailedRegistration = builder.Configuration.Sources.Count;
+
+        builder.AddLocalKind($"{KindUnderTest}-2", new FakeKind());
+
+        Assert.Equal(sourcesAfterTheFailedRegistration, builder.Configuration.Sources.Count);
     }
 
     /// <summary>

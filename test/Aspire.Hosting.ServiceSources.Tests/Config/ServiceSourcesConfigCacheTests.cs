@@ -91,11 +91,14 @@ public class ServiceSourcesConfigCacheTests
     /// The sources this package inserted on the builder's own configuration — the side effect that
     /// has to happen exactly once however many times the config is asked for.
     /// </summary>
-    private static int OurConfigurationSources(IDistributedApplicationBuilder builder) =>
-        builder.Configuration.Sources
-            .OfType<MemoryConfigurationSource>()
-            .Count(source => source.InitialData?.Any(
-                entry => entry.Key.StartsWith("ServiceSources:", StringComparison.OrdinalIgnoreCase)) == true);
+    /// <remarks>
+    /// Counted rather than identified by what an inserted source contains: a file that configures
+    /// no services is inserted just as an empty source, and a count that only recognised a source
+    /// by its entries would report a clean zero for exactly the inputs where a second insert is
+    /// easiest to miss.
+    /// </remarks>
+    private static int SourcesInsertedSince(IDistributedApplicationBuilder builder, int before) =>
+        builder.Configuration.Sources.Count - before;
 
     /// <remarks>
     /// Loading registers servicesources.local.json on the builder's ConfigurationManager, so it is
@@ -110,12 +113,13 @@ public class ServiceSourcesConfigCacheTests
             """{ "services": { "orders": { "source": "local" } } }""");
 
         var builder = CreateBuilder(dir);
+        var sourcesBeforeLoading = builder.Configuration.Sources.Count;
 
         var first = ServiceSourcesConfigCache.LoadedFor(builder);
         var second = ServiceSourcesConfigCache.LoadedFor(builder);
 
         Assert.Same(first, second);
-        Assert.Equal(1, OurConfigurationSources(builder));
+        Assert.Equal(1, SourcesInsertedSince(builder, sourcesBeforeLoading));
     }
 
     /// <remarks>
@@ -131,6 +135,7 @@ public class ServiceSourcesConfigCacheTests
             """{ "services": { "orders": { "source": "local" } } }""");
 
         var builder = CreateBuilder(dir);
+        var sourcesBeforeLoading = builder.Configuration.Sources.Count;
 
         // Dedicated threads and a gate they all wait on, rather than pool work items: the point is
         // that they arrive at the load together, which a pool free to run them one at a time would
@@ -159,6 +164,6 @@ public class ServiceSourcesConfigCacheTests
         }
 
         Assert.All(loaded, entry => Assert.Same(loaded[0], entry));
-        Assert.Equal(1, OurConfigurationSources(builder));
+        Assert.Equal(1, SourcesInsertedSince(builder, sourcesBeforeLoading));
     }
 }
