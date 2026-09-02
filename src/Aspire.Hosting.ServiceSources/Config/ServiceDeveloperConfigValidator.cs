@@ -1,44 +1,466 @@
-using Aspire.Hosting.ServiceSources;
+using Microsoft.Extensions.Configuration;
+using System.ComponentModel;
+using System.Text;
 
 namespace Aspire.Hosting.ServiceSources.Config;
 
+/// <summary>
+/// Fails fast on a key that would bind to nothing, so a typo, a field written flat where it belongs
+/// to a block, and a value and a block written the wrong way round are all reported instead of being
+/// silently dropped. The last of those costs more than itself: the binder answers a key of the wrong
+/// shape by abandoning the whole entry, which then reads downstream as a service nobody configured.
+/// </summary>
 internal static class ServiceDeveloperConfigValidator
 {
     /// <summary>
-    /// Fails fast if <paramref name="config"/> sets a field that <paramref name="relevantFields"/>
-    /// (from the given source's <see cref="IServiceSource.RelevantFields"/>) doesn't list — e.g.
-    /// <c>port</c> under a <c>local</c> source — instead of silently ignoring it, which would let
-    /// a developer typo or leftover field from switching sources go unnoticed.
+    /// Checks every service entry and reports all of their problems together.
     /// </summary>
-    public static void Validate(string serviceName, string source, IReadOnlySet<string> relevantFields, ServiceDeveloperConfig config)
+    /// <remarks>
+    /// Across entries as well as within one. This is the release that moves every existing file
+    /// into blocks, so a file with five still-flat services is five faulted entries: stopping at
+    /// the first would cost a startup per service, which is the same objection that makes the walk
+    /// over one entry collect rather than throw at its first bad key.
+    /// </remarks>
+    public static void ValidateAll(IEnumerable<IConfigurationSection> entries)
     {
-        var foreignFields = new List<string>();
+        List<(string Service, IReadOnlyList<string> Problems)>? faulted = null;
 
-        void CheckField(string? value, string fieldName)
+        foreach (var entry in entries)
         {
-            if (value is not null && !relevantFields.Contains(fieldName))
+            var problems = Collect(entry.Key, entry);
+
+            if (problems.Count > 0)
             {
-                foreignFields.Add(fieldName);
+                (faulted ??= []).Add((entry.Key, problems));
             }
         }
 
-        CheckField(config.Path, "path");
-        CheckField(config.Ref, "ref");
-        CheckField(config.Context, "context");
-        CheckField(config.Namespace, "namespace");
-        CheckField(config.Port?.ToString(), "port");
-        CheckField(config.Url, "url");
-        CheckField(config.Tag, "tag");
-        CheckField(config.Scheme, "scheme");
-
-        if (foreignFields.Count > 0)
+        if (faulted is null)
         {
-            var fieldList = string.Join(", ", foreignFields.Select(f => $"'{f}'"));
-            var isAre = foreignFields.Count > 1 ? "are" : "is";
-            var themIt = foreignFields.Count > 1 ? "them" : "it";
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': {fieldList} {isAre} not valid for source '{source}' — remove {themIt} from "
-                + $"'{DeveloperConfiguration.ServicesKey}:{serviceName}', usually the service's entry in {DeveloperConfiguration.FileName}.");
+            return;
         }
+
+        // A single faulted entry reads exactly as it did when entries were checked one at a time,
+        // so the ordinary case — one service, one mistake — pays nothing for the collecting.
+        throw faulted.Count == 1
+            ? Failure(faulted[0].Service, faulted[0].Problems)
+            : CombinedFailure(faulted);
     }
+
+    /// <summary>
+    /// Every problem with one service's entry. Every block is checked, not only the one
+    /// <c>source</c> names: a block for a source this entry is not currently using is legitimate
+    /// and left alone, but a typo inside it would otherwise lie in wait until the day the source is
+    /// switched to it.
+    /// </summary>
+    /// <remarks>
+    /// Collected rather than thrown at the first problem found. Moving an entry off the flat shape
+    /// misplaces keys in bunches — an entry carrying <c>path</c>, <c>ref</c> and <c>context</c> at
+    /// its root has three — and reporting one per run costs a failed startup per key. Nor was the
+    /// order they surface in stable enough to make that a predictable march: it is
+    /// <see cref="IConfigurationSection.GetChildren"/>'s, which is the provider's, so a file and a
+    /// set of environment variables carrying the same mistakes need not agree on which one is
+    /// named first.
+    /// </remarks>
+    private static IReadOnlyList<string> Collect(string serviceName, IConfigurationSection entry)
+    {
+        var problems = new List<string>();
+
+        // The entry itself, before its keys. Two different mistakes put a value here, and they do
+        // not deserve the same complaint.
+        //
+        // A value-*only* entry is the flat shape's shortest entry — a source and nothing else —
+        // written without the key that used to carry it. The binder answers a scalar where an
+        // object goes with null, which the dictionary binder then drops, so left unchecked it is
+        // the one wrong shape reported as no shape at all: the service reads downstream as one
+        // nobody configured, out of a file that plainly names it.
+        //
+        // An entry can also carry a value *and* keys, because configuration merges per key: a
+        // block in the file underneath a higher layer's scalar —
+        // ServiceSources__Services__orders=local over an entry in local.json — yields both. That
+        // one binds correctly, the binder finding no string converter for the entry type and
+        // falling through to the children, so nothing is dropped and the fault is a different
+        // one: the value is inert, and whoever set it to choose a source got silence. Reported
+        // rather than tolerated for exactly that reason, and collected rather than thrown so that
+        // a merged entry's keys are still walked.
+        if (entry.Value is not null)
+        {
+            problems.Add(EntryExpected(serviceName, entry, alsoHasKeys: HasChildren(entry)));
+        }
+
+        foreach (var key in entry.GetChildren())
+        {
+            if (!ServiceDeveloperConfigShape.RootKeys.Contains(key.Key))
+            {
+                problems.Add(NotValidHere(serviceName, key));
+                continue;
+            }
+
+            if (!ServiceDeveloperConfigShape.BlockFields.TryGetValue(key.Key, out var fields))
+            {
+                // `source` is the one root key that takes a value rather than a block. An object
+                // written there binds it to the empty string and, because the binder gives up on
+                // the whole entry, takes every sibling block down with it.
+                if (HasChildren(key))
+                {
+                    problems.Add(ValueExpected(serviceName, key, block: null));
+                }
+
+                continue;
+            }
+
+            // A block name carrying a value rather than an object is the old flat shape written
+            // with a name this type happens to also use for a block — `"url": "https://…"` against
+            // the `url` block. It binds to nothing, and passing the check above on the strength of
+            // the name alone would let the one field most likely to be written flat through in
+            // silence.
+            if (key.Value is not null)
+            {
+                problems.Add(BlockExpected(serviceName, key, fields));
+                continue;
+            }
+
+            foreach (var field in key.GetChildren())
+            {
+                if (!fields.TryGetValue(field.Key, out var fieldType))
+                {
+                    problems.Add(NotValidInBlock(field, key.Key, fields));
+                    continue;
+                }
+
+                // The mirror of the check above: a block written where a field's value goes. Like
+                // a non-scalar `source`, it binds to nothing and costs the entry every other key
+                // it carries, so the service reads downstream as one nobody configured at all.
+                if (HasChildren(field))
+                {
+                    problems.Add(ValueExpected(serviceName, field, key.Key.ToLowerInvariant()));
+                    continue;
+                }
+
+                // A value of one or more spaces, whatever type the field takes. Refused rather than
+                // read as absent — which is what a string field would otherwise become, since it
+                // binds and the blank-to-absent walk in DeveloperConfiguration then drops it, so a
+                // whitespace `local.path` sent the service to its managed checkout instead of the
+                // developer's directory and said nothing about it.
+                if (field.Value is { Length: > 0 } spaces && string.IsNullOrWhiteSpace(spaces))
+                {
+                    problems.Add(Blank(field, key.Key.ToLowerInvariant()));
+                    continue;
+                }
+
+                if (field.Value is { } value && !BindsTo(fieldType, value))
+                {
+                    problems.Add(NotBindable(field, key.Key.ToLowerInvariant(), fieldType, value));
+                }
+            }
+        }
+
+        return problems;
+    }
+
+    /// <summary>
+    /// One exception for however many problems one entry turned out to have, naming the service
+    /// once rather than once per problem.
+    /// </summary>
+    /// <remarks>
+    /// A lone problem reads exactly as it did when each was thrown where it was found, so the
+    /// ordinary case pays nothing for the collecting. Several are listed, each keeping its own
+    /// remedy line, because the key path is what makes the layer that set it findable and that
+    /// differs per problem.
+    /// </remarks>
+    private static ServiceSourcesConfigurationException Failure(
+        string serviceName, IReadOnlyList<string> problems) =>
+        new(problems.Count == 1
+            ? $"Service '{serviceName}': {problems[0]}"
+            : $"Service '{serviceName}': {problems.Count} problems with the entry:"
+              + string.Concat(problems.Select(p => $"{Environment.NewLine}  - {p}")));
+
+    /// <summary>
+    /// One exception for problems spread across several service entries.
+    /// </summary>
+    /// <remarks>
+    /// Grouped by service rather than flattened into one list: the entries are independent of each
+    /// other, and a developer migrating a file works through it a service at a time.
+    /// </remarks>
+    private static ServiceSourcesConfigurationException CombinedFailure(
+        IReadOnlyList<(string Service, IReadOnlyList<string> Problems)> faulted)
+    {
+        var total = faulted.Sum(entry => entry.Problems.Count);
+
+        var message = new StringBuilder()
+            .Append($"{total} problems across {faulted.Count} service entries:");
+
+        foreach (var (service, problems) in faulted)
+        {
+            message.Append(Environment.NewLine).Append($"  Service '{service}':");
+
+            foreach (var problem in problems)
+            {
+                message.Append(Environment.NewLine).Append($"    - {problem}");
+            }
+        }
+
+        return new ServiceSourcesConfigurationException(message.ToString());
+    }
+
+    /// <summary>
+    /// Whether <paramref name="section"/> holds an object or an array rather than a value.
+    /// </summary>
+    private static bool HasChildren(IConfigurationSection section) => section.GetChildren().Any();
+
+    /// <summary>
+    /// Whether <paramref name="value"/> would survive the binder on its way into a field of
+    /// <paramref name="type"/>.
+    /// </summary>
+    /// <remarks>
+    /// An empty value is bindable for a nullable field and means the field is unset: a higher
+    /// configuration layer can set a key but has no way to remove one, so blanking it is the only
+    /// gesture there is for dropping a value the layer below supplied. Whitespace is not that
+    /// gesture, and never reaches this check — <see cref="Blank"/> refuses it first.
+    /// </remarks>
+    private static bool BindsTo(Type type, string value)
+    {
+        var underlying = Nullable.GetUnderlyingType(type);
+
+        if ((underlying ?? type) == typeof(string))
+        {
+            return true;
+        }
+
+        // Empty is the absent value, which only a field that can hold null has room for.
+        return value.Length == 0
+            ? underlying is not null
+            : TypeDescriptor.GetConverter(underlying ?? type).IsValid(value);
+    }
+
+    /// <remarks>
+    /// The suggestion names the block and nothing else. Telling a developer which <c>source</c> to
+    /// set would be advice to change what the service resolves to — a stray <c>port</c> on a
+    /// container-sourced entry belongs in the <c>kubernetes</c> block, but that is emphatically not
+    /// a reason to make the service kubernetes-sourced.
+    /// </remarks>
+    private static string NotValidHere(string serviceName, IConfigurationSection key)
+    {
+        var home = ServiceDeveloperConfigShape.HomeBlockOf(key.Key)?.ToLowerInvariant();
+
+        return (home is not null
+                ? $"'{key.Key}' is not a valid key here. It belongs in the "
+                  + $"'{home}' block: \"{serviceName}\": {{ ..., \"{home}\": {{ \"{key.Key}\": ... }} }}."
+                : $"'{key.Key}' is not a valid key. Valid keys are "
+                  + $"{Quoted(ServiceDeveloperConfigShape.RootKeys)}.")
+            + SetAt(key);
+    }
+
+    /// <summary>The error for a key that no block of this name declares.</summary>
+    private static string NotValidInBlock(
+        IConfigurationSection field, string block, IReadOnlyDictionary<string, Type> fields) =>
+        $"'{field.Key}' is not a valid key in the "
+        + $"'{block.ToLowerInvariant()}' block. Valid keys there are {Quoted(fields.Keys)}."
+        + SetAt(field);
+
+    /// <summary>
+    /// The error for a whole service entry written as a value instead of a block of settings.
+    /// </summary>
+    /// <remarks>
+    /// Kept apart from <see cref="BlockExpected"/> for the suggestion: the entry is the outermost
+    /// object, so there is no surrounding one to show, and the value it was given is worth reading
+    /// rather than only reporting back. Every source has a block named for it, so a value naming one
+    /// of those blocks is a source name — someone writing <c>"orders": "local"</c>, where the fix is
+    /// the <c>source</c> key that value belongs under and not a list of the keys an entry takes.
+    /// </remarks>
+    /// <param name="alsoHasKeys">
+    /// Whether the entry carries settings as well as this value, which a merge of configuration
+    /// layers can produce and a single file cannot.
+    /// </param>
+    private static string EntryExpected(
+        string serviceName, IConfigurationSection entry, bool alsoHasKeys)
+    {
+        var value = entry.Value ?? "";
+
+        // The entry has its block of settings, so the shape is not what is wrong and the value is
+        // not what the entry was written as. Saying "the entry takes a block of settings" of an
+        // entry that plainly has one — and then showing a shape the file already has — would
+        // describe a mistake nobody made. What is wrong is that this value does nothing.
+        if (alsoHasKeys)
+        {
+            return $"the entry carries the value {Escaped(value)} as well as its settings, and that "
+                + "value is inert: a scalar at a service's own key binds to nothing, so nothing "
+                + "reads it. If it was meant to choose the source, that is the 'source' key inside "
+                + "the entry."
+                + SetAtBlock(entry, nameof(ServiceDeveloperConfig.Source));
+        }
+
+        // The suggestion needs no escaping of its own: a whitespace value is not the name of any
+        // block, so it fails this lookup and the placeholder is what gets shown.
+        var source = ServiceDeveloperConfigShape.BlockFields.ContainsKey(value) ? value : "...";
+
+        return $"the entry takes a block of settings, not the value {Escaped(value)}: "
+            + $"\"{serviceName}\": {{ \"source\": \"{source}\" }}. "
+            + $"Valid keys there are {Quoted(ServiceDeveloperConfigShape.RootKeys)}."
+            + SetAtBlock(entry, nameof(ServiceDeveloperConfig.Source));
+    }
+
+    /// <summary>
+    /// The error for a block name carrying a value: the key is a valid one, and what is wrong is
+    /// the value written where a block of settings goes.
+    /// </summary>
+    /// <remarks>
+    /// Distinct from <see cref="NotValidHere"/> because three of the four block names — everything
+    /// but <c>url</c> — are block names and nothing else, so that message's fallback branch would
+    /// call the key invalid and then list it among the valid ones.
+    /// </remarks>
+    private static string BlockExpected(
+        string serviceName, IConfigurationSection key, IReadOnlyDictionary<string, Type> fields)
+    {
+        var block = key.Key.ToLowerInvariant();
+
+        return $"'{key.Key}' takes a block of settings, not a value: "
+            + $"\"{serviceName}\": {{ ..., \"{block}\": {{ ... }} }}. "
+            + $"Valid keys there are {Quoted(fields.Keys)}."
+            // FirstOrDefault rather than First: every block declares at least one field, but a
+            // message builder that can throw would replace the configuration error being reported
+            // with one about itself.
+            + SetAtBlock(key, fields.Keys.Order(StringComparer.Ordinal).FirstOrDefault() ?? "<field>");
+    }
+
+    /// <summary>
+    /// The error for a key carrying a block where a value goes — a non-scalar <c>source</c>, or a
+    /// field inside a block written as an object.
+    /// </summary>
+    /// <param name="block">
+    /// The block <paramref name="key"/> sits in, or <see langword="null"/> when it sits directly on
+    /// the service entry.
+    /// </param>
+    /// <remarks>
+    /// Keeps the plain <see cref="SetAt"/> remedy, unlike the two errors above it: the key this one
+    /// names is a key that has to hold a value, so setting it from an environment variable is the
+    /// fix rather than the mistake.
+    /// </remarks>
+    private static string ValueExpected(string serviceName, IConfigurationSection key, string? block) =>
+        $"'{key.Key}'{(block is null ? "" : $" in the '{block}' block")} "
+        + $"takes a value, not a block of settings: \"{block ?? serviceName}\": {{ \"{key.Key}\": ... }}."
+        + SetAt(key);
+
+    /// <summary>
+    /// The error for a value the binder could not turn into the field's type — a key that is valid
+    /// everywhere except in what it was set to.
+    /// </summary>
+    /// <remarks>
+    /// Worth its own check rather than being left to the binder, which reports it as a failure to
+    /// convert a value at a key path into a CLR type, from a plain
+    /// <see cref="InvalidOperationException"/> that no handler upstream treats as a configuration
+    /// problem. A whitespace value never arrives here: <see cref="Blank"/> takes it first, for
+    /// every field type rather than only the ones the binder chokes on.
+    ///
+    /// The empty case is unreachable while every field in the shape is nullable, since
+    /// <see cref="BindsTo"/> accepts an empty value for anything that can hold null. It is spelled
+    /// out anyway, because the field that makes it reachable is one non-nullable property away and
+    /// would otherwise be reported as a value of the wrong type with no mention of the one gesture
+    /// the developer was reaching for. The wording has to differ from <see cref="Blank"/>'s: a
+    /// field that cannot be unset is not helped by being told how to unset one.
+    /// </remarks>
+    private static string NotBindable(
+        IConfigurationSection field, string block, Type type, string value) =>
+        $"'{field.Key}' in the '{block}' block takes a {Described(type)}, "
+        + $"but is set to {Escaped(value)}."
+        + (value.Length == 0
+            ? " An empty value leaves a field unset where the field can be unset; this one cannot, "
+              + "so it needs a value."
+            : "")
+        + SetAt(field);
+
+    /// <summary>
+    /// The error for a value of one or more spaces, whatever type the field takes.
+    /// </summary>
+    /// <remarks>
+    /// Kept apart from <see cref="NotBindable"/>, which says what the field takes and what it was
+    /// given. That pairing reads as a contradiction for a string field — a space *is* a string —
+    /// and the field's type is beside the point in any case: what is wrong is that whitespace is
+    /// neither a value nor the empty spelling that unsets a field, and the empty spelling is what
+    /// this is nearly always someone reaching for.
+    ///
+    /// "Whitespace" rather than "spaces" because the check is
+    /// <see cref="string.IsNullOrWhiteSpace"/>, which a tab, a newline and a non-breaking space
+    /// all satisfy. Naming the space would send someone who typed one of those to retype a space
+    /// and meet the identical error — and the value goes through <see cref="Escaped"/> for the
+    /// same reason, since none of them can be told from a space by looking.
+    /// </remarks>
+    private static string Blank(IConfigurationSection field, string block) =>
+        $"'{field.Key}' in the '{block}' block is set to {Escaped(field.Value)}, which is "
+        + "whitespace rather than a value. Set it to an empty value to leave the field unset."
+        + SetAt(field);
+
+    /// <summary>
+    /// A value as a quoted literal with its whitespace spelled out, so that a character which
+    /// looks like a space — a tab, a newline, U+00A0 — is distinguishable from one.
+    /// </summary>
+    /// <remarks>
+    /// The plain space is left as itself: it is the character a reader assumes, so escaping it
+    /// would add noise to the common case and nothing else. Everything else whitespace gets its
+    /// code point, which is what a developer needs in order to find it in the file.
+    ///
+    /// Every message that echoes a value back goes through this, rather than only the ones about
+    /// whitespace. A message is read by someone who cannot see what they typed, and which messages
+    /// a whitespace value can reach is not a thing to work out per message: it was reaching
+    /// <see cref="EntryExpected"/> unescaped for exactly as long as it took to notice.
+    /// </remarks>
+    private static string Escaped(string? value) =>
+        value is null
+            ? "''"
+            : $"'{string.Concat(value.Select(c => c switch
+            {
+                ' ' => " ",
+                '\t' => "\\t",
+                '\n' => "\\n",
+                '\r' => "\\r",
+                _ when char.IsWhiteSpace(c) => $"\\u{(int)c:x4}",
+                _ => c.ToString(),
+            }))}'";
+
+    private static string Described(Type type)
+    {
+        var target = Nullable.GetUnderlyingType(type) ?? type;
+
+        return target == typeof(int) || target == typeof(long) ? "whole number"
+            : target == typeof(bool) ? "true or false"
+            : target.Name.ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Where the offending key came from, as a configuration key path rather than a file.
+    /// </summary>
+    /// <remarks>
+    /// The file is only the lowest of the layers this is read from, and validation deliberately
+    /// covers entries no <c>AddService()</c> call names, so the key a message is about may have
+    /// been contributed by appsettings, user secrets, an environment variable or the command line —
+    /// a CI machine carrying a stale <c>ServiceSources__Services__orders__Local__Path</c> is the
+    /// case that costs the most to track down. Naming the key, and its environment spelling, is
+    /// what makes the layer that set it findable; naming a file would send that developer to edit
+    /// the one place the value is not.
+    /// </remarks>
+    private static string SetAt(IConfigurationSection section) =>
+        $" The key is '{section.Path}', which any configuration layer can set: "
+        + $"{DeveloperConfiguration.FileName}, appsettings, user secrets, the environment variable "
+        + $"{section.Path.Replace(":", "__", StringComparison.Ordinal)}, or the command line.";
+
+    /// <summary>
+    /// The same, for a key that has to hold a block of settings rather than a value.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="SetAt"/> names the key's own environment spelling, which for a block is advice
+    /// that cannot be followed and, worse, describes the mistake being reported: the flat providers
+    /// carry one leaf each, so no environment variable can put an object at this key, and reaching
+    /// for one is how an entry ends up written as a value in the first place. Naming the key path
+    /// still locates the layer that set it — that half is the point of saying any of this — so what
+    /// changes is the spelling, which has to be of a field inside the block rather than of the
+    /// block.
+    /// </remarks>
+    private static string SetAtBlock(IConfigurationSection section, string exampleField) =>
+        $" The key is '{section.Path}', which any configuration layer can set: "
+        + $"{DeveloperConfiguration.FileName}, appsettings, user secrets, the environment or the "
+        + "command line — the flat layers a field at a time, as "
+        + $"{$"{section.Path}:{exampleField}".Replace(":", "__", StringComparison.Ordinal)}.";
+
+    private static string Quoted(IEnumerable<string> keys) =>
+        string.Join(", ", keys.Select(k => $"'{k.ToLowerInvariant()}'").Order(StringComparer.Ordinal));
 }

@@ -180,6 +180,31 @@ public class LocalCheckoutPrefetchTests
         Assert.Equal(2, git.Cloned.Count);
     }
 
+    /// <summary>
+    /// The prefetch enumerates on the <c>source</c> value, so it has to read that value the same way
+    /// <c>AddService()</c> resolves it — case-insensitively. A service spelled <c>"Local"</c> used to
+    /// be dropped from the set silently, and its clone then serialised on the <c>AddService()</c>
+    /// thread instead of running with the others: no error, just a slower start (#167).
+    /// </summary>
+    [Fact]
+    public void FirstAddService_LocalSpelledWithACapital_IsStillPrefetchedInParallel()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        // Re-spell one service's source. The Barrier below is what makes this an assertion about the
+        // prefetch rather than about cloning at all: "billing" is only ever cloned on the prefetch's
+        // own thread, so if the filter drops it, "orders" waits alone and times out.
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"),
+            """{ "services": { "orders": { "source": "local" }, "billing": { "source": "Local" } } }""");
+
+        var builder = TestHelpers.CreateBuilder(dir);
+        var git = new FakeGitClient { StartBarrier = new Barrier(2) };
+        var source = new LocalProjectSource(git);
+
+        source.Resolve(builder, "orders", Metadata("orders"), DevConfig());
+
+        Assert.Equal(2, git.Cloned.Count);
+    }
+
     [Fact]
     public void FirstAddService_TwoServicesInOneRepository_DownloadsItTwiceConcurrently()
     {

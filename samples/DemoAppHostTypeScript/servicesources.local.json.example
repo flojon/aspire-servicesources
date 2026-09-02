@@ -1,6 +1,18 @@
 {
+  // Each source's settings live in a block named for that source, and only the block "source"
+  // names is read. The others sit there unread: the "kubernetes" block on payments below does
+  // nothing while it runs as a container, and would be picked up whole the day "source" says
+  // "kubernetes" — set here, or for one run with
+  // ServiceSources__Services__payments__Source=kubernetes. apphost.mts never sees either way.
+  //
+  // ("kubernetes" needs a real cluster and kubectl, so it is not one to try against this sample;
+  // the block is here to show what a source you are not currently on looks like in the file.
+  // Both services stay on "container" on purpose — see the comment in apphost.mts.)
   "services": {
     "inventory": { "source": "container" },
-    "payments": { "source": "container" }
+    "payments": {
+      "source": "container",
+      "kubernetes": { "context": "dev-west", "namespace": "payments", "port": 8080 }
+    }
   }
 }

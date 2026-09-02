@@ -13,6 +13,12 @@ services:
       image: nginxdemos/hello
       port: 80
       defaultTag: latest
+    kubernetes:
+      # Unread while payments runs as a container. It is what the "kubernetes" block in
+      # servicesources.local.json.example resolves against on the day "source" names kubernetes,
+      # since a kubernetes-sourced service port-forwards to a service the catalog names here.
+      service: payments
+      port: 8080
   catalog:
     # A "local" service that isn't .NET: cloned exactly like `orders` above, but run with the
     # repository's own Maven wrapper instead of AddProject. Needs builder.UseJava() in Program.cs

@@ -11,6 +11,31 @@ nothing will fail to build to warn you.
 
 ## [Unreleased]
 
+### Breaking
+
+- **Each source's settings move into a block named for that source in `servicesources.local.json`**
+  ([#161]). A field written directly on a service's entry is no longer read, and is reported rather
+  than ignored. Rewrite each entry by moving its fields under the source they belong to:
+
+  ```json
+  { "services": { "orders": { "source": "local", "path": "/src/orders" } } }
+  ```
+
+  becomes
+
+  ```json
+  { "services": { "orders": { "source": "local", "local": { "path": "/src/orders" } } } }
+  ```
+
+  `source` itself is unchanged, so pinning a source from the environment —
+  `ServiceSources__Services__orders__Source=container` — needs no edit. Overriding a *field* from a
+  higher layer gains the block segment: `ServiceSources__Services__orders__Local__Ref`.
+
+  The shape exists so that a higher configuration layer can switch a service's source. Configuration
+  merges per key, so with the fields flat the old source's fields survived a switch and were then
+  rejected as invalid for the new source, which made the override story in this release false for
+  the case it was most wanted for. Under a block they survive unread.
+
 ### Added
 
 - **`servicesources.local.json` can be overridden without editing it** ([#69]). The per-developer
@@ -21,12 +46,21 @@ nothing will fail to build to warn you.
   override it, so a single run can pick a different source —
   `ServiceSources__Services__orders__Source=url dotnet run` — and CI can pin every service from the
   environment with no file present at all. Named profiles come from the same mechanism:
-  `appsettings.Cluster.json` plus `--environment Cluster`. The file's shape on disk is unchanged,
-  and nothing about how a .NET or TypeScript AppHost authors it has changed. The keys are in the
-  AppHost's own configuration, so an AppHost can read them as well; the file joins the chain on the
-  first ServiceSources call the AppHost makes — a `UseX()` registration, or the first
-  `AddService()` — rather than on the first read of ours, so such a read does not depend on how many
-  services precede it ([#171]).
+  `appsettings.Cluster.json` plus `--environment Cluster`. The file is still authored the same way
+  by a .NET and by a TypeScript AppHost, and still keeps its own `services` root on disk; only the
+  key its entries reach the AppHost's configuration under is ours. Its per-entry shape does change
+  in this same release — see the [#161] entry above. The keys are in the AppHost's own
+  configuration, so an AppHost can read them as well; the file joins the chain on the first
+  ServiceSources call the AppHost makes — a `UseX()` registration, or the first `AddService()` —
+  rather than on the first read of ours, so such a read does not depend on how many services
+  precede it ([#171]).
+
+- **A malformed entry fails every `AddService()` call, not just the one that read it** ([#161]).
+  The developer configuration is read once per builder and the result reused, so a bad entry is
+  reported to every caller rather than to whichever one happened to trigger the read. What is
+  remembered is the configuration error alone: the read also touches two files, and an
+  `IOException` from one something else held open for a moment is not a verdict on the
+  configuration, so it is left for the next caller to retry.
 
 - **`builder.UseDeferredCheckout()` moves a cold `"local"` checkout past AppHost startup**
   ([#130], [#159]). Opt-in, off by default. A `"local"` service whose managed checkout does not
@@ -126,6 +160,27 @@ nothing will fail to build to warn you.
   certificate names the in-cluster service — and the README says so.
 
 ### Changed
+
+- **A malformed entry fails the AppHost even when nothing uses that service** ([#161]). Key
+  validation moved from `AddService()`, which only ever saw the services an AppHost asks for, to the
+  point the configuration is read, which sees every entry in it. An unknown or misplaced key in an
+  entry no `AddService()` call names now stops the run, where before it waited for the day that
+  service was added. That is deliberate: the parallel checkout prefetch clones every `local`-sourced
+  entry, including ones nothing asks for, so a typo used to buy a clone before anything had looked
+  at the entry. A key whose *shape* is wrong is reported on the same walk — an object written where
+  a field's value goes, or a value written where a source's block goes, each of which binds to
+  nothing and takes the rest of the entry down with it. Validation stays shape-only and never
+  consults `servicesources.yaml`, so an entry naming a service the catalog does not describe still
+  loads, and is still reported by `AddService()`.
+
+- **A blank value means "no value", not an empty string** ([#161]). Every string field inside a
+  service's blocks is read as absent when it is blank or whitespace, which is what makes
+  `ServiceSources__Services__orders__Local__Path=` a working *unset* for a field a lower layer
+  configured — configuration can add a key but never remove one, so blanking it is the only gesture
+  available. `int?` fields, which the binder already mapped from empty to null, were the only ones
+  behaving this way before. One consequence worth knowing: `"url": ""` under `source: url` falls
+  back to the catalog's `url.url` instead of failing with "no url configured", since empty now means
+  unset means use the catalog.
 
 - **A missing `servicesources.local.json` is no longer an error by itself** ([#69]). It used to
   fail immediately, naming the path. Now that the file is one layer of a chain, its absence is
@@ -228,6 +283,68 @@ nothing will fail to build to warn you.
   consumer immediately, and does not check that the URL is reachable. It regains its full meaning
   the moment the service is switched back to a source that runs locally. Every other source is
   unchanged — they resolve to a resource Aspire actually runs, so a wait on one still waits.
+
+- **A blank `path` no longer turns the AppHost's own directory into the service's checkout**
+  ([#161]). An empty `path` — written that way, or blanked from a higher layer — resolved through
+  `Path.GetFullPath("", appHostDirectory)` to the AppHost directory itself, which was then adopted
+  as the checkout and used with no clone and no fetch, so the service ran against whatever happened
+  to be there. A blank `path` is absent, and the service gets its managed checkout.
+
+- **A service whose entry names no source says so** ([#161]). An entry carrying only its blocks, and
+  one whose `source` a higher layer blanked, both bind `source` to the empty string and were
+  reported as `has source '', which is not implemented yet` — pointing at a missing feature rather
+  than at the entry. Both now raise the same "has no source configured" error as an entry that is
+  absent altogether, which names the key, the file and the environment variable that would set it.
+
+- **A `source` is matched the way every other key in an entry is** ([#161], [#167]). The service
+  name, the block names and the field names all arrive through `IConfiguration`, which compares keys
+  case-insensitively; the source value was compared ordinally, so
+  `ServiceSources__Services__orders__Source=Local` was reported as
+  `has source 'Local', which is not implemented yet` — naming a missing feature rather than the
+  capital L. It is the value most likely to be typed by hand, since pinning a source from the
+  environment is what the block shape above exists for. All four source names now match in any
+  casing.
+
+  The parallel checkout prefetch had a quieter version of the same problem: a service whose source
+  was spelled `"Local"` resolved, but was dropped from the set of clones to start, so its checkout
+  ran alone on the `AddService()` thread instead of alongside the others. No error, just a slower
+  first start.
+
+  The unknown-source message is reworded to name the sources that do exist, since with case folded
+  it can now only fire for a name none of them has. `kind` names stay case-sensitive with their
+  "did you mean" hint — those are an open registry satellite packages contribute to, where folding
+  case could collide two packages' registrations, while the four source names are a closed set this
+  package owns.
+
+- **A service entry written as a value instead of a block is reported, not dropped** ([#161]). The
+  likeliest slip in moving off the flat shape — `{ "services": { "orders": "local" } }`, the old
+  shortest entry with the `source` key left off — carries no keys to check, so it passed validation,
+  bound to null and was dropped by the dictionary binder. The run then failed with
+  `No service sources are configured: 'ServiceSources:Services' is empty in every configuration
+  source … (found, but it configures no services)`, of a file that plainly named the service. It is
+  now refused with the rest of the entry's checks, and a value naming a source is answered with the
+  key it belongs under.
+
+- **A value that cannot bind to its field is reported as a configuration error** ([#161]). A
+  `port` written as `"abc"`, or blanked with a space rather than left empty, reached the binder and
+  surfaced as `InvalidOperationException: Failed to convert configuration value at '…' to type
+  'System.Int32'` — from a layer nothing treats as a configuration problem, and naming a CLR type
+  rather than the field. It is now refused with the rest of the entry's checks, at read time,
+  saying what the field takes. A whitespace value gets an answer of its own, since it is not a value
+  of the wrong type but the gesture that unsets a field missed by a character, and it is refused for
+  a string field as well as a numeric one (the message names the character, so a tab or a
+  non-breaking space is not reported as the space it looks like): a whitespace `local.path` was read as absent
+  and sent the service to its managed checkout instead of the developer's directory, with nothing
+  said about it.
+
+- **A rejected key is named by its configuration key path, not by a file** ([#161]). Entries are
+  validated across the whole configuration chain, so the key a message is about may have been
+  contributed by appsettings, user secrets, an environment variable or the command line rather than
+  by `servicesources.local.json` — a CI machine carrying a stale
+  `ServiceSources__Services__orders__Local__Path` being the case that costs the most to find. Every
+  message now ends with the key path and its environment spelling. For a key that has to hold a
+  block rather than a value the spelling named is a field's, since no environment variable can put
+  an object at such a key.
 
 - **Managed checkouts no longer inherit the AppHost repository's MSBuild and NuGet settings**
   ([#119]). A checkout is cloned into `<AppHostDirectory>/.servicesources/checkouts/<service>/`,
@@ -548,6 +665,8 @@ Targets `net10.0`.
 [#130]: https://github.com/flojon/aspire-servicesources/issues/130
 [#159]: https://github.com/flojon/aspire-servicesources/issues/159
 [#160]: https://github.com/flojon/aspire-servicesources/issues/160
+[#161]: https://github.com/flojon/aspire-servicesources/issues/161
+[#167]: https://github.com/flojon/aspire-servicesources/issues/167
 [#170]: https://github.com/flojon/aspire-servicesources/issues/170
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

@@ -21,7 +21,7 @@ public class ContainerSourceTests
         };
 
     private static ServiceDeveloperConfig DevConfig(string? tag = null) =>
-        new() { Source = "container", Tag = tag };
+        new() { Source = "container", Container = new() { Tag = tag } };
 
     [Fact]
     public void ResolveContainerConfig_NoTagAnywhere_ReturnsNullTag()

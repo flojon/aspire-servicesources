@@ -36,7 +36,7 @@ public class ServiceEndpointTests
             builder,
             "orders",
             new ServiceMetadata { Kubernetes = new KubernetesMetadata { Service = "orders-svc", Port = 8080, Scheme = scheme } },
-            new ServiceDeveloperConfig { Source = "kubernetes", Context = "dev-west" });
+            new ServiceDeveloperConfig { Source = "kubernetes", Kubernetes = new() { Context = "dev-west" } });
 
     /// <summary>
     /// Drops the endpoint a source gave the resource, so a test can put an oddly-named one in its

@@ -194,7 +194,7 @@ public class DeferredKindCheckoutTests
     private static ServiceMetadata Metadata(string name) =>
         new() { Repository = $"https://example.com/{name}.git", Kind = KindName };
 
-    private static ServiceDeveloperConfig DevConfig(string? path = null) => new() { Source = "local", Path = path };
+    private static ServiceDeveloperConfig DevConfig(string? path = null) => new() { Source = "local", Local = new() { Path = path } };
 
     private static string ExpectedRepoRoot(string appHostDirectory, string serviceName) =>
         Path.Combine(appHostDirectory, ".servicesources", "checkouts", serviceName);

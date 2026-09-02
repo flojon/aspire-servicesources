@@ -2,7 +2,6 @@ using Aspire.Hosting;
 using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Configuration.Memory;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Config;
 
@@ -165,5 +164,63 @@ public class ServiceSourcesConfigCacheTests
 
         Assert.All(loaded, entry => Assert.Same(loaded[0], entry));
         Assert.Equal(1, SourcesInsertedSince(builder, sourcesBeforeLoading));
+    }
+
+    /// <remarks>
+    /// Reading the config registers the file on the builder, and validation runs after that
+    /// registration, so a rejected entry throws with the side effect already applied. Every later
+    /// caller has to be told what the first one was told, and told it by the captured exception
+    /// rather than by a second walk of the same providers — which is what the identity check below
+    /// distinguishes, a fresh load being unable to produce the same instance.
+    /// </remarks>
+    [Fact]
+    public void LoadedFor_AfterAValidationFailure_RethrowsTheCapturedFailure()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """{ "services": { "orders": { "source": "local", "path": "/src/orders" } } }""");
+
+        var builder = CreateBuilder(dir);
+        var sourcesBeforeLoading = builder.Configuration.Sources.Count;
+
+        var first = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.LoadedFor(builder));
+
+        Assert.Equal(1, SourcesInsertedSince(builder, sourcesBeforeLoading));
+
+        var second = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.LoadedFor(builder));
+
+        // The captured failure itself, not an equal one a second load arrived at independently.
+        Assert.Same(first, second);
+        Assert.Equal(1, SourcesInsertedSince(builder, sourcesBeforeLoading));
+    }
+
+    /// <remarks>
+    /// The counterpart of the test above, and the reason it is a configuration error that gets
+    /// latched rather than whatever turns up: the load reads two files off disk, so a failure that
+    /// has nothing to do with what they say can reach the same place. Latching one of those would
+    /// fail every later <c>AddService()</c> call over a condition that had already passed. Malformed
+    /// yaml stands in for it because it is the one non-configuration failure this can provoke
+    /// deterministically — what the test pins is that a retry happens at all, not that yaml is worth
+    /// retrying.
+    /// </remarks>
+    [Fact]
+    public void LoadedFor_AfterANonConfigurationFailure_LoadsAgainRatherThanRethrowing()
+    {
+        var dir = CreateAppHostDirectory(
+            "services: [ unterminated flow sequence",
+            """{ "services": { "orders": { "source": "local" } } }""");
+
+        var builder = CreateBuilder(dir);
+
+        var first = Assert.ThrowsAny<Exception>(() => ServiceSourcesConfigCache.LoadedFor(builder));
+        Assert.IsNotType<ServiceSourcesConfigurationException>(first);
+
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), OrdersCatalog);
+
+        var loaded = ServiceSourcesConfigCache.LoadedFor(builder);
+
+        Assert.Contains("orders", loaded.Catalog.Services.Keys);
     }
 }

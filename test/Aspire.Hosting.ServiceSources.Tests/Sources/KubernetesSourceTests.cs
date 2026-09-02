@@ -28,7 +28,11 @@ public class KubernetesSourceTests
 
     private static ServiceDeveloperConfig DevConfig(
         string? context = "dev-west", string? @namespace = null, int? port = null, string? scheme = null) =>
-        new() { Source = "kubernetes", Context = context, Namespace = @namespace, Port = port, Scheme = scheme };
+        new()
+        {
+            Source = "kubernetes",
+            Kubernetes = new() { Context = context, Namespace = @namespace, Port = port, Scheme = scheme },
+        };
 
     [Fact]
     public void BuildPortForwardArgs_AllFieldsSet_BuildsArgsInOrder()

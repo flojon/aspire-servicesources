@@ -308,7 +308,12 @@ internal sealed class LocalCheckoutPrefetch
         var appHostDirectory = builder.AppHostDirectory;
 
         var candidates = config.DeveloperConfig.Services
-            .Where(entry => string.Equals(entry.Value.Source, "local", StringComparison.Ordinal))
+            // Case-insensitive to agree with how AddService resolves the same value: a service whose
+            // source is spelled "Local" is one AddService resolves locally, so dropping it here
+            // would leave its clone to run alone on the AddService thread rather than with the
+            // others — no error, just a slower first start. The same reasoning as the re-keying in
+            // DeveloperConfiguration.CanonicalizeToCatalog, applied to the value instead of the key.
+            .Where(entry => string.Equals(entry.Value.Source, "local", StringComparison.OrdinalIgnoreCase))
             // A service the developer marked "local" but that the catalog doesn't describe can't be
             // checked out and isn't this phase's problem to report — AddService still rejects it
             // properly if the AppHost actually asks for it.

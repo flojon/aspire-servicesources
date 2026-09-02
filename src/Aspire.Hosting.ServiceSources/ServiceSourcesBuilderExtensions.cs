@@ -9,7 +9,26 @@ namespace Aspire.Hosting.ServiceSources;
 
 public static class ServiceSourcesBuilderExtensions
 {
-    private static readonly Dictionary<string, IServiceSource> Sources = new()
+    /// <summary>
+    /// The <c>source</c> value a service's developer config names, mapped to the implementation that
+    /// resolves it.
+    /// </summary>
+    /// <remarks>
+    /// Matched with <see cref="StringComparer.OrdinalIgnoreCase"/> because everything else in an
+    /// entry is. The service name, the block names and the field names all arrive through
+    /// <see cref="Microsoft.Extensions.Configuration.IConfiguration"/>, which compares keys
+    /// case-insensitively; the source arrives the same way, and most often as a value someone typed
+    /// into an environment variable by hand. Matching it ordinally answered
+    /// <c>ServiceSources__Services__orders__Source=Local</c> with "not implemented yet", naming a
+    /// missing feature instead of the capital L.
+    ///
+    /// That is the opposite of the deliberate case-sensitivity of <c>kind</c> names (see
+    /// <see cref="Sources.LocalKindRegistry.DescribeNearMatch"/>), and for a reason: kinds are an
+    /// open registry that satellite packages contribute names to, where folding case could collide
+    /// two packages' registrations, while these four names are a closed set this package owns and
+    /// nothing else can add to.
+    /// </remarks>
+    private static readonly Dictionary<string, IServiceSource> Sources = new(StringComparer.OrdinalIgnoreCase)
     {
         ["local"] = new LocalProjectSource(new GitCliClient()),
         ["kubernetes"] = new KubernetesSource(new SocketPortAllocator()),
@@ -73,11 +92,24 @@ public static class ServiceSourcesBuilderExtensions
 
         if (!Sources.TryGetValue(developerConfig.Source, out var source))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{name}' has source '{developerConfig.Source}', which is not implemented yet.");
-        }
+            // Names the alternatives rather than saying "not implemented yet": the lookup folds
+            // case, so reaching here means the name itself is unknown — not that the source exists
+            // under a different spelling, which is what the old wording sent readers looking for.
+            // An entry with no source at all never arrives here; ResolveService reports that
+            // separately, against the key that would set it.
+            var known = string.Join(", ", Sources.Keys.Order(StringComparer.Ordinal).Select(s => $"'{s}'"));
 
-        ServiceDeveloperConfigValidator.Validate(name, developerConfig.Source, source.RelevantFields, developerConfig);
+            // The key, not just the file: the file is only the lowest layer this value can arrive
+            // from, so a developer whose environment carries a stale source would otherwise be sent
+            // to edit the one place it is not. Same reasoning as ServiceDeveloperConfigValidator.
+            var key = $"{DeveloperConfiguration.ServicesKey}:{name}:source";
+
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{name}' has unknown source '{developerConfig.Source}'. Valid sources are {known}. "
+                + $"Correct '{key}' in '{DeveloperConfiguration.FileName}', or wherever a higher layer set "
+                + $"it — appsettings, user secrets, the environment variable "
+                + $"{key.Replace(":", "__", StringComparison.Ordinal)}, or the command line.");
+        }
 
         return source.Resolve(builder, name, metadata, developerConfig);
     }

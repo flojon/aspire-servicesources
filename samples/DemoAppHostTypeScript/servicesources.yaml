@@ -16,3 +16,9 @@ services:
       image: nginxdemos/hello
       port: 80
       defaultTag: latest
+    kubernetes:
+      # Unread while payments runs as a container. It is what the "kubernetes" block in
+      # servicesources.local.json.example resolves against on the day "source" names kubernetes,
+      # since a kubernetes-sourced service port-forwards to a service the catalog names here.
+      service: payments
+      port: 8080

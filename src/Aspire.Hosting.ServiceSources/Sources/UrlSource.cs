@@ -40,8 +40,6 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// </remarks>
 internal sealed class UrlSource : IServiceSource
 {
-    public IReadOnlySet<string> RelevantFields { get; } = new HashSet<string> { "url" };
-
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)
     {
@@ -279,13 +277,13 @@ internal sealed class UrlSource : IServiceSource
 
     internal static Uri ResolveUrl(string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)
     {
-        var rawUrl = config.Url ?? metadata.Url?.Url;
+        var rawUrl = config.Url.Url ?? metadata.Url?.Url;
 
         if (string.IsNullOrWhiteSpace(rawUrl))
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}' source is 'url' but no 'url' is configured — set it in " +
-                "servicesources.local.json or servicesources.yaml's url.url.");
+                $"Service '{serviceName}' source is 'url' but no URL is configured — set " +
+                "'url.url' in servicesources.local.json or servicesources.yaml.");
         }
 
         if (!Uri.TryCreate(rawUrl, UriKind.Absolute, out var uri))

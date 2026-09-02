@@ -37,7 +37,7 @@ public class UseJavaTests
         File.WriteAllText(Path.Combine(appHostDirectory, "servicesources.local.json"), $$"""
             {
               "services": {
-                "java-api": { "source": "local", "path": {{System.Text.Json.JsonSerializer.Serialize(checkout)}} }
+                "java-api": { "source": "local", "local": { "path": {{System.Text.Json.JsonSerializer.Serialize(checkout)}} } }
               }
             }
             """);

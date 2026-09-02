@@ -167,8 +167,7 @@ service pointed at your own directory with `path` needs no git at all.
     "orders": { "source": "local" },
     "payments": {
       "source": "local",
-      "path": "/home/dev/code/payments",
-      "ref": "feature/new-checkout"
+      "local": { "path": "/home/dev/code/payments", "ref": "feature/new-checkout" }
     }
   }
 }
@@ -434,8 +433,8 @@ up on your machine, which each developer chooses in `servicesources.local.json`:
   ```json
   {
     "services": {
-      "orders":   { "source": "local", "path": "/home/dev/code/monorepo" },
-      "payments": { "source": "local", "path": "/home/dev/code/monorepo" }
+      "orders":   { "source": "local", "local": { "path": "/home/dev/code/monorepo" } },
+      "payments": { "source": "local", "local": { "path": "/home/dev/code/monorepo" } }
     }
   }
   ```
@@ -443,7 +442,7 @@ up on your machine, which each developer chooses in `servicesources.local.json`:
   This is usually what you want when the services share code: one clone, one branch, and an
   edit to a shared project is picked up by every service at once. The trade-off is that the
   clone is yours to manage — nothing is ever cloned, fetched or checked out on your behalf —
-  and `ref` cannot be combined with `path`.
+  and `local.ref` cannot be combined with `local.path`.
 
 Mixing the two is fine: services you're actively editing can share one `path` checkout while
 the rest stay on managed clones.
@@ -770,9 +769,7 @@ services:
   "services": {
     "orders": {
       "source": "kubernetes",
-      "context": "dev-west",
-      "namespace": "orders",
-      "port": 8080
+      "kubernetes": { "context": "dev-west", "namespace": "orders", "port": 8080 }
     }
   }
 }
@@ -808,7 +805,10 @@ Set `scheme` in the developer config to override the catalog for just that devel
 ```json
 {
   "services": {
-    "orders": { "source": "kubernetes", "context": "dev-west", "port": 8443, "scheme": "https" }
+    "orders": {
+      "source": "kubernetes",
+      "kubernetes": { "context": "dev-west", "port": 8443, "scheme": "https" }
+    }
   }
 }
 ```
@@ -878,7 +878,7 @@ developer (e.g. pointing at a personal tunnel or local proxy):
 ```json
 {
   "services": {
-    "orders": { "source": "url", "url": "https://orders.dev.internal" }
+    "orders": { "source": "url", "url": { "url": "https://orders.dev.internal" } }
   }
 }
 ```
@@ -913,7 +913,7 @@ developer:
 ```json
 {
   "services": {
-    "orders": { "source": "container", "tag": "v1.4.2" }
+    "orders": { "source": "container", "container": { "tag": "v1.4.2" } }
   }
 }
 ```
@@ -965,7 +965,7 @@ editing `orders` locally:
 debugging against a shared dev cluster:
 
 ```json
-{ "services": { "orders": { "source": "kubernetes", "context": "dev-west", "namespace": "orders", "port": 8080 } } }
+{ "services": { "orders": { "source": "kubernetes", "kubernetes": { "context": "dev-west", "namespace": "orders", "port": 8080 } } } }
 ```
 
 or just needing it reachable, not caring how:
@@ -974,13 +974,17 @@ or just needing it reachable, not caring how:
 { "services": { "orders": { "source": "url" } } }
 ```
 
+The `source` value is matched without regard to case, so `"local"`, `"Local"` and `"LOCAL"` all name
+the same source. A name none of the four has is refused at composition time, naming the ones that
+exist. (The `kind` names in `servicesources.yaml` are the exception — those *are* case-sensitive,
+because satellite packages register them and two packages must not be able to collide by spelling.)
+
 ### Overriding `servicesources.local.json`
 
 The file is read through the AppHost's own `IConfiguration`, as the **lowest**-precedence source in
-the standard provider chain, under the key `ServiceSources:Services:<service>`. Its shape on disk is
-unchanged — it is still the place a developer normally writes a source selection, and a `.NET` or
-TypeScript AppHost authors it identically — but every provider above it can now override an entry
-without the file being touched:
+the standard provider chain, under the key `ServiceSources:Services:<service>`. It is still the
+place a developer normally writes a source selection, and a `.NET` or TypeScript AppHost authors it
+identically — but every provider above it can override an entry without the file being touched:
 
 | Layer | Overrides the file? |
 | --- | --- |
@@ -1024,15 +1028,28 @@ without the file being touched:
 > [`Configure<T>`](#configuring-a-resolved-service) already does that scoping for you.
 
 The immediate payoff is a **single run** with a different source and no edit to a file you'd have to
-remember to change back:
+remember to change back. `source` itself isn't nested under a block, so this still works verbatim:
 
 ```bash
 ServiceSources__Services__orders__Source=url dotnet run
 ```
 
-Any field works the same way, not just `source` — `ServiceSources__Services__orders__Ref`,
-`ServiceSources__Services__orders__Tag`, and so on. (`__` is the .NET configuration separator for
-`:`, and is what you want on every platform.)
+Overriding a *field* works the same way, but gains its source's block segment —
+`ServiceSources__Services__orders__Local__Ref`, `ServiceSources__Services__orders__Container__Tag`,
+and so on. (`__` is the .NET configuration separator for `:`, and is what you want on every
+platform.) Setting one of these to a blank value *unsets* the field, rather than setting it to an
+empty string — `ServiceSources__Services__orders__Local__Path=` leaves the service with no `path`
+at all, even one `servicesources.local.json` (or a layer in between) configured. It does not fall
+back to that lower layer's value: configuration merges the layers *before* this package sees them,
+so the blank is what arrives and the field ends up absent — which for `path` means the service gets
+its managed checkout, exactly as if no layer had ever named one.
+
+Blank means *empty*, exactly, whatever the field's type. A value of one or more spaces is refused
+rather than read as either an unset field or a value of its own:
+`ServiceSources__Services__orders__Kubernetes__Port=` drops the port, and
+`ServiceSources__Services__orders__Local__Path=" "` is an error naming the spelling that works
+rather than an override silently discarded — which is what a stray space surviving a CI variable
+used to cost, leaving the service on its managed checkout with nothing said.
 
 A service whose name contains a hyphen — `order-service`, say — makes a variable name a shell won't
 accept as an inline assignment, so pass it through `env` instead:
@@ -1042,6 +1059,11 @@ env 'ServiceSources__Services__order-service__Source=url' dotnet run
 ```
 
 The key itself is fine either way; it's only the one-line `NAME=value command` form that needs this.
+
+The nesting is what makes this override story work at all: switching `source` from a higher layer
+leaves the previous source's block sitting in the file, unread rather than removed. Nothing has to
+be deleted from `servicesources.local.json` to switch a service away from the source it names there
+— the fields for every other source can sit in the file unused, ready for the next switch back.
 
 CI is the other case. A build agent has no developer to pick sources for it, and cloning every
 service to run one test is waste, so pin them from the environment and ship no file at all:
@@ -1059,7 +1081,10 @@ env:
 {
   "ServiceSources": {
     "Services": {
-      "orders": { "source": "kubernetes", "context": "dev-west", "namespace": "orders", "port": 8080 }
+      "orders": {
+        "source": "kubernetes",
+        "kubernetes": { "context": "dev-west", "namespace": "orders", "port": 8080 }
+      }
     }
   }
 }

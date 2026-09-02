@@ -1,6 +1,9 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Git;
+using Aspire.Hosting.ServiceSources.Sources;
+using Microsoft.Extensions.Configuration;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Config;
 
@@ -112,13 +115,21 @@ public class DeveloperConfigurationTests
               "services": {
                 "orders": {
                   "source": "kubernetes",
-                  "path": "/home/dev/code/orders",
-                  "ref": "feature/new-checkout",
-                  "context": "dev-west",
-                  "namespace": "orders-ns",
-                  "port": 8080,
-                  "url": "https://orders.example",
-                  "tag": "v1.4.2"
+                  "local": {
+                    "path": "/home/dev/code/orders",
+                    "ref": "feature/new-checkout"
+                  },
+                  "kubernetes": {
+                    "context": "dev-west",
+                    "namespace": "orders-ns",
+                    "port": 8080
+                  },
+                  "url": {
+                    "url": "https://orders.example"
+                  },
+                  "container": {
+                    "tag": "v1.4.2"
+                  }
                 }
               }
             }
@@ -129,13 +140,13 @@ public class DeveloperConfigurationTests
         var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
 
         Assert.Equal("kubernetes", config.Source);
-        Assert.Equal("/home/dev/code/orders", config.Path);
-        Assert.Equal("feature/new-checkout", config.Ref);
-        Assert.Equal("dev-west", config.Context);
-        Assert.Equal("orders-ns", config.Namespace);
-        Assert.Equal(8080, config.Port);
-        Assert.Equal("https://orders.example", config.Url);
-        Assert.Equal("v1.4.2", config.Tag);
+        Assert.Equal("/home/dev/code/orders", config.Local.Path);
+        Assert.Equal("feature/new-checkout", config.Local.Ref);
+        Assert.Equal("dev-west", config.Kubernetes.Context);
+        Assert.Equal("orders-ns", config.Kubernetes.Namespace);
+        Assert.Equal(8080, config.Kubernetes.Port);
+        Assert.Equal("https://orders.example", config.Url.Url);
+        Assert.Equal("v1.4.2", config.Container.Tag);
     }
 
     [Fact]
@@ -150,13 +161,13 @@ public class DeveloperConfigurationTests
         var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
 
         Assert.Equal("local", config.Source);
-        Assert.Null(config.Path);
-        Assert.Null(config.Ref);
-        Assert.Null(config.Context);
-        Assert.Null(config.Namespace);
-        Assert.Null(config.Port);
-        Assert.Null(config.Url);
-        Assert.Null(config.Tag);
+        Assert.Null(config.Local.Path);
+        Assert.Null(config.Local.Ref);
+        Assert.Null(config.Kubernetes.Context);
+        Assert.Null(config.Kubernetes.Namespace);
+        Assert.Null(config.Kubernetes.Port);
+        Assert.Null(config.Url.Url);
+        Assert.Null(config.Container.Tag);
     }
 
     /// <remarks>
@@ -413,4 +424,137 @@ public class DeveloperConfigurationTests
         }
     }
 
+    private const string SwitcherCatalog = """
+        services:
+          switcher:
+            repository: https://github.com/company/switcher
+            project: Switcher.csproj
+        """;
+
+    /// <remarks>
+    /// Environment variables are process-global and xunit runs test classes in parallel, so the
+    /// service this test names must be one no other test uses.
+    /// </remarks>
+    [Fact]
+    public void ResolveService_HigherLayerSwitchesSource_LeavesTheOldSourcesBlockUnread()
+    {
+        var checkout = Directory.CreateTempSubdirectory().FullName;
+        var dir = CreateAppHostDirectory(
+            SwitcherCatalog,
+            """
+            { "services": { "switcher": {
+                "source": "url",
+                "url": { "url": "http://from-local-json.invalid" } } } }
+            """);
+
+        Environment.SetEnvironmentVariable("ServiceSources__Services__switcher__Source", "local");
+        Environment.SetEnvironmentVariable("ServiceSources__Services__switcher__Local__Path", checkout);
+        try
+        {
+            var builder = CreateBuilder(dir);
+
+            var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "switcher");
+
+            Assert.Equal("local", config.Source);
+            Assert.Equal(checkout, config.Local.Path);
+
+            // Still bound, and that is the point: the entry it came from is untouched, and nothing
+            // reads it while the effective source is "local".
+            Assert.Equal("http://from-local-json.invalid", config.Url.Url);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ServiceSources__Services__switcher__Source", null);
+            Environment.SetEnvironmentVariable("ServiceSources__Services__switcher__Local__Path", null);
+        }
+    }
+
+    private const string BlankingCatalog = """
+        services:
+          blanking:
+            repository: https://github.com/company/blanking
+            project: Blanking.csproj
+        """;
+
+    /// <remarks>
+    /// Blanking a value is the only gesture a higher layer has for dropping a field the file below
+    /// set — configuration can add a key but not remove one. Without this the empty value binds as
+    /// "" rather than null, and 'path' in particular then resolves through
+    /// Path.GetFullPath("", appHostDirectory) to the AppHost directory itself, which
+    /// LocalGitCheckout adopts as the checkout and uses with no clone or fetch.
+    ///
+    /// The blank arrives on an in-memory layer rather than an environment variable because
+    /// Environment.SetEnvironmentVariable(name, "") *deletes* the variable instead of setting it
+    /// empty, so the test would assert nothing. A real shell's `VAR= dotnet run` does export an
+    /// empty string, and the environment provider reads it as ""; only the in-process gesture for
+    /// arranging it differs. Both layers sit above the file, which is inserted at index 0.
+    /// </remarks>
+    [Fact]
+    public void ResolveService_BlankOverride_DropsTheFieldRatherThanBindingEmpty()
+    {
+        var configured = Directory.CreateTempSubdirectory().FullName;
+        var dir = CreateAppHostDirectory(
+            BlankingCatalog,
+            $$"""
+            { "services": { "blanking": { "source": "local",
+                "local": { "path": "{{configured.Replace("\\", "\\\\")}}" } } } }
+            """);
+
+        var builder = CreateBuilder(dir);
+        builder.Configuration.AddInMemoryCollection(
+            new Dictionary<string, string?> { ["ServiceSources:Services:blanking:Local:Path"] = "" });
+
+        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "blanking");
+
+        // Source comes only from the file, so it proves the file layer bound at all — without it a
+        // null Path could as easily mean the file's value never arrived as that the blank dropped it.
+        Assert.Equal("local", config.Source);
+        Assert.Null(config.Local.Path);
+
+        // The bug this closes: with the path left as "", PrepareRepoRoot takes its override branch
+        // and Path.GetFullPath("", appHostDirectory) hands back the AppHost directory, which it then
+        // adopts as the checkout. Absent, it uses the managed checkout instead. The .git directory
+        // is pre-seeded so the adopt-existing branch answers without needing a git client.
+        var repoRoot = Path.Combine(dir, ".servicesources", "checkouts", "blanking");
+        Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
+
+        var prepared = LocalGitCheckout.PrepareRepoRoot(
+            "blanking", new ServiceMetadata(), config, dir, gitClient: null!);
+
+        Assert.Equal(repoRoot, prepared.RepoRoot);
+        Assert.NotEqual(dir, prepared.RepoRoot);
+    }
+
+    private const string BlankUrlCatalog = """
+        services:
+          blankurl:
+            url:
+              url: https://from-catalog.example.com
+        """;
+
+    /// <remarks>
+    /// Written blank in the file rather than overridden blank from above, which is the other way
+    /// the value arrives empty. Before normalization this bound as "" and shadowed the catalog's
+    /// url.url, so the service failed as "no url configured" while the catalog had one all along.
+    /// </remarks>
+    [Fact]
+    public void ResolveService_BlankFieldInTheFile_FallsBackToTheCatalog()
+    {
+        var dir = CreateAppHostDirectory(
+            BlankUrlCatalog,
+            """{ "services": { "blankurl": { "source": "url", "url": { "url": "" } } } }""");
+
+        var builder = CreateBuilder(dir);
+
+        var (metadata, config) = ServiceSourcesConfigCache.ResolveService(builder, "blankurl");
+
+        Assert.Null(config.Url.Url);
+
+        // Absent rather than empty is what lets the catalog through: `config.Url.Url ?? metadata…`
+        // does not fall through an empty string, so before this the service failed as "no url
+        // configured" while the catalog had one all along.
+        Assert.Equal(
+            "https://from-catalog.example.com/",
+            UrlSource.ResolveUrl("blankurl", metadata, config).ToString());
+    }
 }

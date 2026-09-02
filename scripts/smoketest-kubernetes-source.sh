@@ -10,6 +10,7 @@ set -euo pipefail
 KIND_VERSION="v0.27.0"
 CLUSTER_NAME="servicesources-kubernetessource-smoketest"
 ECHO_TEXT="hello from cluster"
+UNUSED_URL="http://unused.invalid"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 apphost_dir="$repo_root/samples/DemoAppHost"
@@ -119,6 +120,14 @@ EOF
 kubectl --context "$kctx" rollout status deployment/echo --timeout=120s
 
 log "pointing DemoAppHost's kubernetes source at the echo service"
+# This catalog replaces the sample's own, so it has to declare every service DemoAppHost's
+# Program.cs calls AddService for: AddService throws on a name the catalog doesn't carry, and
+# that surfaces as the AppHost dying at startup rather than as a config error.
+#
+# Only `orders` is the subject of this test, so only it gets the kubernetes block. `inventory`
+# and `payments` resolve to the "url" source, which registers no resource and starts nothing,
+# keeping the run down to the single port-forward being verified — and keeping the sample's real
+# entries (a repository clone and a container image) out of it.
 cat > "$apphost_dir/servicesources.yaml" <<EOF
 services:
   orders:
@@ -127,11 +136,22 @@ services:
     kubernetes:
       service: echo
       port: 5678
+  inventory:
+    url:
+      url: ${UNUSED_URL}
+  payments:
+    url:
+      url: ${UNUSED_URL}
 EOF
 cat > "$apphost_dir/servicesources.local.json" <<EOF
 {
   "services": {
-    "orders": { "source": "kubernetes", "context": "$kctx", "namespace": "default" }
+    "orders": {
+      "source": "kubernetes",
+      "kubernetes": { "context": "$kctx", "namespace": "default" }
+    },
+    "inventory": { "source": "url" },
+    "payments": { "source": "url" }
   }
 }
 EOF

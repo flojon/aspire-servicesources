@@ -82,14 +82,14 @@ internal sealed partial class GitCliClient(
             return GitCommand.Run(["--version"]).Succeeded
                 ? null
                 : "'git' is on PATH but 'git --version' failed, so the 'local' source cannot clone or update " +
-                  "checkouts. Repair the git installation, or give each service a 'path' override in " +
-                  "servicesources.local.json to point at a checkout you manage yourself.";
+                  "checkouts. Repair the git installation, or give each service a 'local.path' override " +
+                  "in servicesources.local.json to point at a checkout you manage yourself.";
         }
         catch (GitUnavailableException ex)
         {
             return "The 'local' source clones and updates service repositories with 'git', which was not found on " +
-                   $"PATH ({ex.Message}). Install git (2.7 or newer), or give each service a 'path' override in " +
-                   "servicesources.local.json to point at a checkout you manage yourself.";
+                   $"PATH ({ex.Message}). Install git (2.7 or newer), or give each service a 'local.path' " +
+                   "override in servicesources.local.json to point at a checkout you manage yourself.";
         }
     }
 
