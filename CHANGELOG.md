@@ -55,6 +55,13 @@ nothing will fail to build to warn you.
   rather than on the first read of ours, so such a read does not depend on how many services
   precede it ([#171]).
 
+- **A malformed entry fails every `AddService()` call, not just the one that read it** ([#161]).
+  The developer configuration is read once per builder and the result reused, so a bad entry is
+  reported to every caller rather than to whichever one happened to trigger the read. What is
+  remembered is the configuration error alone: the read also touches two files, and an
+  `IOException` from one something else held open for a moment is not a verdict on the
+  configuration, so it is left for the next caller to retry.
+
 - **`builder.UseDeferredCheckout()` moves a cold `"local"` checkout past AppHost startup**
   ([#130], [#159]). Opt-in, off by default. A `"local"` service whose managed checkout does not
   exist yet is registered against the path that checkout will have, held back with Aspire's
@@ -318,28 +325,24 @@ nothing will fail to build to warn you.
   now refused with the rest of the entry's checks, and a value naming a source is answered with the
   key it belongs under.
 
-- **A transient failure reading the configuration is no longer latched for the life of the builder**
-  ([#161]). The load is remembered so that every caller after the first is told what the first was
-  told, on the grounds that a configuration error is not transient — but the capture caught every
-  exception, and the load also reads two files off disk. An `IOException` from a file something else
-  held open for a moment failed every later `AddService()` call over a condition that had already
-  passed. Only a configuration error is latched now; anything else is left to the next caller to
-  retry.
-
 - **A value that cannot bind to its field is reported as a configuration error** ([#161]). A
   `port` written as `"abc"`, or blanked with a space rather than left empty, reached the binder and
   surfaced as `InvalidOperationException: Failed to convert configuration value at '…' to type
   'System.Int32'` — from a layer nothing treats as a configuration problem, and naming a CLR type
   rather than the field. It is now refused with the rest of the entry's checks, at read time,
   saying what the field takes; a whitespace value is additionally told that an empty one is what
-  unsets a field.
+  unsets a field. That answer covers a string field too, which the binder would have accepted: a
+  whitespace `local.path` was read as absent and sent the service to its managed checkout instead
+  of the developer's directory, with nothing said about it.
 
 - **A rejected key is named by its configuration key path, not by a file** ([#161]). Entries are
   validated across the whole configuration chain, so the key a message is about may have been
   contributed by appsettings, user secrets, an environment variable or the command line rather than
   by `servicesources.local.json` — a CI machine carrying a stale
-  `ServiceSources__Services__orders__Path` being the case that costs the most to find. Every
-  message now ends with the key path and its environment spelling.
+  `ServiceSources__Services__orders__Local__Path` being the case that costs the most to find. Every
+  message now ends with the key path and its environment spelling. For a key that has to hold a
+  block rather than a value the spelling named is a field's, since no environment variable can put
+  an object at such a key.
 
 - **Managed checkouts no longer inherit the AppHost repository's MSBuild and NuGet settings**
   ([#119]). A checkout is cloned into `<AppHostDirectory>/.servicesources/checkouts/<service>/`,
@@ -657,10 +660,10 @@ Targets `net10.0`.
 [#69]: https://github.com/flojon/aspire-servicesources/issues/69
 [#119]: https://github.com/flojon/aspire-servicesources/issues/119
 [#125]: https://github.com/flojon/aspire-servicesources/issues/125
-[#161]: https://github.com/flojon/aspire-servicesources/issues/161
 [#130]: https://github.com/flojon/aspire-servicesources/issues/130
 [#159]: https://github.com/flojon/aspire-servicesources/issues/159
 [#160]: https://github.com/flojon/aspire-servicesources/issues/160
+[#161]: https://github.com/flojon/aspire-servicesources/issues/161
 [#167]: https://github.com/flojon/aspire-servicesources/issues/167
 [#170]: https://github.com/flojon/aspire-servicesources/issues/170
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507

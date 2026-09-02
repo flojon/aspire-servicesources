@@ -67,17 +67,21 @@ internal sealed class DeveloperConfiguration
     }
 
     /// <summary>
-    /// Maps a blank string field to absent, throughout every block.
+    /// Maps an empty string field to absent, throughout every block.
     /// </summary>
     /// <remarks>
-    /// A higher configuration layer can set a key but has no way to remove one, so blanking it is
+    /// A higher configuration layer can set a key but has no way to remove one, so emptying it is
     /// the only gesture available for dropping a field the file below set — and an empty
     /// environment variable binds as "" rather than null, which every consumer would read as a
     /// configured value. Nullable numbers reach the same place by a different route: the binder maps
-    /// an empty string to null for <c>int?</c> before this runs, and a whitespace-only value, which
-    /// it would fail to convert, is refused by
-    /// <see cref="ServiceDeveloperConfigValidator"/> with the empty spelling named — so the gesture
-    /// is the same everywhere, and only the string fields needed the walk below.
+    /// an empty string to null for <c>int?</c> before this runs — so the gesture is the same
+    /// everywhere, and only the string fields needed the walk below.
+    ///
+    /// Empty exactly, not merely blank. A value of one or more spaces is close enough to this
+    /// gesture to be someone reaching for it, and far enough to be a typed value that lost its
+    /// text, so <see cref="ServiceDeveloperConfigValidator"/> refuses it outright and names the
+    /// spelling that works. Treating it as absent here instead is what made a whitespace
+    /// <c>local.path</c> run the service from its managed checkout without a word.
     /// </remarks>
     private static void NormalizeBlankToAbsent(ServiceDeveloperConfig config)
     {
@@ -87,7 +91,7 @@ internal sealed class DeveloperConfiguration
 
             foreach (var field in block.PropertyType.GetProperties().Where(f => f.PropertyType == typeof(string)))
             {
-                if (field.GetValue(instance) is string value && string.IsNullOrWhiteSpace(value))
+                if (field.GetValue(instance) is string { Length: 0 })
                 {
                     field.SetValue(instance, null);
                 }

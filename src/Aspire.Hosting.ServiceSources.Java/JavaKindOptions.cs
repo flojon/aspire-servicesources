@@ -149,8 +149,8 @@ internal sealed class JavaKindOptions
         {
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}': java.workingDirectory '{trimmed}' is an absolute path, but it must be " +
-                "relative to the root of the service's checkout. Use 'path' in servicesources.local.json to point " +
-                "at a checkout somewhere else on disk.");
+                "relative to the root of the service's checkout. Use 'local.path' in " +
+                "servicesources.local.json to point at a checkout somewhere else on disk.");
         }
 
         if (EscapesRoot(trimmed))

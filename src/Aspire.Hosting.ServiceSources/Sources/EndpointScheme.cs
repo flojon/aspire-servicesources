@@ -54,7 +54,7 @@ internal static class EndpointScheme
         // Named per origin because the two live in different files, and only one of them is the
         // file the person reading this error owns.
         var origin = fromDeveloperConfig
-            ? "servicesources.local.json"
+            ? $"servicesources.local.json's {source}.scheme"
             : $"servicesources.yaml's {source}.scheme";
 
         throw new ServiceSourcesConfigurationException(

@@ -115,12 +115,18 @@ public class AddServiceTests
     }
 
     /// <summary>
-    /// Casing carries no meaning for any source, not just <c>"local"</c>: the lookup is
-    /// case-insensitive, and the key validation that follows runs exactly as it does for the
-    /// canonical spelling.
+    /// A misplaced key is reported as the shape problem it is, rather than as whatever the entry
+    /// would have failed on later. Key validation covers every entry before any source is resolved,
+    /// so the source's spelling — uppercase here — cannot change the answer.
     /// </summary>
+    /// <remarks>
+    /// Not coverage of the case-insensitive source lookup, though it reads like it: validation runs
+    /// ahead of <c>Sources.TryGetValue</c> and would produce this same message under an ordinal
+    /// one. <see cref="AddService_SourceValueInAnyCasing_ResolvesTheSameSource"/> is the test that
+    /// fails if the case-folding regresses.
+    /// </remarks>
     [Fact]
-    public void AddService_UppercaseSourceValue_StillValidatesTheRestOfTheEntry()
+    public void AddService_MisplacedKey_IsReportedAheadOfResolvingTheSource()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
@@ -139,10 +145,11 @@ public class AddServiceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
 
-        // The shape complaint, not the unknown-source one: the source resolved, so what runs is key
-        // validation. (#176 reworded this from "not valid for source" — a block belonging to another
-        // source is now ignored rather than rejected, so what is left to reject is a key in the
-        // wrong place.)
+        // The shape complaint, not the unknown-source one: validation runs before the source is
+        // looked up at all, so a malformed entry is named as malformed rather than reported against
+        // whatever it would have resolved to. (#176 reworded this from "not valid for source" — a
+        // block belonging to another source is now ignored rather than rejected, so what is left to
+        // reject is a key in the wrong place.)
         Assert.Contains("'port'", ex.Message);
         Assert.Contains("is not a valid key here", ex.Message);
         Assert.DoesNotContain("unknown source", ex.Message);

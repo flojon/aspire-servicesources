@@ -442,7 +442,7 @@ up on your machine, which each developer chooses in `servicesources.local.json`:
   This is usually what you want when the services share code: one clone, one branch, and an
   edit to a shared project is picked up by every service at once. The trade-off is that the
   clone is yours to manage — nothing is ever cloned, fetched or checked out on your behalf —
-  and `ref` cannot be combined with `path`.
+  and `local.ref` cannot be combined with `local.path`.
 
 Mixing the two is fine: services you're actively editing can share one `path` checkout while
 the rest stay on managed clones.
@@ -1042,10 +1042,14 @@ empty string — `ServiceSources__Services__orders__Local__Path=` leaves the ser
 at all, even one `servicesources.local.json` (or a layer in between) configured. It does not fall
 back to that lower layer's value: configuration merges the layers *before* this package sees them,
 so the blank is what arrives and the field ends up absent — which for `path` means the service gets
-its managed checkout, exactly as if no layer had ever named one. A numeric field takes the empty
-spelling exactly:
-`ServiceSources__Services__orders__Kubernetes__Port=` drops the port, while a value of one or more
-spaces is refused rather than read as one — the message says so and names the spelling that works.
+its managed checkout, exactly as if no layer had ever named one.
+
+Blank means *empty*, exactly, whatever the field's type. A value of one or more spaces is refused
+rather than read as either an unset field or a value of its own:
+`ServiceSources__Services__orders__Kubernetes__Port=` drops the port, and
+`ServiceSources__Services__orders__Local__Path=" "` is an error naming the spelling that works
+rather than an override silently discarded — which is what a stray space surviving a CI variable
+used to cost, leaving the service on its managed checkout with nothing said.
 
 A service whose name contains a hyphen — `order-service`, say — makes a variable name a shell won't
 accept as an inline assignment, so pass it through `env` instead:

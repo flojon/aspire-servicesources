@@ -72,8 +72,9 @@ internal static class LocalGitCheckout
             if (config.Local.Ref is not null)
             {
                 throw new ServiceSourcesConfigurationException(
-                    $"Service '{serviceName}': 'ref' cannot be combined with 'path' — 'path' points directly at " +
-                    "an existing checkout, and 'ref' only applies when this tool manages the clone.");
+                    $"Service '{serviceName}': 'local.ref' cannot be combined with 'local.path' — " +
+                    "'local.path' points directly at an existing checkout, and 'local.ref' only applies " +
+                    "when this tool manages the clone.");
             }
 
             // Anchor a relative `path` override to the AppHost directory (matching Aspire's own
@@ -89,8 +90,8 @@ internal static class LocalGitCheckout
             if (!Directory.Exists(overridden))
             {
                 throw new ServiceSourcesConfigurationException(
-                    $"Service '{serviceName}': the 'path' override points at '{overridden}', which does not exist. " +
-                    "'path' must name an existing local directory.");
+                    $"Service '{serviceName}': the 'local.path' override points at '{overridden}', which does " +
+                    "not exist. 'local.path' must name an existing local directory.");
             }
 
             // Used as-is: no clone, no checkout, no fetch, ever.
@@ -239,7 +240,7 @@ internal static class LocalGitCheckout
                 $"Service '{serviceName}': the checkout at '{repoRoot}' has a '.git' file rather than a '.git' " +
                 "directory, so it is a linked worktree or a clone made with --separate-git-dir rather than a " +
                 "checkout this tool cloned. Move it aside and re-run to have it cloned fresh, or point the " +
-                "service at it with the 'path' override in servicesources.local.json.");
+                "service at it with the 'local.path' override in servicesources.local.json.");
         }
 
         // Unique per attempt: two builders resolving the same service concurrently (xUnit does

@@ -49,12 +49,13 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
         if (string.IsNullOrWhiteSpace(config.Kubernetes.Context))
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': source 'kubernetes' requires 'context' in servicesources.local.json.");
+                $"Service '{serviceName}': source 'kubernetes' requires 'kubernetes.context' in " +
+                "servicesources.local.json.");
         }
 
         remotePort = config.Kubernetes.Port ?? kubernetes.Port ?? throw new ServiceSourcesConfigurationException(
-            $"Service '{serviceName}': no 'port' configured for source 'kubernetes' — set it in " +
-            "servicesources.local.json or servicesources.yaml's kubernetes.port.");
+            $"Service '{serviceName}': no port configured for source 'kubernetes' — set " +
+            "'kubernetes.port' in servicesources.local.json or servicesources.yaml.");
 
         if (remotePort is < 1 or > 65535)
         {

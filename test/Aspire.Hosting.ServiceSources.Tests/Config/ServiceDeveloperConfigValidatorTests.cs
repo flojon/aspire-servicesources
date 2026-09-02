@@ -247,9 +247,10 @@ public class ServiceDeveloperConfigValidatorTests
     }
 
     /// <remarks>
-    /// Blanking a key is the only gesture configuration offers for dropping a value a lower layer
-    /// set, and it is whitespace-tolerant for every string field. The binder does not extend that to
-    /// a number, so the one spelling that does work is named rather than left to be guessed at.
+    /// Emptying a key is the only gesture configuration offers for dropping a value a lower layer
+    /// set, and whitespace is that gesture missed by a character rather than the gesture itself. It
+    /// is refused whatever the field's type — see the string case below, which the binder itself
+    /// would have taken — so the one spelling that does work is named rather than guessed at.
     /// </remarks>
     [Fact]
     public void Validate_WhitespaceWhereANumberGoes_NamesTheSpellingThatUnsetsIt()
@@ -330,5 +331,75 @@ public class ServiceDeveloperConfigValidatorTests
         Assert.Contains("'source'", ex.Message);
         Assert.Contains("'local'", ex.Message);
         Assert.DoesNotContain("configures no services", ex.Message);
+    }
+
+    /// <remarks>
+    /// Moving an entry off the flat shape misplaces keys in bunches, so every problem is collected
+    /// rather than thrown at the first one found: one per run is one failed startup per key, and
+    /// the order they surface in belongs to the configuration provider rather than to the file, so
+    /// which key a developer was sent to fix first was not even reproducible.
+    /// </remarks>
+    [Fact]
+    public void Validate_SeveralMisplacedKeys_ReportsAllOfThemAtOnce()
+    {
+        var ex = Load("""
+            { "services": { "orders": {
+                "source": "local",
+                "path": "/src/orders",
+                "ref": "main",
+                "context": "dev-west" } } }
+            """);
+
+        Assert.Contains("3 problems with the entry", ex.Message);
+        Assert.Contains("'path'", ex.Message);
+        Assert.Contains("'ref'", ex.Message);
+        Assert.Contains("'context'", ex.Message);
+    }
+
+    /// <remarks>
+    /// The mirror of the numeric case above, and the reason it is not left to the binder: a string
+    /// field takes whitespace perfectly well, and the blank-to-absent walk then drops it, so this
+    /// override used to vanish and send the service to its managed checkout without a word. Silence
+    /// is the one outcome the validator exists to prevent, and the field's type is no reason to
+    /// make an exception of it.
+    /// </remarks>
+    [Fact]
+    public void Validate_WhitespaceWhereAStringGoes_IsRefusedRatherThanReadAsAbsent()
+    {
+        var ex = Load("""
+            { "services": { "orders": {
+                "source": "local",
+                "local": { "path": " " } } } }
+            """);
+
+        Assert.Contains("'path' in the 'local' block", ex.Message);
+        Assert.Contains("empty value", ex.Message);
+    }
+
+    /// <remarks>
+    /// The remedy line names an environment variable, and for a key that has to hold a block that
+    /// advice cannot be followed: the flat providers carry one leaf each, so no environment
+    /// variable can put an object at this key, and reaching for one is how an entry comes to be
+    /// written as a value in the first place. The spelling named has to be a field's.
+    /// </remarks>
+    [Fact]
+    public void Validate_BlockKeyRejection_NamesAFieldsEnvironmentSpellingNotTheBlocksOwn()
+    {
+        var ex = Load("""{ "services": { "orders": { "source": "url", "url": "https://orders.invalid" } } }""");
+
+        Assert.Contains("ServiceSources__Services__orders__url__Url", ex.Message);
+    }
+
+    /// <remarks>
+    /// The same for the whole entry, whose remedy used to advise setting
+    /// <c>ServiceSources__Services__orders</c> — a key that holds an object, so the advice was the
+    /// mistake being reported.
+    /// </remarks>
+    [Fact]
+    public void Validate_EntryRejection_NamesAFieldsEnvironmentSpellingNotTheEntrysOwn()
+    {
+        var ex = Load("""{ "services": { "orders": "local" } }""");
+
+        Assert.Contains("ServiceSources__Services__orders__Source", ex.Message);
     }
 }
