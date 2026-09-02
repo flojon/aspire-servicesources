@@ -209,6 +209,12 @@ public class UrlConsumerWaitTests
     /// resource a connection-string expression references, and it took the same never-resolving
     /// path — with nothing in the AppHost to point at, since nobody wrote the wait.
     /// </summary>
+    /// <remarks>
+    /// Covers the wait only. A <b>container</b> that <c>WithReference</c>s such a connection string
+    /// is a separate, still-open case: the container's annotation points at the connection-string
+    /// resource rather than at the service, so the pre-flight does not see it and the container
+    /// fails the way #58 describes. See the remarks on <c>UrlSource.ConsumedUrlService</c>.
+    /// </remarks>
     [Fact]
     public async Task UrlSourcedService_ReferencedByAConnectionString_ResolvesRatherThanHanging()
     {
@@ -224,5 +230,135 @@ public class UrlConsumerWaitTests
         using var cts = new CancellationTokenSource(ResolvesWithin);
 
         await notifications.WaitForDependenciesAsync(connectionString.Resource, cts.Token);
+    }
+
+    /// <summary>
+    /// Dropping the wait is the right behaviour, but doing it silently is not: the developer who
+    /// set <c>Source=url</c> is rarely the one who wrote the <c>WaitFor</c>, and the consumer now
+    /// starts early. Reported through the same channel a skipped <c>Configure</c> call uses.
+    /// </summary>
+    [Fact]
+    public async Task DroppedWait_IsReportedRatherThanSilent()
+    {
+        var builder = TestHelpers.CreateBuilderThatCanStart(AppHostDirectory("url"));
+
+        var inventory = builder.AddService("inventory");
+        Consumer(builder, "worker").WaitFor(inventory);
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        var warning = Assert.Single(warnings);
+        Assert.Contains("inventory", warning);
+        Assert.Contains("WaitFor from 'worker'", warning);
+        Assert.Contains("'url'", warning);
+    }
+
+    /// <summary>
+    /// Named by the call the AppHost wrote rather than by Aspire's enum member, since finding that
+    /// line in <c>Program.cs</c> is the whole point of the warning.
+    /// </summary>
+    [Fact]
+    public async Task DroppedWaitForCompletion_IsNamedByTheCallThatWroteIt()
+    {
+        var builder = TestHelpers.CreateBuilderThatCanStart(AppHostDirectory("url"));
+
+        var inventory = builder.AddService("inventory");
+        Consumer(builder, "worker").WaitForCompletion(inventory);
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.Contains("WaitForCompletion from 'worker'", Assert.Single(warnings));
+    }
+
+    /// <summary>
+    /// The one wait that is <i>not</i> reported. Aspire adds it itself for each resource a
+    /// connection-string expression references, so there is no call in the AppHost for the warning
+    /// to send anyone to — reporting it would be noise about something nobody wrote.
+    /// </summary>
+    [Fact]
+    public async Task WaitAddedByAConnectionString_IsDroppedWithoutAWarning()
+    {
+        var builder = TestHelpers.CreateBuilderThatCanStart(AppHostDirectory("url"));
+
+        var inventory = builder.AddService("inventory");
+        var connectionString = builder.AddConnectionString(
+            "inventory-cs", ReferenceExpression.Create($"{inventory.GetEndpoint("https")}"));
+
+        // Aspire really does add one here: the IResourceWithoutLifetime test in AddConnectionString
+        // is applied to the value provider, which is an EndpointReference rather than the resource.
+        Assert.Single(connectionString.Resource.Annotations.OfType<WaitAnnotation>());
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.Empty(connectionString.Resource.Annotations.OfType<WaitAnnotation>());
+        Assert.Empty(warnings);
+    }
+
+    /// <summary>
+    /// One message per service, not one per mechanism: a service that loses both a <c>Configure</c>
+    /// call and a consumer's wait says so once. Pins the subscription ordering that makes it
+    /// possible — the wait is recorded during <c>BeforeStartEvent</c>, so this handler has to run
+    /// before the warnings' own flush for the two to group.
+    /// </summary>
+    [Fact]
+    public async Task DroppedWait_JoinsTheServicesOtherSkipsInOneWarning()
+    {
+        var builder = TestHelpers.CreateBuilderThatCanStart(AppHostDirectory("url"));
+
+        var inventory = builder.AddService("inventory")
+            .Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B"));
+        Consumer(builder, "worker").WaitFor(inventory);
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        var warning = Assert.Single(warnings);
+        Assert.Contains("2 calls", warning);
+        Assert.Contains("Configure<IResourceWithEnvironment>", warning);
+        Assert.Contains("WaitFor from 'worker'", warning);
+    }
+
+    /// <summary>
+    /// The ordering above cannot be relied on in every AppHost: a skip recorded before any
+    /// <c>"url"</c> service exists registers the warnings' flush first, and it then runs before the
+    /// wait is dropped. The drop still has to be reported — once — which is why the flush reports
+    /// only what it has not reported yet and this pre-flight calls it too.
+    /// </summary>
+    [Fact]
+    public async Task DroppedWait_IsStillReportedWhenAnEarlierSkipFlushesFirst()
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              orders:
+                kubernetes:
+                  service: orders-svc
+                  port: 8080
+              inventory:
+                url:
+                  url: https://inventory.example.com
+            """);
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), """
+            {
+              "services": {
+                "orders": { "source": "kubernetes", "context": "dev-west" },
+                "inventory": { "source": "url" }
+              }
+            }
+            """);
+
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+
+        // Before any "url" service, so this skip is what first creates the warnings and subscribes
+        // their flush — ahead of the pre-flight that drops the wait below.
+        builder.AddService("orders").Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B"));
+
+        var inventory = builder.AddService("inventory");
+        Consumer(builder, "worker").WaitFor(inventory);
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.Equal(2, warnings.Count);
+        Assert.Single(warnings, warning => warning.Contains("orders") && warning.Contains("'kubernetes'"));
+        Assert.Single(warnings, warning => warning.Contains("WaitFor from 'worker'"));
     }
 }

@@ -34,6 +34,12 @@ internal sealed class ServiceConfigurationWarnings
 
     private readonly List<Skip> _skips = [];
 
+    /// <summary>
+    /// How much of <see cref="_skips"/> <see cref="Flush"/> has already reported. A count rather
+    /// than a per-skip flag because the list is only ever appended to.
+    /// </summary>
+    private int _reported;
+
     private bool _subscribed;
 
     private sealed record Skip(string ServiceName, string Source, string Capability);
@@ -48,14 +54,20 @@ internal sealed class ServiceConfigurationWarnings
         {
             lock (_gate)
             {
-                return _skips
-                    .GroupBy(skip => (skip.ServiceName, skip.Source))
-                    .Select(group => SkipReason(
-                        group.Key.ServiceName, group.Key.Source, [.. group.Select(skip => skip.Capability)]))
-                    .ToArray();
+                return Describe(_skips);
             }
         }
     }
+
+    /// <summary>
+    /// One message per (service, source) over <paramref name="skips"/>.
+    /// </summary>
+    private static IReadOnlyList<string> Describe(IEnumerable<Skip> skips) =>
+        skips
+            .GroupBy(skip => (skip.ServiceName, skip.Source))
+            .Select(group => SkipReason(
+                group.Key.ServiceName, group.Key.Source, [.. group.Select(skip => skip.Capability)]))
+            .ToArray();
 
     public static ServiceConfigurationWarnings For(IDistributedApplicationBuilder builder)
     {
@@ -99,9 +111,26 @@ internal sealed class ServiceConfigurationWarnings
         }
     }
 
-    private void Flush(IServiceProvider services)
+    /// <summary>
+    /// Reports every skip added since the last call, and is safe to call more than once.
+    /// </summary>
+    /// <remarks>
+    /// Report-once rather than report-all because a skip can be recorded <i>during</i>
+    /// <c>BeforeStartEvent</c> — <see cref="Sources.UrlSource"/> drops a consumer's wait on a
+    /// <c>"url"</c> service there, once the whole model is visible — and Aspire dispatches handlers
+    /// for one event in subscription order with no way to ask to go last. Whichever of the two
+    /// handlers runs second reports what the first had not seen yet, so a late skip is logged
+    /// exactly once whatever the order turns out to be.
+    /// </remarks>
+    public void Flush(IServiceProvider services)
     {
-        var messages = Messages;
+        IReadOnlyList<string> messages;
+
+        lock (_gate)
+        {
+            messages = Describe(_skips.Skip(_reported));
+            _reported = _skips.Count;
+        }
 
         if (messages.Count == 0)
         {
@@ -135,13 +164,19 @@ internal sealed class ServiceConfigurationWarnings
         return $"Service '{serviceName}': skipped {DescribeCalls(capabilities)} because its source is " +
                $"'{source}' — {detail}. The service is expected to be configured wherever it actually " +
                "runs. Set its source to 'local' or 'container' in servicesources.local.json for this AppHost's " +
-               "configuration to apply.";
+               "configuration and start ordering to apply.";
     }
 
     /// <summary>
     /// A single call reads as itself; several read as a count plus a per-capability tally, so the
     /// message stays one line however many calls it stands for.
     /// </summary>
+    /// <remarks>
+    /// The count is of "calls" rather than "Configure calls" because a service can accumulate skips
+    /// of two different shapes: its own <c>Configure</c> calls, and a consumer's <c>WaitFor</c> on
+    /// it that <see cref="Sources.UrlSource"/> drops. The tally names each one, so the summary does
+    /// not have to guess which shape it is standing for.
+    /// </remarks>
     private static string DescribeCalls(IReadOnlyList<string> capabilities)
     {
         if (capabilities.Count == 1)
@@ -153,6 +188,6 @@ internal sealed class ServiceConfigurationWarnings
             .GroupBy(capability => capability, StringComparer.Ordinal)
             .Select(group => group.Count() == 1 ? group.Key : $"{group.Key} ×{group.Count()}");
 
-        return $"{capabilities.Count} Configure calls ({string.Join(", ", tally)})";
+        return $"{capabilities.Count} calls ({string.Join(", ", tally)})";
     }
 }

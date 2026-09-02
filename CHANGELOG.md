@@ -192,6 +192,13 @@ nothing will fail to build to warn you.
   on a url-sourced service now starts; one that `WithReference`s it is still refused up front, as
   before ([#58]).
 
+  Each dropped wait is **reported**, in the same startup warning as the service's skipped
+  `Configure` calls — a `WaitFor` in `Program.cs` is configuration like any other, and the developer
+  who set `Source=url` is rarely the one who wrote it. The warning names the call and the consumer
+  (`skipped WaitFor from 'storefront'`). The exception is the `WaitForStart` Aspire adds itself for
+  each resource an `AddConnectionString` expression references: nobody wrote it, so there is no line
+  for a warning to point at.
+
   **Read before upgrading:** a `WaitFor` on a service that resolves `"url"` now starts the
   consumer immediately, and does not check that the URL is reachable. It regains its full meaning
   the moment the service is switched back to a source that runs locally. Every other source is

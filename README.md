@@ -834,6 +834,17 @@ goes the same way, since a service running out of band is never going to exit. E
 covered, containers included: a container that *references* a url service is still refused as
 above, but one that only waits on it starts normally.
 
+The drop is **logged**, alongside any `Configure` calls the same service skipped:
+
+```
+warn: Aspire.Hosting.ServiceSources
+      Service 'orders': skipped WaitFor from 'storefront' because its source is 'url' — it
+      resolves to a fixed, already-running URL with no local process to configure. ...
+```
+
+The one wait not reported is the `WaitForStart` Aspire adds itself for each resource an
+`AddConnectionString` expression references — nobody wrote it, so there is no line to point at.
+
 Note what this does **not** promise: the URL is not fetched, so the consumer starts whether or not
 anything is listening. A `WaitFor` written against a `"local"` service keeps its full meaning the
 moment the service is switched back, which is the point — a developer choosing `"url"` in their own
@@ -1001,7 +1012,8 @@ for Aspire to hold back.
 
 That is this service waiting for something else. The other direction — something else waiting for
 *this* service, `consumer.WaitFor(service)`, which is ordinary Aspire rather than a `Configure`
-call — is dropped for `"url"` and honoured for every other source, including `"kubernetes"`. See
+call — is dropped for `"url"` and honoured for every other source, including `"kubernetes"`. That
+drop is reported in the same message as the service's skipped `Configure` calls. See
 [the `"url"` source](#url-source).
 
 Skipping rather than failing is deliberate: a developer switching a service to a remote source in

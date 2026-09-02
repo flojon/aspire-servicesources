@@ -63,9 +63,19 @@ internal sealed class ServiceExecutableResource(string name, string command, str
 /// filters <c>waitAnnotation.Resource is not IResourceWithoutLifetime</c> before it waits on
 /// anything, so declaring it drops the wait rather than satisfying it. That is the honest answer
 /// here — a fixed, pre-known URL is already up as far as this AppHost is concerned, and there is no
-/// lifetime for the wait to be ordered against. It covers all three <see cref="WaitType"/>s and the
-/// <c>WaitForStart</c> that <c>AddConnectionString</c> adds on the AppHost's behalf, which is
-/// filtered on the same interface.
+/// lifetime for the wait to be ordered against. It covers all three <see cref="WaitType"/>s, since
+/// the filter is on the wait's target rather than on what kind of wait it is.
+/// </para>
+/// <para>
+/// It also covers the <c>WaitForStart</c> that <c>AddConnectionString</c> adds on the AppHost's
+/// behalf for each resource its expression references — but at the waiting end, not at the point
+/// the wait is added. <c>AddConnectionString</c> does test <see cref="IResourceWithoutLifetime"/>
+/// itself, and that test does not fire here: it is applied to the <i>value provider</i>, and for
+/// the ordinary spelling <c>ReferenceExpression.Create($"{svc.GetEndpoint("https")}")</c> the
+/// provider is an <c>EndpointReference</c>, which reaches this resource through
+/// <c>IValueWithReferences</c> — a branch that adds the wait without re-testing what it found. So
+/// the annotation is created; <c>WaitForDependenciesAsync</c> is what declines to honour it, and
+/// <see cref="UrlSource"/> is what removes it from the model.
 /// </para>
 /// <para>
 /// Publishing a <c>Running</c> state instead would also resolve <c>WaitFor</c> — Aspire's health
