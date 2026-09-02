@@ -283,15 +283,18 @@ internal static class ServiceDeveloperConfigValidator
         // describe a mistake nobody made. What is wrong is that this value does nothing.
         if (alsoHasKeys)
         {
-            return $"the entry carries the value '{value}' as well as its settings, and that value "
-                + "is inert: a scalar at a service's own key binds to nothing, so nothing reads it. "
-                + "If it was meant to choose the source, that is the 'source' key inside the entry."
+            return $"the entry carries the value {Escaped(value)} as well as its settings, and that "
+                + "value is inert: a scalar at a service's own key binds to nothing, so nothing "
+                + "reads it. If it was meant to choose the source, that is the 'source' key inside "
+                + "the entry."
                 + SetAtBlock(entry, nameof(ServiceDeveloperConfig.Source));
         }
 
+        // The suggestion needs no escaping of its own: a whitespace value is not the name of any
+        // block, so it fails this lookup and the placeholder is what gets shown.
         var source = ServiceDeveloperConfigShape.BlockFields.ContainsKey(value) ? value : "...";
 
-        return $"the entry takes a block of settings, not the value '{value}': "
+        return $"the entry takes a block of settings, not the value {Escaped(value)}: "
             + $"\"{serviceName}\": {{ \"source\": \"{source}\" }}. "
             + $"Valid keys there are {Quoted(ServiceDeveloperConfigShape.RootKeys)}."
             + SetAtBlock(entry, nameof(ServiceDeveloperConfig.Source));
@@ -395,6 +398,11 @@ internal static class ServiceDeveloperConfigValidator
     /// The plain space is left as itself: it is the character a reader assumes, so escaping it
     /// would add noise to the common case and nothing else. Everything else whitespace gets its
     /// code point, which is what a developer needs in order to find it in the file.
+    ///
+    /// Every message that echoes a value back goes through this, rather than only the ones about
+    /// whitespace. A message is read by someone who cannot see what they typed, and which messages
+    /// a whitespace value can reach is not a thing to work out per message: it was reaching
+    /// <see cref="EntryExpected"/> unescaped for exactly as long as it took to notice.
     /// </remarks>
     private static string Escaped(string? value) =>
         value is null

@@ -468,6 +468,21 @@ public class ServiceDeveloperConfigValidatorTests
     }
 
     /// <remarks>
+    /// The entry's own value is echoed back like a field's, so it needs the same escaping: an
+    /// entry set to a non-breaking space from some layer would otherwise be reported as the space
+    /// it looks like, which is the message telling a developer their value is something other than
+    /// what they typed.
+    /// </remarks>
+    [Fact]
+    public void Validate_EntryWrittenAsANonSpaceWhitespaceValue_NamesTheCharacter()
+    {
+        var ex = Load("""{ "services": { "orders": "\u00a0" } }""");
+
+        Assert.Contains("the entry takes a block of settings", ex.Message);
+        Assert.Contains("\\u00a0", ex.Message);
+    }
+
+    /// <remarks>
     /// The collecting spans entries, not only the keys within one. A file still to be moved onto
     /// the block shape has every service wrong at once, and reporting a service at a time costs a
     /// failed startup each — the same objection that makes the walk over one entry collect.
