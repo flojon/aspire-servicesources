@@ -63,6 +63,13 @@ internal sealed class LocalCheckoutPrefetch
     private readonly Dictionary<string, Task<CheckoutResult>> _checkouts = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// The progress stream of each prefetched clone, keyed the same way and populated at the same
+    /// time as <see cref="_checkouts"/> — so a caller that has a checkout task to wait on always has
+    /// somewhere to watch it happen.
+    /// </summary>
+    private readonly Dictionary<string, CheckoutProgress> _progress = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// Services <see cref="GetRepoRoot"/> was actually asked for — the set the prefetch could not
     /// know up front, learned by the time <c>BeforeStartEvent</c> runs.
     /// </summary>
@@ -238,6 +245,20 @@ internal sealed class LocalCheckoutPrefetch
         $"service's entry in {DeveloperConfiguration.FileName}, or fix what the failure names.";
 
     /// <summary>
+    /// The progress stream of the clone this run started for <paramref name="serviceName"/>, or
+    /// <see langword="null"/> if the service is not in the prefetch set and so has no clone of ours
+    /// to watch.
+    /// </summary>
+    /// <remarks>
+    /// Available from the moment the prefetch starts, and the stream it returns is buffered, so a
+    /// caller that attaches long afterwards — <see cref="DeferredCheckout"/> attaches once the host
+    /// is up — still sees the clone from its first line. Ends when the clone does, including when
+    /// there was no clone to run because the checkout already existed.
+    /// </remarks>
+    public CheckoutProgress? ProgressFor(string serviceName) =>
+        _progress.TryGetValue(serviceName, out var progress) ? progress : null;
+
+    /// <summary>
     /// Records that the AppHost really does add <paramref name="serviceName"/>, without waiting for
     /// its checkout.
     /// </summary>
@@ -328,6 +349,12 @@ internal sealed class LocalCheckoutPrefetch
 
         foreach (var candidate in candidates)
         {
+            // Created out here, before the task that writes to it, so that _progress is fully
+            // populated by the time this method returns — the same guarantee _checkouts gives, and
+            // for the same reason: both are read without the lock afterwards.
+            var progress = new CheckoutProgress();
+            _progress[candidate.Name] = progress;
+
             _checkouts[candidate.Name] = Task.Run(() =>
             {
                 try
@@ -336,7 +363,8 @@ internal sealed class LocalCheckoutPrefetch
                     // may never be added, but reconciling an existing checkout is not — see
                     // GetRepoRoot, which finishes the job for the services that are.
                     var prepared = LocalGitCheckout.PrepareRepoRoot(
-                        candidate.Name, candidate.Metadata, candidate.Config, appHostDirectory, gitClient);
+                        candidate.Name, candidate.Metadata, candidate.Config, appHostDirectory, gitClient,
+                        progress);
                     return new CheckoutResult(prepared, null);
                 }
                 catch (Exception ex)
@@ -345,6 +373,14 @@ internal sealed class LocalCheckoutPrefetch
                     // requested, and a faulted task nobody awaits is an unobserved exception. If it
                     // is never requested, ReportSpeculativeWork is what surfaces this.
                     return new CheckoutResult(null, ex);
+                }
+                finally
+                {
+                    // On every path, including the ones with no clone in them at all: a warm
+                    // checkout, a 'path' override, a config error thrown before git ran. Whoever is
+                    // watching waits for the stream to end, so leaving it open for those would
+                    // leave them waiting for a clone that already didn't happen.
+                    progress.Complete();
                 }
             });
         }

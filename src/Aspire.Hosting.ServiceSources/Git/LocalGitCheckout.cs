@@ -60,12 +60,19 @@ internal static class LocalGitCheckout
     /// create: a missing checkout is cloned, and the clone we made is put on its ref. Anything
     /// already there is left exactly as it was, for <see cref="ReconcileRepoRoot"/> to deal with.
     /// </summary>
+    /// <param name="progress">
+    /// Where to report the clone's progress, for a caller with somewhere to show it — see
+    /// <see cref="Sources.LocalCheckoutPrefetch"/>, which owns one per service. Nothing else here
+    /// reports progress: a clone is the only part of resolving a checkout that takes long enough to
+    /// be worth watching.
+    /// </param>
     public static PreparedCheckout PrepareRepoRoot(
         string serviceName,
         ServiceMetadata metadata,
         ServiceDeveloperConfig config,
         string appHostDirectory,
-        IGitClient gitClient)
+        IGitClient gitClient,
+        IGitProgressSink? progress = null)
     {
         if (config.Local.Path is not null)
         {
@@ -112,7 +119,7 @@ internal static class LocalGitCheckout
         // checkout, not one we just made, so it gets the same treatment as a checkout found
         // there on a later run: theirs may be a clone of another repository, and may hold
         // work in flight that a checkout would discard.
-        if (CloneIntoPlace(serviceName, metadata, checkoutsRoot, repoRoot, gitClient))
+        if (CloneIntoPlace(serviceName, metadata, checkoutsRoot, repoRoot, gitClient, progress))
         {
             return new PreparedCheckout(repoRoot, NeedsReconciliation: true);
         }
@@ -219,7 +226,12 @@ internal static class LocalGitCheckout
     /// </para>
     /// </remarks>
     private static bool CloneIntoPlace(
-        string serviceName, ServiceMetadata metadata, string checkoutsRoot, string repoRoot, IGitClient gitClient)
+        string serviceName,
+        ServiceMetadata metadata,
+        string checkoutsRoot,
+        string repoRoot,
+        IGitClient gitClient,
+        IGitProgressSink? progress)
     {
         // See PrepareRepoRoot: the real URL goes to git, the redacted one goes into messages.
         var displayRepository = GitUrl.Redact(metadata.Repository);
@@ -251,7 +263,7 @@ internal static class LocalGitCheckout
         {
             try
             {
-                gitClient.Clone(metadata.Repository, scratch);
+                gitClient.Clone(metadata.Repository, scratch, progress);
             }
             catch (GitAuthenticationFailedException ex)
             {

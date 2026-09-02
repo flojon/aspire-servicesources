@@ -62,6 +62,31 @@ nothing will fail to build to warn you.
   `IOException` from one something else held open for a moment is not a verdict on the
   configuration, so it is left for the next caller to retry.
 
+- **A deferred cold checkout shows the clone's own progress** ([#131]). A `"local"` service whose
+  checkout is deferred used to sit in `Checking out` for however long its repository took, with no
+  way to tell a slow clone from a stuck one. The State column now carries git's own account of it —
+  the phase, that phase's percentage, and the bytes transferred while a pack is arriving
+  (`Receiving objects 48% · 18.54 MiB`) — and every line git writes reaches the service's console
+  logs as it arrives. Updates are coalesced to roughly one a second, so a clone that emits a line
+  per percentage point costs one dashboard round trip per second rather than a hundred.
+
+  The phase is named rather than folded into a single 0–100 bar. A clone runs five of them —
+  counting and compressing on the server, then receiving, resolving deltas and updating files
+  locally — and their relative durations depend on the repository, so weighting them into one bar
+  would invent numbers that are wrong for any given clone. When the transfer ends the state returns
+  to `Checking out` for the ref reconciliation that follows, which reports nothing. Silence is
+  normal too: git suppresses progress for work that finishes inside its own delay threshold, and a
+  clone from a local path reports none at all, so a small repository can still go from
+  `Checking out` straight to running.
+
+  This needs no opt-in beyond `builder.UseDeferredCheckout()`, and it is only possible now that both
+  of its halves exist: before [#130] the clone ran during composition, with no dashboard to report
+  to, and before [#85] it ran inside LibGit2Sharp, whose callbacks carry object and byte counts but
+  no transfer rate. One side effect reaches the eager path as well — a prefetched clone now runs
+  under `--progress`, so if it fails, the lines git wrote before failing are in the message. The
+  progress lines themselves are stripped out of it, or a clone interrupted at 60% would report
+  `fatal: early EOF` underneath sixty superseded percentages.
+
 - **`builder.UseDeferredCheckout()` moves a cold `"local"` checkout past AppHost startup**
   ([#130], [#159]). Opt-in, off by default. A `"local"` service whose managed checkout does not
   exist yet is registered against the path that checkout will have, held back with Aspire's
@@ -671,3 +696,4 @@ Targets `net10.0`.
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
 [#171]: https://github.com/flojon/aspire-servicesources/issues/171
+[#131]: https://github.com/flojon/aspire-servicesources/issues/131

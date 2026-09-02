@@ -30,7 +30,7 @@ public class LocalCheckoutPrefetchTests
         public ManualResetEventSlim BlockFor(string repositoryUrl) =>
             _blockUntil[repositoryUrl] = new ManualResetEventSlim(false);
 
-        public void Clone(string repositoryUrl, string destinationPath)
+        public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null)
         {
             lock (Cloned)
             {
@@ -488,5 +488,85 @@ public class LocalCheckoutPrefetchTests
 
         Assert.Equal(2, git.Cloned.Count);
         Assert.Contains("https://example.com/billing.git", git.Cloned);
+    }
+
+    /// <summary>
+    /// Every line the prefetched clone reported, once its stream has ended. Fails the test rather
+    /// than hanging if it never does — a stream left open is a deferred service left in "Checking
+    /// out" forever.
+    /// </summary>
+    private static async Task<IReadOnlyList<string>> DrainProgressAsync(
+        LocalCheckoutPrefetch prefetch, string serviceName)
+    {
+        var progress = prefetch.ProgressFor(serviceName);
+        Assert.NotNull(progress);
+
+        using var giveUp = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        var lines = new List<string>();
+        await foreach (var line in progress.ReadAllAsync(giveUp.Token))
+        {
+            lines.Add(line);
+        }
+
+        return lines;
+    }
+
+    [Fact]
+    public async Task Progress_CarriesWhatTheCloneReported()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreateBuilder(dir);
+        var git = new FakeGitClient();
+
+        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+
+        // The fake reports nothing, which is a clone git had nothing to say about — the small
+        // repository of the "silence is normal" case. What matters here is that the stream ends.
+        Assert.Empty(await DrainProgressAsync(LocalCheckoutPrefetch.For(builder, git), "orders"));
+    }
+
+    [Fact]
+    public async Task Progress_EndsWhenThereWasNoCloneToRun()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        PlantExistingCheckout(dir, "orders");
+
+        var builder = TestHelpers.CreateBuilder(dir);
+        var git = new FakeGitClient();
+
+        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+
+        // A warm checkout: nothing was cloned, so nothing was reported — but the stream still has to
+        // end, because whoever is watching waits for that rather than polling.
+        Assert.Empty(git.Cloned);
+        Assert.Empty(await DrainProgressAsync(LocalCheckoutPrefetch.For(builder, git), "orders"));
+    }
+
+    [Fact]
+    public async Task Progress_EndsWhenTheCloneFailed()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreateBuilder(dir);
+        var git = new FakeGitClient();
+        git.FailFor("https://example.com/orders.git", new InvalidOperationException("no such repo"));
+
+        Assert.ThrowsAny<Exception>(
+            () => new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig()));
+
+        Assert.Empty(await DrainProgressAsync(LocalCheckoutPrefetch.For(builder, git), "orders"));
+    }
+
+    [Fact]
+    public void Progress_IsAbsentForAServiceThePrefetchNeverSaw()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreateBuilder(dir);
+        var git = new FakeGitClient();
+
+        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+
+        // Its checkout is resolved on the calling thread instead, with no clone of ours to watch.
+        Assert.Null(LocalCheckoutPrefetch.For(builder, git).ProgressFor("billing"));
     }
 }

@@ -32,7 +32,7 @@ public class LocalProjectSourceTests
 
         public Exception? FetchException { get; set; }
 
-        public void Clone(string repositoryUrl, string destinationPath)
+        public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null)
         {
             // libgit2 refuses to clone into a directory that already has content ("exists and is
             // not an empty directory"), which is precisely what turns an interrupted clone into a

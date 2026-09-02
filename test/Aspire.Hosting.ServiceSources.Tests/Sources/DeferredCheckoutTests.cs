@@ -2,6 +2,7 @@ using System.Net.Sockets;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Git;
+using Aspire.Hosting.ServiceSources.Tests.Git;
 using Aspire.Hosting.ServiceSources.Sources;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -22,6 +23,8 @@ public class DeferredCheckoutTests
 
         private readonly Dictionary<string, string> _launchSettings = new(StringComparer.Ordinal);
 
+        private readonly Dictionary<string, string[]> _progressLines = new(StringComparer.Ordinal);
+
         public List<string> Cloned { get; } = [];
 
         /// <summary>Holds this repository's clone open until the returned gate is set.</summary>
@@ -36,11 +39,28 @@ public class DeferredCheckoutTests
         /// </summary>
         public void WithLaunchSettings(string repositoryUrl, string json) => _launchSettings[repositoryUrl] = json;
 
-        public void Clone(string repositoryUrl, string destinationPath)
+        /// <summary>
+        /// Progress lines this repository's clone reports, in git's own wording, before it finishes.
+        /// Stands in for the stream the real client parses out of git's stderr.
+        /// </summary>
+        public void ReportProgress(string repositoryUrl, params string[] lines) =>
+            _progressLines[repositoryUrl] = lines;
+
+        public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null)
         {
             lock (Cloned)
             {
                 Cloned.Add(repositoryUrl);
+            }
+
+            if (_progressLines.TryGetValue(repositoryUrl, out var lines))
+            {
+                Assert.NotNull(progress);
+
+                foreach (var line in lines)
+                {
+                    progress.Report(line);
+                }
             }
 
             if (_blockUntil.TryGetValue(repositoryUrl, out var gate))
@@ -844,6 +864,185 @@ public class DeferredCheckoutTests
         // the same key is dropped. Restoring it the other way round would tell the process it was
         // launched under a profile that was not selected.
         Assert.Equal("http", context.EnvironmentVariables["DOTNET_LAUNCH_PROFILE"]);
+    }
+
+    [Fact]
+    public async Task CloneProgress_ReachesTheStateColumnAndThenGivesWayToCheckingOut()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.UseDeferredCheckout();
+
+        var git = new FakeGitClient();
+        git.ReportProgress(
+            "https://example.com/orders.git",
+            "Cloning into '/x'...",
+            "remote: Counting objects:  50% (1/2)",
+            "Receiving objects:  48% (6864/14091), 18.54 MiB | 18.38 MiB/s");
+
+        // The clone is held open past the progress it reports, so the state it produced can be
+        // observed while it is still true rather than raced against the clone finishing.
+        var gate = git.BlockFor("https://example.com/orders.git");
+
+        var orders = new LocalProjectSource(git)
+            .Resolve(builder, "orders", Metadata("orders"), DevConfig())
+            .WithHttpEndpoint();
+
+        var services = builder.Services.BuildServiceProvider();
+
+        var states = new List<string>();
+        var reachedProgress = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var backToCheckingOut = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var watching = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        var watcher = Task.Run(
+            async () =>
+            {
+                await foreach (var published in services.GetRequiredService<ResourceNotificationService>()
+                                   .WatchAsync(watching.Token))
+                {
+                    if (!string.Equals(published.Resource.Name, "orders", StringComparison.Ordinal)
+                        || published.Snapshot.State?.Text is not { } text)
+                    {
+                        continue;
+                    }
+
+                    lock (states)
+                    {
+                        states.Add(text);
+
+                        if (text.StartsWith("Receiving objects", StringComparison.Ordinal))
+                        {
+                            reachedProgress.TrySetResult();
+                        }
+                        else if (text == "Checking out" && reachedProgress.Task.IsCompleted)
+                        {
+                            backToCheckingOut.TrySetResult();
+                        }
+                    }
+                }
+            },
+            watching.Token);
+
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+        await PublishNotStartedAsync(services, orders.Resource);
+
+        await reachedProgress.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        gate.Set();
+
+        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+        await backToCheckingOut.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        await watching.CancelAsync();
+        await watcher.ContinueWith(_ => { }, TaskScheduler.Default);
+
+        string[] observed;
+        lock (states)
+        {
+            observed = [.. states];
+        }
+
+        // git's phase and its own percentage, with the bytes it reported alongside them — not a
+        // weighted aggregate across phases, which would invent numbers no clone can honour.
+        Assert.Contains("Counting objects 50%", observed);
+        Assert.Contains("Receiving objects 48% · 18.54 MiB", observed);
+
+        // And back to "Checking out" once the clone's stream ends, because what follows it — putting
+        // the checkout on its configured ref — reports nothing, and a percentage left standing over
+        // it would read as a transfer that had stalled.
+        Assert.Equal(
+            "Checking out",
+            observed[(Array.LastIndexOf(observed, "Receiving objects 48% · 18.54 MiB") + 1)..].First());
+    }
+
+    [Fact]
+    public async Task RealClone_ReportsItsPhasesAndItsOutputToTheResource()
+    {
+        var origin = TestRepository.CreateOrigin();
+        origin.Commit("Service.csproj", "<Project />", "add project");
+
+        // Addressed as a URL rather than as the path it sits at: a clone from a path hardlinks the
+        // object store and reports no progress at all, so it would leave nothing to observe.
+        var repository = new Uri(origin.Path).AbsoluteUri;
+
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.yaml"),
+            $"services:\n  orders:\n    repository: {repository}\n    project: Service.csproj\n");
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.local.json"),
+            """{ "services": { "orders": { "source": "local" } } }""");
+
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.UseDeferredCheckout();
+
+        // The real client, so what reaches the dashboard is what git actually wrote rather than what
+        // a double says it would have.
+        var orders = new LocalProjectSource(new GitCliClient(TestRepository.IsolatedEnvironment()))
+            .Resolve(
+                builder,
+                "orders",
+                new ServiceMetadata { Repository = repository, Project = "Service.csproj" },
+                DevConfig())
+            .WithHttpEndpoint();
+
+        var services = builder.Services.BuildServiceProvider();
+
+        var states = new List<string>();
+        using var watching = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        var watcher = Task.Run(
+            async () =>
+            {
+                await foreach (var published in services.GetRequiredService<ResourceNotificationService>()
+                                   .WatchAsync(watching.Token))
+                {
+                    if (string.Equals(published.Resource.Name, "orders", StringComparison.Ordinal)
+                        && published.Snapshot.State?.Text is { } text)
+                    {
+                        lock (states)
+                        {
+                            states.Add(text);
+                        }
+                    }
+                }
+            },
+            watching.Token);
+
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+        await PublishNotStartedAsync(services, orders.Resource);
+
+        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(60));
+
+        await watching.CancelAsync();
+        await watcher.ContinueWith(_ => { }, TaskScheduler.Default);
+
+        string[] observed;
+        lock (states)
+        {
+            observed = [.. states];
+        }
+
+        Assert.True(
+            File.Exists(Path.Combine(ExpectedRepoRoot(dir, "orders"), "Service.csproj")),
+            "The checkout did not land.");
+
+        // A phase git named, whichever ones this repository turned out to be big enough to produce.
+        // The clone is over long before the resource has a state to publish to, which is the case
+        // that matters most here: the stream is buffered, so what git said is replayed rather than
+        // lost.
+        string[] phases =
+            ["Counting objects", "Compressing objects", "Receiving objects", "Resolving deltas", "Updating files"];
+
+        Assert.Contains(
+            observed,
+            text => phases.Any(phase => text.StartsWith(phase + " ", StringComparison.Ordinal)));
+
+        // And back to "Checking out" afterwards, so nothing is left claiming a transfer is in
+        // flight while the checkout is reconciled onto its ref.
+        Assert.Contains("Checking out", observed);
     }
 
     /// <summary>

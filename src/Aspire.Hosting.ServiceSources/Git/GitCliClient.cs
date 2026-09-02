@@ -93,10 +93,18 @@ internal sealed partial class GitCliClient(
         }
     }
 
-    public void Clone(string repositoryUrl, string destinationPath) =>
+    public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null)
+    {
+        // git prints progress only when stderr is a terminal, and the stderr of a process we
+        // redirect never is, so --progress is what asks for it at all. Passed only when someone is
+        // watching: without a reader the lines are output nobody reads, and they would land in the
+        // stderr a failure is reported from.
+        string[] progressOption = progress is null ? [] : ["--progress"];
+
         // "--" so a repository URL or a destination that begins with '-' is read as an argument
         // rather than as an option.
-        RunRemoteCommand(["clone", "--", repositoryUrl, destinationPath]);
+        RunRemoteCommand(["clone", .. progressOption, "--", repositoryUrl, destinationPath], progress);
+    }
 
     public void Checkout(string repositoryPath, string reference)
     {
@@ -243,9 +251,9 @@ internal sealed partial class GitCliClient(
     /// whole command fails without the environment token ever being offered. Re-running with the
     /// configured helpers cleared gives the token its turn.
     /// </remarks>
-    private void RunRemoteCommand(IReadOnlyList<string> arguments)
+    private void RunRemoteCommand(IReadOnlyList<string> arguments, IGitProgressSink? progress = null)
     {
-        var result = GitCommand.Run([.. CredentialLadderOptions(), .. arguments], environmentOverrides);
+        var result = GitCommand.Run([.. CredentialLadderOptions(), .. arguments], environmentOverrides, progress);
         if (result.Succeeded)
         {
             return;
@@ -254,9 +262,11 @@ internal sealed partial class GitCliClient(
         if (HasEnvironmentToken && LooksLikeAuthFailure(result.StandardError))
         {
             // Safe to simply re-run: a failed `git clone` removes the directory it created, and a
-            // failed `git fetch` leaves the checkout as it was.
+            // failed `git fetch` leaves the checkout as it was. The second attempt reports to the
+            // same sink, so the percentage starts over — with the first attempt's failure in the
+            // resource's logs just above it to say why.
             var retry = GitCommand.Run(
-                [.. EnvironmentOnlyCredentialOptions(), .. arguments], environmentOverrides);
+                [.. EnvironmentOnlyCredentialOptions(), .. arguments], environmentOverrides, progress);
             if (retry.Succeeded)
             {
                 return;
