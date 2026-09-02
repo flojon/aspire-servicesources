@@ -299,6 +299,97 @@ jobs:
           path: .smoketest-cache/apphost.log
           if-no-files-found: ignore
 
+  smoketest-config-layers:
+    # Alongside `build` for the same reason smoketest-container is: a real AppHost process,
+    # sharing nothing with the unit-test job.
+    name: 🪜 config layers smoke test
+    runs-on: ubuntu-latest
+    # Every run in this script is expected to fail fast at composition, so it is quick; the cap
+    # is here because it launches the AppHost seven times and one of those could hang.
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # MinVer reads tags to version the referenced package projects; without full
+          # history it falls back to a placeholder version and warns while doing it.
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      # Its own key, for the reason spelled out on smoketest-container's cache: these jobs run
+      # concurrently, and a job that restores only DemoAppHost must not be the one that saves
+      # under a key another job restores from.
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: nuget-smoketest-config-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props', '**/Directory.Build.props', 'global.json') }}
+          restore-keys: nuget-smoketest-config-${{ runner.os }}-
+
+      # No container runtime and no network: the script's runs all end at AddService, because the
+      # layer under test names a source that does not exist.
+      - name: Run config layers smoke test
+        run: ./scripts/smoketest-config-layers.sh
+
+      - name: Upload AppHost logs
+        # One log per run, named for the layer it was proving, so a failure can be read against
+        # the step that reported it.
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoketest-config-layers-logs
+          path: .smoketest-cache/config-layers-*.log
+          if-no-files-found: ignore
+
+  smoketest-local-source:
+    name: 📦 local source smoke test
+    runs-on: ubuntu-latest
+    # Longer than the config-layers job: each of its three runs clones a repository and lets
+    # Aspire restore and build the checkout before anything starts.
+    timeout-minutes: 25
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: nuget-smoketest-local-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props', '**/Directory.Build.props', 'global.json') }}
+          restore-keys: nuget-smoketest-local-${{ runner.os }}-
+
+      # git is preinstalled on ubuntu-latest, and the repository the script clones is one it
+      # creates itself, so this needs no network and no container runtime.
+      - name: Run local source smoke test
+        run: ./scripts/smoketest-local-source.sh
+
+      - name: Upload AppHost log
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoketest-local-source-apphost-log
+          path: .smoketest-cache/local-source-apphost.log
+          if-no-files-found: ignore
+
   typecheck-typescript:
     # samples/DemoAppHostTypeScript is the only thing here that compiles what these packages
     # export to Aspire's Type System, and codegen is where that surface breaks: a signature the
