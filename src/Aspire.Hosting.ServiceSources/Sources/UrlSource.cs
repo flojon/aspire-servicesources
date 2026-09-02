@@ -29,6 +29,14 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// <c>ExternalServiceResource</c> (option 2) is the route that would work, and is what the upstream
 /// issue blocks. See <see cref="ServiceUrlResource"/> for both.
 /// </para>
+/// <para>
+/// The other consequence of leaving the resource unregistered is that nothing ever publishes a
+/// state for it, so a consumer's <c>WaitFor</c> on one waited for the life of the run (#170). That
+/// one is fixed rather than pre-flighted, in two halves: <see cref="ServiceUrlResource"/> declares
+/// <see cref="IResourceWithoutLifetime"/>, which Aspire's wait machinery filters on, and
+/// <see cref="DropWaitsOnUrlServices"/> removes the now-inert annotation before start, because
+/// Aspire also reads it as a dependency and a container consumer fails on that.
+/// </para>
 /// </remarks>
 internal sealed class UrlSource : IServiceSource
 {
@@ -112,9 +120,97 @@ internal sealed class UrlSource : IServiceSource
                     "Tracked as issue #72; it depends on microsoft/aspire#9965.");
             }
 
+            var warnings = ServiceConfigurationWarnings.For(builder);
+
+            DropWaitsOnUrlServices(@event.Model, warnings);
+
+            // Flushed here rather than left to the warnings class's own BeforeStartEvent handler,
+            // because these skips are recorded *during* that event: by now that handler has either
+            // run already, or — if the call above is what created it — was subscribed too late to
+            // run at all, since Aspire snapshots an event's subscription list before dispatching.
+            // Flush reports each skip once, so the two paths cannot double-log.
+            warnings.Flush(@event.Services);
+
             return Task.CompletedTask;
         });
+
+        // Created eagerly, and after the subscription above so that its flush handler is registered
+        // behind this one. That ordering is what keeps a dropped wait in the *same* grouped message
+        // as the service's skipped Configure calls instead of a second one after them.
+        _ = ServiceConfigurationWarnings.For(builder);
     }
+
+    /// <summary>
+    /// Removes every <see cref="WaitAnnotation"/> in the model that waits on a url-sourced service,
+    /// after the check above has had its say about references.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ServiceUrlResource"/> declaring <see cref="IResourceWithoutLifetime"/> is what
+    /// makes such a wait resolve instead of hanging (#170), and for a project or executable consumer
+    /// that is the whole of it — Aspire's wait machinery filters the annotation out and the resource
+    /// starts. The annotation is still <i>there</i>, though, and Aspire reads it in a second place
+    /// that has nothing to do with waiting: <c>GetResourceDependenciesAsync</c> counts a wait target
+    /// as a dependency of the waiter. For a <b>container</b> consumer that puts the url service back
+    /// into the set DCP plumbs container-to-host networking for, and it fails to start for the same
+    /// reason a <c>WithReference</c> would — except silently, with no error naming a cause, because
+    /// nothing was referenced. Measured: with the annotation left in place the container reaches
+    /// <c>FailedToStart</c> and nothing is logged; with it removed it runs.
+    /// <para>
+    /// Removed for every consumer rather than only containers, so that one rule holds everywhere: a
+    /// wait on a url-sourced service is dropped, because there is no lifetime to order against. The
+    /// <c>"WaitFor"</c> relationship <c>WaitFor()</c> also records is left alone — it is dashboard
+    /// grouping, carries no dependency, and a container consumer of one starts fine with it.
+    /// </para>
+    /// <para>
+    /// Each drop is <b>reported</b>, through the same channel a skipped <c>Configure</c> call goes
+    /// through. A <c>WaitFor</c> in <c>Program.cs</c> is configuration like any other, and dropping
+    /// it silently is the failure mode issue #53 was filed about: the developer who set
+    /// <c>Source=url</c> in their own <c>servicesources.local.json</c> is not usually the one who
+    /// wrote the wait, and without a warning the consumer simply starts early with nothing said.
+    /// See <see cref="ServiceConfigurationWarnings"/>.
+    /// </para>
+    /// </remarks>
+    private static void DropWaitsOnUrlServices(
+        DistributedApplicationModel model, ServiceConfigurationWarnings warnings)
+    {
+        foreach (var resource in model.Resources)
+        {
+            // Materialised before removing: Annotations is the live collection being mutated.
+            var waitsOnUrlServices = resource.Annotations
+                .OfType<WaitAnnotation>()
+                .Where(wait => wait.Resource is ServiceUrlResource)
+                .ToArray();
+
+            foreach (var wait in waitsOnUrlServices)
+            {
+                resource.Annotations.Remove(wait);
+
+                // Aspire writes these itself, one per resource a connection-string expression
+                // references, so there is no call in Program.cs for a warning to send anyone to.
+                // Reporting them would mean warning a developer about something they did not write
+                // — noise of exactly the kind the grouped message exists to avoid. The cost is that
+                // a hand-written WaitFor on a connection-string resource goes unreported too.
+                if (resource is ConnectionStringResource)
+                {
+                    continue;
+                }
+
+                warnings.AddSkip(wait.Resource.Name, "url", $"{WaitCall(wait.WaitType)} from '{resource.Name}'");
+            }
+        }
+    }
+
+    /// <summary>
+    /// The call an AppHost wrote to produce <paramref name="waitType"/>. Aspire's enum names two of
+    /// the three differently from the methods that set them, and the warning has to name something
+    /// the reader can search <c>Program.cs</c> for.
+    /// </summary>
+    private static string WaitCall(WaitType waitType) => waitType switch
+    {
+        WaitType.WaitForCompletion => "WaitForCompletion",
+        WaitType.WaitUntilStarted => "WaitForStart",
+        _ => "WaitFor",
+    };
 
     /// <summary>
     /// Aspire's relationship type for a resource one depends on, as opposed to the <c>"Parent"</c>
@@ -143,6 +239,20 @@ internal sealed class UrlSource : IServiceSource
     /// still produces the raw trace. Those carry the dependency inside an opaque delegate that would
     /// have to be executed to inspect, so this is a floor on the diagnostics rather than a
     /// guarantee: the common spellings are named, the rest fail as they did before.
+    /// </para>
+    /// <para>
+    /// One gap in that floor is <b>inspectable</b> and still open: a container that reaches the
+    /// service through a connection string —
+    /// <c>container.WithReference(builder.AddConnectionString("cs",
+    /// ReferenceExpression.Create($"{svc.GetEndpoint("https")}")))</c> — leaves a
+    /// <c>ConnectionStringReferenceAnnotation</c> pointing at the <c>ConnectionStringResource</c>,
+    /// not at the service, so nothing here matches. Measured: the url service is still in the set
+    /// <c>GetResourceDependenciesAsync</c> returns for that container, and it still fails the way
+    /// #58 describes. Closing it means walking the connection string's expression for an endpoint on
+    /// a <see cref="ServiceUrlResource"/>, which widens what this pre-flight refuses and belongs
+    /// with #72 rather than here. Note that the wait side of the same shape <i>is</i> handled — see
+    /// <see cref="DropWaitsOnUrlServices"/> — so a connection string that a container does not
+    /// reference is fine.
     /// </para>
     /// </remarks>
     private static ServiceUrlResource? ConsumedUrlService(ContainerResource consumer)

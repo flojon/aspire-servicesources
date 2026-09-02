@@ -2,6 +2,8 @@ using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Aspire.Hosting.ServiceSources.Tests;
 
@@ -50,4 +52,70 @@ internal static class TestHelpers
     public static Task PublishBeforeStartEventAsync(IDistributedApplicationBuilder builder) =>
         builder.Eventing.PublishAsync(new BeforeStartEvent(
             builder.Services.BuildServiceProvider(), new DistributedApplicationModel(builder.Resources)));
+
+    /// <summary>
+    /// The package's own log category, which is what <c>ServiceConfigurationWarnings</c> writes
+    /// under.
+    /// </summary>
+    private const string ServiceSourcesCategory = "Aspire.Hosting.ServiceSources";
+
+    /// <summary>
+    /// Publishes <c>BeforeStartEvent</c> with a logger attached, and returns the warnings the
+    /// package wrote while it ran.
+    /// </summary>
+    /// <remarks>
+    /// Distinct from reading <c>ServiceConfigurationWarnings.Messages</c>, which is the buffer: this
+    /// is what a developer would actually see at startup, so it also covers <i>whether</i> the
+    /// buffer was flushed. That matters for skips recorded during the event itself, where the flush
+    /// depends on which subscriber runs first.
+    /// </remarks>
+    public static async Task<IReadOnlyList<string>> PublishBeforeStartEventCapturingWarningsAsync(
+        IDistributedApplicationBuilder builder)
+    {
+        var captured = new List<string>();
+        builder.Services.AddSingleton<ILoggerProvider>(new CapturingLoggerProvider(captured));
+
+        await PublishBeforeStartEventAsync(builder);
+
+        lock (captured)
+        {
+            return captured.ToArray();
+        }
+    }
+
+    private sealed class CapturingLoggerProvider(List<string> captured) : ILoggerProvider
+    {
+        public ILogger CreateLogger(string categoryName) =>
+            categoryName == ServiceSourcesCategory ? new CapturingLogger(captured) : NullLogger.Instance;
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class CapturingLogger(List<string> captured) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Warning;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (!IsEnabled(logLevel))
+            {
+                return;
+            }
+
+            lock (captured)
+            {
+                captured.Add(formatter(state, exception));
+            }
+        }
+    }
 }

@@ -144,7 +144,9 @@ public class ServiceConfigurationExtensionsTests
         service.Configure<IResourceWithWaitSupport>(_ => { });
 
         var message = Assert.Single(ServiceConfigurationWarnings.For(builder).Messages);
-        Assert.Contains("26 Configure calls", message);
+        // "calls" rather than "Configure calls": the same message also stands for a consumer's
+        // dropped WaitFor, so the tally names each call and the summary only counts them.
+        Assert.Contains("26 calls", message);
         Assert.Contains("Configure<IResourceWithEnvironment> ×25", message);
         Assert.Contains("Configure<IResourceWithWaitSupport>", message);
     }

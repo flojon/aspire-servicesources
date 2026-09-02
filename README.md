@@ -819,10 +819,41 @@ Point a service at a fixed, already-known URL — e.g. a Kubernetes ingress, a s
 deployment, or any other reachable HTTP(S) endpoint. There's no underlying resource for
 Aspire to run; the endpoint resolves straight to the configured URL.
 
-Two consequences follow from the service running out of band: the AppHost's
-[`Configure` calls are skipped and logged](#configuring-a-resolved-service), and a **container**
+Three consequences follow from the service running out of band. The AppHost's
+[`Configure` calls are skipped and logged](#configuring-a-resolved-service). A **container**
 can't `WithReference` it — a project or executable can — which fails with a clear error rather than
-a DCP stack trace. See [#58](https://github.com/flojon/aspire-servicesources/issues/58).
+a DCP stack trace; see [#58](https://github.com/flojon/aspire-servicesources/issues/58). And a
+consumer's `WaitFor` on it resolves immediately instead of waiting:
+
+```csharp
+var orders = builder.AddService("orders");
+
+builder.AddProject<Projects.Storefront>("storefront")
+    .WaitFor(orders);   // no-op while 'orders' is "url"
+```
+
+There is no lifetime to order against — the URL is already up, or it isn't, and nothing this
+AppHost starts will change that — so the wait is dropped rather than satisfied. `WaitForCompletion`
+goes the same way, since a service running out of band is never going to exit. Every consumer is
+covered, containers included: a container that *references* a url service is still refused as
+above, but one that only waits on it starts normally.
+
+The drop is **logged**, alongside any `Configure` calls the same service skipped:
+
+```
+warn: Aspire.Hosting.ServiceSources
+      Service 'orders': skipped WaitFor from 'storefront' because its source is 'url' — it
+      resolves to a fixed, already-running URL with no local process to configure. ...
+```
+
+The one wait not reported is the `WaitForStart` Aspire adds itself for each resource an
+`AddConnectionString` expression references — nobody wrote it, so there is no line to point at.
+
+Note what this does **not** promise: the URL is not fetched, so the consumer starts whether or not
+anything is listening. A `WaitFor` written against a `"local"` service keeps its full meaning the
+moment the service is switched back, which is the point — a developer choosing `"url"` in their own
+`servicesources.local.json` must not hang an AppHost they don't own. See
+[#170](https://github.com/flojon/aspire-servicesources/issues/170).
 
 `servicesources.yaml`:
 ```yaml
@@ -1101,6 +1132,12 @@ real, registered `kubectl port-forward` executable, and holding *that* back unti
 finishes is exactly what the AppHost asked for. Only configuration that would land on the wrong
 process is dropped. A `"url"` service skips wait ordering too, since it has no registered resource
 for Aspire to hold back.
+
+That is this service waiting for something else. The other direction — something else waiting for
+*this* service, `consumer.WaitFor(service)`, which is ordinary Aspire rather than a `Configure`
+call — is dropped for `"url"` and honoured for every other source, including `"kubernetes"`. That
+drop is reported in the same message as the service's skipped `Configure` calls. See
+[the `"url"` source](#url-source).
 
 Skipping rather than failing is deliberate: a developer switching a service to a remote source in
 their own `servicesources.local.json` must not break a `Program.cs` they don't own. You'll see:

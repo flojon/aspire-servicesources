@@ -53,5 +53,39 @@ internal sealed class ServiceExecutableResource(string name, string command, str
 /// as #72), and because it is <c>sealed</c>, so this package cannot add the interface itself. That
 /// is the real dependency on the upstream issue, and why <c>sealed</c> matters.
 /// </para>
+/// <para>
+/// <b><see cref="IResourceWithoutLifetime"/></b> is what stops that non-registration from hanging a
+/// consumer, and is issue #170. Aspire honours a <see cref="WaitAnnotation"/> by watching the
+/// waited-on resource's state until it reports <c>Running</c>; nothing ever publishes a state for a
+/// resource DCP does not know about, so <c>WaitFor(service)</c> on one of these waited for the life
+/// of the run — no error, no timeout, and the service absent from the resource list that would have
+/// explained the stall. Aspire's own escape hatch is this marker: <c>WaitForDependenciesAsync</c>
+/// filters <c>waitAnnotation.Resource is not IResourceWithoutLifetime</c> before it waits on
+/// anything, so declaring it drops the wait rather than satisfying it. That is the honest answer
+/// here — a fixed, pre-known URL is already up as far as this AppHost is concerned, and there is no
+/// lifetime for the wait to be ordered against. It covers all three <see cref="WaitType"/>s, since
+/// the filter is on the wait's target rather than on what kind of wait it is.
+/// </para>
+/// <para>
+/// It also covers the <c>WaitForStart</c> that <c>AddConnectionString</c> adds on the AppHost's
+/// behalf for each resource its expression references — but at the waiting end, not at the point
+/// the wait is added. <c>AddConnectionString</c> does test <see cref="IResourceWithoutLifetime"/>
+/// itself, and that test does not fire here: it is applied to the <i>value provider</i>, and for
+/// the ordinary spelling <c>ReferenceExpression.Create($"{svc.GetEndpoint("https")}")</c> the
+/// provider is an <c>EndpointReference</c>, which reaches this resource through
+/// <c>IValueWithReferences</c> — a branch that adds the wait without re-testing what it found. So
+/// the annotation is created; <c>WaitForDependenciesAsync</c> is what declines to honour it, and
+/// <see cref="UrlSource"/> is what removes it from the model.
+/// </para>
+/// <para>
+/// Publishing a <c>Running</c> state instead would also resolve <c>WaitFor</c> — Aspire's health
+/// service watches the notification stream rather than the model, so it would stamp the ready event
+/// this resource never gets. It is not what is done, for three reasons: <c>WaitForCompletion</c>
+/// would still hang forever, because a resource reported as running never completes; the state
+/// would put a row in the dashboard for something DCP cannot start, stop or restart; and it would
+/// claim the URL is reachable, which nothing here has checked. Dropping the wait claims only what
+/// is true.
+/// </para>
 /// </remarks>
-internal sealed class ServiceUrlResource(string name) : Resource(name), IResourceWithServiceDiscovery;
+internal sealed class ServiceUrlResource(string name)
+    : Resource(name), IResourceWithServiceDiscovery, IResourceWithoutLifetime;
