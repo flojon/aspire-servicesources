@@ -145,6 +145,10 @@ per-developer):**
 }
 ```
 
+That file is the base layer of the AppHost's own configuration — an environment variable or an
+`appsettings.json` entry can override any of it for a single run, without an edit. See
+[Overriding `servicesources.local.json`](#overriding-servicesourceslocaljson).
+
 That's it — running the AppHost now clones `orders` into
 `<AppHostDirectory>/.servicesources/checkouts/orders/`, checks out `main`, and runs it via
 Aspire's own project orchestration, wired up to `api` through service discovery exactly like
@@ -938,6 +942,125 @@ or just needing it reachable, not caring how:
 ```json
 { "services": { "orders": { "source": "url" } } }
 ```
+
+### Overriding `servicesources.local.json`
+
+The file is read through the AppHost's own `IConfiguration`, as the **lowest**-precedence source in
+the standard provider chain, under the key `ServiceSources:Services:<service>`. Its shape on disk is
+unchanged — it is still the place a developer normally writes a source selection, and a `.NET` or
+TypeScript AppHost authors it identically — but every provider above it can now override an entry
+without the file being touched:
+
+| Layer | Overrides the file? |
+| --- | --- |
+| `servicesources.local.json` | — (the base) |
+| `appsettings.json` | yes |
+| `appsettings.{Environment}.json` | yes |
+| User secrets | yes (requires a `UserSecretsId` in the AppHost csproj; without one the layer is simply absent) |
+| Environment variables | yes |
+| Command-line arguments | yes |
+
+> **The `appsettings` layers need the file in the AppHost's output directory.** An AppHost project
+> ships no `appsettings.json`, so unlike a web project it has no item copying that pattern to
+> `bin/`, and a file placed beside the `.csproj` is silently never found — there is no error,
+> the layer is simply absent. Add it explicitly:
+>
+> ```xml
+> <ItemGroup>
+>   <Content Include="appsettings*.json" CopyToOutputDirectory="PreserveNewest" />
+> </ItemGroup>
+> ```
+
+> **The `ServiceSources:*` keys reach the AppHost's own `IConfiguration` on its first ServiceSources
+> call, not before.** `servicesources.local.json` is a file of ours, read from the AppHost directory
+> and re-keyed into the chain by whichever ServiceSources method the AppHost calls first — a
+> `UseX()` registration, or the first `AddService()`. A read placed *above* all of them sees the
+> chain without that layer, so a selection written only in the file comes back `null`, silently,
+> since a missing key is not an error:
+>
+> ```csharp
+> // null — nothing of ours has been called yet, so the file is not in the chain.
+> var source = builder.Configuration["ServiceSources:Services:orders:source"];
+>
+> builder.UseJavaScript();
+>
+> // "local" — the file joined the chain on the line above.
+> source = builder.Configuration["ServiceSources:Services:orders:source"];
+> ```
+>
+> Reading these keys from an AppHost should be rare. Scoping a declaration to one source is what
+> sends an AppHost looking for them, and
+> [`Configure<T>`](#configuring-a-resolved-service) already does that scoping for you.
+
+The immediate payoff is a **single run** with a different source and no edit to a file you'd have to
+remember to change back:
+
+```bash
+ServiceSources__Services__orders__Source=url dotnet run
+```
+
+Any field works the same way, not just `source` — `ServiceSources__Services__orders__Ref`,
+`ServiceSources__Services__orders__Tag`, and so on. (`__` is the .NET configuration separator for
+`:`, and is what you want on every platform.)
+
+A service whose name contains a hyphen — `order-service`, say — makes a variable name a shell won't
+accept as an inline assignment, so pass it through `env` instead:
+
+```bash
+env 'ServiceSources__Services__order-service__Source=url' dotnet run
+```
+
+The key itself is fine either way; it's only the one-line `NAME=value command` form that needs this.
+
+CI is the other case. A build agent has no developer to pick sources for it, and cloning every
+service to run one test is waste, so pin them from the environment and ship no file at all:
+
+```yaml
+env:
+  ServiceSources__Services__orders__Source: container
+  ServiceSources__Services__payments__Source: container
+```
+
+**Named profiles** fall out of the same mechanism. Put the cluster-facing selection in
+`appsettings.Cluster.json` next to the AppHost:
+
+```json
+{
+  "ServiceSources": {
+    "Services": {
+      "orders": { "source": "kubernetes", "context": "dev-west", "namespace": "orders", "port": 8080 }
+    }
+  }
+}
+```
+
+and choose it per run by passing the environment as an argument to the AppHost:
+
+```bash
+aspire run -- --environment Cluster     # everything after -- goes to the AppHost
+dotnet run -- --environment Cluster     # or launching the AppHost directly
+```
+
+**`DOTNET_ENVIRONMENT=Cluster` does not work under `aspire run`.** The CLI sets
+`ASPNETCORE_ENVIRONMENT` and `DOTNET_ENVIRONMENT` to `Development` itself when it launches the
+AppHost, so a value exported in your shell is overwritten and the profile is silently not
+selected — you get the base file's selection with no indication that the profile was ignored.
+The variable route only works when you run the AppHost yourself with `dotnet run`. The
+command-line form above works in both.
+
+Note the extra `ServiceSources` root: inside the AppHost's shared configuration the entries are namespaced, while `servicesources.local.json` keeps its bare
+`services` root because it is a file of ours, read from the AppHost directory and re-keyed as it
+joins the chain.
+
+Two failures are reported differently on purpose, because a typo in a configuration key produces an
+empty section rather than an error:
+
+- **Nothing configured anywhere** — `ServiceSources:Services` is empty in every source. The message
+  says so, names the `servicesources.local.json` path it looked for and whether it was found, and
+  lists every source consulted.
+- **This one service isn't configured** — other services resolved, this one has no entry. The
+  message names `ServiceSources:Services:<service>:source` and the environment variable that would
+  set it.
 
 ## Configuring a resolved service
 

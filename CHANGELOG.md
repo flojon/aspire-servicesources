@@ -13,6 +13,21 @@ nothing will fail to build to warn you.
 
 ### Added
 
+- **`servicesources.local.json` can be overridden without editing it** ([#69]). The per-developer
+  source selection is now read through the AppHost's own `IConfiguration` rather than by a loader
+  of ours, with the file registered as the *lowest*-precedence source in the standard chain under
+  the key `ServiceSources:Services:<service>`. `appsettings.json`,
+  `appsettings.{Environment}.json`, user secrets, environment variables and the command line all
+  override it, so a single run can pick a different source —
+  `ServiceSources__Services__orders__Source=url dotnet run` — and CI can pin every service from the
+  environment with no file present at all. Named profiles come from the same mechanism:
+  `appsettings.Cluster.json` plus `--environment Cluster`. The file's shape on disk is unchanged,
+  and nothing about how a .NET or TypeScript AppHost authors it has changed. The keys are in the
+  AppHost's own configuration, so an AppHost can read them as well; the file joins the chain on the
+  first ServiceSources call the AppHost makes — a `UseX()` registration, or the first
+  `AddService()` — rather than on the first read of ours, so such a read does not depend on how many
+  services precede it ([#171]).
+
 - **`builder.UseDeferredCheckout()` moves a cold `"local"` checkout past AppHost startup**
   ([#130], [#159]). Opt-in, off by default. A `"local"` service whose managed checkout does not
   exist yet is registered against the path that checkout will have, held back with Aspire's
@@ -111,6 +126,16 @@ nothing will fail to build to warn you.
   certificate names the in-cluster service — and the README says so.
 
 ### Changed
+
+- **A missing `servicesources.local.json` is no longer an error by itself** ([#69]). It used to
+  fail immediately, naming the path. Now that the file is one layer of a chain, its absence is
+  ordinary — the environment may carry the whole configuration — so the failure moved to the point
+  where a service genuinely has no source. Two errors are raised there instead of one: "nothing is
+  configured anywhere", which names the key, the file path it looked for and every source
+  consulted, and "this service has no source", which names
+  `ServiceSources:Services:<service>:source` and the environment variable that would set it. The
+  distinction is deliberate — a mistyped key yields an empty section rather than a failure, so
+  "nothing configured" has to be reported as its own condition.
 
 - **`git` on `PATH` is now required for a managed `"local"` checkout** ([#85]), and
   `LibGit2Sharp` is gone from the package. Clone, fetch and checkout shell out to the `git`
@@ -485,6 +510,7 @@ Targets `net10.0`.
 [#89]: https://github.com/flojon/aspire-servicesources/issues/89
 [#112]: https://github.com/flojon/aspire-servicesources/pull/112
 [#117]: https://github.com/flojon/aspire-servicesources/pull/117
+[#69]: https://github.com/flojon/aspire-servicesources/issues/69
 [#119]: https://github.com/flojon/aspire-servicesources/issues/119
 [#125]: https://github.com/flojon/aspire-servicesources/issues/125
 [#130]: https://github.com/flojon/aspire-servicesources/issues/130
@@ -492,3 +518,4 @@ Targets `net10.0`.
 [#160]: https://github.com/flojon/aspire-servicesources/issues/160
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
+[#171]: https://github.com/flojon/aspire-servicesources/issues/171

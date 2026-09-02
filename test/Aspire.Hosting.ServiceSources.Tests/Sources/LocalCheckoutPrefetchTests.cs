@@ -426,4 +426,42 @@ public class LocalCheckoutPrefetchTests
         // Nothing was speculative in the end, so there is nothing to tell the developer about.
         Assert.Null(LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage);
     }
+
+    /// <remarks>
+    /// The prefetch matches its candidates against the catalog by name, and the names it matches
+    /// with come from configuration, whose keys are case-insensitive — so an entry that spells a
+    /// service differently from the catalog must still reach this phase. Two participants on the
+    /// barrier is what makes that observable: if 'billing' were dropped for being spelled
+    /// 'Billing', only 'orders' would ever arrive and the clone would time out rather than the
+    /// assertion merely counting one fewer.
+    /// </remarks>
+    [Fact]
+    public void FirstAddService_ConfigurationSpellsAServiceDifferentlyFromTheCatalog_StillPrefetchesIt()
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.yaml"),
+            """
+            services:
+              orders:
+                repository: https://example.com/orders.git
+                project: Service.csproj
+              billing:
+                repository: https://example.com/billing.git
+                project: Service.csproj
+            """);
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.local.json"),
+            """
+            { "services": { "orders": { "source": "local" }, "Billing": { "source": "local" } } }
+            """);
+
+        var builder = TestHelpers.CreateBuilder(dir);
+        var git = new FakeGitClient { StartBarrier = new Barrier(2) };
+
+        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+
+        Assert.Equal(2, git.Cloned.Count);
+        Assert.Contains("https://example.com/billing.git", git.Cloned);
+    }
 }
