@@ -67,9 +67,9 @@ internal static class LocalGitCheckout
         string appHostDirectory,
         IGitClient gitClient)
     {
-        if (config.Path is not null)
+        if (config.Local.Path is not null)
         {
-            if (config.Ref is not null)
+            if (config.Local.Ref is not null)
             {
                 throw new ServiceSourcesConfigurationException(
                     $"Service '{serviceName}': 'ref' cannot be combined with 'path' — 'path' points directly at " +
@@ -78,8 +78,8 @@ internal static class LocalGitCheckout
 
             // Anchor a relative `path` override to the AppHost directory (matching Aspire's own
             // AddProject behavior), not to the process's current working directory.
-            // Path.GetFullPath is a no-op when config.Path is already absolute.
-            var overridden = Path.GetFullPath(config.Path, appHostDirectory);
+            // Path.GetFullPath is a no-op when config.Local.Path is already absolute.
+            var overridden = Path.GetFullPath(config.Local.Path, appHostDirectory);
 
             // Only the built-in dotnet kind goes on to look for a project file underneath this
             // directory; every other kind hands the checkout straight to its handler, so without
@@ -152,7 +152,7 @@ internal static class LocalGitCheckout
     /// the catalog named one — in which case whatever the clone already has checked out stands.
     /// </summary>
     private static string? ConfiguredReference(ServiceMetadata metadata, ServiceDeveloperConfig config) =>
-        config.Ref ?? metadata.DefaultRef;
+        config.Local.Ref ?? metadata.DefaultRef;
 
     /// <summary>
     /// Adopts a checkout this call did not create — one left by an earlier run, or one a concurrent

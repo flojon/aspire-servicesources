@@ -6,8 +6,6 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 
 internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceSource
 {
-    public IReadOnlySet<string> RelevantFields { get; } = new HashSet<string> { "context", "namespace", "port", "scheme" };
-
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)
     {
@@ -16,7 +14,7 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
         // port: an unsupported scheme is config validation like the rest and shouldn't burn an
         // allocation on its way to throwing.
         var kubernetes = RequireKubernetesBlock(serviceName, metadata);
-        var scheme = EndpointScheme.Resolve(serviceName, "kubernetes", config.Scheme, kubernetes.Scheme);
+        var scheme = EndpointScheme.Resolve(serviceName, "kubernetes", config.Kubernetes.Scheme, kubernetes.Scheme);
 
         var args = BuildPortForwardArgs(serviceName, metadata, config, portAllocator, out var localPort, out _);
 
@@ -48,13 +46,13 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
     {
         var kubernetes = RequireKubernetesBlock(serviceName, metadata);
 
-        if (string.IsNullOrWhiteSpace(config.Context))
+        if (string.IsNullOrWhiteSpace(config.Kubernetes.Context))
         {
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}': source 'kubernetes' requires 'context' in servicesources.local.json.");
         }
 
-        remotePort = config.Port ?? kubernetes.Port ?? throw new ServiceSourcesConfigurationException(
+        remotePort = config.Kubernetes.Port ?? kubernetes.Port ?? throw new ServiceSourcesConfigurationException(
             $"Service '{serviceName}': no 'port' configured for source 'kubernetes' — set it in " +
             "servicesources.local.json or servicesources.yaml's kubernetes.port.");
 
@@ -64,7 +62,7 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
                 $"Service '{serviceName}': port value '{remotePort}' is not a valid port (must be between 1 and 65535).");
         }
 
-        var @namespace = config.Namespace ?? "default";
+        var @namespace = config.Kubernetes.Namespace ?? "default";
 
         localPort = portAllocator.AllocatePort();
 
@@ -74,7 +72,7 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
             $"svc/{kubernetes.Service}",
             $"{localPort}:{remotePort}",
             "--context",
-            config.Context,
+            config.Kubernetes.Context,
             "--namespace",
             @namespace,
         ];

@@ -5,8 +5,6 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 
 internal sealed class ContainerSource : IServiceSource
 {
-    public IReadOnlySet<string> RelevantFields { get; } = new HashSet<string> { "tag" };
-
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)
     {
@@ -49,7 +47,7 @@ internal sealed class ContainerSource : IServiceSource
                 $"Service '{serviceName}': container.port value '{port}' is not a valid port (must be between 1 and 65535).");
         }
 
-        var tag = string.IsNullOrWhiteSpace(config.Tag) ? metadata.Container.DefaultTag : config.Tag;
+        var tag = string.IsNullOrWhiteSpace(config.Container.Tag) ? metadata.Container.DefaultTag : config.Container.Tag;
 
         return (metadata.Container.Image, tag, port);
     }

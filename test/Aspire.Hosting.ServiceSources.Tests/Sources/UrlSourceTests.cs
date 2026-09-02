@@ -17,7 +17,7 @@ public class UrlSourceTests
         };
 
     private static ServiceDeveloperConfig DevConfig(string? urlOverride = null) =>
-        new() { Source = "url", Url = urlOverride };
+        new() { Source = "url", Url = new() { Url = urlOverride } };
 
     [Fact]
     public void ResolveUrl_NoOverride_FallsBackToMetadataUrl()

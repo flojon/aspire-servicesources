@@ -120,7 +120,7 @@ public class LocalProjectSourceTests
         new() { Repository = repository, Project = project, DefaultRef = defaultRef };
 
     private static ServiceDeveloperConfig DevConfig(string? path = null, string? @ref = null) =>
-        new() { Source = "local", Path = path, Ref = @ref };
+        new() { Source = "local", Local = new() { Path = path, Ref = @ref } };
 
     private static string UnusedAppHostDirectory => Directory.CreateTempSubdirectory().FullName;
 

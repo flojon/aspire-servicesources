@@ -6,8 +6,6 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 
 internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
 {
-    public IReadOnlySet<string> RelevantFields { get; } = new HashSet<string> { "path", "ref" };
-
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)
     {

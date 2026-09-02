@@ -34,7 +34,7 @@ public class AddServiceIntegrationTests
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
             {
-              "services": { "orders": { "source": "local", "ref": "feature/v2" } }
+              "services": { "orders": { "source": "local", "local": { "ref": "feature/v2" } } }
             }
             """);
 
@@ -72,8 +72,8 @@ public class AddServiceIntegrationTests
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
             {
               "services": {
-                "orders-main": { "source": "local", "ref": "main" },
-                "orders-v2": { "source": "local", "ref": "feature/v2" }
+                "orders-main": { "source": "local", "local": { "ref": "main" } },
+                "orders-v2": { "source": "local", "local": { "ref": "feature/v2" } }
               }
             }
             """);
@@ -105,8 +105,8 @@ public class AddServiceIntegrationTests
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
             {
               "services": {
-                "orders-a": { "source": "local", "ref": "main" },
-                "orders-b": { "source": "local", "ref": "main" }
+                "orders-a": { "source": "local", "local": { "ref": "main" } },
+                "orders-b": { "source": "local", "local": { "ref": "main" } }
               }
             }
             """);

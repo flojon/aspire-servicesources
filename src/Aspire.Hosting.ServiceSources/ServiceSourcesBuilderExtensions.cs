@@ -9,7 +9,13 @@ namespace Aspire.Hosting.ServiceSources;
 
 public static class ServiceSourcesBuilderExtensions
 {
-    private static readonly Dictionary<string, IServiceSource> Sources = new()
+    // OrdinalIgnoreCase because everything else in an entry is matched that way. The service name,
+    // the block names and the field names all arrive through IConfiguration, which compares keys
+    // case-insensitively; the source arrives the same way, and most often as a value someone typed
+    // into an environment variable by hand. Matching it ordinally would answer
+    // ServiceSources__Services__orders__Source=Local with "not implemented yet", which names a
+    // missing feature instead of the capital L.
+    private static readonly Dictionary<string, IServiceSource> Sources = new(StringComparer.OrdinalIgnoreCase)
     {
         ["local"] = new LocalProjectSource(new GitCliClient()),
         ["kubernetes"] = new KubernetesSource(new SocketPortAllocator()),
@@ -76,8 +82,6 @@ public static class ServiceSourcesBuilderExtensions
             throw new ServiceSourcesConfigurationException(
                 $"Service '{name}' has source '{developerConfig.Source}', which is not implemented yet.");
         }
-
-        ServiceDeveloperConfigValidator.Validate(name, developerConfig.Source, source.RelevantFields, developerConfig);
 
         return source.Resolve(builder, name, metadata, developerConfig);
     }

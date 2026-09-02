@@ -39,7 +39,24 @@ internal sealed class DeveloperConfiguration
 
         var path = Path.Combine(builder.AppHostDirectory, FileName);
 
-        var bound = builder.Configuration.GetSection(ServicesKey).Get<Dictionary<string, ServiceDeveloperConfig>>() ?? [];
+        var section = builder.Configuration.GetSection(ServicesKey);
+
+        // Before binding, and for every entry rather than only the ones an AddService call reaches:
+        // LocalCheckoutPrefetch clones every "local" entry the moment the first local-sourced
+        // service is resolved, including entries for services no AddService call ever names, so a
+        // malformed one would otherwise pay for a checkout before anything looked at it. The keys
+        // are checked as the developer spelled them, ahead of the canonicalization below.
+        foreach (var entry in section.GetChildren())
+        {
+            ServiceDeveloperConfigValidator.Validate(entry.Key, entry);
+        }
+
+        var bound = section.Get<Dictionary<string, ServiceDeveloperConfig>>() ?? [];
+
+        foreach (var config in bound.Values)
+        {
+            NormalizeBlankToAbsent(config);
+        }
 
         return new DeveloperConfiguration
         {
@@ -47,6 +64,35 @@ internal sealed class DeveloperConfiguration
             FilePath = path,
             FileFound = File.Exists(path),
         };
+    }
+
+    /// <summary>
+    /// Maps a blank string field to absent, throughout every block.
+    /// </summary>
+    /// <remarks>
+    /// A higher configuration layer can set a key but has no way to remove one, so blanking it is
+    /// the only gesture available for dropping a field the file below set — and an empty
+    /// environment variable binds as "" rather than null, which every consumer would read as a
+    /// configured value. Nullable numbers reach the same place by a different route: the binder maps
+    /// an empty string to null for <c>int?</c> before this runs, and a whitespace-only value, which
+    /// it would fail to convert, is refused by
+    /// <see cref="ServiceDeveloperConfigValidator"/> with the empty spelling named — so the gesture
+    /// is the same everywhere, and only the string fields needed the walk below.
+    /// </remarks>
+    private static void NormalizeBlankToAbsent(ServiceDeveloperConfig config)
+    {
+        foreach (var block in ServiceDeveloperConfigShape.Blocks)
+        {
+            var instance = block.GetValue(config);
+
+            foreach (var field in block.PropertyType.GetProperties().Where(f => f.PropertyType == typeof(string)))
+            {
+                if (field.GetValue(instance) is string value && string.IsNullOrWhiteSpace(value))
+                {
+                    field.SetValue(instance, null);
+                }
+            }
+        }
     }
 
     /// <summary>

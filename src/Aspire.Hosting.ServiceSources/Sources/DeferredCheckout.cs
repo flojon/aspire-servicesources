@@ -151,7 +151,7 @@ internal sealed class DeferredCheckout
         // A 'path' override points at a checkout the developer manages themselves. There is nothing
         // to clone, so there is nothing to wait for — and nothing this package is entitled to
         // create at that path if it turns out to be missing.
-        if (config.Path is not null)
+        if (config.Local.Path is not null)
         {
             return false;
         }

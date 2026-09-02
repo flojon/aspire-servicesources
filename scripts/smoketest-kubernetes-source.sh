@@ -131,7 +131,10 @@ EOF
 cat > "$apphost_dir/servicesources.local.json" <<EOF
 {
   "services": {
-    "orders": { "source": "kubernetes", "context": "$kctx", "namespace": "default" }
+    "orders": {
+      "source": "kubernetes",
+      "kubernetes": { "context": "$kctx", "namespace": "default" }
+    }
   }
 }
 EOF

@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 
 namespace Aspire.Hosting.ServiceSources.Config;
 
@@ -37,6 +38,16 @@ internal static class ServiceSourcesConfigCache
             throw loaded.DeveloperConfig.NotConfiguredError(serviceName);
         }
 
+        // An entry with a blank source is an entry with no source. It arrives that way from an
+        // entry that names only its blocks, and from a higher layer blanking the key — the one
+        // gesture configuration offers for dropping a value a layer below set. Either way the
+        // developer's problem is a source that is missing, not one this package fails to
+        // recognise, so it takes the same route as an entry that is absent altogether.
+        if (string.IsNullOrWhiteSpace(developerConfig.Source))
+        {
+            throw loaded.DeveloperConfig.NotConfiguredError(serviceName);
+        }
+
         return (metadata, developerConfig);
     }
 
@@ -51,16 +62,33 @@ internal static class ServiceSourcesConfigCache
 
         private LoadedConfig? _loaded;
 
+        private ExceptionDispatchInfo? _failure;
+
         /// <summary>
-        /// A load that throws leaves the slot empty, so the next caller tries again and fails the
-        /// same way — a configuration error has to keep being reported to whoever asks, rather than
-        /// being cached as a success that never happened or silently swallowed after the first call.
+        /// A load that throws is remembered and rethrown rather than retried, so every later caller
+        /// is told what the first one was told: a configuration error is not transient, and a second
+        /// walk of the same providers would only arrive at it again.
         /// </summary>
         public LoadedConfig Load(IDistributedApplicationBuilder builder)
         {
             lock (_gate)
             {
-                return _loaded ??= LoadedConfig.Load(builder);
+                _failure?.Throw();
+
+                if (_loaded is not null)
+                {
+                    return _loaded;
+                }
+
+                try
+                {
+                    return _loaded = LoadedConfig.Load(builder);
+                }
+                catch (Exception ex)
+                {
+                    _failure = ExceptionDispatchInfo.Capture(ex);
+                    throw;
+                }
             }
         }
     }

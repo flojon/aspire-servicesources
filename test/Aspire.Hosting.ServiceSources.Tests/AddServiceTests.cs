@@ -32,7 +32,7 @@ public class AddServiceTests
                 project: Orders.csproj
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), $$"""
-            { "services": { "orders": { "source": "local", "path": "{{projectDir.Replace("\\", "\\\\")}}" } } }
+            { "services": { "orders": { "source": "local", "local": { "path": "{{projectDir.Replace("\\", "\\\\")}}" } } } }
             """);
 
         var builder = CreateBuilder(appHostDir);
@@ -68,7 +68,7 @@ public class AddServiceTests
                 project: Orders.csproj
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), $$"""
-            { "services": { "orders": { "source": "local", "path": "{{relativePath.Replace("\\", "\\\\")}}" } } }
+            { "services": { "orders": { "source": "local", "local": { "path": "{{relativePath.Replace("\\", "\\\\")}}" } } } }
             """);
 
         var builder = CreateBuilder(appHostDir);
@@ -114,7 +114,7 @@ public class AddServiceTests
                   port: 8080
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
-            { "services": { "orders": { "source": "kubernetes", "context": "dev-west", "namespace": "orders-ns" } } }
+            { "services": { "orders": { "source": "kubernetes", "kubernetes": { "context": "dev-west", "namespace": "orders-ns" } } } }
             """);
 
         var builder = CreateBuilder(appHostDir);
@@ -199,7 +199,7 @@ public class AddServiceTests
                   url: https://orders.example.com
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
-            { "services": { "orders": { "source": "url", "url": "https://orders.dev.internal" } } }
+            { "services": { "orders": { "source": "url", "url": { "url": "https://orders.dev.internal" } } } }
             """);
 
         var builder = CreateBuilder(appHostDir);
@@ -312,7 +312,7 @@ public class AddServiceTests
                   defaultTag: latest
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
-            { "services": { "orders": { "source": "container", "tag": "v1.4.2" } } }
+            { "services": { "orders": { "source": "container", "container": { "tag": "v1.4.2" } } } }
             """);
 
         var builder = CreateBuilder(appHostDir);
@@ -347,6 +347,34 @@ public class AddServiceTests
         Assert.Contains("container.image", ex.Message);
     }
 
+    /// <remarks>
+    /// An entry that names no source at all, and one whose source a higher layer blanked — the
+    /// gesture for dropping a value a layer below set — both bind <c>Source</c> to the empty
+    /// string. Neither is a source this package has yet to implement; the service simply has no
+    /// source, which is the condition <c>NotConfiguredError</c> describes and names the fix for.
+    /// </remarks>
+    [Theory]
+    [InlineData("""{ "services": { "orders": { "local": { "ref": "main" } } } }""")]
+    [InlineData("""{ "services": { "orders": { "source": "" } } }""")]
+    public void AddService_EntryWithNoSource_ReportsItAsNotConfigured(string developerConfig)
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), developerConfig);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
+
+        Assert.Contains("'orders' has no source configured", ex.Message);
+        Assert.DoesNotContain("not implemented", ex.Message);
+    }
+
     [Fact]
     public void AddService_IsExportedToAts()
     {
@@ -360,9 +388,8 @@ public class AddServiceTests
         var resourceNameAttribute = nameParameter.GetCustomAttributes(typeof(ResourceNameAttribute), inherit: false);
         Assert.Single(resourceNameAttribute);
     }
-
     [Fact]
-    public void AddService_ContainerSourceWithForeignPortField_ThrowsNamingServiceFieldAndSource()
+    public void AddService_PortInsideContainerBlock_ThrowsNamingTheBlockAndItsValidKeys()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
@@ -375,11 +402,14 @@ public class AddServiceTests
                   port: 8080
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
-            { "services": { "orders": { "source": "container", "port": 9090 } } }
+            { "services": { "orders": { "source": "container", "container": { "port": 9090 } } } }
             """);
 
         var builder = CreateBuilder(appHostDir);
 
+        // The image decides the port it serves, so there is nothing per-developer to override and
+        // the container block has no 'port'. Written inside the block, that is an unknown key there
+        // rather than a field belonging to another source.
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
 
         Assert.Contains("orders", ex.Message);
@@ -402,7 +432,7 @@ public class AddServiceTests
                   scheme: https
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
-            { "services": { "orders": { "source": "kubernetes", "context": "dev-west" } } }
+            { "services": { "orders": { "source": "kubernetes", "kubernetes": { "context": "dev-west" } } } }
             """);
 
         var builder = CreateBuilder(appHostDir);
@@ -429,7 +459,8 @@ public class AddServiceTests
                   port: 8080
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
-            { "services": { "orders": { "source": "kubernetes", "context": "dev-west", "port": 8443, "scheme": "https" } } }
+            { "services": { "orders": { "source": "kubernetes",
+                "kubernetes": { "context": "dev-west", "port": 8443, "scheme": "https" } } } }
             """);
 
         var builder = CreateBuilder(appHostDir);
@@ -437,12 +468,12 @@ public class AddServiceTests
         var service = builder.AddService("orders");
 
         // Scheme travels with port: a developer forwarding a different port is the one who knows
-        // what that port speaks, so the override lives in the same file as the port override.
+        // what that port speaks, so the override lives in the same block as the port override.
         Assert.Equal("https", service.GetServiceEndpoint().EndpointName);
     }
 
     [Fact]
-    public void AddService_LocalSourceWithForeignSchemeField_ThrowsNamingServiceFieldAndSource()
+    public void AddService_SchemeInsideLocalBlock_ThrowsNamingTheBlockAndItsValidKeys()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
@@ -452,11 +483,14 @@ public class AddServiceTests
                 project: Orders.csproj
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
-            { "services": { "orders": { "source": "local", "path": "/tmp/orders", "scheme": "https" } } }
+            { "services": { "orders": { "source": "local",
+                "local": { "path": "/tmp/orders", "scheme": "https" } } } }
             """);
 
         var builder = CreateBuilder(appHostDir);
 
+        // Scheme is a kubernetes port-forward's concern; a local checkout's endpoint comes from the
+        // project's own launch profile. The block it was written in is the one named.
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
 
         Assert.Contains("orders", ex.Message);
@@ -465,7 +499,7 @@ public class AddServiceTests
     }
 
     [Fact]
-    public void AddService_ContainerSourceWithForeignSchemeField_ThrowsNamingServiceFieldAndSource()
+    public void AddService_SchemeInsideContainerBlock_ThrowsNamingTheBlockAndItsValidKeys()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
@@ -478,7 +512,7 @@ public class AddServiceTests
                   port: 8080
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
-            { "services": { "orders": { "source": "container", "scheme": "https" } } }
+            { "services": { "orders": { "source": "container", "container": { "scheme": "https" } } } }
             """);
 
         var builder = CreateBuilder(appHostDir);
@@ -493,7 +527,7 @@ public class AddServiceTests
     }
 
     [Fact]
-    public void AddService_MisspelledSchemeInsideKubernetesBlock_ThrowsNamingTheUnknownProperty()
+    public void AddService_MisspelledSchemeInCatalogKubernetesBlock_ThrowsNamingTheUnknownProperty()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
@@ -507,7 +541,7 @@ public class AddServiceTests
                   schema: https
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
-            { "services": { "orders": { "source": "kubernetes", "context": "dev-west" } } }
+            { "services": { "orders": { "source": "kubernetes", "kubernetes": { "context": "dev-west" } } } }
             """);
 
         var builder = CreateBuilder(appHostDir);
@@ -516,5 +550,35 @@ public class AddServiceTests
 
         Assert.Contains("schema", ex.Message);
         Assert.Contains("scheme", ex.Message);
+    }
+
+    /// <remarks>
+    /// The service name, the block names and the field names in an entry are all matched the way
+    /// IConfiguration compares keys. The source is matched by a dictionary lookup instead, and is
+    /// the value most likely to be typed by hand into an environment variable, so an ordinal match
+    /// would answer 'Url' by naming a missing feature rather than the capital U.
+    /// </remarks>
+    [Theory]
+    [InlineData("url")]
+    [InlineData("Url")]
+    [InlineData("URL")]
+    public void AddService_SourceValueInAnyCasing_ResolvesTheSameSource(string source)
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              inventory:
+                url:
+                  url: https://inventory.invalid
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), $$"""
+            { "services": { "inventory": { "source": "{{source}}" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var service = builder.AddService("inventory");
+
+        Assert.Equal("inventory", service.Resource.Name);
     }
 }

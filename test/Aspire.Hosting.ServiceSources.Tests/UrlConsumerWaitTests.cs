@@ -340,7 +340,7 @@ public class UrlConsumerWaitTests
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), """
             {
               "services": {
-                "orders": { "source": "kubernetes", "context": "dev-west" },
+                "orders": { "source": "kubernetes", "kubernetes": { "context": "dev-west" } },
                 "inventory": { "source": "url" }
               }
             }

@@ -171,7 +171,7 @@ public class ServiceConfigurationExtensionsTests
         var builder = Builder();
         var service = new KubernetesSource(new FixedPortAllocator()).Resolve(
             builder, "orders", KubernetesMetadata,
-            new ServiceDeveloperConfig { Source = "kubernetes", Context = "dev" });
+            new ServiceDeveloperConfig { Source = "kubernetes", Kubernetes = new() { Context = "dev" } });
 
         // The port-forward executable would accept environment variables happily, so skipping has to
         // be driven by the source rather than by a capability check.
@@ -188,7 +188,7 @@ public class ServiceConfigurationExtensionsTests
         var migrations = builder.AddResource(new ServiceContainerResource("migrations")).WithImage("migrate");
         var service = new KubernetesSource(new FixedPortAllocator()).Resolve(
             builder, "orders", KubernetesMetadata,
-            new ServiceDeveloperConfig { Source = "kubernetes", Context = "dev" });
+            new ServiceDeveloperConfig { Source = "kubernetes", Kubernetes = new() { Context = "dev" } });
 
         // Unlike environment variables, start ordering is not "configuring the wrong process": the
         // port-forward is a real registered executable, and holding it back until migrations finish is

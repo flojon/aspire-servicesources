@@ -61,7 +61,7 @@ public class ContainerConsumerTests
                   port: 8080
             """);
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), """
-            { "services": { "inventory": { "source": "kubernetes", "context": "dev" } } }
+            { "services": { "inventory": { "source": "kubernetes", "kubernetes": { "context": "dev" } } } }
             """);
 
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
@@ -104,7 +104,7 @@ public class ContainerConsumerTests
                 project: Inventory.csproj
             """);
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), $$"""
-            { "services": { "inventory": { "source": "local", "path": "{{projectDir.Replace("\\", "\\\\")}}" } } }
+            { "services": { "inventory": { "source": "local", "local": { "path": "{{projectDir.Replace("\\", "\\\\")}}" } } } }
             """);
 
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
