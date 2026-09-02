@@ -165,9 +165,9 @@ nothing will fail to build to warn you.
   validation moved from `AddService()`, which only ever saw the services an AppHost asks for, to the
   point the configuration is read, which sees every entry in it. An unknown or misplaced key in an
   entry no `AddService()` call names now stops the run, where before it waited for the day that
-  service was added. That is deliberate: the parallel checkout prefetch clones every `local`-sourced
-  entry, including ones nothing asks for, so a typo used to buy a clone before anything had looked
-  at the entry. A key whose *shape* is wrong is reported on the same walk — an object written where
+  service was added. That is deliberate: the parallel checkout prefetch clones `local`-sourced
+  entries nothing has asked for yet (see [#76] for which ones), so a typo used to buy a clone before
+  anything had looked at the entry. A key whose *shape* is wrong is reported on the same walk — an object written where
   a field's value goes, or a value written where a source's block goes, each of which binds to
   nothing and takes the rest of the entry down with it. Validation stays shape-only and never
   consults `servicesources.yaml`, so an entry naming a service the catalog does not describe still
@@ -251,6 +251,29 @@ nothing will fail to build to warn you.
   `aspire restore` exits 0 even when the TypeScript it just wrote does not compile.
 
 ### Fixed
+
+- **`UseDeferredCheckout()` stops the AppHost cloning `"local"` services it never adds** ([#76]).
+  The speculative checkout prefetch could not know which services an AppHost would add — that is
+  what made it speculative — so every `"local"` entry with no checkout yet was cloned on the first
+  `AddService()` call. A config listing ten `"local"` services in front of an AppHost that adds two
+  paid eight cold `git clone`s, and the only remedy offered was to trim the file.
+
+  It turns out the prefetch does not need to know what the AppHost adds. It needs to know which
+  services something would *block* on, and a deferred registration blocks on nothing: its clone
+  overlaps the rest of composition wherever it is started from. So a service that would be deferred
+  if it were added is left out of the speculative set and clones itself when it is added instead —
+  and "would be deferred if added" is decidable from configuration alone, before any `AddService()`
+  call has happened. Deferral being off, or refused (publish mode, a kind that cannot build its
+  resource without reading the repository), keeps the old speculative clone: without it, cold clones
+  would run one after another on the composition thread, which is the tax [#2] removed.
+
+  Two other entries left the speculative set with it, both of which it could only lose by: a
+  checkout that already exists, and a `local.path` override. Neither is ever cloned into, so
+  speculating over them bought no parallelism — and a stale `path` override for a service the
+  AppHost never adds used to be reported at startup as a checkout that had failed, about a
+  repository nobody was going to download. The unused-checkout notice is now about clones that were
+  actually paid for, where before it named warm checkouts and told the developer that "cloning them
+  was paid for anyway".
 
 - **A `WaitFor` on a `"url"`-sourced service no longer hangs the consumer forever** ([#170]).
   Aspire honours a wait by watching the waited-on resource until it reports `Running`, and a
@@ -671,3 +694,5 @@ Targets `net10.0`.
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
 [#171]: https://github.com/flojon/aspire-servicesources/issues/171
+[#2]: https://github.com/flojon/aspire-servicesources/issues/2
+[#76]: https://github.com/flojon/aspire-servicesources/issues/76

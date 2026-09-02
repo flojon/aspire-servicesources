@@ -124,14 +124,21 @@ public static class ServiceSourcesBuilderExtensions
     /// <remarks>
     /// <para>
     /// Must be called before the first <see cref="AddService"/>, which is where the decision is
-    /// made. Nothing else about the run changes: the clones start at exactly the same moment they
-    /// always did, and a service whose checkout already exists — every service on every run after
-    /// the first — resolves eagerly, with full launch-profile fidelity, exactly as it does without
-    /// this call. Services with a <c>path</c> override are never deferred either; that directory is
-    /// the developer's own and there is nothing to clone. Neither is anything outside run mode:
+    /// made. A service whose checkout already exists — every service on every run after the first —
+    /// resolves eagerly, with full launch-profile fidelity, exactly as it does without this call.
+    /// Services with a <c>path</c> override are never deferred either; that directory is the
+    /// developer's own and there is nothing to clone. Neither is anything outside run mode:
     /// <c>aspire publish</c> and manifest generation clone first as they always have, because a
     /// manifest written from a repository that is not on disk would describe a project without its
     /// endpoints or its profile environment.
+    /// </para>
+    /// <para>
+    /// The clones stay parallel and get narrower. A deferred registration blocks on nothing, so its
+    /// clone starts at its own <see cref="AddService"/> call and still overlaps the ones around it —
+    /// but it no longer has to be started ahead of demand to do that, which is what let the
+    /// speculative prefetch stop cloning services this AppHost never adds (#76). Without this call
+    /// the clones must start before the AppHost has said what it wants, so every <c>"local"</c>
+    /// entry with no checkout yet is cloned.
     /// </para>
     /// <para>
     /// Applies to the <c>"local"</c> kinds that own a managed checkout — <c>dotnet</c>, <c>java</c>

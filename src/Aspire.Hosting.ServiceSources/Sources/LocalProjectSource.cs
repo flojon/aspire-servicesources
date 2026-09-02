@@ -24,13 +24,14 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         // clone of this repository before saying so.
         //
         // Only the first "local" AddService gets that for free across the board: the prefetch below
-        // starts cloning every "local" service at once, so once any of them has been resolved the
-        // other clones are already in flight and this check no longer runs ahead of them.
+        // starts the speculative clones at once, so once any service has been resolved those clones
+        // are already in flight and this check no longer runs ahead of them.
         var handler = isDotnetKind ? null : ResolveKindHandler(builder, serviceName, metadata);
         handler?.Validate(serviceName, metadata.KindConfig);
 
-        // Starts every "local" service's checkout at once, on background threads, and returns
-        // without waiting for any of them. See LocalCheckoutPrefetch.
+        // Starts the checkouts an AddService call would have to block on — every "local" service
+        // whose first clone nothing else is going to run — at once, on background threads, and
+        // returns without waiting for any of them. See LocalCheckoutPrefetch.
         var prefetch = LocalCheckoutPrefetch.For(builder, gitClient);
 
         var deferred = DeferredCheckout.For(builder);

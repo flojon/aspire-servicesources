@@ -29,10 +29,13 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// and <c>dotnet run --project</c> builds the project then too, rather than at startup.
 /// </para>
 /// <para>
-/// The clone itself is not started here and is not made any later: <see cref="LocalCheckoutPrefetch"/>
-/// still kicks every <c>"local"</c> checkout off on the first <c>AddService()</c> call, on
-/// background threads. All that changes is who waits for it — a background task after the host is
-/// up, instead of composition.
+/// The clone itself is not made any later. It is started from this registration —
+/// <see cref="LocalCheckoutPrefetch.StartCheckout"/>, on a background thread — rather than by the
+/// speculative prefetch, because a deferred service is the one case where the prefetch does not have
+/// to guess: nothing between here and <c>BeforeStartEvent</c> waits on the clone, so it overlaps
+/// with the rest of composition wherever it was started from, and the prefetch is free to leave it
+/// out and stop cloning services this AppHost never adds (#76). All that changes for this service is
+/// who waits for it — a background task after the host is up, instead of composition.
 /// </para>
 /// <para>
 /// What still has to be final before <c>Build()</c> is the <em>path</em>. DCP freezes it into the
@@ -390,10 +393,14 @@ internal sealed class DeferredCheckout
         IGitClient gitClient,
         Action<IResource, string, ILogger> onCheckoutLanded)
     {
-        // The prefetch reports every checkout it started that no AddService() call asked for, at
-        // BeforeStartEvent. This service was asked for; it just won't be waited on until later, so
-        // it has to say so now or it would be reported as speculative work nobody wanted.
-        prefetch.MarkRequested(serviceName);
+        // The clone starts here, not in the speculative phase: the prefetch leaves a service that
+        // would be deferred out of its set precisely because this call will claim it (#76). Starting
+        // it now rather than when the start task gets to it keeps it overlapping with the rest of
+        // composition — nothing between here and BeforeStartEvent waits on it.
+        //
+        // It also marks the service requested, which it must: the prefetch decides what to report as
+        // speculative work at BeforeStartEvent, before a deferred service has waited on anything.
+        prefetch.StartCheckout(serviceName, metadata, config, builder.AppHostDirectory, gitClient);
 
         lock (_gate)
         {
