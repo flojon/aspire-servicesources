@@ -371,6 +371,30 @@ nothing will fail to build to warn you.
   its generated host project below this package's 13.5.2 Aspire floor and fails `aspire restore`
   with `NU1605`.
 
+- **A misspelled `services` key in `servicesources.local.json` is named, rather than read as an
+  empty file** ([#122]). Only the file's `services` subtree is read, so `{ "service": { ... } }`
+  contributed nothing and the failure arrived as "no service sources are configured" — a description
+  of an empty file, handed to a developer looking at a populated one. Every typo *inside* an entry
+  became an error in [#161]; the file's own root key was the one shape left silent.
+
+  Rejecting root keys the file does not recognize would be the wrong fix. The file is deliberately
+  entitled to carry keys of its own — only `services` crosses into the AppHost's configuration,
+  which is what keeps an unrelated key out of it — so an unrecognized root key is not
+  distinguishable from a typo by validity. What separates them is resemblance. So the check is a
+  near miss: when nothing is configured anywhere and the file has no `services` key, a root key
+  within two edits of `services` is named, along with the rename to make.
+
+  ```
+  '/src/apphost/servicesources.local.json' has a top-level key 'service' and no 'services' key.
+  Only 'services' is read, so nothing under 'service' configures anything — rename it to 'services'
+  if that is what it was meant to be: { "services": { "orders": { "source": "..." } } }.
+  ```
+
+  A root key differing from `services` only by case is not a near miss but the key itself:
+  configuration keys are case-insensitive, so `Services` is read as it stands. A file carrying
+  `services` as well is never reported whatever else it carries, since its entries are being read
+  and there is nothing to correct.
+
 ### Documentation
 
 - **Who builds a `"local"` checkout, and when** ([#81]). Aspire does, on every start: a `dotnet`
@@ -671,3 +695,4 @@ Targets `net10.0`.
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
 [#171]: https://github.com/flojon/aspire-servicesources/issues/171
+[#122]: https://github.com/flojon/aspire-servicesources/issues/122

@@ -557,4 +557,149 @@ public class DeveloperConfigurationTests
             "https://from-catalog.example.com/",
             UrlSource.ResolveUrl("blankurl", metadata, config).ToString());
     }
+
+    /// <remarks>
+    /// The file's own root key is the one typo left silent after every key <em>inside</em> an entry
+    /// became an error: only the <c>services</c> subtree crosses into the AppHost's configuration,
+    /// so a misspelled root contributes nothing and the failure arrives as "nothing is configured"
+    /// — a description of an empty file, handed to a developer looking at a populated one.
+    ///
+    /// Reported as a near miss rather than by rejecting root keys the file does not recognize: the
+    /// file is entitled to carry keys of its own (pinned by
+    /// <see cref="ReadFrom_FileCarriesOtherTopLevelKeys_LeavesThemOutOfTheAppHostConfiguration"/>),
+    /// so an unknown root key is not distinguishable from a typo by validity — only by resemblance.
+    /// </remarks>
+    [Theory]
+    [InlineData("service")]
+    [InlineData("serivces")]
+    public void ResolveService_RootKeyOfTheFileIsMisspelled_SaysSoAndNamesBothSpellings(string rootKey)
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            $$"""{ "{{rootKey}}": { "orders": { "source": "local" } } }""");
+
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.Contains($"'{rootKey}'", ex.Message);
+        Assert.Contains("'services'", ex.Message);
+        Assert.Contains(Path.Combine(dir, "servicesources.local.json"), ex.Message);
+    }
+
+    /// <remarks>
+    /// Configuration keys are case-insensitive, so a root key differing from <c>services</c> only
+    /// by case is not a near miss but the key itself, and the file loads. Pinned because the near
+    /// miss above folds case to find its candidates, and folding without excluding an exact fold
+    /// would report the file that works as the file that is misspelled.
+    /// </remarks>
+    [Fact]
+    public void ResolveService_RootKeyOfTheFileDiffersFromServicesOnlyByCase_LoadsTheEntries()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """{ "Services": { "orders": { "source": "local" } } }""");
+
+        var builder = CreateBuilder(dir);
+
+        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+
+        Assert.Equal("local", config.Source);
+    }
+
+    /// <remarks>
+    /// A root key the file is entitled to carry is not a typo, and saying "did you mean services?"
+    /// of one would be advice to rename a key that belongs to something else.
+    /// </remarks>
+    [Fact]
+    public void ResolveService_FileCarriesOnlyAnUnrelatedRootKey_ReportsNothingConfiguredWithoutASuggestion()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """{ "ConnectionStrings": { "db": "Server=somewhere" } }""");
+
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.Contains("empty in every configuration source", ex.Message);
+        Assert.DoesNotContain("ConnectionStrings", ex.Message);
+    }
+
+    /// <remarks>
+    /// A file carrying both is not a typo: whatever the second key is for, the entries under
+    /// <c>services</c> are being read, so there is nothing to correct.
+    /// </remarks>
+    [Fact]
+    public void ResolveService_FileCarriesServicesAndANearMiss_LoadsTheEntriesAndSaysNothing()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """
+            {
+              "services": { "orders": { "source": "local" } },
+              "service": { "orders": { "source": "url" } }
+            }
+            """);
+
+        var builder = CreateBuilder(dir);
+
+        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+
+        Assert.Equal("local", config.Source);
+    }
+
+    /// <remarks>
+    /// The same rule where <c>services</c> is present but empty. The near miss explains an empty
+    /// section and nothing else, and an empty <c>services</c> is a file whose root key is right and
+    /// whose entries are missing — a different mistake, already reported as such.
+    /// </remarks>
+    [Fact]
+    public void ResolveService_ServicesIsEmptyAndANearMissCarriesTheEntries_ReportsNothingConfiguredWithoutASuggestion()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """
+            {
+              "services": { },
+              "service": { "orders": { "source": "local" } }
+            }
+            """);
+
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.Contains("empty in every configuration source", ex.Message);
+        Assert.DoesNotContain("'service'", ex.Message);
+    }
+
+    /// <remarks>
+    /// Two candidates in one file, which the message has to choose between. The closest one wins,
+    /// and an exact tie is broken by the key itself, so the message names the same key on every run
+    /// rather than whichever the configuration provider happened to enumerate first.
+    /// </remarks>
+    [Fact]
+    public void ResolveService_FileCarriesTwoMisspellingsOfServices_NamesTheClosestOne()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """
+            {
+              "serivces": { "orders": { "source": "url" } },
+              "service": { "orders": { "source": "local" } }
+            }
+            """);
+
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.Contains("'service'", ex.Message);
+        Assert.DoesNotContain("'serivces'", ex.Message);
+    }
 }

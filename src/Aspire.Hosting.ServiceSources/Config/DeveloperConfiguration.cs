@@ -23,6 +23,13 @@ internal sealed class DeveloperConfiguration
     public required bool FileFound { get; init; }
 
     /// <summary>
+    /// A root key of the file that looks like a misspelling of <c>services</c>, when the file has no
+    /// <c>services</c> key of its own and nothing is configured anywhere. Read by
+    /// <see cref="NothingConfiguredError"/>, which is the one failure it explains.
+    /// </summary>
+    public required string? NearMissRootKey { get; init; }
+
+    /// <summary>
     /// Reads the developer's selection out of <paramref name="builder"/>'s configuration. Whichever
     /// entry point the AppHost called first has already put <c>servicesources.local.json</c> into
     /// that chain; the call below covers the internal paths that reach a read without one, and is a
@@ -59,11 +66,18 @@ internal sealed class DeveloperConfiguration
             NormalizeBlankToAbsent(config);
         }
 
+        var services = CanonicalizeToCatalog(bound, catalogNames);
+
         return new DeveloperConfiguration
         {
-            Services = CanonicalizeToCatalog(bound, catalogNames),
+            Services = services,
             FilePath = path,
             FileFound = File.Exists(path),
+            // Read only when nothing is configured, which is the only state that reaches the error
+            // naming it — so an AppHost that starts never pays for the extra parse.
+            NearMissRootKey = services.Count == 0
+                ? DeveloperConfigFileSource.NearMissForServicesKey(path)
+                : null,
         };
     }
 
@@ -208,11 +222,27 @@ internal sealed class DeveloperConfiguration
     private ServiceSourcesConfigurationException NothingConfiguredError(string serviceName) =>
         new($"No service sources are configured: '{ServicesKey}' is empty in every configuration source, "
             + $"so no service has a source — including '{serviceName}'. "
-            + $"Create '{FilePath}' ({(FileFound ? "found, but it configures no services" : "not found")}) with "
-            + $"{{ \"services\": {{ \"{serviceName}\": {{ \"source\": \"...\" }} }} }}, "
-            + $"or set the environment variable {EnvironmentVariableFor(serviceName)}. "
-            + "Sources consulted: that file, appsettings.json, appsettings.{Environment}.json, user secrets, "
-            + "environment variables and command-line arguments.");
+            + (NearMissRootKey is not null
+                ? MisspelledRootKeyAdvice(serviceName, NearMissRootKey)
+                : $"Create '{FilePath}' ({(FileFound ? "found, but it configures no services" : "not found")}) with "
+                  + $"{{ \"services\": {{ \"{serviceName}\": {{ \"source\": \"...\" }} }} }}, "
+                  + $"or set the environment variable {EnvironmentVariableFor(serviceName)}. "
+                  + "Sources consulted: that file, appsettings.json, appsettings.{Environment}.json, user secrets, "
+                  + "environment variables and command-line arguments."));
+
+    /// <summary>
+    /// The advice for a file whose root key looks like a misspelling of <c>services</c>.
+    /// </summary>
+    /// <remarks>
+    /// Replaces the advice above rather than joining it: the developer has a populated file, so
+    /// being told to create one with an example entry describes a mistake they did not make, and the
+    /// list of sources consulted answers a question that is no longer open. What sits under the
+    /// misspelled key stays uncounted — only <c>services</c> is read, so nothing here has looked.
+    /// </remarks>
+    private string MisspelledRootKeyAdvice(string serviceName, string rootKey) =>
+        $"'{FilePath}' has a top-level key '{rootKey}' and no 'services' key. Only 'services' is read, "
+        + $"so nothing under '{rootKey}' configures anything — rename it to 'services' if that is what "
+        + $"it was meant to be: {{ \"services\": {{ \"{serviceName}\": {{ \"source\": \"...\" }} }} }}.";
 
     private static string EnvironmentVariableFor(string serviceName) =>
         $"{ServicesKey.Replace(":", "__", StringComparison.Ordinal)}__{serviceName}__Source";
