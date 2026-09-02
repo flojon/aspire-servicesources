@@ -293,4 +293,42 @@ public class ServiceDeveloperConfigValidatorTests
         Assert.Contains("'ServiceSources:Services:orders:path'", ex.Message);
         Assert.Contains("ServiceSources__Services__orders__path", ex.Message);
     }
+
+    /// <remarks>
+    /// The likeliest slip of all in moving off the flat shape, because the flat shape's shortest
+    /// entry was a source and nothing else: the whole entry gets written as that source's name. It
+    /// carries no children, so the walk above never had a key to look at, and the binder answers a
+    /// scalar where a service entry goes with null — which the dictionary binder drops, leaving the
+    /// service reading downstream as one nobody configured. The check is worth more than the message
+    /// it produces: it is the difference between being told the shape is wrong and being told, of a
+    /// file that plainly names the service, that it "configures no services".
+    /// </remarks>
+    [Fact]
+    public void Validate_ServiceEntryWrittenAsAValue_IsRejectedRatherThanDropped()
+    {
+        var ex = Load("""{ "services": { "orders": "local" } }""");
+
+        Assert.Contains("the entry takes a block of settings, not the value 'local'", ex.Message);
+
+        // The value names a source, so the suggestion is the key it belongs under rather than a
+        // placeholder the developer has to fill in again.
+        Assert.Contains("""{ "source": "local" }""", ex.Message);
+        Assert.DoesNotContain("configures no services", ex.Message);
+    }
+
+    /// <remarks>
+    /// The same shape without a value that happens to name a source: the suggestion falls back to
+    /// naming the keys an entry takes, since there is nothing to guess at.
+    /// </remarks>
+    [Fact]
+    public void Validate_ServiceEntryWrittenAsAValueThatIsNotASourceName_NamesTheValidKeys()
+    {
+        var ex = Load("""{ "services": { "orders": "/src/orders" } }""");
+
+        Assert.Contains("the entry takes a block of settings, not the value '/src/orders'", ex.Message);
+        Assert.Contains("""{ "source": "..." }""", ex.Message);
+        Assert.Contains("'source'", ex.Message);
+        Assert.Contains("'local'", ex.Message);
+        Assert.DoesNotContain("configures no services", ex.Message);
+    }
 }

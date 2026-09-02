@@ -974,6 +974,11 @@ or just needing it reachable, not caring how:
 { "services": { "orders": { "source": "url" } } }
 ```
 
+The `source` value is matched without regard to case, so `"local"`, `"Local"` and `"LOCAL"` all name
+the same source. A name none of the four has is refused at composition time, naming the ones that
+exist. (The `kind` names in `servicesources.yaml` are the exception — those *are* case-sensitive,
+because satellite packages register them and two packages must not be able to collide by spelling.)
+
 ### Overriding `servicesources.local.json`
 
 The file is read through the AppHost's own `IConfiguration`, as the **lowest**-precedence source in
@@ -1032,10 +1037,13 @@ ServiceSources__Services__orders__Source=url dotnet run
 Overriding a *field* works the same way, but gains its source's block segment —
 `ServiceSources__Services__orders__Local__Ref`, `ServiceSources__Services__orders__Container__Tag`,
 and so on. (`__` is the .NET configuration separator for `:`, and is what you want on every
-platform.) Setting one of these to a blank value *drops* the field a layer below set, rather than
-setting it to an empty string — `ServiceSources__Services__orders__Local__Path=` removes a `path`
-that `servicesources.local.json` (or a layer in between) configured, falling back to whatever the
-next layer down provides instead. A numeric field takes the empty spelling exactly:
+platform.) Setting one of these to a blank value *unsets* the field, rather than setting it to an
+empty string — `ServiceSources__Services__orders__Local__Path=` leaves the service with no `path`
+at all, even one `servicesources.local.json` (or a layer in between) configured. It does not fall
+back to that lower layer's value: configuration merges the layers *before* this package sees them,
+so the blank is what arrives and the field ends up absent — which for `path` means the service gets
+its managed checkout, exactly as if no layer had ever named one. A numeric field takes the empty
+spelling exactly:
 `ServiceSources__Services__orders__Kubernetes__Port=` drops the port, while a value of one or more
 spaces is refused rather than read as one — the message says so and names the spelling that works.
 

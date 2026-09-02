@@ -65,10 +65,18 @@ internal static class ServiceSourcesConfigCache
         private ExceptionDispatchInfo? _failure;
 
         /// <summary>
-        /// A load that throws is remembered and rethrown rather than retried, so every later caller
-        /// is told what the first one was told: a configuration error is not transient, and a second
-        /// walk of the same providers would only arrive at it again.
+        /// A load that throws a configuration error is remembered and rethrown rather than retried,
+        /// so every later caller is told what the first one was told: such an error is not
+        /// transient, and a second walk of the same providers would only arrive at it again.
         /// </summary>
+        /// <remarks>
+        /// Only that kind of failure is latched, because only that kind is known to be permanent.
+        /// The load also reads two files off disk, so an <see cref="IOException"/> from a file
+        /// something else holds open for a moment can reach here — and latching it would fail every
+        /// later <c>AddService()</c> call over a condition that had already passed by the time the
+        /// second one asked. Anything unrecognised is left to the next caller to retry, which at
+        /// worst repeats a deterministic failure and re-reports it unchanged.
+        /// </remarks>
         public LoadedConfig Load(IDistributedApplicationBuilder builder)
         {
             lock (_gate)
@@ -84,7 +92,7 @@ internal static class ServiceSourcesConfigCache
                 {
                     return _loaded = LoadedConfig.Load(builder);
                 }
-                catch (Exception ex)
+                catch (ServiceSourcesConfigurationException ex)
                 {
                     _failure = ExceptionDispatchInfo.Capture(ex);
                     throw;

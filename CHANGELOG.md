@@ -289,13 +289,42 @@ nothing will fail to build to warn you.
   than at the entry. Both now raise the same "has no source configured" error as an entry that is
   absent altogether, which names the key, the file and the environment variable that would set it.
 
-- **A `source` is matched the way every other key in an entry is** ([#161]). The service name, the
-  block names and the field names all arrive through `IConfiguration`, which compares keys
+- **A `source` is matched the way every other key in an entry is** ([#161], [#167]). The service
+  name, the block names and the field names all arrive through `IConfiguration`, which compares keys
   case-insensitively; the source value was compared ordinally, so
   `ServiceSources__Services__orders__Source=Local` was reported as
   `has source 'Local', which is not implemented yet` — naming a missing feature rather than the
   capital L. It is the value most likely to be typed by hand, since pinning a source from the
-  environment is what the block shape above exists for.
+  environment is what the block shape above exists for. All four source names now match in any
+  casing.
+
+  The parallel checkout prefetch had a quieter version of the same problem: a service whose source
+  was spelled `"Local"` resolved, but was dropped from the set of clones to start, so its checkout
+  ran alone on the `AddService()` thread instead of alongside the others. No error, just a slower
+  first start.
+
+  The unknown-source message is reworded to name the sources that do exist, since with case folded
+  it can now only fire for a name none of them has. `kind` names stay case-sensitive with their
+  "did you mean" hint — those are an open registry satellite packages contribute to, where folding
+  case could collide two packages' registrations, while the four source names are a closed set this
+  package owns.
+
+- **A service entry written as a value instead of a block is reported, not dropped** ([#161]). The
+  likeliest slip in moving off the flat shape — `{ "services": { "orders": "local" } }`, the old
+  shortest entry with the `source` key left off — carries no keys to check, so it passed validation,
+  bound to null and was dropped by the dictionary binder. The run then failed with
+  `No service sources are configured: 'ServiceSources:Services' is empty in every configuration
+  source … (found, but it configures no services)`, of a file that plainly named the service. It is
+  now refused with the rest of the entry's checks, and a value naming a source is answered with the
+  key it belongs under.
+
+- **A transient failure reading the configuration is no longer latched for the life of the builder**
+  ([#161]). The load is remembered so that every caller after the first is told what the first was
+  told, on the grounds that a configuration error is not transient — but the capture caught every
+  exception, and the load also reads two files off disk. An `IOException` from a file something else
+  held open for a moment failed every later `AddService()` call over a condition that had already
+  passed. Only a configuration error is latched now; anything else is left to the next caller to
+  retry.
 
 - **A value that cannot bind to its field is reported as a configuration error** ([#161]). A
   `port` written as `"abc"`, or blanked with a space rather than left empty, reached the binder and
@@ -632,6 +661,7 @@ Targets `net10.0`.
 [#130]: https://github.com/flojon/aspire-servicesources/issues/130
 [#159]: https://github.com/flojon/aspire-servicesources/issues/159
 [#160]: https://github.com/flojon/aspire-servicesources/issues/160
+[#167]: https://github.com/flojon/aspire-servicesources/issues/167
 [#170]: https://github.com/flojon/aspire-servicesources/issues/170
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

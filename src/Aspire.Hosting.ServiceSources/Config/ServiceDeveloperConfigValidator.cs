@@ -18,6 +18,17 @@ internal static class ServiceDeveloperConfigValidator
     /// </summary>
     public static void Validate(string serviceName, IConfigurationSection entry)
     {
+        // The entry itself, before its keys: an entry written as a value has no children, so the
+        // walk below would find nothing to object to. It is the flat shape's shortest entry — a
+        // source and nothing else — written without the key that used to carry it, and the binder
+        // answers a scalar where an object goes with null, which the dictionary binder then drops.
+        // Left unchecked it is the one wrong shape reported as no shape at all: the service reads
+        // downstream as one nobody configured, out of a file that plainly names it.
+        if (entry.Value is not null)
+        {
+            throw EntryExpected(serviceName, entry);
+        }
+
         foreach (var key in entry.GetChildren())
         {
             if (!ServiceDeveloperConfigShape.RootKeys.Contains(key.Key))
@@ -127,6 +138,30 @@ internal static class ServiceDeveloperConfigValidator
         new($"Service '{serviceName}': '{field.Key}' is not a valid key in the "
             + $"'{block.ToLowerInvariant()}' block. Valid keys there are {Quoted(fields.Keys)}."
             + SetAt(field));
+
+    /// <summary>
+    /// The error for a whole service entry written as a value instead of a block of settings.
+    /// </summary>
+    /// <remarks>
+    /// Kept apart from <see cref="BlockExpected"/> for the suggestion: the entry is the outermost
+    /// object, so there is no surrounding one to show, and the value it was given is worth reading
+    /// rather than only reporting back. Every source has a block named for it, so a value naming one
+    /// of those blocks is a source name — someone writing <c>"orders": "local"</c>, where the fix is
+    /// the <c>source</c> key that value belongs under and not a list of the keys an entry takes.
+    /// </remarks>
+    private static ServiceSourcesConfigurationException EntryExpected(
+        string serviceName, IConfigurationSection entry)
+    {
+        var value = entry.Value ?? "";
+
+        var source = ServiceDeveloperConfigShape.BlockFields.ContainsKey(value) ? value : "...";
+
+        return new ServiceSourcesConfigurationException(
+            $"Service '{serviceName}': the entry takes a block of settings, not the value '{value}': "
+            + $"\"{serviceName}\": {{ \"source\": \"{source}\" }}. "
+            + $"Valid keys there are {Quoted(ServiceDeveloperConfigShape.RootKeys)}."
+            + SetAt(entry));
+    }
 
     /// <summary>
     /// The error for a block name carrying a value: the key is a valid one, and what is wrong is

@@ -195,4 +195,32 @@ public class ServiceSourcesConfigCacheTests
         Assert.Same(first, second);
         Assert.Equal(1, SourcesInsertedSince(builder, sourcesBeforeLoading));
     }
+
+    /// <remarks>
+    /// The counterpart of the test above, and the reason it is a configuration error that gets
+    /// latched rather than whatever turns up: the load reads two files off disk, so a failure that
+    /// has nothing to do with what they say can reach the same place. Latching one of those would
+    /// fail every later <c>AddService()</c> call over a condition that had already passed. Malformed
+    /// yaml stands in for it because it is the one non-configuration failure this can provoke
+    /// deterministically — what the test pins is that a retry happens at all, not that yaml is worth
+    /// retrying.
+    /// </remarks>
+    [Fact]
+    public void LoadedFor_AfterANonConfigurationFailure_LoadsAgainRatherThanRethrowing()
+    {
+        var dir = CreateAppHostDirectory(
+            "services: [ unterminated flow sequence",
+            """{ "services": { "orders": { "source": "local" } } }""");
+
+        var builder = CreateBuilder(dir);
+
+        var first = Assert.ThrowsAny<Exception>(() => ServiceSourcesConfigCache.LoadedFor(builder));
+        Assert.IsNotType<ServiceSourcesConfigurationException>(first);
+
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), OrdersCatalog);
+
+        var loaded = ServiceSourcesConfigCache.LoadedFor(builder);
+
+        Assert.Contains("orders", loaded.Catalog.Services.Keys);
+    }
 }

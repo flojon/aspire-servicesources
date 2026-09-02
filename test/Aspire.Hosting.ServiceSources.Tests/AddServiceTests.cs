@@ -78,8 +78,91 @@ public class AddServiceTests
         Assert.Contains(builder.Resources, r => r.Name == "orders");
     }
 
+    /// <summary>
+    /// A source <em>value</em> spelled with different casing than the source's own name still
+    /// resolves. Configuration keys are case-insensitive everywhere, so a developer who capitalises
+    /// a value the way they would capitalise anything else — especially in an environment variable —
+    /// has not made a mistake, and used to be told the source was not implemented (#167).
+    /// </summary>
     [Fact]
-    public void AddService_UnknownSource_ThrowsNamingServiceAndSource()
+    public void AddService_SourceValueSpelledWithACapital_ResolvesTheSameSource()
+    {
+        var projectDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(projectDir, "Orders.csproj"), """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+              </PropertyGroup>
+            </Project>
+            """);
+
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), $$"""
+            { "services": { "orders": { "source": "Local", "local": { "path": "{{projectDir.Replace("\\", "\\\\")}}" } } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var service = builder.AddService("orders");
+
+        Assert.Contains(builder.Resources, r => ReferenceEquals(r, service.Resource));
+    }
+
+    /// <summary>
+    /// Casing carries no meaning for any source, not just <c>"local"</c>: the lookup is
+    /// case-insensitive, and the key validation that follows runs exactly as it does for the
+    /// canonical spelling.
+    /// </summary>
+    [Fact]
+    public void AddService_UppercaseSourceValue_StillValidatesTheRestOfTheEntry()
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+                url:
+                  url: https://orders.example.com
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "URL", "port": 8080 } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
+
+        // The shape complaint, not the unknown-source one: the source resolved, so what runs is key
+        // validation. (#176 reworded this from "not valid for source" — a block belonging to another
+        // source is now ignored rather than rejected, so what is left to reject is a key in the
+        // wrong place.)
+        Assert.Contains("'port'", ex.Message);
+        Assert.Contains("is not a valid key here", ex.Message);
+        Assert.DoesNotContain("unknown source", ex.Message);
+    }
+
+    /// <summary>
+    /// The message for a source nobody implements has to say that, and only that: with
+    /// case-insensitive matching it can no longer fire for a source that exists under another
+    /// spelling, so it names the sources that do exist rather than hinting the feature is pending
+    /// (#167).
+    /// </summary>
+    /// <remarks>
+    /// The kind of report is pinned, not just the names it interpolates. A source name that is
+    /// present but unrecognised has to reach the unknown-source complaint and never the "no source
+    /// configured" report reserved for a blank or absent source, since the two sit on this same code
+    /// path — and a variant of that message that still quoted the service and the source would
+    /// satisfy every other assertion here (#168).
+    /// </remarks>
+    [Fact]
+    public void AddService_UnknownSource_ReportsItAsUnknownAndNamesTheSourcesThatDoExist()
     {
         var appHostDir = Directory.CreateTempSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
@@ -98,6 +181,16 @@ public class AddServiceTests
 
         Assert.Contains("orders", ex.Message);
         Assert.Contains("docker", ex.Message);
+        Assert.Contains("unknown source", ex.Message);
+        Assert.Contains("'local'", ex.Message);
+        Assert.Contains("'kubernetes'", ex.Message);
+        Assert.Contains("'url'", ex.Message);
+        Assert.Contains("'container'", ex.Message);
+        Assert.DoesNotContain("not implemented yet", ex.Message);
+
+        // The key as well as the file, since the file is only the lowest layer it can arrive from.
+        Assert.Contains("'ServiceSources:Services:orders:source'", ex.Message);
+        Assert.Contains("ServiceSources__Services__orders__source", ex.Message);
     }
 
     [Fact]
@@ -388,6 +481,7 @@ public class AddServiceTests
         var resourceNameAttribute = nameParameter.GetCustomAttributes(typeof(ResourceNameAttribute), inherit: false);
         Assert.Single(resourceNameAttribute);
     }
+
     [Fact]
     public void AddService_PortInsideContainerBlock_ThrowsNamingTheBlockAndItsValidKeys()
     {
