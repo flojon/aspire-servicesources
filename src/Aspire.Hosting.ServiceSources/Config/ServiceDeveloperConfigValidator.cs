@@ -66,22 +66,26 @@ internal static class ServiceDeveloperConfigValidator
     {
         var problems = new List<string>();
 
-        // The entry itself, before its keys. An entry written as a value is the flat shape's
-        // shortest entry — a source and nothing else — written without the key that used to carry
-        // it, and the binder answers a scalar where an object goes with null, which the dictionary
-        // binder then drops. Left unchecked it is the one wrong shape reported as no shape at all:
-        // the service reads downstream as one nobody configured, out of a file that plainly names
-        // it.
+        // The entry itself, before its keys. Two different mistakes put a value here, and they do
+        // not deserve the same complaint.
         //
-        // Collected rather than thrown, because a value here does not mean there are no keys to
-        // walk. Configuration merges per key, so a block in the file underneath a higher layer's
-        // scalar — ServiceSources__Services__orders=local over an entry in local.json — yields a
-        // section carrying a value *and* children. Reporting only the value would hide every
-        // misplaced key inside it behind a complaint about a shape the developer's own file has
-        // not got.
+        // A value-*only* entry is the flat shape's shortest entry — a source and nothing else —
+        // written without the key that used to carry it. The binder answers a scalar where an
+        // object goes with null, which the dictionary binder then drops, so left unchecked it is
+        // the one wrong shape reported as no shape at all: the service reads downstream as one
+        // nobody configured, out of a file that plainly names it.
+        //
+        // An entry can also carry a value *and* keys, because configuration merges per key: a
+        // block in the file underneath a higher layer's scalar —
+        // ServiceSources__Services__orders=local over an entry in local.json — yields both. That
+        // one binds correctly, the binder finding no string converter for the entry type and
+        // falling through to the children, so nothing is dropped and the fault is a different
+        // one: the value is inert, and whoever set it to choose a source got silence. Reported
+        // rather than tolerated for exactly that reason, and collected rather than thrown so that
+        // a merged entry's keys are still walked.
         if (entry.Value is not null)
         {
-            problems.Add(EntryExpected(serviceName, entry));
+            problems.Add(EntryExpected(serviceName, entry, alsoHasKeys: HasChildren(entry)));
         }
 
         foreach (var key in entry.GetChildren())
@@ -264,9 +268,26 @@ internal static class ServiceDeveloperConfigValidator
     /// of those blocks is a source name — someone writing <c>"orders": "local"</c>, where the fix is
     /// the <c>source</c> key that value belongs under and not a list of the keys an entry takes.
     /// </remarks>
-    private static string EntryExpected(string serviceName, IConfigurationSection entry)
+    /// <param name="alsoHasKeys">
+    /// Whether the entry carries settings as well as this value, which a merge of configuration
+    /// layers can produce and a single file cannot.
+    /// </param>
+    private static string EntryExpected(
+        string serviceName, IConfigurationSection entry, bool alsoHasKeys)
     {
         var value = entry.Value ?? "";
+
+        // The entry has its block of settings, so the shape is not what is wrong and the value is
+        // not what the entry was written as. Saying "the entry takes a block of settings" of an
+        // entry that plainly has one — and then showing a shape the file already has — would
+        // describe a mistake nobody made. What is wrong is that this value does nothing.
+        if (alsoHasKeys)
+        {
+            return $"the entry carries the value '{value}' as well as its settings, and that value "
+                + "is inert: a scalar at a service's own key binds to nothing, so nothing reads it. "
+                + "If it was meant to choose the source, that is the 'source' key inside the entry."
+                + SetAtBlock(entry, nameof(ServiceDeveloperConfig.Source));
+        }
 
         var source = ServiceDeveloperConfigShape.BlockFields.ContainsKey(value) ? value : "...";
 
@@ -325,13 +346,24 @@ internal static class ServiceDeveloperConfigValidator
     /// Worth its own check rather than being left to the binder, which reports it as a failure to
     /// convert a value at a key path into a CLR type, from a plain
     /// <see cref="InvalidOperationException"/> that no handler upstream treats as a configuration
-    /// problem. A value of one or more spaces never arrives here: <see cref="Blank"/> takes it
-    /// first, for every field type rather than only the ones the binder chokes on.
+    /// problem. A whitespace value never arrives here: <see cref="Blank"/> takes it first, for
+    /// every field type rather than only the ones the binder chokes on.
+    ///
+    /// The empty case is unreachable while every field in the shape is nullable, since
+    /// <see cref="BindsTo"/> accepts an empty value for anything that can hold null. It is spelled
+    /// out anyway, because the field that makes it reachable is one non-nullable property away and
+    /// would otherwise be reported as a value of the wrong type with no mention of the one gesture
+    /// the developer was reaching for. The wording has to differ from <see cref="Blank"/>'s: a
+    /// field that cannot be unset is not helped by being told how to unset one.
     /// </remarks>
     private static string NotBindable(
         IConfigurationSection field, string block, Type type, string value) =>
         $"'{field.Key}' in the '{block}' block takes a {Described(type)}, "
-        + $"but is set to '{value}'."
+        + $"but is set to {Escaped(value)}."
+        + (value.Length == 0
+            ? " An empty value leaves a field unset where the field can be unset; this one cannot, "
+              + "so it needs a value."
+            : "")
         + SetAt(field);
 
     /// <summary>
@@ -340,14 +372,42 @@ internal static class ServiceDeveloperConfigValidator
     /// <remarks>
     /// Kept apart from <see cref="NotBindable"/>, which says what the field takes and what it was
     /// given. That pairing reads as a contradiction for a string field — a space *is* a string —
-    /// and the field's type is beside the point in any case: what is wrong is that spaces are
+    /// and the field's type is beside the point in any case: what is wrong is that whitespace is
     /// neither a value nor the empty spelling that unsets a field, and the empty spelling is what
     /// this is nearly always someone reaching for.
+    ///
+    /// "Whitespace" rather than "spaces" because the check is
+    /// <see cref="string.IsNullOrWhiteSpace"/>, which a tab, a newline and a non-breaking space
+    /// all satisfy. Naming the space would send someone who typed one of those to retype a space
+    /// and meet the identical error — and the value goes through <see cref="Escaped"/> for the
+    /// same reason, since none of them can be told from a space by looking.
     /// </remarks>
     private static string Blank(IConfigurationSection field, string block) =>
-        $"'{field.Key}' in the '{block}' block is set to '{field.Value}', which is one or more "
-        + "spaces rather than a value. Set it to an empty value to leave the field unset."
+        $"'{field.Key}' in the '{block}' block is set to {Escaped(field.Value)}, which is "
+        + "whitespace rather than a value. Set it to an empty value to leave the field unset."
         + SetAt(field);
+
+    /// <summary>
+    /// A value as a quoted literal with its whitespace spelled out, so that a character which
+    /// looks like a space — a tab, a newline, U+00A0 — is distinguishable from one.
+    /// </summary>
+    /// <remarks>
+    /// The plain space is left as itself: it is the character a reader assumes, so escaping it
+    /// would add noise to the common case and nothing else. Everything else whitespace gets its
+    /// code point, which is what a developer needs in order to find it in the file.
+    /// </remarks>
+    private static string Escaped(string? value) =>
+        value is null
+            ? "''"
+            : $"'{string.Concat(value.Select(c => c switch
+            {
+                ' ' => " ",
+                '\t' => "\\t",
+                '\n' => "\\n",
+                '\r' => "\\r",
+                _ when char.IsWhiteSpace(c) => $"\\u{(int)c:x4}",
+                _ => c.ToString(),
+            }))}'";
 
     private static string Described(Type type)
     {

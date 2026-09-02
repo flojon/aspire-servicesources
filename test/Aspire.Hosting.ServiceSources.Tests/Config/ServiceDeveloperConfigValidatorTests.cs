@@ -263,7 +263,7 @@ public class ServiceDeveloperConfigValidatorTests
             """);
 
         Assert.Contains("'port' in the 'kubernetes' block", ex.Message);
-        Assert.Contains("one or more spaces rather than a value", ex.Message);
+        Assert.Contains("whitespace rather than a value", ex.Message);
         Assert.Contains("empty value", ex.Message);
     }
 
@@ -375,12 +375,33 @@ public class ServiceDeveloperConfigValidatorTests
             """);
 
         Assert.Contains("'path' in the 'local' block", ex.Message);
-        Assert.Contains("one or more spaces rather than a value", ex.Message);
+        Assert.Contains("whitespace rather than a value", ex.Message);
         Assert.Contains("empty value", ex.Message);
 
         // Not the "takes a <type>" phrasing a bind failure gets: a space *is* a string, so
         // reporting what the field takes against what it was given contradicts itself here.
         Assert.DoesNotContain("takes a string", ex.Message);
+    }
+
+    /// <remarks>
+    /// The check is IsNullOrWhiteSpace, which a tab, a newline and a non-breaking space all
+    /// satisfy, so the message may not call the value a space: someone who typed one of these
+    /// would retype a space and meet the identical error. Nor can it echo the character as it
+    /// stands, since none of them can be told from a space by looking.
+    /// </remarks>
+    [Fact]
+    public void Validate_NonSpaceWhitespaceValue_NamesTheCharacterRatherThanCallingItASpace()
+    {
+        // A non-breaking space, the one a copy-paste out of a browser or a document leaves behind.
+        var ex = Load("""
+            { "services": { "orders": {
+                "source": "local",
+                "local": { "path": "\u00a0" } } } }
+            """);
+
+        Assert.Contains("whitespace rather than a value", ex.Message);
+        Assert.Contains("\\u00a0", ex.Message);
+        Assert.DoesNotContain("one or more spaces", ex.Message);
     }
 
     /// <remarks>
@@ -436,8 +457,14 @@ public class ServiceDeveloperConfigValidatorTests
             () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
 
         Assert.Contains("2 problems with the entry", ex.Message);
-        Assert.Contains("the entry takes a block of settings", ex.Message);
         Assert.Contains("'path' is not a valid key here", ex.Message);
+
+        // The entry does have its block of settings, and it binds: the binder finds no string
+        // converter for the entry type and falls through to the children. So the fault is the
+        // inert value, not the shape — telling this developer that "the entry takes a block of
+        // settings" and showing them one would describe a mistake they did not make.
+        Assert.Contains("as well as its settings, and that value is inert", ex.Message);
+        Assert.DoesNotContain("the entry takes a block of settings", ex.Message);
     }
 
     /// <remarks>
