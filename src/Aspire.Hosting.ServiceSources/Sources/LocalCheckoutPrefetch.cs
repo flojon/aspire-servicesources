@@ -43,8 +43,9 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// </para>
 /// <list type="bullet">
 /// <item>
-/// A checkout there is nothing to clone for — <see cref="LocalGitCheckout.IsColdManagedCheckout"/>,
-/// the same rule the deferral decision is built on. A working tree already on disk, or a
+/// A checkout there is nothing to clone for — the complement of
+/// <see cref="LocalGitCheckout.IsColdManagedCheckout"/>, which is the rule the deferral decision
+/// is built on too. A working tree already on disk, or a
 /// <c>local.path</c> override naming the developer's own directory: speculating over one costs a
 /// <c>Directory.Exists</c>, buys no parallelism, and — for a stale override — invents a failure
 /// about a repository nobody was going to download. <see cref="GetRepoRoot"/> resolves these

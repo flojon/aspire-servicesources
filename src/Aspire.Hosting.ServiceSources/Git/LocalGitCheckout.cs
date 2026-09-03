@@ -39,10 +39,10 @@ internal static class LocalGitCheckout
         Path.Combine(appHostDirectory, ".servicesources", "checkouts", serviceName);
 
     /// <summary>
-    /// Whether this package owns <paramref name="serviceName"/>'s checkout directory, and so has a
-    /// <see cref="ManagedRepoRoot"/> to say anything about at all. A <c>local.path</c> override
-    /// answers no: that is the developer's own directory, which this package neither creates,
-    /// clones into, nor writes to.
+    /// Whether this package owns the checkout directory, and so has a
+    /// <see cref="ManagedRepoRoot"/> to say anything about at all. No <c>local.path</c> means it
+    /// does; a <c>local.path</c> override means it does not, because that names the developer's own
+    /// directory, which this package neither creates, clones into, nor writes to.
     /// </summary>
     /// <remarks>
     /// The shared first half of every question answered about a service's checkout from its path
@@ -69,11 +69,11 @@ internal static class LocalGitCheckout
     /// policy (opted in, run mode) on top of it to decide for real.
     /// </para>
     /// <para>
-    /// Those two have to agree. The prefetch drops a candidate from the clone set on the strength
-    /// of this predicate and <c>ShouldDefer</c> then decides for real, so a service the two answer
-    /// differently is dropped from the prefetch and then takes the eager path — cloning alone on
-    /// the <c>AddService()</c> thread instead of alongside the others. That failure is silent: no
-    /// error, no wrong result, just a slower first run, which is the shape of #76 itself.
+    /// Those two have to agree. The prefetch drops a candidate on the strength of this predicate
+    /// and never revisits it, so a service the two answer differently is left out of the clone set
+    /// and then takes the eager path — cloning alone on the <c>AddService()</c> thread instead of
+    /// alongside the others. That failure is silent: no error, no wrong result, just a slower
+    /// first run, which is the shape of #76 itself.
     /// </para>
     /// <para>
     /// Anything already on disk is excluded whatever it is. A working tree from an earlier run is
