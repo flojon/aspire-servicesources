@@ -265,7 +265,9 @@ see, and one bad clone costs one service instead of the run. The clones stay par
 service's clone starts at its own `AddService()` call and blocks nobody, so several of them still
 run at once — the wall-clock is the slowest clone, not the sum. The one thing that still clones in
 turn is a third-party `kind` handler that declares deferral support and then declines it for a
-particular service; the built-in `dotnet`, `java` and `javascript` kinds never do.
+particular service; the built-in `dotnet`, `java` and `javascript` kinds never do. If you maintain
+a kind of your own, [Implementing a kind](#implementing-a-kind) covers the two members that opt into
+this and what declining late costs.
 
 It also stops the AppHost downloading repositories it doesn't use. Without deferral the clones have
 to start before the AppHost has said which services it wants, so every `"local"` entry with no
@@ -707,6 +709,51 @@ once, and cannot re-register `"dotnet"` or use a
 name that collides with a well-known service property (`repository`, `project`, `defaultRef`,
 `kind`, `kubernetes`, `url`, `container`) — a block by one of those names would be read as that
 property rather than as the kind's options.
+
+**Supporting [`UseDeferredCheckout()`](#first-run-usedeferredcheckout).** Two more members, both
+optional and both defaulting to "no", decide whether a service of your kind can start before its
+checkout lands. Leave them alone and your kind keeps working exactly as it does now, always on the
+eager path:
+
+```csharp
+// Answered before anything is registered, so core can decide which services to clone ahead of
+// demand. Must touch no filesystem, add nothing to the app model, and never throw - it is called
+// for services that may never be added. Answer from the options block alone.
+public bool SupportsDeferredCheckout(object? rawConfig) => true;
+
+// Resolve for a checkout that hasn't happened yet: repoRoot is the directory the clone *will*
+// land in, and nothing is there yet.
+public DeferredLocalResource? ResolveDeferred(
+    IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig)
+{
+    // The same resource Resolve would build, but from the options block alone.
+    var options = LocalKindConfig.Parse<Options>(rawConfig, serviceName);
+    IResourceBuilder<IResourceWithServiceDiscovery> app = ...;
+
+    return new DeferredLocalResource
+    {
+        Service = app,
+        // Your checks that need the working tree. Core runs this after the clone and reports a
+        // failure as that service's resource state.
+        ValidateCheckout = () => ValidateWrapperScript(repoRoot),
+    };
+}
+```
+
+Build the resource exactly as `Resolve` would, but read no file under `repoRoot` — hand those checks
+back as `ValidateCheckout`. Endpoints are the one thing that can't be added later, so a kind that
+can only learn its endpoints by reading the repository should return `null`. Holding the resource
+back and starting it once the checkout lands is core's job, and it covers every resource the call
+adds to the app model, not just the one returned as `Service`.
+
+Returning `null` from `ResolveDeferred` after `SupportsDeferredCheckout` said `true` is honoured —
+legitimate for a kind that can only tell once it has looked at everything — but it isn't free. The
+checkout prefetch acts on `SupportsDeferredCheckout`, so a service that answered `true` is left out
+of the clones started ahead of demand, and declining here drops it onto the eager path with no clone
+already running: it is cloned inline, alone, on the `AddService()` thread rather than alongside the
+others. Decide in `SupportsDeferredCheckout` wherever you can, where the answer is free. A block too
+malformed to answer for is `false`, which routes it to the eager path where `Validate` reports it
+properly.
 
 #### Private repositories
 

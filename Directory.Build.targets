@@ -117,10 +117,16 @@
         // "([#62])", whose definitions live at the end of the file and outside the section.
         // NuGet renders release notes as plain text, so neither survives as a link: unwrap
         // both rather than shipping markup that resolves to nothing.
+        //
+        // A cross-repository reference carries a prefix - "[microsoft/aspire#19507]",
+        // "[NuGetGallery#6948]" - and needs the same unwrapping. Only a label ending in
+        // "#<digits>" is one of these, which leaves "[AspireExport]" and the like alone.
+        // The inline form goes first: the reference pattern alone would leave the trailing
+        // "(https://...)" behind as visible text.
         Func<string, string> plain = text =>
         {
-            text = Regex.Replace(text, @"\[(\#\d+)\]\([^()]*\)", "$1");
-            return Regex.Replace(text, @"\[(\#\d+)\]", "$1");
+            text = Regex.Replace(text, @"\[([^\[\]]*\#\d+)\]\([^()]*\)", "$1");
+            return Regex.Replace(text, @"\[([^\[\]]*\#\d+)\]", "$1");
         };
 
         // The changelog.d/ fragments, grouped under their headings in the order the changelog

@@ -11,11 +11,13 @@ nothing will fail to build to warn you.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-03
+
 ### Breaking
 
 - **Each source's settings move into a block named for that source in `servicesources.local.json`**
   ([#161]). A field written directly on a service's entry is no longer read, and is reported rather
-  than ignored. Rewrite each entry by moving its fields under the source they belong to:
+  than ignored. Move each entry's fields under the source they belong to:
 
   ```json
   { "services": { "orders": { "source": "local", "path": "/src/orders" } } }
@@ -31,97 +33,66 @@ nothing will fail to build to warn you.
   `ServiceSources__Services__orders__Source=container` — needs no edit. Overriding a *field* from a
   higher layer gains the block segment: `ServiceSources__Services__orders__Local__Ref`.
 
-  The shape exists so that a higher configuration layer can switch a service's source. Configuration
-  merges per key, so with the fields flat the old source's fields survived a switch and were then
-  rejected as invalid for the new source, which made the override story in this release false for
-  the case it was most wanted for. Under a block they survive unread.
+- **`git` on `PATH` is now required for a managed `"local"` checkout** ([#85]), and `LibGit2Sharp`
+  is gone from the package. Clone, fetch and checkout shell out to the `git` executable, the same
+  "a tool you already have" trade the `"kubernetes"` source makes with `kubectl`. Install `git` 2.7
+  or newer; a service pointed at your own directory with `path` needs none. In exchange, about
+  **23 MB of `runtimes/`** leaves every consumer's build output, plus 32 MB in `~/.nuget/packages`.
+  Nothing in `servicesources.yaml`, `servicesources.local.json` or the public API changes.
+
+- **Core and both satellite packages have to move together** ([#79]). A satellite pins core to its
+  own minor, so an AppHost that references core and a satellite separately cannot take core `0.4.0`
+  while holding a `0.3.x` satellite: restore fails with `NU1107`. The bound shipped in `0.3.0`, and
+  `0.4.0` is the first minor to cross it. Move both, or drop the core reference and let the
+  satellite bring core in for you.
 
 ### Added
 
 - **`servicesources.local.json` can be overridden without editing it** ([#69]). The per-developer
-  source selection is now read through the AppHost's own `IConfiguration` rather than by a loader
-  of ours, with the file registered as the *lowest*-precedence source in the standard chain under
-  the key `ServiceSources:Services:<service>`. `appsettings.json`,
-  `appsettings.{Environment}.json`, user secrets, environment variables and the command line all
-  override it, so a single run can pick a different source —
-  `ServiceSources__Services__orders__Source=url dotnet run` — and CI can pin every service from the
-  environment with no file present at all. Named profiles come from the same mechanism:
-  `appsettings.Cluster.json` plus `--environment Cluster`. The file is still authored the same way
-  by a .NET and by a TypeScript AppHost, and still keeps its own `services` root on disk; only the
-  key its entries reach the AppHost's configuration under is ours. Its per-entry shape does change
-  in this same release — see the [#161] entry above. The keys are in the AppHost's own
-  configuration, so an AppHost can read them as well; the file joins the chain on the first
-  ServiceSources call the AppHost makes — a `UseX()` registration, or the first `AddService()` —
-  rather than on the first read of ours, so such a read does not depend on how many services
-  precede it ([#171]).
+  source selection is now read through the AppHost's own `IConfiguration`, with the file registered
+  as the *lowest*-precedence source in the standard chain under the key
+  `ServiceSources:Services:<service>`. `appsettings.json`, `appsettings.{Environment}.json`, user
+  secrets, environment variables and the command line all override it, so a single run can pick a
+  different source — `ServiceSources__Services__orders__Source=url dotnet run` — and CI can pin
+  every service from the environment with no file present at all. Named profiles come from the same
+  mechanism: `appsettings.Cluster.json` plus `--environment Cluster`. The file is authored exactly
+  as before and keeps its own `services` root on disk, but its per-entry shape does change in this
+  release — see the [#161] entry above. It joins the chain on the first ServiceSources call the
+  AppHost makes, so reading these keys yourself does not depend on how many services precede it
+  ([#171]).
 
-- **A malformed entry fails every `AddService()` call, not just the one that read it** ([#161]).
-  The developer configuration is read once per builder and the result reused, so a bad entry is
-  reported to every caller rather than to whichever one happened to trigger the read. What is
-  remembered is the configuration error alone: the read also touches two files, and an
-  `IOException` from one something else held open for a moment is not a verdict on the
-  configuration, so it is left for the next caller to retry.
+- **A malformed entry fails every `AddService()` call, not just the one that read it** ([#161]). The
+  developer configuration is read once per builder and the result reused. Only the configuration
+  error is remembered: an `IOException` from a file something else held open for a moment is left
+  for the next caller to retry.
 
 - **A deferred cold checkout shows the clone's own progress** ([#131]). A `"local"` service whose
   checkout is deferred used to sit in `Checking out` for however long its repository took, with no
   way to tell a slow clone from a stuck one. The State column now carries git's own account of it —
   the phase, that phase's percentage, and the bytes transferred while a pack is arriving
   (`Receiving objects 48% · 18.54 MiB`) — and every line git writes reaches the service's console
-  logs as it arrives. Updates are coalesced to roughly one a second, so a clone that emits a line
-  per percentage point costs one dashboard round trip per second rather than a hundred.
-
-  The phase is named rather than folded into a single 0–100 bar. A clone runs five of them —
-  counting and compressing on the server, then receiving, resolving deltas and updating files
-  locally — and their relative durations depend on the repository, so weighting them into one bar
-  would invent numbers that are wrong for any given clone. When the transfer ends the state returns
-  to `Checking out` for the ref reconciliation that follows, which reports nothing. Silence is
-  normal too: git suppresses progress for work that finishes inside its own delay threshold, and a
-  clone from a local path reports none at all, so a small repository can still go from
-  `Checking out` straight to running.
-
-  This needs no opt-in beyond `builder.UseDeferredCheckout()`, and it is only possible now that both
-  of its halves exist: before [#130] the clone ran during composition, with no dashboard to report
-  to, and before [#85] it ran inside LibGit2Sharp, whose callbacks carry object and byte counts but
-  no transfer rate. One side effect reaches the eager path as well — a prefetched clone now runs
-  under `--progress`, so if it fails, the lines git wrote before failing are in the message. The
-  progress lines themselves are stripped out of it, or a clone interrupted at 60% would report
-  `fatal: early EOF` underneath sixty superseded percentages.
+  logs. Needs no opt-in beyond `builder.UseDeferredCheckout()`. Silence is normal: git reports no
+  progress for work that finishes inside its own delay threshold, and none at all for a clone from a
+  local path, so a small repository can go from `Checking out` straight to running. A prefetched
+  clone on the eager path now runs under `--progress` too, so a failure carries the lines git wrote
+  before it.
 
 - **`builder.UseDeferredCheckout()` moves a cold `"local"` checkout past AppHost startup**
   ([#130], [#159]). Opt-in, off by default. A `"local"` service whose managed checkout does not
   exist yet is registered against the path that checkout will have, held back with Aspire's
-  explicit-start behaviour, cloned while the AppHost runs, and started once its checkout lands.
-  The dashboard comes up immediately instead of after every clone, checkout progress and failure
-  become visible resource state, and a clone that fails costs one service rather than the whole
-  AppHost.
+  explicit-start behaviour, cloned while the AppHost runs, and started once its checkout lands. The
+  dashboard comes up immediately instead of after every clone, and a clone that fails costs one
+  service rather than the whole AppHost. All three `"local"` kinds that own a managed checkout are
+  covered — `dotnet`, `java` and `javascript`.
 
-  All three `"local"` kinds that own a managed checkout are covered — `dotnet`, `java` and
-  `javascript`. (The other *sources* — `url`, `kubernetes` and `container` — never clone a
-  repository, so they have nothing to defer.) The launch-profile caveat below is the `dotnet` kind's alone: neither
-  satellite kind has a launch profile, and both take their endpoints from the committed catalog —
-  `java` requires `port` in its kind block, and a `javascript` service always gets an `http`
-  endpoint whose port Aspire allocates when the block does not name one — so a deferred `java` or
-  `javascript` service is identical to a warm one. Their checks against the working tree
-  (`workingDirectory` and the `mvnw`/`gradlew` wrapper; `appDirectory`, `package.json` and
-  `scriptPath`) run just after the clone, reported as that service's resource state. For
-  `javascript`, the separate resource that runs `npm install` is held back with the app and
-  started ahead of it.
-
-  Aspire reads a project's launch profile during composition and turns it into endpoints,
-  environment variables and command-line arguments there and then, so a deferred service — whose
-  repository is not on disk yet — gets none of the three, and nothing re-runs the step.
-  **Environment is restored**: once the clone lands, the profile's `environmentVariables` are
-  applied before the resource starts, and only where the AppHost has not already set the same key.
-  Without that a deferred service runs as `Production` while every warm run of it runs as
-  `Development`, because `Host.CreateDefaultBuilder` takes the environment name from
-  `DOTNET_ENVIRONMENT` and most repositories set it in the launch profile and nowhere else. Values
-  are expanded and `DOTNET_LAUNCH_PROFILE` is set, both as Aspire does them on a warm run, and the
-  profile is the one Aspire itself will select — including a profile named by
-  `DOTNET_LAUNCH_PROFILE` or one whose `commandName` is `Executable` or absent — so the process
-  never gets one profile's environment and another's arguments.
-
-  **Endpoints cannot be restored**, since ports are allocated during composition, so declare any
-  you need:
+  The caveat is the `dotnet` kind's, and it is why the call is opt-in: Aspire reads a project's
+  launch profile during composition, when a deferred service has no repository on disk.
+  **Environment is restored** once the clone lands — the profile's `environmentVariables` are
+  applied before the resource starts, and only where the AppHost has not already set the same key,
+  so a deferred service does not run as `Production` while every warm run of it runs as
+  `Development`; `DOTNET_ENVIRONMENT` and `DOTNET_LAUNCH_PROFILE` are set as Aspire sets them on a
+  warm run. **Endpoints cannot be restored**, since ports are allocated during composition, so
+  declare any you need:
 
   ```csharp
   builder.UseDeferredCheckout();
@@ -129,162 +100,109 @@ nothing will fail to build to warn you.
   var orders = builder.AddService("orders").WithHttpEndpoint();
   ```
 
-  A service that declares none is *not* refused — a run-to-completion worker has no
-  `applicationUrl` on either path and would have to declare an endpoint it never listens on.
-  Instead the landed launch profile is read after the clone and a shortfall is reported then,
-  quoting the `applicationUrl` it actually found and what to add. The line above is correct on a
-  warm checkout too, where it updates the endpoint the profile already created.
+  A service that declares none is *not* refused: the landed profile is read after the clone and a
+  shortfall reported then, quoting the `applicationUrl` it found and what to add. The line above is
+  correct on a warm checkout too.
 
-  Nothing else about a run changes. The clones still start on the first `AddService()` call, in
-  parallel, at the same moment as before — only who waits for them moves. A checkout that already
-  exists takes the eager path unchanged, as do `path` overrides. So does everything outside run
-  mode: `aspire publish` and manifest generation clone first as they always have, because a
-  manifest written from a repository that is not on disk would describe a project without its
-  endpoints or its profile environment.
-
-  A satellite package registering its own kind through `AddLocalKind()` opts in by implementing
-  `ILocalResourceKind.ResolveDeferred()`, which is handed the path the clone will land in and
-  returns the resource plus a `ValidateCheckout` callback for the checks that need the working
-  tree. It defaults to returning `null`, meaning "resolve me eagerly", so an existing handler
-  keeps its current behaviour without changing. Its companion
-  `ILocalResourceKind.SupportsDeferredCheckout(rawConfig)` answers the same question without
-  registering anything — `ResolveDeferred` adds resources to the app model, so it cannot be used to
-  ask speculatively — and also defaults to declining.
-
-  `appType: node` and `appType: bun` are deferred only when the catalog guarantees a `package.json`
-  — `runScript` is set, or `packageManager` names one. Aspire's `AddNodeApp`/`AddBunApp` attach a
-  package manager, and with it the `npm install` resource the app waits on, only when they can see
-  a `package.json` in the app directory; what a warm run builds therefore depends on the
-  repository's contents, which a checkout that has not landed cannot be read for. Rather than
-  guess, those services resolve eagerly. Every other `appType` runs a `package.json` script by
-  definition and is deferred unconditionally.
+  Nothing else about a run changes: a checkout that already exists takes the eager path, as do
+  `path` overrides, and `aspire publish` and manifest generation clone first as they always have. A
+  satellite registering its own kind opts in through `ILocalResourceKind.ResolveDeferred()` and
+  `SupportsDeferredCheckout(rawConfig)`, both of which default to declining — the README documents
+  the pair. `appType: node` and `appType: bun` are deferred only when the catalog guarantees a
+  `package.json` (`runScript` is set, or `packageManager` names one); every other `appType` is
+  deferred unconditionally.
 
 - **`GetServiceEndpoint()`, a portable way for a consumer to name a resolved service's endpoint**
-  ([#160]). The endpoint *name* a service exposes was decided by whichever source resolved it — a
-  `"local"` dotnet project takes its endpoints from its launch profile, a `"url"` service is named
-  for the URL's scheme, and every other source produced `http` — so a consumer's
-  `GetEndpoint("https")` resolved only while that service happened to sit on a source that produced
-  an `https` endpoint. Switching one service from `"local"` to `"kubernetes"` therefore broke an
-  unrelated consumer, and broke it late: composition succeeded and Aspire's `ExpressionResolver`
-  threw while gathering the consumer's environment, surfacing as a `FailedToStart` on the
-  **consumer**, naming a service the consumer never changed. `GetServiceEndpoint()` asks for *the*
-  endpoint the service exposes — `https` if there is one, else `http`, else its only endpoint — and
-  survives a source switch. It is exported to Aspire's Type System as `getServiceEndpoint()`, so a
+  ([#160]). The endpoint *name* a service exposes was decided by whichever source resolved it, so a
+  consumer's `GetEndpoint("https")` resolved only while that service happened to sit on a source
+  that produced an `https` endpoint. Switching one service from `"local"` to `"kubernetes"`
+  therefore broke an unrelated consumer, and broke it late — a `FailedToStart` on the **consumer**,
+  naming a service the consumer never changed. `GetServiceEndpoint()` asks for *the* endpoint the
+  service exposes — `https` if there is one, else `http`, else its only endpoint — and survives a
+  source switch. It is exported to Aspire's Type System as `getServiceEndpoint()`, so a
   guest-language AppHost has the same spelling. `GetEndpoint("<scheme>")` keeps working and stays
   the right call for an endpoint you added yourself; the README says which to reach for.
 
 - **`scheme` on the `kubernetes` and `container` config blocks** ([#160]). Both hardcoded `http`,
   which was not merely a naming choice: `kubectl port-forward` is a byte-transparent TCP tunnel, so
-  a pod serving TLS is genuinely reachable at `https://localhost:<port>` and a consumer handed an
-  `http://` URL for it cannot connect at all. Set `scheme: https` in `servicesources.yaml` and the
-  service exposes an endpoint named `https` whose URL says so. It defaults to `http`, so nothing
-  changes for a service that does not set it. For `"kubernetes"` a developer can override it in
-  `servicesources.local.json` alongside a `port` override; for `"container"` it is catalog-only,
-  exactly as `container.port` is, since the image decides what it serves. Certificate hostname
-  validation is the one thing a tunnel cannot fix — the client connects to `localhost` while the
-  certificate names the in-cluster service — and the README says so.
+  a pod serving TLS is reachable at `https://localhost:<port>` and a consumer handed an `http://`
+  URL for it cannot connect at all. Set `scheme: https` in `servicesources.yaml` and the service
+  exposes an endpoint named `https` whose URL says so; it defaults to `http`. For `"kubernetes"` a
+  developer can override it in `servicesources.local.json` alongside a `port` override; for
+  `"container"` it is catalog-only, exactly as `container.port` is. Certificate hostname validation
+  is the one thing a tunnel cannot fix, and the README says so.
 
 ### Changed
 
 - **A `kind` handler that declines deferral late now clones in turn rather than in parallel**
   ([#76]). Only affects third-party `ILocalResourceKind` implementations; no AppHost change, and
-  neither built-in satellite is affected — `java` answers unconditionally and `javascript` answers
-  both deferral questions from the same predicate, so neither can reach this.
-
-  Returning `null` from `ResolveDeferred` after `SupportsDeferredCheckout` answered `true` is still
-  honoured, and deciding late is still documented as legitimate for a kind that can only tell once
-  it has looked at everything. What changed is the price. The checkout prefetch now acts on
-  `SupportsDeferredCheckout`, leaving a service that answered `true` out of the clones it starts
-  ahead of demand — so a late decline drops the service onto the eager path with no clone already
-  running for it, and it is cloned inline, alone, on the `AddService()` thread rather than alongside
-  the other services. Before, the prefetch started every cold clone regardless of the answer, so
-  deciding late cost nothing but the eager path.
-
-  Nothing breaks and nothing fails to build: the service still resolves and still starts. A kind
-  that can decide from its options block alone should answer in `SupportsDeferredCheckout`, where
-  the answer is free and the prefetch can act on it.
+  neither built-in satellite is affected. Returning `null` from `ResolveDeferred` after
+  `SupportsDeferredCheckout` answered `true` is still honoured — what changed is the price. The
+  checkout prefetch now acts on `SupportsDeferredCheckout` and leaves such a service out of the
+  clones it starts ahead of demand, so a late decline is cloned inline, alone, on the
+  `AddService()` thread. Nothing breaks: the service still resolves and still starts. A kind that
+  can decide from its options block alone should answer in `SupportsDeferredCheckout`, where the
+  answer is free.
 
 - **A malformed entry fails the AppHost even when nothing uses that service** ([#161]). Key
   validation moved from `AddService()`, which only ever saw the services an AppHost asks for, to the
   point the configuration is read, which sees every entry in it. An unknown or misplaced key in an
   entry no `AddService()` call names now stops the run, where before it waited for the day that
-  service was added. That is deliberate: the parallel checkout prefetch clones `local`-sourced
-  entries nothing has asked for yet (see [#76] for which ones), so a typo used to buy a clone before
-  anything had looked at the entry. A key whose *shape* is wrong is reported on the same walk — an object written where
-  a field's value goes, or a value written where a source's block goes, each of which binds to
-  nothing and takes the rest of the entry down with it. Validation stays shape-only and never
-  consults `servicesources.yaml`, so an entry naming a service the catalog does not describe still
-  loads, and is still reported by `AddService()`.
+  service was added — deliberate, because the checkout prefetch clones `local`-sourced entries
+  nothing has asked for yet (see [#76]), so a typo used to buy a clone. A key whose *shape* is wrong
+  is reported on the same walk. Validation stays shape-only and never consults `servicesources.yaml`,
+  so an entry naming a service the catalog does not describe still loads, and is still reported by
+  `AddService()`.
 
 - **A blank value means "no value", not an empty string** ([#161]). Every string field inside a
   service's blocks is read as absent when it is blank or whitespace, which is what makes
   `ServiceSources__Services__orders__Local__Path=` a working *unset* for a field a lower layer
   configured — configuration can add a key but never remove one, so blanking it is the only gesture
-  available. `int?` fields, which the binder already mapped from empty to null, were the only ones
-  behaving this way before. One consequence worth knowing: `"url": ""` under `source: url` falls
-  back to the catalog's `url.url` instead of failing with "no url configured", since empty now means
-  unset means use the catalog.
+  available. `int?` fields were the only ones behaving this way before. One consequence worth
+  knowing: `"url": ""` under `source: url` falls back to the catalog's `url.url` instead of failing
+  with "no url configured".
 
-- **A missing `servicesources.local.json` is no longer an error by itself** ([#69]). It used to
-  fail immediately, naming the path. Now that the file is one layer of a chain, its absence is
-  ordinary — the environment may carry the whole configuration — so the failure moved to the point
-  where a service genuinely has no source. Two errors are raised there instead of one: "nothing is
-  configured anywhere", which names the key, the file path it looked for and every source
-  consulted, and "this service has no source", which names
-  `ServiceSources:Services:<service>:source` and the environment variable that would set it. The
-  distinction is deliberate — a mistyped key yields an empty section rather than a failure, so
-  "nothing configured" has to be reported as its own condition.
-
-- **`git` on `PATH` is now required for a managed `"local"` checkout** ([#85]), and
-  `LibGit2Sharp` is gone from the package. Clone, fetch and checkout shell out to the `git`
-  executable, the same "a tool you already have" trade the `"kubernetes"` source makes with
-  `kubectl`. `git` 2.7 or newer; a service pointed at your own directory with `path` needs none.
-
-  This removes the only source-specific external dependency the package had, and by far the
-  heaviest thing it shipped. `LibGit2Sharp.NativeBinaries` carries a native libgit2 for all
-  thirteen RIDs it supports in one package, and an Aspire AppHost is a portable build by default,
-  so every consumer's build output got **all** of them — about **23 MB of `runtimes/`**, roughly
-  half of a sample AppHost's `bin`, all but one of them for a platform that machine will never
-  run. Plus 32 MB in `~/.nuget/packages`. There is no per-RID variant to reference instead and
-  the native assets can't be pruned, so the dependency had to go rather than be trimmed.
-
-  Nothing in `servicesources.yaml`, `servicesources.local.json` or the public API changes.
+- **A missing `servicesources.local.json` is no longer an error by itself** ([#69]). It used to fail
+  immediately, naming the path; now that the file is one layer of a chain, its absence is ordinary,
+  so the failure moved to the point where a service genuinely has no source. Two errors are raised
+  there instead of one: "nothing is configured anywhere", which names the key, the file path it
+  looked for and every source consulted, and "this service has no source", which names
+  `ServiceSources:Services:<service>:source` and the environment variable that would set it.
 
 - **SSH repository URLs now work** ([#85]). `git@host:org/repo`, `host:org/repo` and `ssh://...`
   were previously refused at resolution time with a message pointing at the HTTPS equivalent,
   because LibGit2Sharp's bundled binaries had no SSH transport. They are now handed to `git` as
-  written and resolved by your SSH agent and `~/.ssh/config`. Because nothing may block the
-  AppHost on a prompt, SSH runs with `BatchMode=yes` unless you set your own `GIT_SSH_COMMAND`:
-  an un-agented passphrase-protected key, or a host not yet in `known_hosts`, fails immediately
-  rather than waiting. Connect once by hand to settle either.
+  written and resolved by your SSH agent and `~/.ssh/config`. Because nothing may block the AppHost
+  on a prompt, SSH runs with `BatchMode=yes` unless you set your own `GIT_SSH_COMMAND`: an
+  un-agented passphrase-protected key, or a host not yet in `known_hosts`, fails immediately rather
+  than waiting. Connect once by hand to settle either.
 
-- **Credential resolution is `git`'s own** ([#85]). Every `credential.helper` you have configured
-  is consulted by git exactly as it is for a `git clone` you type yourself, rather than this
-  package running `git credential fill` and passing the result to libgit2 — so helper ordering,
-  per-URL config and `credential reject` on a refused credential all behave as git documents them.
-  `SERVICESOURCES_GIT_USERNAME`/`SERVICESOURCES_GIT_TOKEN` still apply as a last resort, supplied
-  as a helper of last resort so they never override one you configured; if a configured helper's
-  credential is refused, the command is re-run once with those helpers cleared so the environment
-  token still gets its turn. The per-process credential cache is gone with the plumbing that
-  needed it, so a rotated token takes effect on the next resolution with nothing to clear.
+- **Credential resolution is `git`'s own** ([#85]). Every `credential.helper` you have configured is
+  consulted by git exactly as it is for a `git clone` you type yourself, so helper ordering, per-URL
+  config and `credential reject` all behave as git documents them.
+  `SERVICESOURCES_GIT_USERNAME`/`SERVICESOURCES_GIT_TOKEN` are supplied as a helper of last resort,
+  so they never override one you configured; if a configured helper's credential is refused, the
+  command is re-run once with those helpers cleared so the environment token still gets its turn.
+  The per-process credential cache is gone, so a rotated token takes effect on the next resolution
+  with nothing to clear.
 
-- **`ServiceSourcesConfigurationException` prints as its message, not as a stack dump**
-  ([#125]). These are raised from `AddService()` and normally end the AppHost unhandled, so the
-  runtime's rendering of them *is* the error output — and it buried the sentence naming the fix
-  under three nested inner-exception blocks and a stack trace per level, about thirty lines for a
-  failed private clone. `ToString()` now prints the message plus one `caused by:` line per cause,
-  and names `SERVICESOURCES_FULL_ERRORS=1` whenever it dropped anything; set that for the
-  runtime's complete dump. `Message`, the `InnerException` chain and `StackTrace` are untouched,
-  but anything logging one of these exceptions logs the summary unless that variable is set.
+- **`ServiceSourcesConfigurationException` prints as its message, not as a stack dump** ([#125]).
+  These are raised from `AddService()` and normally end the AppHost unhandled, so the runtime's
+  rendering of them *is* the error output — and it buried the sentence naming the fix under three
+  nested inner-exception blocks and a stack trace per level, about thirty lines for a failed private
+  clone. `ToString()` now prints the message plus one `caused by:` line per cause, and names
+  `SERVICESOURCES_FULL_ERRORS=1` whenever it dropped anything; set that for the runtime's complete
+  dump. `Message`, the `InnerException` chain and `StackTrace` are untouched, but anything logging
+  one of these exceptions logs the summary unless that variable is set.
 
 - **A clone or fetch that never resolved a credential says so** ([#125]), instead of reporting
   authentication as the likely cause. When no credential helper yields anything and neither
-  `SERVICESOURCES_GIT_TOKEN` nor `SERVICESOURCES_GIT_USERNAME` is set, `git` falls through to
-  asking a human and finds prompting disabled (`could not read Username for '<host>': terminal
-  prompts disabled`) — a client-side dead end that never reached the host, so blaming a rejected
-  token sent developers hunting for one they never had. The usual real cause is a credential
-  helper that resolves in your shell but not in the environment the AppHost process inherits. A
-  failure that did carry a credential keeps the old wording.
+  `SERVICESOURCES_GIT_TOKEN` nor `SERVICESOURCES_GIT_USERNAME` is set, `git` falls through to asking
+  a human and finds prompting disabled (`could not read Username for '<host>': terminal prompts
+  disabled`) — a client-side dead end that never reached the host, so blaming a rejected token sent
+  developers hunting for one they never had. The usual real cause is a credential helper that
+  resolves in your shell but not in the environment the AppHost process inherits. A failure that did
+  carry a credential keeps the old wording.
 
 - CI type-checks the TypeScript export surface on every PR ([#88]). `samples/DemoAppHostTypeScript`
   regenerates its Aspire Type System SDK from the branch's own source tree — `aspire.config.json`
@@ -293,62 +211,42 @@ nothing will fail to build to warn you.
   guest languages: the export test asserts the `[AspireExport]` attribute is *present*, and
   `aspire restore` exits 0 even when the TypeScript it just wrote does not compile.
 
+- Smoke tests cover the configuration layers and the `"local"` source ([#180]), so the precedence
+  chain [#69] introduced is exercised end-to-end rather than only in unit tests.
+
 ### Fixed
 
 - **`UseDeferredCheckout()` stops the AppHost cloning `"local"` services it never adds** ([#76]).
-  The speculative checkout prefetch could not know which services an AppHost would add — that is
-  what made it speculative — so every `"local"` entry with no checkout yet was cloned on the first
-  `AddService()` call. A config listing ten `"local"` services in front of an AppHost that adds two
-  paid eight cold `git clone`s, and the only remedy offered was to trim the file.
+  The speculative checkout prefetch could not know which services an AppHost would add, so every
+  `"local"` entry with no checkout yet was cloned on the first `AddService()` call: a config listing
+  ten `"local"` services in front of an AppHost that adds two paid eight cold `git clone`s, and the
+  only remedy offered was to trim the file. A service that would be deferred if it were added is now
+  left out of the speculative set and clones itself when it is added instead. Deferral being off, or
+  refused (publish mode, a kind that cannot build its resource without reading the repository),
+  keeps the old speculative clone, which is what stops cold clones running one after another on the
+  composition thread — the tax [#2] removed.
 
-  It turns out the prefetch does not need to know what the AppHost adds. It needs to know which
-  services something would *block* on, and a deferred registration blocks on nothing: its clone
-  overlaps the rest of composition wherever it is started from. So a service that would be deferred
-  if it were added is left out of the speculative set and clones itself when it is added instead —
-  and "would be deferred if added" is decidable from configuration alone, before any `AddService()`
-  call has happened. Deferral being off, or refused (publish mode, a kind that cannot build its
-  resource without reading the repository), keeps the old speculative clone: without it, cold clones
-  would run one after another on the composition thread, which is the tax [#2] removed.
+  Two other entries left the speculative set with it, neither ever cloned into: a checkout that
+  already exists, and a `local.path` override. So the unused-checkout notice is now about clones
+  that were actually paid for, where before a stale `path` override for a service the AppHost never
+  adds was reported at startup as a checkout that had failed.
 
-  Two other entries left the speculative set with it, both of which it could only lose by: a
-  checkout that already exists, and a `local.path` override. Neither is ever cloned into, so
-  speculating over them bought no parallelism — and a stale `path` override for a service the
-  AppHost never adds used to be reported at startup as a checkout that had failed, about a
-  repository nobody was going to download. The unused-checkout notice is now about clones that were
-  actually paid for, where before it named warm checkouts and told the developer that "cloning them
-  was paid for anyway".
-
-- **A `WaitFor` on a `"url"`-sourced service no longer hangs the consumer forever** ([#170]).
-  Aspire honours a wait by watching the waited-on resource until it reports `Running`, and a
-  `"url"` service has no resource for Aspire to run — so nothing ever published a state, and a
-  consumer that wrote `.WaitFor(service)` sat in `Waiting` for the life of the run. No error, no
-  timeout, and the service missing from the resource list that would have explained the stall. It
-  hit whoever set `Source=url` in their own `servicesources.local.json`, on an AppHost that works
-  for everyone else — the same shape as [#160], and harder to diagnose because nothing threw.
-
+- **A `WaitFor` on a `"url"`-sourced service no longer hangs the consumer forever** ([#170]). Aspire
+  honours a wait by watching the waited-on resource until it reports `Running`, and a `"url"`
+  service has no resource for Aspire to run — so nothing ever published a state, and a consumer that
+  wrote `.WaitFor(service)` sat in `Waiting` for the life of the run, with no error and no timeout.
   The resource now declares Aspire's `IResourceWithoutLifetime`, which Aspire's wait machinery
-  filters on, so the wait is **dropped rather than satisfied** — the honest answer for a fixed,
-  pre-known URL that is already up as far as this AppHost is concerned. `WaitFor`,
-  `WaitForStart` and `WaitForCompletion` are all covered, as is the `WaitForStart` that
-  `AddConnectionString` adds on the AppHost's behalf for each resource its expression references.
-  The annotation is also removed from the model before start, because Aspire reads it in a second
-  place that has nothing to do with waiting — a wait target counts as a *dependency* of the waiter —
-  and that put the url service back into the set DCP plumbs container networking for, failing a
-  **container** consumer with a bare `FailedToStart` and nothing logged. A container that only waits
-  on a url-sourced service now starts; one that `WithReference`s it is still refused up front, as
-  before ([#58]).
+  filters on, so the wait is **dropped rather than satisfied**. `WaitFor`, `WaitForStart` and
+  `WaitForCompletion` are all covered, as is the `WaitForStart` that `AddConnectionString` adds on
+  the AppHost's behalf. A **container** consumer that only waits on a url-sourced service now starts
+  too, where before it failed with a bare `FailedToStart` and nothing logged; one that
+  `WithReference`s it is still refused up front, as before ([#58]). Each dropped wait is reported in
+  the same startup warning as the service's skipped `Configure` calls, naming the call and the
+  consumer (`skipped WaitFor from 'storefront'`).
 
-  Each dropped wait is **reported**, in the same startup warning as the service's skipped
-  `Configure` calls — a `WaitFor` in `Program.cs` is configuration like any other, and the developer
-  who set `Source=url` is rarely the one who wrote it. The warning names the call and the consumer
-  (`skipped WaitFor from 'storefront'`). The exception is the `WaitForStart` Aspire adds itself for
-  each resource an `AddConnectionString` expression references: nobody wrote it, so there is no line
-  for a warning to point at.
-
-  **Read before upgrading:** a `WaitFor` on a service that resolves `"url"` now starts the
-  consumer immediately, and does not check that the URL is reachable. It regains its full meaning
-  the moment the service is switched back to a source that runs locally. Every other source is
-  unchanged — they resolve to a resource Aspire actually runs, so a wait on one still waits.
+  **Read before upgrading:** a `WaitFor` on a service that resolves `"url"` now starts the consumer
+  immediately, and does not check that the URL is reachable. It regains its full meaning the moment
+  the service is switched back to a source that runs locally. Every other source is unchanged.
 
 - **A blank `path` no longer turns the AppHost's own directory into the service's checkout**
   ([#161]). An empty `path` — written that way, or blanked from a higher layer — resolved through
@@ -362,55 +260,39 @@ nothing will fail to build to warn you.
   than at the entry. Both now raise the same "has no source configured" error as an entry that is
   absent altogether, which names the key, the file and the environment variable that would set it.
 
-- **A `source` is matched the way every other key in an entry is** ([#161], [#167]). The service
-  name, the block names and the field names all arrive through `IConfiguration`, which compares keys
-  case-insensitively; the source value was compared ordinally, so
-  `ServiceSources__Services__orders__Source=Local` was reported as
-  `has source 'Local', which is not implemented yet` — naming a missing feature rather than the
-  capital L. It is the value most likely to be typed by hand, since pinning a source from the
-  environment is what the block shape above exists for. All four source names now match in any
-  casing.
-
-  The parallel checkout prefetch had a quieter version of the same problem: a service whose source
-  was spelled `"Local"` resolved, but was dropped from the set of clones to start, so its checkout
-  ran alone on the `AddService()` thread instead of alongside the others. No error, just a slower
-  first start.
-
-  The unknown-source message is reworded to name the sources that do exist, since with case folded
-  it can now only fire for a name none of them has. `kind` names stay case-sensitive with their
-  "did you mean" hint — those are an open registry satellite packages contribute to, where folding
-  case could collide two packages' registrations, while the four source names are a closed set this
-  package owns.
+- **A `source` is matched the way every other key in an entry is** ([#161], [#167]). Service, block
+  and field names all arrive through `IConfiguration`, which compares keys case-insensitively; the
+  source value was compared ordinally, so `ServiceSources__Services__orders__Source=Local` was
+  reported as `has source 'Local', which is not implemented yet` — naming a missing feature rather
+  than the capital L. All four source names now match in any casing, and the unknown-source message
+  is reworded to name the sources that do exist. A service spelled `"Local"` also used to be dropped
+  from the prefetch's set of clones and cloned alone. `kind` names stay case-sensitive with their
+  "did you mean" hint, since those are an open registry satellite packages contribute to.
 
 - **A service entry written as a value instead of a block is reported, not dropped** ([#161]). The
   likeliest slip in moving off the flat shape — `{ "services": { "orders": "local" } }`, the old
   shortest entry with the `source` key left off — carries no keys to check, so it passed validation,
-  bound to null and was dropped by the dictionary binder. The run then failed with
-  `No service sources are configured: 'ServiceSources:Services' is empty in every configuration
-  source … (found, but it configures no services)`, of a file that plainly named the service. It is
-  now refused with the rest of the entry's checks, and a value naming a source is answered with the
-  key it belongs under.
+  bound to null and was dropped by the dictionary binder, and the run failed with
+  `'ServiceSources:Services' is empty in every configuration source`, of a file that plainly named
+  the service. It is now refused with the rest of the entry's checks, and a value naming a source is
+  answered with the key it belongs under.
 
-- **A value that cannot bind to its field is reported as a configuration error** ([#161]). A
-  `port` written as `"abc"`, or blanked with a space rather than left empty, reached the binder and
+- **A value that cannot bind to its field is reported as a configuration error** ([#161]). A `port`
+  written as `"abc"`, or blanked with a space rather than left empty, reached the binder and
   surfaced as `InvalidOperationException: Failed to convert configuration value at '…' to type
   'System.Int32'` — from a layer nothing treats as a configuration problem, and naming a CLR type
-  rather than the field. It is now refused with the rest of the entry's checks, at read time,
-  saying what the field takes. A whitespace value gets an answer of its own, since it is not a value
-  of the wrong type but the gesture that unsets a field missed by a character, and it is refused for
-  a string field as well as a numeric one (the message names the character, so a tab or a
-  non-breaking space is not reported as the space it looks like): a whitespace `local.path` was read as absent
-  and sent the service to its managed checkout instead of the developer's directory, with nothing
-  said about it.
+  rather than the field. It is now refused at read time, saying what the field takes. A whitespace
+  value gets an answer of its own naming the character, so a tab or a non-breaking space is not
+  reported as the space it looks like, and it is refused for a string field as well as a numeric
+  one: a whitespace `local.path` was read as absent and sent the service to its managed checkout
+  instead of the developer's directory.
 
 - **A rejected key is named by its configuration key path, not by a file** ([#161]). Entries are
   validated across the whole configuration chain, so the key a message is about may have been
   contributed by appsettings, user secrets, an environment variable or the command line rather than
   by `servicesources.local.json` — a CI machine carrying a stale
   `ServiceSources__Services__orders__Local__Path` being the case that costs the most to find. Every
-  message now ends with the key path and its environment spelling. For a key that has to hold a
-  block rather than a value the spelling named is a field's, since no environment variable can put
-  an object at such a key.
+  message now ends with the key path and its environment spelling.
 
 - **Managed checkouts no longer inherit the AppHost repository's MSBuild and NuGet settings**
   ([#119]). A checkout is cloned into `<AppHostDirectory>/.servicesources/checkouts/<service>/`,
@@ -426,41 +308,32 @@ nothing will fail to build to warn you.
   everything accumulated above it. Set `SERVICESOURCES_KEEP_PACKAGE_SOURCE_MAPPING=1` to keep it
   enforced. The README documents each barrier and where its coverage stops.
 
-- **The TypeScript AppHost sample no longer needs an unreleased Aspire CLI** ([#88]). The README
-  put the floor for `samples/DemoAppHostTypeScript` at CLI **13.6.0**, which is not released.
-  Measured against released **13.5.3**: the generated SDK type-checks clean under strict `tsc` and
-  the sample runs end-to-end. Nothing in the package changed — the requirement was stale. Aspire's
-  codegen omits the `*Promise`/`*PromiseImpl` wrapper pair for a bare Aspire interface return
+- **The TypeScript AppHost sample no longer needs an unreleased Aspire CLI** ([#88]). The README put
+  the floor for `samples/DemoAppHostTypeScript` at CLI **13.6.0**, which is not released. Nothing in
+  the package changed — the requirement was stale. Measured against released **13.5.3**: the
+  generated SDK type-checks clean under strict `tsc` and the sample runs end-to-end. Aspire's codegen
+  omits the `*Promise`/`*PromiseImpl` wrapper pair for a bare Aspire interface return
   ([microsoft/aspire#19507]) — the six `TS2552` errors the README warned about — but emits it when
   the interface appears as an extension-method *receiver*, which the eight `[AspireExport]` shims
-  added in `0.3.0` declare, so they carry it for `addService` too. The real floor is **13.5.3**, for an unrelated reason: an older CLI pins
-  its generated host project below this package's 13.5.2 Aspire floor and fails `aspire restore`
-  with `NU1605`.
+  added in `0.3.0` declare, so they carry it for `addService` too. The real floor is **13.5.3**, for
+  an unrelated reason: an older CLI pins its generated host project below this package's 13.5.2
+  Aspire floor and fails `aspire restore` with `NU1605`.
 
 - **A misspelled `services` key in `servicesources.local.json` is named, rather than read as an
   empty file** ([#122]). Only the file's `services` subtree is read, so `{ "service": { ... } }`
   contributed nothing and the failure arrived as "no service sources are configured" — a description
-  of an empty file, handed to a developer looking at a populated one. Every typo *inside* an entry
-  became an error in [#161]; the file's own root key was the one shape left silent.
-
-  Rejecting root keys the file does not recognize would be the wrong fix. The file is deliberately
-  entitled to carry keys of its own — only `services` crosses into the AppHost's configuration,
-  which is what keeps an unrelated key out of it — so an unrecognized root key is not
-  distinguishable from a typo by validity. What separates them is resemblance. So the check is a
-  near miss: when nothing is configured anywhere and the file has no `services` key, a root key
-  within two edits of `services` is named, and the message stops there. The long form's advice —
-  which sources were consulted, how to write an entry, the environment variable that sets one —
-  answers "why is nothing configured?", which the key has just answered.
+  of an empty file, handed to a developer looking at a populated one. When nothing is configured
+  anywhere and the file has no `services` key, a root key within two edits of `services` is now
+  named:
 
   ```
   No service sources are configured: '/src/apphost/servicesources.local.json' has a top-level key
   'service'. Did you mean 'services'?
   ```
 
-  A root key differing from `services` only by case is not a near miss but the key itself:
-  configuration keys are case-insensitive, so `Services` is read as it stands. A file carrying
-  `services` as well is never reported whatever else it carries, since its entries are being read
-  and there is nothing to correct.
+  Unrecognized root keys are still allowed — the file is entitled to carry keys of its own, and only
+  `services` crosses into the AppHost's configuration. A root key differing from `services` only by
+  case is read as the key itself, since configuration keys are case-insensitive.
 
 ### Documentation
 
@@ -714,7 +587,8 @@ Targets `net10.0`.
 - Fail-fast configuration validation with `ServiceSourcesConfigurationException`.
 - MIT license, README, symbol packages, and Trusted Publishing (OIDC) to nuget.org.
 
-[Unreleased]: https://github.com/flojon/aspire-servicesources/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/flojon/aspire-servicesources/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/flojon/aspire-servicesources/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/flojon/aspire-servicesources/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/flojon/aspire-servicesources/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/flojon/aspire-servicesources/compare/v0.1.0...v0.2.0
@@ -754,15 +628,17 @@ Targets `net10.0`.
 [#112]: https://github.com/flojon/aspire-servicesources/pull/112
 [#117]: https://github.com/flojon/aspire-servicesources/pull/117
 [#119]: https://github.com/flojon/aspire-servicesources/issues/119
+[#122]: https://github.com/flojon/aspire-servicesources/issues/122
 [#125]: https://github.com/flojon/aspire-servicesources/issues/125
 [#130]: https://github.com/flojon/aspire-servicesources/issues/130
+[#131]: https://github.com/flojon/aspire-servicesources/issues/131
 [#159]: https://github.com/flojon/aspire-servicesources/issues/159
 [#160]: https://github.com/flojon/aspire-servicesources/issues/160
 [#161]: https://github.com/flojon/aspire-servicesources/issues/161
 [#167]: https://github.com/flojon/aspire-servicesources/issues/167
 [#170]: https://github.com/flojon/aspire-servicesources/issues/170
 [#171]: https://github.com/flojon/aspire-servicesources/issues/171
-[#122]: https://github.com/flojon/aspire-servicesources/issues/122
+[#180]: https://github.com/flojon/aspire-servicesources/pull/180
+
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
-[#131]: https://github.com/flojon/aspire-servicesources/issues/131
