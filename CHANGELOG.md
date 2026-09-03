@@ -161,13 +161,31 @@ nothing will fail to build to warn you.
 
 ### Changed
 
+- **A `kind` handler that declines deferral late now clones in turn rather than in parallel**
+  ([#76]). Only affects third-party `ILocalResourceKind` implementations; no AppHost change, and
+  neither built-in satellite is affected — `java` answers unconditionally and `javascript` answers
+  both deferral questions from the same predicate, so neither can reach this.
+
+  Returning `null` from `ResolveDeferred` after `SupportsDeferredCheckout` answered `true` is still
+  honoured, and deciding late is still documented as legitimate for a kind that can only tell once
+  it has looked at everything. What changed is the price. The checkout prefetch now acts on
+  `SupportsDeferredCheckout`, leaving a service that answered `true` out of the clones it starts
+  ahead of demand — so a late decline drops the service onto the eager path with no clone already
+  running for it, and it is cloned inline, alone, on the `AddService()` thread rather than alongside
+  the other services. Before, the prefetch started every cold clone regardless of the answer, so
+  deciding late cost nothing but the eager path.
+
+  Nothing breaks and nothing fails to build: the service still resolves and still starts. A kind
+  that can decide from its options block alone should answer in `SupportsDeferredCheckout`, where
+  the answer is free and the prefetch can act on it.
+
 - **A malformed entry fails the AppHost even when nothing uses that service** ([#161]). Key
   validation moved from `AddService()`, which only ever saw the services an AppHost asks for, to the
   point the configuration is read, which sees every entry in it. An unknown or misplaced key in an
   entry no `AddService()` call names now stops the run, where before it waited for the day that
-  service was added. That is deliberate: the parallel checkout prefetch clones every `local`-sourced
-  entry, including ones nothing asks for, so a typo used to buy a clone before anything had looked
-  at the entry. A key whose *shape* is wrong is reported on the same walk — an object written where
+  service was added. That is deliberate: the parallel checkout prefetch clones `local`-sourced
+  entries nothing has asked for yet (see [#76] for which ones), so a typo used to buy a clone before
+  anything had looked at the entry. A key whose *shape* is wrong is reported on the same walk — an object written where
   a field's value goes, or a value written where a source's block goes, each of which binds to
   nothing and takes the rest of the entry down with it. Validation stays shape-only and never
   consults `servicesources.yaml`, so an entry naming a service the catalog does not describe still
@@ -251,6 +269,29 @@ nothing will fail to build to warn you.
   `aspire restore` exits 0 even when the TypeScript it just wrote does not compile.
 
 ### Fixed
+
+- **`UseDeferredCheckout()` stops the AppHost cloning `"local"` services it never adds** ([#76]).
+  The speculative checkout prefetch could not know which services an AppHost would add — that is
+  what made it speculative — so every `"local"` entry with no checkout yet was cloned on the first
+  `AddService()` call. A config listing ten `"local"` services in front of an AppHost that adds two
+  paid eight cold `git clone`s, and the only remedy offered was to trim the file.
+
+  It turns out the prefetch does not need to know what the AppHost adds. It needs to know which
+  services something would *block* on, and a deferred registration blocks on nothing: its clone
+  overlaps the rest of composition wherever it is started from. So a service that would be deferred
+  if it were added is left out of the speculative set and clones itself when it is added instead —
+  and "would be deferred if added" is decidable from configuration alone, before any `AddService()`
+  call has happened. Deferral being off, or refused (publish mode, a kind that cannot build its
+  resource without reading the repository), keeps the old speculative clone: without it, cold clones
+  would run one after another on the composition thread, which is the tax [#2] removed.
+
+  Two other entries left the speculative set with it, both of which it could only lose by: a
+  checkout that already exists, and a `local.path` override. Neither is ever cloned into, so
+  speculating over them bought no parallelism — and a stale `path` override for a service the
+  AppHost never adds used to be reported at startup as a checkout that had failed, about a
+  repository nobody was going to download. The unused-checkout notice is now about clones that were
+  actually paid for, where before it named warm checkouts and told the developer that "cloning them
+  was paid for anyway".
 
 - **A `WaitFor` on a `"url"`-sourced service no longer hangs the consumer forever** ([#170]).
   Aspire honours a wait by watching the waited-on resource until it reports `Running`, and a
@@ -654,6 +695,7 @@ Targets `net10.0`.
 [0.2.0]: https://github.com/flojon/aspire-servicesources/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/flojon/aspire-servicesources/releases/tag/v0.1.0
 
+[#2]: https://github.com/flojon/aspire-servicesources/issues/2
 [#23]: https://github.com/flojon/aspire-servicesources/issues/23
 [#24]: https://github.com/flojon/aspire-servicesources/issues/24
 [#38]: https://github.com/flojon/aspire-servicesources/pull/38
@@ -675,7 +717,9 @@ Targets `net10.0`.
 [#64]: https://github.com/flojon/aspire-servicesources/pull/64
 [#67]: https://github.com/flojon/aspire-servicesources/pull/67
 [#68]: https://github.com/flojon/aspire-servicesources/pull/68
+[#69]: https://github.com/flojon/aspire-servicesources/issues/69
 [#72]: https://github.com/flojon/aspire-servicesources/issues/72
+[#76]: https://github.com/flojon/aspire-servicesources/issues/76
 [#79]: https://github.com/flojon/aspire-servicesources/issues/79
 [#80]: https://github.com/flojon/aspire-servicesources/issues/80
 [#81]: https://github.com/flojon/aspire-servicesources/issues/81
@@ -684,7 +728,6 @@ Targets `net10.0`.
 [#89]: https://github.com/flojon/aspire-servicesources/issues/89
 [#112]: https://github.com/flojon/aspire-servicesources/pull/112
 [#117]: https://github.com/flojon/aspire-servicesources/pull/117
-[#69]: https://github.com/flojon/aspire-servicesources/issues/69
 [#119]: https://github.com/flojon/aspire-servicesources/issues/119
 [#125]: https://github.com/flojon/aspire-servicesources/issues/125
 [#130]: https://github.com/flojon/aspire-servicesources/issues/130
@@ -693,7 +736,7 @@ Targets `net10.0`.
 [#161]: https://github.com/flojon/aspire-servicesources/issues/161
 [#167]: https://github.com/flojon/aspire-servicesources/issues/167
 [#170]: https://github.com/flojon/aspire-servicesources/issues/170
-[microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
-[NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
 [#171]: https://github.com/flojon/aspire-servicesources/issues/171
 [#122]: https://github.com/flojon/aspire-servicesources/issues/122
+[microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
+[NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

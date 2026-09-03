@@ -24,13 +24,14 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         // clone of this repository before saying so.
         //
         // Only the first "local" AddService gets that for free across the board: the prefetch below
-        // starts cloning every "local" service at once, so once any of them has been resolved the
-        // other clones are already in flight and this check no longer runs ahead of them.
+        // starts the speculative clones at once, so once any service has been resolved those clones
+        // are already in flight and this check no longer runs ahead of them.
         var handler = isDotnetKind ? null : ResolveKindHandler(builder, serviceName, metadata);
         handler?.Validate(serviceName, metadata.KindConfig);
 
-        // Starts every "local" service's checkout at once, on background threads, and returns
-        // without waiting for any of them. See LocalCheckoutPrefetch.
+        // Starts the checkouts an AddService call would have to block on — every "local" service
+        // whose first clone nothing else is going to run — at once, on background threads, and
+        // returns without waiting for any of them. See LocalCheckoutPrefetch.
         var prefetch = LocalCheckoutPrefetch.For(builder, gitClient);
 
         var deferred = DeferredCheckout.For(builder);
@@ -62,9 +63,22 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
             }
         }
 
-        // Blocks on this service's checkout, but every "local" service's checkout was started
-        // together on the first AddService call, so the wait is for the slowest one overall rather
-        // than for this one in turn.
+        // Blocks on this service's checkout. Usually that checkout was started on the first
+        // AddService call together with the other speculative ones, so the wait is for the slowest
+        // one overall rather than for this one in turn.
+        //
+        // One case waits alone: a service the prefetch left out because it would have been deferred
+        // (#76), whose kind then declined deferral by returning null from ResolveDeferred after
+        // SupportsDeferredCheckout had said yes. There is no prefetched task for it, so GetRepoRoot
+        // clones it inline, here, on this thread.
+        //
+        // That kind is not doing anything wrong: ILocalResourceKind documents deciding late as a
+        // legitimate choice, for a kind that can only tell once it has looked at everything, and
+        // this path is what keeps it working. What changed is its price. Deciding late used to cost
+        // only the eager path, because the prefetch had already started every cold clone regardless
+        // of the answer; now the prefetch acts on the early answer, so a late decline is also a
+        // clone that runs in turn instead of with the others. Correct, and slower — which is why
+        // the interface now says so where a handler author reads it.
         var repoRoot = prefetch.GetRepoRoot(serviceName, metadata, config, builder.AppHostDirectory, gitClient);
 
         if (isDotnetKind)

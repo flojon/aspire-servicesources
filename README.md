@@ -188,14 +188,25 @@ service pointed at your own directory with `path` needs no git at all.
   used as-is — no clone, no checkout, no fetch, ever. A relative `path` is anchored to the
   AppHost directory, and must name a directory that already exists. `ref` cannot be combined
   with `path`.
-- Keep the file to the services you actually add. `AddService()` has to hand back the real
-  resource, so it can't wait until the AppHost has finished composing to find out which services
-  it wants — the first call clones the checkouts for *every* `"local"` entry, in parallel. Only the
-  services you actually add are then reconciled to their configured `ref`: a checkout that already
-  exists is never touched on behalf of an entry you don't `AddService()`, so work in progress on a
-  branch there is safe. Entries you never add still cost network and disk for that first clone. The
-  AppHost logs which ones those were at startup — and warns if one of them failed, since nothing
-  else would ever tell you — so you know what to drop.
+- Keep the file to the services you actually add — unless you use
+  [`UseDeferredCheckout()`](#first-run-usedeferredcheckout), which removes the reason to.
+  `AddService()` has to hand back the real resource, so it can't wait until the AppHost has finished
+  composing to find out which services it wants: an entry whose *first* checkout an `AddService()`
+  call would have to block on is cloned on the first call, in parallel with the others, before the
+  AppHost has said which ones it wants. Entries you never add cost network and disk for that first
+  clone. The AppHost logs which ones those were at startup — and warns if one of them failed, since
+  nothing else would ever tell you — so you know what to drop.
+
+  Nothing else is speculated over. A checkout that already exists — every service on every run
+  after the first — is resolved only for the services you add, and so is a `path` override. And a
+  service whose first checkout is *deferred* is cloned only when you add it: a deferred
+  registration blocks on nothing, so its clone no longer has to be started ahead of demand to run
+  alongside the others. With `UseDeferredCheckout()` on, a config listing ten `"local"` services in
+  front of an AppHost that adds two downloads two (#76).
+
+  Either way, only the services you actually add are reconciled to their configured `ref`: a
+  checkout that already exists is never touched on behalf of an entry you don't `AddService()`, so
+  work in progress on a branch there is safe.
 
 #### Aspire builds a checkout, on every start
 
@@ -250,9 +261,15 @@ var orders = builder.AddService("orders").WithHttpEndpoint();
 ```
 
 The dashboard comes up immediately, checkout progress and failure become resource state you can
-see, and one bad clone costs one service instead of the run. The clones themselves start at
-exactly the same moment they always did — the first `AddService()` call — so nothing gets
-slower; only who waits for them changes.
+see, and one bad clone costs one service instead of the run. The clones stay parallel: a deferred
+service's clone starts at its own `AddService()` call and blocks nobody, so several of them still
+run at once — the wall-clock is the slowest clone, not the sum. The one thing that still clones in
+turn is a third-party `kind` handler that declares deferral support and then declines it for a
+particular service; the built-in `dotnet`, `java` and `javascript` kinds never do.
+
+It also stops the AppHost downloading repositories it doesn't use. Without deferral the clones have
+to start before the AppHost has said which services it wants, so every `"local"` entry with no
+checkout yet is cloned; a deferred one is cloned only when it is added (#76).
 
 **What a cold checkout costs, and what it doesn't.** This part is about the `dotnet` kind. The
 `java` and `javascript` kinds have no launch profile and read nothing out of the repository while
@@ -1289,8 +1306,8 @@ wrapper. `builder.UseJava()` is wired up, but `AddService("catalog")` is comment
 service is left out of `servicesources.local.json.example`, since unlike the three above it needs a
 JDK. To run it, do both: uncomment the call and add `"catalog": { "source": "local" }` to your
 `servicesources.local.json`. Leaving it out of that file by default is what keeps the sample from
-cloning PetClinic on every run — the first `AddService` prefetches every `"local"` entry there,
-whether or not you add it.
+cloning PetClinic on its first run: the sample does not call `UseDeferredCheckout()`, so the first
+`AddService` clones every `"local"` entry there that has no checkout yet, whether or not you add it.
 
 ```bash
 cd samples/DemoAppHost

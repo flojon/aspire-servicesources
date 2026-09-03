@@ -9,16 +9,16 @@ using Microsoft.Extensions.Logging;
 namespace Aspire.Hosting.ServiceSources.Sources;
 
 /// <summary>
-/// Resolves the git checkout for every <c>"local"</c>-sourced service in parallel, once, on the
-/// first <c>AddService()</c> call.
+/// Starts, in parallel and once, the git checkout for every <c>"local"</c>-sourced service whose
+/// clone an <c>AddService()</c> call would otherwise have to wait for on its own.
 /// </summary>
 /// <remarks>
 /// <para>
 /// <c>AddService()</c> has to hand back the real resource, so a <c>"local"</c> service can no longer
 /// wait for <c>BeforeStartEvent</c> to be resolved. Cloning each service as it is asked for would
 /// serialize every cold clone — the tax issue #2 removed. Instead the trigger moves rather than the
-/// parallelism: the first call prefetches all of them at once, so wall-clock stays
-/// <c>max(checkout)</c>, and every later call finds its checkout already done.
+/// parallelism: the first call starts them all at once, so wall-clock stays <c>max(checkout)</c>,
+/// and every later call finds its checkout already done.
 /// </para>
 /// <para>
 /// The prefetch set comes from the developer configuration, which must already name every service
@@ -32,9 +32,36 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// Nothing here blocks on the speculative part. Each checkout is its own task and
 /// <see cref="GetRepoRoot"/> waits only on the one it was asked for, so a developer whose config
 /// marks ten services <c>"local"</c> while the AppHost adds two waits for those two, not for all
-/// ten. There is no way to narrow the set itself: <c>AddService()</c> is called one service at a
-/// time and must return the real resource before the next call happens, so the prefetch cannot see
-/// the calls that have not happened yet.
+/// ten.
+/// </para>
+/// <para>
+/// The set itself cannot be narrowed to what the AppHost adds — <c>AddService()</c> is called one
+/// service at a time and must return the real resource before the next call happens, so the
+/// prefetch cannot see the calls that have not happened yet. But it does not need that set. It
+/// needs the set of services whose clone <em>something would block on</em>, and two kinds of
+/// service are excluded from that without knowing anything about demand (#76):
+/// </para>
+/// <list type="bullet">
+/// <item>
+/// A checkout there is nothing to clone for. A working tree already on disk, or a
+/// <c>local.path</c> override naming the developer's own directory: speculating over one costs a
+/// <c>Directory.Exists</c>, buys no parallelism, and — for a stale override — invents a failure
+/// about a repository nobody was going to download. <see cref="GetRepoRoot"/> resolves these
+/// directly, which is the same work in a different thread.
+/// </item>
+/// <item>
+/// A service that <em>would be deferred if it were added</em>. Whether a service is deferrable is a
+/// pure function of configuration (see <see cref="DeferredCheckout.ShouldDefer"/> and
+/// <see cref="ILocalResourceKind.SupportsDeferredCheckout"/>), so it is answerable here, for a
+/// service nobody has mentioned. A deferred registration blocks composition on nothing, so its
+/// clone no longer has to be started ahead of demand to overlap with the others — it starts at its
+/// own <c>AddService()</c> call, via <see cref="StartCheckout"/>, and overlaps just the same.
+/// </item>
+/// </list>
+/// <para>
+/// What is left in the set is the case that genuinely needs speculating over: a cold clone that
+/// <c>AddService()</c> will block on. That still costs a repository the AppHost may never add, for
+/// as long as deferral is opt-in and refused in publish mode.
 /// </para>
 /// <para>
 /// Free of waiting is not free of cost, and the difference matters. Resolving a checkout is not a
@@ -89,10 +116,18 @@ internal sealed class LocalCheckoutPrefetch
     }
 
     /// <summary>
-    /// Starts the prefetch once per builder. Returns only after every checkout task has been
-    /// created, so <see cref="_checkouts"/> is fully populated — and thereafter read-only — before
-    /// any caller can reach <see cref="GetRepoRoot"/>.
+    /// Starts the prefetch once per builder. Returns only after every speculative checkout task has
+    /// been created, so the speculative part of <see cref="_checkouts"/> is complete before any
+    /// caller can reach <see cref="GetRepoRoot"/>.
     /// </summary>
+    /// <remarks>
+    /// It is <b>not</b> complete thereafter, which it used to be: <see cref="StartCheckout"/> adds
+    /// an entry each time a deferred service is registered, interleaved with the
+    /// <c>AddService()</c> calls that read the dictionary in <see cref="GetRepoRoot"/>. That is why
+    /// both sides take <see cref="_gate"/> — the lock became load-bearing when the prefetch stopped
+    /// being the only writer (#76), and dropping it on the strength of "populated once, then read"
+    /// would now be a data race.
+    /// </remarks>
     private void EnsureStarted(IDistributedApplicationBuilder builder, IGitClient gitClient)
     {
         lock (_gate)
@@ -139,13 +174,15 @@ internal sealed class LocalCheckoutPrefetch
             // sending a developer to a file that holds nothing — or doesn't exist — leaves them
             // nothing to act on.
             return $"{unused.Length} {(unused.Length == 1 ? "service is" : "services are")} configured as " +
-                   $"'local' that this AppHost never adds ({string.Join(", ", unused)}). Cloning them was paid " +
-                   "for anyway: AddService() has to hand back the real resource, so every 'local' entry is " +
-                   "prefetched in parallel before the AppHost says which ones it wants. Only the services this " +
-                   "AppHost adds are reconciled to their configured ref. Clear " +
+                   $"'local' with no checkout yet that this AppHost never adds ({string.Join(", ", unused)}). " +
+                   "Cloning them was paid for anyway: AddService() has to hand back the real resource, so a " +
+                   "'local' entry whose first checkout the AppHost would have to wait for is cloned in parallel " +
+                   "with the others, before the AppHost says which ones it wants. Only the services this AppHost " +
+                   "adds are reconciled to their configured ref. Clear " +
                    $"'{DeveloperConfiguration.ServicesKey}:<service>:source' for the ones you don't call " +
                    $"AddService() for — usually their entries in {DeveloperConfiguration.FileName} — to stop " +
-                   "paying for them.";
+                   "paying for them. builder.UseDeferredCheckout() also stops it: a service whose first checkout " +
+                   "is deferred past startup is cloned only when it is added.";
         }
     }
 
@@ -238,19 +275,38 @@ internal sealed class LocalCheckoutPrefetch
         $"service's entry in {DeveloperConfiguration.FileName}, or fix what the failure names.";
 
     /// <summary>
-    /// Records that the AppHost really does add <paramref name="serviceName"/>, without waiting for
-    /// its checkout.
+    /// Starts <paramref name="serviceName"/>'s checkout now, and records that the AppHost really
+    /// does add it — without waiting for either. For a service the prefetch deliberately left out of
+    /// its speculative set because this registration was going to claim it: a deferred one.
     /// </summary>
     /// <remarks>
-    /// For a service whose checkout is deferred past startup (see <see cref="DeferredCheckout"/>):
-    /// its <see cref="GetRepoRoot"/> call happens after <c>BeforeStartEvent</c> has already decided
-    /// what to report, so without this it would be named as speculative work nobody asked for.
+    /// <para>
+    /// This is what keeps the clones overlapping after #76 narrowed the speculative set. A deferred
+    /// registration returns without blocking on anything, so the next <c>AddService()</c> call
+    /// starts its own clone while this one is still running — the same wall-clock the prefetch used
+    /// to buy by starting them all at once, for exactly the services the AppHost asked for.
+    /// </para>
+    /// <para>
+    /// Marking the service requested matters on its own: the report at <c>BeforeStartEvent</c>
+    /// decides what to name before a deferred service has waited on its checkout, so without this
+    /// one would be named as speculative work nobody wanted.
+    /// </para>
     /// </remarks>
-    public void MarkRequested(string serviceName)
+    public void StartCheckout(string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config,
+        string appHostDirectory, IGitClient gitClient)
     {
         lock (_gate)
         {
             _requested.Add(serviceName);
+
+            // One checkout per service, whoever asked for it first. The filter in Run means this is
+            // normally a fresh entry, but the two decisions are made separately and a service in
+            // both sets must still be cloned once.
+            if (!_checkouts.ContainsKey(serviceName))
+            {
+                _checkouts[serviceName] = StartCheckoutTask(
+                    serviceName, metadata, config, appHostDirectory, gitClient);
+            }
         }
     }
 
@@ -261,13 +317,24 @@ internal sealed class LocalCheckoutPrefetch
     public string GetRepoRoot(string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config,
         string appHostDirectory, IGitClient gitClient)
     {
-        MarkRequested(serviceName);
+        Task<CheckoutResult>? checkout;
 
-        if (!_checkouts.TryGetValue(serviceName, out var checkout))
+        lock (_gate)
         {
-            // Not in the prefetch set — the developer config was loaded before this service was
-            // added to it, or the service is being resolved through a path the prefetch doesn't
-            // enumerate. Resolve it directly rather than failing.
+            _requested.Add(serviceName);
+
+            // Locked because _checkouts is no longer written only during Run: StartCheckout adds to
+            // it as deferred services are registered, which is interleaved with the AddService calls
+            // that read it here.
+            _checkouts.TryGetValue(serviceName, out checkout);
+        }
+
+        if (checkout is null)
+        {
+            // Not in the prefetch set. Either nothing needed prefetching for it — a warm checkout, a
+            // 'local.path' override — or the developer config was loaded before this service was
+            // added to it, or it is being resolved through a path the prefetch doesn't enumerate.
+            // Resolve it directly rather than failing.
             return LocalGitCheckout.ResolveRepoRoot(serviceName, metadata, config, appHostDirectory, gitClient);
         }
 
@@ -307,6 +374,9 @@ internal sealed class LocalCheckoutPrefetch
 
         var appHostDirectory = builder.AppHostDirectory;
 
+        var deferred = DeferredCheckout.For(builder);
+        var kinds = LocalKindRegistry.For(builder);
+
         var candidates = config.DeveloperConfig.Services
             // Case-insensitive to agree with how AddService resolves the same value: a service whose
             // source is spelled "Local" is one AddService resolves locally, so dropping it here
@@ -319,6 +389,13 @@ internal sealed class LocalCheckoutPrefetch
             // properly if the AppHost actually asks for it.
             .Where(entry => config.Catalog.Services.ContainsKey(entry.Key))
             .Select(entry => (Name: entry.Key, Metadata: config.Catalog.Services[entry.Key], Config: entry.Value))
+            // Only checkouts there is something to clone for. Everything else resolves to the same
+            // answer in GetRepoRoot for a fraction of the code, and reaches nobody at all when the
+            // service is never added — which is where speculating over one used to go wrong.
+            .Where(candidate => IsColdManagedCheckout(candidate.Name, candidate.Config, appHostDirectory))
+            // ...minus the ones a deferred registration would clone for itself.
+            .Where(candidate => !WouldBeDeferredIfAdded(
+                builder, deferred, kinds, candidate.Name, candidate.Metadata, candidate.Config))
             .ToArray();
 
         if (candidates.Length == 0)
@@ -328,27 +405,128 @@ internal sealed class LocalCheckoutPrefetch
 
         foreach (var candidate in candidates)
         {
-            _checkouts[candidate.Name] = Task.Run(() =>
-            {
-                try
-                {
-                    // Prepare, not resolve: cloning what is missing is safe to do for a service that
-                    // may never be added, but reconciling an existing checkout is not — see
-                    // GetRepoRoot, which finishes the job for the services that are.
-                    var prepared = LocalGitCheckout.PrepareRepoRoot(
-                        candidate.Name, candidate.Metadata, candidate.Config, appHostDirectory, gitClient);
-                    return new CheckoutResult(prepared, null);
-                }
-                catch (Exception ex)
-                {
-                    // Captured, never thrown from the task itself: this service may never be
-                    // requested, and a faulted task nobody awaits is an unobserved exception. If it
-                    // is never requested, ReportSpeculativeWork is what surfaces this.
-                    return new CheckoutResult(null, ex);
-                }
-            });
+            _checkouts[candidate.Name] = StartCheckoutTask(
+                candidate.Name, candidate.Metadata, candidate.Config, appHostDirectory, gitClient);
         }
     }
+
+    /// <summary>
+    /// Whether there is anything for a clone to do here: a package-managed checkout directory with
+    /// nothing in it yet. A <c>local.path</c> override is the developer's own directory and is never
+    /// cloned into, and a working tree already on disk is one
+    /// <see cref="LocalGitCheckout.PrepareRepoRoot"/> deliberately leaves alone.
+    /// </summary>
+    /// <remarks>
+    /// Pure configuration plus one <c>Directory.Exists</c> — the same question
+    /// <see cref="DeferredCheckout.ShouldDefer"/> asks, for the same reason: it has to be answerable
+    /// about a service nobody has added.
+    /// </remarks>
+    private static bool IsColdManagedCheckout(
+        string serviceName, ServiceDeveloperConfig config, string appHostDirectory) =>
+        config.Local.Path is null
+        && !Directory.Exists(LocalGitCheckout.ManagedRepoRoot(appHostDirectory, serviceName));
+
+    /// <summary>
+    /// Whether this service would be registered deferred if the AppHost added it — in which case its
+    /// clone is <see cref="StartCheckout"/>'s to start, at that call, and starting it speculatively
+    /// here would only download a repository for a service that may never be mentioned.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This mirrors the decision <c>LocalProjectSource</c> makes per service, and has to: a service
+    /// dropped here that then takes the eager path would clone alone on the <c>AddService()</c>
+    /// thread instead of alongside the others. Every input is available without demand —
+    /// <c>UseDeferredCheckout()</c> and <c>AddLocalKind</c> both run before the first
+    /// <c>AddService()</c>, the execution mode is fixed, and the kind is asked the deliberately
+    /// speculative form of the question.
+    /// </para>
+    /// <para>
+    /// The mirror is exact but for one case, which cannot be mirrored: a kind whose
+    /// <see cref="ILocalResourceKind.ResolveDeferred"/> returns <see langword="null"/> after its
+    /// <see cref="ILocalResourceKind.SupportsDeferredCheckout"/> answered <see langword="true"/>.
+    /// That is honoured (<c>DeferredCheckout.RegisterKind</c> returns null and the eager path takes
+    /// over), and the service then clones alone rather than with the others.
+    /// </para>
+    /// <para>
+    /// It is a permitted choice rather than a defect — the interface documents deciding late for a
+    /// kind that can only tell once it has looked at everything — and it is the divergence the probe
+    /// exists to make cheap to avoid and cannot make impossible: the deciding call is the one with
+    /// side effects, so it can never be the one asked here. Both built-in satellites answer both
+    /// questions from the same predicate and so never diverge. The cost is a serial clone, not a
+    /// wrong one, and it is disclosed on
+    /// <see cref="ILocalResourceKind.ResolveDeferred"/> where a handler author reads it.
+    /// </para>
+    /// </remarks>
+    private static bool WouldBeDeferredIfAdded(
+        IDistributedApplicationBuilder builder,
+        DeferredCheckout deferred,
+        LocalKindRegistry kinds,
+        string serviceName,
+        ServiceMetadata metadata,
+        ServiceDeveloperConfig config)
+    {
+        if (!deferred.ShouldDefer(builder, serviceName, config))
+        {
+            return false;
+        }
+
+        if (string.Equals(metadata.Kind, LocalKinds.Dotnet, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (!kinds.TryGet(metadata.Kind, out var handler) || handler is null)
+        {
+            // A kind nothing registered. AddService rejects this service before it ever reaches a
+            // checkout, so the answer only matters for how much is cloned in the meantime, and the
+            // conservative one — keep it in the set — is what happened before.
+            return false;
+        }
+
+        try
+        {
+            return handler.SupportsDeferredCheckout(metadata.KindConfig);
+        }
+        catch (Exception)
+        {
+            // Documented as answering rather than throwing, and asked here about a service the
+            // AppHost may never mention — so a handler that breaks the contract must not take an
+            // unrelated AddService() call down with it. LocalProjectSource puts the same question
+            // for a service that really is added, and reports the breach there by name.
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The speculative half of a checkout, on its own thread: clone what is missing, and stop at
+    /// anything already there. Never throws — the failure is carried in the result — because this
+    /// task may be one nobody ever awaits.
+    /// </summary>
+    private static Task<CheckoutResult> StartCheckoutTask(
+        string serviceName,
+        ServiceMetadata metadata,
+        ServiceDeveloperConfig config,
+        string appHostDirectory,
+        IGitClient gitClient) =>
+        Task.Run(() =>
+        {
+            try
+            {
+                // Prepare, not resolve: cloning what is missing is safe to do for a service that
+                // may never be added, but reconciling an existing checkout is not — see
+                // GetRepoRoot, which finishes the job for the services that are.
+                var prepared = LocalGitCheckout.PrepareRepoRoot(
+                    serviceName, metadata, config, appHostDirectory, gitClient);
+                return new CheckoutResult(prepared, null);
+            }
+            catch (Exception ex)
+            {
+                // Captured, never thrown from the task itself: this service may never be
+                // requested, and a faulted task nobody awaits is an unobserved exception. If it
+                // is never requested, ReportSpeculativeWork is what surfaces this.
+                return new CheckoutResult(null, ex);
+            }
+        });
 
     private sealed record CheckoutResult(LocalGitCheckout.PreparedCheckout? Checkout, Exception? Exception);
 }

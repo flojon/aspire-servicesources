@@ -276,6 +276,57 @@ public class DeferredKindCheckoutTests
         Assert.True(Directory.Exists(ExpectedRepoRoot(dir, "frontend")));
     }
 
+    /// <summary>
+    /// #76 for a satellite kind. <c>SupportsDeferredCheckout</c> is the question core can ask about
+    /// a service nobody has added — it touches no filesystem and registers nothing — so the prefetch
+    /// can ask it too, and leave a would-be-deferred service's clone to the registration that will
+    /// actually want it.
+    /// </summary>
+    [Fact]
+    public void OptedIn_KindThatCanDefer_ColdServiceTheAppHostNeverAdds_IsNotCloned()
+    {
+        var dir = CreateAppHostDirectory("frontend", "admin");
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.UseDeferredCheckout();
+
+        var kind = new StandInKind();
+        builder.AddLocalKind(KindName, kind);
+
+        var git = new FakeGitClient();
+        new LocalProjectSource(git).Resolve(builder, "frontend", Metadata("frontend"), DevConfig());
+
+        Assert.Null(LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage);
+
+        Assert.True(
+            SpinWait.SpinUntil(() => git.Cloned.Count > 0, TimeSpan.FromSeconds(30)),
+            "the deferred service's own checkout was never cloned.");
+        Assert.Equal(["https://example.com/frontend.git"], git.Cloned);
+    }
+
+    /// <summary>
+    /// The converse, and the reason the prefetch has to ask rather than assume: a kind that cannot
+    /// build its resource without reading the repository takes the eager path, where the clone
+    /// blocks composition — so speculating for it is still what keeps the clones parallel.
+    /// </summary>
+    [Fact]
+    public void OptedIn_KindThatCannotDefer_ColdServiceTheAppHostNeverAdds_IsStillCloned()
+    {
+        var dir = CreateAppHostDirectory("frontend", "admin");
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.UseDeferredCheckout();
+
+        var kind = new StandInKind(supportsDeferral: false);
+        builder.AddLocalKind(KindName, kind);
+
+        var git = new FakeGitClient();
+        new LocalProjectSource(git).Resolve(builder, "frontend", Metadata("frontend"), DevConfig());
+
+        Assert.True(
+            SpinWait.SpinUntil(() => git.Cloned.Count == 2, TimeSpan.FromSeconds(30)),
+            "the speculative checkout for 'admin' never ran.");
+        Assert.Contains("https://example.com/admin.git", git.Cloned);
+    }
+
     [Fact]
     public void WithoutOptIn_ColdCheckout_StillResolvesEagerly()
     {
@@ -476,9 +527,14 @@ public class DeferredKindCheckoutTests
 
         // The whole point of the cheap question: it is answerable without the expensive one being
         // asked, because the expensive one adds resources to the app model as a side effect.
-        Assert.Equal(1, kind.SupportsDeferredCheckoutCalls);
         Assert.Equal(0, kind.ResolveDeferredCalls);
         Assert.True(kind.ResolvedEagerly);
+
+        // Twice, by the two callers that need the answer for different reasons: the checkout
+        // prefetch, deciding whether this service's clone is one it has to start ahead of demand
+        // (#76), and then the registration itself. Cheap and side-effect free is what makes asking
+        // twice — and asking about services that are never added at all — affordable.
+        Assert.Equal(2, kind.SupportsDeferredCheckoutCalls);
     }
 
     [Fact]
@@ -495,12 +551,18 @@ public class DeferredKindCheckoutTests
             .Resolve(builder, "frontend", Metadata("frontend"), DevConfig());
 
         // A kind may only be able to decide once it has looked at everything, so null out of
-        // ResolveDeferred stays honoured even after the cheap probe said yes — and still costs
-        // nothing but the eager path.
+        // ResolveDeferred stays honoured even after the cheap probe said yes.
         Assert.Equal(1, kind.ResolveDeferredCalls);
         Assert.True(kind.ResolvedEagerly);
         Assert.False(IsHeldBack(service.Resource));
         Assert.Single(builder.Resources, r => r.Name == "frontend");
+
+        // And the checkout still lands. This is the one case where the two deferral questions
+        // disagree, so the prefetch — which believed the first answer — started nothing for this
+        // service (#76) and GetRepoRoot has to clone it inline through its "not in the prefetch
+        // set" fallback. Serial rather than parallel, but the service must still be resolvable;
+        // that fallback is what makes declining late safe rather than merely permitted.
+        Assert.True(Directory.Exists(ExpectedRepoRoot(dir, "frontend")));
     }
 
     [Fact]
