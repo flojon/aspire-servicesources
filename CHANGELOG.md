@@ -387,8 +387,8 @@ nothing will fail to build to warn you.
   answers "why is nothing configured?", which the key has just answered.
 
   ```
-  No service sources are configured: '/src/apphost/servicesources.local.json' has no 'services'
-  key, only 'service'. Did you mean 'services'?
+  No service sources are configured: '/src/apphost/servicesources.local.json' has a top-level key
+  'service'. Did you mean 'services'?
   ```
 
   A root key differing from `services` only by case is not a near miss but the key itself:
