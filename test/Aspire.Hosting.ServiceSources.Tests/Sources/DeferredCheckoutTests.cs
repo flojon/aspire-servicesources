@@ -1052,9 +1052,11 @@ public class DeferredCheckoutTests
     public async Task CloneProgress_IsReportedForAServiceThePrefetchNeverEnumerated()
     {
         // The catalog describes "orders" but the developer configuration does not name it, so the
-        // prefetch has nothing to speculate about and the checkout is resolved on the start task
-        // instead. That path can run a whole cold clone, so it is not one to leave unwatched — and
-        // it is the path a deferred service takes whenever the prefetch declines to claim it.
+        // speculative prefetch has nothing to enumerate for it: its clone is started by the deferred
+        // registration itself, at the AddService call, rather than by the sweep over the config.
+        // That is the ordinary path for a deferred service since #177, and the one whose progress
+        // has the furthest to travel — the clone begins while the AppHost is still composing, long
+        // before there is a resource with a state column to report into.
         var dir = Directory.CreateTempSubdirectory().FullName;
         File.WriteAllText(
             Path.Combine(dir, "servicesources.yaml"),
@@ -1071,9 +1073,6 @@ public class DeferredCheckoutTests
         var orders = new LocalProjectSource(git)
             .Resolve(builder, "orders", Metadata("orders"), DevConfig())
             .WithHttpEndpoint();
-
-        // Nothing was cloned while composing: this service is not in the prefetch set at all.
-        Assert.Empty(git.Cloned);
 
         var services = builder.Services.BuildServiceProvider();
 
@@ -1112,6 +1111,9 @@ public class DeferredCheckoutTests
             observed = [.. states];
         }
 
+        // The clone really did run, and what it reported reached the resource — across the gap
+        // between a clone that starts during composition and a dashboard that exists only after the
+        // host is up, which the buffered stream is what bridges.
         Assert.Contains("https://example.com/orders.git", git.Cloned);
         Assert.Contains("Receiving objects 48% · 18.54 MiB", observed);
 
