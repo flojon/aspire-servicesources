@@ -1,7 +1,9 @@
 # Aspire.Hosting.ServiceSources — The `prepare` Step
 
 **Date:** 2026-08-28
-**Status:** Design — ready for implementation planning. Amended 2026-08-30 to settle #123.
+**Status:** Design — ready for implementation planning. Amended 2026-08-30 to settle #123, and
+2026-09-03 against the code that has landed since: the nested developer config (#161/#171) and
+deferred checkouts reaching every kind (#136, #159/#164).
 **Resolves:** GitHub issue #118 (a `"local"` checkout whose runnable artifact is produced by a
 script the repository commits and then gitignores).
 **Also resolves:** #123 (whether the step should run for a self-managed `path` checkout — it
@@ -9,7 +11,8 @@ does, but only when the developer declares it themselves; see [`path` checkouts]
 **Leaves a seam for:** #81 (whether a fresh checkout is ever built before its resource starts) —
 since closed, confirming this step is that seam and needs nothing added here. See
 [the checkout-build findings](2026-08-30-servicesources-checkout-build-findings.md).
-**Surfaced:** #122 (`servicesources.local.json` silently ignores unknown properties).
+**Surfaced:** #122 (`servicesources.local.json` silently ignoring unknown properties) — since
+fixed, which removes a caveat this design used to carry; see finding 8.
 
 ## Motivation
 
@@ -55,6 +58,12 @@ own text, which is why they are recorded here rather than left implicit.
    exit code. Making the failure survivable would require a different resource model and would be
    inconsistent with every other resolution failure in the tool.
 
+   Deferral is that different resource model, and it has since arrived. A service whose checkout is
+   deferred is started from a background task rather than from `AddService()`, so a step that fails
+   there costs that one service and nothing else — exactly what #118 asked for. The finding stands
+   where it was made, at the composition seam, and no longer everywhere; see
+   [Deferred checkouts](#deferred-checkouts).
+
 3. **The Java kind never checks that `jarPath` exists.** `JavaKindOptions` validates the *shape* of
    the path (rejects absolute paths, rejects climbing out of the checkout) and normalizes separators;
    it performs no `File.Exists`. So the motivating failure is `java -jar` failing at run time, not a
@@ -63,12 +72,16 @@ own text, which is why they are recorded here rather than left implicit.
    `LocalProjectSource.ResolveProjectFile` does check `File.Exists` on the project file, so a
    repository that generates its `.csproj` needs the step to have run first.
 
-4. **A satellite package cannot read `servicesources.local.json`.** `ServiceSourcesConfigCache` is
-   `internal`, core's only `InternalsVisibleTo` is its own test assembly, and
+4. **A kind cannot read the developer config.** `ServiceSourcesConfigCache` is `internal`, and
    `ILocalResourceKind.Resolve` receives `builder`, `serviceName`, `repoRoot` and `rawConfig` and
-   nothing else. A bootstrap option owned entirely by a satellite is therefore overridable in the
-   catalog but *cannot* be overridden per developer. Since a per-developer override is wanted, core
-   must own the mechanism.
+   nothing else. A bootstrap option owned entirely by a kind is therefore overridable in the catalog
+   but *cannot* be overridden per developer. Since a per-developer override is wanted, core must own
+   the mechanism.
+
+   The satellite packages this was first written about have since gone: #187/#188 moved the `java`
+   and `javascript` kinds into core, where they can see its internals. The conclusion is unchanged;
+   the constraint has just moved to where it always mattered, since `ILocalResourceKind` is public
+   and a third-party kind (#54) stands exactly where a satellite did.
 
 5. **No built-in kind has a useful default today.** `java` is one kind with three mutually exclusive
    run modes selected inside its options block (`mavenGoal` / `gradleTask` / `jarPath`, exactly one
@@ -76,32 +89,60 @@ own text, which is why they are recorded here rather than left implicit.
    `bootRun` depends on `classes` — so a default build step in front of them is a double compile.
    The `jarPath` mode cannot be given a default at all, because only the repository knows how its jar
    comes to exist. `javascript`'s integrations install from source. `dotnet` is inlined in
-   `LocalProjectSource` and has no satellite; #81 suggests Aspire itself owns that build. Every
-   branch is empty, so `ILocalResourceKind` gains no member in this design (see
+   `LocalProjectSource` rather than in a kind at all; #81 suggests Aspire itself owns that build.
+   Every branch is empty, so `ILocalResourceKind` gains no member in this design (see
    *Consequences accepted*).
 
-6. **There is no `ILogger` during `AddService()`.** The AppHost is still being composed; both
-   `LocalCheckoutPrefetch` and `ServiceConfigurationWarnings` buffer their notices to
-   `BeforeStartEvent` for this reason. A step that runs during composition and takes minutes cannot
-   report progress through the logging pipeline.
+6. **There is no `ILogger` during `AddService()` — and on the deferred path there is one.** The
+   AppHost is still being composed; both `LocalCheckoutPrefetch` and `ServiceConfigurationWarnings`
+   buffer their notices to `BeforeStartEvent` for this reason. A step that runs during composition
+   and takes minutes cannot report progress through the logging pipeline. A deferred service is the
+   opposite case: its checkout runs from `BeforeStartEvent` on a task that already holds
+   `ResourceLoggerService.GetLogger(resource)` and publishes resource state, which is how
+   `ReportCloneProgressAsync` mirrors git's own progress into the dashboard (#131). The two paths
+   have different reporting surfaces available, so this design uses each one's best rather than
+   reducing both to the console.
 
 7. **`IGitClient` cannot report the checked-out commit.** It exposes `Clone`, `Checkout`, `Fetch`,
    `HasUncommittedChanges`, `IsRefCheckedOut` and `GetOriginUrl`. Keying a completion marker on the
    resolved commit requires one new member.
 
-8. **The catalog rejects unknown keys; the developer config does not.** `ServiceCatalogLoader`
-   derives its expected sets from the metadata types by reflection and rejects unknown keys at the
-   root, at the service level, and inside a typed nested block. `DeveloperConfigLoader` is a plain
-   `System.Text.Json` deserialization with a naming policy and nothing else, so unmapped members are
-   skipped silently. A `prepare` block therefore gets typo rejection for free on the catalog side and
-   none on the local side. Filed as #122; not fixed here.
+8. **Both files now reject unknown keys — one level deep.** `ServiceCatalogLoader` derives its
+   expected sets from the metadata types by reflection and rejects unknown keys at the root, at the
+   service level, and inside a typed nested block. The developer config gained the same treatment
+   when its settings moved under per-source blocks (#161/#171): `ServiceDeveloperConfigShape`
+   reflects `ServiceDeveloperConfig` for the valid root keys and each block's fields, and
+   `ServiceDeveloperConfigValidator` reports an unknown key, names the block a misplaced one belongs
+   in, and refuses a value where a block goes and a block where a value goes. The asymmetry #122
+   described is gone, and with it this design's former caveat that a typo in the developer's
+   `prepare` block would be silent.
+
+   What the block inherits instead is a depth limit. `ServiceDeveloperConfigShape.BlockFields` is
+   block name → field name → type, exactly two levels deep, and the validator rejects any field
+   carrying children as "takes a value, not a block". A `prepare` block inside `local` is the first
+   three-level path that file has ever held, and `command` is its first list-valued field — and
+   `IConfiguration` renders a JSON array as indexed children, so *both* trip that check as it
+   stands. Neither is a defect: no developer field has ever been either shape. What it costs is set
+   out under [Schema — developer config](#schema--developer-config-and-the-override-rule).
+
+9. **A `path` override never defers.** `DeferredCheckout.ShouldDefer` refuses one outright — there
+   is nothing to clone, and nothing this package is entitled to create at a path the developer
+   manages. So the single arrangement in which two services share one working tree, the monorepo
+   `path` pattern the README documents, is also the one that always resolves eagerly. That is what
+   lets the concurrency rule below hold without a gate.
 
 ## Architecture
 
 ```
-materialize (clone / reconcile to ref)  ──→  prepare  ──→  kind (dotnet | java | javascript | …)
-        LocalGitCheckout                   (new)          LocalProjectSource dispatch
+eager     materialize (clone / reconcile)  ──→  prepare  ──→  kind (dotnet | java | …)
+               LocalGitCheckout               (new)        LocalProjectSource dispatch
+
+deferred  clone lands, in the background   ──→  prepare  ──→  ValidateCheckout ──→ start
+               LocalCheckoutPrefetch          (new)             DeferredCheckout
 ```
+
+Both paths exist today, and the step sits at the same point in each: after the working tree is
+complete, before the kind is allowed to judge it. See [Where the step runs](#where-the-step-runs).
 
 ### Schema — catalog
 
@@ -158,15 +199,31 @@ macOS can branch internally.
 
 ### Schema — developer config, and the override rule
 
-`ServiceDeveloperConfig` gains a `Prepare` property of the same shape:
+A developer's settings for a source live in a block named for that source (#161/#171), so
+`prepare` is a property of `LocalDeveloperConfig` rather than of the entry root:
 
 ```json
 {
   "services": {
-    "routing": { "source": "local", "prepare": { "mode": "never" } }
+    "routing": { "source": "local", "local": { "prepare": { "mode": "never" } } }
   }
 }
 ```
+
+That layout does two things this design would otherwise have had to arrange for itself. A `prepare`
+block written under a service whose source is not `"local"` is no longer a foreign field to detect
+and reject — it is a key inside a block nothing reads, which is the point of the layout — and
+`prepare` binds only when `"local"` is the entry's *effective* source, so a higher configuration
+layer switching the source away cannot leave a step behind it to run.
+
+It also lands one level deeper than anything that file holds today, and it carries a list. Per
+finding 8, `ServiceDeveloperConfigShape` and `ServiceDeveloperConfigValidator` therefore both need
+a level: the shape to describe a block field that is itself a block, the validator to walk into it
+and to accept indexed children where a field's type is a collection rather than reporting them as
+"takes a value, not a block". That is a real cost this design adds to a file it did not write, and
+it is the price of the typo rejection finding 8 now gets for free. It should land with `prepare`
+rather than ahead of it, since nothing else in the file needs it. The validator's existing messages
+are under separate review (#182); nothing here depends on their wording.
 
 The developer's block is merged over the catalog's **per field**, with one exception: `mode`
 overrides if present, anything absent is inherited, and `command`/`windowsCommand` are replaced
@@ -196,9 +253,10 @@ Disabling is expressed as `mode: never` rather than as an absence because JSON c
 explicit `null` from a missing key without a nullable wrapper, and because a developer overriding
 only the mode is the common case the merge rule above is shaped for.
 
-Two supporting changes: `LocalProjectSource.RelevantFields` becomes `{ "path", "ref", "prepare" }`,
-and `ServiceDeveloperConfigValidator` gains a check for it so `prepare` under a `"container"` source
-is rejected as a foreign field like `port` under `"local"` already is.
+An earlier draft of this design also had `LocalProjectSource.RelevantFields` grow a `"prepare"`
+entry, and a validator check to reject `prepare` under a `"container"` source. Neither survives:
+`RelevantFields` went away with the flat shape, and the foreign-field question it answered is
+structural now rather than checked.
 
 ### Relationship to #134 (the code-authored catalog)
 
@@ -260,37 +318,118 @@ placement is doing work:
   across services. That is also the answer to #81's concern about parallel builds thrashing DLL
   locks (microsoft/aspire#15190): anything routed through this seam is serialized by construction.
 
-  Narrowed by measurement after this design was written: serial *here* is not serial everywhere.
-  Aspire launches project resources concurrently, so the builds `dotnet run` performs are parallel
-  whatever this seam does, and that contention reproduces — for services sharing build output.
-  See [the checkout-build findings](2026-08-30-servicesources-checkout-build-findings.md). The
-  sentence above holds for prepare steps and only for them.
+  Narrowed twice since, and both times in the same direction. By measurement first: serial *here*
+  is not serial everywhere, because Aspire launches project resources concurrently, so the builds
+  `dotnet run` performs are parallel whatever this seam does, and that contention reproduces for
+  services sharing build output — see
+  [the checkout-build findings](2026-08-30-servicesources-checkout-build-findings.md). Then by
+  deferral, which gives a service a task of its own to prepare on. The sentence above holds for
+  prepare steps on the eager path, and only there; see
+  [Concurrency](#prepare-steps-are-serial-on-the-eager-path-and-concurrent-on-the-deferred-one).
 - **`LocalGitCheckout` is untouched** and stays purely about git.
 
 The block is *parsed and validated* earlier — alongside the existing `handler?.Validate(...)`
 pre-flight, before `GetRepoRoot` — so a malformed `prepare` block is reported without first paying
-for a cold clone, matching the reasoning already documented on that call.
+for a cold clone, matching the reasoning already documented on that call. That pre-flight also runs
+ahead of `ShouldDefer`, so it covers both paths: a typo'd `mode` or a command climbing out of the
+checkout is a composition-time error for a deferred service too, reported before anything is
+registered against a checkout that does not exist. Only what needs the working tree waits for it,
+which is the same division `DeferredLocalResource.ValidateCheckout` draws for a kind.
 
 #### Deferred checkouts
 
-`builder.UseDeferredCheckout()` (#130, PR #136 — opt-in, off by default, and unmerged as this is
-written) removes the assumption the placement above rests on. It registers a managed `dotnet`
-service against the path its checkout *will* have, holds the resource back with
-`WithExplicitStart()`, and clones in a background task that releases it from
-`AfterResourcesCreatedEvent`. During composition that checkout does not exist, so a step wired
-between `GetRepoRoot` and the kind dispatch would run against a missing directory or not run at all.
+`builder.UseDeferredCheckout()` (#130/#136, opt-in and off by default, extended from `dotnet` to the
+`java` and `javascript` kinds by #159/#164) removes the assumption the placement above rests on. It
+registers the service against the path its checkout *will* have, holds back every resource the kind
+added with `WithExplicitStart()`, and clones in a background task launched from `BeforeStartEvent`.
+During composition that checkout does not exist, so a step wired between `GetRepoRoot` and the kind
+dispatch would run against a missing directory, or not run at all.
 
-The step therefore follows the checkout rather than the composition: for a deferred service it runs
-in that same background task, after the clone lands and before the resource is released to start.
-Nothing else changes — same marker, same modes, same failure text — except where a failure surfaces,
-which is wherever #136 puts a failed clone: resource state, not an exception on a task nobody awaits.
+The step therefore follows the checkout rather than the composition, and the seam it needs is
+already there. `DeferredCheckout.StartDeferredAsync` puts it in the same position relative to the
+kind's own checks that the eager path does:
 
-This is not a corner case dressed up as one. Finding 3 singles out `kind: dotnet` as the kind whose
-`ResolveProjectFile` does `File.Exists`, which is the whole reason the ordering constraint is real —
-and `dotnet` is exactly the kind #136 defers. A repository that generates its own `.csproj` is a
-service both features are aimed at. Every other resolution path is untouched: #136 leaves a `path`
-override, a warm checkout and all non-`dotnet` kinds on the eager path, so nothing in
-[`path` checkouts](#path-checkouts) interacts with it.
+```
+eager     GetRepoRoot  ──→  prepare  ──→  kind dispatch, its checks included
+deferred  clone lands  ──→  prepare  ──→  ValidateCheckout  ──→  helpers  ──→  service
+```
+
+Concretely: after the resolved `repoRoot` has been compared against the one the resource was
+registered against, and before `OnCheckoutLanded` — which is where a kind's
+`DeferredLocalResource.ValidateCheckout` runs and where the `dotnet` kind reads its landed launch
+profile. Before the held-back *helpers*, not merely before the service: `Aspire.Hosting.JavaScript`
+adds an installer resource that core starts ahead of the app, and a prepare step is entitled to
+generate the `package.json` that installer reads.
+
+Nothing about the step itself changes — same marker, same modes, same command resolution, same
+failure text. The marker keeps working unaltered too: `<repoRoot>/.git/` exists as soon as the clone
+lands, which is before prepare runs.
+
+This is not a corner case dressed up as one, and #164 is why. Finding 3 singles out `kind: dotnet`
+as the kind whose `ResolveProjectFile` does `File.Exists`, which is the whole reason the ordering
+constraint is real, and `dotnet` was the only kind #136 deferred — so a repository that generates
+its own `.csproj` was already a service both features aim at. Since #164 the **motivating case is
+itself on this path**: GraphHopper is `kind: java`, `java` always supports deferral because its
+endpoints come from the committed catalog rather than from the checkout, and its `jarPath` does not
+exist until `prepare.sh` has run. The one resolution path an earlier draft of this design assumed
+would never be deferred is the one the feature exists for.
+
+Two things differ from the eager path, and both are improvements rather than compromises. A failure
+becomes resource state and a resource log instead of an exception out of composition — finding 2's
+"it fails the AppHost" is an eager-path statement, and deferral is the one path on which #118's
+"failure is per-service" is literally satisfied. And progress has somewhere better to go than the
+console, because the task holds the service's `ILogger` and publishes its state (finding 6); see
+*Execution and output*.
+
+What is untouched: a `path` override (finding 9), a warm checkout, publish mode — which #136
+restricts deferral out of, so `aspire publish` and manifest generation always take the eager path —
+and a `node`/`bun` service that cannot promise a `package.json` without looking at one: #164 has it
+decline deferral rather than register an app with no installer. Each of those prepares eagerly, and
+nothing in [`path` checkouts](#path-checkouts) interacts with deferral at all.
+
+#### Prepare steps are serial on the eager path and concurrent on the deferred one
+
+`DeferredCheckout.StartAll` launches one `Task.Run` per deferred service and awaits none of them,
+deliberately: waiting there would put back exactly the block that #136 exists to remove. So deferred
+services prepare **concurrently with each other**, and the claim under *Where the step runs* — that
+`AddService()` being serial makes prepare steps serial across services — describes the eager path
+alone.
+
+The honest reading is that seriality was never something this design provided. It was a property of
+the call sequence prepare happened to sit in, borrowed once to answer #81's concern about parallel
+builds thrashing DLL locks; #81 has since closed without needing it, having established that Aspire
+launches project resources concurrently regardless.
+
+**Scoped rather than restored.** A gate serializing the prepare call inside the deferred task was
+considered and rejected. It would make one service's four-minute graph import delay the *start* of
+every other deferred service whose checkout landed minutes earlier — reintroducing precisely the
+coupling deferral removes, turning one slow service into a slow AppHost, and turning a hung prepare
+step into a global stall rather than one failed resource. What it would buy is thin at this seam:
+the interleaved-output objection does not arise, because deferred output goes to per-resource logs
+rather than to a shared console, and the shared-directory objection does not arise either, per the
+second rule below. It would also be the first step toward ordering between prepare steps, which #118
+excludes by name.
+
+What is guaranteed, and what the README must say:
+
+- **A service's prepare step never runs concurrently with itself.** A service resolves on exactly
+  one of the two paths, and has exactly one task on it. So the marker never has two writers, which
+  is the race that could actually corrupt state.
+- **Two services never prepare in the same directory.** Managed checkouts are per-service clones
+  (see *Once per checkout, not once per repository*), so two managed services off one repository
+  have two working trees. The one arrangement that shares a tree is two services pointed at one
+  `path`, and per finding 9 a `path` override never defers — so both of those steps take the eager
+  path, and are serial.
+- **A prepare command may run concurrently with a *different* service's prepare command**, and has
+  to tolerate it. What those two share is the machine and whatever package caches they use —
+  `~/.m2`, `~/.npm`, the NuGet cache — never a working tree.
+
+The residual cost is real and accepted: two expensive steps on one laptop contend for CPU, disk and
+memory where they would previously have queued. It is the same cost Aspire's concurrent resource
+launch already imposes on the builds those services run, and the remedy is the one this design
+points at everywhere else — the script owns the question. A step that genuinely must not overlap
+with another can take its own lock, which is the mutual-exclusion form of *Change detection belongs
+to the script*.
 
 ### Once-ness and the marker
 
@@ -555,7 +694,8 @@ commit moved, the commit could not be resolved, or the mode is `always`. That si
 the whole of what this design says about telling a developer why their start is slow: one report per
 decision to run, rather than a warning special-cased to a mode or to a shape of checkout. A decision
 to *skip* is not reported; skipping is the ordinary case, and the marker file already records it.
-It goes to the console, like everything else this step emits and for the same reason (finding 6).
+Where it goes follows the path, as everything else this step emits does (finding 6): the console
+during composition, the service's own resource log when the checkout was deferred.
 
 The full resolved command is logged before it runs — the "log it loudly" half of #118's trust
 discussion. Provenance is otherwise unchanged from what the tool already does: `mavenGoal` and
@@ -573,19 +713,35 @@ the service:
 [prepare routing] done in 4m12s
 ```
 
-Written to the console rather than to a logger, because there is no logger yet (finding 6). This is
-the one part of the design with an unmeasured risk: whether `aspire run` buffers the AppHost's
-standard output, which would mute the stream during composition. It should be checked against a
-throwaway AppHost early in implementation. If it buffers, the fallback is to capture the output and
-emit a start line, a periodic "still running (Nm)" heartbeat, and the tail of the output on failure —
-same mechanism, different presentation.
+On the eager path those lines go to the console rather than to a logger, because there is no logger
+yet (finding 6). This is the one part of the design carrying an unmeasured risk: whether `aspire run`
+buffers the AppHost's standard output, which would mute the stream during composition. It should be
+checked against a throwaway AppHost early in implementation. If it buffers, the fallback is to
+capture the output and emit a start line, a periodic "still running (Nm)" heartbeat, and the tail of
+the output on failure — same mechanism, different presentation.
+
+On the deferred path that risk does not arise, and the presentation is better than the console could
+be. The step runs on the task that already holds the service's `ILogger` and publishes its resource
+state, so each line reaches the service's resource log as it arrives and is visible in the dashboard,
+and the service carries a state of its own while it runs — "Preparing", alongside the "Checking out"
+that #131 publishes during the clone. That is what #118 asks for in the sentence it calls most likely
+to make or break the feature: a country-sized import has to read as an initialization phase rather
+than as an apparent hang. The deferred path delivers exactly that, and since #164 it is the path the
+motivating case is on.
 
 ### Failure
 
 A non-zero exit throws `ServiceSourcesConfigurationException` naming the service, the resolved
 command and the exit code, with the tail of the captured output. A command that cannot be launched at
-all is reported separately and, on Windows with no `windowsCommand` variant configured, names that as the
-likely cause. Per finding 2, both fail the AppHost.
+all is reported separately and, on Windows with no `windowsCommand` variant configured, names that
+as the likely cause.
+
+Where that lands is the path's business rather than this step's. During composition it fails the
+AppHost, per finding 2. On the deferred path the same exception is caught by
+`StartDeferredAsync`'s existing handler and reported as resource state and resource logs, exactly as
+a failed clone already is — so the service does not start and every other service does. #118 asks
+for the second behaviour; this design delivers it wherever the resource model can express it, and
+says plainly that during composition it cannot.
 
 ### `path` checkouts
 
@@ -661,16 +817,29 @@ repository at all, so tracking the catalog's command is a questionable default t
 - **No `ILocalResourceKind` change.** Per finding 5 there is no non-null default to supply today, and
   adding a member every implementation opts out of is speculative public API on a published
   interface. Adding a default-implemented member later is source-compatible — `Validate` is the
-  precedent — so this stays one small, reversible step away if a compiled-language satellite
+  precedent — so this stays one small, reversible step away if a compiled-language kind
   (#45–#50) produces a real default. #81 was the other candidate and has since closed without
   producing one: a `kind: dotnet` resource is launched with `dotnet run` from inside the checkout,
   so it is built on every start and needs no default at all. See
   [the checkout-build findings](2026-08-30-servicesources-checkout-build-findings.md).
-- **A typo in the developer config's `prepare` block is silent** (finding 8, #122). The catalog side
-  is validated; the local side is not, and fixing that asymmetry is its own change. The README should
-  say so.
-- **Serial across services.** A second service with a slow prepare step adds its full duration to
-  startup. Parallelizing would mean moving into the speculative phase, which finding 1 forbids.
+- **The developer config learns two new shapes.** `prepare` is the first block nested inside a block
+  in that file and `command` its first list-valued field, so `ServiceDeveloperConfigShape` and
+  `ServiceDeveloperConfigValidator` each gain a level (finding 8). Paid willingly: what it buys is
+  that a typo in the developer's `prepare` block is *not* silent, which earlier drafts of this design
+  had to accept as a caveat.
+- **A list merges index-wise between developer-config layers.** `IConfiguration` merges per key and a
+  JSON array is keyed by index, so an environment variable setting `…:prepare:command:0` over a
+  two-element command in the file replaces the first element and leaves the second in place. Those
+  are `IConfiguration`'s semantics rather than this design's; they do not touch the catalog, which
+  has its own yaml loader, nor the catalog-over-developer merge, which is done in our own code where
+  the command pair is replaced as a unit. Documented rather than fought — a sentinel or a length
+  check would be a local invention in the one file whose point is that it behaves like
+  configuration.
+- **Serial on the eager path only.** A second eagerly-resolved service with a slow prepare step adds
+  its full duration to startup, and parallelizing *there* would mean moving into the speculative
+  phase, which finding 1 forbids. Deferred services prepare concurrently instead — faster, and the
+  accepted trade is that two expensive steps can contend for one machine. See
+  [Concurrency](#prepare-steps-are-serial-on-the-eager-path-and-concurrent-on-the-deferred-one).
 - **Duplicated work for two services off one repository.** Each has its own checkout, so each pays
   for its own prepare — twice the download, twice the disk. Correct rather than merely tolerable
   (see *Once per checkout, not once per repository*), but a developer running both halves of a
@@ -710,6 +879,12 @@ constructor parameter with a process-backed default — the same shape as the ex
 injection, which `LocalProjectSourceTests` already exercises with a fake. No test spawns a real
 process.
 
+The deferred path needs the same substitution one level further in, since it runs the step from
+`DeferredCheckout` rather than from `LocalProjectSource`. Whichever way that runner reaches it, both
+paths must share one implementation: the marker, the modes, the command resolution and the failure
+text are the same code called from two places, and the point of the tests below is that only *where*
+the step runs differs.
+
 - **Marker** — absent, runs; present and matching, skips; command changed, re-runs; commit changed,
   re-runs; platform variant changed, re-runs; written only on success, so a failed step re-runs;
   an unreadable or malformed marker runs rather than throws; a null commit from `GetHeadCommitSha`
@@ -743,21 +918,32 @@ process.
   every run reports the reason it ran rather than warning about the mode.
 - **The decision to run is reported** — with the reason, for each of no marker, changed command,
   moved commit, unresolvable commit and `mode: always`; a skip reports nothing.
-- **Deferred checkout** — a `dotnet` service registered through `UseDeferredCheckout()` runs its
-  step in the background task after the clone lands and before the resource is released, not during
-  composition; its failure surfaces as resource state.
+- **Deferred checkout** — a service registered through `UseDeferredCheckout()` runs its step in the
+  background task after the clone lands, before `ValidateCheckout` and before the held-back helpers
+  are started, and not during composition; its failure surfaces as resource state rather than as an
+  exception. Covered for `dotnet`, `java` and `javascript`, since #164 defers all three and the
+  motivating case is `java`. Assert on the ordering and on the state finally reached rather than on
+  a sequence of intermediate snapshots — a resource watch replays only the current one, which is
+  what made the #189 tests flake.
+- **Concurrency** — two deferred services prepare without either waiting on the other; a single
+  service's step is never entered twice concurrently.
 - **Failure** — non-zero exit names service, command and exit code; a command that cannot be launched
   is distinguished.
 - **Confinement** — a first element climbing out of the checkout is rejected; a bare name is left for
   `PATH`.
-- **Loader** — the block parses; an unknown key inside it is rejected with the expected set;
-  registering a kind named `prepare` is refused; `prepare` under a non-`local` source is rejected as
-  a foreign field.
+- **Loader, catalog side** — the block parses; an unknown key inside it is rejected with the
+  expected set; registering a kind named `prepare` is refused.
+- **Loader, developer side** — `local: { prepare: { … } }` binds; `comand` inside it is rejected by
+  name, one level deeper than the validator reaches today; a `command` written as a scalar rather
+  than a list is rejected; a `command` list binds rather than being reported as a block; and a
+  `prepare` block under a service whose effective source is not `"local"` is inert rather than an
+  error, because it sits in a block nothing reads.
 
 Documentation: a `prepare` subsection under `"local"` source options in the README, covering the
 schema, the override table, the marker and how to force a re-run, the four modes and how to choose
 between them (the `once` vs `oncePerCommit` question is "does the repository define this step?"),
 the requirement that the command be safe to re-run under all of them, the rule that a `path`
 checkout declares its own step rather than inheriting the catalog's (and that declaring any block,
-including `{"mode": "never"}`, silences the resulting notice), and the silent-typo caveat.
+including `{"mode": "never"}`, silences the resulting notice), and the rule that a command must
+tolerate running alongside a *different* service's command when checkouts are deferred.
 `CHANGELOG.md` entry under the open version.
