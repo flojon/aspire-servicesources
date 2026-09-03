@@ -28,10 +28,18 @@
     <PackageReference Include="CommunityToolkit.Aspire.Hosting.Java" PrivateAssets="all" />
   </ItemGroup>
 
-  <!-- NuGet imports build/$(PackageId).targets into every consuming project, which is what lets
-       the floor for the two undeclared references be checked at the consumer's restore. -->
+  <!-- The floor check for the two undeclared references, imported into a consuming project by
+       NuGet. Packed to both folders deliberately: build/ is imported only for a *direct*
+       PackageReference, so an AppHost that picks this package up through a shared conventions
+       package - the shape a team uses to centralise its Aspire setup - would get no check at all
+       and would meet the floor as a runtime load failure instead. buildTransitive/ is what reaches
+       that project. Both are shipped rather than buildTransitive/ alone so the direct case does not
+       depend on buildTransitive/ also being honoured for direct references. Shipping both is safe
+       because they are the same file: two imports declaring one target name leave one target, which
+       runs once. -->
   <ItemGroup>
-    <None Include="build\$(PackageId).targets" Pack="true" PackagePath="build\" />
+    <None Include="build\$(PackageId).targets" Pack="true" PackagePath="build\$(PackageId).targets" />
+    <None Include="build\$(PackageId).targets" Pack="true" PackagePath="buildTransitive\$(PackageId).targets" />
   </ItemGroup>
 
 </Project>

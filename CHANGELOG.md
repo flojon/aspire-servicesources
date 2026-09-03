@@ -45,11 +45,15 @@ nothing will fail to build to warn you.
   per-method at JIT time, so the assembly is needed only when a service of that kind actually
   resolves.
 
-  Forget one and you are told which. A referenced version below the minimum fails the build with
-  `SERVICESOURCES001`, naming the package and the version that resolved. Missing entirely, the
-  first `AddService()` for a service of that kind fails with a message naming the package to
-  install — which is the only report a guest-language AppHost gets, since it consumes core through
-  a project reference the Aspire CLI generates and that imports no build-time checks.
+  Forget one and you are told which. A referenced version below the minimum fails the build,
+  naming the package and the version that resolved — `SERVICESOURCES001` for
+  `Aspire.Hosting.JavaScript`, `SERVICESOURCES002` for `CommunityToolkit.Aspire.Hosting.Java`. A
+  prerelease of the minimum counts as below it, since a preview cut before that release carries
+  its assembly version and would otherwise bind and then fail on a missing member. The check
+  reaches a package reached transitively as well as a direct one. Missing entirely, the first
+  `AddService()` for a service of that kind fails with a message naming the package to install —
+  which is the only report a guest-language AppHost gets, since it consumes core through a project
+  reference the Aspire CLI generates and that imports no build-time checks.
 
 ## [0.4.0] - 2026-09-03
 

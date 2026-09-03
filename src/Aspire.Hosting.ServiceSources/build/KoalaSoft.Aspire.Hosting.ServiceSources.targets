@@ -37,13 +37,40 @@
           Include="@(_ServiceSourcesJavaAsset->'%(NuGetPackageVersion)'->Distinct())" />
     </ItemGroup>
 
+    <!--
+      [MSBuild]::VersionLessThan parses with System.Version semantics, which stop at the first '-':
+      it reads 13.5.2-preview.1 as 13.5.2 and so calls it not-less-than the 13.5.2 floor. By SemVer
+      a prerelease precedes the release it labels, and the difference is real rather than pedantic -
+      a preview cut before the release carries that release's assembly version, so it binds and then
+      fails on the missing member with a MissingMethodException, which is not a load failure and is
+      not translated at run time.
+
+      So the comparison is split: the numeric core against the floor as before, plus an equal core
+      carrying a prerelease label, which is the one case System.Version cannot see. A prerelease
+      *above* the floor (13.5.3-preview.1 against a 13.5.2 floor) is correctly left alone.
+    -->
+    <ItemGroup>
+      <_ServiceSourcesJavaScriptVersion>
+        <Core>$([System.Text.RegularExpressions.Regex]::Replace('%(Identity)', '-.*$', ''))</Core>
+        <Prerelease>$([System.String]::Copy('%(Identity)').Contains('-'))</Prerelease>
+      </_ServiceSourcesJavaScriptVersion>
+      <_ServiceSourcesJavaVersion>
+        <Core>$([System.Text.RegularExpressions.Regex]::Replace('%(Identity)', '-.*$', ''))</Core>
+        <Prerelease>$([System.String]::Copy('%(Identity)').Contains('-'))</Prerelease>
+      </_ServiceSourcesJavaVersion>
+    </ItemGroup>
+
     <Error Condition="'@(_ServiceSourcesJavaScriptVersion)' != ''
-                      and $([MSBuild]::VersionLessThan('%(_ServiceSourcesJavaScriptVersion.Identity)', '$(ServiceSourcesJavaScriptMinVersion)'))"
+                      and ($([MSBuild]::VersionLessThan('%(_ServiceSourcesJavaScriptVersion.Core)', '$(ServiceSourcesJavaScriptMinVersion)'))
+                           or ('%(_ServiceSourcesJavaScriptVersion.Prerelease)' == 'True'
+                               and $([MSBuild]::VersionEquals('%(_ServiceSourcesJavaScriptVersion.Core)', '$(ServiceSourcesJavaScriptMinVersion)'))))"
            Code="SERVICESOURCES001"
            Text="KoalaSoft.Aspire.Hosting.ServiceSources needs Aspire.Hosting.JavaScript $(ServiceSourcesJavaScriptMinVersion) or newer for services with kind 'javascript', but this project resolves %(_ServiceSourcesJavaScriptVersion.Identity). Raise the Aspire.Hosting.JavaScript version, or remove the reference if no service declares that kind." />
 
     <Error Condition="'@(_ServiceSourcesJavaVersion)' != ''
-                      and $([MSBuild]::VersionLessThan('%(_ServiceSourcesJavaVersion.Identity)', '$(ServiceSourcesJavaMinVersion)'))"
+                      and ($([MSBuild]::VersionLessThan('%(_ServiceSourcesJavaVersion.Core)', '$(ServiceSourcesJavaMinVersion)'))
+                           or ('%(_ServiceSourcesJavaVersion.Prerelease)' == 'True'
+                               and $([MSBuild]::VersionEquals('%(_ServiceSourcesJavaVersion.Core)', '$(ServiceSourcesJavaMinVersion)'))))"
            Code="SERVICESOURCES002"
            Text="KoalaSoft.Aspire.Hosting.ServiceSources needs CommunityToolkit.Aspire.Hosting.Java $(ServiceSourcesJavaMinVersion) or newer for services with kind 'java', but this project resolves %(_ServiceSourcesJavaVersion.Identity). Raise the CommunityToolkit.Aspire.Hosting.Java version, or remove the reference if no service declares that kind." />
   </Target>

@@ -64,11 +64,13 @@ compiles against both but declares neither as a dependency, so an AppHost with n
 `TypeLoadException` on first resolve. The version is yours to choose: pick any release at or
 above the minimum above, and the two need not match each other.
 
-Forget one and you are told which. Below the minimum, your build fails with
-`SERVICESOURCES001` naming the package and the version it resolved. Missing entirely, the
-first `AddService()` for a service of that kind fails with a message naming the package to
-install — the check that would have caught it at build time only runs for a project that
-consumes this package from NuGet.
+Forget one and you are told which. Below the minimum, your build fails naming the package and
+the version it resolved — `SERVICESOURCES001` for `Aspire.Hosting.JavaScript`,
+`SERVICESOURCES002` for `CommunityToolkit.Aspire.Hosting.Java`. A prerelease of the minimum
+counts as below it. Missing entirely, the first `AddService()` for a service of that kind fails
+with a message naming the package to install — which is the only report a guest-language AppHost
+gets, since the Aspire CLI hands it this package through a project reference and a project
+reference imports no build-time checks.
 
 Or reference the project directly from your AppHost instead:
 
