@@ -11,6 +11,8 @@ nothing will fail to build to warn you.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-03
+
 ### Breaking
 
 - **Each source's settings move into a block named for that source in `servicesources.local.json`**
@@ -585,7 +587,8 @@ Targets `net10.0`.
 - Fail-fast configuration validation with `ServiceSourcesConfigurationException`.
 - MIT license, README, symbol packages, and Trusted Publishing (OIDC) to nuget.org.
 
-[Unreleased]: https://github.com/flojon/aspire-servicesources/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/flojon/aspire-servicesources/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/flojon/aspire-servicesources/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/flojon/aspire-servicesources/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/flojon/aspire-servicesources/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/flojon/aspire-servicesources/compare/v0.1.0...v0.2.0
