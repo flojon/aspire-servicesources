@@ -95,7 +95,19 @@ public class LocalCheckoutPrefetchTests
 
         public bool IsRefCheckedOut(string repositoryPath, string reference) => false;
 
-        public string? GetOriginUrl(string repositoryPath) => null;
+        public string? GetOriginUrl(string repositoryPath)
+        {
+            // Only ReconcileRepoRoot asks this, so waiting here holds the second half of a checkout
+            // open without touching the first.
+            _blockReconciliation?.Wait(TimeSpan.FromSeconds(30));
+            return null;
+        }
+
+        private ManualResetEventSlim? _blockReconciliation;
+
+        /// <summary>Holds ref reconciliation open until the returned gate is set.</summary>
+        public ManualResetEventSlim BlockReconciliation() =>
+            _blockReconciliation = new ManualResetEventSlim(false);
     }
 
     private sealed class FakeKindResource(string name) : Resource(name), IResourceWithServiceDiscovery;
@@ -604,6 +616,60 @@ public class LocalCheckoutPrefetchTests
         // keeps --progress off every clone that has no audience. ("orders" is cloned too, by the
         // speculative prefetch, and that one does get a stream: it is created with the checkout.)
         Assert.False(git.ProgressAttachedFor["https://example.com/billing.git"]);
+    }
+
+    [Fact]
+    public async Task UnclaimedCheckout_EndsItsProgressStreamWhenTheCloneDoes_NotAfterReconciliation()
+    {
+        // "billing" is in the catalog but not configured "local", so the prefetch never claims it
+        // and GetRepoRoot resolves it itself — the path that has to close its own stream.
+        var dir = CreateAppHostDirectory("orders");
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.yaml"),
+            """
+            services:
+              orders:
+                repository: https://example.com/orders.git
+                project: Service.csproj
+              billing:
+                repository: https://example.com/billing.git
+                project: Service.csproj
+            """);
+
+        // Already on disk, so the prepare half returns at once and every remaining second of this
+        // checkout is reconciliation — which reports nothing.
+        PlantExistingCheckout(dir, "billing");
+
+        var builder = TestHelpers.CreateBuilder(dir);
+        var git = new FakeGitClient();
+        var reconciling = git.BlockReconciliation();
+
+        var prefetch = LocalCheckoutPrefetch.For(builder, git);
+        var progress = prefetch.WatchCheckout("billing");
+
+        using var giveUp = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        var streamEnded = Task.Run(
+            async () =>
+            {
+                await foreach (var _ in progress.ReadAllAsync(giveUp.Token))
+                {
+                }
+            },
+            giveUp.Token);
+
+        var resolved = Task.Run(
+            () => prefetch.GetRepoRoot("billing", Metadata("billing"), DevConfig(), dir, git),
+            CancellationToken.None);
+
+        // The stream is over while the checkout is not. Closing it only when GetRepoRoot returns
+        // would leave whatever the clone last reported — "Updating files 100%" — sitting on the
+        // dashboard for the whole of the reconciliation, which is the stall this reporting exists
+        // to rule out rather than to imitate.
+        await streamEnded.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.False(resolved.IsCompleted);
+
+        reconciling.Set();
+        await resolved.WaitAsync(TimeSpan.FromSeconds(30));
     }
 
     [Fact]

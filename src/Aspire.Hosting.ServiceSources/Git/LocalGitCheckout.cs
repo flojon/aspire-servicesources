@@ -42,18 +42,24 @@ internal static class LocalGitCheckout
     /// The fully resolved checkout directory: prepared, then reconciled. For callers already
     /// resolving a service the AppHost asked for, so there is nothing to defer.
     /// </summary>
+    /// <remarks>
+    /// Takes no progress sink, deliberately. Reporting a clone is only half the job — the stream has
+    /// to end when the clone does, and the caller that wants it watched can only close it between
+    /// these two halves. So a caller with something to report to calls them separately (see
+    /// <see cref="Sources.LocalCheckoutPrefetch.GetRepoRoot"/>); anything reaching for this one has
+    /// nobody watching.
+    /// </remarks>
     public static string ResolveRepoRoot(
         string serviceName,
         ServiceMetadata metadata,
         ServiceDeveloperConfig config,
         string appHostDirectory,
-        IGitClient gitClient,
-        IGitProgressSink? progress = null) =>
+        IGitClient gitClient) =>
         ReconcileRepoRoot(
             serviceName,
             metadata,
             config,
-            PrepareRepoRoot(serviceName, metadata, config, appHostDirectory, gitClient, progress),
+            PrepareRepoRoot(serviceName, metadata, config, appHostDirectory, gitClient),
             gitClient);
 
     /// <summary>

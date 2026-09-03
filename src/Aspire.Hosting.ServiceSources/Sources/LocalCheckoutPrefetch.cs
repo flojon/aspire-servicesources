@@ -324,12 +324,12 @@ internal sealed class LocalCheckoutPrefetch
         }
         finally
         {
-            // The checkout is over, so its progress stream is too — however it was resolved, and
-            // whether it succeeded. This is the guarantee WatchCheckout hands out: a watcher waits
-            // for the end of the stream, so the one path that always runs is where ending it
-            // belongs. Ending an already-ended stream is a no-op, so the prefetch's own timelier
-            // close — which fires when the clone finishes rather than when the ref reconciliation
-            // after it does — still wins where there is one.
+            // A backstop, not the close that matters: both paths above already end the stream as
+            // soon as the clone does, which is what keeps the last percentage from sitting on the
+            // dashboard through the ref reconciliation that follows. This one exists for a checkout
+            // started somewhere neither path knows about, so that WatchCheckout's guarantee — the
+            // stream always ends, because a watcher waits for that rather than polling — holds
+            // even then. Ending an already-ended stream is a no-op.
             ProgressFor(serviceName)?.Complete();
         }
     }
@@ -346,8 +346,27 @@ internal sealed class LocalCheckoutPrefetch
             // enumerate. Resolve it directly rather than failing, reporting to the same stream a
             // prefetched clone would have: this path can run a full cold clone, and a deferred
             // service resolved through it would otherwise sit in "Checking out" for all of it.
-            return LocalGitCheckout.ResolveRepoRoot(
-                serviceName, metadata, config, appHostDirectory, gitClient, ProgressFor(serviceName));
+            //
+            // Taken in its two halves rather than through ResolveRepoRoot, so that the stream can be
+            // closed between them — on the same terms as a prefetched checkout, whose task closes it
+            // the moment PrepareRepoRoot returns.
+            var progress = ProgressFor(serviceName);
+
+            LocalGitCheckout.PreparedCheckout prepared;
+            try
+            {
+                prepared = LocalGitCheckout.PrepareRepoRoot(
+                    serviceName, metadata, config, appHostDirectory, gitClient, progress);
+            }
+            finally
+            {
+                // The clone is what there was to watch, and it is over. What follows reports
+                // nothing, so a watcher left reading would hold the last percentage on screen for
+                // the whole of it — reading as exactly the stall this reporting exists to rule out.
+                progress?.Complete();
+            }
+
+            return LocalGitCheckout.ReconcileRepoRoot(serviceName, metadata, config, prepared, gitClient);
         }
 
         // Waits on this service's checkout only. The other prefetched checkouts keep running in the

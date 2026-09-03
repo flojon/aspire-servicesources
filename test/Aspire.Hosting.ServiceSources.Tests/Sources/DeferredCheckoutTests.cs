@@ -1111,6 +1111,12 @@ public class DeferredCheckoutTests
 
         Assert.Contains("https://example.com/orders.git", git.Cloned);
         Assert.Contains("Receiving objects 48% · 18.54 MiB", observed);
+
+        // And gives way to "Checking out" here too, rather than holding the last percentage through
+        // whatever the checkout still has to do after the clone.
+        Assert.Equal(
+            "Checking out",
+            observed[(Array.LastIndexOf(observed, "Receiving objects 48% · 18.54 MiB") + 1)..].First());
     }
 
     /// <summary>
