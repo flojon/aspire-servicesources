@@ -872,10 +872,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
-          # Joined into one string rather than read as JSON: `contains()` on the labels array
-          # would need the whole check inside an `if:` expression, where it could not explain
-          # itself when it fails.
-          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
         run: |
           changed=$(gh pr diff "$PR" --name-only)
 
@@ -884,7 +880,18 @@ jobs:
             exit 0
           fi
 
-          if grep -qxF 'no-changelog' <<<"${LABELS//,/$'\n'}"; then
+          # Asked for at run time rather than read from github.event.pull_request.labels, so
+          # that the escape hatch this job's error message points at actually works. `on:
+          # pull_request` with no `types:` fires on opened, synchronize and reopened only, so
+          # adding the label starts no run - and re-running this job replays the original
+          # payload, in which the label is still absent. Read live, a re-run is enough.
+          #
+          # Captured before matching rather than piped into grep: this step runs under
+          # `bash -eo pipefail`, and `grep -q` exits on its first match, so gh would take a
+          # SIGPIPE and fail the pipeline exactly when the label *is* present.
+          labels=$(gh pr view "$PR" --json labels --jq '.labels[].name')
+
+          if grep -qxF 'no-changelog' <<<"$labels"; then
             echo "Labelled no-changelog; not asking for a fragment."
             exit 0
           fi

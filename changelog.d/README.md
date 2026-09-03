@@ -33,17 +33,24 @@ accepts that only for a PR that leaves `src/` alone, or one carrying the `no-cha
 The bullet, exactly as it should read in the changelog, with its links written **inline**:
 
 ```markdown
-- **`servicesources.local.json` can be overridden without editing it**
-  ([#69](https://github.com/flojon/aspire-servicesources/issues/69)). The per-developer source
-  selection is now read through the AppHost's own `IConfiguration` rather than by a loader of
-  ours, so a single run can pick a different source without editing the file.
+- **`servicesources.local.json` can be overridden without editing it** ([#69](https://github.com/flojon/aspire-servicesources/issues/69)). The per-developer
+  source selection is now read through the AppHost's own `IConfiguration` rather than by a loader
+  of ours, so a single run can pick a different source without editing the file.
 ```
 
 Inline rather than the `[#69]` reference style the changelog itself uses, because a reference
 needs a definition in one shared, ordered block at the bottom of `CHANGELOG.md` — the second
 place concurrent PRs collided. `scripts/collect-changelog.sh` converts these to reference style
 and writes the definitions when it folds the fragments in, so the changelog keeps the style it
-has and only the release PR ever touches that block.
+has and only the release PR ever touches that block. A cross-repository reference works the same
+way — write `[microsoft/aspire#19507](https://github.com/microsoft/aspire/issues/19507)` inline
+and the fold moves the definition to the block below the numbered one.
+
+**Wrap the paragraph as if the link were already `([#69])`** — the inline URL does not count
+towards the line width, so the line carrying it runs long here and the rest wrap to the ~98
+columns `CHANGELOG.md` uses. The fold does not reflow anything, so a fragment wrapped to 98
+*including* the URL leaves a stub line behind once the link shrinks to its reference form. The
+fragment is read once, in review; the changelog is read for years.
 
 Write the entry for someone deciding whether to upgrade: what changed, what it means for them,
 and for anything breaking or behavioural, what to do about it. Entries are hand-written on

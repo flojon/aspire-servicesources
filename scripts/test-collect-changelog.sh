@@ -207,6 +207,48 @@ assert_eq "the fragments are deleted, leaving only the README" \
   "README.md" \
   "$(ls "$fixture/changelog.d")"
 
+# ------------------------------------------------------------- cross-repository references
+
+# A fragment is the only route a cross-repository reference has into the changelog now, and it
+# writes it inline like every other link. Left unconverted it would sit in the file as the one
+# entry written in a style the rest of it does not use, and its definition would never reach the
+# block at the bottom. Its own fixture, so the ordering assertions above keep their exact
+# expected output.
+printf '\ncross-repository references\n'
+
+fixture=$workdir/xrepo
+write_fixture "$fixture"
+cat > "$fixture/changelog.d/30-fixed.md" <<'EOF'
+- **Worked around an upstream bug** ([#30](https://github.com/flojon/aspire-servicesources/issues/30)).
+  Caused by [microsoft/aspire#19507](https://github.com/microsoft/aspire/issues/19507), and by
+  [NuGetGallery#6948](https://github.com/NuGet/NuGetGallery/issues/6948), both still open. The
+  `[AspireExport]` attribute is unaffected.
+EOF
+run "$fixture" 0.4.0 --date 2026-09-03 >/dev/null
+xrepo=$(cat "$fixture/CHANGELOG.md")
+
+assert_contains "a cross-repository reference is converted to the reference style" \
+  "$xrepo" "[microsoft/aspire#19507], and by"
+assert_lacks "its inline URL does not survive in the entry" \
+  "$xrepo" "[microsoft/aspire#19507](https://github.com/microsoft/aspire/issues/19507)"
+assert_contains "a prefix without a slash is converted too" \
+  "$xrepo" "[NuGetGallery#6948], both still open"
+
+# The label the file already defines must not gain a second definition, and the new one has to
+# be there - both below the numbered block, which is what a reader of this file expects.
+assert_eq "its definition joins the named block, existing ones kept once" \
+  "[NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
+[microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507" \
+  "$(printf '%s\n' "$xrepo" | grep -E '^\[[^]]*#[0-9]+\]: ' | grep -vE '^\[#[0-9]+\]: ')"
+
+assert_contains "the local reference in the same entry still lands in the numbered block" \
+  "$xrepo" "[#30]: https://github.com/flojon/aspire-servicesources/issues/30"
+
+# A bracketed literal that is not a reference at all. The conversion keys on a label ending in
+# "#<digits>", so an attribute name in an entry has to come through untouched.
+assert_contains "a bracketed literal that is not a reference is left alone" \
+  "$xrepo" '`[AspireExport]` attribute is unaffected'
+
 # ---------------------------------------------------------------------------- refusals
 
 printf '\nrefusals\n'
@@ -253,7 +295,20 @@ assert_eq "the fragments checked in are named correctly" "" "$("$collect" --lint
 
 # Folding the real changelog has to leave every released section byte-identical: the script
 # rewrites the link block, and a released section is a historical record.
-real=$(CHANGELOG_FILE=$repo_root/CHANGELOG.md "$collect" 9.9.9 --date 2026-09-03 --dry-run)
+#
+# Against the real CHANGELOG.md, but with a fragment directory of this test's own. The checked-in
+# changelog.d/ is empty of fragments for most of the release cycle - closing a release folds them
+# all away - and a fold with nothing to release refuses, by design. Reading the real directory
+# here would therefore abort the whole suite under `set -e`, with no summary printed, on the
+# first PR after every release, for a reason having nothing to do with that PR.
+real_fragments=$workdir/real-fragments
+mkdir -p "$real_fragments"
+cat > "$real_fragments/9-fixed.md" <<'EOF'
+- **A synthetic entry, so that this test does not depend on what `changelog.d/` happens to hold**
+  ([#9](https://github.com/flojon/aspire-servicesources/issues/9)).
+EOF
+real=$(CHANGELOG_FILE=$repo_root/CHANGELOG.md FRAGMENT_DIR=$real_fragments \
+  "$collect" 9.9.9 --date 2026-09-03 --dry-run)
 released_before=$(awk '/^## \[0/ { inside = 1 } /^\[/ { exit } inside' "$repo_root/CHANGELOG.md")
 released_after=$(printf '%s\n' "$real" | awk '/^## \[0/ { inside = 1 } /^\[/ { exit } inside')
 assert_eq "released sections are untouched by a fold" "$released_before" "$released_after"

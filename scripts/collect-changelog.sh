@@ -108,6 +108,29 @@ unreleased_body() {
   ' "$CHANGELOG_FILE"
 }
 
+# Anything under "## [Unreleased]" that the fold would not carry across: a "### " heading not in
+# SECTIONS - a Keep a Changelog one this file does not use, such as "### Removed", or a typo -
+# and any prose sitting above the first heading. render_sections reads the five known headings
+# and nothing else, and close() then rewrites the file and deletes the fragments, so text left
+# out here is gone from the working tree with no diff to notice it in. Prints one line per
+# offending line, empty when the section is foldable.
+unreleased_strays() {
+  local known="" section
+  for section in "${SECTIONS[@]}"; do
+    known+="### $section"$'\n'
+  done
+
+  unreleased_body | awk -v known="$known" '
+    BEGIN { n = split(known, k, "\n"); for (i = 1; i <= n; i++) if (k[i] != "") ok[k[i]] = 1 }
+    /^### / {
+      seen = 1
+      if (!($0 in ok)) printf "  %s (heading the fold does not know)\n", $0
+      next
+    }
+    !seen && NF { printf "  %s (above the first heading)\n", $0 }
+  '
+}
+
 # Strip leading and trailing blank lines, leaving the interior alone.
 trim_blank_lines() {
   awk '
@@ -171,13 +194,18 @@ render_sections() {
 # ordered definition block at the bottom of the file - that block was the second place
 # concurrent PRs collided. Folding is the moment that stops mattering, since only the release PR
 # touches it, so convert back to the reference style the rest of the changelog is written in.
+#
+# Both kinds of reference the entries use are converted: a local "[#62]", and a
+# cross-repository one carrying a prefix - "[microsoft/aspire#19507]", "[NuGetGallery#6948]".
+# Only a label ending in "#<digits>" is one of these, which leaves "[AspireExport]" and every
+# other bracketed literal in an entry alone.
 to_reference_links() {
-  sed -E 's/\[(#[0-9]+)\]\([^()]*\)/[\1]/g'
+  sed -E 's/\[([^][]*#[0-9]+)\]\([^()]*\)/[\1]/g'
 }
 
-# "<number> <url>" for every inline link in the text on stdin.
+# "<label> <url>" for every inline link in the text on stdin, the label without its brackets.
 inline_link_definitions() {
-  grep -oE '\[#[0-9]+\]\([^()]*\)' | sed -E 's/^\[#([0-9]+)\]\((.*)\)$/\1 \2/'
+  grep -oE '\[[^][]*#[0-9]+\]\([^()]*\)' | sed -E 's/^\[(.*)\]\((.*)\)$/\1 \2/'
 }
 
 # ---------------------------------------------------------------------------- close
@@ -201,14 +229,33 @@ close() {
   next_h2=$(awk -v start="$unrel_line" 'NR > start && /^## / { print NR; exit }' "$CHANGELOG_FILE")
   [[ -n $next_h2 ]] || next_h2=$link_line
 
+  # Checked before anything is rendered: this is the last moment the text can still be moved by
+  # hand, and the alternative is dropping it from the release and from the file in one step.
+  local strays
+  strays=$(unreleased_strays)
+  if [[ -n $strays ]]; then
+    printf 'collect-changelog: [Unreleased] holds text the fold would drop:\n%s\n' "$strays" >&2
+    die "move it under one of: ${SECTIONS[*]}"
+  fi
+
   local body
   body=$(render_sections yes)
   [[ -n $body ]] || die "nothing to release: no fragments, and nothing under [Unreleased]"
 
-  # Every [#N] the new section cites, with the URL its fragment gave it. Definitions already in
-  # the file win, so re-citing an issue an earlier release mentioned changes nothing.
-  local new_defs
+  # Every reference the new section cites, with the URL its fragment gave it. Definitions
+  # already in the file win, so re-citing an issue an earlier release mentioned changes nothing.
+  #
+  # Split by kind, because the two go to different places in the link block: a local "#62" into
+  # the numerically sorted block, a cross-repository "microsoft/aspire#19507" into the named one
+  # below it. A fragment is the only way a cross-repository reference can arrive now, so without
+  # the split it would keep its inline link and be the one entry in the file written in a style
+  # the rest of it does not use.
+  local new_defs new_local new_named
   new_defs=$(printf '%s\n' "$body" | inline_link_definitions || true)
+  new_local=$(printf '%s\n' "$new_defs" | grep -E '^#[0-9]+ ' | sed -E 's/^#//' || true)
+  # A prefix, then the "#<digits>". Not every cross-repository label carries a slash -
+  # "[NuGetGallery#6948]" does not - so the test is "starts with something other than '#'".
+  new_named=$(printf '%s\n' "$new_defs" | grep -E '^[^ #][^ ]*#[0-9]+ ' || true)
   body=$(printf '%s\n' "$body" | to_reference_links)
 
   local base prev existing_defs version_links named
@@ -227,13 +274,29 @@ close() {
 
   # Existing definitions first so that, deduplicated by a stable sort, they win over a fragment
   # that cites the same number with a different URL.
+  #
+  # The `|| true` matters under `pipefail`: a release whose entries cite no issue at all leaves
+  # grep with nothing to match, and the failing pipeline would take `set -e` with it - aborting
+  # the whole fold on the assignment, before the write, printing nothing at all.
   local merged_defs
   merged_defs=$(
     {
       printf '%s\n' "$existing_defs" | sed -E 's/^\[#([0-9]+)\]: /\1 /'
-      printf '%s\n' "$new_defs"
+      printf '%s\n' "$new_local"
     } | grep -E '^[0-9]+ ' | sort -s -k1,1n |
-      awk '!seen[$1]++ { printf "[#%s]: %s\n", $1, $2 }'
+      awk '!seen[$1]++ { printf "[#%s]: %s\n", $1, $2 }' || true
+  )
+
+  # The named block the same way, except that it keeps the order it was written in rather than
+  # being sorted - there is no ordering for "microsoft/aspire" against "NuGetGallery" that a
+  # reader would notice. Existing definitions come first, so one already in the file wins over a
+  # fragment citing the same label, and a new one lands at the end.
+  local merged_named
+  merged_named=$(
+    {
+      printf '%s\n' "$named"
+      printf '%s\n' "$new_named" | sed -E 's/^([^ ]+) (.*)$/[\1]: \2/'
+    } | grep -E '^\[' | awk '!seen[$1]++' || true
   )
 
   local out
@@ -263,12 +326,14 @@ close() {
 
     # Issue references, existing plus whatever the fragments brought, numerically ordered. The
     # block on disk drifted out of order over time precisely because every PR appended to its
-    # end to miss a conflict; nothing appends to it any more, so normalise it.
-    printf '\n%s\n' "$merged_defs"
+    # end to miss a conflict; nothing appends to it any more, so normalise it. Conditional
+    # because a release can legitimately cite no issue number, and an unconditional printf would
+    # put two blank lines and nothing else where the block would have been.
+    [[ -n $merged_defs ]] && printf '\n%s\n' "$merged_defs"
 
     # Anything else the file defines - cross-repository references such as [NuGetGallery#6948] -
     # kept below the numbered block, in the order they were written.
-    [[ -n $named ]] && printf '\n%s\n' "$named"
+    [[ -n $merged_named ]] && printf '\n%s\n' "$merged_named"
 
     true
   } > "$out"
