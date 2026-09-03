@@ -60,11 +60,10 @@ nothing will fail to build to warn you.
 
   Handing it a checkout that has to be there is also what drops `Validate` off the deferred path
   above, and it moves the call: core runs `Validate` after resolving the checkout rather than
-  before, so a malformed options block for the *first* `"local"` service an AppHost adds is now
-  reported after that service's clone rather than ahead of it. Later services are unaffected —
-  their clones were already in flight. The "the handler failed while creating its resource" wrapper
-  on the deferred path now points at `DeferredLocalResource.ValidateCheckout` rather than at
-  `Validate`, which core does not call there.
+  before. That changes when a bad options block is reported, for **every** `"local"` service and
+  not just the first — see the **Changed** entry below. The "the handler failed while creating its
+  resource" wrapper on the deferred path now points at `DeferredLocalResource.ValidateCheckout`
+  rather than at `Validate`, which core does not call there.
 
 - **The `.JavaScript` and `.Java` satellite packages are gone. Their kinds ship in
   `KoalaSoft.Aspire.Hosting.ServiceSources`, and your AppHost references Aspire's hosting
@@ -111,6 +110,16 @@ nothing will fail to build to warn you.
   turns the build-time check off for that project and leaves the run-time report standing.
 
 ### Changed
+
+- **A `"local"` service with a non-`dotnet` kind now waits for its checkout before its options block
+  is checked** ([#63]). `AddService()` used to reject a typo'd `java:` or `javascript:` block
+  without waiting for any clone to finish; `Validate` needs the checkout to judge the block's paths
+  against, so it now runs after it. Two visible consequences, for every such service rather than
+  only the first: a service that is *both* misconfigured *and* pointed at a repository that cannot
+  be reached reports the clone failure instead of the configuration error, and on a cold clone you
+  wait the clone out before being told about the typo. An unregistered or misspelled `kind` is
+  unaffected — that lookup needs no working tree and still runs first — as is the `dotnet` kind,
+  which has always checked its `project` file against the resolved checkout.
 
 - The `java` and `javascript` kinds report a path missing from the checkout — `workingDirectory`
   and the `mvnw`/`gradlew` wrapper for `java`, `appDirectory`, `scriptPath` and `package.json` for

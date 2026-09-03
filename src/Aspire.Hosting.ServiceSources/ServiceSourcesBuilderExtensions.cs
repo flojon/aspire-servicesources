@@ -229,12 +229,26 @@ public static class ServiceSourcesBuilderExtensions
     /// is the only seam left to put one at.
     /// </para>
     /// <para>
-    /// Any <c>Validate</c> at all counts as the attempt, not just the pre-<c>repoRoot</c>
-    /// <c>Validate(string, object?)</c>: adding the new parameter in the wrong position fails in
-    /// exactly the same silent way as never adding it, and matching only the old shape would let the
-    /// half-migrated case through. The trade is that an unrelated inherited method named
-    /// <c>Validate</c> is refused too, which the message answers by naming the method it found and
-    /// the signature it wanted.
+    /// What counts as the attempt is a <em>public instance</em> <c>Validate</c> taking a
+    /// <see cref="string"/> first, not only the pre-<c>repoRoot</c> <c>Validate(string, object?)</c>:
+    /// adding the new parameter in the wrong position fails in exactly the same silent way as never
+    /// adding it, so matching the old shape alone would let the half-migrated case through. The two
+    /// filters are what keep that from reaching code that is doing nothing wrong — an implicit
+    /// interface implementation must be public, and every shape being looked for starts with the
+    /// service name, so a kind's own <c>private void Validate(MyOptions)</c> helper is nobody's
+    /// attempted implementation and is left alone. An explicit implementation never needs to be
+    /// matched by name at all; the interface map above has already answered for it.
+    /// </para>
+    /// <para>
+    /// Searched across the hierarchy rather than declared members only, deliberately: a kind's
+    /// <c>Validate</c> can sit on an abstract base it shares with its siblings, and restricting the
+    /// search would skip the refusal in precisely that case — the failure this exists to catch.
+    /// What that trades away is narrow, since such a base method has to be public to have
+    /// implemented the interface: a public inherited <c>Validate</c> taking a
+    /// <see cref="string"/> first, meant for something else entirely, is refused too. The message
+    /// answers that by naming the method it found alongside the one it wanted, and an author in that
+    /// position clears it by implementing the interface member — which costs nothing, the default
+    /// being a no-op.
     /// </para>
     /// <para>
     /// Both conditions are required, so a kind that has migrated and, for its own reasons, keeps a
@@ -253,25 +267,61 @@ public static class ServiceSourcesBuilderExtensions
             return;
         }
 
-        var declared = type
-            .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
-            .FirstOrDefault(method => method.Name == nameof(ILocalResourceKind.Validate));
+        // Public, because an implicit interface implementation has to be; taking a service name
+        // first, because every shape this is looking for starts with one. Ordered before it is
+        // picked from, so a type with several of them names the same one on every run.
+        var candidates = type
+            .GetMethods(BindingFlags.Public | BindingFlags.Instance)
+            .Where(method => method.Name == nameof(ILocalResourceKind.Validate))
+            .Where(method => method.GetParameters() is [{ } first, ..] && first.ParameterType == typeof(string))
+            .OrderBy(method => method.GetParameters().Length)
+            .ThenBy(Describe, StringComparer.Ordinal)
+            .ToArray();
 
-        if (declared is null)
+        if (candidates.Length == 0)
         {
             return;
         }
 
+        // The pre-repoRoot shape whenever it is one of them: that is the migration this is nearly
+        // always about, and naming it beats naming whichever other Validate happened to sort first.
+        var declared = Array.Find(candidates, IsPreRepoRootShape) ?? candidates[0];
+        var wanted = CurrentValidate();
+
         throw new ServiceSourcesConfigurationException(
             $"Kind '{kind}' is registered by '{type.FullName}', which declares '{Describe(declared)}' but does " +
             $"not implement '{nameof(ILocalResourceKind)}.{nameof(ILocalResourceKind.Validate)}" +
-            "(string serviceName, string repoRoot, object? rawConfig)'. Validate gained a 'repoRoot' " +
-            "parameter — the service's resolved checkout directory, so a kind can check a path its options " +
-            "block names against the repository that path is relative to. Nothing failed to compile because " +
-            "Validate is a defaulted member: a method of any other shape is never called, and everything it " +
-            "rejected would now be accepted. Match the signature exactly — or, if that method was never " +
-            "meant to be the interface's, implement Validate(string, string, object?) alongside it.");
+            "(string serviceName, string repoRoot, object? rawConfig)'. " +
+            (Describe(declared) == Describe(wanted)
+                ? "Those read alike here, so the difference is not in the parameter list — check the return " +
+                  "type, the accessibility, any generic parameters, and the nullability of 'rawConfig'. "
+                : string.Empty) +
+            "Validate gained a 'repoRoot' parameter — the service's resolved checkout directory, so a kind " +
+            "can check a path its options block names against the repository that path is relative to. " +
+            "Nothing failed to compile because Validate is a defaulted member: a method of any other shape " +
+            "is never called, and everything it rejected would now be accepted. Match the signature exactly " +
+            "— or, if that method was never meant to be the interface's, implement " +
+            "Validate(string, string, object?) alongside it.");
     }
+
+    /// <summary>The pre-<c>repoRoot</c> signature, the one an un-migrated kind still carries.</summary>
+    private static bool IsPreRepoRootShape(MethodInfo method) =>
+        method.GetParameters() is [{ ParameterType: var name }, { ParameterType: var config }]
+        && name == typeof(string)
+        && config == typeof(object);
+
+    /// <summary>
+    /// <see cref="ILocalResourceKind.Validate"/> itself, so the signature a found method is compared
+    /// against is rendered by the same code that renders the found one — a difference the message
+    /// shows has to be a difference that is really there.
+    /// </summary>
+    private static MethodInfo CurrentValidate() =>
+        typeof(ILocalResourceKind).GetMethod(
+            nameof(ILocalResourceKind.Validate),
+            BindingFlags.Public | BindingFlags.Instance,
+            binder: null,
+            types: [typeof(string), typeof(string), typeof(object)],
+            modifiers: null)!;
 
     /// <summary>
     /// Whether <paramref name="type"/> itself supplies
@@ -305,10 +355,12 @@ public static class ServiceSourcesBuilderExtensions
     /// <summary>
     /// A method rendered the way its author wrote it, for a message that has to be recognisable as
     /// the method in front of them — the point of naming what was found rather than what was
-    /// expected.
+    /// expected. The return type is part of it: a <c>bool Validate(string, string, object?)</c> is
+    /// refused for that alone, and a rendering that stopped at the parameters would print the found
+    /// signature and the wanted one identically.
     /// </summary>
     private static string Describe(MethodInfo method) =>
-        $"{method.Name}(" +
+        $"{TypeName(method.ReturnType)} {method.Name}(" +
         string.Join(", ", method.GetParameters().Select(p => $"{TypeName(p.ParameterType)} {p.Name}")) +
         ")";
 
@@ -322,6 +374,7 @@ public static class ServiceSourcesBuilderExtensions
         _ when type == typeof(object) => "object",
         _ when type == typeof(bool) => "bool",
         _ when type == typeof(int) => "int",
+        _ when type == typeof(void) => "void",
         _ => type.Name,
     };
 }

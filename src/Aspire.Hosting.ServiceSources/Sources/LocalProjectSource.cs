@@ -20,12 +20,19 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         // Settled before paying for a checkout: looking the kind up is a dictionary probe against
         // registry state, needs no working tree, and running it after the clone would make a typo'd
         // kind — or a kind nobody registered — cost a cold clone of this repository before saying
-        // so. The handler's own Validate cannot join it here, because it is handed the resolved
-        // checkout to judge the service's paths against; it runs below, immediately before Resolve.
+        // so. Only the first "local" AddService gets even that ahead of every clone: the prefetch
+        // below starts the speculative ones at once, so once any service has been resolved they are
+        // already in flight and this check no longer runs in front of them.
         //
-        // Only the first "local" AddService gets even this for free across the board: the prefetch
-        // below starts the speculative clones at once, so once any service has been resolved those
-        // clones are already in flight and this check no longer runs ahead of them.
+        // The handler's own Validate used to sit here and cannot any more: it is handed the
+        // resolved checkout to judge the service's paths against, so it runs below, after
+        // GetRepoRoot and immediately before Resolve. That costs every service and not only the
+        // first — an options block used to be rejected without waiting on any clone at all, and now
+        // each service blocks on its own checkout before its block is so much as parsed. A service
+        // that is both misconfigured and pointed at a repository that cannot be reached reports the
+        // clone failure rather than the configuration error, and on a cold clone the typo is
+        // reported only once the clone has finished. Paid deliberately: a kind's paths are relative
+        // to the checkout, so without one in hand the check cannot be made at all.
         var handler = isDotnetKind ? null : ResolveKindHandler(builder, serviceName, metadata);
 
         // Starts the checkouts an AddService call would have to block on — every "local" service

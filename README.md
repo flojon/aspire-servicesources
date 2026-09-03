@@ -735,11 +735,13 @@ name that collides with a well-known service property (`repository`, `project`, 
 `kind`, `kubernetes`, `url`, `container`) — a block by one of those names would be read as that
 property rather than as the kind's options.
 
-It also refuses a handler that declares a `Validate` not matching the interface member — the
-pre-`repoRoot` `Validate(string, object?)`, or the parameter added in the wrong position — naming
-the kind and the method it found. `Validate` is a defaulted interface member, so any of those
-compile clean and simply stop implementing it, and everything they rejected would be silently
-accepted instead. Registration is the only place left to say so; the build won't.
+It also refuses a handler that declares a public `Validate` taking a service name first which
+doesn't match the interface member — the pre-`repoRoot` `Validate(string, object?)`, the parameter
+added in the wrong position, the wrong return type — naming the kind and the method it found.
+`Validate` is a defaulted interface member, so any of those compile clean and simply stop
+implementing it, and everything they rejected would be silently accepted instead. Registration is
+the only place left to say so; the build won't. A `Validate` of your own that was never an attempt
+at the interface member — a private helper, or one taking your own options type — is left alone.
 
 **Supporting [`UseDeferredCheckout()`](#first-run-usedeferredcheckout).** Two more members, both
 optional and both defaulting to "no", decide whether a service of your kind can start before its

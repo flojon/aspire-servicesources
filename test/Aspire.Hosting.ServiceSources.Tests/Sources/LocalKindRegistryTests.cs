@@ -179,16 +179,49 @@ public class LocalKindRegistryTests
             throw new NotSupportedException("Not exercised by these tests.");
     }
 
+    /// <summary>
+    /// Everything right but the return type, which does not implement the member either. Rendering
+    /// the parameter list alone would print the found signature and the wanted one identically.
+    /// </summary>
+    private sealed class KindWhoseValidateReturnsAValue : ILocalResourceKind
+    {
+        public bool Validate(string serviceName, string repoRoot, object? rawConfig) => true;
+
+        public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+            IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) =>
+            throw new NotSupportedException("Not exercised by these tests.");
+    }
+
+    /// <summary>
+    /// The one mismatch that survives rendering the return type: a generic <c>Validate</c> does not
+    /// implement the non-generic member, and prints exactly like it.
+    /// </summary>
+    private sealed class KindWhoseValidateIsGeneric : ILocalResourceKind
+    {
+        public void Validate<T>(string serviceName, string repoRoot, object? rawConfig)
+        {
+        }
+
+        public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+            IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) =>
+            throw new NotSupportedException("Not exercised by these tests.");
+    }
+
     [Theory]
-    [InlineData(typeof(KindWithTheOldValidateSignature), "object rawConfig)")]
-    [InlineData(typeof(KindWithTheParameterInTheWrongPosition), "object rawConfig, string repoRoot)")]
+    [InlineData(typeof(KindWithTheOldValidateSignature), "void Validate(string serviceName, object rawConfig)")]
+    [InlineData(
+        typeof(KindWithTheParameterInTheWrongPosition),
+        "void Validate(string serviceName, object rawConfig, string repoRoot)")]
+    [InlineData(
+        typeof(KindWhoseValidateReturnsAValue),
+        "bool Validate(string serviceName, string repoRoot, object rawConfig)")]
     public void AddLocalKind_HandlerWhoseValidateDoesNotMatchTheInterface_IsRefusedAtRegistration(
-        Type handlerType, string signatureTail)
+        Type handlerType, string expectedSignature)
     {
         var builder = CreateBuilder();
 
-        // Nothing else catches either shape: both compile, and core runs the defaulted no-op in
-        // their place, so the kind's own rejections just stop happening.
+        // Nothing else catches any of these shapes: all compile, and core runs the defaulted no-op
+        // in their place, so the kind's own rejections just stop happening.
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => builder.AddLocalKind(
                 "javascript", (ILocalResourceKind)Activator.CreateInstance(handlerType)!));
@@ -198,9 +231,24 @@ public class LocalKindRegistryTests
         Assert.Contains("repoRoot", ex.Message);
 
         // The method it actually found, not just the one it wanted — otherwise an author who put the
-        // parameter in the wrong place is told to add a parameter that is already there.
-        Assert.Contains($"Validate(string serviceName, {signatureTail}", ex.Message);
+        // parameter in the wrong place is told to add a parameter that is already there, and one who
+        // got only the return type wrong is shown two signatures that read the same.
+        Assert.Contains($"declares '{expectedSignature}'", ex.Message);
         Assert.False(LocalKindRegistry.For(builder).TryGet("javascript", out _));
+    }
+
+    [Fact]
+    public void AddLocalKind_HandlerWhoseValidateStillReadsAlike_SaysWhereToLookInstead()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => builder.AddLocalKind("javascript", new KindWhoseValidateIsGeneric()));
+
+        // Nothing in the parameter list distinguishes them, so quoting both back would read as a
+        // message that contradicts itself unless it says where the difference actually is.
+        Assert.Contains("not in the parameter list", ex.Message);
+        Assert.Contains("generic parameters", ex.Message);
     }
 
     [Fact]
@@ -222,6 +270,37 @@ public class LocalKindRegistryTests
         var builder = CreateBuilder();
 
         builder.AddLocalKind("javascript", new FakeKind());
+
+        Assert.True(LocalKindRegistry.For(builder).TryGet("javascript", out _));
+    }
+
+    /// <summary>
+    /// A kind that leaves the defaulted member alone on purpose and has a <c>Validate</c> of its own
+    /// for something else. Neither method is an attempt at the interface member — one is private,
+    /// the other does not start with a service name — and this worked before the parameter was
+    /// added, so refusing it would be inventing a migration the author never had to make.
+    /// </summary>
+    private sealed class KindWithItsOwnValidateHelpers : ILocalResourceKind
+    {
+        private sealed class Options;
+
+        private void Validate(Options options)
+        {
+        }
+
+        public void Validate(int port) => Validate(new Options());
+
+        public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+            IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) =>
+            throw new NotSupportedException("Not exercised by these tests.");
+    }
+
+    [Fact]
+    public void AddLocalKind_HandlerWhoseValidateIsItsOwnHelper_IsAccepted()
+    {
+        var builder = CreateBuilder();
+
+        builder.AddLocalKind("javascript", new KindWithItsOwnValidateHelpers());
 
         Assert.True(LocalKindRegistry.For(builder).TryGet("javascript", out _));
     }
