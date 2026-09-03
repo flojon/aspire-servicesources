@@ -1070,6 +1070,18 @@ public class DeferredCheckoutTests
         git.ReportProgress(
             "https://example.com/orders.git", "Receiving objects:  48% (6864/14091), 18.54 MiB | 18.38 MiB/s");
 
+        // Held open past the progress it reports, the way the sibling test above holds its clone, so
+        // the state the progress produced can be observed while it is still true (#189). Without the
+        // hold the clone — and the whole service with it — can reach a terminal state before the
+        // watcher below has subscribed, and a subscriber that arrives late is replayed only the
+        // snapshot as it stands, not the states it missed.
+        //
+        // It costs this test nothing it is about: the fake reports its progress before the hold, so
+        // that progress is still written while the AppHost is composing, with no resource to report
+        // into and no notification service to report through. The gap the buffered stream bridges is
+        // exactly the same one; only the far side of it now waits to be watched.
+        var gate = git.BlockFor("https://example.com/orders.git");
+
         var orders = new LocalProjectSource(git)
             .Resolve(builder, "orders", Metadata("orders"), DevConfig())
             .WithHttpEndpoint();
@@ -1077,6 +1089,9 @@ public class DeferredCheckoutTests
         var services = builder.Services.BuildServiceProvider();
 
         var states = new List<string>();
+        var reachedProgress = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var backToCheckingOut = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
         using var watching = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var watcher = Task.Run(
             async () =>
@@ -1084,12 +1099,23 @@ public class DeferredCheckoutTests
                 await foreach (var published in services.GetRequiredService<ResourceNotificationService>()
                                    .WatchAsync(watching.Token))
                 {
-                    if (string.Equals(published.Resource.Name, "orders", StringComparison.Ordinal)
-                        && published.Snapshot.State?.Text is { } text)
+                    if (!string.Equals(published.Resource.Name, "orders", StringComparison.Ordinal)
+                        || published.Snapshot.State?.Text is not { } text)
                     {
-                        lock (states)
+                        continue;
+                    }
+
+                    lock (states)
+                    {
+                        states.Add(text);
+
+                        if (text.StartsWith("Receiving objects", StringComparison.Ordinal))
                         {
-                            states.Add(text);
+                            reachedProgress.TrySetResult();
+                        }
+                        else if (text == "Checking out" && reachedProgress.Task.IsCompleted)
+                        {
+                            backToCheckingOut.TrySetResult();
                         }
                     }
                 }
@@ -1100,7 +1126,12 @@ public class DeferredCheckoutTests
             new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
         await PublishNotStartedAsync(services, orders.Resource);
 
+        await reachedProgress.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        gate.Set();
+
         await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+        await backToCheckingOut.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
         await watching.CancelAsync();
         await watcher.ContinueWith(_ => { }, TaskScheduler.Default);
