@@ -32,6 +32,18 @@ internal static class DeveloperConfigFileSource
     private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, Registration> Registrations = new();
 
     /// <summary>
+    /// How far from <c>services</c> a root key can be spelled and still be taken for it. Two edits
+    /// covers a dropped or doubled letter and a transposed pair, which is the whole of what a
+    /// misspelling of an eight-letter word usually is.
+    /// </summary>
+    /// <remarks>
+    /// Generous rather than exact because of where the answer is used: only in a failure that is
+    /// already being thrown, and only when nothing at all is configured. A false positive adds a
+    /// sentence about a key to an error message; it cannot cost a working file anything.
+    /// </remarks>
+    private const int NearMissEdits = 2;
+
+    /// <summary>
     /// Registers the file on <paramref name="builder"/>'s configuration if it isn't registered
     /// already. Cheap and safe to call from every entry point, and from every read.
     /// </summary>
@@ -115,5 +127,84 @@ internal static class DeveloperConfigFileSource
 
             return new MemoryConfigurationSource { InitialData = reRooted };
         }
+    }
+
+    /// <summary>
+    /// The root key of the file at <paramref name="path"/> that looks like a misspelling of
+    /// <c>services</c>, or <see langword="null"/> when the file has a <c>services</c> key, has no
+    /// key resembling one, or is not there.
+    /// </summary>
+    /// <remarks>
+    /// A near miss rather than a check that every root key is one this file recognizes. Only the
+    /// <c>services</c> subtree crosses into the AppHost's configuration precisely so that the file
+    /// can carry keys of its own, which makes an unrecognized root key indistinguishable from a
+    /// typo by validity — resemblance to the one key that is read is the only thing that separates
+    /// them.
+    /// <para>
+    /// Asked only when nothing is configured anywhere, so the parse below is never on the path of
+    /// an AppHost that starts. A file carrying <c>services</c> as well is not a typo whatever else
+    /// it carries: its entries are being read, so there is nothing to correct.
+    /// </para>
+    /// </remarks>
+    public static string? NearMissForServicesKey(string path)
+    {
+        var file = new ConfigurationBuilder().AddJsonFile(path, optional: true).Build();
+
+        using (file as IDisposable)
+        {
+            var rootKeys = file.GetChildren().Select(section => section.Key).ToArray();
+
+            // Folded, because a root key differing only by case is not a near miss but the key
+            // itself: configuration keys are case-insensitive, so `Services` is already read.
+            if (rootKeys.Any(key => key.Equals(FileServicesKey, StringComparison.OrdinalIgnoreCase)))
+            {
+                return null;
+            }
+
+            // Closest first, then ordinal, so a file with two candidates names the same one every
+            // run rather than whichever the provider happened to enumerate first.
+            return rootKeys
+                .Select(key => (Key: key, Distance: EditDistance(key.ToLowerInvariant(), FileServicesKey)))
+                .Where(candidate => candidate.Distance <= NearMissEdits)
+                .OrderBy(candidate => candidate.Distance)
+                .ThenBy(candidate => candidate.Key, StringComparer.Ordinal)
+                .Select(candidate => candidate.Key)
+                .FirstOrDefault();
+        }
+    }
+
+    /// <summary>
+    /// The Levenshtein distance between <paramref name="from"/> and <paramref name="to"/>: how many
+    /// single-character inserts, deletes and substitutions separate them.
+    /// </summary>
+    /// <remarks>
+    /// Two rows rather than the full matrix, since only the previous row is ever read. A transposed
+    /// pair costs two edits here where the Damerau variant charges one, which is why
+    /// <see cref="NearMissEdits"/> is two rather than one.
+    /// </remarks>
+    private static int EditDistance(string from, string to)
+    {
+        var previous = new int[to.Length + 1];
+        var current = new int[to.Length + 1];
+
+        for (var j = 0; j <= to.Length; j++)
+        {
+            previous[j] = j;
+        }
+
+        for (var i = 1; i <= from.Length; i++)
+        {
+            current[0] = i;
+
+            for (var j = 1; j <= to.Length; j++)
+            {
+                var substitution = previous[j - 1] + (from[i - 1] == to[j - 1] ? 0 : 1);
+                current[j] = Math.Min(Math.Min(current[j - 1] + 1, previous[j] + 1), substitution);
+            }
+
+            (previous, current) = (current, previous);
+        }
+
+        return previous[to.Length];
     }
 }
