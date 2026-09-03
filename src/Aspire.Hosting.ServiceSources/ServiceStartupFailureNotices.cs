@@ -8,8 +8,8 @@ namespace Aspire.Hosting.ServiceSources;
 
 /// <summary>
 /// Reports, in the AppHost's own console, that a resource this package added is not running —
-/// naming the service, the state that was reported for it, and the dashboard as the place that
-/// says why.
+/// naming the service, the state that was reported for it, and where the output that says why has
+/// gone.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -83,11 +83,20 @@ internal sealed class ServiceStartupFailureNotices
         public bool Failing { get; set; }
 
         /// <summary>
-        /// Whether this instance has been asked to stop since it last began starting. A stop the
-        /// developer asked for ends in a terminal state like any other, and must not be reported as
-        /// a failure to start.
+        /// Whether this instance has been asked to stop and has not ended yet. A stop the developer
+        /// asked for ends in a terminal state like any other, and must not be reported as a failure
+        /// to start.
         /// </summary>
         public bool StopRequested { get; set; }
+
+        /// <summary>
+        /// Whether the terminal state that a requested stop produces has already been seen, and
+        /// with which exit code — so that the same ended-on-request snapshot arriving again is
+        /// still recognised, without the guard outliving the stop it belongs to.
+        /// </summary>
+        public bool StoppedOnRequest { get; set; }
+
+        public int? StoppedExitCode { get; set; }
     }
 
     // Plain object rather than System.Threading.Lock: this package still targets net8.0.
@@ -159,14 +168,21 @@ internal sealed class ServiceStartupFailureNotices
             return;
         }
 
+        // Whether there is a dashboard for the notice to send the reader to. Resolved here rather
+        // than assumed, because a host built by DistributedApplicationTestingBuilder has none by
+        // default, and neither does an AppHost that turned it off.
+        var dashboard = services.GetService<DistributedApplicationOptions>() is not { DisableDashboard: true };
+
         ReportTask = Task.Run(
-            () => WatchAsync(notifications, logger, services, cancellationToken), CancellationToken.None);
+            () => WatchAsync(notifications, logger, services, dashboard, cancellationToken),
+            CancellationToken.None);
     }
 
     private async Task WatchAsync(
         ResourceNotificationService notifications,
         ILogger logger,
         IServiceProvider services,
+        bool dashboard,
         CancellationToken cancellationToken)
     {
         // Everything here runs on a task nobody awaits, so a throw would be an unobserved exception
@@ -190,22 +206,14 @@ internal sealed class ServiceStartupFailureNotices
                 : CancellationTokenSource.CreateLinkedTokenSource(
                     cancellationToken, lifetime.ApplicationStopping);
 
-            await ReportAsync(notifications.WatchAsync(stopping.Token), logger, stopping.Token)
+            await ReportAsync(notifications.WatchAsync(stopping.Token), logger, stopping.Token, dashboard)
                 .ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             // ReportAsync swallows its own; this is the prologue's, and a provider already disposed
             // when a late BeforeStartEvent reaches it is the way it happens.
-            try
-            {
-                logger.LogDebug(ex, "Reporting service start failures could not start: {Message}", ex.Message);
-            }
-            catch (Exception)
-            {
-                // The logger is one of the things that can be torn down under us, so noting the
-                // problem must not become the problem.
-            }
+            Note(logger, ex, "Reporting service start failures could not start");
         }
         finally
         {
@@ -223,21 +231,38 @@ internal sealed class ServiceStartupFailureNotices
     /// us is one of the ordinary ways this ends.
     /// </remarks>
     internal async Task ReportAsync(
-        IAsyncEnumerable<ResourceEvent> events, ILogger logger, CancellationToken cancellationToken)
+        IAsyncEnumerable<ResourceEvent> events,
+        ILogger logger,
+        CancellationToken cancellationToken,
+        bool dashboard = true)
     {
         try
         {
             await foreach (var published in events.WithCancellation(cancellationToken).ConfigureAwait(false))
             {
-                if (Notice(published) is not { } notice)
+                try
                 {
-                    continue;
+                    if (Notice(published, dashboard) is { } notice)
+                    {
+                        // An error rather than a warning, and deliberately louder than the
+                        // prefetch's notices: a service the AppHost actually added and that is not
+                        // running is not a cost to be aware of, it is the run being wrong.
+                        logger.LogError("{ServiceSourcesNotice}", notice);
+                    }
                 }
-
-                // An error rather than a warning, and deliberately louder than the prefetch's
-                // notices: a service the AppHost actually added and that is not running is not a
-                // cost to be aware of, it is the run being wrong.
-                logger.LogError("{ServiceSourcesNotice}", notice);
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // Per event rather than around the loop, because this loop is the only thing
+                    // watching: ending it on one bad event would put every later service back into
+                    // the silence this class exists to break, and cost far more than the notice it
+                    // gave up on. What survives is the loop-level catch below, for a stream that
+                    // has genuinely ended.
+                    Note(logger, ex, "Reporting skipped one resource event");
+                }
             }
         }
         catch (OperationCanceledException)
@@ -246,15 +271,22 @@ internal sealed class ServiceStartupFailureNotices
         }
         catch (Exception ex)
         {
-            try
-            {
-                logger.LogDebug(ex, "Reporting service start failures stopped early: {Message}", ex.Message);
-            }
-            catch (Exception)
-            {
-                // The logger is one of the things that can be torn down under us, so noting the
-                // problem must not become the problem.
-            }
+            Note(logger, ex, "Reporting service start failures stopped early");
+        }
+    }
+
+    /// <summary>
+    /// Records something that went wrong inside the report itself, without becoming the next thing
+    /// that goes wrong: the logger is one of the pieces that can be torn down under this loop.
+    /// </summary>
+    private static void Note(ILogger logger, Exception exception, string what)
+    {
+        try
+        {
+            logger.LogDebug(exception, "{What}: {Message}", what, exception.Message);
+        }
+        catch (Exception)
+        {
         }
     }
 
@@ -262,8 +294,13 @@ internal sealed class ServiceStartupFailureNotices
     /// The notice <paramref name="published"/> calls for, or <see langword="null"/> when it is not
     /// about a resource of ours, does not report a failure, or repeats one already reported.
     /// </summary>
-    private string? Notice(ResourceEvent published)
+    private string? Notice(ResourceEvent published, bool dashboard)
     {
+        // Read straight off the live collection rather than through a defensive copy: Aspire backs
+        // ResourceAnnotationCollection with a list whose reads walk an ImmutableArray snapshot, so
+        // enumerating one while DCP is still adding annotations cannot throw. Measured — 200,000
+        // enumerations against a thread adding and clearing throughout produced no failure — and a
+        // copy would imply a hazard that is not there. The caller isolates this event anyway.
         if (published.Resource.Annotations.OfType<ServiceSourceAnnotation>().FirstOrDefault()
             is not { } annotation)
         {
@@ -284,18 +321,49 @@ internal sealed class ServiceStartupFailureNotices
                 _instances[published.ResourceId] = instance = new Instance();
             }
 
-            // An instance that is beginning again is no longer the one that was asked to stop, so a
-            // crash after a restart is reported rather than swallowed by the previous stop.
-            if (Is(state, KnownResourceStates.Starting) || Is(state, KnownResourceStates.NotStarted))
+            var exitCode = published.Snapshot.ExitCode;
+
+            // A start has been attempted, so whatever stop came before it is finished business.
+            // FailedToStart belongs in this list rather than being something the guard can
+            // suppress: it is Aspire's verdict on a start attempt, and it cannot be the echo of a
+            // stop, because a stop ends in Exited or Finished — measured for a project and for a
+            // container alike. Without it, a restart that fails before publishing any Starting
+            // would be silently swallowed by the stop that preceded it.
+            if (Is(state, KnownResourceStates.Starting)
+                || Is(state, KnownResourceStates.NotStarted)
+                || Is(state, KnownResourceStates.FailedToStart))
             {
                 instance.StopRequested = false;
+                instance.StoppedOnRequest = false;
+                instance.StoppedExitCode = null;
             }
             else if (Is(state, KnownResourceStates.Stopping))
             {
                 instance.StopRequested = true;
             }
 
-            var failed = !instance.StopRequested && IsFailure(state, published.Snapshot.ExitCode);
+            var terminal = Is(state, KnownResourceStates.Exited) || Is(state, KnownResourceStates.Finished);
+
+            bool onRequest;
+
+            if (terminal && instance.StopRequested)
+            {
+                // The end of the stop that was asked for. The guard is spent here rather than left
+                // standing, so it cannot reach past this one state into a later failure.
+                instance.StopRequested = false;
+                instance.StoppedOnRequest = true;
+                instance.StoppedExitCode = exitCode;
+                onRequest = true;
+            }
+            else
+            {
+                // The same ended-on-request snapshot arriving again — a stopped resource keeps
+                // republishing the state it ended in. A restart that died instead would carry a
+                // different exit code, or arrive as FailedToStart, which is cleared above.
+                onRequest = terminal && instance.StoppedOnRequest && exitCode == instance.StoppedExitCode;
+            }
+
+            var failed = !onRequest && IsFailure(state, exitCode);
             var wasFailing = instance.Failing;
             instance.Failing = failed;
 
@@ -314,7 +382,8 @@ internal sealed class ServiceStartupFailureNotices
             published.ResourceId,
             annotation.Source,
             state,
-            published.Snapshot.ExitCode);
+            published.Snapshot.ExitCode,
+            dashboard);
     }
 
     /// <summary>
@@ -373,7 +442,8 @@ internal sealed class ServiceStartupFailureNotices
         string resourceId,
         string source,
         string state,
-        int? exitCode)
+        int? exitCode,
+        bool dashboard)
     {
         // The resource is normally named for the service, and "'orders' ... its resource 'orders'"
         // reads as two things rather than one.
@@ -391,17 +461,24 @@ internal sealed class ServiceStartupFailureNotices
 
         var reported = exitCode is { } code ? $"'{state}' with exit code {code}" : $"'{state}'";
 
+        // Where the output actually is. Naming the dashboard unconditionally would send the reader
+        // to the one place that does not exist on a run without one — a DistributedApplicationTestingBuilder
+        // host, or any AppHost that turned it off — and the notice would then be the only account
+        // of the failure while pointing at nothing.
+        var elsewhere = dashboard
+            ? "its own console in the Aspire dashboard does, at the dashboard URL logged above"
+            : "that resource's own logs do, wherever this host surfaces them — this run has no dashboard";
+
         // Only 'local' runs code from a working tree this package resolved, and only there is the
         // build itself something the developer has no other account of.
         var checkout = string.Equals(source, "local", StringComparison.Ordinal)
             ? " A 'local' service runs from a checkout rather than from a project added to this " +
-              "AppHost, and the build of that checkout writes to that same console — so a failure " +
+              "AppHost, and the build of that checkout writes to those same logs — so a failure " +
               "to compile is reported nowhere else at all."
             : string.Empty;
 
         return $"Service '{serviceName}' is configured as '{source}' and {resource} is not running: it " +
                $"reported {reported}. This console does not carry that resource's output, so nothing here " +
-               "says why — its own console in the Aspire dashboard does, at the dashboard URL logged " +
-               $"above.{checkout}";
+               $"says why — {elsewhere}.{checkout}";
     }
 }

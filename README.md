@@ -265,7 +265,9 @@ Two things to know when it goes wrong:
   booting reports it for every container-backed service and then starts them all normally once the
   runtime answers. A service you restart and that fails again *is* reported again. The line says
   only *that* the service isn't running and where to look: what went wrong belongs to the process
-  Aspire launched, whose output this package doesn't own.
+  Aspire launched, whose output this package doesn't own. On a run with no dashboard — a
+  `DistributedApplicationTestingBuilder` host, or an AppHost that turned it off — the line points
+  at the resource's own logs instead of naming a dashboard that isn't there.
 
   `"local"` is where this matters most, and why it was asked for there. You never added the
   project — you wrote a name in `servicesources.local.json` — and you didn't choose where its code

@@ -61,23 +61,33 @@ public class ServiceStartupFailureNoticeTests
     /// The same, for snapshots that belong to named instances of one resource — the shape replicas
     /// arrive in, where the events interleave in a single stream and only the id tells them apart.
     /// </summary>
-    private static async Task<IReadOnlyList<string>> ReportInstancesAsync(
-        IResource resource, params (string ResourceId, CustomResourceSnapshot Snapshot)[] events)
+    private static Task<IReadOnlyList<string>> ReportInstancesAsync(
+        IResource resource, params (string ResourceId, CustomResourceSnapshot Snapshot)[] events) =>
+        ReportEventsAsync(
+            dashboard: true,
+            [.. events.Select(e => new ResourceEvent(resource, e.ResourceId, e.Snapshot))]);
+
+    /// <summary>
+    /// Feeds the report a finite run of ready-made events and hands back what it wrote, with
+    /// nothing left running afterwards — so the assertions are on a completed report rather than on
+    /// a race with one.
+    /// </summary>
+    private static async Task<IReadOnlyList<string>> ReportEventsAsync(
+        bool dashboard, params ResourceEvent[] events)
     {
         var logger = new RecordingLogger();
 
         await new ServiceStartupFailureNotices()
-            .ReportAsync(Publish(resource, events), logger, CancellationToken.None);
+            .ReportAsync(Publish(events), logger, CancellationToken.None, dashboard);
 
         return logger.Written;
     }
 
-    private static async IAsyncEnumerable<ResourceEvent> Publish(
-        IResource resource, IEnumerable<(string ResourceId, CustomResourceSnapshot Snapshot)> events)
+    private static async IAsyncEnumerable<ResourceEvent> Publish(IEnumerable<ResourceEvent> events)
     {
-        foreach (var (resourceId, snapshot) in events)
+        foreach (var published in events)
         {
-            yield return new ResourceEvent(resource, resourceId, snapshot);
+            yield return published;
             await Task.Yield();
         }
     }
@@ -315,6 +325,96 @@ public class ServiceStartupFailureNoticeTests
 
         Assert.Contains("'orders'", notice);
         Assert.DoesNotContain("orders-yjebxsrp", notice);
+    }
+
+    /// <summary>
+    /// A resource whose annotations cannot be read at all. Stands in for anything that can throw
+    /// while one event is being considered, which must cost that event and nothing else.
+    /// </summary>
+    private sealed class ExplodingResource : IResource
+    {
+        public string Name => "exploding";
+
+        public ResourceAnnotationCollection Annotations =>
+            throw new InvalidOperationException("Collection was modified.");
+    }
+
+    [Fact]
+    public async Task AnEventThatThrows_CostsThatEventAndNoLaterOne()
+    {
+        // The loop is the only thing watching, so ending it on one bad event would put every later
+        // service back into the silence this class exists to break.
+        var orders = ServiceResource();
+
+        var written = await ReportEventsAsync(
+            dashboard: true,
+            new ResourceEvent(new ExplodingResource(), "exploding-aaaa", Snapshot(KnownResourceStates.Running)),
+            new ResourceEvent(orders, "orders-aaaa", Snapshot(KnownResourceStates.FailedToStart)),
+            new ResourceEvent(new ExplodingResource(), "exploding-aaaa", Snapshot(KnownResourceStates.Running)));
+
+        Assert.Contains("'orders'", Assert.Single(written));
+    }
+
+    [Fact]
+    public async Task WithoutADashboard_TheNoticePointsAtTheResourcesOwnLogsInstead()
+    {
+        // A DistributedApplicationTestingBuilder host has no dashboard by default, and neither does
+        // an AppHost that turned it off. Naming one would send the reader to the only place that
+        // isn't there.
+        var written = await ReportEventsAsync(
+            dashboard: false,
+            new ResourceEvent(ServiceResource(), "orders-aaaa", Snapshot(KnownResourceStates.FailedToStart)));
+
+        var notice = Assert.Single(written);
+
+        Assert.DoesNotContain("dashboard URL", notice);
+        Assert.Contains("no dashboard", notice);
+        Assert.Contains("own logs", notice);
+    }
+
+    [Fact]
+    public async Task ARestartThatFailsImmediatelyAfterAStop_IsStillReported()
+    {
+        // The failing half of the stop guard: an instance that reports FailedToStart with no
+        // Starting snapshot in between must not inherit the suppression from the stop before it.
+        // FailedToStart cannot be the echo of a stop — a stop ends in Exited or Finished — so it
+        // clears the guard rather than being swallowed by it.
+        var written = await ReportAsync(
+            ServiceResource(),
+            Snapshot(KnownResourceStates.Running),
+            Snapshot(KnownResourceStates.Stopping),
+            Snapshot(KnownResourceStates.Finished, exitCode: 0),
+            Snapshot(KnownResourceStates.FailedToStart));
+
+        Assert.Single(written);
+    }
+
+    [Fact]
+    public async Task AStoppedResourceRepublishingHowItEnded_IsStillNotReported()
+    {
+        // The guard has to survive repeats of the state the stop produced — a stopped resource goes
+        // on republishing it — while not surviving into anything else.
+        var written = await ReportAsync(
+            ServiceResource(),
+            Snapshot(KnownResourceStates.Running),
+            Snapshot(KnownResourceStates.Stopping),
+            Snapshot(KnownResourceStates.Exited, exitCode: 137),
+            Snapshot(KnownResourceStates.Exited, exitCode: 137),
+            Snapshot(KnownResourceStates.Exited, exitCode: 137));
+
+        Assert.Empty(written);
+    }
+
+    [Fact]
+    public async Task ARestartThatDiesWithADifferentExitCodeThanTheStop_IsReported()
+    {
+        var written = await ReportAsync(
+            ServiceResource(),
+            Snapshot(KnownResourceStates.Stopping),
+            Snapshot(KnownResourceStates.Exited, exitCode: 137),
+            Snapshot(KnownResourceStates.Exited, exitCode: 1));
+
+        Assert.Contains("exit code 1", Assert.Single(written));
     }
 
     [Fact]
