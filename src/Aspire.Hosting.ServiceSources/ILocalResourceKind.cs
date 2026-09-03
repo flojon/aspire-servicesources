@@ -74,8 +74,13 @@ public interface ILocalResourceKind
     /// Called only when the AppHost opted in with <c>UseDeferredCheckout()</c>, this service's
     /// managed checkout is genuinely cold, and <see cref="SupportsDeferredCheckout"/> answered
     /// <see langword="true"/> for this same <paramref name="rawConfig"/>. Returning
-    /// <see langword="null"/> anyway is still honoured — it costs only the eager path — but a kind
-    /// that can decide in advance should say so there, where asking is free.
+    /// <see langword="null"/> anyway is still honoured, but it is no longer free: the checkout
+    /// prefetch acts on <see cref="SupportsDeferredCheckout"/>, leaving a service that answered
+    /// <see langword="true"/> out of the clones it starts ahead of demand, so declining here drops
+    /// the service onto the eager path with no clone already running for it — it is cloned inline,
+    /// alone, on the <c>AddService()</c> thread rather than alongside the other services. A kind
+    /// that can decide in advance should say so there, where asking is free and the answer is
+    /// acted on.
     /// Build the resource exactly as <see cref="Resolve"/>
     /// would, but touch no file under <paramref name="repoRoot"/>: hand the checks that need the
     /// working tree back as <see cref="DeferredLocalResource.ValidateCheckout"/> and core will run

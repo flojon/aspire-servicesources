@@ -551,12 +551,18 @@ public class DeferredKindCheckoutTests
             .Resolve(builder, "frontend", Metadata("frontend"), DevConfig());
 
         // A kind may only be able to decide once it has looked at everything, so null out of
-        // ResolveDeferred stays honoured even after the cheap probe said yes — and still costs
-        // nothing but the eager path.
+        // ResolveDeferred stays honoured even after the cheap probe said yes.
         Assert.Equal(1, kind.ResolveDeferredCalls);
         Assert.True(kind.ResolvedEagerly);
         Assert.False(IsHeldBack(service.Resource));
         Assert.Single(builder.Resources, r => r.Name == "frontend");
+
+        // And the checkout still lands. This is the one case where the two deferral questions
+        // disagree, so the prefetch — which believed the first answer — started nothing for this
+        // service (#76) and GetRepoRoot has to clone it inline through its "not in the prefetch
+        // set" fallback. Serial rather than parallel, but the service must still be resolvable;
+        // that fallback is what makes declining late safe rather than merely permitted.
+        Assert.True(Directory.Exists(ExpectedRepoRoot(dir, "frontend")));
     }
 
     [Fact]

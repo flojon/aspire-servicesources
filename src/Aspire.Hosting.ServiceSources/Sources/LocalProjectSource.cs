@@ -63,9 +63,16 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
             }
         }
 
-        // Blocks on this service's checkout, but every "local" service's checkout was started
-        // together on the first AddService call, so the wait is for the slowest one overall rather
-        // than for this one in turn.
+        // Blocks on this service's checkout. Usually that checkout was started on the first
+        // AddService call together with the other speculative ones, so the wait is for the slowest
+        // one overall rather than for this one in turn.
+        //
+        // One case waits alone: a service the prefetch left out because it would have been deferred
+        // (#76), whose kind then declined deferral by returning null from ResolveDeferred after
+        // SupportsDeferredCheckout had said yes. There is no prefetched task for it, so GetRepoRoot
+        // clones it inline, here, on this thread. Correct but serial — and unreachable without a
+        // handler that contradicts itself, which is why ILocalResourceKind asks kinds to decide in
+        // SupportsDeferredCheckout, where the answer is free and the prefetch can act on it.
         var repoRoot = prefetch.GetRepoRoot(serviceName, metadata, config, builder.AppHostDirectory, gitClient);
 
         if (isDotnetKind)

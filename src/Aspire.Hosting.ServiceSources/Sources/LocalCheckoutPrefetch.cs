@@ -116,10 +116,18 @@ internal sealed class LocalCheckoutPrefetch
     }
 
     /// <summary>
-    /// Starts the prefetch once per builder. Returns only after every checkout task has been
-    /// created, so <see cref="_checkouts"/> is fully populated — and thereafter read-only — before
-    /// any caller can reach <see cref="GetRepoRoot"/>.
+    /// Starts the prefetch once per builder. Returns only after every speculative checkout task has
+    /// been created, so the speculative part of <see cref="_checkouts"/> is complete before any
+    /// caller can reach <see cref="GetRepoRoot"/>.
     /// </summary>
+    /// <remarks>
+    /// It is <b>not</b> complete thereafter, which it used to be: <see cref="StartCheckout"/> adds
+    /// an entry each time a deferred service is registered, interleaved with the
+    /// <c>AddService()</c> calls that read the dictionary in <see cref="GetRepoRoot"/>. That is why
+    /// both sides take <see cref="_gate"/> — the lock became load-bearing when the prefetch stopped
+    /// being the only writer (#76), and dropping it on the strength of "populated once, then read"
+    /// would now be a data race.
+    /// </remarks>
     private void EnsureStarted(IDistributedApplicationBuilder builder, IGitClient gitClient)
     {
         lock (_gate)
@@ -424,12 +432,25 @@ internal sealed class LocalCheckoutPrefetch
     /// here would only download a repository for a service that may never be mentioned.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// This mirrors the decision <c>LocalProjectSource</c> makes per service, and has to: a service
     /// dropped here that then takes the eager path would clone alone on the <c>AddService()</c>
     /// thread instead of alongside the others. Every input is available without demand —
     /// <c>UseDeferredCheckout()</c> and <c>AddLocalKind</c> both run before the first
     /// <c>AddService()</c>, the execution mode is fixed, and the kind is asked the deliberately
     /// speculative form of the question.
+    /// </para>
+    /// <para>
+    /// The mirror is exact but for one case, which cannot be mirrored: a kind whose
+    /// <see cref="ILocalResourceKind.ResolveDeferred"/> returns <see langword="null"/> after its
+    /// <see cref="ILocalResourceKind.SupportsDeferredCheckout"/> answered <see langword="true"/>.
+    /// That is honoured (<c>DeferredCheckout.RegisterKind</c> returns null and the eager path takes
+    /// over), and the service then clones alone rather than with the others. It is the divergence
+    /// the probe exists to make rare and cannot make impossible: the deciding call is the one with
+    /// side effects, so it can never be the one asked here. Both built-in satellites answer both
+    /// questions from the same predicate and so never diverge. The cost is a serial clone, not a
+    /// wrong one.
+    /// </para>
     /// </remarks>
     private static bool WouldBeDeferredIfAdded(
         IDistributedApplicationBuilder builder,
