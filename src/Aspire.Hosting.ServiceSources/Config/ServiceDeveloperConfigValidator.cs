@@ -238,16 +238,45 @@ internal static class ServiceDeveloperConfigValidator
     /// set would be advice to change what the service resolves to — a stray <c>port</c> on a
     /// container-sourced entry belongs in the <c>kubernetes</c> block, but that is emphatically not
     /// a reason to make the service kubernetes-sourced.
+    /// <para>
+    /// A key that is nearly a field gets the same sentence with the field named, because the list
+    /// in the last branch cannot help there: the keys valid at an entry's root are <c>source</c>
+    /// and the block names, so a misspelled <c>path</c> was answered with five words that could
+    /// never include <c>path</c>. Every field moved into a block in the release before this one,
+    /// which makes "a field written flat at the entry root" the shape of every unmigrated file
+    /// there is — and the shape a developer retyping one gets wrong.
+    /// </para>
+    /// <para>
+    /// The near miss is not extended to <see cref="NotValidInBlock"/>, where the same mistake
+    /// inside a block is already answered with the block's own list of valid keys — two to four
+    /// words, one of which is the answer. A guess adds nothing to a list the reader can already
+    /// read, and would put a wrong field name in front of them when the typo is closer to a field
+    /// they did not mean.
+    /// </para>
     /// </remarks>
     private static string NotValidHere(string serviceName, IConfigurationSection key)
     {
         var home = ServiceDeveloperConfigShape.HomeBlockOf(key.Key)?.ToLowerInvariant();
 
-        return (home is not null
-                ? $"'{key.Key}' is not a valid key here. It belongs in the "
-                  + $"'{home}' block: \"{serviceName}\": {{ ..., \"{home}\": {{ \"{key.Key}\": ... }} }}."
-                : $"'{key.Key}' is not a valid key. Valid keys are "
-                  + $"{Quoted(ServiceDeveloperConfigShape.RootKeys)}.")
+        if (home is not null)
+        {
+            return $"'{key.Key}' is not a valid key here. It belongs in the "
+                + $"'{home}' block: \"{serviceName}\": {{ ..., \"{home}\": {{ \"{key.Key}\": ... }} }}."
+                + SetAt(key);
+        }
+
+        if (ServiceDeveloperConfigShape.NearMissFieldOf(key.Key) is var (field, block))
+        {
+            var lowered = block.ToLowerInvariant();
+
+            return $"'{key.Key}' is not a valid key here. Did you mean '{field.ToLowerInvariant()}', in the "
+                + $"'{lowered}' block: \"{serviceName}\": {{ ..., \"{lowered}\": "
+                + $"{{ \"{field.ToLowerInvariant()}\": ... }} }}?"
+                + SetAt(key);
+        }
+
+        return $"'{key.Key}' is not a valid key. Valid keys are "
+            + $"{Quoted(ServiceDeveloperConfigShape.RootKeys)}."
             + SetAt(key);
     }
 

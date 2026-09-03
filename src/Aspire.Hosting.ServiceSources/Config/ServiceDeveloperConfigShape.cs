@@ -54,4 +54,29 @@ internal static class ServiceDeveloperConfigShape
     /// </summary>
     public static string? HomeBlockOf(string field) =>
         BlockFields.FirstOrDefault(block => block.Value.ContainsKey(field)).Key;
+
+    /// <summary>
+    /// The field <paramref name="writtenKey"/> looks like a misspelling of, and the block it lives
+    /// in — or <see langword="null"/> when it resembles no field.
+    /// </summary>
+    /// <remarks>
+    /// The fuzzy counterpart of <see cref="HomeBlockOf"/>, and asked only after that has come back
+    /// empty. Spelled correctly, a field written at an entry's root is answered with the block it
+    /// belongs in; one letter off, it used to be answered with the list of keys valid at the root,
+    /// which cannot contain the word the developer was reaching for — the field is a level down. So
+    /// the reader got five words, none of them the answer, and no hint the key existed at all.
+    /// <para>
+    /// One answer rather than every tie, because no two blocks declare a field by the same name:
+    /// ties are possible in principle — a typo can sit one edit from fields in two blocks — and
+    /// <see cref="NearMiss.Nearest"/> resolves them the way <c>servicesources.local.json</c>'s root
+    /// key does, closest then ordinal, so the same one is named on every run.
+    /// </para>
+    /// </remarks>
+    public static (string Field, string Block)? NearMissFieldOf(string writtenKey) =>
+        NearMiss.Nearest(
+                writtenKey,
+                BlockFields.SelectMany(block => block.Value.Keys.Select(field => (Field: field, Block: block.Key))),
+                candidate => candidate.Field)
+            .Select(candidate => ((string, string)?)candidate)
+            .FirstOrDefault();
 }
