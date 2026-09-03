@@ -591,7 +591,7 @@ internal sealed class LocalCheckoutPrefetch
     /// It is a permitted choice rather than a defect — the interface documents deciding late for a
     /// kind that can only tell once it has looked at everything — and it is the divergence the probe
     /// exists to make cheap to avoid and cannot make impossible: the deciding call is the one with
-    /// side effects, so it can never be the one asked here. Both built-in satellites answer both
+    /// side effects, so it can never be the one asked here. Both built-in kinds answer both
     /// questions from the same predicate and so never diverge. The cost is a serial clone, not a
     /// wrong one, and it is disclosed on
     /// <see cref="ILocalResourceKind.ResolveDeferred"/> where a handler author reads it.

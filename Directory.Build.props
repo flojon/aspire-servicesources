@@ -3,11 +3,10 @@
   <PropertyGroup>
     <!-- Aspire.Hosting.targets defaults this to false, so Aspire's own integration analyzers
          (the ASPIREEXPORT* rules over the [AspireExport] surface consumed by TypeScript
-         AppHosts) never run unless a project opts in. Enable it repo-wide: every
-         ServiceSources package is an Aspire integration, and forgetting the opt-in in a new
-         satellite project is silent — the analyzer simply does not run, and a broken export
-         surface is found by `aspire` CLI codegen against a released package instead of at
-         build time.
+         AppHosts) never run unless a project opts in. Enable it repo-wide: this package is an
+         Aspire integration, and forgetting the opt-in is silent — the analyzer simply does not
+         run, and a broken export surface is found by `aspire` CLI codegen against a released
+         package instead of at build time.
 
          Repo-wide reaches projects that are not integrations too - the test assemblies and the
          sample AppHost. Those export nothing, which ASPIREEXPORT017 (Aspire 13.5.0 and later)
@@ -16,13 +15,10 @@
     <EnableAspireIntegrationAnalyzers>true</EnableAspireIntegrationAnalyzers>
   </PropertyGroup>
 
-  <!-- Versioning is lockstep: one release tag mints the same version for every package, and a
-       satellite constrains core to the minor it was built against - not to an exact version,
-       so core patches still reach consumers on their own (PinCoreDependency in
-       Directory.Build.targets). MinVer is repo-wide for the same reason as the analyzer
-       switch above, that the failure of omitting it is silent: a project without it packs as
-       the SDK default 1.0.0, which release.yml would then push to nuget.org or fail the
-       release on. -->
+  <!-- One release tag mints the version, from the tag itself. MinVer is repo-wide for the same
+       reason as the analyzer switch above, that the failure of omitting it is silent: a project
+       without it packs as the SDK default 1.0.0, which release.yml would then push to nuget.org
+       or fail the release on. -->
   <PropertyGroup>
     <MinVerTagPrefix>v</MinVerTagPrefix>
   </PropertyGroup>

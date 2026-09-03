@@ -20,7 +20,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         // Settle everything configuration alone can settle before paying for a checkout. Looking
         // the kind up is a dictionary probe against registry state; the handler's own Validate
         // only reads the kind config. Neither needs a working tree, and running them after the
-        // clone would make a typo'd kind — or a satellite package nobody registered — cost a cold
+        // clone would make a typo'd kind — or a kind nobody registered — cost a cold
         // clone of this repository before saying so.
         //
         // Only the first "local" AddService gets that for free across the board: the prefetch below
@@ -42,7 +42,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
             // its checkout will have — and starting it once the clone lands — costs the AppHost
             // nothing it would otherwise have had, and buys it a dashboard while the clone runs.
             //
-            // A satellite kind gets the same treatment when it can build its resource without
+            // A non-dotnet kind gets the same treatment when it can build its resource without
             // reading the repository, which java always can and javascript can for most of its app
             // types: their endpoints come from the committed catalog rather than from anything in
             // the checkout. SupportsDeferredCheckout is asked first because it is the form of the
@@ -127,8 +127,9 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}': kind '{metadata.Kind}' is not registered. " +
                 registry.DescribeNearMatch(metadata.Kind) +
-                "Add the satellite package for this kind and call its registration method " +
-                "(e.g. builder.UseJavaScript()) before the first AddService call.");
+                "Call the kind's registration method before the first AddService call " +
+                "(builder.UseJavaScript() or builder.UseJava() for the built-in kinds), or " +
+                "register your own with builder.AddLocalKind(name, handler).");
         }
 
         return handler;
@@ -151,7 +152,10 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         }
         catch (Exception ex) when (ex is not ServiceSourcesConfigurationException)
         {
-            throw new ServiceSourcesConfigurationException(HandlerFailedMessage(serviceName, metadata.Kind), ex);
+            throw new ServiceSourcesConfigurationException(
+                GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, metadata.Kind)
+                    ?? HandlerFailedMessage(serviceName, metadata.Kind),
+                ex);
         }
 
         if (registration is not null && registration.Service is null)
@@ -202,7 +206,10 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         }
         catch (Exception ex) when (ex is not ServiceSourcesConfigurationException)
         {
-            throw new ServiceSourcesConfigurationException(HandlerFailedMessage(serviceName, metadata.Kind), ex);
+            throw new ServiceSourcesConfigurationException(
+                GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, metadata.Kind)
+                    ?? HandlerFailedMessage(serviceName, metadata.Kind),
+                ex);
         }
 
         if (resourceBuilder is null)

@@ -4,7 +4,7 @@ namespace Aspire.Hosting.ServiceSources;
 
 /// <summary>
 /// Turns a cloned/checked-out local repository into a real Aspire resource for one non-dotnet
-/// "local" service kind (e.g. JavaScript, Java). Implemented by satellite packages and registered
+/// "local" service kind (e.g. JavaScript, Java). Registered
 /// via <see cref="ServiceSourcesBuilderExtensions.AddLocalKind"/>.
 /// </summary>
 public interface ILocalResourceKind

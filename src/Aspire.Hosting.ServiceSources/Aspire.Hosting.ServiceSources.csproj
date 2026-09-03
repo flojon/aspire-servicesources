@@ -19,4 +19,30 @@
     <PackageReference Include="YamlDotNet" />
   </ItemGroup>
 
+  <!-- The two guest-language hosting packages are compile-time only: PrivateAssets="all" keeps
+       them out of this package's nuspec, so an AppHost inherits neither them nor the Aspire
+       floors they carry. The kinds reach their types only inside method bodies, so the JIT
+       needs the assembly on disk only when a service actually declares kind: javascript/java. -->
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.JavaScript" PrivateAssets="all" />
+    <PackageReference Include="CommunityToolkit.Aspire.Hosting.Java" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- The floor check for the two undeclared references, imported into a consuming project by
+       NuGet.
+
+       buildTransitive/ only, and the folder name is not a preference: measured against a restored
+       package, NuGet's generated nuget.g.targets imports buildTransitive/ and nothing else for a
+       *direct* PackageReference as well as for a transitive one - buildTransitive/ supersedes
+       build/ rather than complementing it. A build/ copy would never be imported by anything, and
+       having both invites deleting the wrong one, which would silently stop the gate reaching an
+       AppHost that picks this package up through a shared conventions package. The directory here
+       is named to match the package path for the same reason.
+
+       Requires NuGet 5.0 or later, which every client able to restore a net8.0 package has. -->
+  <ItemGroup>
+    <None Include="buildTransitive\$(PackageId).targets" Pack="true"
+          PackagePath="buildTransitive\$(PackageId).targets" />
+  </ItemGroup>
+
 </Project>

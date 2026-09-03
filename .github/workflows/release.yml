@@ -27,13 +27,10 @@ jobs:
       - name: Test
         run: dotnet test -c Release
 
-      # Packed project by project rather than solution-wide: the solution also holds the sample
-      # AppHost and the test projects, which must never reach a feed. Add a line per new package.
+      # Packed by project rather than solution-wide: the solution also holds the sample AppHost
+      # and the test projects, which must never reach a feed.
       - name: Pack
-        run: |
-          dotnet pack src/Aspire.Hosting.ServiceSources/Aspire.Hosting.ServiceSources.csproj -c Release -o ./artifacts
-          dotnet pack src/Aspire.Hosting.ServiceSources.Java/Aspire.Hosting.ServiceSources.Java.csproj -c Release -o ./artifacts
-          dotnet pack src/Aspire.Hosting.ServiceSources.JavaScript/Aspire.Hosting.ServiceSources.JavaScript.csproj -c Release -o ./artifacts
+        run: dotnet pack src/Aspire.Hosting.ServiceSources/Aspire.Hosting.ServiceSources.csproj -c Release -o ./artifacts
 
       - name: NuGet login (OIDC -> temp API key)
         uses: NuGet/login@v1
@@ -56,24 +53,15 @@ jobs:
     permissions:
       packages: write
 
-    # Every package published by preview.yml needs pruning, or its version list is the one that
-    # grows without bound. Add a name here whenever a package is added to the pack steps above.
-    strategy:
-      # The action takes one package-name, so each published package gets its own job. Independent
-      # of each other: a package with no previews yet — a satellite's first release — fails its own
-      # prune, and must not take the others' down with it.
-      fail-fast: false
-      matrix:
-        package:
-          - KoalaSoft.Aspire.Hosting.ServiceSources
-          - KoalaSoft.Aspire.Hosting.ServiceSources.Java
-          - KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript
-
     steps:
+      # Everything preview.yml published needs pruning, or its version list is the one that grows
+      # without bound. One package, so this is a single step rather than a matrix; should a second
+      # packable project ever appear, give it its own job rather than another leg here — a package
+      # with no previews yet fails its own prune and must not take the others' down with it.
       - name: Delete superseded prerelease versions
         uses: actions/delete-package-versions@v5
         with:
-          package-name: ${{ matrix.package }}
+          package-name: KoalaSoft.Aspire.Hosting.ServiceSources
           package-type: nuget
           delete-only-pre-release-versions: "true"
           # Floor: GitHub Packages holds only previews, so an unbounded prune empties it.

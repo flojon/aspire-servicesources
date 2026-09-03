@@ -1,0 +1,84 @@
+<Project>
+
+  <!--
+    The version floor for the two guest-language hosting packages, which this package references
+    with PrivateAssets="all" and therefore does not declare as a dependency. NuGet enforces no
+    minimum on a reference it cannot see, so this does it instead: below the floor the compile-time
+    assembly reference cannot be satisfied, and the failure would otherwise arrive at run time as a
+    FileNotFoundException the first time a service of that kind resolves.
+
+    Only a package the AppHost actually references is checked. Not referencing one at all is the
+    normal case - an AppHost that declares no javascript or java service never needs either
+    assembly - and is reported at run time, by the kind that needed it, if a service does.
+
+    A package can also arrive transitively, from a graph the AppHost does not control, where
+    neither remedy in the message below is available. Setting
+    ServiceSourcesSkipGuestLanguageFloorCheck=true turns this off for that project, which is why
+    the message names it: the check is worth failing a build over, but not worth being unable to
+    get past. The run-time report in GuestLanguagePackages still stands behind it.
+  -->
+  <PropertyGroup>
+    <ServiceSourcesJavaScriptMinVersion>13.5.2</ServiceSourcesJavaScriptMinVersion>
+    <ServiceSourcesJavaMinVersion>13.3.0</ServiceSourcesJavaMinVersion>
+  </PropertyGroup>
+
+  <!--
+    ResolvePackageAssets is what turns the lock file into @(ResolvedCompileFileDefinitions), whose
+    NuGetPackageId/NuGetPackageVersion metadata is the resolved version rather than the range the
+    AppHost asked for - the resolved version is the one that has to clear the floor.
+  -->
+  <Target Name="ServiceSourcesVerifyGuestLanguageFloors"
+          AfterTargets="ResolvePackageAssets"
+          Condition="'$(ServiceSourcesSkipGuestLanguageFloorCheck)' != 'true'">
+
+    <ItemGroup>
+      <!-- A package resolves one compile item per assembly in it, so collapse to the version. -->
+      <_ServiceSourcesJavaScriptAsset Include="@(ResolvedCompileFileDefinitions)"
+                                      Condition="'%(NuGetPackageId)' == 'Aspire.Hosting.JavaScript'" />
+      <_ServiceSourcesJavaAsset Include="@(ResolvedCompileFileDefinitions)"
+                                Condition="'%(NuGetPackageId)' == 'CommunityToolkit.Aspire.Hosting.Java'" />
+      <_ServiceSourcesJavaScriptVersion
+          Include="@(_ServiceSourcesJavaScriptAsset->'%(NuGetPackageVersion)'->Distinct())" />
+      <_ServiceSourcesJavaVersion
+          Include="@(_ServiceSourcesJavaAsset->'%(NuGetPackageVersion)'->Distinct())" />
+    </ItemGroup>
+
+    <!--
+      [MSBuild]::VersionLessThan parses with System.Version semantics, which stop at the first '-':
+      it reads 13.5.2-preview.1 as 13.5.2 and so calls it not-less-than the 13.5.2 floor. By SemVer
+      a prerelease precedes the release it labels, and the difference is real rather than pedantic -
+      a preview cut before the release carries that release's assembly version, so it binds and then
+      fails on the missing member with a MissingMethodException, which is not a load failure and is
+      not translated at run time.
+
+      So the comparison is split: the numeric core against the floor as before, plus an equal core
+      carrying a prerelease label, which is the one case System.Version cannot see. A prerelease
+      *above* the floor (13.5.3-preview.1 against a 13.5.2 floor) is correctly left alone.
+    -->
+    <ItemGroup>
+      <_ServiceSourcesJavaScriptVersion>
+        <Core>$([System.Text.RegularExpressions.Regex]::Replace('%(Identity)', '-.*$', ''))</Core>
+        <Prerelease>$([System.String]::Copy('%(Identity)').Contains('-'))</Prerelease>
+      </_ServiceSourcesJavaScriptVersion>
+      <_ServiceSourcesJavaVersion>
+        <Core>$([System.Text.RegularExpressions.Regex]::Replace('%(Identity)', '-.*$', ''))</Core>
+        <Prerelease>$([System.String]::Copy('%(Identity)').Contains('-'))</Prerelease>
+      </_ServiceSourcesJavaVersion>
+    </ItemGroup>
+
+    <Error Condition="'@(_ServiceSourcesJavaScriptVersion)' != ''
+                      and ($([MSBuild]::VersionLessThan('%(_ServiceSourcesJavaScriptVersion.Core)', '$(ServiceSourcesJavaScriptMinVersion)'))
+                           or ('%(_ServiceSourcesJavaScriptVersion.Prerelease)' == 'True'
+                               and $([MSBuild]::VersionEquals('%(_ServiceSourcesJavaScriptVersion.Core)', '$(ServiceSourcesJavaScriptMinVersion)'))))"
+           Code="SERVICESOURCES001"
+           Text="KoalaSoft.Aspire.Hosting.ServiceSources needs Aspire.Hosting.JavaScript $(ServiceSourcesJavaScriptMinVersion) or newer for services with kind 'javascript', but this project resolves %(_ServiceSourcesJavaScriptVersion.Identity). Raise the Aspire.Hosting.JavaScript version, or remove the reference if no service declares that kind. If it arrived transitively and neither is yours to do, set ServiceSourcesSkipGuestLanguageFloorCheck=true to bypass this check - the failure is then reported at run time, by the service that needed it." />
+
+    <Error Condition="'@(_ServiceSourcesJavaVersion)' != ''
+                      and ($([MSBuild]::VersionLessThan('%(_ServiceSourcesJavaVersion.Core)', '$(ServiceSourcesJavaMinVersion)'))
+                           or ('%(_ServiceSourcesJavaVersion.Prerelease)' == 'True'
+                               and $([MSBuild]::VersionEquals('%(_ServiceSourcesJavaVersion.Core)', '$(ServiceSourcesJavaMinVersion)'))))"
+           Code="SERVICESOURCES002"
+           Text="KoalaSoft.Aspire.Hosting.ServiceSources needs CommunityToolkit.Aspire.Hosting.Java $(ServiceSourcesJavaMinVersion) or newer for services with kind 'java', but this project resolves %(_ServiceSourcesJavaVersion.Identity). Raise the CommunityToolkit.Aspire.Hosting.Java version, or remove the reference if no service declares that kind. If it arrived transitively and neither is yours to do, set ServiceSourcesSkipGuestLanguageFloorCheck=true to bypass this check - the failure is then reported at run time, by the service that needed it." />
+  </Target>
+
+</Project>

@@ -66,9 +66,12 @@
          therefore resolves an exact version - the floor above by default, or whatever
          aspire-matrix.yml passed. -->
     <PackageVersion Include="Aspire.Hosting" Version="$(AspireVersion)" />
-    <PackageVersion Include="Aspire.Hosting.JavaScript" Version="$(AspireVersion)" />
 
-    <PackageVersion Include="CommunityToolkit.Aspire.Hosting.Java" Version="13.3.0" />
+    <!-- Aspire.Hosting.JavaScript and CommunityToolkit.Aspire.Hosting.Java are declared in the
+         root file instead. Both are PrivateAssets="all" here, so they are not floors a consumer
+         inherits through the nuspec - but the kind test projects reference them for real, and
+         those live under test/, which sees only the root file. Declaring them in both places is
+         NU1506, since this file imports that one. -->
     <PackageVersion Include="YamlDotNet" Version="18.1.0" />
   </ItemGroup>
 

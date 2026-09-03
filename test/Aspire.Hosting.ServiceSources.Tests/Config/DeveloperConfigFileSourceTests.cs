@@ -188,7 +188,8 @@ public class DeveloperConfigFileSourceTests
     [Fact]
     public void EveryPublicBuilderExtension_RegistersTheFile()
     {
-        string[] accountedFor = ["AddLocalKind", "AddService", "UseDeferredCheckout"];
+        string[] accountedFor =
+            ["AddLocalKind", "AddService", "UseDeferredCheckout", "UseJava", "UseJavaScript"];
 
         var entryPoints = typeof(ServiceSourcesBuilderExtensions).Assembly.GetExportedTypes()
             .SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.Static))

@@ -4,7 +4,7 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 
 /// <summary>
 /// Per-builder registry of <see cref="ILocalResourceKind"/> handlers, keyed by the <c>kind</c>
-/// name a service's <c>servicesources.yaml</c> entry declares. Populated by satellite packages via
+/// name a service's <c>servicesources.yaml</c> entry declares. Populated via
 /// <see cref="ServiceSourcesBuilderExtensions.AddLocalKind"/>, consulted by the <c>"local"</c>
 /// source for any kind other than the built-in <c>"dotnet"</c>.
 /// </summary>
