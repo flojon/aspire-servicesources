@@ -654,16 +654,14 @@ reported as such, rather than left to surface as a failure to start the app. On 
 run is `mvnw.cmd`/`gradlew.bat`, whether it was found by default or named by `wrapperPath`: the
 extensionless scripts beside them are POSIX shell scripts that Windows cannot exec.
 
-Every problem with the block bar two — unknown properties, a missing or out-of-range `port`, no run
-mode or more than one, a `workingDirectory`, `wrapperPath` or `jarPath` escaping the repository, a
-`wrapperPath` set alongside `jarPath` — is reported by the `AddService("catalog")` call itself,
-before the service has added anything to the app model. The two exceptions are a `workingDirectory`
-that doesn't exist in the checkout and a wrapper script that isn't there: both need the checkout on
-disk, which isn't cloned until the block itself has been checked, so they are reported a moment
-later, once the resource is being created. Under
-[`UseDeferredCheckout()`](#first-run-usedeferredcheckout) that moment is later still — after the
-clone lands, as this service's resource state — but it is the same two checks saying the same two
-things.
+Every problem with the block — unknown properties, a missing or out-of-range `port`, no run
+mode or more than one, a `workingDirectory`, `wrapperPath` or `jarPath` escaping the repository,
+a `wrapperPath` set alongside `jarPath`, a `workingDirectory` that isn't in the checkout, a
+wrapper script that isn't there — is reported by the `AddService("catalog")` call itself, before
+the service has added anything to the app model. The last two are read against the checkout, so
+under [`UseDeferredCheckout()`](#first-run-usedeferredcheckout), where there isn't one yet, they
+are reported after the clone lands as this service's resource state instead — the same two checks
+saying the same two things.
 
 **Reaching the rest of the Java integration.** The `java:` block covers how to start the app; it
 deliberately doesn't mirror every modifier the Community Toolkit offers. Anything else is reachable
@@ -698,11 +696,21 @@ public sealed class JavaScriptKind : ILocalResourceKind
         public string? RunScript { get; set; }
     }
 
-    // Optional, and worth implementing whenever Resolve parses rawConfig: this runs immediately
-    // before Resolve, and before this service's checkout, so a typo'd options block is reported
-    // without a half-created resource behind it and without paying for a clone first.
-    public void Validate(string serviceName, object? rawConfig) =>
-        LocalKindConfig.Parse<Options>(rawConfig, serviceName);
+    // Optional, and worth implementing whenever Resolve parses rawConfig or reads the checkout:
+    // this runs immediately before Resolve, against the same repoRoot, and before this service has
+    // added anything to the app model — so a typo'd options block, or one naming a directory the
+    // repository doesn't have, is reported without a half-created resource behind it.
+    public void Validate(string serviceName, string repoRoot, object? rawConfig)
+    {
+        var options = LocalKindConfig.Parse<Options>(rawConfig, serviceName);
+
+        if (options?.AppDirectory is { } appDirectory
+            && !Directory.Exists(Path.Combine(repoRoot, appDirectory)))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': appDirectory '{appDirectory}' is not in the checkout.");
+        }
+    }
 
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig)
@@ -757,10 +765,12 @@ public DeferredLocalResource? ResolveDeferred(
 ```
 
 Build the resource exactly as `Resolve` would, but read no file under `repoRoot` — hand those checks
-back as `ValidateCheckout`. Endpoints are the one thing that can't be added later, so a kind that
-can only learn its endpoints by reading the repository should return `null`. Holding the resource
-back and starting it once the checkout lands is core's job, and it covers every resource the call
-adds to the app model, not just the one returned as `Service`.
+back as `ValidateCheckout`. `Validate` is paired with `Resolve` and so isn't called on this path at
+all: there is no checkout for it to judge the service against, which is why `ResolveDeferred` has to
+reject a bad options block itself. Endpoints are the one thing that can't be added later, so a kind
+that can only learn its endpoints by reading the repository should return `null`. Holding the
+resource back and starting it once the checkout lands is core's job, and it covers every resource
+the call adds to the app model, not just the one returned as `Service`.
 
 Returning `null` from `ResolveDeferred` after `SupportsDeferredCheckout` said `true` is honoured —
 legitimate for a kind that can only tell once it has looked at everything — but it isn't free. The

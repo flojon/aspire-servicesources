@@ -22,21 +22,36 @@ public interface ILocalResourceKind
         object? rawConfig);
 
     /// <summary>
-    /// Optional pre-flight check, called for a service immediately before <see cref="Resolve"/> and
-    /// before that service has added anything to the app model. Implementations that parse
-    /// <paramref name="rawConfig"/> in <see cref="Resolve"/> should parse it here too —
-    /// <see cref="LocalKindConfig.Parse{T}"/> is cheap and side-effect free — so a typo'd options
-    /// block is reported without a half-created resource. Throw
+    /// Optional pre-flight check, called for a service immediately before <see cref="Resolve"/>,
+    /// against the very same <paramref name="repoRoot"/> and <paramref name="rawConfig"/>, and
+    /// before that service has added anything to the app model. Throw
     /// <see cref="ServiceSourcesConfigurationException"/> to report a problem; the default is a no-op.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// Implementations that parse <paramref name="rawConfig"/> in <see cref="Resolve"/> should parse
+    /// it here too — <see cref="LocalKindConfig.Parse{T}"/> is cheap and side-effect free — so a
+    /// typo'd options block is reported without a half-created resource. So should every check a
+    /// kind makes against the checkout: <paramref name="repoRoot"/> is resolved, so a
+    /// <c>workingDirectory</c> or an entry-point file that is not in the repository can be reported
+    /// from here rather than from halfway through building a resource.
+    /// </para>
+    /// <para>
+    /// Paired with <see cref="Resolve"/>, and therefore not called for a service that takes the
+    /// deferred path: there is no checkout to judge against yet when
+    /// <see cref="ResolveDeferred"/> runs, so that call validates the options block itself and hands
+    /// the working-tree checks back as <see cref="DeferredLocalResource.ValidateCheckout"/>, which
+    /// core runs once the clone has landed.
+    /// </para>
+    /// <para>
     /// This used to run for every "local" service before <em>any</em> of them had touched the app
     /// model, so failures could be aggregated. That guarantee is gone: <c>AddService()</c> now
     /// returns the real resource, so each service is fully resolved before the next is even
     /// mentioned. Services resolved earlier in <c>Program.cs</c> are already in the app model when
     /// this runs.
+    /// </para>
     /// </remarks>
-    void Validate(string serviceName, object? rawConfig)
+    void Validate(string serviceName, string repoRoot, object? rawConfig)
     {
     }
 

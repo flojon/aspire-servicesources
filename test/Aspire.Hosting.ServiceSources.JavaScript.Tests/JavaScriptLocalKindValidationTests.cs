@@ -3,25 +3,32 @@ using Aspire.Hosting.ServiceSources;
 namespace Aspire.Hosting.ServiceSources.JavaScript.Tests;
 
 /// <summary>
-/// Covers everything the handler can reject from its options block alone. These all go through
+/// Covers everything the handler rejects before it builds anything: the options block, and the
+/// paths in it read against the service's checkout. These all go through
 /// <see cref="ILocalResourceKind.Validate"/>, which core calls immediately before this service's
-/// <see cref="ILocalResourceKind.Resolve"/> and ahead of its checkout — so a typo'd options block is
-/// caught without paying for a clone, and without the handler having to start building a resource
-/// before it can tell the config is wrong.
+/// <see cref="ILocalResourceKind.Resolve"/> and against the same resolved checkout — so a typo'd
+/// options block, or one naming a directory the repository does not have, is caught without the
+/// handler having to start building a resource first.
 /// </summary>
 public class JavaScriptLocalKindValidationTests
 {
-    private static void Validate(string yaml) =>
-        new JavaScriptLocalKind().Validate("frontend", TestHelpers.ParseOptionsBlock(yaml));
+    /// <summary>
+    /// Validated against a checkout holding a <c>package.json</c> and a <c>server.js</c> at its
+    /// root, which is what every options block here names unless it says otherwise — the cases
+    /// about the checkout itself pass their own.
+    /// </summary>
+    private static void Validate(string yaml, string? repoRoot = null) =>
+        new JavaScriptLocalKind().Validate(
+            "frontend", repoRoot ?? TestHelpers.CreateRepo(), TestHelpers.ParseOptionsBlock(yaml));
 
-    private static ServiceSourcesConfigurationException Rejects(string yaml) =>
-        Assert.Throws<ServiceSourcesConfigurationException>(() => Validate(yaml));
+    private static ServiceSourcesConfigurationException Rejects(string yaml, string? repoRoot = null) =>
+        Assert.Throws<ServiceSourcesConfigurationException>(() => Validate(yaml, repoRoot));
 
     [Fact]
     public void NoOptionsBlockIsAccepted()
     {
         // A service can declare kind: javascript and nothing else — every option has a default.
-        new JavaScriptLocalKind().Validate("frontend", null);
+        new JavaScriptLocalKind().Validate("frontend", TestHelpers.CreateRepo(), null);
     }
 
     [Fact]
@@ -33,7 +40,7 @@ public class JavaScriptLocalKindValidationTests
             packageManager: pnpm
             port: 3000
             targetPort: 5173
-            """);
+            """, TestHelpers.CreateRepo("src/frontend"));
 
     [Fact]
     public void UnknownPropertyIsRejected()
@@ -168,5 +175,65 @@ public class JavaScriptLocalKindValidationTests
 
         Assert.Contains(field, ex.Message);
         Assert.Contains("empty", ex.Message);
+    }
+
+    [Fact]
+    public void AppDirectoryMissingFromTheCheckoutIsRejected()
+    {
+        var ex = Rejects("appDirectory: src/frontendd");
+
+        Assert.Contains("frontend", ex.Message);
+        Assert.Contains("src/frontendd", ex.Message);
+        Assert.Contains("not found", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("javascript")]
+    [InlineData("vite")]
+    [InlineData("nextjs")]
+    public void AppDirectoryWithoutAPackageJsonIsRejected(string appType)
+    {
+        // These app types run a package.json script, so an appDirectory without one cannot work.
+        // Left unchecked it reaches the developer as an npm "could not read package.json" from the
+        // installer resource, detached from the service whose entry pointed at the wrong directory —
+        // the same reason scriptPath is checked to exist.
+        var ex = Rejects($"appType: {appType}", TestHelpers.CreateRepo(withPackageJson: false));
+
+        Assert.Contains("frontend", ex.Message);
+        Assert.Contains("package.json", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("node")]
+    [InlineData("bun")]
+    public void RunScriptWithoutAPackageJsonIsRejected(string appType)
+    {
+        // A run script IS a package.json script, and Aspire's AddNodeApp/AddBunApp only wire up a
+        // package manager when the app directory has a package.json. Without this check the run
+        // script is silently dropped and the service starts the scriptPath it was told to override.
+        var ex = Rejects($"""
+            appType: {appType}
+            scriptPath: server.js
+            runScript: start
+            """, TestHelpers.CreateRepo(withPackageJson: false));
+
+        Assert.Contains("frontend", ex.Message);
+        Assert.Contains("package.json", ex.Message);
+        Assert.Contains("runScript", ex.Message);
+    }
+
+    [Fact]
+    public void ScriptPathMissingFromTheCheckoutIsRejected()
+    {
+        // Otherwise a typo surfaces at run time as "node: cannot find module", detached from the
+        // service whose catalog entry named it — the dotnet kind checks its project file the same way.
+        var ex = Rejects("""
+            appType: node
+            scriptPath: serverr.js
+            """);
+
+        Assert.Contains("frontend", ex.Message);
+        Assert.Contains("serverr.js", ex.Message);
+        Assert.Contains("not found", ex.Message);
     }
 }
