@@ -24,8 +24,8 @@ public static class ServiceSourcesBuilderExtensions
     ///
     /// That is the opposite of the deliberate case-sensitivity of <c>kind</c> names (see
     /// <see cref="Sources.LocalKindRegistry.DescribeNearMatch"/>), and for a reason: kinds are an
-    /// open registry that anything may contribute names to, where folding case could collide
-    /// two packages' registrations, while these four names are a closed set this package owns and
+    /// open registry that anything may contribute names to, where folding case could collide two
+    /// independent registrations, while these four names are a closed set this package owns and
     /// nothing else can add to.
     /// </remarks>
     private static readonly Dictionary<string, IServiceSource> Sources = new(StringComparer.OrdinalIgnoreCase)
@@ -191,8 +191,10 @@ public static class ServiceSourcesBuilderExtensions
     /// <summary>
     /// Registers <paramref name="handler"/> as the resolver for local-sourced services whose
     /// <c>servicesources.yaml</c> entry declares <c>kind: &lt;paramref name="kind"/&gt;</c>.
-    /// Called by a kind's own registration method (e.g. a hypothetical
-    /// <c>UseJavaScript()</c>), not typically called directly by an AppHost author.
+    /// Called by a kind's own registration method — <see cref="JavaScriptServiceSourcesBuilderExtensions.UseJavaScript"/>
+    /// and <see cref="JavaServiceSourcesBuilderExtensions.UseJava"/> are the built-in two — rather
+    /// than directly by an AppHost author. Public because a kind implemented outside this package
+    /// has no other way to register itself.
     /// </summary>
     [AspireExportIgnore]
     public static IDistributedApplicationBuilder AddLocalKind(
