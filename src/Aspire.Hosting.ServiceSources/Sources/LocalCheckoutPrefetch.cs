@@ -445,11 +445,16 @@ internal sealed class LocalCheckoutPrefetch
     /// <see cref="ILocalResourceKind.ResolveDeferred"/> returns <see langword="null"/> after its
     /// <see cref="ILocalResourceKind.SupportsDeferredCheckout"/> answered <see langword="true"/>.
     /// That is honoured (<c>DeferredCheckout.RegisterKind</c> returns null and the eager path takes
-    /// over), and the service then clones alone rather than with the others. It is the divergence
-    /// the probe exists to make rare and cannot make impossible: the deciding call is the one with
+    /// over), and the service then clones alone rather than with the others.
+    /// </para>
+    /// <para>
+    /// It is a permitted choice rather than a defect — the interface documents deciding late for a
+    /// kind that can only tell once it has looked at everything — and it is the divergence the probe
+    /// exists to make cheap to avoid and cannot make impossible: the deciding call is the one with
     /// side effects, so it can never be the one asked here. Both built-in satellites answer both
     /// questions from the same predicate and so never diverge. The cost is a serial clone, not a
-    /// wrong one.
+    /// wrong one, and it is disclosed on
+    /// <see cref="ILocalResourceKind.ResolveDeferred"/> where a handler author reads it.
     /// </para>
     /// </remarks>
     private static bool WouldBeDeferredIfAdded(

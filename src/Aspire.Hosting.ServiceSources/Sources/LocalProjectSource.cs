@@ -70,9 +70,15 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         // One case waits alone: a service the prefetch left out because it would have been deferred
         // (#76), whose kind then declined deferral by returning null from ResolveDeferred after
         // SupportsDeferredCheckout had said yes. There is no prefetched task for it, so GetRepoRoot
-        // clones it inline, here, on this thread. Correct but serial — and unreachable without a
-        // handler that contradicts itself, which is why ILocalResourceKind asks kinds to decide in
-        // SupportsDeferredCheckout, where the answer is free and the prefetch can act on it.
+        // clones it inline, here, on this thread.
+        //
+        // That kind is not doing anything wrong: ILocalResourceKind documents deciding late as a
+        // legitimate choice, for a kind that can only tell once it has looked at everything, and
+        // this path is what keeps it working. What changed is its price. Deciding late used to cost
+        // only the eager path, because the prefetch had already started every cold clone regardless
+        // of the answer; now the prefetch acts on the early answer, so a late decline is also a
+        // clone that runs in turn instead of with the others. Correct, and slower — which is why
+        // the interface now says so where a handler author reads it.
         var repoRoot = prefetch.GetRepoRoot(serviceName, metadata, config, builder.AppHostDirectory, gitClient);
 
         if (isDotnetKind)

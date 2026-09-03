@@ -261,9 +261,11 @@ var orders = builder.AddService("orders").WithHttpEndpoint();
 ```
 
 The dashboard comes up immediately, checkout progress and failure become resource state you can
-see, and one bad clone costs one service instead of the run. Nothing gets slower: a deferred
+see, and one bad clone costs one service instead of the run. The clones stay parallel: a deferred
 service's clone starts at its own `AddService()` call and blocks nobody, so several of them still
-run at once — the wall-clock is the slowest clone, not the sum.
+run at once — the wall-clock is the slowest clone, not the sum. The one thing that still clones in
+turn is a third-party `kind` handler that declares deferral support and then declines it for a
+particular service; the built-in `dotnet`, `java` and `javascript` kinds never do.
 
 It also stops the AppHost downloading repositories it doesn't use. Without deferral the clones have
 to start before the AppHost has said which services it wants, so every `"local"` entry with no

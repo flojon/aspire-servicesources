@@ -161,6 +161,24 @@ nothing will fail to build to warn you.
 
 ### Changed
 
+- **A `kind` handler that declines deferral late now clones in turn rather than in parallel**
+  ([#76]). Only affects third-party `ILocalResourceKind` implementations; no AppHost change, and
+  neither built-in satellite is affected — `java` answers unconditionally and `javascript` answers
+  both deferral questions from the same predicate, so neither can reach this.
+
+  Returning `null` from `ResolveDeferred` after `SupportsDeferredCheckout` answered `true` is still
+  honoured, and deciding late is still documented as legitimate for a kind that can only tell once
+  it has looked at everything. What changed is the price. The checkout prefetch now acts on
+  `SupportsDeferredCheckout`, leaving a service that answered `true` out of the clones it starts
+  ahead of demand — so a late decline drops the service onto the eager path with no clone already
+  running for it, and it is cloned inline, alone, on the `AddService()` thread rather than alongside
+  the other services. Before, the prefetch started every cold clone regardless of the answer, so
+  deciding late cost nothing but the eager path.
+
+  Nothing breaks and nothing fails to build: the service still resolves and still starts. A kind
+  that can decide from its options block alone should answer in `SupportsDeferredCheckout`, where
+  the answer is free and the prefetch can act on it.
+
 - **A malformed entry fails the AppHost even when nothing uses that service** ([#161]). Key
   validation moved from `AddService()`, which only ever saw the services an AppHost asks for, to the
   point the configuration is read, which sees every entry in it. An unknown or misplaced key in an
