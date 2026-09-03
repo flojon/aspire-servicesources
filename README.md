@@ -1402,4 +1402,6 @@ history, including the phase 2 backlog (repo auto-update, config discovery walk-
 dependency/infrastructure resolution, and more).
 
 Changes are recorded in [`CHANGELOG.md`](CHANGELOG.md); how a release is cut is in
-[`RELEASING.md`](RELEASING.md).
+[`RELEASING.md`](RELEASING.md). A change is written up as a file of its own under
+[`changelog.d/`](changelog.d/README.md) and folded into the changelog at release time, so that
+two PRs adding an entry never collide over the same lines.

@@ -837,3 +837,62 @@ jobs:
 
           print(f"Aspire CLI pinned to {pinned}, at or above the {floor} floor in {PROPS}")
           EOF
+
+  changelog:
+    # Its own job for the same reason as verify-invariants: it reads files and a PR's metadata,
+    # never restores or compiles, and so reports in seconds rather than queueing behind a build.
+    name: 📝 changelog fragment
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # A fragment whose filename does not match the convention is skipped in silence when the
+      # release is cut: the entry gets written, reviewed, merged, and then never appears
+      # anywhere. Checked on every run rather than only on a PR, since a name can also arrive
+      # by a push straight to main.
+      - name: Check fragment names
+        run: ./scripts/collect-changelog.sh --lint
+
+      # The fold runs about four times a year and rewrites CHANGELOG.md in place, producing the
+      # text that reaches an immutable nuget.org listing. Without this the first exercise of any
+      # change to it would be in the middle of a release.
+      - name: Test the release-time fold
+        run: ./scripts/test-collect-changelog.sh
+
+      # A change to src/ that a consumer can observe needs an entry, and the entry is easiest to
+      # write while the change is fresh. The label is the way out for the rest - a refactor, a
+      # test-only change, a build fix - because "does anyone outside this repo care" is a
+      # judgement no path filter can make.
+      - name: Require a fragment for a change to src/
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          # Joined into one string rather than read as JSON: `contains()` on the labels array
+          # would need the whole check inside an `if:` expression, where it could not explain
+          # itself when it fails.
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          changed=$(gh pr diff "$PR" --name-only)
+
+          if ! grep -q '^src/' <<<"$changed"; then
+            echo "Nothing under src/ changed; no changelog fragment needed."
+            exit 0
+          fi
+
+          if grep -qxF 'no-changelog' <<<"${LABELS//,/$'\n'}"; then
+            echo "Labelled no-changelog; not asking for a fragment."
+            exit 0
+          fi
+
+          if grep -qE '^changelog\.d/[0-9]+-(breaking|added|changed|fixed|documentation)\.md$' <<<"$changed"; then
+            echo "Changelog fragment present."
+            exit 0
+          fi
+
+          echo "::error::This PR changes src/ but adds no changelog entry. Add one as changelog.d/<issue-or-pr>-<section>.md, section being breaking, added, changed, fixed or documentation - see changelog.d/README.md. If the change is invisible to a consumer, label the PR 'no-changelog' instead."
+          exit 1

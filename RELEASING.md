@@ -36,18 +36,30 @@ Two feeds receive them:
 
 ### 1. Close the changelog
 
-`CHANGELOG.md` is the source of release notes — `Directory.Build.targets` reads the section
-matching the version being packed into `PackageReleaseNotes`, so what is written here is what
-appears on the nuget.org listing. Open a PR that:
+Entries do not go into `CHANGELOG.md` as they land. Each PR leaves one in a file of its own
+under `changelog.d/`, so that two PRs never edit the same lines ([#145]) — the convention is in
+[`changelog.d/README.md`](changelog.d/README.md). Closing a release is folding them in:
 
-- renames `## [Unreleased]` to `## [X.Y.Z] - <date>` and adds a fresh empty `## [Unreleased]`
-  above it,
-- adds the `[X.Y.Z]:` compare link and repoints `[Unreleased]:` at the new version,
-- adds link definitions for any `[#N]` references used in the new section.
+```bash
+scripts/collect-changelog.sh X.Y.Z     # --dry-run to see the result without writing it
+```
+
+That groups the fragments by section under a new `## [X.Y.Z] - <date>` heading, together with
+anything that was written under `## [Unreleased]` by hand; leaves `## [Unreleased]` empty above
+it; repoints `[Unreleased]:` and adds the `[X.Y.Z]:` compare link; converts the fragments'
+inline links to the reference style the file uses and merges the definitions into the block at
+the bottom; and deletes the fragments. Commit the deletions along with the file — `git add -A`.
+
+Open a PR with the result and **read the diff**. `Directory.Build.targets` reads the section
+matching the version being packed into `PackageReleaseNotes`, so this text is what appears on
+the nuget.org listing, and a published version can never be edited. That is the whole reason
+the fold happens in a reviewable PR rather than inside `release.yml`.
 
 While the version is below `1.0.0`, a breaking change may ship in a minor, so each one needs a
 **Breaking** entry saying what breaks and how to migrate. Behavioral changes that still compile
-go under **Changed** — those are the ones nothing warns a consumer about.
+go under **Changed** — those are the ones nothing warns a consumer about. The script only
+groups and moves what the fragments say; if an entry does not read that way, edit it in the
+release PR.
 
 ### 2. Verify before tagging
 
@@ -120,9 +132,12 @@ permanent; the tag is the only record of what commit they were built from.
 
 There is no manual prerelease step. Every commit to `main` publishes one to GitHub Packages
 automatically, versioned `X.Y.Z-alpha.0.N`, with release notes taken from the `[Unreleased]`
-changelog section. Installing from that feed needs a token with `read:packages` — the README's
-Preview builds section has the details.
+changelog section **and the `changelog.d/` fragments waiting to be folded into it**. Between one
+release and the next the fragments are where the entries actually live, so a preview build that
+read only the file would carry no notes at all for weeks. Installing from that feed needs a
+token with `read:packages` — the README's Preview builds section has the details.
 
+[#145]: https://github.com/flojon/aspire-servicesources/issues/145
 [MinVer]: https://github.com/adamralph/minver
 [nuget.org]: https://www.nuget.org/profiles/flojon
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

@@ -69,10 +69,17 @@
 
     Lives in .targets rather than .props because it reads $(PackageVersion), which MinVer
     computes from the git tag during the build - it does not exist yet at .props time.
+
+    Between releases the entries are not in CHANGELOG.md at all: each PR writes one to a file of
+    its own under changelog.d/, and they are folded into the file only when the release is cut
+    (see changelog.d/README.md). So the [Unreleased] fallback below reads that directory too -
+    without it every per-commit prerelease would pack no notes for the whole gap between one
+    release and the next.
   -->
 
   <PropertyGroup>
     <ChangelogFile Condition="'$(ChangelogFile)' == ''">$(MSBuildThisFileDirectory)CHANGELOG.md</ChangelogFile>
+    <ChangelogFragmentDir Condition="'$(ChangelogFragmentDir)' == ''">$(MSBuildThisFileDirectory)changelog.d</ChangelogFragmentDir>
     <ChangelogUrl Condition="'$(ChangelogUrl)' == ''">https://github.com/flojon/aspire-servicesources/blob/main/CHANGELOG.md</ChangelogUrl>
   </PropertyGroup>
 
@@ -81,13 +88,17 @@
              AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
     <ParameterGroup>
       <ChangelogFile ParameterType="System.String" Required="true" />
+      <FragmentDir ParameterType="System.String" />
       <ReleaseVersion ParameterType="System.String" Required="true" />
       <SectionName ParameterType="System.String" Output="true" />
       <Section ParameterType="System.String" Output="true" />
     </ParameterGroup>
     <Task>
       <Using Namespace="System" />
+      <Using Namespace="System.Collections.Generic" />
       <Using Namespace="System.IO" />
+      <Using Namespace="System.Linq" />
+      <Using Namespace="System.Text" />
       <Using Namespace="System.Text.RegularExpressions" />
       <Code Type="Fragment" Language="cs"><![CDATA[
         // Body of "## [<name>] ...", up to the next "## " heading or the reference-link
@@ -98,24 +109,73 @@
                 text,
                 @"^\#\# \[" + Regex.Escape(name) + @"\][^\n]*\n(?<body>.*?)(?=^\#\# |^\[)",
                 RegexOptions.Multiline | RegexOptions.Singleline);
-            if (!match.Success) return "";
+            return match.Success ? match.Groups["body"].Value.Trim() : "";
+        };
 
-            // "([#62])" is a markdown reference link, and its definition lives at the end of
-            // the file, outside the section. NuGet renders release notes as plain text, so
-            // unwrap it to "(#62)" rather than shipping a link that resolves to nothing.
-            return Regex.Replace(match.Groups["body"].Value.Trim(), @"\[(\#\d+)\]", "$1");
+        // Both link styles the entries use render as a bare "(#62)". A fragment writes its
+        // links inline, "([#62](https://...))", and the changelog writes them as references,
+        // "([#62])", whose definitions live at the end of the file and outside the section.
+        // NuGet renders release notes as plain text, so neither survives as a link: unwrap
+        // both rather than shipping markup that resolves to nothing.
+        Func<string, string> plain = text =>
+        {
+            text = Regex.Replace(text, @"\[(\#\d+)\]\([^()]*\)", "$1");
+            return Regex.Replace(text, @"\[(\#\d+)\]", "$1");
+        };
+
+        // The changelog.d/ fragments, grouped under their headings in the order the changelog
+        // uses. Mirrors what scripts/collect-changelog.sh will write at release time, closely
+        // enough for release notes - the script is what produces the file itself.
+        Func<string> fragments = () =>
+        {
+            if (string.IsNullOrEmpty(FragmentDir) || !Directory.Exists(FragmentDir)) return "";
+
+            var rendered = new StringBuilder();
+            foreach (var section in new[] { "Breaking", "Added", "Changed", "Fixed", "Documentation" })
+            {
+                var suffix = "-" + section.ToLowerInvariant() + ".md";
+
+                // The pattern is matched again as a case-sensitive regex because a Windows
+                // filesystem would let "*-added.md" match "12-Added.md", which is not a name
+                // the convention allows and not one the release script would pick up.
+                var names = Directory.GetFiles(FragmentDir, "*" + suffix)
+                    .Select(Path.GetFileName)
+                    .Where(name => Regex.IsMatch(name, @"^\d+" + Regex.Escape(suffix) + "$"))
+                    .OrderBy(name => int.Parse(name.Split('-')[0]))
+                    .ToList();
+                if (names.Count == 0) continue;
+
+                rendered.Append("### ").Append(section).Append("\n\n");
+                foreach (var name in names)
+                {
+                    rendered.Append(File.ReadAllText(Path.Combine(FragmentDir, name)).Trim());
+                    rendered.Append("\n\n");
+                }
+            }
+            return rendered.ToString().Trim();
         };
 
         var changelog = File.ReadAllText(ChangelogFile);
 
-        // A tagged release has its own section. The per-commit prereleases preview.yml
-        // pushes never do, so they describe what is sitting unreleased on main instead.
-        Section = body(changelog, ReleaseVersion);
+        // A tagged release has its own section, folded in when the release was cut. The
+        // per-commit prereleases preview.yml pushes never do, so they describe what is sitting
+        // unreleased on main instead: the [Unreleased] section, plus the fragments waiting to
+        // be folded into it. Both, because a hand-written entry can still be sitting in the
+        // file - a section present in both then appears twice, which is untidy in a preview
+        // listing and better than dropping half the notes.
+        Section = plain(body(changelog, ReleaseVersion));
         SectionName = Section.Length > 0 ? ReleaseVersion : "";
 
         if (Section.Length == 0 && ReleaseVersion.Contains("-"))
         {
-            Section = body(changelog, "Unreleased");
+            var pending = new List<string>();
+            var unreleased = body(changelog, "Unreleased");
+            if (unreleased.Length > 0) pending.Add(unreleased);
+
+            var waiting = fragments();
+            if (waiting.Length > 0) pending.Add(waiting);
+
+            Section = plain(string.Join("\n\n", pending));
             SectionName = Section.Length > 0 ? "Unreleased" : "";
         }
       ]]></Code>
@@ -127,7 +187,9 @@
           BeforeTargets="GenerateNuspec"
           Condition="'$(IsPackable)' != 'false' and '$(PackageReleaseNotes)' == '' and Exists('$(ChangelogFile)')">
 
-    <ReadChangelogSection ChangelogFile="$(ChangelogFile)" ReleaseVersion="$(PackageVersion)">
+    <ReadChangelogSection ChangelogFile="$(ChangelogFile)"
+                          FragmentDir="$(ChangelogFragmentDir)"
+                          ReleaseVersion="$(PackageVersion)">
       <Output TaskParameter="SectionName" PropertyName="_ChangelogSectionName" />
       <Output TaskParameter="Section" PropertyName="_ChangelogSection" />
     </ReadChangelogSection>
