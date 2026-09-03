@@ -53,23 +53,31 @@ public class ServiceStartupFailureNoticeTests
     /// order DCP would have published them, with nothing left running afterwards, so the assertions
     /// are on a completed report rather than on a race with one.
     /// </summary>
-    private static async Task<IReadOnlyList<string>> ReportAsync(
-        IResource resource, params CustomResourceSnapshot[] snapshots)
+    private static Task<IReadOnlyList<string>> ReportAsync(
+        IResource resource, params CustomResourceSnapshot[] snapshots) =>
+        ReportInstancesAsync(resource, [.. snapshots.Select(snapshot => (resource.Name, snapshot))]);
+
+    /// <summary>
+    /// The same, for snapshots that belong to named instances of one resource — the shape replicas
+    /// arrive in, where the events interleave in a single stream and only the id tells them apart.
+    /// </summary>
+    private static async Task<IReadOnlyList<string>> ReportInstancesAsync(
+        IResource resource, params (string ResourceId, CustomResourceSnapshot Snapshot)[] events)
     {
         var logger = new RecordingLogger();
 
         await new ServiceStartupFailureNotices()
-            .ReportAsync(Publish(resource, snapshots), logger, CancellationToken.None);
+            .ReportAsync(Publish(resource, events), logger, CancellationToken.None);
 
         return logger.Written;
     }
 
     private static async IAsyncEnumerable<ResourceEvent> Publish(
-        IResource resource, IEnumerable<CustomResourceSnapshot> snapshots)
+        IResource resource, IEnumerable<(string ResourceId, CustomResourceSnapshot Snapshot)> events)
     {
-        foreach (var snapshot in snapshots)
+        foreach (var (resourceId, snapshot) in events)
         {
-            yield return new ResourceEvent(resource, resource.Name, snapshot);
+            yield return new ResourceEvent(resource, resourceId, snapshot);
             await Task.Yield();
         }
     }
@@ -141,11 +149,53 @@ public class ServiceStartupFailureNoticeTests
     }
 
     [Fact]
-    public async Task RuntimeUnhealthy_IsReported()
+    public async Task RuntimeUnhealthy_IsNotReported_BecauseAspireRetriesOutOfIt()
     {
-        var written = await ReportAsync(ServiceResource(), Snapshot(KnownResourceStates.RuntimeUnhealthy));
+        // Measured against Aspire 13.5.2: an AppHost started before the container runtime is
+        // reachable reports RuntimeUnhealthy for every container-backed service, and then goes on
+        // to Starting and Running once the runtime answers. The state names the runtime, not this
+        // service — and a line already written cannot be withdrawn once the service turns out fine.
+        var written = await ReportAsync(
+            ServiceResource(source: "container"),
+            Snapshot(KnownResourceStates.Starting),
+            Snapshot(KnownResourceStates.RuntimeUnhealthy),
+            Snapshot(KnownResourceStates.Starting),
+            Snapshot(KnownResourceStates.Running));
 
-        Assert.Contains(KnownResourceStates.RuntimeUnhealthy, Assert.Single(written));
+        Assert.Empty(written);
+    }
+
+    [Fact]
+    public async Task AStopTheDeveloperAskedFor_IsNotReportedAsAFailureToStart()
+    {
+        // Stopping is what Aspire publishes before it takes a resource down on request — measured
+        // for both a project and a container, each of which then reported exit code 0, so this
+        // guards a case that does not misfire today rather than one that does. It is here because
+        // the exit code of a stop is the runtime's to choose and a signal exit would read exactly
+        // like a crash; the state that says "this was asked for" does not.
+        var written = await ReportAsync(
+            ServiceResource(),
+            Snapshot(KnownResourceStates.Running),
+            Snapshot(KnownResourceStates.Stopping),
+            Snapshot(KnownResourceStates.Exited, exitCode: 137));
+
+        Assert.Empty(written);
+    }
+
+    [Fact]
+    public async Task AServiceStartedAgainAfterAStop_IsStillReportedWhenItThenFails()
+    {
+        // The stop is remembered only until the instance begins again, so it cannot swallow the
+        // next failure.
+        var written = await ReportAsync(
+            ServiceResource(),
+            Snapshot(KnownResourceStates.Running),
+            Snapshot(KnownResourceStates.Stopping),
+            Snapshot(KnownResourceStates.Exited, exitCode: 0),
+            Snapshot(KnownResourceStates.Starting),
+            Snapshot(KnownResourceStates.Exited, exitCode: 1));
+
+        Assert.Single(written);
     }
 
     [Fact]
@@ -203,6 +253,68 @@ public class ServiceStartupFailureNoticeTests
 
         Assert.Contains("'local'", local);
         Assert.Contains("'container'", container);
+    }
+
+    [Fact]
+    public async Task OneFailingReplicaAmongHealthyOnes_IsReportedOnceAndDoesNotRepeat()
+    {
+        // Replicas share one IResource and are told apart only by their id, and their snapshots
+        // interleave in the one stream this reads. Keyed by resource name, the healthy replica's
+        // Running would clear the failure the other had just reported and the next snapshot from
+        // the dead one would report it again — for as long as the host ran.
+        var orders = ServiceResource();
+        orders.Annotations.Add(new ReplicaAnnotation(2));
+
+        var written = await ReportInstancesAsync(
+            orders,
+            ("orders-aaaa", Snapshot(KnownResourceStates.Running)),
+            ("orders-bbbb", Snapshot(KnownResourceStates.Running)),
+            ("orders-bbbb", Snapshot(KnownResourceStates.Finished, exitCode: 1)),
+            ("orders-aaaa", Snapshot(KnownResourceStates.Running)),
+            ("orders-bbbb", Snapshot(KnownResourceStates.Finished, exitCode: 1)),
+            ("orders-aaaa", Snapshot(KnownResourceStates.Running)),
+            ("orders-bbbb", Snapshot(KnownResourceStates.Finished, exitCode: 1)),
+            ("orders-aaaa", Snapshot(KnownResourceStates.Running)));
+
+        // Stable rather than growing with the interleaving, and it names which replica died.
+        var notice = Assert.Single(written);
+        Assert.Contains("orders-bbbb", notice);
+        Assert.DoesNotContain("orders-aaaa", notice);
+    }
+
+    [Fact]
+    public async Task EachFailingReplica_IsReportedWithItsOwnExitCode()
+    {
+        var orders = ServiceResource();
+        orders.Annotations.Add(new ReplicaAnnotation(2));
+
+        var written = await ReportInstancesAsync(
+            orders,
+            ("orders-aaaa", Snapshot(KnownResourceStates.Finished, exitCode: 1)),
+            ("orders-bbbb", Snapshot(KnownResourceStates.Finished, exitCode: 3)));
+
+        // One line per failing replica rather than one per service: two replicas can die of
+        // different things, and a single line would have to pick one of them to be about.
+        Assert.Equal(2, written.Count);
+        Assert.Contains(written, line => line.Contains("orders-aaaa", StringComparison.Ordinal)
+            && line.Contains("exit code 1", StringComparison.Ordinal));
+        Assert.Contains(written, line => line.Contains("orders-bbbb", StringComparison.Ordinal)
+            && line.Contains("exit code 3", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AnUnreplicatedService_DoesNotNameItsInstanceId()
+    {
+        // DCP suffixes every instance id whether the service is replicated or not, so naming it
+        // unconditionally would put "orders-yjebxsrp" into the ordinary one-replica line.
+        var written = await ReportInstancesAsync(
+            ServiceResource(),
+            ("orders-yjebxsrp", Snapshot(KnownResourceStates.FailedToStart)));
+
+        var notice = Assert.Single(written);
+
+        Assert.Contains("'orders'", notice);
+        Assert.DoesNotContain("orders-yjebxsrp", notice);
     }
 
     [Fact]

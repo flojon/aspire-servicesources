@@ -59,11 +59,36 @@ internal sealed class ServiceStartupFailureNotices
         Cache = new();
 
     /// <summary>
-    /// Whether each resource is currently being reported as failed, by resource name. What makes a
-    /// failure one line rather than one per snapshot: a failed resource goes on producing snapshots
-    /// — health reports, URLs, the state it failed in — for as long as the host runs.
+    /// What has been reported for each running <em>instance</em>, keyed by
+    /// <see cref="ResourceEvent.ResourceId"/>.
     /// </summary>
-    private readonly Dictionary<string, bool> _failing = new(StringComparer.Ordinal);
+    /// <remarks>
+    /// The id rather than the resource's name, because replicas share one <see cref="IResource"/>
+    /// and are told apart only by their id — and their snapshots interleave in the single stream
+    /// this reads. Keyed by name, one replica's <c>Running</c> would clear the failure another
+    /// replica had just reported, and that replica's next snapshot would report it again.
+    /// </remarks>
+    private readonly Dictionary<string, Instance> _instances = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// What this report remembers about one instance between snapshots.
+    /// </summary>
+    private sealed class Instance
+    {
+        /// <summary>
+        /// Whether the last state seen was a failure, so that one failure is one line: a failed
+        /// instance goes on producing snapshots — health reports, URLs, the state it died in — for
+        /// as long as the host runs.
+        /// </summary>
+        public bool Failing { get; set; }
+
+        /// <summary>
+        /// Whether this instance has been asked to stop since it last began starting. A stop the
+        /// developer asked for ends in a terminal state like any other, and must not be reported as
+        /// a failure to start.
+        /// </summary>
+        public bool StopRequested { get; set; }
+    }
 
     // Plain object rather than System.Threading.Lock: this package still targets net8.0.
     private readonly object _gate = new();
@@ -144,18 +169,48 @@ internal sealed class ServiceStartupFailureNotices
         IServiceProvider services,
         CancellationToken cancellationToken)
     {
-        // The token BeforeStartEvent carries is whatever was handed to RunAsync, and the token an
-        // AppHost from the template supplies is none: it ends in Run(), which is RunAsync().Wait()
-        // with the default. ApplicationStopping is the signal that does fire, and it fires before
-        // DCP stops anything — so the exits of an orderly shutdown are never read as failures to
-        // start. The event's own token is kept alongside it because a host given a real one means
-        // it.
-        using var stopping = CancellationTokenSource.CreateLinkedTokenSource(
-            cancellationToken,
-            services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping);
+        // Everything here runs on a task nobody awaits, so a throw would be an unobserved exception
+        // with nothing said about it — which is why the lifetime is resolved defensively rather than
+        // required, and why building the token source is inside the guard rather than in front of
+        // it. Same reasoning as the null checks in Start.
+        CancellationTokenSource? stopping = null;
 
-        await ReportAsync(notifications.WatchAsync(stopping.Token), logger, stopping.Token)
-            .ConfigureAwait(false);
+        try
+        {
+            // The token BeforeStartEvent carries is whatever was handed to RunAsync, and the token
+            // an AppHost from the template supplies is none: it ends in Run(), which is
+            // RunAsync().Wait() with the default. ApplicationStopping is the signal that does fire,
+            // and it fires before DCP stops anything — so the exits of an orderly shutdown are never
+            // read as failures to start. The event's own token is kept alongside it because a host
+            // given a real one means it.
+            var lifetime = services.GetService<IHostApplicationLifetime>();
+
+            stopping = lifetime is null
+                ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
+                : CancellationTokenSource.CreateLinkedTokenSource(
+                    cancellationToken, lifetime.ApplicationStopping);
+
+            await ReportAsync(notifications.WatchAsync(stopping.Token), logger, stopping.Token)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // ReportAsync swallows its own; this is the prologue's, and a provider already disposed
+            // when a late BeforeStartEvent reaches it is the way it happens.
+            try
+            {
+                logger.LogDebug(ex, "Reporting service start failures could not start: {Message}", ex.Message);
+            }
+            catch (Exception)
+            {
+                // The logger is one of the things that can be torn down under us, so noting the
+                // problem must not become the problem.
+            }
+        }
+        finally
+        {
+            stopping?.Dispose();
+        }
     }
 
     /// <summary>
@@ -222,12 +277,27 @@ internal sealed class ServiceStartupFailureNotices
             return null;
         }
 
-        var failed = IsFailure(state, published.Snapshot.ExitCode);
-
         lock (_gate)
         {
-            _failing.TryGetValue(published.Resource.Name, out var wasFailing);
-            _failing[published.Resource.Name] = failed;
+            if (!_instances.TryGetValue(published.ResourceId, out var instance))
+            {
+                _instances[published.ResourceId] = instance = new Instance();
+            }
+
+            // An instance that is beginning again is no longer the one that was asked to stop, so a
+            // crash after a restart is reported rather than swallowed by the previous stop.
+            if (Is(state, KnownResourceStates.Starting) || Is(state, KnownResourceStates.NotStarted))
+            {
+                instance.StopRequested = false;
+            }
+            else if (Is(state, KnownResourceStates.Stopping))
+            {
+                instance.StopRequested = true;
+            }
+
+            var failed = !instance.StopRequested && IsFailure(state, published.Snapshot.ExitCode);
+            var wasFailing = instance.Failing;
+            instance.Failing = failed;
 
             // Reported on the way into a failed state rather than while in one. A resource the
             // developer restarts from the dashboard leaves the failed state first, so a second
@@ -239,8 +309,9 @@ internal sealed class ServiceStartupFailureNotices
         }
 
         return FailureMessage(
+            published.Resource,
             annotation.ServiceName,
-            published.Resource.Name,
+            published.ResourceId,
             annotation.Source,
             state,
             published.Snapshot.ExitCode);
@@ -250,15 +321,26 @@ internal sealed class ServiceStartupFailureNotices
     /// Whether a reported state means the service is not running when it should be.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A terminal state counts only when the exit code says it went badly. A missing exit code says
     /// nothing either way, and reporting it as a failure would invent one — the mistake
     /// <see cref="Sources.LocalCheckoutPrefetch"/>'s speculative reporting is written to avoid.
+    /// </para>
+    /// <para>
+    /// <c>RuntimeUnhealthy</c> is deliberately absent, and was measured before being dropped: it
+    /// says the container <em>runtime</em> is unreachable, not that this service failed, and Aspire
+    /// retries out of it. An AppHost started while the container runtime is still coming up reports
+    /// <c>RuntimeUnhealthy</c> for every container-backed service and then goes on to
+    /// <c>Starting</c> and <c>Running</c> when the runtime answers, so reporting it would print an
+    /// error for a service that is about to be fine — and there is no way to withdraw a line
+    /// already written. Under-reporting a transient beats crying wolf, because a channel that
+    /// sometimes lies is one a developer learns to ignore, and being ignored is the failure this
+    /// whole report exists to fix.
+    /// </para>
     /// </remarks>
     private static bool IsFailure(string state, int? exitCode)
     {
-        // Compared rather than matched: Aspire declares these as static readonly fields, not
-        // constants, so they are not pattern-matchable.
-        if (Is(state, KnownResourceStates.FailedToStart) || Is(state, KnownResourceStates.RuntimeUnhealthy))
+        if (Is(state, KnownResourceStates.FailedToStart))
         {
             return true;
         }
@@ -269,22 +351,43 @@ internal sealed class ServiceStartupFailureNotices
         }
 
         return false;
-
-        static bool Is(string state, string known) => string.Equals(state, known, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// Compares a reported state with a known one.
+    /// </summary>
+    /// <remarks>
+    /// Compared rather than pattern-matched: Aspire declares <see cref="KnownResourceStates"/>'s
+    /// members as static readonly fields rather than constants, so they cannot appear in a pattern.
+    /// </remarks>
+    private static bool Is(string state, string known) =>
+        string.Equals(state, known, StringComparison.Ordinal);
 
     /// <summary>
     /// Says which service, what was reported for it, and where the reason is — without claiming to
     /// know what the reason was.
     /// </summary>
     private static string FailureMessage(
-        string serviceName, string resourceName, string source, string state, int? exitCode)
+        IResource resourceModel,
+        string serviceName,
+        string resourceId,
+        string source,
+        string state,
+        int? exitCode)
     {
         // The resource is normally named for the service, and "'orders' ... its resource 'orders'"
         // reads as two things rather than one.
-        var resource = string.Equals(serviceName, resourceName, StringComparison.Ordinal)
+        var resource = string.Equals(serviceName, resourceModel.Name, StringComparison.Ordinal)
             ? "its resource"
-            : $"its resource '{resourceName}'";
+            : $"its resource '{resourceModel.Name}'";
+
+        // The instance id only where there is more than one instance to tell apart. DCP gives every
+        // instance a suffixed id whether the service is replicated or not, so naming it
+        // unconditionally would put an id nobody asked about into the ordinary one-replica line.
+        if (resourceModel.Annotations.OfType<ReplicaAnnotation>().LastOrDefault() is { Replicas: > 1 })
+        {
+            resource += $" replica '{resourceId}'";
+        }
 
         var reported = exitCode is { } code ? $"'{state}' with exit code {code}" : $"'{state}'";
 

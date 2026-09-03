@@ -75,11 +75,17 @@ nothing will fail to build to warn you.
 
   Read off the resource's state rather than off any one failure path, so it covers a build that
   won't compile, a deferred clone that never landed, and a service of any source — not `"local"`
-  alone. Reported for `FailedToStart`, for `RuntimeUnhealthy`, and for a terminal state with a
-  non-zero exit code; a terminal state whose exit code was never reported is not treated as a
-  failure, and neither is an orderly Ctrl-C. It says only *that* the service isn't running: the
-  output that says why belongs to the process Aspire launched, whose streams this package does not
-  own. Needs no opt-in, and nothing about how a failure reaches the dashboard changes.
+  alone. Reported for `FailedToStart` and for a terminal state with a non-zero exit code, one line
+  per failing replica.
+
+  It errs towards silence rather than towards a false alarm, since a channel that sometimes lies is
+  one developers learn to ignore. Not reported: a terminal state whose exit code was never
+  reported, an orderly Ctrl-C, a resource stopped from the dashboard, and `RuntimeUnhealthy` —
+  which names an unreachable container runtime rather than a failed service, and which an AppHost
+  started before its container runtime is up reports for every container-backed service before
+  starting them all normally. It says only *that* the service isn't running: the output that says
+  why belongs to the process Aspire launched, whose streams this package does not own. Needs no
+  opt-in, and nothing about how a failure reaches the dashboard changes.
 
 ## [0.4.0] - 2026-09-03
 

@@ -252,12 +252,20 @@ Two things to know when it goes wrong:
         failure to compile is reported nowhere else at all.
   ```
 
-  One line per service, for every source rather than `"local"` alone, whenever a service's
-  resource reports `FailedToStart`, reports `RuntimeUnhealthy`, or ends with a non-zero exit code.
-  A terminal state whose exit code was never reported is not treated as a failure, an orderly
-  Ctrl-C is not either, and a service you restart from the dashboard that fails again is reported
-  again. The line says only *that* the service isn't running and where to look: what went wrong
-  belongs to the process Aspire launched, whose output this package doesn't own.
+  One line per failing resource instance, for every source rather than `"local"` alone, whenever
+  it reports `FailedToStart` or ends with a non-zero exit code. A replicated service gets one line
+  per replica that failed, naming which one and its own exit code; an unreplicated one gets a
+  single line and no instance id.
+
+  It errs towards saying nothing rather than crying wolf, because a channel that sometimes lies is
+  one you learn to ignore — which is the problem it exists to fix. So none of these are reported:
+  a terminal state whose exit code was never reported, an orderly Ctrl-C, a resource you stopped
+  yourself from the dashboard, and `RuntimeUnhealthy` — the last says your *container runtime* is
+  unreachable, not that this service failed, and an AppHost started before Docker has finished
+  booting reports it for every container-backed service and then starts them all normally once the
+  runtime answers. A service you restart and that fails again *is* reported again. The line says
+  only *that* the service isn't running and where to look: what went wrong belongs to the process
+  Aspire launched, whose output this package doesn't own.
 
   `"local"` is where this matters most, and why it was asked for there. You never added the
   project — you wrote a name in `servicesources.local.json` — and you didn't choose where its code
