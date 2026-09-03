@@ -238,9 +238,32 @@ code you moved away from.
 Two things to know when it goes wrong:
 
 - **The compiler's output isn't in the AppHost's console.** It goes to that resource's console in
-  the dashboard, like any other project resource. A checkout that fails to compile therefore looks
-  like a resource that never starts, and the reason is one click away rather than in the terminal
-  you launched from.
+  the dashboard, like any other project resource, so the reason a checkout wouldn't compile is one
+  click away rather than in the terminal you launched from. What the AppHost's console does say is
+  that the service isn't running (#150):
+
+  ```text
+  fail: Aspire.Hosting.ServiceSources[0]
+        Service 'orders' is configured as 'local' and its resource is not running: it reported
+        'Finished' with exit code 1. This console does not carry that resource's output, so
+        nothing here says why — its own console in the Aspire dashboard does, at the dashboard
+        URL logged above. A 'local' service runs from a checkout rather than from a project
+        added to this AppHost, and the build of that checkout writes to that same console — so a
+        failure to compile is reported nowhere else at all.
+  ```
+
+  One line per service, for every source rather than `"local"` alone, whenever a service's
+  resource reports `FailedToStart`, reports `RuntimeUnhealthy`, or ends with a non-zero exit code.
+  A terminal state whose exit code was never reported is not treated as a failure, an orderly
+  Ctrl-C is not either, and a service you restart from the dashboard that fails again is reported
+  again. The line says only *that* the service isn't running and where to look: what went wrong
+  belongs to the process Aspire launched, whose output this package doesn't own.
+
+  `"local"` is where this matters most, and why it was asked for there. You never added the
+  project — you wrote a name in `servicesources.local.json` — and you didn't choose where its code
+  lives, so a resource that quietly fails to appear is one you may not know to look for. The same
+  reasoning already covers a clone that fails for a service nothing waits on; this is the step
+  after it.
 - **Two `path` services in one repository can collide.** If both point into the same repository
   and their projects share a `ProjectReference`, Aspire starts both at once, and two builds write
   that shared project's `bin/`/`obj/` simultaneously — which fails intermittently, with an
@@ -290,8 +313,11 @@ checkout yet is cloned; a deferred one is cloned only when it is added (#76).
 The wait is one you can watch. git's own progress becomes the service's state — the phase it is
 in, that phase's percentage, and the bytes transferred while a pack is arriving
 (`Receiving objects 48% · 18.54 MiB`) — with every line git writes going to the service's console
-logs as it arrives. A failure lands in the same two places. Nothing appears for a repository small
-enough that git reports nothing, which is normal rather than a sign of a stall.
+logs as it arrives. A failure lands in the same two places, plus one line in the AppHost's own
+console saying that service isn't running — the same line
+[a checkout that won't compile gets](#aspire-builds-a-checkout-on-every-start), because both are
+read off the resource's state rather than off any one failure path. Nothing appears for a
+repository small enough that git reports nothing, which is normal rather than a sign of a stall.
 
 **What a cold checkout costs, and what it doesn't.** This part is about the `dotnet` kind. The
 `java` and `javascript` kinds have no launch profile and read nothing out of the repository while

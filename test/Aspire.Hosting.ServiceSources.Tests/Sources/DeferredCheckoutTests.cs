@@ -682,6 +682,40 @@ public class DeferredCheckoutTests
     }
 
     [Fact]
+    public async Task DeferredCheckoutFailure_AlsoReachesTheAppHostsOwnConsole()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.UseDeferredCheckout();
+
+        var notices = TestHelpers.StreamServiceSourcesWarnings(builder);
+
+        var git = new FakeGitClient();
+        git.FailFor("https://example.com/orders.git", new InvalidOperationException("no such repo"));
+        var orders = new LocalProjectSource(git)
+            .Resolve(builder, "orders", Metadata("orders"), DevConfig())
+            .WithHttpEndpoint();
+
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+        await PublishNotStartedAsync(services, orders.Resource);
+
+        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+        // The detail stays where this class puts it — the resource's own log and its state — and the
+        // AppHost's console gets one line saying the service failed and where to look. Nothing here
+        // reports the clone: the notice comes from the FailedToStart this class publishes, which is
+        // the same surface #118's prepare step fails on, so neither needs a console channel of its
+        // own.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        var notice = await notices.ReadAsync(timeout.Token);
+
+        Assert.Contains("'orders'", notice);
+        Assert.Contains("dashboard", notice);
+    }
+
+    [Fact]
     public async Task HostShutdownWhileWaitingForDcp_EndsTheStartTaskRatherThanWaitingForever()
     {
         var dir = CreateAppHostDirectory("orders");

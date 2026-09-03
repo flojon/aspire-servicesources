@@ -22,6 +22,12 @@ internal static class ResolvedService
         where TResource : class, IResourceWithServiceDiscovery
     {
         resource.WithAnnotation(new ServiceSourceAnnotation(serviceName, source));
+
+        // Subscribed from here rather than from AddService because this is exactly the set the
+        // report is about — the resources a source produced, and no others — and because a source
+        // that hands back nothing to tag has nothing to report on either.
+        ServiceStartupFailureNotices.For(resource.ApplicationBuilder);
+
         return resource;
     }
 }

@@ -57,6 +57,30 @@ nothing will fail to build to warn you.
   arrived transitively and neither remedy is yours to apply, `ServiceSourcesSkipGuestLanguageFloorCheck=true`
   turns the build-time check off for that project and leaves the run-time report standing.
 
+### Added
+
+- **A service whose resource never runs is reported in the AppHost's own console** ([#150]). A
+  `"local"` checkout that fails to compile used to produce nothing there at all: Aspire's build of
+  a checkout is `dotnet run`'s own, so the compiler's output goes to that resource's console in the
+  dashboard, and from the terminal the service simply never appeared. There is now one line per
+  service, naming it, naming the state Aspire reported for it, and pointing at the dashboard:
+
+  ```text
+  fail: Aspire.Hosting.ServiceSources[0]
+        Service 'orders' is configured as 'local' and its resource is not running: it reported
+        'Finished' with exit code 1. This console does not carry that resource's output, so
+        nothing here says why — its own console in the Aspire dashboard does, at the dashboard
+        URL logged above. …
+  ```
+
+  Read off the resource's state rather than off any one failure path, so it covers a build that
+  won't compile, a deferred clone that never landed, and a service of any source — not `"local"`
+  alone. Reported for `FailedToStart`, for `RuntimeUnhealthy`, and for a terminal state with a
+  non-zero exit code; a terminal state whose exit code was never reported is not treated as a
+  failure, and neither is an orderly Ctrl-C. It says only *that* the service isn't running: the
+  output that says why belongs to the process Aspire launched, whose streams this package does not
+  own. Needs no opt-in, and nothing about how a failure reaches the dashboard changes.
+
 ## [0.4.0] - 2026-09-03
 
 ### Breaking
@@ -678,6 +702,7 @@ Targets `net10.0`.
 [#125]: https://github.com/flojon/aspire-servicesources/issues/125
 [#130]: https://github.com/flojon/aspire-servicesources/issues/130
 [#131]: https://github.com/flojon/aspire-servicesources/issues/131
+[#150]: https://github.com/flojon/aspire-servicesources/issues/150
 [#159]: https://github.com/flojon/aspire-servicesources/issues/159
 [#160]: https://github.com/flojon/aspire-servicesources/issues/160
 [#161]: https://github.com/flojon/aspire-servicesources/issues/161
