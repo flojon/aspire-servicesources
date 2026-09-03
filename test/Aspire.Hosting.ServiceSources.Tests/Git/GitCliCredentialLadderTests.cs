@@ -136,6 +136,37 @@ public class GitCliCredentialLadderTests
         Assert.Contains("127.0.0.1", exception.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void HelperCredentialRefused_TheRetryReportsToTheSameProgressStream()
+    {
+        using var server = StubGitServer.Accepting("git", EnvironmentToken);
+        var progress = new RecordingProgressSink();
+
+        // The ladder's second rung re-runs the whole command, so this stream is written by two
+        // separate git processes one after the other.
+        Clone(server, token: EnvironmentToken, configureHelper: true, progress: progress);
+
+        // Both of them announced themselves, so the stream carries the second attempt rather than
+        // ending with the first. Each invocation gets a reader of its own, so a line left unfinished
+        // when one process exits cannot run into the next one's first line.
+        Assert.Equal(2, progress.CountStartingWith("Cloning into"));
+
+        // Which is also what makes the restart legible: the failure that caused it is in the stream
+        // between the two, so a percentage that starts over has its reason directly above it.
+        Assert.Contains(progress.Lines, line => line.Contains("Authentication failed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void WithNothingToRetryWith_TheProgressStreamCarriesTheOneAttempt()
+    {
+        using var server = StubGitServer.RefusingEverything();
+        var progress = new RecordingProgressSink();
+
+        Clone(server, configureHelper: true, progress: progress);
+
+        Assert.Equal(1, progress.CountStartingWith("Cloning into"));
+    }
+
     /// <summary>
     /// The distinct credentials the client offered, in the order it first offered them. Requests
     /// carrying none are dropped: git always makes an unauthenticated attempt first, and each
@@ -151,12 +182,16 @@ public class GitCliCredentialLadderTests
     /// always ends in an error whatever the credentials — only the handshake is under test.
     /// </summary>
     private static void Clone(
-        StubGitServer server, string? token = null, string? username = null, bool configureHelper = false)
+        StubGitServer server,
+        string? token = null,
+        string? username = null,
+        bool configureHelper = false,
+        IGitProgressSink? progress = null)
     {
         try
         {
             new GitCliClient(Environment(token, username, configureHelper, server))
-                .Clone(server.RepositoryUrl, TestRepository.EmptyDestination());
+                .Clone(server.RepositoryUrl, TestRepository.EmptyDestination(), progress);
         }
         catch (Exception ex) when (ex is GitAuthenticationFailedException or GitCommandFailedException)
         {

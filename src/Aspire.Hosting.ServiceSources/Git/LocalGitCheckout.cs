@@ -47,12 +47,13 @@ internal static class LocalGitCheckout
         ServiceMetadata metadata,
         ServiceDeveloperConfig config,
         string appHostDirectory,
-        IGitClient gitClient) =>
+        IGitClient gitClient,
+        IGitProgressSink? progress = null) =>
         ReconcileRepoRoot(
             serviceName,
             metadata,
             config,
-            PrepareRepoRoot(serviceName, metadata, config, appHostDirectory, gitClient),
+            PrepareRepoRoot(serviceName, metadata, config, appHostDirectory, gitClient, progress),
             gitClient);
 
     /// <summary>

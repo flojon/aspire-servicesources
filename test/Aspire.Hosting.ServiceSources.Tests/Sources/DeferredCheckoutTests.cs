@@ -1045,6 +1045,74 @@ public class DeferredCheckoutTests
         Assert.Contains("Checking out", observed);
     }
 
+    [Fact]
+    public async Task CloneProgress_IsReportedForAServiceThePrefetchNeverEnumerated()
+    {
+        // The catalog describes "orders" but the developer configuration does not name it, so the
+        // prefetch has nothing to speculate about and the checkout is resolved on the start task
+        // instead. That path can run a whole cold clone, so it is not one to leave unwatched — and
+        // it is the path a deferred service takes whenever the prefetch declines to claim it.
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.yaml"),
+            "services:\n  orders:\n    repository: https://example.com/orders.git\n    project: Service.csproj\n");
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), """{ "services": { } }""");
+
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.UseDeferredCheckout();
+
+        var git = new FakeGitClient();
+        git.ReportProgress(
+            "https://example.com/orders.git", "Receiving objects:  48% (6864/14091), 18.54 MiB | 18.38 MiB/s");
+
+        var orders = new LocalProjectSource(git)
+            .Resolve(builder, "orders", Metadata("orders"), DevConfig())
+            .WithHttpEndpoint();
+
+        // Nothing was cloned while composing: this service is not in the prefetch set at all.
+        Assert.Empty(git.Cloned);
+
+        var services = builder.Services.BuildServiceProvider();
+
+        var states = new List<string>();
+        using var watching = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        var watcher = Task.Run(
+            async () =>
+            {
+                await foreach (var published in services.GetRequiredService<ResourceNotificationService>()
+                                   .WatchAsync(watching.Token))
+                {
+                    if (string.Equals(published.Resource.Name, "orders", StringComparison.Ordinal)
+                        && published.Snapshot.State?.Text is { } text)
+                    {
+                        lock (states)
+                        {
+                            states.Add(text);
+                        }
+                    }
+                }
+            },
+            watching.Token);
+
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+        await PublishNotStartedAsync(services, orders.Resource);
+
+        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+        await watching.CancelAsync();
+        await watcher.ContinueWith(_ => { }, TaskScheduler.Default);
+
+        string[] observed;
+        lock (states)
+        {
+            observed = [.. states];
+        }
+
+        Assert.Contains("https://example.com/orders.git", git.Cloned);
+        Assert.Contains("Receiving objects 48% · 18.54 MiB", observed);
+    }
+
     /// <summary>
     /// Stands in for DCP, which publishes <c>NotStarted</c> when it withholds an explicit-start
     /// executable. That state is what each deferred task waits for before it touches the resource.

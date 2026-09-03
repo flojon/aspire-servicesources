@@ -9,30 +9,6 @@ namespace Aspire.Hosting.ServiceSources.Tests.Git;
 /// </summary>
 public class CloneProgressTests
 {
-    private sealed class RecordingSink : IGitProgressSink
-    {
-        private readonly List<string> _lines = [];
-
-        public void Report(string line)
-        {
-            lock (_lines)
-            {
-                _lines.Add(line);
-            }
-        }
-
-        public IReadOnlyList<string> Lines
-        {
-            get
-            {
-                lock (_lines)
-                {
-                    return [.. _lines];
-                }
-            }
-        }
-    }
-
     /// <summary>
     /// The origin addressed as a URL rather than as the plain path the other tests use. A clone from
     /// a path is the one case git reports nothing for at all — it hardlinks the object store instead
@@ -45,7 +21,7 @@ public class CloneProgressTests
     {
         var origin = TestRepository.CreateOrigin();
         var destination = TestRepository.EmptyDestination();
-        var sink = new RecordingSink();
+        var sink = new RecordingProgressSink();
 
         new GitCliClient(TestRepository.IsolatedEnvironment()).Clone(CloneUrl(origin), destination, sink);
 
@@ -67,7 +43,7 @@ public class CloneProgressTests
     public void Clone_WithASink_ReportsTheRestOfStderrToo()
     {
         var origin = TestRepository.CreateOrigin();
-        var sink = new RecordingSink();
+        var sink = new RecordingProgressSink();
 
         new GitCliClient(TestRepository.IsolatedEnvironment())
             .Clone(CloneUrl(origin), TestRepository.EmptyDestination(), sink);
@@ -86,7 +62,7 @@ public class CloneProgressTests
         var result = GitCommand.Run(
             ["clone", "--progress", "--", CloneUrl(origin), destination],
             TestRepository.IsolatedEnvironment(),
-            new RecordingSink());
+            new RecordingProgressSink());
 
         Assert.True(result.Succeeded, result.StandardError);
 

@@ -20,7 +20,12 @@ public class LocalCheckoutPrefetchTests
 
         public Barrier? StartBarrier { get; set; }
 
+        private readonly Dictionary<string, string[]> _progressLines = new(StringComparer.Ordinal);
+
         public List<string> Cloned { get; } = [];
+
+        /// <summary>Whether each repository's clone was given somewhere to report progress.</summary>
+        public Dictionary<string, bool> ProgressAttachedFor { get; } = new(StringComparer.Ordinal);
 
         public List<(string RepositoryPath, string Reference)> CheckedOut { get; } = [];
 
@@ -30,11 +35,26 @@ public class LocalCheckoutPrefetchTests
         public ManualResetEventSlim BlockFor(string repositoryUrl) =>
             _blockUntil[repositoryUrl] = new ManualResetEventSlim(false);
 
+        /// <summary>Progress lines this repository's clone reports before it finishes.</summary>
+        public void ReportProgress(string repositoryUrl, params string[] lines) =>
+            _progressLines[repositoryUrl] = lines;
+
         public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null)
         {
             lock (Cloned)
             {
                 Cloned.Add(repositoryUrl);
+                ProgressAttachedFor[repositoryUrl] = progress is not null;
+            }
+
+            if (_progressLines.TryGetValue(repositoryUrl, out var lines))
+            {
+                Assert.NotNull(progress);
+
+                foreach (var line in lines)
+                {
+                    progress.Report(line);
+                }
             }
 
             if (_blockUntil.TryGetValue(repositoryUrl, out var gate))
@@ -498,8 +518,7 @@ public class LocalCheckoutPrefetchTests
     private static async Task<IReadOnlyList<string>> DrainProgressAsync(
         LocalCheckoutPrefetch prefetch, string serviceName)
     {
-        var progress = prefetch.ProgressFor(serviceName);
-        Assert.NotNull(progress);
+        var progress = prefetch.WatchCheckout(serviceName);
 
         using var giveUp = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
@@ -558,15 +577,52 @@ public class LocalCheckoutPrefetchTests
     }
 
     [Fact]
-    public void Progress_IsAbsentForAServiceThePrefetchNeverSaw()
+    public void Progress_IsNotRequestedForACheckoutNobodyIsWatching()
     {
         var dir = CreateAppHostDirectory("orders");
+
+        // "billing" is in the catalog but not configured as "local", so the prefetch never
+        // enumerates it and its checkout is resolved on the calling thread instead.
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.yaml"),
+            """
+            services:
+              orders:
+                repository: https://example.com/orders.git
+                project: Service.csproj
+              billing:
+                repository: https://example.com/billing.git
+                project: Service.csproj
+            """);
+
         var builder = TestHelpers.CreateBuilder(dir);
         var git = new FakeGitClient();
 
+        new LocalProjectSource(git).Resolve(builder, "billing", Metadata("billing"), DevConfig());
+
+        // Nobody asked to watch it, so git was never asked for progress either — which is what
+        // keeps --progress off every clone that has no audience. ("orders" is cloned too, by the
+        // speculative prefetch, and that one does get a stream: it is created with the checkout.)
+        Assert.False(git.ProgressAttachedFor["https://example.com/billing.git"]);
+    }
+
+    [Fact]
+    public async Task ConcurrentClones_EachReportToTheirOwnStream()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var builder = TestHelpers.CreateBuilder(dir);
+
+        var git = new FakeGitClient();
+        git.ReportProgress("https://example.com/orders.git", "Receiving objects:  10% (1/10)");
+        git.ReportProgress("https://example.com/billing.git", "Receiving objects:  20% (2/10)");
+
         new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
 
-        // Its checkout is resolved on the calling thread instead, with no clone of ours to watch.
-        Assert.Null(LocalCheckoutPrefetch.For(builder, git).ProgressFor("billing"));
+        var prefetch = LocalCheckoutPrefetch.For(builder, git);
+
+        // Both clones run at once, so a shared buffer or a shared parser would show up as one
+        // service's progress on the other's resource.
+        Assert.Equal(["Receiving objects:  10% (1/10)"], await DrainProgressAsync(prefetch, "orders"));
+        Assert.Equal(["Receiving objects:  20% (2/10)"], await DrainProgressAsync(prefetch, "billing"));
     }
 }

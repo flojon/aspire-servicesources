@@ -664,11 +664,17 @@ internal sealed class DeferredCheckout
                 GitUrl.Redact(deferred.Metadata.Repository),
                 deferred.RepoRoot);
 
+            // Claimed here, on this thread, rather than inside the reporting task: the checkout
+            // below may be the thing that starts the clone — a service the prefetch never enumerated
+            // is resolved on this call — and it can only report to a stream that already exists by
+            // the time it runs.
+            var progress = deferred.Prefetch.WatchCheckout(deferred.ServiceName);
+
             // git's own account of the clone, mirrored onto this resource while it runs. On a task
             // of its own because the call below blocks this one for as long as the clone takes,
             // which is exactly the stretch there is something to report.
             var reporting = Task.Run(
-                () => ReportCloneProgressAsync(deferred, notifications, logger, stoppingToken),
+                () => ReportCloneProgressAsync(deferred, notifications, logger, progress, stoppingToken),
                 CancellationToken.None);
 
             string repoRoot;
@@ -762,23 +768,21 @@ internal sealed class DeferredCheckout
     /// Silence is not a stall. git suppresses progress for work that finishes inside its own delay
     /// threshold, and a clone from a local path reports nothing at all, so a small repository can go
     /// from "Checking out" to started without a single line — which is why nothing here times out or
-    /// reports an absence.
+    /// reports an absence. The same goes for a checkout that was already on disk: there was no clone
+    /// to report, and the stream ends saying so.
+    /// </para>
+    /// <para>
+    /// Ends when the stream does, which <see cref="LocalCheckoutPrefetch.GetRepoRoot"/> guarantees
+    /// happens — so this cannot outlive the checkout it is reporting on, whichever path resolved it.
     /// </para>
     /// </remarks>
     private static async Task ReportCloneProgressAsync(
         Deferred deferred,
         ResourceNotificationService notifications,
         ILogger logger,
+        CheckoutProgress progress,
         CancellationToken cancellationToken)
     {
-        if (deferred.Prefetch.ProgressFor(deferred.ServiceName) is not { } progress)
-        {
-            // Not a prefetched service, so its checkout is resolved on the calling thread with no
-            // clone of ours to watch. GetRepoRoot says the same thing by falling through to
-            // ResolveRepoRoot.
-            return;
-        }
-
         var published = false;
         var publishedAt = 0L;
         string? publishedPhase = null;

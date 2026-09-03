@@ -245,18 +245,54 @@ internal sealed class LocalCheckoutPrefetch
         $"service's entry in {DeveloperConfiguration.FileName}, or fix what the failure names.";
 
     /// <summary>
-    /// The progress stream of the clone this run started for <paramref name="serviceName"/>, or
-    /// <see langword="null"/> if the service is not in the prefetch set and so has no clone of ours
-    /// to watch.
+    /// The progress stream to watch <paramref name="serviceName"/>'s checkout through, created if
+    /// this run has not started that checkout yet.
     /// </summary>
     /// <remarks>
-    /// Available from the moment the prefetch starts, and the stream it returns is buffered, so a
-    /// caller that attaches long afterwards — <see cref="DeferredCheckout"/> attaches once the host
-    /// is up — still sees the clone from its first line. Ends when the clone does, including when
-    /// there was no clone to run because the checkout already existed.
+    /// <para>
+    /// Created on demand rather than only alongside a prefetched checkout, because not every
+    /// checkout comes from the prefetch: a service the developer configuration did not name is
+    /// resolved by <see cref="GetRepoRoot"/> on the calling thread instead, and that clone deserves
+    /// to be watchable on the same terms. A caller asks for this <em>before</em> the checkout it
+    /// means to watch is resolved, so that the stream is in place for whichever path resolves it.
+    /// </para>
+    /// <para>
+    /// Never returns a stream that outlives the checkout: <see cref="GetRepoRoot"/> ends it on
+    /// every path it can return by. So a stream created here for a checkout that turns out to be
+    /// started somewhere this class does not know about still ends — a watcher waits for that rather
+    /// than polling, and one left open would be a watcher left waiting forever.
+    /// </para>
+    /// <para>
+    /// Buffered, so a caller that attaches long after the clone began — <see cref="DeferredCheckout"/>
+    /// attaches once the host is up, and the prefetch starts cloning during composition — still sees
+    /// it from its first line.
+    /// </para>
     /// </remarks>
-    public CheckoutProgress? ProgressFor(string serviceName) =>
-        _progress.TryGetValue(serviceName, out var progress) ? progress : null;
+    public CheckoutProgress WatchCheckout(string serviceName)
+    {
+        lock (_gate)
+        {
+            if (!_progress.TryGetValue(serviceName, out var progress))
+            {
+                _progress[serviceName] = progress = new CheckoutProgress();
+            }
+
+            return progress;
+        }
+    }
+
+    /// <summary>
+    /// The progress stream for <paramref name="serviceName"/> if one exists, without creating one.
+    /// A checkout nobody is watching reports nothing, which is what keeps <c>--progress</c> off
+    /// every clone that has no audience.
+    /// </summary>
+    private CheckoutProgress? ProgressFor(string serviceName)
+    {
+        lock (_gate)
+        {
+            return _progress.TryGetValue(serviceName, out var progress) ? progress : null;
+        }
+    }
 
     /// <summary>
     /// Records that the AppHost really does add <paramref name="serviceName"/>, without waiting for
@@ -282,14 +318,36 @@ internal sealed class LocalCheckoutPrefetch
     public string GetRepoRoot(string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config,
         string appHostDirectory, IGitClient gitClient)
     {
+        try
+        {
+            return ResolveRequestedRepoRoot(serviceName, metadata, config, appHostDirectory, gitClient);
+        }
+        finally
+        {
+            // The checkout is over, so its progress stream is too — however it was resolved, and
+            // whether it succeeded. This is the guarantee WatchCheckout hands out: a watcher waits
+            // for the end of the stream, so the one path that always runs is where ending it
+            // belongs. Ending an already-ended stream is a no-op, so the prefetch's own timelier
+            // close — which fires when the clone finishes rather than when the ref reconciliation
+            // after it does — still wins where there is one.
+            ProgressFor(serviceName)?.Complete();
+        }
+    }
+
+    private string ResolveRequestedRepoRoot(string serviceName, ServiceMetadata metadata,
+        ServiceDeveloperConfig config, string appHostDirectory, IGitClient gitClient)
+    {
         MarkRequested(serviceName);
 
         if (!_checkouts.TryGetValue(serviceName, out var checkout))
         {
             // Not in the prefetch set — the developer config was loaded before this service was
             // added to it, or the service is being resolved through a path the prefetch doesn't
-            // enumerate. Resolve it directly rather than failing.
-            return LocalGitCheckout.ResolveRepoRoot(serviceName, metadata, config, appHostDirectory, gitClient);
+            // enumerate. Resolve it directly rather than failing, reporting to the same stream a
+            // prefetched clone would have: this path can run a full cold clone, and a deferred
+            // service resolved through it would otherwise sit in "Checking out" for all of it.
+            return LocalGitCheckout.ResolveRepoRoot(
+                serviceName, metadata, config, appHostDirectory, gitClient, ProgressFor(serviceName));
         }
 
         // Waits on this service's checkout only. The other prefetched checkouts keep running in the
