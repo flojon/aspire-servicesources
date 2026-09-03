@@ -229,26 +229,27 @@ public static class ServiceSourcesBuilderExtensions
     /// is the only seam left to put one at.
     /// </para>
     /// <para>
-    /// What counts as the attempt is a <em>public instance</em> <c>Validate</c> taking a
-    /// <see cref="string"/> first, not only the pre-<c>repoRoot</c> <c>Validate(string, object?)</c>:
-    /// adding the new parameter in the wrong position fails in exactly the same silent way as never
-    /// adding it, so matching the old shape alone would let the half-migrated case through. The two
-    /// filters are what keep that from reaching code that is doing nothing wrong — an implicit
-    /// interface implementation must be public, and every shape being looked for starts with the
-    /// service name, so a kind's own <c>private void Validate(MyOptions)</c> helper is nobody's
-    /// attempted implementation and is left alone. An explicit implementation never needs to be
-    /// matched by name at all; the interface map above has already answered for it.
+    /// What counts as the attempt is a <em>public instance</em> <c>Validate</c> that takes the
+    /// service name first and the opaque options block somewhere, not only the pre-<c>repoRoot</c>
+    /// <c>Validate(string, object?)</c>: adding the new parameter in the wrong position fails in
+    /// exactly the same silent way as never adding it, so matching the old shape alone would let the
+    /// half-migrated case through. Those three filters are what keep it off code that is doing
+    /// nothing wrong — see <see cref="CouldHaveBeenMeantAsValidate"/> for the two on the parameter
+    /// list, and an implicit interface implementation must be public, so a kind's own
+    /// <c>private void Validate(MyOptions)</c> is nobody's attempted implementation. An explicit
+    /// implementation never needs matching by name at all; the interface map above has already
+    /// answered for it.
     /// </para>
     /// <para>
     /// Searched across the hierarchy rather than declared members only, deliberately: a kind's
     /// <c>Validate</c> can sit on an abstract base it shares with its siblings, and restricting the
     /// search would skip the refusal in precisely that case — the failure this exists to catch.
     /// What that trades away is narrow, since such a base method has to be public to have
-    /// implemented the interface: a public inherited <c>Validate</c> taking a
-    /// <see cref="string"/> first, meant for something else entirely, is refused too. The message
-    /// answers that by naming the method it found alongside the one it wanted, and an author in that
-    /// position clears it by implementing the interface member — which costs nothing, the default
-    /// being a no-op.
+    /// implemented the interface: a public inherited <c>Validate</c> that happens to take a
+    /// <see cref="string"/> and an <see cref="object"/>, meant for something else entirely, is
+    /// refused too. The message answers that by naming the method it found alongside the one it
+    /// wanted, and an author in that position clears it by implementing the interface member —
+    /// which costs nothing, the default being a no-op.
     /// </para>
     /// <para>
     /// Both conditions are required, so a kind that has migrated and, for its own reasons, keeps a
@@ -267,13 +268,12 @@ public static class ServiceSourcesBuilderExtensions
             return;
         }
 
-        // Public, because an implicit interface implementation has to be; taking a service name
-        // first, because every shape this is looking for starts with one. Ordered before it is
-        // picked from, so a type with several of them names the same one on every run.
+        // Ordered before it is picked from, so a type with several of them names the same one on
+        // every run.
         var candidates = type
             .GetMethods(BindingFlags.Public | BindingFlags.Instance)
             .Where(method => method.Name == nameof(ILocalResourceKind.Validate))
-            .Where(method => method.GetParameters() is [{ } first, ..] && first.ParameterType == typeof(string))
+            .Where(CouldHaveBeenMeantAsValidate)
             .OrderBy(method => method.GetParameters().Length)
             .ThenBy(Describe, StringComparer.Ordinal)
             .ToArray();
@@ -304,6 +304,29 @@ public static class ServiceSourcesBuilderExtensions
             "Validate(string, string, object?) alongside it.");
     }
 
+    /// <summary>
+    /// Whether <paramref name="method"/> could have been meant as
+    /// <see cref="ILocalResourceKind.Validate"/> and missed: it takes the service name first, and
+    /// the opaque options block is somewhere in the list. Every un-migrated and mis-migrated shape
+    /// has both, and a <c>Validate</c> of the kind's own that has neither — a
+    /// <c>Validate(string message)</c> it logs through, a member it inherited from an interface of
+    /// its own — has nothing to do with this one and is left alone.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately shy of an exact signature match, which is the one thing it must not be: an exact
+    /// match is <em>implementing</em> the member, and the whole point is to catch the near misses.
+    /// So it asks only for the two things every near miss shares, and settles the rest by naming
+    /// what it found in the message.
+    /// </remarks>
+    private static bool CouldHaveBeenMeantAsValidate(MethodInfo method)
+    {
+        var parameters = method.GetParameters();
+
+        return parameters is [{ ParameterType: var first }, ..]
+            && first == typeof(string)
+            && Array.Exists(parameters, parameter => parameter.ParameterType == typeof(object));
+    }
+
     /// <summary>The pre-<c>repoRoot</c> signature, the one an un-migrated kind still carries.</summary>
     private static bool IsPreRepoRootShape(MethodInfo method) =>
         method.GetParameters() is [{ ParameterType: var name }, { ParameterType: var config }]
@@ -321,7 +344,11 @@ public static class ServiceSourcesBuilderExtensions
             BindingFlags.Public | BindingFlags.Instance,
             binder: null,
             types: [typeof(string), typeof(string), typeof(object)],
-            modifiers: null)!;
+            modifiers: null)
+        ?? throw new InvalidOperationException(
+            $"{nameof(ILocalResourceKind)}.{nameof(ILocalResourceKind.Validate)} does not have the signature this " +
+            "check looks it up by, so the check can no longer tell an implementation from a near miss. The two " +
+            "are in the same assembly and have to change together.");
 
     /// <summary>
     /// Whether <paramref name="type"/> itself supplies
@@ -330,18 +357,28 @@ public static class ServiceSourcesBuilderExtensions
     /// miss: an explicitly implemented member is named for the interface it came from.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Written to answer "no" for anything it cannot read positively. A target the runtime left
     /// unfilled is the shape a non-overridden default member has, which is the case this whole check
     /// exists to catch — reading it as "implemented" would skip the refusal in precisely the
     /// situation that needs it.
+    /// </para>
+    /// <para>
+    /// The slot is found by matching the member itself rather than its name. There is one
+    /// <c>Validate</c> on the interface today, so the two agree; adding an overload later would make
+    /// a name match read whichever slot came first, and answering from the wrong one either refuses
+    /// a correct handler or accepts one that never implemented the real member — the failure this
+    /// exists to catch, arrived at through the check meant to catch it.
+    /// </para>
     /// </remarks>
     private static bool ImplementsCurrentValidate(Type type)
     {
+        var wanted = CurrentValidate();
         var map = type.GetInterfaceMap(typeof(ILocalResourceKind));
 
         for (var i = 0; i < map.InterfaceMethods.Length; i++)
         {
-            if (map.InterfaceMethods[i].Name != nameof(ILocalResourceKind.Validate))
+            if (map.InterfaceMethods[i] != wanted)
             {
                 continue;
             }

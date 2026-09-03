@@ -275,10 +275,12 @@ public class LocalKindRegistryTests
     }
 
     /// <summary>
-    /// A kind that leaves the defaulted member alone on purpose and has a <c>Validate</c> of its own
-    /// for something else. Neither method is an attempt at the interface member — one is private,
-    /// the other does not start with a service name — and this worked before the parameter was
-    /// added, so refusing it would be inventing a migration the author never had to make.
+    /// A kind that leaves the defaulted member alone on purpose and has <c>Validate</c>s of its own
+    /// for something else: one private, one not starting with a service name, and one — the shape a
+    /// diagnostic helper or an unrelated <c>IValidatable</c> would have — that starts with a string
+    /// but carries no options block. None is an attempt at the interface member, and all of them
+    /// registered before the parameter was added, so refusing any would invent a migration the
+    /// author never had to make.
     /// </summary>
     private sealed class KindWithItsOwnValidateHelpers : ILocalResourceKind
     {
@@ -289,6 +291,8 @@ public class LocalKindRegistryTests
         }
 
         public void Validate(int port) => Validate(new Options());
+
+        public void Validate(string message) => Validate(message.Length);
 
         public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
             IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) =>
@@ -301,6 +305,33 @@ public class LocalKindRegistryTests
         var builder = CreateBuilder();
 
         builder.AddLocalKind("javascript", new KindWithItsOwnValidateHelpers());
+
+        Assert.True(LocalKindRegistry.For(builder).TryGet("javascript", out _));
+    }
+
+    /// <summary>
+    /// The narrowest form of that, on its own: nothing but a public <c>Validate(string)</c> beside a
+    /// correct <c>Resolve</c>. It passes a filter that asks only for a leading string, so it is
+    /// pinned separately from the class above — a kind reduced to exactly this shape is the one a
+    /// logging helper, or a member inherited from an unrelated interface, actually produces.
+    /// </summary>
+    private sealed class KindWithAStringOnlyValidateHelper : ILocalResourceKind
+    {
+        public void Validate(string message)
+        {
+        }
+
+        public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+            IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) =>
+            throw new NotSupportedException("Not exercised by these tests.");
+    }
+
+    [Fact]
+    public void AddLocalKind_HandlerWhoseOnlyValidateTakesNoOptionsBlock_IsAccepted()
+    {
+        var builder = CreateBuilder();
+
+        builder.AddLocalKind("javascript", new KindWithAStringOnlyValidateHelper());
 
         Assert.True(LocalKindRegistry.For(builder).TryGet("javascript", out _));
     }

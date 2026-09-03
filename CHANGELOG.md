@@ -117,9 +117,12 @@ nothing will fail to build to warn you.
   against, so it now runs after it. Two visible consequences, for every such service rather than
   only the first: a service that is *both* misconfigured *and* pointed at a repository that cannot
   be reached reports the clone failure instead of the configuration error, and on a cold clone you
-  wait the clone out before being told about the typo. An unregistered or misspelled `kind` is
-  unaffected — that lookup needs no working tree and still runs first — as is the `dotnet` kind,
-  which has always checked its `project` file against the resolved checkout.
+  wait the clone out before being told about the typo. A bad block on the *first* `AddService()`
+  also no longer stops the speculative clones: they used to be started just after `Validate`, so
+  aborting there meant nothing was cloned at all, and they now start before the block is parsed —
+  visible only as checkouts left on disk by a run that failed. An unregistered or misspelled `kind`
+  is unaffected — that lookup needs no working tree and still runs first — as is `dotnet`, which
+  has always checked its `project` file against the resolved checkout.
 
 - The `java` and `javascript` kinds report a path missing from the checkout — `workingDirectory`
   and the `mvnw`/`gradlew` wrapper for `java`, `appDirectory`, `scriptPath` and `package.json` for
