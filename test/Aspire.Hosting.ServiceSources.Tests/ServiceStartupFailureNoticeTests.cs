@@ -406,6 +406,39 @@ public class ServiceStartupFailureNoticeTests
     }
 
     [Fact]
+    public async Task AStopWhoseExitCodeArrivesAfterItsTerminalState_IsStillNotReported()
+    {
+        // A snapshot can carry a terminal state before its exit code is filled in — which is why
+        // IsFailure refuses to read anything into a missing one — and the stop's own ending is not
+        // exempt. Spending the guard on the exit-code-less half and then treating the completed
+        // half as a different, failed ending would print a failure for a stop that was asked for.
+        var written = await ReportAsync(
+            ServiceResource(),
+            Snapshot(KnownResourceStates.Running),
+            Snapshot(KnownResourceStates.Stopping),
+            Snapshot(KnownResourceStates.Exited),
+            Snapshot(KnownResourceStates.Exited, exitCode: 137),
+            Snapshot(KnownResourceStates.Exited, exitCode: 137));
+
+        Assert.Empty(written);
+    }
+
+    [Fact]
+    public async Task OneDeath_IsOneLineEvenWhenSomethingElseIsReportedInBetween()
+    {
+        // The instance never says it is alive again, so the state it died in arriving after an
+        // unrelated snapshot is the same death, not a second one.
+        var written = await ReportAsync(
+            ServiceResource(source: "container"),
+            Snapshot(KnownResourceStates.Running),
+            Snapshot(KnownResourceStates.Exited, exitCode: 1),
+            Snapshot(KnownResourceStates.RuntimeUnhealthy),
+            Snapshot(KnownResourceStates.Exited, exitCode: 1));
+
+        Assert.Single(written);
+    }
+
+    [Fact]
     public async Task ARestartThatDiesWithADifferentExitCodeThanTheStop_IsReported()
     {
         var written = await ReportAsync(

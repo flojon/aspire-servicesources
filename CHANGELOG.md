@@ -63,7 +63,8 @@ nothing will fail to build to warn you.
   `"local"` checkout that fails to compile used to produce nothing there at all: Aspire's build of
   a checkout is `dotnet run`'s own, so the compiler's output goes to that resource's console in the
   dashboard, and from the terminal the service simply never appeared. There is now one line per
-  service, naming it, naming the state Aspire reported for it, and pointing at the dashboard:
+  failing resource, naming the service, naming the state Aspire reported for it, and pointing at
+  the dashboard:
 
   ```text
   fail: Aspire.Hosting.ServiceSources[0]

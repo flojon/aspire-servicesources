@@ -248,7 +248,7 @@ Two things to know when it goes wrong:
         'Finished' with exit code 1. This console does not carry that resource's output, so
         nothing here says why — its own console in the Aspire dashboard does, at the dashboard
         URL logged above. A 'local' service runs from a checkout rather than from a project
-        added to this AppHost, and the build of that checkout writes to that same console — so a
+        added to this AppHost, and the build of that checkout writes to those same logs — so a
         failure to compile is reported nowhere else at all.
   ```
 

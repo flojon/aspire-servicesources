@@ -76,9 +76,10 @@ internal sealed class ServiceStartupFailureNotices
     private sealed class Instance
     {
         /// <summary>
-        /// Whether the last state seen was a failure, so that one failure is one line: a failed
-        /// instance goes on producing snapshots — health reports, URLs, the state it died in — for
-        /// as long as the host runs.
+        /// Whether a failure has been reported for this instance and it has not come back since, so
+        /// that one failure is one line: a failed instance goes on producing snapshots — health
+        /// reports, URLs, the state it died in — for as long as the host runs. Cleared only by a
+        /// state that says the instance is alive again, never by one that merely isn't a failure.
         /// </summary>
         public bool Failing { get; set; }
 
@@ -342,6 +343,18 @@ internal sealed class ServiceStartupFailureNotices
                 instance.StopRequested = true;
             }
 
+            // Only a state that says this instance is alive again ends the failure it last
+            // reported. Clearing on anything that merely isn't a failure would let one death be
+            // reported twice: a container that exits non-zero, goes RuntimeUnhealthy when the
+            // runtime drops, and then republishes the state it died in would report the same death
+            // a second time, having said nothing in between about being alive.
+            if (Is(state, KnownResourceStates.Starting)
+                || Is(state, KnownResourceStates.NotStarted)
+                || Is(state, KnownResourceStates.Running))
+            {
+                instance.Failing = false;
+            }
+
             var terminal = Is(state, KnownResourceStates.Exited) || Is(state, KnownResourceStates.Finished);
 
             bool onRequest;
@@ -355,17 +368,36 @@ internal sealed class ServiceStartupFailureNotices
                 instance.StoppedExitCode = exitCode;
                 onRequest = true;
             }
-            else
+            else if (terminal && instance.StoppedOnRequest)
             {
                 // The same ended-on-request snapshot arriving again — a stopped resource keeps
                 // republishing the state it ended in. A restart that died instead would carry a
                 // different exit code, or arrive as FailedToStart, which is cleared above.
-                onRequest = terminal && instance.StoppedOnRequest && exitCode == instance.StoppedExitCode;
+                //
+                // Unless the exit code was not known yet when the stop ended. A snapshot can carry
+                // a terminal state before its exit code is filled in — which is why IsFailure
+                // refuses to read anything into a missing one — and the stop's own terminal state
+                // is not exempt from that. Taking the first code that does arrive as the stop's own
+                // is what keeps the completed code from reading as a different, failed ending.
+                if (instance.StoppedExitCode is null)
+                {
+                    instance.StoppedExitCode = exitCode;
+                }
+
+                onRequest = exitCode == instance.StoppedExitCode;
+            }
+            else
+            {
+                onRequest = false;
             }
 
             var failed = !onRequest && IsFailure(state, exitCode);
             var wasFailing = instance.Failing;
-            instance.Failing = failed;
+
+            if (failed)
+            {
+                instance.Failing = true;
+            }
 
             // Reported on the way into a failed state rather than while in one. A resource the
             // developer restarts from the dashboard leaves the failed state first, so a second
