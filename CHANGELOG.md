@@ -382,12 +382,13 @@ nothing will fail to build to warn you.
   which is what keeps an unrelated key out of it — so an unrecognized root key is not
   distinguishable from a typo by validity. What separates them is resemblance. So the check is a
   near miss: when nothing is configured anywhere and the file has no `services` key, a root key
-  within two edits of `services` is named, along with the rename to make.
+  within two edits of `services` is named, and the message stops there. The long form's advice —
+  which sources were consulted, how to write an entry, the environment variable that sets one —
+  answers "why is nothing configured?", which the key has just answered.
 
   ```
-  '/src/apphost/servicesources.local.json' has a top-level key 'service' and no 'services' key.
-  Only 'services' is read, so nothing under 'service' configures anything — rename it to 'services'
-  if that is what it was meant to be: { "services": { "orders": { "source": "..." } } }.
+  No service sources are configured: '/src/apphost/servicesources.local.json' has no 'services'
+  key, only 'service'. Did you mean 'services'?
   ```
 
   A root key differing from `services` only by case is not a near miss but the key itself:

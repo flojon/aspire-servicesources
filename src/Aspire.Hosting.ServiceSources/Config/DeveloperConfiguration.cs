@@ -219,30 +219,23 @@ internal sealed class DeveloperConfiguration
     /// that was consulted, instead of arriving as a per-service message that sends the developer
     /// looking for a single missing entry.
     /// </summary>
+    /// <remarks>
+    /// A near miss on the file's root key stops the message where the question mark is. Everything
+    /// the long form goes on to say — which sources were consulted, how to write an entry, the
+    /// environment variable that sets one — answers "why is nothing configured?", which the key
+    /// just answered. Naming the file and asking the question is the whole of what is left to say.
+    /// </remarks>
     private ServiceSourcesConfigurationException NothingConfiguredError(string serviceName) =>
-        new($"No service sources are configured: '{ServicesKey}' is empty in every configuration source, "
-            + $"so no service has a source — including '{serviceName}'. "
+        new("No service sources are configured: "
             + (NearMissRootKey is not null
-                ? MisspelledRootKeyAdvice(serviceName, NearMissRootKey)
-                : $"Create '{FilePath}' ({(FileFound ? "found, but it configures no services" : "not found")}) with "
+                ? $"'{FilePath}' has no 'services' key, only '{NearMissRootKey}'. Did you mean 'services'?"
+                : $"'{ServicesKey}' is empty in every configuration source, "
+                  + $"so no service has a source — including '{serviceName}'. "
+                  + $"Create '{FilePath}' ({(FileFound ? "found, but it configures no services" : "not found")}) with "
                   + $"{{ \"services\": {{ \"{serviceName}\": {{ \"source\": \"...\" }} }} }}, "
                   + $"or set the environment variable {EnvironmentVariableFor(serviceName)}. "
                   + "Sources consulted: that file, appsettings.json, appsettings.{Environment}.json, user secrets, "
                   + "environment variables and command-line arguments."));
-
-    /// <summary>
-    /// The advice for a file whose root key looks like a misspelling of <c>services</c>.
-    /// </summary>
-    /// <remarks>
-    /// Replaces the advice above rather than joining it: the developer has a populated file, so
-    /// being told to create one with an example entry describes a mistake they did not make, and the
-    /// list of sources consulted answers a question that is no longer open. What sits under the
-    /// misspelled key stays uncounted — only <c>services</c> is read, so nothing here has looked.
-    /// </remarks>
-    private string MisspelledRootKeyAdvice(string serviceName, string rootKey) =>
-        $"'{FilePath}' has a top-level key '{rootKey}' and no 'services' key. Only 'services' is read, "
-        + $"so nothing under '{rootKey}' configures anything — rename it to 'services' if that is what "
-        + $"it was meant to be: {{ \"services\": {{ \"{serviceName}\": {{ \"source\": \"...\" }} }} }}.";
 
     private static string EnvironmentVariableFor(string serviceName) =>
         $"{ServicesKey.Replace(":", "__", StringComparison.Ordinal)}__{serviceName}__Source";
