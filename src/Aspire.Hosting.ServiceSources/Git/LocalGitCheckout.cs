@@ -39,6 +39,55 @@ internal static class LocalGitCheckout
         Path.Combine(appHostDirectory, ".servicesources", "checkouts", serviceName);
 
     /// <summary>
+    /// Whether this package owns <paramref name="serviceName"/>'s checkout directory, and so has a
+    /// <see cref="ManagedRepoRoot"/> to say anything about at all. A <c>local.path</c> override
+    /// answers no: that is the developer's own directory, which this package neither creates,
+    /// clones into, nor writes to.
+    /// </summary>
+    /// <remarks>
+    /// The shared first half of every question answered about a service's checkout from its path
+    /// alone, before the checkout exists — <see cref="IsColdManagedCheckout"/> today, and whatever
+    /// else has to be decided from the same three inputs. Named rather than spelled out at each of
+    /// them, because a caller that answers it differently answers a different question while
+    /// looking like it asks this one.
+    /// </remarks>
+    public static bool IsManagedCheckout(ServiceDeveloperConfig config) => config.Local.Path is null;
+
+    /// <summary>
+    /// Whether a clone still has to happen before this service has a checkout: the package manages
+    /// the directory (<see cref="IsManagedCheckout"/>) and there is nothing at
+    /// <see cref="ManagedRepoRoot"/> yet. Configuration plus one <c>Directory.Exists</c>, so it is
+    /// answerable about a service nobody has added.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The single rule two independent decisions are built on, which is why it lives here rather
+    /// than in either of them. <see cref="Sources.LocalCheckoutPrefetch"/> filters its speculative
+    /// clone set with it — everything it excludes resolves to the same answer in
+    /// <c>GetRepoRoot</c> for a fraction of the code, and reaches nobody at all when the service is
+    /// never added — and <see cref="Sources.DeferredCheckout.ShouldDefer"/> layers the deferral
+    /// policy (opted in, run mode) on top of it to decide for real.
+    /// </para>
+    /// <para>
+    /// Those two have to agree. The prefetch drops a candidate from the clone set on the strength
+    /// of this predicate and <c>ShouldDefer</c> then decides for real, so a service the two answer
+    /// differently is dropped from the prefetch and then takes the eager path — cloning alone on
+    /// the <c>AddService()</c> thread instead of alongside the others. That failure is silent: no
+    /// error, no wrong result, just a slower first run, which is the shape of #76 itself.
+    /// </para>
+    /// <para>
+    /// Anything already on disk is excluded whatever it is. A working tree from an earlier run is
+    /// one <see cref="PrepareRepoRoot"/> deliberately leaves alone, and debris from an interrupted
+    /// clone is for the eager path to recognise and deal with; neither is a clone waiting to
+    /// happen.
+    /// </para>
+    /// </remarks>
+    public static bool IsColdManagedCheckout(
+        string appHostDirectory, string serviceName, ServiceDeveloperConfig config) =>
+        IsManagedCheckout(config)
+        && !Directory.Exists(ManagedRepoRoot(appHostDirectory, serviceName));
+
+    /// <summary>
     /// The fully resolved checkout directory: prepared, then reconciled. For callers already
     /// resolving a service the AppHost asked for, so there is nothing to defer.
     /// </summary>
