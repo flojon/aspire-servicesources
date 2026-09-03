@@ -2,17 +2,24 @@
 #
 # A version in src/ is a contract with consumers: NuGet reads a bare version as a floor, so
 # it is the *oldest* release a consumer may bring. Raising it excludes people who were fine,
-# and nobody gains - the satellites are built against their floor, not against latest, and
-# restore hands every consumer that same floor unless something else in their graph forces
-# higher. Bumping those is therefore a deliberate act (new API is actually needed, or a real
+# and nobody gains - the package is built against its floor, not against latest, and restore
+# hands every consumer that same floor unless something else in their graph forces higher.
+# Bumping those is therefore a deliberate act (new API is actually needed, or a real
 # advisory), not something a bot should do on a schedule.
+#
+# The two guest-language hosting packages are floors in the same sense without being
+# dependencies at all. Core references them with PrivateAssets="all", so they appear in no
+# nuspec - but the version core compiles against is still the oldest a consumer may bring,
+# because the runtime rolls an assembly reference forward and refuses to roll it back. Their
+# versions therefore live in the root Directory.Packages.props, where the kind test projects
+# can see them, and they are ignored here for exactly the src/ reason.
 #
 # test/ and samples/ are the opposite: nobody consumes them, their versions constrain no one,
 # and staying current is exactly what they are for.
 #
 # `directories` below is scoped to test/ and samples/ for that reason, but scoping alone does
-# not keep Dependabot out of src/: every test project carries a ProjectReference to the
-# satellite it tests, and Dependabot's NuGet updater walks that graph to resolve central
+# not keep Dependabot out of src/: every test project carries a ProjectReference to core,
+# and Dependabot's NuGet updater walks that graph to resolve central
 # package management versions, editing whatever Directory.Packages.props declares a package
 # it decides to bump - regardless of which directory triggered the scan. Confirmed in
 # practice, not just in theory: a test/-scoped run proposed CommunityToolkit.Aspire.Hosting.Java
@@ -51,10 +58,14 @@ updates:
     # header). This list is enforced per package id instead, so it holds regardless of the
     # graph Dependabot walked to get there.
     #
-    # Every id declared in src/Directory.Packages.props is here, kept in sync with that file
-    # by hand - there is no wildcard meaning "whatever that file declares". Those five are
-    # floors regardless of publisher, not just the Aspire ones. `ignore` blocks only version
-    # updates, so the header's security exception still applies to each.
+    # Every floor is here, kept in sync by hand - there is no wildcard meaning "whatever
+    # those files declare". Most come from src/Directory.Packages.props; the two
+    # guest-language hosting packages are floors without being dependencies, and are named as
+    # such in src/Aspire.Hosting.ServiceSources/build/KoalaSoft.Aspire.Hosting.ServiceSources.targets
+    # (see the header). ci.yml's `verify repo invariants` job reads both files and fails if a
+    # floor is missing from this list. These are floors regardless of publisher, not just the
+    # Aspire ones. `ignore` blocks only version updates, so the header's security exception
+    # still applies to each.
     ignore:
       - dependency-name: "Aspire.Hosting"
       - dependency-name: "Aspire.Hosting.JavaScript"

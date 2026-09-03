@@ -34,11 +34,16 @@
 
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting.AppHost" />
+
+    <!-- The `catalog` service in servicesources.yaml declares kind: java, and this is what that
+         costs an AppHost: core compiles against the hosting package but references it with
+         PrivateAssets="all", so it reaches nobody who did not ask for it. An AppHost with no
+         java or javascript service references neither. -->
+    <PackageReference Include="CommunityToolkit.Aspire.Hosting.Java" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="../../src/Aspire.Hosting.ServiceSources/Aspire.Hosting.ServiceSources.csproj" IsAspireProjectResource="false" />
-    <ProjectReference Include="../../src/Aspire.Hosting.ServiceSources.Java/Aspire.Hosting.ServiceSources.Java.csproj" IsAspireProjectResource="false" />
   </ItemGroup>
 
 </Project>

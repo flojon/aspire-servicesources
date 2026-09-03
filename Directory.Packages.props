@@ -3,13 +3,18 @@
   <!--
     Central Package Management: versions live here, PackageReference in the projects carries
     only the id. Without it the same version is repeated once per project - the xunit set is
-    identical across all three test projects today, and every satellite added for #46-#50
-    repeats it again.
+    identical across all three test projects today.
 
     This file holds the versions for projects whose dependencies constrain nobody: the tests
-    and the sample. The published packages have their own file next to them, because a
-    version there is a floor consumers inherit and the two roles want opposite policies.
-    See src/Directory.Packages.props.
+    and the sample. The published package has its own file next to it, because a version there
+    is a floor consumers inherit and the two roles want opposite policies. See
+    src/Directory.Packages.props.
+
+    The two guest-language hosting packages are the exception, and they are declared below
+    rather than there. Core references them with PrivateAssets="all", so they are floors on
+    nobody through the nuspec - but the kind test projects reference them for real, and those
+    live under test/, which sees only this file. Declaring them in both places is NU1506,
+    since src/Directory.Packages.props imports this one.
   -->
 
   <PropertyGroup>
@@ -20,9 +25,8 @@
 
       Transitive pinning promotes every transitively-referenced package to a direct
       PackageReference, which for a packable project means it lands in the generated nuspec.
-      The satellites would then declare Aspire.Hosting, LibGit2Sharp and YamlDotNet - core's
-      private implementation details, two of which they never touch - as part of their own
-      public contract, each one a floor imposed on consumers and a version to maintain here
+      Core would then declare its dependencies' dependencies as part of its own public
+      contract, each one a floor imposed on every consumer and a version to maintain here
       forever. It defaults to off; the comment exists because turning it on is a common
       recommendation aimed at applications, where nothing is published and the reasoning
       does not apply.

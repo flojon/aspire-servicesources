@@ -151,7 +151,10 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         }
         catch (Exception ex) when (ex is not ServiceSourcesConfigurationException)
         {
-            throw new ServiceSourcesConfigurationException(HandlerFailedMessage(serviceName, metadata.Kind), ex);
+            throw new ServiceSourcesConfigurationException(
+                GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, metadata.Kind)
+                    ?? HandlerFailedMessage(serviceName, metadata.Kind),
+                ex);
         }
 
         if (registration is not null && registration.Service is null)
@@ -202,7 +205,10 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         }
         catch (Exception ex) when (ex is not ServiceSourcesConfigurationException)
         {
-            throw new ServiceSourcesConfigurationException(HandlerFailedMessage(serviceName, metadata.Kind), ex);
+            throw new ServiceSourcesConfigurationException(
+                GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, metadata.Kind)
+                    ?? HandlerFailedMessage(serviceName, metadata.Kind),
+                ex);
         }
 
         if (resourceBuilder is null)

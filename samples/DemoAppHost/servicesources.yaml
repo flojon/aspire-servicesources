@@ -22,7 +22,8 @@ services:
   catalog:
     # A "local" service that isn't .NET: cloned exactly like `orders` above, but run with the
     # repository's own Maven wrapper instead of AddProject. Needs builder.UseJava() in Program.cs
-    # and the KoalaSoft.Aspire.Hosting.ServiceSources.Java package.
+    # and a reference to CommunityToolkit.Aspire.Hosting.Java, which core deliberately does not
+    # bring for you — see DemoAppHost.csproj.
     repository: https://github.com/spring-projects/spring-petclinic
     defaultRef: main
     kind: java
