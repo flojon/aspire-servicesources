@@ -264,6 +264,7 @@ Two things to know when it goes wrong:
   lives, so a resource that quietly fails to appear is one you may not know to look for. The same
   reasoning already covers a clone that fails for a service nothing waits on; this is the step
   after it.
+
 - **Two `path` services in one repository can collide.** If both point into the same repository
   and their projects share a `ProjectReference`, Aspire starts both at once, and two builds write
   that shared project's `bin/`/`obj/` simultaneously — which fails intermittently, with an
