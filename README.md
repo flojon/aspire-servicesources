@@ -54,7 +54,10 @@ referenced by your AppHost alongside this one — see
 
 ```bash
 dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources
-dotnet add package Aspire.Hosting.JavaScript
+
+# then one line per language the AppHost actually declares a service for
+dotnet add package Aspire.Hosting.JavaScript              # kind: javascript
+dotnet add package CommunityToolkit.Aspire.Hosting.Java   # kind: java
 ```
 
 Add one per language you actually use, and nothing for a language you don't. This package
@@ -503,7 +506,7 @@ at that service's `AddService()` call, before its checkout is used.
 
 Runs the checkout through
 [`Aspire.Hosting.JavaScript`](https://www.nuget.org/packages/Aspire.Hosting.JavaScript), which
-your AppHost references itself (13.5.2 or newer — see [Installation](#installation)). Reference
+your AppHost references itself (13.5.2 or newer — see [Installation](#install)). Reference
 it, then call `UseJavaScript()` once, before the first `AddService()` call:
 
 ```csharp
@@ -579,7 +582,7 @@ that use them.
 Runs the checkout through the .NET Aspire Community Toolkit's
 [Java integration](https://github.com/CommunityToolkit/Aspire), which your AppHost references
 itself as `CommunityToolkit.Aspire.Hosting.Java` (13.3.0 or newer — see
-[Installation](#installation)). Reference it, then call `UseJava()`
+[Installation](#install)). Reference it, then call `UseJava()`
 once, before the first `AddService()` call — `AddService()` resolves eagerly, so a `kind: java`
 service registered after it has already run has nowhere to look up its handler:
 

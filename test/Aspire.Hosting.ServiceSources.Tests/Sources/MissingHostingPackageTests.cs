@@ -107,6 +107,79 @@ public class MissingHostingPackageTests
         Assert.DoesNotContain("satellite", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// The other half of #187 item (1). A package present but older than the floor does not always
+    /// fail to load: a prerelease cut before a release carries that release's assembly version, so
+    /// it binds and then fails on the member that is not there yet. That arrives as a
+    /// <see cref="TypeLoadException"/> or a <see cref="MissingMemberException"/> rather than a
+    /// <see cref="FileNotFoundException"/>, and names no assembly, so it is answered by asking what
+    /// is actually installed rather than by reading the exception.
+    /// </summary>
+    [Theory]
+    [InlineData("Aspire.Hosting.JavaScript", "13.5.2")]
+    [InlineData("CommunityToolkit.Aspire.Hosting.Java", "13.3.0")]
+    public void PackagePresentButOlderThanTheFloor_IsReportedAsTooOld(string packageId, string floor)
+    {
+        // Old for the package under test, comfortably new for the other, so the message has to
+        // name the one that is actually behind rather than whichever is enumerated first.
+        var message = GuestLanguagePackages.DescribeMissingPackage(
+            new TypeLoadException("could not load type 'Whatever'"),
+            "frontend",
+            "javascript",
+            name => name == packageId ? new Version(13, 0, 0) : new Version(99, 0, 0));
+
+        Assert.NotNull(message);
+        Assert.Contains(packageId, message, StringComparison.Ordinal);
+        Assert.Contains(floor, message, StringComparison.Ordinal);
+        Assert.Contains("13.0.0", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MissingMemberFailure_IsAlsoAnsweredByWhatIsInstalled()
+    {
+        var message = GuestLanguagePackages.DescribeMissingPackage(
+            new MissingMethodException("Method not found: 'Void Whatever.Missing()'"),
+            "frontend",
+            "javascript",
+            _ => new Version(13, 4, 6));
+
+        Assert.NotNull(message);
+        Assert.Contains("13.4.6", message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Every package being present and new enough means the handler broke for its own reasons, even
+    /// though the exception type is one a version mismatch also produces.
+    /// </summary>
+    [Fact]
+    public void LoadMismatchWithEveryPackageNewEnough_KeepsTheGenericMessage()
+    {
+        var message = GuestLanguagePackages.DescribeMissingPackage(
+            new TypeLoadException("could not load type 'Whatever'"),
+            "frontend",
+            "javascript",
+            _ => new Version(99, 0, 0));
+
+        Assert.Null(message);
+    }
+
+    /// <summary>
+    /// An exception type a version mismatch does not produce must not be attributed to one, however
+    /// old the installed package happens to be - otherwise an unrelated bug in a handler is reported
+    /// as a packaging problem.
+    /// </summary>
+    [Fact]
+    public void OrdinaryHandlerFailure_IsNotAttributedToAnOldPackage()
+    {
+        var message = GuestLanguagePackages.DescribeMissingPackage(
+            new InvalidOperationException("the handler is broken"),
+            "frontend",
+            "javascript",
+            _ => new Version(13, 0, 0));
+
+        Assert.Null(message);
+    }
+
     private static ServiceMetadata Metadata(string kind) => new()
     {
         Repository = "https://example.com/frontend.git",
