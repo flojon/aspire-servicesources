@@ -22,6 +22,8 @@ public class LocalCheckoutPrefetchTests
 
         private readonly Dictionary<string, string[]> _progressLines = new(StringComparer.Ordinal);
 
+        private ManualResetEventSlim? _blockReconciliation;
+
         public List<string> Cloned { get; } = [];
 
         /// <summary>Whether each repository's clone was given somewhere to report progress.</summary>
@@ -38,6 +40,10 @@ public class LocalCheckoutPrefetchTests
         /// <summary>Progress lines this repository's clone reports before it finishes.</summary>
         public void ReportProgress(string repositoryUrl, params string[] lines) =>
             _progressLines[repositoryUrl] = lines;
+
+        /// <summary>Holds ref reconciliation open until the returned gate is set.</summary>
+        public ManualResetEventSlim BlockReconciliation() =>
+            _blockReconciliation = new ManualResetEventSlim(false);
 
         public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null)
         {
@@ -102,12 +108,6 @@ public class LocalCheckoutPrefetchTests
             _blockReconciliation?.Wait(TimeSpan.FromSeconds(30));
             return null;
         }
-
-        private ManualResetEventSlim? _blockReconciliation;
-
-        /// <summary>Holds ref reconciliation open until the returned gate is set.</summary>
-        public ManualResetEventSlim BlockReconciliation() =>
-            _blockReconciliation = new ManualResetEventSlim(false);
     }
 
     private sealed class FakeKindResource(string name) : Resource(name), IResourceWithServiceDiscovery;
@@ -523,6 +523,128 @@ public class LocalCheckoutPrefetchTests
     }
 
     /// <summary>
+    /// The heart of #76. The prefetch cannot know which services the AppHost will add, but it does
+    /// not have to: what it needs is the set of services that would be <em>deferred</em> if added,
+    /// and that is decidable from configuration alone. A deferred service starts its own clone when
+    /// it is registered, so speculating for it buys nothing — and for a service that is never added,
+    /// it downloads a repository on the strength of a config entry alone.
+    /// </summary>
+    [Fact]
+    public void OptedIntoDeferral_ColdServiceTheAppHostNeverAdds_IsNotCloned()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.UseDeferredCheckout();
+        var git = new FakeGitClient();
+
+        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+
+        // Nothing was started speculatively at all. The candidate set is computed synchronously
+        // inside the first AddService, so this is already settled by the time Resolve has returned —
+        // no waiting for a clone that is not coming.
+        Assert.Null(LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage);
+
+        // 'orders' is still cloned: deferral moves the clone off the composition thread, it does not
+        // skip it. So this waits for a clone that is on its way rather than for one that never runs.
+        Assert.True(
+            SpinWait.SpinUntil(() => git.Cloned.Count > 0, TimeSpan.FromSeconds(30)),
+            "the deferred service's own checkout was never cloned.");
+        Assert.Equal(["https://example.com/orders.git"], git.Cloned);
+    }
+
+    /// <summary>
+    /// Why issue #76's "lazy per-service clone" was rejected, and why it is affordable now: a
+    /// deferred service's clone blocks nobody, so starting each one at its own <c>AddService()</c>
+    /// call still leaves them all running at once.
+    /// </summary>
+    [Fact]
+    public void OptedIntoDeferral_TwoColdServicesAdded_StillCloneInParallel()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.UseDeferredCheckout();
+        // Barrier(2): neither clone may return until both have started. Had the per-service starts
+        // serialised them, the first would wedge here and the second would never be reached.
+        var git = new FakeGitClient { StartBarrier = new Barrier(2) };
+        var source = new LocalProjectSource(git);
+
+        source.Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        source.Resolve(builder, "billing", Metadata("billing"), DevConfig());
+
+        Assert.True(
+            SpinWait.SpinUntil(() => git.Cloned.Count == 2, TimeSpan.FromSeconds(30)),
+            "the two deferred checkouts did not overlap.");
+    }
+
+    /// <summary>
+    /// The filter puts the same question to <c>DeferredCheckout</c> that the registration will,
+    /// rather than merely checking that <c>UseDeferredCheckout()</c> was called. Publish mode clones
+    /// first as it always has — a manifest written from a repository that is not on disk would
+    /// describe a project without its endpoints — so there the speculation is still the only thing
+    /// keeping the clones parallel.
+    /// </summary>
+    [Fact]
+    public void PublishMode_ColdServiceTheAppHostNeverAdds_IsStillCloned()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var builder = TestHelpers.CreatePublishingBuilder(dir);
+        builder.UseDeferredCheckout();
+        var git = new FakeGitClient { StartBarrier = new Barrier(2) };
+
+        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+
+        Assert.Equal(2, git.Cloned.Count);
+    }
+
+    /// <summary>
+    /// The notice's remedy is "stop paying for clones you do not use", so it has to be about clones
+    /// that were actually paid for. A checkout already on disk costs the prefetch a
+    /// <c>Directory.Exists</c> and nothing else — naming it sent the developer to delete a config
+    /// entry to save a download that never happened.
+    /// </summary>
+    [Fact]
+    public void WarmCheckoutForAServiceNeverAdded_IsNotReportedAsAClonePaidFor()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        PlantExistingCheckout(dir, "billing");
+        var builder = TestHelpers.CreateBuilder(dir);
+        var git = new FakeGitClient();
+
+        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+
+        Assert.Equal(["https://example.com/orders.git"], git.Cloned);
+        Assert.Null(LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage);
+    }
+
+    /// <summary>
+    /// A <c>local.path</c> override names a checkout the developer manages, so there is nothing for
+    /// the prefetch to clone and nothing for it to keep parallel. Speculating over one only found
+    /// ways to fail: a stale override for a service this AppHost never adds was reported as a
+    /// checkout that failed, about a repository nobody was ever going to download.
+    /// </summary>
+    [Fact]
+    public void PathOverrideForAServiceNeverAdded_IsNotReportedAsAFailedPrefetch()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.local.json"),
+            """
+            { "services": {
+                "orders": { "source": "local" },
+                "billing": { "source": "local", "local": { "path": "moved-away" } } } }
+            """);
+        var builder = TestHelpers.CreateBuilder(dir);
+        var git = new FakeGitClient();
+
+        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+
+        var prefetch = LocalCheckoutPrefetch.For(builder, git);
+
+        Assert.Empty(prefetch.FailedUnusedCheckoutMessages);
+        Assert.Null(prefetch.UnusedCheckoutsMessage);
+    }
+
+    /// <summary>
     /// Every line the prefetched clone reported, once its stream has ended. Fails the test rather
     /// than hanging if it never does — a stream left open is a deferred service left in "Checking
     /// out" forever.
@@ -670,6 +792,22 @@ public class LocalCheckoutPrefetchTests
 
         reconciling.Set();
         await resolved.WaitAsync(TimeSpan.FromSeconds(30));
+    }
+
+    [Fact]
+    public async Task WatchingACheckoutThatHasAlreadyFinished_GetsAStreamThatHasAlreadyEnded()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreateBuilder(dir);
+        var git = new FakeGitClient();
+
+        // Resolved in full first: the checkout is over, and so is anything that was watching it.
+        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+
+        // A watcher arriving now is too late — there is no clone left to report and nothing that
+        // closes a stream would run again to close this one. Handing back an open stream would be
+        // handing back a wait that never ends, which is worse than the nothing it has to report.
+        Assert.Empty(await DrainProgressAsync(LocalCheckoutPrefetch.For(builder, git), "orders"));
     }
 
     [Fact]

@@ -588,8 +588,11 @@ public class DeferredCheckoutTests
         new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
 
         // The prefetch decides what to report at BeforeStartEvent, before a deferred service has
-        // waited on its checkout. Without MarkRequested it would name this one as speculative work
-        // the AppHost never wanted.
+        // waited on its checkout. StartCheckout is what keeps this one out of that report: the
+        // unused set is everything in _checkouts that nothing requested, and a deferred service is
+        // in _checkouts — its own registration put it there — so the requested half of that call is
+        // load-bearing, not bookkeeping. Without it this service would be named as speculative work
+        // the AppHost never wanted, while it was being cloned precisely because the AppHost did.
         Assert.Null(LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage);
 
         gate.Set();
