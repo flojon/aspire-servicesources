@@ -340,15 +340,16 @@ internal sealed class DeferredCheckout
         || resource.Annotations.OfType<IProjectMetadata>().Any();
 
     /// <summary>
-    /// Runs the kind's post-clone checks, the ones <see cref="ILocalResourceKind.Resolve"/> makes
-    /// against the working tree and <see cref="ILocalResourceKind.ResolveDeferred"/> could not.
+    /// Runs the kind's post-clone checks: the ones core would have taken from
+    /// <see cref="ILocalResourceKind.Validate"/> against a warm checkout, which
+    /// <see cref="ILocalResourceKind.ResolveDeferred"/> had no checkout to make.
     /// </summary>
     /// <remarks>
     /// A handler that reports a problem any other way than
     /// <see cref="ServiceSourcesConfigurationException"/> is wrapped in one, for the same reason
-    /// <c>LocalProjectSource.InvokeKindHandler</c> wraps the eager path: the exception is about to
-    /// become this service's failure state, and "the handler for kind 'java' failed" is a more
-    /// useful thing to read there than a bare <c>IOException</c>.
+    /// <c>LocalProjectSource.ValidateWithKindHandler</c> wraps these same checks on the eager path:
+    /// the exception is about to become this service's failure state, and "the handler for kind
+    /// 'java' failed" is a more useful thing to read there than a bare <c>IOException</c>.
     /// </remarks>
     private static void RunCheckoutValidation(
         DeferredLocalResource registration, string serviceName, string kind, string repoRoot, ILogger logger)

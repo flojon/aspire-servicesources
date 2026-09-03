@@ -20,7 +20,8 @@ public class LocalKindValidationTests
     /// outside. Every checkout-relative check a kind makes needs a <c>repoRoot</c> that is really
     /// there, which is the whole point of these tests.
     /// </summary>
-    private sealed class RecordingKind(bool rejectFromValidate = false) : ILocalResourceKind
+    private sealed class RecordingKind(bool rejectFromValidate = false, bool faultFromValidate = false)
+        : ILocalResourceKind
     {
         public List<string> Calls { get; } = [];
 
@@ -37,6 +38,11 @@ public class LocalKindValidationTests
             {
                 throw new ServiceSourcesConfigurationException(
                     $"Service '{serviceName}': '{repoRoot}' does not hold what this kind needs.");
+            }
+
+            if (faultFromValidate)
+            {
+                throw new InvalidOperationException("the handler is broken");
             }
         }
 
@@ -123,6 +129,30 @@ public class LocalKindValidationTests
         Assert.Contains(checkout, ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("failed while creating", ex.Message, StringComparison.Ordinal);
         Assert.Null(ex.InnerException);
+    }
+
+    /// <summary>
+    /// The other half of that, and the reason this call is wrapped at all: <c>Validate</c> now
+    /// resolves the whole options block and makes every check a kind has against the working tree,
+    /// so it faults for the same reasons <see cref="ILocalResourceKind.Resolve"/> does. Core names
+    /// the service and the kind either way — an unwrapped call here would report the identical fault
+    /// as a bare exception out of <c>AddService()</c> depending only on which method it came from.
+    /// </summary>
+    [Fact]
+    public void ValidateThatFaults_IsReportedAgainstTheServiceAndTheKind()
+    {
+        var checkout = Directory.CreateTempSubdirectory("servicesources-kind-validate-").FullName;
+        var builder = TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+        builder.AddLocalKind(KindName, new RecordingKind(faultFromValidate: true));
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new UnusedGitClient())
+                .Resolve(builder, ServiceName, Metadata(), DevConfig(checkout)));
+
+        Assert.Contains(ServiceName, ex.Message, StringComparison.Ordinal);
+        Assert.Contains(KindName, ex.Message, StringComparison.Ordinal);
+        Assert.Contains(nameof(ILocalResourceKind.Validate), ex.Message, StringComparison.Ordinal);
+        Assert.IsType<InvalidOperationException>(ex.InnerException);
     }
 
     private sealed class StandInResource(string name, string workingDirectory)

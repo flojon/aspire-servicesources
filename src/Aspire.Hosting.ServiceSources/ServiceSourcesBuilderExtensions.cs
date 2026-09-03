@@ -1,3 +1,4 @@
+using System.Reflection;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
@@ -198,6 +199,8 @@ public static class ServiceSourcesBuilderExtensions
     public static IDistributedApplicationBuilder AddLocalKind(
         this IDistributedApplicationBuilder builder, string kind, ILocalResourceKind handler)
     {
+        RequireCurrentValidateSignature(kind, handler);
+
         // UseJavaScript()/UseJava() land here, and an AppHost calls one of those
         // before its first AddService() — so this is usually the call that completes the AppHost's
         // configuration chain, ahead of any line of theirs that reads it.
@@ -205,5 +208,78 @@ public static class ServiceSourcesBuilderExtensions
 
         LocalKindRegistry.For(builder).Register(kind, handler);
         return builder;
+    }
+
+    /// <summary>
+    /// Refuses a handler still written against the pre-<c>repoRoot</c>
+    /// <see cref="ILocalResourceKind.Validate"/> signature, which nothing else would catch.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="ILocalResourceKind.Validate"/> is a defaulted interface member, so a kind
+    /// declaring the old <c>Validate(string, object?)</c> compiles clean against the current
+    /// interface — it simply stops implementing anything, and core calls the do-nothing default in
+    /// its place. Every rejection that method made would silently stop running, and the typo'd
+    /// options block it used to name would reach <see cref="ILocalResourceKind.Resolve"/> and
+    /// surface as a handler that failed while creating its resource. There is no compiler
+    /// diagnostic for that, so registration is the only seam left to put one at.
+    /// </para>
+    /// <para>
+    /// Both conditions are required. A kind that has migrated and, for its own reasons, kept a
+    /// method of the old shape — a helper of its own, an overload for its tests — is doing nothing
+    /// wrong, so what is refused is the old method <em>in place of</em> the new one. Whether the new
+    /// one is really implemented is read from the interface map rather than by name, so an explicit
+    /// implementation counts and the inherited default does not.
+    /// </para>
+    /// </remarks>
+    private static void RequireCurrentValidateSignature(string kind, ILocalResourceKind handler)
+    {
+        var type = handler.GetType();
+
+        var stale = type.GetMethod(
+            nameof(ILocalResourceKind.Validate),
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+            binder: null,
+            types: [typeof(string), typeof(object)],
+            modifiers: null);
+
+        if (stale is null || ImplementsCurrentValidate(type))
+        {
+            return;
+        }
+
+        throw new ServiceSourcesConfigurationException(
+            $"Kind '{kind}' is registered by '{type.FullName}', which declares " +
+            "'Validate(string serviceName, object? rawConfig)' and no " +
+            "'Validate(string serviceName, string repoRoot, object? rawConfig)'. " +
+            $"{nameof(ILocalResourceKind)}.{nameof(ILocalResourceKind.Validate)} gained a 'repoRoot' " +
+            "parameter — the service's resolved checkout directory, so a kind can check a path its " +
+            "options block names against the repository that path is relative to — and the old " +
+            "two-parameter method no longer implements the interface. Nothing failed to compile " +
+            "because Validate is a defaulted member: the old method is simply never called, and " +
+            "everything it rejected would now be accepted. Add the parameter.");
+    }
+
+    /// <summary>
+    /// Whether <paramref name="type"/> itself supplies
+    /// <see cref="ILocalResourceKind.Validate"/> rather than inheriting the interface's default. The
+    /// interface map answers that for an explicit implementation too, which a search by name would
+    /// miss: an explicitly implemented member is named for the interface it came from.
+    /// </summary>
+    private static bool ImplementsCurrentValidate(Type type)
+    {
+        var map = type.GetInterfaceMap(typeof(ILocalResourceKind));
+
+        for (var i = 0; i < map.InterfaceMethods.Length; i++)
+        {
+            if (map.InterfaceMethods[i].Name != nameof(ILocalResourceKind.Validate))
+            {
+                continue;
+            }
+
+            return map.TargetMethods[i]?.DeclaringType != typeof(ILocalResourceKind);
+        }
+
+        return false;
     }
 }

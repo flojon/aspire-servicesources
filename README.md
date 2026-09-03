@@ -734,6 +734,11 @@ name that collides with a well-known service property (`repository`, `project`, 
 `kind`, `kubernetes`, `url`, `container`) — a block by one of those names would be read as that
 property rather than as the kind's options.
 
+It also refuses a handler still declaring the pre-`repoRoot` `Validate(string, object?)` and not
+the current three-parameter one, naming the kind and the type. `Validate` is a defaulted interface
+member, so that kind compiles clean and simply stops implementing it — everything it rejected
+would be silently accepted instead. Registration is the only place left to say so; the build won't.
+
 **Supporting [`UseDeferredCheckout()`](#first-run-usedeferredcheckout).** Two more members, both
 optional and both defaulting to "no", decide whether a service of your kind can start before its
 checkout lands. Leave them alone and your kind keeps working exactly as it does now, always on the

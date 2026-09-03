@@ -21,9 +21,19 @@ nothing will fail to build to warn you.
   public void Validate(string serviceName, string repoRoot, object? rawConfig)  // after
   ```
 
-  To migrate, add the parameter. A kind that only parsed its options block needs nothing else —
-  the member is still defaulted, so a kind that never implemented it is unaffected. `Resolve`,
-  `SupportsDeferredCheckout` and `ResolveDeferred` are untouched.
+  **Nothing fails to build, so read this even though your AppHost still compiles.** `Validate` is
+  a defaulted interface member: a kind still declaring the old two-parameter method compiles clean
+  against the new interface, it simply stops implementing it, and core calls the do-nothing default
+  in its place. Every rejection that method made would quietly stop running, and the typo'd options
+  block it used to name would reach `Resolve` and surface as "the handler failed while creating its
+  resource" instead. There is no compiler diagnostic for that, so `AddLocalKind` now refuses a
+  handler that declares `Validate(string, object?)` and no `Validate(string, string, object?)`,
+  naming the kind and the type. Registering the kind is what tells you; the build will not.
+
+  To migrate, add the parameter. A kind that only parsed its options block needs nothing else. A
+  kind that never implemented `Validate` at all is unaffected — the default stands, and the check
+  above says nothing about it, as it does not about a migrated kind that keeps an old-shaped method
+  of its own. `Resolve`, `SupportsDeferredCheckout` and `ResolveDeferred` are untouched.
 
   What the parameter buys is the check a kind could not make before: `repoRoot` is the same
   directory `Resolve` is about to get, already cloned and checked out, so a `workingDirectory`,

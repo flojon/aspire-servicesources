@@ -114,9 +114,9 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         // for the same reason: a kind's paths are relative to this directory, so a wrong one can
         // only be recognised here. Immediately before Resolve, and before this service has added
         // anything, so a handler reports it without a half-created resource behind it.
-        handler!.Validate(serviceName, repoRoot, metadata.KindConfig);
+        ValidateWithKindHandler(serviceName, metadata, repoRoot, handler!);
 
-        return InvokeKindHandler(builder, serviceName, metadata, repoRoot, handler);
+        return InvokeKindHandler(builder, serviceName, metadata, repoRoot, handler!);
     }
 
     /// <summary>
@@ -214,6 +214,42 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         $"{nameof(DeferredLocalResource)}.{nameof(DeferredLocalResource.ValidateCheckout)}, which core runs " +
         "once the clone is there; anything settleable from the options block alone should be reported as a " +
         $"{nameof(ServiceSourcesConfigurationException)} naming the service.";
+
+    /// <summary>
+    /// Asks the handler to pass judgement on the service's configuration against its resolved
+    /// checkout, before anything is built from it. Wrapped like every other call core makes into a
+    /// handler: this one resolves the whole options block and makes every check the kind has against
+    /// the working tree, so it reaches a language's hosting package exactly as
+    /// <see cref="InvokeKindHandler"/> does — and the identical failure must not report as a bare
+    /// load error just because it happened one call earlier.
+    /// </summary>
+    private static void ValidateWithKindHandler(
+        string serviceName, ServiceMetadata metadata, string repoRoot, ILocalResourceKind handler)
+    {
+        try
+        {
+            handler.Validate(serviceName, repoRoot, metadata.KindConfig);
+        }
+        catch (Exception ex) when (ex is not ServiceSourcesConfigurationException)
+        {
+            throw new ServiceSourcesConfigurationException(
+                GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, metadata.Kind)
+                    ?? ValidateFailedMessage(serviceName, metadata.Kind),
+                ex);
+        }
+    }
+
+    /// <summary>
+    /// For a handler that faulted in <see cref="ILocalResourceKind.Validate"/> rather than reporting
+    /// something. Unlike <see cref="HandlerFailedMessage"/> it has nowhere better to point the
+    /// author at: this <em>is</em> the place a configuration problem belongs.
+    /// </summary>
+    private static string ValidateFailedMessage(string serviceName, string kind) =>
+        $"Service '{serviceName}': the handler for kind '{kind}' failed while checking the service's " +
+        $"configuration against its checkout. A configuration problem should be reported from " +
+        $"{nameof(ILocalResourceKind)}.{nameof(ILocalResourceKind.Validate)} as a " +
+        $"{nameof(ServiceSourcesConfigurationException)} naming the service; anything else out of that " +
+        "call is a fault in the handler.";
 
     private static IResourceBuilder<IResourceWithServiceDiscovery> InvokeKindHandler(
         IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, string repoRoot,
