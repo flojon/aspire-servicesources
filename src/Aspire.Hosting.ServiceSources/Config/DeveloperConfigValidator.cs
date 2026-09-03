@@ -10,10 +10,28 @@ namespace Aspire.Hosting.ServiceSources.Config;
 /// silently dropped. The last of those costs more than itself: the binder answers a key of the wrong
 /// shape by abandoning the whole entry, which then reads downstream as a service nobody configured.
 /// </summary>
-internal static class ServiceDeveloperConfigValidator
+/// <remarks>
+/// Written against <see cref="DeveloperConfigShape"/> rather than against one entry type, so that
+/// the backing-service section added alongside <c>services:</c> arrives with the same diagnostics
+/// rather than a thinner copy of them. Every message names the kind of entry it is about, because
+/// the two sections are edited in the same file and "Service 'orders-db'" sends the reader to the
+/// wrong half of it.
+/// </remarks>
+internal static class DeveloperConfigValidator
 {
     /// <summary>
-    /// Checks every service entry and reports all of their problems together.
+    /// The one root key both entry shapes spell the same way, and the only one that takes a value.
+    /// </summary>
+    /// <remarks>
+    /// A literal rather than <c>nameof</c> of either entry type's property: naming one of them here
+    /// would read as though the other's <c>source</c> were a different key, which is exactly the
+    /// confusion the shape indirection exists to remove. The shapes derive their root keys from
+    /// their own properties, so a rename that dropped this key would fail the lookup below.
+    /// </remarks>
+    private const string SourceKey = "Source";
+
+    /// <summary>
+    /// Checks every entry of one kind and reports all of their problems together.
     /// </summary>
     /// <remarks>
     /// Across entries as well as within one. This is the release that moves every existing file
@@ -21,13 +39,13 @@ internal static class ServiceDeveloperConfigValidator
     /// the first would cost a startup per service, which is the same objection that makes the walk
     /// over one entry collect rather than throw at its first bad key.
     /// </remarks>
-    public static void ValidateAll(IEnumerable<IConfigurationSection> entries)
+    public static void ValidateAll(IEnumerable<IConfigurationSection> entries, DeveloperConfigShape shape)
     {
         List<(string Service, IReadOnlyList<string> Problems)>? faulted = null;
 
         foreach (var entry in entries)
         {
-            var problems = Collect(entry.Key, entry);
+            var problems = Collect(entry.Key, entry, shape);
 
             if (problems.Count > 0)
             {
@@ -43,8 +61,8 @@ internal static class ServiceDeveloperConfigValidator
         // A single faulted entry reads exactly as it did when entries were checked one at a time,
         // so the ordinary case — one service, one mistake — pays nothing for the collecting.
         throw faulted.Count == 1
-            ? Failure(faulted[0].Service, faulted[0].Problems)
-            : CombinedFailure(faulted);
+            ? Failure(faulted[0].Service, faulted[0].Problems, shape)
+            : CombinedFailure(faulted, shape);
     }
 
     /// <summary>
@@ -62,7 +80,8 @@ internal static class ServiceDeveloperConfigValidator
     /// set of environment variables carrying the same mistakes need not agree on which one is
     /// named first.
     /// </remarks>
-    private static IReadOnlyList<string> Collect(string serviceName, IConfigurationSection entry)
+    private static IReadOnlyList<string> Collect(
+        string serviceName, IConfigurationSection entry, DeveloperConfigShape shape)
     {
         var problems = new List<string>();
 
@@ -85,18 +104,18 @@ internal static class ServiceDeveloperConfigValidator
         // a merged entry's keys are still walked.
         if (entry.Value is not null)
         {
-            problems.Add(EntryExpected(serviceName, entry, alsoHasKeys: HasChildren(entry)));
+            problems.Add(EntryExpected(serviceName, entry, alsoHasKeys: HasChildren(entry), shape));
         }
 
         foreach (var key in entry.GetChildren())
         {
-            if (!ServiceDeveloperConfigShape.RootKeys.Contains(key.Key))
+            if (!shape.RootKeys.Contains(key.Key))
             {
-                problems.Add(NotValidHere(serviceName, key));
+                problems.Add(NotValidHere(serviceName, key, shape));
                 continue;
             }
 
-            if (!ServiceDeveloperConfigShape.BlockFields.TryGetValue(key.Key, out var fields))
+            if (!shape.BlockFields.TryGetValue(key.Key, out var fields))
             {
                 // `source` is the one root key that takes a value rather than a block. An object
                 // written there binds it to the empty string and, because the binder gives up on
@@ -169,10 +188,10 @@ internal static class ServiceDeveloperConfigValidator
     /// differs per problem.
     /// </remarks>
     private static ServiceSourcesConfigurationException Failure(
-        string serviceName, IReadOnlyList<string> problems) =>
+        string serviceName, IReadOnlyList<string> problems, DeveloperConfigShape shape) =>
         new(problems.Count == 1
-            ? $"Service '{serviceName}': {problems[0]}"
-            : $"Service '{serviceName}': {problems.Count} problems with the entry:"
+            ? $"{shape.Kind} '{serviceName}': {problems[0]}"
+            : $"{shape.Kind} '{serviceName}': {problems.Count} problems with the entry:"
               + string.Concat(problems.Select(p => $"{Environment.NewLine}  - {p}")));
 
     /// <summary>
@@ -183,16 +202,16 @@ internal static class ServiceDeveloperConfigValidator
     /// other, and a developer migrating a file works through it a service at a time.
     /// </remarks>
     private static ServiceSourcesConfigurationException CombinedFailure(
-        IReadOnlyList<(string Service, IReadOnlyList<string> Problems)> faulted)
+        IReadOnlyList<(string Service, IReadOnlyList<string> Problems)> faulted, DeveloperConfigShape shape)
     {
         var total = faulted.Sum(entry => entry.Problems.Count);
 
         var message = new StringBuilder()
-            .Append($"{total} problems across {faulted.Count} service entries:");
+            .Append($"{total} problems across {faulted.Count} {shape.Noun} entries:");
 
         foreach (var (service, problems) in faulted)
         {
-            message.Append(Environment.NewLine).Append($"  Service '{service}':");
+            message.Append(Environment.NewLine).Append($"  {shape.Kind} '{service}':");
 
             foreach (var problem in problems)
             {
@@ -239,6 +258,12 @@ internal static class ServiceDeveloperConfigValidator
     /// container-sourced entry belongs in the <c>kubernetes</c> block, but that is emphatically not
     /// a reason to make the service kubernetes-sourced.
     /// <para>
+    /// A field several blocks declare names all of them rather than picking one, since which of
+    /// them the developer meant is exactly what this message does not know. A backing service's
+    /// <c>connectionString</c> is the case: every source that takes one declares its own, because
+    /// the templates differ per source.
+    /// </para>
+    /// <para>
     /// A key that is nearly a field gets the same sentence with the field named, because the list
     /// in the last branch cannot help there: the keys valid at an entry's root are <c>source</c>
     /// and the block names, so a misspelled <c>path</c> was answered with five words that could
@@ -254,31 +279,72 @@ internal static class ServiceDeveloperConfigValidator
     /// they did not mean.
     /// </para>
     /// </remarks>
-    private static string NotValidHere(string serviceName, IConfigurationSection key)
+    private static string NotValidHere(
+        string serviceName, IConfigurationSection key, DeveloperConfigShape shape)
     {
-        var home = ServiceDeveloperConfigShape.HomeBlockOf(key.Key)?.ToLowerInvariant();
+        var homes = shape.HomeBlocksOf(key.Key).Select(block => block.ToLowerInvariant()).ToArray();
 
-        if (home is not null)
+        if (homes.Length == 1)
         {
             return $"'{key.Key}' is not a valid key here. It belongs in the "
-                + $"'{home}' block: \"{serviceName}\": {{ ..., \"{home}\": {{ \"{key.Key}\": ... }} }}."
+                + $"'{homes[0]}' block: \"{serviceName}\": {{ ..., \"{homes[0]}\": {{ \"{key.Key}\": ... }} }}."
                 + SetAt(key);
         }
 
-        if (ServiceDeveloperConfigShape.NearMissFieldOf(key.Key) is var (field, block))
+        if (homes.Length > 1)
         {
-            var lowered = block.ToLowerInvariant();
-
-            return $"'{key.Key}' is not a valid key here. Did you mean '{field.ToLowerInvariant()}', in the "
-                + $"'{lowered}' block: \"{serviceName}\": {{ ..., \"{lowered}\": "
-                + $"{{ \"{field.ToLowerInvariant()}\": ... }} }}?"
+            return $"'{key.Key}' is not a valid key here. It belongs inside the block of the source "
+                + $"it configures — {Quoted(homes)}: "
+                + $"\"{serviceName}\": {{ ..., \"{homes[0]}\": {{ \"{key.Key}\": ... }} }}."
                 + SetAt(key);
         }
 
-        return $"'{key.Key}' is not a valid key. Valid keys are "
-            + $"{Quoted(ServiceDeveloperConfigShape.RootKeys)}."
+        var near = shape.NearMissFieldsOf(key.Key);
+
+        // One candidate keeps the shape to write, exactly as the exact-match branch above shows it.
+        // Several cannot: there is no single block to put the key in, so the sentence names the
+        // candidates and stops rather than illustrating one of them as though it were the answer.
+        if (near.Count == 1)
+        {
+            var (field, block) = (near[0].Field.ToLowerInvariant(), near[0].Block.ToLowerInvariant());
+
+            return $"'{key.Key}' is not a valid key here. Did you mean '{field}', in the "
+                + $"'{block}' block: \"{serviceName}\": {{ ..., \"{block}\": {{ \"{field}\": ... }} }}?"
+                + SetAt(key);
+        }
+
+        if (near.Count > 1)
+        {
+            return $"'{key.Key}' is not a valid key here. Did you mean {DescribeNearMisses(near)}?"
+                + SetAt(key);
+        }
+
+        return $"'{key.Key}' is not a valid key. Valid keys are {Quoted(shape.RootKeys)}."
             + SetAt(key);
     }
+
+    /// <summary>
+    /// Near-miss candidates as prose: <c>'connectionString', in the 'direct' or 'kubernetes'
+    /// block</c>.
+    /// </summary>
+    /// <remarks>
+    /// Grouped by field name so that the common tie — one field several source blocks each declare
+    /// their own copy of — reads as one suggestion in more than one place rather than as the same
+    /// word twice. Candidates arrive already ordered by <see cref="NearMiss.Nearest"/>, so what is
+    /// added here is only the block ordering within a group.
+    /// </remarks>
+    private static string DescribeNearMisses(IEnumerable<(string Field, string Block)> candidates) =>
+        string.Join(
+            ", or ",
+            candidates
+                .GroupBy(candidate => candidate.Field, StringComparer.OrdinalIgnoreCase)
+                .Select(group =>
+                    $"'{group.Key.ToLowerInvariant()}', in the "
+                    + string.Join(
+                        " or ",
+                        group.Select(candidate => $"'{candidate.Block.ToLowerInvariant()}'")
+                            .Order(StringComparer.Ordinal))
+                    + " block"));
 
     /// <summary>The error for a key that no block of this name declares.</summary>
     private static string NotValidInBlock(
@@ -302,7 +368,7 @@ internal static class ServiceDeveloperConfigValidator
     /// layers can produce and a single file cannot.
     /// </param>
     private static string EntryExpected(
-        string serviceName, IConfigurationSection entry, bool alsoHasKeys)
+        string serviceName, IConfigurationSection entry, bool alsoHasKeys, DeveloperConfigShape shape)
     {
         var value = entry.Value ?? "";
 
@@ -316,17 +382,17 @@ internal static class ServiceDeveloperConfigValidator
                 + "value is inert: a scalar at a service's own key binds to nothing, so nothing "
                 + "reads it. If it was meant to choose the source, that is the 'source' key inside "
                 + "the entry."
-                + SetAtBlock(entry, nameof(ServiceDeveloperConfig.Source));
+                + SetAtBlock(entry, SourceKey);
         }
 
         // The suggestion needs no escaping of its own: a whitespace value is not the name of any
-        // block, so it fails this lookup and the placeholder is what gets shown.
-        var source = ServiceDeveloperConfigShape.BlockFields.ContainsKey(value) ? value : "...";
+        // source, so it fails this lookup and the placeholder is what gets shown.
+        var source = shape.SourceNames.Contains(value) ? value : "...";
 
         return $"the entry takes a block of settings, not the value {Escaped(value)}: "
             + $"\"{serviceName}\": {{ \"source\": \"{source}\" }}. "
-            + $"Valid keys there are {Quoted(ServiceDeveloperConfigShape.RootKeys)}."
-            + SetAtBlock(entry, nameof(ServiceDeveloperConfig.Source));
+            + $"Valid keys there are {Quoted(shape.RootKeys)}."
+            + SetAtBlock(entry, SourceKey);
     }
 
     /// <summary>
@@ -334,9 +400,10 @@ internal static class ServiceDeveloperConfigValidator
     /// the value written where a block of settings goes.
     /// </summary>
     /// <remarks>
-    /// Distinct from <see cref="NotValidHere"/> because three of the four block names — everything
-    /// but <c>url</c> — are block names and nothing else, so that message's fallback branch would
-    /// call the key invalid and then list it among the valid ones.
+    /// Distinct from <see cref="NotValidHere"/> because a block name is nearly always a block name
+    /// and nothing else — <c>url</c>, which is also a service's <c>url.url</c> field, is the
+    /// exception — so that message's fallback branch would call the key invalid and then list it
+    /// among the valid ones.
     /// </remarks>
     private static string BlockExpected(
         string serviceName, IConfigurationSection key, IReadOnlyDictionary<string, Type> fields)

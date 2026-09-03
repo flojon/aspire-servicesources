@@ -101,7 +101,7 @@ public static class ServiceSourcesBuilderExtensions
 
             // The key, not just the file: the file is only the lowest layer this value can arrive
             // from, so a developer whose environment carries a stale source would otherwise be sent
-            // to edit the one place it is not. Same reasoning as ServiceDeveloperConfigValidator.
+            // to edit the one place it is not. Same reasoning as DeveloperConfigValidator.
             var key = $"{DeveloperConfiguration.ServicesKey}:{name}:source";
 
             throw new ServiceSourcesConfigurationException(

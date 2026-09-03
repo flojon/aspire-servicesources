@@ -1296,6 +1296,108 @@ including the wait-ordering exception, which `waitForService` and `waitForServic
 In C# they're hidden from IntelliSense — use `Configure<T>`, which reaches every Aspire extension
 method rather than just these.
 
+## Backing services: databases, brokers and caches
+
+A service usually depends on a database or a broker, and a developer wants the same choice for it
+that they have for the service: run it locally, or connect to the one already running in the shared
+dev cluster. `AddBackingService()` is that choice.
+
+```csharp
+var ordersDb = builder.AddBackingService("orders-db",
+    local: () => builder.AddPostgres("orders-pg").AddDatabase("orders-db", "orders"));
+
+builder.AddService("orders")
+    .Configure<IResourceWithEnvironment>(r => r.WithReference(ordersDb))
+    .Configure<IResourceWithWaitSupport>(r => r.WaitFor(ordersDb));
+```
+
+Two things are different from `AddService()`:
+
+- **There is no catalog.** A backing service is declared by the `AddBackingService()` call itself,
+  so nothing goes in `servicesources.yaml` — an AppHost that only connects to a database needs no
+  catalog file at all.
+- **The local case is your code, not ours.** Provisioning a database locally is already expressed
+  perfectly well as `builder.AddPostgres(...)`, by the person who knows what it should be, so the
+  `"local"` source runs that factory and returns its result unchanged. Re-expressing image and
+  version as catalog fields would be a worse version of Aspire's own integrations.
+
+Because the local case is a factory, this works for anything with a connection string —
+`AddSqlServer(...).AddDatabase(...)`, `AddRabbitMQ(...)`, `AddRedis(...)` — with no support needed
+per backend.
+
+### Sources
+
+Configured under a new `backingServices:` section of `servicesources.local.json`, alongside
+`services:` and read through the same configuration layers, so every override in
+[Overriding `servicesources.local.json`](#overriding-servicesourceslocaljson) applies here too:
+
+```jsonc
+{
+  "services": { "orders": { "source": "local" } },
+  "backingServices": {
+    "orders-db": {
+      "source": "direct",
+      "direct": { "connectionString": "Host=localhost;Port=5432;Database=orders;Username=dev" }
+    }
+  }
+}
+```
+
+| `source` | Meaning |
+| --- | --- |
+| `"local"` | Run the `local` factory. **The default** — a backing service with no entry resolves here, so an AppHost nobody has configured runs as it reads. |
+| `"direct"` | Connect to `direct.connectionString`. Covers a database the developer started by hand *and* a cluster database published through an ingress: from the AppHost's side both are an address to connect to, with no process to manage. |
+
+`"direct"` is named for the one thing that distinguishes it — nothing in the way — rather than for
+where the database runs. It is not `"remote"`, because the common case is a `localhost` the
+developer started themselves, and not `"external"`, which Aspire already uses for an external
+*HTTP* service.
+
+Each source's settings live in a block named for it, exactly as a service entry's do, so a higher
+configuration layer can switch `source` without a field from the source you switched away from
+being read alongside it.
+
+### Name the local factory's resource after the backing service
+
+Aspire's `WithReference(...)` keys the connection string on the **referenced resource's own name**,
+and under `"local"` that resource is whatever your factory built. So:
+
+```csharp
+// Good — one name everywhere. Switching source changes the value and nothing else.
+builder.AddBackingService("orders-db", () => builder.AddPostgres("pg").AddDatabase("orders-db", "orders"));
+// → ConnectionStrings__orders-db, under every source
+
+// Trouble — the key moves when the developer switches source.
+builder.AddBackingService("orders-db", () => builder.AddPostgres("pg").AddDatabase("orders"));
+// → ConnectionStrings__orders under "local", ConnectionStrings__orders-db under "direct"
+```
+
+`AddDatabase("orders-db", "orders")` names the Aspire resource and the actual database separately,
+which is what to reach for when the two want different names. Nothing enforces this yet — the app
+is what reports it, by starting and finding no connection string where it looked.
+
+### Connection-string placeholders
+
+`direct.connectionString` is normally a literal, and a brace in it stays a brace — `Driver={PostgreSQL}`
+and other ODBC-style strings pass through untouched. Two placeholders are recognised and reserved
+for sources that can resolve them, and are rejected under `"direct"` with a message saying why:
+
+- `{port}`, or `{port:<name>}` — a local port the AppHost forwards. `"direct"` forwards nothing, so
+  write the port the backing service already listens on.
+- `{secret:<name>:<key>}` — a value read from a Kubernetes secret. Not supported yet.
+
+A malformed placeholder — `{secret:orders-creds}`, with no key — fails when the AppHost starts,
+naming the backing service and the configuration key, rather than reaching the app as text.
+
+### From a guest-language AppHost
+
+`addBackingService` is exported, and the local factory crosses the boundary as an ordinary callback:
+
+```typescript
+const ordersDb = await builder.addBackingService('orders-db',
+    async () => builder.addPostgres('orders-pg').addDatabase('orders-db', 'orders'));
+```
+
 ## Naming a service's endpoint
 
 A consumer that wants the service's URL asks for an endpoint. Aspire names endpoints, and

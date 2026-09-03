@@ -10,7 +10,7 @@ namespace Aspire.Hosting.ServiceSources.Tests.Config;
 /// reported rather than silently dropped. Every block is checked, not only the one the entry's
 /// source names.
 /// </summary>
-public class ServiceDeveloperConfigValidatorTests
+public class DeveloperConfigValidatorTests
 {
     private const string Catalog = """
         services:
@@ -213,7 +213,7 @@ public class ServiceDeveloperConfigValidatorTests
     [Fact]
     public void Shape_NoFieldNameIsSharedByTwoBlocks()
     {
-        var blocks = ServiceDeveloperConfigShape.BlockFields;
+        var blocks = DeveloperConfigShape.Service.BlockFields;
 
         foreach (var (name, fields) in blocks)
         {

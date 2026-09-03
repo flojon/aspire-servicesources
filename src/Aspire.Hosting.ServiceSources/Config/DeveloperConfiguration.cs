@@ -13,6 +13,9 @@ internal sealed class DeveloperConfiguration
     /// <summary>The configuration key the per-service entries live under.</summary>
     public const string ServicesKey = "ServiceSources:Services";
 
+    /// <summary>The configuration key the per-backing-service entries live under.</summary>
+    public const string BackingServicesKey = "ServiceSources:BackingServices";
+
     public const string FileName = "servicesources.local.json";
 
     public required IReadOnlyDictionary<string, ServiceDeveloperConfig> Services { get; init; }
@@ -57,13 +60,13 @@ internal sealed class DeveloperConfiguration
         // Every entry in one call, so that a file still to be moved onto the block shape is
         // reported once rather than a service at a time: checking them in a loop here threw on the
         // first faulted entry, which cost a startup per misconfigured service.
-        ServiceDeveloperConfigValidator.ValidateAll(section.GetChildren());
+        DeveloperConfigValidator.ValidateAll(section.GetChildren(), DeveloperConfigShape.Service);
 
         var bound = section.Get<Dictionary<string, ServiceDeveloperConfig>>() ?? [];
 
         foreach (var config in bound.Values)
         {
-            NormalizeBlankToAbsent(config);
+            NormalizeBlankToAbsent(config, DeveloperConfigShape.Service);
         }
 
         var services = CanonicalizeToCatalog(bound, catalogNames);
@@ -82,6 +85,53 @@ internal sealed class DeveloperConfiguration
     }
 
     /// <summary>
+    /// The backing-service entries, validated and bound the same way the service entries above are,
+    /// and keyed case-insensitively as they arrived.
+    /// </summary>
+    /// <remarks>
+    /// Read on its own rather than as part of <see cref="ReadFrom"/>, because it needs no catalog
+    /// and the catalog is a file that may not exist. A backing service is declared by the
+    /// <c>AddBackingService</c> call itself — the name in the AppHost's own code is the spelling,
+    /// with no second list to reconcile it against — so an AppHost that connects to a database and
+    /// adds no source-switched service at all is a complete AppHost, and asking it for a
+    /// <c>servicesources.yaml</c> would be asking for an empty file to satisfy a lookup that never
+    /// happens. It also keeps the two failures apart: a malformed catalog no longer decides whether
+    /// a backing service can be resolved.
+    /// <para>
+    /// Every entry is checked rather than only the ones an <c>AddBackingService</c> call reaches,
+    /// for the same reason the service side checks all of them: a mistake in an entry nothing has
+    /// asked for yet is still a mistake, and finding it one startup at a time costs a startup per
+    /// entry.
+    /// </para>
+    /// <para>
+    /// Validated against its own shape, since a problem has to be reported against the shape the
+    /// key was written under: sharing the service walk would describe a backing service's entry
+    /// with a service's list of valid keys.
+    /// </para>
+    /// </remarks>
+    public static IReadOnlyDictionary<string, BackingServiceDeveloperConfig> ReadBackingServicesFrom(
+        IDistributedApplicationBuilder builder)
+    {
+        DeveloperConfigFileSource.EnsureRegistered(builder);
+
+        var section = builder.Configuration.GetSection(BackingServicesKey);
+
+        DeveloperConfigValidator.ValidateAll(section.GetChildren(), DeveloperConfigShape.BackingService);
+
+        var bound = section.Get<Dictionary<string, BackingServiceDeveloperConfig>>() ?? [];
+
+        foreach (var config in bound.Values)
+        {
+            NormalizeBlankToAbsent(config, DeveloperConfigShape.BackingService);
+        }
+
+        // Re-keyed onto configuration's own comparer: the binder produces an ordinal dictionary,
+        // which would miss the name AddBackingService() asked for whenever a provider contributed
+        // the key under a different casing than the AppHost's call spells it.
+        return new Dictionary<string, BackingServiceDeveloperConfig>(bound, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// Maps an empty string field to absent, throughout every block.
     /// </summary>
     /// <remarks>
@@ -94,13 +144,13 @@ internal sealed class DeveloperConfiguration
     ///
     /// Empty exactly, not merely blank. A value of one or more spaces is close enough to this
     /// gesture to be someone reaching for it, and far enough to be a typed value that lost its
-    /// text, so <see cref="ServiceDeveloperConfigValidator"/> refuses it outright and names the
+    /// text, so <see cref="DeveloperConfigValidator"/> refuses it outright and names the
     /// spelling that works. Treating it as absent here instead is what made a whitespace
     /// <c>local.path</c> run the service from its managed checkout without a word.
     /// </remarks>
-    private static void NormalizeBlankToAbsent(ServiceDeveloperConfig config)
+    private static void NormalizeBlankToAbsent(object config, DeveloperConfigShape shape)
     {
-        foreach (var block in ServiceDeveloperConfigShape.Blocks)
+        foreach (var block in shape.Blocks)
         {
             var instance = block.GetValue(config);
 

@@ -57,6 +57,53 @@ nothing will fail to build to warn you.
   arrived transitively and neither remedy is yours to apply, `ServiceSourcesSkipGuestLanguageFloorCheck=true`
   turns the build-time check off for that project and leaves the run-time report standing.
 
+### Added
+
+- **`AddBackingService()` — the database, broker or cache a service connects to, source-switched
+  the same way the service is** ([#144]). A service usually depends on a database, and a developer
+  wants the same choice for it that they have for the service: run it locally, or connect to the one
+  already running. The AppHost declares it once, and each developer decides in their own
+  `servicesources.local.json`:
+
+  ```csharp
+  var ordersDb = builder.AddBackingService("orders-db",
+      local: () => builder.AddPostgres("orders-pg").AddDatabase("orders-db", "orders"));
+
+  builder.AddService("orders")
+      .Configure<IResourceWithEnvironment>(r => r.WithReference(ordersDb))
+      .Configure<IResourceWithWaitSupport>(r => r.WaitFor(ordersDb));
+  ```
+
+  Two sources ship in this release, configured under a new `backingServices:` section read through
+  the same configuration layers as `services:`. `"local"` runs the factory the AppHost supplied and
+  returns its result unchanged — it is the default, so a backing service with no entry runs as the
+  AppHost reads. `"direct"` connects to a `direct.connectionString` the developer supplies, which
+  covers both a database they started by hand and a cluster database published through an ingress:
+  from the AppHost's side both are an address with no process to manage. A `"kubernetes"` source
+  that opens a `kubectl port-forward` is the next stage of the same issue and is not in this
+  release.
+
+  There is no catalog side to this. A backing service is declared by the `AddBackingService()` call
+  itself, so `servicesources.yaml` is untouched — and an AppHost that only connects to a database
+  needs no catalog file at all. Local provisioning stays the AppHost's own code, because
+  `builder.AddPostgres(...)` already expresses it better than catalog fields would; that also means
+  it works unchanged for anything carrying a connection string, `AddRabbitMQ` and `AddRedis`
+  included.
+
+  **Name the resource your local factory returns after the backing service.** Aspire's
+  `WithReference(...)` keys the connection string on the referenced resource's own name, which under
+  `"local"` is whatever the factory built — so `() => builder.AddPostgres("pg").AddDatabase("orders")`
+  behind a backing service called `orders-db` gives a consumer `ConnectionStrings__orders` locally
+  and `ConnectionStrings__orders-db` under `"direct"`, moving the key the app reads when the
+  developer switches. `AddDatabase("orders-db", "orders")` names the resource and the database
+  separately. Nothing enforces this yet.
+
+  `direct.connectionString` is normally a literal, and a brace in it stays a brace, so ODBC-style
+  strings such as `Driver={PostgreSQL}` pass through untouched. `{port}` and
+  `{secret:<name>:<key>}` are recognised, reserved for the sources that can resolve them, and
+  rejected under `"direct"` with a message saying why; a malformed one fails at startup naming the
+  backing service and the key, rather than reaching the app as text.
+
 ### Fixed
 
 - **A field misspelled at a service entry's root now names the field it was reaching for**
@@ -702,6 +749,7 @@ Targets `net10.0`.
 [#125]: https://github.com/flojon/aspire-servicesources/issues/125
 [#130]: https://github.com/flojon/aspire-servicesources/issues/130
 [#131]: https://github.com/flojon/aspire-servicesources/issues/131
+[#144]: https://github.com/flojon/aspire-servicesources/issues/144
 [#159]: https://github.com/flojon/aspire-servicesources/issues/159
 [#160]: https://github.com/flojon/aspire-servicesources/issues/160
 [#161]: https://github.com/flojon/aspire-servicesources/issues/161

@@ -5,7 +5,15 @@ namespace Aspire.Hosting.ServiceSources.Config;
 
 internal static class ServiceSourcesConfigCache
 {
-    private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, ConfigLoader> Cache = new();
+    private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, ConfigLoader<LoadedConfig>> Cache = new();
+
+    /// <summary>
+    /// The backing-service entries, cached apart from <see cref="Cache"/> because they are loaded
+    /// apart from it — see <see cref="DeveloperConfiguration.ReadBackingServicesFrom"/>.
+    /// </summary>
+    private static readonly ConditionalWeakTable<
+        IDistributedApplicationBuilder,
+        ConfigLoader<IReadOnlyDictionary<string, BackingServiceDeveloperConfig>>> BackingServiceCache = new();
 
     /// <summary>
     /// The whole loaded configuration, for callers that work across services rather than resolving
@@ -20,7 +28,37 @@ internal static class ServiceSourcesConfigCache
         // uses, for the same reason. Registering servicesources.local.json is guarded that way
         // too — see DeveloperConfigFileSource, which owns it because an entry point registers it
         // before any of this runs.
-        Cache.GetValue(builder, static _ => new ConfigLoader()).Load(builder);
+        Cache.GetValue(builder, static _ => new ConfigLoader<LoadedConfig>())
+            .Load(builder, LoadedConfig.Load);
+
+    /// <summary>
+    /// One backing service's developer config, or an entry with no source — which means
+    /// <c>"local"</c> — when nothing configures it.
+    /// </summary>
+    /// <remarks>
+    /// Unconfigured is the default rather than an error, unlike <see cref="ResolveService"/>: a
+    /// backing service with no entry runs from the factory the AppHost passed to
+    /// <c>AddBackingService</c>, which is what an AppHost nobody has pointed at a cluster does for
+    /// every one of them. There is nothing for the developer to fix, so there is nothing to report.
+    /// <para>
+    /// A blank source takes the same route. It arrives from a higher layer blanking the key — the
+    /// one gesture configuration offers for dropping a value a layer below set — and dropping the
+    /// source is asking for the default, not asking for a source nobody named.
+    /// </para>
+    /// </remarks>
+    public static BackingServiceDeveloperConfig ResolveBackingService(
+        IDistributedApplicationBuilder builder, string name) =>
+        BackingServicesFor(builder).TryGetValue(name, out var config) ? config : new BackingServiceDeveloperConfig();
+
+    /// <summary>
+    /// Every backing-service entry, for the same kind of caller <see cref="LoadedFor"/> serves.
+    /// </summary>
+    public static IReadOnlyDictionary<string, BackingServiceDeveloperConfig> BackingServicesFor(
+        IDistributedApplicationBuilder builder) =>
+        BackingServiceCache
+            .GetValue(builder, static _ =>
+                new ConfigLoader<IReadOnlyDictionary<string, BackingServiceDeveloperConfig>>())
+            .Load(builder, DeveloperConfiguration.ReadBackingServicesFrom);
 
     public static (ServiceMetadata Metadata, ServiceDeveloperConfig DeveloperConfig) ResolveService(
         IDistributedApplicationBuilder builder, string serviceName)
@@ -52,15 +90,21 @@ internal static class ServiceSourcesConfigCache
     }
 
     /// <summary>
-    /// One builder's slot in <see cref="Cache"/>. Holding the load behind this rather than in the
-    /// table's factory is what makes it happen exactly once per builder.
+    /// One builder's slot in a cache above. Holding the load behind this rather than in the table's
+    /// factory is what makes it happen exactly once per builder.
     /// </summary>
-    private sealed class ConfigLoader
+    /// <remarks>
+    /// Generic over what is loaded because there are two of these — the catalog and the service
+    /// entries, and the backing-service entries — and the once-per-builder guarantee and the
+    /// latching below are the whole of what either needs.
+    /// </remarks>
+    private sealed class ConfigLoader<T>
+        where T : class
     {
         // Plain object rather than System.Threading.Lock: this package still targets net8.0.
         private readonly object _gate = new();
 
-        private LoadedConfig? _loaded;
+        private T? _loaded;
 
         private ExceptionDispatchInfo? _failure;
 
@@ -77,7 +121,7 @@ internal static class ServiceSourcesConfigCache
         /// second one asked. Anything unrecognised is left to the next caller to retry, which at
         /// worst repeats a deterministic failure and re-reports it unchanged.
         /// </remarks>
-        public LoadedConfig Load(IDistributedApplicationBuilder builder)
+        public T Load(IDistributedApplicationBuilder builder, Func<IDistributedApplicationBuilder, T> load)
         {
             lock (_gate)
             {
@@ -90,7 +134,7 @@ internal static class ServiceSourcesConfigCache
 
                 try
                 {
-                    return _loaded = LoadedConfig.Load(builder);
+                    return _loaded = load(builder);
                 }
                 catch (ServiceSourcesConfigurationException ex)
                 {
