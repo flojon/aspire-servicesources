@@ -29,7 +29,13 @@ internal interface IGitClient
     /// likely cause.
     /// </para>
     /// </remarks>
-    void Clone(string repositoryUrl, string destinationPath);
+    /// <param name="progress">
+    /// Where to report the clone's own progress as it runs, or <see langword="null"/> when nobody is
+    /// watching. Only <see cref="Clone"/> takes one: it is the operation that can take minutes on a
+    /// first run, and the only one whose wait a developer is shown (see
+    /// <see cref="Sources.DeferredCheckout"/>).
+    /// </param>
+    void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null);
 
     void Checkout(string repositoryPath, string reference);
 

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
@@ -64,6 +65,19 @@ internal sealed class DeferredCheckout
     /// <c>WithProjectDefaults</c> sets on the warm path and the restore has to set here.
     /// </summary>
     private const string LaunchProfileNameVariable = "DOTNET_LAUNCH_PROFILE";
+
+    /// <summary>
+    /// What the State column says while a service is waiting for its checkout and has no progress of
+    /// its own to show — before the clone reports anything, and again once it is done and the
+    /// checkout is being reconciled onto its configured ref.
+    /// </summary>
+    private const string CheckingOutState = "Checking out";
+
+    /// <summary>
+    /// The shortest gap between two published progress updates within one phase. See
+    /// <see cref="ReportCloneProgressAsync"/>.
+    /// </summary>
+    private static readonly TimeSpan ProgressPublishInterval = TimeSpan.FromSeconds(1);
 
     // Plain object rather than System.Threading.Lock: this package still targets net8.0.
     private readonly object _gate = new();
@@ -650,22 +664,43 @@ internal sealed class DeferredCheckout
                     .ConfigureAwait(false);
             }
 
-            await notifications.PublishUpdateAsync(deferred.Resource, snapshot => snapshot with
-            {
-                State = new ResourceStateSnapshot("Checking out", KnownResourceStateStyles.Info),
-            }).ConfigureAwait(false);
+            await PublishCheckingOutAsync(notifications, deferred.Resource).ConfigureAwait(false);
 
             logger.LogInformation(
                 "Resolving checkout of {Repository} into {RepoRoot} before starting.",
                 GitUrl.Redact(deferred.Metadata.Repository),
                 deferred.RepoRoot);
 
-            var repoRoot = deferred.Prefetch.GetRepoRoot(
-                deferred.ServiceName,
-                deferred.Metadata,
-                deferred.Config,
-                deferred.AppHostDirectory,
-                deferred.GitClient);
+            // Claimed here, on this thread, rather than inside the reporting task: the checkout
+            // below may be the thing that starts the clone — a service the prefetch never enumerated
+            // is resolved on this call — and it can only report to a stream that already exists by
+            // the time it runs.
+            var progress = deferred.Prefetch.WatchCheckout(deferred.ServiceName);
+
+            // git's own account of the clone, mirrored onto this resource while it runs. On a task
+            // of its own because the call below blocks this one for as long as the clone takes,
+            // which is exactly the stretch there is something to report.
+            var reporting = Task.Run(
+                () => ReportCloneProgressAsync(deferred, notifications, logger, progress, stoppingToken),
+                CancellationToken.None);
+
+            string repoRoot;
+            try
+            {
+                repoRoot = deferred.Prefetch.GetRepoRoot(
+                    deferred.ServiceName,
+                    deferred.Metadata,
+                    deferred.Config,
+                    deferred.AppHostDirectory,
+                    deferred.GitClient);
+            }
+            finally
+            {
+                // Awaited on the failure path too, and before the failure is reported: a progress
+                // line still in flight would otherwise be published over the state that says this
+                // service failed. It never throws, so it cannot displace the exception it runs under.
+                await reporting.ConfigureAwait(false);
+            }
 
             // The absolute .csproj path was frozen into the DCP executable spec before this ran, so
             // a checkout that landed anywhere else cannot be started — the resource would run with
@@ -722,6 +757,116 @@ internal sealed class DeferredCheckout
             await ReportFailureAsync(deferred, services, ex, started).ConfigureAwait(false);
         }
     }
+
+    /// <summary>
+    /// Mirrors the running clone onto the resource: every line git writes goes to the resource's
+    /// logs as it arrives, and the phase it names goes to the State column. Returns when the clone's
+    /// progress stream ends.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A clone the developer cannot see is the state deferral leaves them in: the AppHost reaches
+    /// the dashboard, and the service sits in "Checking out" for however long the repository takes.
+    /// git already reports what it is doing in enough detail to answer "is this moving?" — phase,
+    /// percentage, bytes and a transfer rate — so this carries that through rather than inventing a
+    /// progress model on top of it.
+    /// </para>
+    /// <para>
+    /// Silence is not a stall. git suppresses progress for work that finishes inside its own delay
+    /// threshold, and a clone from a local path reports nothing at all, so a small repository can go
+    /// from "Checking out" to started without a single line — which is why nothing here times out or
+    /// reports an absence. The same goes for a checkout that was already on disk: there was no clone
+    /// to report, and the stream ends saying so.
+    /// </para>
+    /// <para>
+    /// Ends when the stream does, which <see cref="LocalCheckoutPrefetch.GetRepoRoot"/> guarantees
+    /// happens — so this cannot outlive the checkout it is reporting on, whichever path resolved it.
+    /// </para>
+    /// </remarks>
+    private static async Task ReportCloneProgressAsync(
+        Deferred deferred,
+        ResourceNotificationService notifications,
+        ILogger logger,
+        CheckoutProgress progress,
+        CancellationToken cancellationToken)
+    {
+        var published = false;
+        var publishedAt = 0L;
+        string? publishedPhase = null;
+
+        try
+        {
+            await foreach (var line in progress.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
+                // Verbatim, progress lines included: the logs are where the developer goes for what
+                // actually happened, and git's own stream is a better record of it than any summary
+                // of ours. The State column is where the summarising happens.
+                logger.LogInformation("{GitProgress}", line);
+
+                if (!GitProgressLine.TryParse(line, out var parsed))
+                {
+                    continue;
+                }
+
+                // Coalesced, because "Receiving objects" emits a line per percentage point and every
+                // publish is a round trip to the dashboard. A new phase is always published — it is
+                // the part a developer reads — and within one phase a second apart is enough to look
+                // alive.
+                var now = Stopwatch.GetTimestamp();
+                if (published
+                    && string.Equals(parsed.Phase, publishedPhase, StringComparison.Ordinal)
+                    && Stopwatch.GetElapsedTime(publishedAt, now) < ProgressPublishInterval)
+                {
+                    continue;
+                }
+
+                published = true;
+                publishedAt = now;
+                publishedPhase = parsed.Phase;
+
+                await notifications.PublishUpdateAsync(deferred.Resource, snapshot => snapshot with
+                {
+                    State = new ResourceStateSnapshot(parsed.StateText, KnownResourceStateStyles.Info),
+                }).ConfigureAwait(false);
+            }
+
+            if (published)
+            {
+                // The transfer is over; the checkout is not. What follows is the reconciliation onto
+                // the configured ref, which reports nothing, and leaving "Updating files 100%" up for
+                // it would read as a clone that had stopped moving.
+                await PublishCheckingOutAsync(notifications, deferred.Resource).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The host is shutting down. The clone goes on — nothing takes a cancellation token as
+            // far as git — but there is no longer anywhere to report it to.
+        }
+        catch (Exception ex)
+        {
+            // Reporting progress must never be the thing that fails a checkout. The caller awaits
+            // this from a finally, so an exception escaping here would replace the exception the
+            // checkout itself failed with — and the checkout is the part that matters. A
+            // notification service being torn down under us costs the progress display and nothing
+            // else.
+            try
+            {
+                logger.LogDebug(ex, "Reporting checkout progress stopped early: {Message}", ex.Message);
+            }
+            catch (Exception)
+            {
+                // The logger is one of the things that can be torn down under us, so noting the
+                // problem must not become the problem.
+            }
+        }
+    }
+
+    private static Task PublishCheckingOutAsync(ResourceNotificationService notifications, IResource resource) =>
+        notifications.PublishUpdateAsync(resource, snapshot => snapshot with
+        {
+            State = new ResourceStateSnapshot(CheckingOutState, KnownResourceStateStyles.Info),
+        });
 
     /// <param name="started">
     /// The resources whose start command already succeeded, which this failure is therefore not

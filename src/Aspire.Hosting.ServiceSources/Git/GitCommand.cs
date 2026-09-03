@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 
 namespace Aspire.Hosting.ServiceSources.Git;
 
@@ -46,11 +47,18 @@ internal static class GitCommand
     /// value is <see langword="null"/>. This is the whole of what decides which credentials git
     /// can reach, so a test can hand it an isolated environment instead of the developer's own.
     /// </param>
+    /// <param name="progress">
+    /// Where to report git's progress lines as they arrive, or <see langword="null"/> to read stderr
+    /// as one block at the end. The caller that passes one is also responsible for asking git for
+    /// progress with <c>--progress</c>; this only decides how stderr is read.
+    /// </param>
     /// <exception cref="GitUnavailableException">
     /// <c>git</c> could not be launched at all.
     /// </exception>
     public static GitCommandResult Run(
-        IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string?>? environmentOverrides = null)
+        IReadOnlyList<string> arguments,
+        IReadOnlyDictionary<string, string?>? environmentOverrides = null,
+        IGitProgressSink? progress = null)
     {
         var startInfo = new ProcessStartInfo("git")
         {
@@ -106,7 +114,9 @@ internal static class GitCommand
         // Read both pipes concurrently. A clone writes progress to stderr while the pack arrives on
         // stdout, so draining them in sequence would fill one pipe's buffer and deadlock.
         var stdoutTask = process.StandardOutput.ReadToEndAsync();
-        var stderrTask = process.StandardError.ReadToEndAsync();
+        var stderrTask = progress is null
+            ? ReadStandardErrorAsync(process.StandardError)
+            : ReadStandardErrorAsync(process.StandardError, progress);
 
         // git reads prompts from the terminal rather than stdin, but close it anyway so nothing
         // downstream of it can wait on input that will never come.
@@ -115,7 +125,70 @@ internal static class GitCommand
         Task.WaitAll(stdoutTask, stderrTask);
         process.WaitForExit();
 
-        return new GitCommandResult(process.ExitCode, stdoutTask.Result, GitUrl.RedactAll(stderrTask.Result));
+        return new GitCommandResult(process.ExitCode, stdoutTask.Result, stderrTask.Result);
+    }
+
+    /// <summary>
+    /// All of stderr, redacted. Nobody is watching, so there is nothing to gain from reading it in
+    /// pieces.
+    /// </summary>
+    private static async Task<string> ReadStandardErrorAsync(StreamReader standardError) =>
+        GitUrl.RedactAll(await standardError.ReadToEndAsync().ConfigureAwait(false));
+
+    /// <summary>
+    /// Reads stderr as it arrives, reporting each line to <paramref name="progress"/> and returning
+    /// what remains for a failure message.
+    /// </summary>
+    /// <remarks>
+    /// One stream carries both, which is why one reader does both jobs: git writes its progress to
+    /// stderr and its errors there too, so a failing clone's diagnosis and its progress cannot be
+    /// separated by reading a different pipe.
+    /// <para>
+    /// What it returns is stderr <em>minus</em> the progress. A clone interrupted mid-transfer has
+    /// written a line per percent by then, and a failure message made of git's whole stderr would
+    /// bury "fatal: early EOF" under a hundred superseded percentages. Only lines
+    /// <see cref="GitProgressLine.TryParse"/> recognises are dropped, so everything that is actually
+    /// a diagnostic — including the phase lines with no percentage, which carry object counts —
+    /// still reaches the developer.
+    /// </para>
+    /// </remarks>
+    private static async Task<string> ReadStandardErrorAsync(
+        StreamReader standardError, IGitProgressSink progress)
+    {
+        var splitter = new ProgressLineSplitter();
+        var retained = new StringBuilder();
+        var buffer = new char[4096];
+
+        int read;
+        while ((read = await standardError.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false)) > 0)
+        {
+            foreach (var line in splitter.Append(new string(buffer, 0, read)))
+            {
+                Deliver(line, progress, retained);
+            }
+        }
+
+        if (splitter.Flush() is { } last)
+        {
+            Deliver(last, progress, retained);
+        }
+
+        return retained.ToString();
+    }
+
+    private static void Deliver(string line, IGitProgressSink progress, StringBuilder retained)
+    {
+        // Redacted per line rather than once at the end: these go straight to a sink that puts them
+        // in the resource's logs, so a token in the repository URL would travel there ahead of
+        // anything that could remove it.
+        var redacted = GitUrl.RedactAll(line);
+
+        progress.Report(redacted);
+
+        if (!GitProgressLine.TryParse(redacted, out _))
+        {
+            retained.AppendLine(redacted);
+        }
     }
 
     private static Process Start(ProcessStartInfo startInfo)

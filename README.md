@@ -271,6 +271,12 @@ It also stops the AppHost downloading repositories it doesn't use. Without defer
 to start before the AppHost has said which services it wants, so every `"local"` entry with no
 checkout yet is cloned; a deferred one is cloned only when it is added (#76).
 
+The wait is one you can watch. git's own progress becomes the service's state — the phase it is
+in, that phase's percentage, and the bytes transferred while a pack is arriving
+(`Receiving objects 48% · 18.54 MiB`) — with every line git writes going to the service's console
+logs as it arrives. A failure lands in the same two places. Nothing appears for a repository small
+enough that git reports nothing, which is normal rather than a sign of a stall.
+
 **What a cold checkout costs, and what it doesn't.** This part is about the `dotnet` kind. The
 `java` and `javascript` kinds have no launch profile and read nothing out of the repository while
 composing, so deferral costs them nothing at all — skip to *Scoped deliberately narrowly* below.

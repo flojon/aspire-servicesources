@@ -90,6 +90,20 @@ internal sealed class LocalCheckoutPrefetch
     private readonly Dictionary<string, Task<CheckoutResult>> _checkouts = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// The progress stream of each checkout, created alongside the checkout itself and keyed the
+    /// same way — so a caller that has a checkout to wait on always has somewhere to watch it
+    /// happen, whichever call started it.
+    /// </summary>
+    private readonly Dictionary<string, CheckoutProgress> _progress = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Services whose checkout has already been resolved, so there is nothing left to watch. What
+    /// makes <see cref="WatchCheckout"/> safe to call at any time rather than only before the
+    /// checkout it means to watch.
+    /// </summary>
+    private readonly HashSet<string> _resolved = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// Services <see cref="GetRepoRoot"/> was actually asked for — the set the prefetch could not
     /// know up front, learned by the time <c>BeforeStartEvent</c> runs.
     /// </summary>
@@ -311,11 +325,117 @@ internal sealed class LocalCheckoutPrefetch
     }
 
     /// <summary>
+    /// The progress stream to watch <paramref name="serviceName"/>'s checkout through, created if
+    /// this run has not started that checkout yet.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A caller asks for this <em>before</em> the checkout it means to watch is resolved, so that
+    /// the stream is in place for whichever call starts it — the speculative prefetch, a deferred
+    /// service's own <see cref="StartCheckout"/>, or <see cref="GetRepoRoot"/> resolving a service
+    /// neither claimed.
+    /// </para>
+    /// <para>
+    /// Never returns a stream that outlives the checkout, whenever it is called. Every path that
+    /// starts a checkout ends its stream when the clone ends, and <see cref="GetRepoRoot"/> ends it
+    /// again as a backstop — but a caller that arrives after all of that has already happened would
+    /// otherwise be handed a fresh stream with nothing left to close it. So a checkout already
+    /// resolved hands back a stream that has already ended: a watcher waits for the end rather than
+    /// polling, and there is nothing left for this one to see.
+    /// </para>
+    /// <para>
+    /// Buffered, so a caller that attaches long after the clone began — <see cref="DeferredCheckout"/>
+    /// attaches once the host is up, and a clone starts at its <c>AddService()</c> call — still sees
+    /// it from its first line.
+    /// </para>
+    /// </remarks>
+    public CheckoutProgress WatchCheckout(string serviceName)
+    {
+        lock (_gate)
+        {
+            return WatchCheckoutLocked(serviceName);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="WatchCheckout"/> for a caller that already holds <see cref="_gate"/> — which
+    /// every checkout start does, so that a stream is in place before the task that writes to it
+    /// can run.
+    /// </summary>
+    private CheckoutProgress WatchCheckoutLocked(string serviceName)
+    {
+        if (!_progress.TryGetValue(serviceName, out var progress))
+        {
+            _progress[serviceName] = progress = new CheckoutProgress();
+
+            if (_resolved.Contains(serviceName))
+            {
+                // Too late to watch: this checkout is already done, so nothing will ever write to
+                // this stream — and nothing that closes one would run again to close it. Ended now
+                // rather than left open, because the difference between "no progress to report" and
+                // "a watcher waiting forever" is the whole of what this guarantee is for.
+                progress.Complete();
+            }
+        }
+
+        return progress;
+    }
+
+    /// <summary>
+    /// Records that this service's checkout is over and ends whatever was watching it, so that a
+    /// watcher arriving afterwards is told so rather than left waiting.
+    /// </summary>
+    private void MarkResolved(string serviceName)
+    {
+        CheckoutProgress? progress;
+
+        lock (_gate)
+        {
+            _resolved.Add(serviceName);
+            _progress.TryGetValue(serviceName, out progress);
+        }
+
+        progress?.Complete();
+    }
+
+    /// <summary>
+    /// The progress stream for <paramref name="serviceName"/> if one exists, without creating one.
+    /// A checkout nobody is watching reports nothing, which is what keeps <c>--progress</c> off
+    /// every clone that has no audience.
+    /// </summary>
+    private CheckoutProgress? ProgressFor(string serviceName)
+    {
+        lock (_gate)
+        {
+            return _progress.TryGetValue(serviceName, out var progress) ? progress : null;
+        }
+    }
+
+    /// <summary>
     /// The checkout directory for <paramref name="serviceName"/>, re-throwing the failure the
     /// parallel phase recorded for it.
     /// </summary>
     public string GetRepoRoot(string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config,
         string appHostDirectory, IGitClient gitClient)
+    {
+        try
+        {
+            return ResolveRequestedRepoRoot(serviceName, metadata, config, appHostDirectory, gitClient);
+        }
+        finally
+        {
+            // A backstop, not the close that matters: every path that starts a checkout already
+            // ends its stream as soon as the clone does, which is what keeps the last percentage
+            // from sitting on the dashboard through the ref reconciliation that follows. This one
+            // is here so that WatchCheckout's guarantee — the stream always ends, because a watcher
+            // waits for that rather than polling — holds even for a checkout started somewhere none
+            // of those paths knows about. Ending an already-ended stream is a no-op.
+            MarkResolved(serviceName);
+        }
+    }
+
+    private string ResolveRequestedRepoRoot(string serviceName, ServiceMetadata metadata,
+        ServiceDeveloperConfig config, string appHostDirectory, IGitClient gitClient)
     {
         Task<CheckoutResult>? checkout;
 
@@ -334,8 +454,28 @@ internal sealed class LocalCheckoutPrefetch
             // Not in the prefetch set. Either nothing needed prefetching for it — a warm checkout, a
             // 'local.path' override — or the developer config was loaded before this service was
             // added to it, or it is being resolved through a path the prefetch doesn't enumerate.
-            // Resolve it directly rather than failing.
-            return LocalGitCheckout.ResolveRepoRoot(serviceName, metadata, config, appHostDirectory, gitClient);
+            // Resolve it directly rather than failing, reporting to the same stream a checkout
+            // started anywhere else would have: this path can still run a full cold clone, and a
+            // deferred service resolved through it would otherwise sit in "Checking out" for all
+            // of it.
+            //
+            // Taken in its two halves rather than through ResolveRepoRoot, so that the stream can
+            // be closed between them — at the same moment StartCheckoutTask closes the one it
+            // started, rather than after the reconciliation that reports nothing.
+            var progress = ProgressFor(serviceName);
+
+            LocalGitCheckout.PreparedCheckout prepared;
+            try
+            {
+                prepared = LocalGitCheckout.PrepareRepoRoot(
+                    serviceName, metadata, config, appHostDirectory, gitClient, progress);
+            }
+            finally
+            {
+                progress?.Complete();
+            }
+
+            return LocalGitCheckout.ReconcileRepoRoot(serviceName, metadata, config, prepared, gitClient);
         }
 
         // Waits on this service's checkout only. The other prefetched checkouts keep running in the
@@ -502,13 +642,22 @@ internal sealed class LocalCheckoutPrefetch
     /// anything already there. Never throws — the failure is carried in the result — because this
     /// task may be one nobody ever awaits.
     /// </summary>
-    private static Task<CheckoutResult> StartCheckoutTask(
+    /// <remarks>
+    /// Both callers hold <see cref="_gate"/>, which is what lets the progress stream be created
+    /// here: it is in place before the task that writes to it can run, and before any watcher can
+    /// look for it. Creating it at the one place a checkout starts is also what stops a new way of
+    /// starting one from silently arriving without progress.
+    /// </remarks>
+    private Task<CheckoutResult> StartCheckoutTask(
         string serviceName,
         ServiceMetadata metadata,
         ServiceDeveloperConfig config,
         string appHostDirectory,
-        IGitClient gitClient) =>
-        Task.Run(() =>
+        IGitClient gitClient)
+    {
+        var progress = WatchCheckoutLocked(serviceName);
+
+        return Task.Run(() =>
         {
             try
             {
@@ -516,7 +665,7 @@ internal sealed class LocalCheckoutPrefetch
                 // may never be added, but reconciling an existing checkout is not — see
                 // GetRepoRoot, which finishes the job for the services that are.
                 var prepared = LocalGitCheckout.PrepareRepoRoot(
-                    serviceName, metadata, config, appHostDirectory, gitClient);
+                    serviceName, metadata, config, appHostDirectory, gitClient, progress);
                 return new CheckoutResult(prepared, null);
             }
             catch (Exception ex)
@@ -526,7 +675,18 @@ internal sealed class LocalCheckoutPrefetch
                 // is never requested, ReportSpeculativeWork is what surfaces this.
                 return new CheckoutResult(null, ex);
             }
+            finally
+            {
+                // The clone is what there was to watch, and it is over — on every path, including
+                // the ones with no clone in them at all: a warm checkout, a 'path' override, a
+                // config error thrown before git ran. Ended here rather than when GetRepoRoot
+                // returns, because the ref reconciliation that follows reports nothing and a
+                // watcher left reading would hold the last percentage on screen for the whole of
+                // it, reading as exactly the stall this reporting exists to rule out.
+                progress.Complete();
+            }
         });
+    }
 
     private sealed record CheckoutResult(LocalGitCheckout.PreparedCheckout? Checkout, Exception? Exception);
 }
