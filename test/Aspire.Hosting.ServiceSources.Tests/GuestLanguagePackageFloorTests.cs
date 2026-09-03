@@ -115,6 +115,30 @@ public class GuestLanguagePackageFloorTests
         }
     }
 
+    /// <summary>
+    /// Two tables have to be edited together for a kind: the floors, keyed by assembly, and the
+    /// kind-to-assembly map that decides which floor a failing service can be told about. Wire only
+    /// the first and that kind's too-old report silently degrades to the generic "the handler
+    /// failed" message — nothing errors, so nothing says so. #46-#50 each add a kind, so this is
+    /// checked rather than remembered.
+    /// </summary>
+    [Fact]
+    public void EveryKindAndEveryFloor_AreWiredToEachOther()
+    {
+        var floors = GuestLanguagePackages.Floors.Select(floor => floor.PackageId).ToHashSet(StringComparer.Ordinal);
+        var mapped = GuestLanguagePackages.KindAssemblies.Select(entry => entry.AssemblyName).ToHashSet(StringComparer.Ordinal);
+
+        // Assembly simple name and package id are the same string for both of these today; if a
+        // package ever ships an assembly named differently this needs a second lookup, not a
+        // relaxed assertion.
+        Assert.Equal(floors.OrderBy(id => id, StringComparer.Ordinal), mapped.OrderBy(id => id, StringComparer.Ordinal));
+
+        foreach (var (kind, _) in GuestLanguagePackages.KindAssemblies)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(kind));
+        }
+    }
+
     private static string TargetsPath() => Path.Combine(
         RepositoryRoot(), "src", "Aspire.Hosting.ServiceSources", "build",
         "KoalaSoft.Aspire.Hosting.ServiceSources.targets");

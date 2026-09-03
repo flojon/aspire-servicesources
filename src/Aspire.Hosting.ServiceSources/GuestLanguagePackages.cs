@@ -38,11 +38,35 @@ internal static class GuestLanguagePackages
         };
 
     /// <summary>
+    /// Which assembly a kind reaches, keyed by the <c>kind</c> a service's yaml declares. Ordinal,
+    /// because kind names are matched case-sensitively wherever else they are read.
+    /// </summary>
+    /// <remarks>
+    /// Needed because a load failure that binds and then fails on a missing member names no
+    /// assembly, so the only thing that says which package could possibly be at fault is the kind
+    /// of the service that failed. Keyed off the kinds' own constants rather than repeating the
+    /// strings, so a renamed kind cannot leave this pointing at a name nothing declares.
+    /// </remarks>
+    private static readonly Dictionary<string, string> AssemblyByKind = new(StringComparer.Ordinal)
+    {
+        [JavaScriptLocalKind.KindName] = "Aspire.Hosting.JavaScript",
+        [Java.JavaLocalResourceKind.KindName] = "CommunityToolkit.Aspire.Hosting.Java",
+    };
+
+    /// <summary>
     /// The floors, for the invariant tests that compare them with the MSBuild ones and with the
     /// versions the repository restores against.
     /// </summary>
     public static IEnumerable<(string PackageId, string MinimumVersion)> Floors =>
         ByAssemblyName.Values;
+
+    /// <summary>
+    /// The kind-to-assembly mapping, for the invariant test that checks a kind added later is wired
+    /// into both tables rather than only one — half-wired, the too-old report for that kind silently
+    /// degrades to the generic message.
+    /// </summary>
+    public static IEnumerable<(string Kind, string AssemblyName)> KindAssemblies =>
+        AssemblyByKind.Select(entry => (entry.Key, entry.Value));
 
     /// <inheritdoc cref="DescribeMissingPackage(Exception, string, string, Func{string, Version?})"/>
     public static string? DescribeMissingPackage(Exception exception, string serviceName, string kind) =>
@@ -85,32 +109,40 @@ internal static class GuestLanguagePackages
             return null;
         }
 
-        foreach (var (assemblyName, package) in ByAssemblyName)
+        // Scoped to the failing service's own kind, unlike the branch above: there the exception
+        // names the assembly and is the better authority, whereas here the kind is the only thing
+        // that says which package could possibly be at fault. A javascript service cannot be failing
+        // because the java package is old - it never touches it - and naming one while quoting the
+        // other is worse than the generic message, since it sends the reader to change something
+        // irrelevant. A kind registered by someone else reaches packages whose floors are not ours
+        // to know, so it falls through.
+        if (!AssemblyByKind.TryGetValue(kind, out var assemblyName)
+            || !ByAssemblyName.TryGetValue(assemblyName, out var needed))
         {
-            var installed = installedVersion(assemblyName);
-
-            if (installed is null)
-            {
-                continue;
-            }
-
-            // Assembly versions carry a revision component that package versions do not, so compare
-            // only the three that both have.
-            var comparable = new Version(installed.Major, installed.Minor, Math.Max(installed.Build, 0));
-
-            if (comparable >= Version.Parse(package.MinimumVersion))
-            {
-                continue;
-            }
-
-            return $"Service '{serviceName}' has kind '{kind}', which needs {package.PackageId} "
-                + $"{package.MinimumVersion} or newer, but this AppHost has {comparable}. That version "
-                + "loaded and then failed on a member it does not carry, which is what a release "
-                + "older than the minimum — or a prerelease of it — does rather than failing to load. "
-                + $"Raise {package.PackageId} to {package.MinimumVersion} or newer.";
+            return null;
         }
 
-        return null;
+        var installed = installedVersion(assemblyName);
+
+        if (installed is null)
+        {
+            return null;
+        }
+
+        // Assembly versions carry a revision component that package versions do not, so compare only
+        // the three that both have.
+        var comparable = new Version(installed.Major, installed.Minor, Math.Max(installed.Build, 0));
+
+        if (comparable >= Version.Parse(needed.MinimumVersion))
+        {
+            return null;
+        }
+
+        return $"Service '{serviceName}' has kind '{kind}', which needs {needed.PackageId} "
+            + $"{needed.MinimumVersion} or newer, but this AppHost has {comparable}. That version "
+            + "loaded and then failed on a member it does not carry, which is what a release older "
+            + "than the minimum — or a prerelease of it — does rather than failing to load. "
+            + $"Raise {needed.PackageId} to {needed.MinimumVersion} or newer.";
     }
 
     private static string NotInstalledMessage(

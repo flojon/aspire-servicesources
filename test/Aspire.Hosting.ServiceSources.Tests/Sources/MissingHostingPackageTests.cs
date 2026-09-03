@@ -116,22 +116,58 @@ public class MissingHostingPackageTests
     /// is actually installed rather than by reading the exception.
     /// </summary>
     [Theory]
-    [InlineData("Aspire.Hosting.JavaScript", "13.5.2")]
-    [InlineData("CommunityToolkit.Aspire.Hosting.Java", "13.3.0")]
-    public void PackagePresentButOlderThanTheFloor_IsReportedAsTooOld(string packageId, string floor)
+    [InlineData("javascript", "Aspire.Hosting.JavaScript", "13.5.2")]
+    [InlineData("java", "CommunityToolkit.Aspire.Hosting.Java", "13.3.0")]
+    public void PackagePresentButOlderThanTheFloor_IsReportedAsTooOld(
+        string kind, string packageId, string floor)
     {
-        // Old for the package under test, comfortably new for the other, so the message has to
-        // name the one that is actually behind rather than whichever is enumerated first.
+        // Old for the package this kind needs, comfortably new for the other.
         var message = GuestLanguagePackages.DescribeMissingPackage(
             new TypeLoadException("could not load type 'Whatever'"),
             "frontend",
-            "javascript",
+            kind,
             name => name == packageId ? new Version(13, 0, 0) : new Version(99, 0, 0));
 
         Assert.NotNull(message);
         Assert.Contains(packageId, message, StringComparison.Ordinal);
         Assert.Contains(floor, message, StringComparison.Ordinal);
         Assert.Contains("13.0.0", message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The failing service's kind decides which package can possibly be to blame. A
+    /// <c>kind: javascript</c> service cannot be failing because the java package is old — it never
+    /// touches it — and a sentence that names one while quoting the other is worse than the generic
+    /// message, because it sends the reader to change something irrelevant.
+    /// </summary>
+    [Theory]
+    [InlineData("javascript", "CommunityToolkit.Aspire.Hosting.Java")]
+    [InlineData("java", "Aspire.Hosting.JavaScript")]
+    public void OldPackageBelongingToAnotherKind_IsNotBlamed(string kind, string unrelatedPackage)
+    {
+        var message = GuestLanguagePackages.DescribeMissingPackage(
+            new TypeLoadException("could not load type 'Whatever'"),
+            "frontend",
+            kind,
+            name => name == unrelatedPackage ? new Version(1, 0, 0) : new Version(99, 0, 0));
+
+        Assert.Null(message);
+    }
+
+    /// <summary>
+    /// A kind registered by someone else through <see cref="ServiceSourcesBuilderExtensions.AddLocalKind"/>
+    /// reaches whatever packages its own author chose, none of which this type knows the floors for.
+    /// </summary>
+    [Fact]
+    public void KindThisPackageDoesNotOwn_IsNeverAttributedToOneOfThesePackages()
+    {
+        var message = GuestLanguagePackages.DescribeMissingPackage(
+            new TypeLoadException("could not load type 'Whatever'"),
+            "frontend",
+            "rust",
+            _ => new Version(1, 0, 0));
+
+        Assert.Null(message);
     }
 
     [Fact]
