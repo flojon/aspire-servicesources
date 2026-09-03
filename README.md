@@ -699,7 +699,8 @@ public sealed class JavaScriptKind : ILocalResourceKind
     // Optional, and worth implementing whenever Resolve parses rawConfig or reads the checkout:
     // this runs immediately before Resolve, against the same repoRoot, and before this service has
     // added anything to the app model — so a typo'd options block, or one naming a directory the
-    // repository doesn't have, is reported without a half-created resource behind it.
+    // repository doesn't have, is reported without a half-created resource behind it. Not the only
+    // place to put these checks if your kind supports deferred checkouts — see below.
     public void Validate(string serviceName, string repoRoot, object? rawConfig)
     {
         var options = LocalKindConfig.Parse<Options>(rawConfig, serviceName);
@@ -734,10 +735,11 @@ name that collides with a well-known service property (`repository`, `project`, 
 `kind`, `kubernetes`, `url`, `container`) — a block by one of those names would be read as that
 property rather than as the kind's options.
 
-It also refuses a handler still declaring the pre-`repoRoot` `Validate(string, object?)` and not
-the current three-parameter one, naming the kind and the type. `Validate` is a defaulted interface
-member, so that kind compiles clean and simply stops implementing it — everything it rejected
-would be silently accepted instead. Registration is the only place left to say so; the build won't.
+It also refuses a handler that declares a `Validate` not matching the interface member — the
+pre-`repoRoot` `Validate(string, object?)`, or the parameter added in the wrong position — naming
+the kind and the method it found. `Validate` is a defaulted interface member, so any of those
+compile clean and simply stop implementing it, and everything they rejected would be silently
+accepted instead. Registration is the only place left to say so; the build won't.
 
 **Supporting [`UseDeferredCheckout()`](#first-run-usedeferredcheckout).** Two more members, both
 optional and both defaulting to "no", decide whether a service of your kind can start before its
@@ -770,12 +772,19 @@ public DeferredLocalResource? ResolveDeferred(
 ```
 
 Build the resource exactly as `Resolve` would, but read no file under `repoRoot` — hand those checks
-back as `ValidateCheckout`. `Validate` is paired with `Resolve` and so isn't called on this path at
-all: there is no checkout for it to judge the service against, which is why `ResolveDeferred` has to
-reject a bad options block itself. Endpoints are the one thing that can't be added later, so a kind
-that can only learn its endpoints by reading the repository should return `null`. Holding the
-resource back and starting it once the checkout lands is core's job, and it covers every resource
-the call adds to the app model, not just the one returned as `Service`.
+back as `ValidateCheckout`. Endpoints are the one thing that can't be added later, so a kind that
+can only learn its endpoints by reading the repository should return `null`. Holding the resource
+back and starting it once the checkout lands is core's job, and it covers every resource the call
+adds to the app model, not just the one returned as `Service`.
+
+> **Validate your options block here too.** `Validate` is paired with `Resolve`, and core calls
+> neither for a service it defers — there is no checkout for `Validate` to judge the service
+> against, so `ResolveDeferred` runs in their place. A kind that can answer `true` from
+> `SupportsDeferredCheckout` and rejects a bad block only in `Validate` has arranged for that block
+> never to be checked at all under `UseDeferredCheckout()`. Parse it here as well and throw
+> `ServiceSourcesConfigurationException`. Nothing warns you: implementing both `Validate` and
+> `ResolveDeferred` is the ordinary, correct arrangement — the built-in `java` kind does — so
+> there is no signal to refuse the way a mismatched `Validate` signature is refused.
 
 Returning `null` from `ResolveDeferred` after `SupportsDeferredCheckout` said `true` is honoured —
 legitimate for a kind that can only tell once it has looked at everything — but it isn't free. The

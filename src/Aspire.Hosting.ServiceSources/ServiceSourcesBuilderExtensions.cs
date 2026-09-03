@@ -199,6 +199,10 @@ public static class ServiceSourcesBuilderExtensions
     public static IDistributedApplicationBuilder AddLocalKind(
         this IDistributedApplicationBuilder builder, string kind, ILocalResourceKind handler)
     {
+        // Ahead of the reflection below, which would otherwise turn a null handler into a bare
+        // NullReferenceException naming neither the kind nor the call it came out of.
+        ArgumentNullException.ThrowIfNull(handler);
+
         RequireCurrentValidateSignature(kind, handler);
 
         // UseJavaScript()/UseJava() land here, and an AppHost calls one of those
@@ -211,53 +215,62 @@ public static class ServiceSourcesBuilderExtensions
     }
 
     /// <summary>
-    /// Refuses a handler still written against the pre-<c>repoRoot</c>
-    /// <see cref="ILocalResourceKind.Validate"/> signature, which nothing else would catch.
+    /// Refuses a handler whose <c>Validate</c> does not match
+    /// <see cref="ILocalResourceKind.Validate"/>, which nothing else would catch.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <see cref="ILocalResourceKind.Validate"/> is a defaulted interface member, so a kind
-    /// declaring the old <c>Validate(string, object?)</c> compiles clean against the current
-    /// interface — it simply stops implementing anything, and core calls the do-nothing default in
-    /// its place. Every rejection that method made would silently stop running, and the typo'd
-    /// options block it used to name would reach <see cref="ILocalResourceKind.Resolve"/> and
-    /// surface as a handler that failed while creating its resource. There is no compiler
-    /// diagnostic for that, so registration is the only seam left to put one at.
+    /// <see cref="ILocalResourceKind.Validate"/> is a defaulted interface member, so a
+    /// <c>Validate</c> of any other shape compiles clean against the current interface — the kind
+    /// simply stops implementing anything, and core calls the do-nothing default in its place. Every
+    /// rejection that method made would silently stop running, and the typo'd options block it used
+    /// to name would reach <see cref="ILocalResourceKind.Resolve"/> and surface as a handler that
+    /// failed while creating its resource. There is no compiler diagnostic for that, so registration
+    /// is the only seam left to put one at.
     /// </para>
     /// <para>
-    /// Both conditions are required. A kind that has migrated and, for its own reasons, kept a
-    /// method of the old shape — a helper of its own, an overload for its tests — is doing nothing
-    /// wrong, so what is refused is the old method <em>in place of</em> the new one. Whether the new
-    /// one is really implemented is read from the interface map rather than by name, so an explicit
-    /// implementation counts and the inherited default does not.
+    /// Any <c>Validate</c> at all counts as the attempt, not just the pre-<c>repoRoot</c>
+    /// <c>Validate(string, object?)</c>: adding the new parameter in the wrong position fails in
+    /// exactly the same silent way as never adding it, and matching only the old shape would let the
+    /// half-migrated case through. The trade is that an unrelated inherited method named
+    /// <c>Validate</c> is refused too, which the message answers by naming the method it found and
+    /// the signature it wanted.
+    /// </para>
+    /// <para>
+    /// Both conditions are required, so a kind that has migrated and, for its own reasons, keeps a
+    /// method of the old shape — a helper, an overload for its tests — is doing nothing wrong and is
+    /// not refused. Whether the interface member is really implemented is read from the interface
+    /// map rather than by name, so an explicit implementation counts and the inherited default does
+    /// not.
     /// </para>
     /// </remarks>
     private static void RequireCurrentValidateSignature(string kind, ILocalResourceKind handler)
     {
         var type = handler.GetType();
 
-        var stale = type.GetMethod(
-            nameof(ILocalResourceKind.Validate),
-            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
-            binder: null,
-            types: [typeof(string), typeof(object)],
-            modifiers: null);
+        if (ImplementsCurrentValidate(type))
+        {
+            return;
+        }
 
-        if (stale is null || ImplementsCurrentValidate(type))
+        var declared = type
+            .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+            .FirstOrDefault(method => method.Name == nameof(ILocalResourceKind.Validate));
+
+        if (declared is null)
         {
             return;
         }
 
         throw new ServiceSourcesConfigurationException(
-            $"Kind '{kind}' is registered by '{type.FullName}', which declares " +
-            "'Validate(string serviceName, object? rawConfig)' and no " +
-            "'Validate(string serviceName, string repoRoot, object? rawConfig)'. " +
-            $"{nameof(ILocalResourceKind)}.{nameof(ILocalResourceKind.Validate)} gained a 'repoRoot' " +
-            "parameter — the service's resolved checkout directory, so a kind can check a path its " +
-            "options block names against the repository that path is relative to — and the old " +
-            "two-parameter method no longer implements the interface. Nothing failed to compile " +
-            "because Validate is a defaulted member: the old method is simply never called, and " +
-            "everything it rejected would now be accepted. Add the parameter.");
+            $"Kind '{kind}' is registered by '{type.FullName}', which declares '{Describe(declared)}' but does " +
+            $"not implement '{nameof(ILocalResourceKind)}.{nameof(ILocalResourceKind.Validate)}" +
+            "(string serviceName, string repoRoot, object? rawConfig)'. Validate gained a 'repoRoot' " +
+            "parameter — the service's resolved checkout directory, so a kind can check a path its options " +
+            "block names against the repository that path is relative to. Nothing failed to compile because " +
+            "Validate is a defaulted member: a method of any other shape is never called, and everything it " +
+            "rejected would now be accepted. Match the signature exactly — or, if that method was never " +
+            "meant to be the interface's, implement Validate(string, string, object?) alongside it.");
     }
 
     /// <summary>
@@ -266,6 +279,12 @@ public static class ServiceSourcesBuilderExtensions
     /// interface map answers that for an explicit implementation too, which a search by name would
     /// miss: an explicitly implemented member is named for the interface it came from.
     /// </summary>
+    /// <remarks>
+    /// Written to answer "no" for anything it cannot read positively. A target the runtime left
+    /// unfilled is the shape a non-overridden default member has, which is the case this whole check
+    /// exists to catch — reading it as "implemented" would skip the refusal in precisely the
+    /// situation that needs it.
+    /// </remarks>
     private static bool ImplementsCurrentValidate(Type type)
     {
         var map = type.GetInterfaceMap(typeof(ILocalResourceKind));
@@ -277,9 +296,32 @@ public static class ServiceSourcesBuilderExtensions
                 continue;
             }
 
-            return map.TargetMethods[i]?.DeclaringType != typeof(ILocalResourceKind);
+            return map.TargetMethods[i] is { } target && target.DeclaringType != typeof(ILocalResourceKind);
         }
 
         return false;
     }
+
+    /// <summary>
+    /// A method rendered the way its author wrote it, for a message that has to be recognisable as
+    /// the method in front of them — the point of naming what was found rather than what was
+    /// expected.
+    /// </summary>
+    private static string Describe(MethodInfo method) =>
+        $"{method.Name}(" +
+        string.Join(", ", method.GetParameters().Select(p => $"{TypeName(p.ParameterType)} {p.Name}")) +
+        ")";
+
+    /// <summary>
+    /// The C# keyword for the handful of types these signatures are built from, and the plain type
+    /// name for anything else — <see cref="Type.Name"/> alone would render 'string' as 'String'.
+    /// </summary>
+    private static string TypeName(Type type) => type switch
+    {
+        _ when type == typeof(string) => "string",
+        _ when type == typeof(object) => "object",
+        _ when type == typeof(bool) => "bool",
+        _ when type == typeof(int) => "int",
+        _ => type.Name,
+    };
 }

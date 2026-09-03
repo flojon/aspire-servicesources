@@ -27,13 +27,28 @@ nothing will fail to build to warn you.
   in its place. Every rejection that method made would quietly stop running, and the typo'd options
   block it used to name would reach `Resolve` and surface as "the handler failed while creating its
   resource" instead. There is no compiler diagnostic for that, so `AddLocalKind` now refuses a
-  handler that declares `Validate(string, object?)` and no `Validate(string, string, object?)`,
-  naming the kind and the type. Registering the kind is what tells you; the build will not.
+  handler that declares a `Validate` not matching the interface member, naming the kind and the
+  method it found. Registering the kind is what tells you; the build will not.
 
   To migrate, add the parameter. A kind that only parsed its options block needs nothing else. A
   kind that never implemented `Validate` at all is unaffected — the default stands, and the check
   above says nothing about it, as it does not about a migrated kind that keeps an old-shaped method
   of its own. `Resolve`, `SupportsDeferredCheckout` and `ResolveDeferred` are untouched.
+
+  **A second silent change, and this one has no registration-time refusal to catch it: `Validate`
+  is no longer called for a service on the deferred path.** It is paired with `Resolve`, which core
+  does not call there either — under
+  [`UseDeferredCheckout()`](README.md#first-run-usedeferredcheckout) there is no checkout for it to
+  judge the service against, so `ResolveDeferred` is called instead. **If your kind can answer
+  `true` from `SupportsDeferredCheckout` and validates its options block only in `Validate`, that
+  block stops being validated at all for a deferred service.** Parse and reject it from
+  `ResolveDeferred` too, and hand the working-tree checks back as
+  `DeferredLocalResource.ValidateCheckout` as before. No trip wire is possible for this one:
+  implementing both `Validate` and `ResolveDeferred` is the ordinary, correct arrangement — the
+  built-in `java` kind is one — so anything detectable here would fire on working code. Saying it
+  is the only warning there is. Both shipped kinds already validate in `ResolveDeferred` and are
+  unaffected; a kind that leaves `SupportsDeferredCheckout` at its `false` default never reaches
+  this path at all.
 
   What the parameter buys is the check a kind could not make before: `repoRoot` is the same
   directory `Resolve` is about to get, already cloned and checked out, so a `workingDirectory`,
@@ -43,17 +58,13 @@ nothing will fail to build to warn you.
   `project` file, and core's "report it from `ILocalResourceKind.Validate` instead" message is now
   advice a handler author can act on.
 
-  Two consequences of handing it a checkout that has to be there:
-
-  - Core calls `Validate` after resolving the checkout rather than before, so a malformed options
-    block for the *first* `"local"` service an AppHost adds is now reported after that service's
-    clone rather than ahead of it. Later services are unaffected — their clones were already in
-    flight.
-  - `Validate` is paired with `Resolve`, and so is no longer called for a service that takes the
-    deferred path ([`UseDeferredCheckout()`](README.md#first-run-usedeferredcheckout)), where there
-    is no checkout to judge against. `ResolveDeferred` already had to reject a bad options block
-    itself and hand its working-tree checks back as `DeferredLocalResource.ValidateCheckout`; that
-    is unchanged, and the wrapper message on that path now points there rather than at `Validate`.
+  Handing it a checkout that has to be there is also what drops `Validate` off the deferred path
+  above, and it moves the call: core runs `Validate` after resolving the checkout rather than
+  before, so a malformed options block for the *first* `"local"` service an AppHost adds is now
+  reported after that service's clone rather than ahead of it. Later services are unaffected —
+  their clones were already in flight. The "the handler failed while creating its resource" wrapper
+  on the deferred path now points at `DeferredLocalResource.ValidateCheckout` rather than at
+  `Validate`, which core does not call there.
 
 - **The `.JavaScript` and `.Java` satellite packages are gone. Their kinds ship in
   `KoalaSoft.Aspire.Hosting.ServiceSources`, and your AppHost references Aspire's hosting

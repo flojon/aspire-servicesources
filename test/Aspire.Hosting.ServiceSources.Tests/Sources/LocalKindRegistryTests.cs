@@ -164,20 +164,55 @@ public class LocalKindRegistryTests
             throw new NotSupportedException("Not exercised by these tests.");
     }
 
-    [Fact]
-    public void AddLocalKind_HandlerStillOnTheOldValidateSignature_IsRefusedAtRegistration()
+    /// <summary>
+    /// Half-migrated: the parameter was added, in the wrong position. This fails in exactly the way
+    /// <see cref="KindWithTheOldValidateSignature"/> does — no interface member implemented, the
+    /// method never called — so matching only the old two-parameter shape would let it through.
+    /// </summary>
+    private sealed class KindWithTheParameterInTheWrongPosition : ILocalResourceKind
+    {
+        public void Validate(string serviceName, object? rawConfig, string repoRoot) =>
+            throw new ServiceSourcesConfigurationException("Never reached, and that is the point.");
+
+        public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+            IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) =>
+            throw new NotSupportedException("Not exercised by these tests.");
+    }
+
+    [Theory]
+    [InlineData(typeof(KindWithTheOldValidateSignature), "object rawConfig)")]
+    [InlineData(typeof(KindWithTheParameterInTheWrongPosition), "object rawConfig, string repoRoot)")]
+    public void AddLocalKind_HandlerWhoseValidateDoesNotMatchTheInterface_IsRefusedAtRegistration(
+        Type handlerType, string signatureTail)
     {
         var builder = CreateBuilder();
 
-        // Nothing else catches this: the old method compiles, and core runs the defaulted no-op in
-        // its place, so the kind's own rejections just stop happening.
+        // Nothing else catches either shape: both compile, and core runs the defaulted no-op in
+        // their place, so the kind's own rejections just stop happening.
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => builder.AddLocalKind("javascript", new KindWithTheOldValidateSignature()));
+            () => builder.AddLocalKind(
+                "javascript", (ILocalResourceKind)Activator.CreateInstance(handlerType)!));
 
         Assert.Contains("javascript", ex.Message);
-        Assert.Contains(nameof(KindWithTheOldValidateSignature), ex.Message);
+        Assert.Contains(handlerType.Name, ex.Message);
         Assert.Contains("repoRoot", ex.Message);
+
+        // The method it actually found, not just the one it wanted — otherwise an author who put the
+        // parameter in the wrong place is told to add a parameter that is already there.
+        Assert.Contains($"Validate(string serviceName, {signatureTail}", ex.Message);
         Assert.False(LocalKindRegistry.For(builder).TryGet("javascript", out _));
+    }
+
+    [Fact]
+    public void AddLocalKind_NullHandler_IsRejectedByName()
+    {
+        // The reflection above dereferences the handler, so without this the caller gets a bare
+        // NullReferenceException naming neither the argument nor the call it came out of.
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ArgumentNullException>(() => builder.AddLocalKind("javascript", null!));
+
+        Assert.Equal("handler", ex.ParamName);
     }
 
     [Fact]

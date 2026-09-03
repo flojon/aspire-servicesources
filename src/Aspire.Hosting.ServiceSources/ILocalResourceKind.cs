@@ -37,11 +37,16 @@ public interface ILocalResourceKind
     /// from here rather than from halfway through building a resource.
     /// </para>
     /// <para>
-    /// Paired with <see cref="Resolve"/>, and therefore not called for a service that takes the
-    /// deferred path: there is no checkout to judge against yet when
-    /// <see cref="ResolveDeferred"/> runs, so that call validates the options block itself and hands
-    /// the working-tree checks back as <see cref="DeferredLocalResource.ValidateCheckout"/>, which
-    /// core runs once the clone has landed.
+    /// <b>This is not the only place a kind that supports deferral can validate its options block.</b>
+    /// This call is paired with <see cref="Resolve"/>, and neither runs for a service on the deferred
+    /// path: there is no checkout to judge against yet when <see cref="ResolveDeferred"/> is called
+    /// instead. So a kind whose <see cref="SupportsDeferredCheckout"/> can answer
+    /// <see langword="true"/> has to parse and reject its block from <see cref="ResolveDeferred"/> as
+    /// well, and hand the working-tree checks back as
+    /// <see cref="DeferredLocalResource.ValidateCheckout"/>, which core runs once the clone has
+    /// landed. Validating only here leaves that service unvalidated under
+    /// <c>UseDeferredCheckout()</c>, silently: nothing reports the gap, because a kind that
+    /// implements both members is the ordinary case rather than a mistake.
     /// </para>
     /// <para>
     /// This used to run for every "local" service before <em>any</em> of them had touched the app
@@ -75,6 +80,13 @@ public interface ILocalResourceKind
     /// either; a block too malformed to answer for is <see langword="false"/>, which routes it to
     /// the eager path where <see cref="Validate"/> reports it properly.
     /// </para>
+    /// <para>
+    /// Answering <see langword="true"/> is also what takes this service's block out of
+    /// <see cref="Validate"/>'s hands, since core calls neither that nor <see cref="Resolve"/> for a
+    /// service it defers. A kind that answers <see langword="true"/> for a block it only validates in
+    /// <see cref="Validate"/> has just arranged for that block never to be validated — so whatever
+    /// this call admits, <see cref="ResolveDeferred"/> must be able to reject.
+    /// </para>
     /// </remarks>
     bool SupportsDeferredCheckout(object? rawConfig) => false;
 
@@ -102,6 +114,15 @@ public interface ILocalResourceKind
     /// them after the clone. Everything else is unchanged, including the endpoints — those cannot be
     /// added later, so a kind that can only learn its endpoints by reading the repository should
     /// return <see langword="null"/> rather than register a service nothing can resolve.
+    /// </para>
+    /// <para>
+    /// <b>Validating the options block is this call's job on this path.</b> Core does not call
+    /// <see cref="Validate"/> for a service it defers — that member is paired with
+    /// <see cref="Resolve"/>, and there is no checkout for it to judge the service against — so
+    /// whatever <see cref="Validate"/> would have rejected has to be rejected here as well, by
+    /// throwing <see cref="ServiceSourcesConfigurationException"/>. Leaving it only in
+    /// <see cref="Validate"/> means a deferred service of this kind is never validated at all, and
+    /// nothing reports that.
     /// </para>
     /// <para>
     /// Holding the resource back and starting it is core's job, not the handler's, and it covers
