@@ -35,10 +35,10 @@ public class MissingHostingPackageTests
         Assert.Contains(packageId, ex.Message, StringComparison.Ordinal);
 
         // The remedy, not just the diagnosis: both AppHost flavours need naming, because the
-        // build-time floor check in buildTransitive/KoalaSoft.Aspire.Hosting.ServiceSources.targets only
-        // reaches a project that consumes core as a NuGet package. A guest-language AppHost gets
-        // core through the ProjectReference the CLI generates, which imports no build/ targets, so
-        // this message is the only thing that tells its author what to add.
+        // build-time floor check in buildTransitive/ only reaches a project that consumes core as
+        // a NuGet package. A guest-language AppHost gets core through the ProjectReference the CLI
+        // generates, which imports none of a package's build-time targets, so this message is the
+        // only thing that tells its author what to add.
         Assert.Contains("aspire.config.json", ex.Message, StringComparison.Ordinal);
 
         // The load failure is the cause, and keeping it reachable is what lets anyone diagnose a

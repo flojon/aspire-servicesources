@@ -467,11 +467,11 @@ jobs:
       # Two invariants dependabot.yml states in prose and nothing enforces.
       #
       # That the nuget `ignore` list covers every floor, whether it is declared in
-      # src/Directory.Packages.props or named as a floor by core's build/ targets: directory
-      # scoping does not keep the updater out of src/ (that file's header, #80, #89), so the
-      # per-id list is what actually holds - maintained by hand, since there is no wildcard
-      # for "whatever those files declare". Core taking on a new dependency is one edit away
-      # from a floor Dependabot may raise, silently.
+      # src/Directory.Packages.props or named as a floor by core's buildTransitive/ targets.
+      # Directory scoping does not keep the updater out of src/ (that file's header, #80,
+      # #89), so the per-id list is what actually holds - maintained by hand, since there is
+      # no wildcard for "whatever those files declare". Core taking on a new dependency is one
+      # edit away from a floor Dependabot may raise, silently.
       #
       # And that no key is duplicated. Two `ignore` keys in one mapping has happened here:
       # YAML keeps the last, so the earlier list parsed and was discarded while still reading

@@ -16,10 +16,11 @@ namespace Aspire.Hosting.ServiceSources;
 /// version, so it binds and then fails on the member that is not there yet. This turns both into
 /// something actionable.
 /// <para>
-/// <c>buildTransitive/KoalaSoft.Aspire.Hosting.ServiceSources.targets</c> catches the too-old case earlier, at
-/// build time, but only for a project that consumes core as a NuGet package. A guest-language
-/// AppHost gets core through the <c>ProjectReference</c> the Aspire CLI generates, and a project
-/// reference imports no <c>build/</c> targets, so for those this is the only report there is.
+/// <c>buildTransitive/KoalaSoft.Aspire.Hosting.ServiceSources.targets</c> catches the too-old case
+/// earlier, at build time, but only for a project that consumes core as a NuGet package. A
+/// guest-language AppHost gets core through the <c>ProjectReference</c> the Aspire CLI generates,
+/// and a project reference imports none of a package's build-time targets, so for those this is
+/// the only report there is.
 /// </para>
 /// </remarks>
 internal static class GuestLanguagePackages
