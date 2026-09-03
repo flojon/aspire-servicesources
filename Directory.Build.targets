@@ -103,7 +103,10 @@
             // "([#62])" is a markdown reference link, and its definition lives at the end of
             // the file, outside the section. NuGet renders release notes as plain text, so
             // unwrap it to "(#62)" rather than shipping a link that resolves to nothing.
-            return Regex.Replace(match.Groups["body"].Value.Trim(), @"\[(\#\d+)\]", "$1");
+            // A cross-repository reference carries a prefix - "[microsoft/aspire#19507]",
+            // "[NuGetGallery#6948]" - and needs the same unwrapping. Only a label ending in
+            // "#<digits>" is one of these, which leaves "[AspireExport]" and the like alone.
+            return Regex.Replace(match.Groups["body"].Value.Trim(), @"\[([^\[\]]*\#\d+)\]", "$1");
         };
 
         var changelog = File.ReadAllText(ChangelogFile);
