@@ -87,12 +87,7 @@ internal static class TestHelpers
     /// Attaches a capturing logger to <paramref name="builder"/>'s services and hands back the list
     /// the package's own warnings land in.
     /// </summary>
-    /// <remarks>
-    /// For a test that has to build the service provider itself — because it goes on to publish
-    /// resource states through it — rather than let
-    /// <see cref="PublishBeforeStartEventCapturingWarningsAsync"/> build one and throw it away.
-    /// </remarks>
-    public static List<string> CaptureServiceSourcesWarnings(IDistributedApplicationBuilder builder)
+    private static List<string> CaptureServiceSourcesWarnings(IDistributedApplicationBuilder builder)
     {
         var captured = new List<string>();
 
