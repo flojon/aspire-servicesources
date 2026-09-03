@@ -19,4 +19,19 @@
     <PackageReference Include="YamlDotNet" />
   </ItemGroup>
 
+  <!-- The two guest-language hosting packages are compile-time only: PrivateAssets="all" keeps
+       them out of this package's nuspec, so an AppHost inherits neither them nor the Aspire
+       floors they carry. The kinds reach their types only inside method bodies, so the JIT
+       needs the assembly on disk only when a service actually declares kind: javascript/java. -->
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.JavaScript" PrivateAssets="all" />
+    <PackageReference Include="CommunityToolkit.Aspire.Hosting.Java" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- NuGet imports build/$(PackageId).targets into every consuming project, which is what lets
+       the floor for the two undeclared references be checked at the consumer's restore. -->
+  <ItemGroup>
+    <None Include="build\$(PackageId).targets" Pack="true" PackagePath="build\" />
+  </ItemGroup>
+
 </Project>

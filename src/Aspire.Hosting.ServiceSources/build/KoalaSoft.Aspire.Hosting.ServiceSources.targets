@@ -1,0 +1,51 @@
+<Project>
+
+  <!--
+    The version floor for the two guest-language hosting packages, which this package references
+    with PrivateAssets="all" and therefore does not declare as a dependency. NuGet enforces no
+    minimum on a reference it cannot see, so this does it instead: below the floor the compile-time
+    assembly reference cannot be satisfied, and the failure would otherwise arrive at run time as a
+    FileNotFoundException the first time a service of that kind resolves.
+
+    Only a package the AppHost actually references is checked. Not referencing one at all is the
+    normal case - an AppHost that declares no javascript or java service never needs either
+    assembly - and is reported at run time, by the kind that needed it, if a service does.
+  -->
+  <PropertyGroup>
+    <ServiceSourcesJavaScriptMinVersion>13.5.2</ServiceSourcesJavaScriptMinVersion>
+    <ServiceSourcesJavaMinVersion>13.3.0</ServiceSourcesJavaMinVersion>
+  </PropertyGroup>
+
+  <!--
+    ResolvePackageAssets is what turns the lock file into @(ResolvedCompileFileDefinitions), whose
+    NuGetPackageId/NuGetPackageVersion metadata is the resolved version rather than the range the
+    AppHost asked for - the resolved version is the one that has to clear the floor.
+  -->
+  <Target Name="ServiceSourcesVerifyGuestLanguageFloors"
+          AfterTargets="ResolvePackageAssets"
+          Condition="'$(ServiceSourcesSkipGuestLanguageFloorCheck)' != 'true'">
+
+    <ItemGroup>
+      <!-- A package resolves one compile item per assembly in it, so collapse to the version. -->
+      <_ServiceSourcesJavaScriptAsset Include="@(ResolvedCompileFileDefinitions)"
+                                      Condition="'%(NuGetPackageId)' == 'Aspire.Hosting.JavaScript'" />
+      <_ServiceSourcesJavaAsset Include="@(ResolvedCompileFileDefinitions)"
+                                Condition="'%(NuGetPackageId)' == 'CommunityToolkit.Aspire.Hosting.Java'" />
+      <_ServiceSourcesJavaScriptVersion
+          Include="@(_ServiceSourcesJavaScriptAsset->'%(NuGetPackageVersion)'->Distinct())" />
+      <_ServiceSourcesJavaVersion
+          Include="@(_ServiceSourcesJavaAsset->'%(NuGetPackageVersion)'->Distinct())" />
+    </ItemGroup>
+
+    <Error Condition="'@(_ServiceSourcesJavaScriptVersion)' != ''
+                      and $([MSBuild]::VersionLessThan('%(_ServiceSourcesJavaScriptVersion.Identity)', '$(ServiceSourcesJavaScriptMinVersion)'))"
+           Code="SERVICESOURCES001"
+           Text="KoalaSoft.Aspire.Hosting.ServiceSources needs Aspire.Hosting.JavaScript $(ServiceSourcesJavaScriptMinVersion) or newer for services with kind 'javascript', but this project resolves %(_ServiceSourcesJavaScriptVersion.Identity). Raise the Aspire.Hosting.JavaScript version, or remove the reference if no service declares that kind." />
+
+    <Error Condition="'@(_ServiceSourcesJavaVersion)' != ''
+                      and $([MSBuild]::VersionLessThan('%(_ServiceSourcesJavaVersion.Identity)', '$(ServiceSourcesJavaMinVersion)'))"
+           Code="SERVICESOURCES002"
+           Text="KoalaSoft.Aspire.Hosting.ServiceSources needs CommunityToolkit.Aspire.Hosting.Java $(ServiceSourcesJavaMinVersion) or newer for services with kind 'java', but this project resolves %(_ServiceSourcesJavaVersion.Identity). Raise the CommunityToolkit.Aspire.Hosting.Java version, or remove the reference if no service declares that kind." />
+  </Target>
+
+</Project>
