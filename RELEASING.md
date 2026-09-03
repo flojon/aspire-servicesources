@@ -14,16 +14,19 @@ is what makes the packages `0.3.1`. Consequences worth knowing before you start:
 - **Off a tag, every build is a prerelease** — `0.3.1-alpha.0.4` and so on. That is what the
   preview feed publishes, and it is why some problems only appear at release time (see
   [Gotchas](#gotchas)).
-- **All three packages release in lockstep**, one version from one tag. A satellite pins core
-  to its own minor, so they have to move together.
+- **One package is published**, one version from one tag.
 
-Published packages:
+Published package:
 
 | Package | Contents |
 | --- | --- |
-| `KoalaSoft.Aspire.Hosting.ServiceSources` | core |
-| `KoalaSoft.Aspire.Hosting.ServiceSources.Java` | `kind: java` satellite |
-| `KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript` | `kind: javascript` satellite |
+| `KoalaSoft.Aspire.Hosting.ServiceSources` | everything, including the `javascript` and `java` kinds |
+
+The `javascript` and `java` kinds compile against Aspire's hosting packages for those
+languages, referenced with `PrivateAssets="all"` so they reach no consumer's nuspec. Those are
+not released from here and have their own versions; the minimum each kind needs is enforced by
+`src/Aspire.Hosting.ServiceSources/build/KoalaSoft.Aspire.Hosting.ServiceSources.targets` and
+restated in `GuestLanguagePackages`, which a test keeps in agreement.
 
 Two feeds receive them:
 
@@ -81,37 +84,35 @@ triggers `release.yml`.
 gh run watch $(gh run list --workflow=release.yml --limit 1 --json databaseId --jq '.[0].databaseId') --exit-status
 ```
 
-`release.yml` tests, packs all three packages, obtains a nuget.org API key over OIDC trusted
+`release.yml` tests, packs, obtains a nuget.org API key over OIDC trusted
 publishing, and pushes. It runs `dotnet nuget push` **without** `--skip-duplicate`, deliberately:
 every release tag is a new version, so a 409 is a real failure and must not be swallowed.
 
 Then `prune-previews` deletes superseded prereleases from GitHub Packages, keeping the five most
-recent, one job per package.
+recent.
 
 Finally, confirm the packages are actually on the feed — a push can be accepted and still fail
 nuget.org's asynchronous validation, and indexing lags the push by a few minutes either way:
 
 ```bash
 curl -s https://api.nuget.org/v3-flatcontainer/koalasoft.aspire.hosting.servicesources/index.json
-curl -s https://api.nuget.org/v3-flatcontainer/koalasoft.aspire.hosting.servicesources.java/index.json
-curl -s https://api.nuget.org/v3-flatcontainer/koalasoft.aspire.hosting.servicesources.javascript/index.json
 ```
 
 ## Gotchas
 
 **A release build is not the shape CI has been testing.** Every build off a tag is a prerelease,
 so until the tag exists, nothing has packed a stable version. In `0.3.0` this shipped a broken
-release: `PinCoreDependency` closed the satellites' core range with a prerelease upper bound,
-`[0.3.0, 0.4.0-0)`, which nuget.org rejects at push time with `The package manifest contains an
-invalid Version` ([NuGetGallery#6948]) while `pack`, `restore`, the client and GitHub Packages
-all accept it. Core published; both satellites did not. The bound is now chosen per build and CI
-packs the release shape too — but the general hazard remains, so prefer a fix that makes CI
-exercise the release shape over one that only corrects the symptom.
+release: the satellites' core dependency was rewritten into a range with a prerelease upper
+bound, `[0.3.0, 0.4.0-0)`, which nuget.org rejects at push time with `The package manifest
+contains an invalid Version` ([NuGetGallery#6948]) while `pack`, `restore`, the client and
+GitHub Packages all accept it. Core published; both satellites did not. Those packages and that
+range are gone, but the general hazard is not — any dependency can acquire a prerelease bound —
+so CI packs the release shape and scans it, and prefer a fix that makes CI exercise the release
+shape over one that only corrects the symptom.
 
-**A partly-failed release cannot be re-run.** `release.yml` pushes all three packages in one
-step, so once core is on nuget.org, re-running the workflow for that tag fails on core's 409
-before it retries anything. And the version is spent — nuget.org will not accept it again even
-after an unlist. The way out is a patch release carrying the fix, which is what `0.3.1` is.
+**A spent version cannot be reused.** Once a version is on nuget.org, re-running the workflow
+for that tag fails on its 409, and nuget.org will not accept that version again even after an
+unlist. The way out is a patch release carrying the fix, which is what `0.3.1` was.
 
 **Do not delete or move a tag that has published anything.** The packages it produced are
 permanent; the tag is the only record of what commit they were built from.

@@ -1,5 +1,13 @@
 # Multi-language local source (#41)
 
+> **Superseded in part by #187, 2026-09-03.** The `ILocalResourceKind`/`AddLocalKind`
+> extension point below is unchanged and still how a kind is written. The *packaging* is not:
+> there are no satellite packages. A kind lives in
+> `KoalaSoft.Aspire.Hosting.ServiceSources` and the language's hosting package is referenced
+> with `PrivateAssets="all"`, so it reaches no consumer who has not asked for it — the
+> AppHost references it directly. Read the packaging sections here as history; #187 and the
+> per-language issues (#46-#50) carry the current shape.
+
 ## Problem
 
 `AddService()`'s `"local"` source only knows how to clone a repository and run

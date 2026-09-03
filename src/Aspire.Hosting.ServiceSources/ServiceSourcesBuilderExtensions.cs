@@ -24,7 +24,7 @@ public static class ServiceSourcesBuilderExtensions
     ///
     /// That is the opposite of the deliberate case-sensitivity of <c>kind</c> names (see
     /// <see cref="Sources.LocalKindRegistry.DescribeNearMatch"/>), and for a reason: kinds are an
-    /// open registry that satellite packages contribute names to, where folding case could collide
+    /// open registry that anything may contribute names to, where folding case could collide
     /// two packages' registrations, while these four names are a closed set this package owns and
     /// nothing else can add to.
     /// </remarks>
@@ -142,7 +142,7 @@ public static class ServiceSourcesBuilderExtensions
     /// </para>
     /// <para>
     /// Applies to the <c>"local"</c> kinds that own a managed checkout — <c>dotnet</c>, <c>java</c>
-    /// and <c>javascript</c>. The satellite kinds pay none of the cost below: neither has a launch
+    /// and <c>javascript</c>. Those two kinds pay none of the cost below: neither has a launch
     /// profile, and both take their endpoints from the committed catalog, so a deferred one is
     /// identical to a warm one and only their post-clone checks move. <c>url</c>, <c>kubernetes</c>
     /// and <c>container</c> clone nothing, so there is nothing to defer.
@@ -191,14 +191,14 @@ public static class ServiceSourcesBuilderExtensions
     /// <summary>
     /// Registers <paramref name="handler"/> as the resolver for local-sourced services whose
     /// <c>servicesources.yaml</c> entry declares <c>kind: &lt;paramref name="kind"/&gt;</c>.
-    /// Called by a satellite package's own registration method (e.g. a hypothetical
+    /// Called by a kind's own registration method (e.g. a hypothetical
     /// <c>UseJavaScript()</c>), not typically called directly by an AppHost author.
     /// </summary>
     [AspireExportIgnore]
     public static IDistributedApplicationBuilder AddLocalKind(
         this IDistributedApplicationBuilder builder, string kind, ILocalResourceKind handler)
     {
-        // A satellite's UseJavaScript()/UseJava() lands here, and an AppHost calls one of those
+        // UseJavaScript()/UseJava() land here, and an AppHost calls one of those
         // before its first AddService() — so this is usually the call that completes the AppHost's
         // configuration chain, ahead of any line of theirs that reads it.
         DeveloperConfigFileSource.EnsureRegistered(builder);

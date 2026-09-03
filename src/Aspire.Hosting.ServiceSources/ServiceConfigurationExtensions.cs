@@ -10,7 +10,7 @@ namespace Aspire.Hosting.ServiceSources;
 /// <para>
 /// The resolved resource's type depends on the service's source, which each developer sets in
 /// <c>servicesources.local.json</c> and can change without touching the AppHost. It may also be a
-/// type this package has never heard of, produced by a satellite
+/// type this package has never heard of, produced by a kind
 /// <see cref="ILocalResourceKind"/> delegating to an official Aspire integration. So the
 /// capabilities available cannot be expressed in <c>AddService</c>'s return type, and these methods
 /// name the capability they need and check for it at runtime.
@@ -26,7 +26,7 @@ namespace Aspire.Hosting.ServiceSources;
 /// put every mirrored method into IntelliSense on <i>every</i> resource builder in any AppHost
 /// referencing this package, and a mirror only ever covers the subset of Aspire's API somebody
 /// remembered to mirror. <c>Configure&lt;T&gt;</c> needs no updating as Aspire's API grows, and
-/// reaches satellite-specific extension methods this package has never heard of.
+/// reaches kind-specific extension methods this package has never heard of.
 /// </para>
 /// </remarks>
 public static class ServiceConfigurationExtensions
@@ -78,7 +78,7 @@ public static class ServiceConfigurationExtensions
 
     /// <summary>
     /// The resolved resource's builder, viewed as <typeparamref name="T"/>. Reaches anything
-    /// <see cref="Configure{T}"/> would, plus a satellite kind's own extension methods
+    /// <see cref="Configure{T}"/> would, plus a non-dotnet kind's own extension methods
     /// (<c>service.As&lt;JavaScriptAppResource&gt;().WithRunScript("dev")</c>).
     /// </summary>
     /// <remarks>

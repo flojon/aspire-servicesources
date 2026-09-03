@@ -11,6 +11,46 @@ nothing will fail to build to warn you.
 
 ## [Unreleased]
 
+### Breaking
+
+- **The `.JavaScript` and `.Java` satellite packages are gone. Their kinds ship in
+  `KoalaSoft.Aspire.Hosting.ServiceSources`, and your AppHost references Aspire's hosting
+  package for the language directly** ([#187]). To migrate, drop the satellite, reference core,
+  and add the hosting package you actually use:
+
+  ```bash
+  dotnet remove package KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript
+  dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources
+  dotnet add package Aspire.Hosting.JavaScript
+  ```
+
+  | `kind` | Package to reference | Minimum |
+  | --- | --- | --- |
+  | `java` | `CommunityToolkit.Aspire.Hosting.Java` | 13.3.0 |
+  | `javascript` | `Aspire.Hosting.JavaScript` | 13.5.2 |
+
+  Nothing in `servicesources.yaml`, `servicesources.local.json`, the options blocks or the public
+  API changes: `UseJavaScript()` and `UseJava()` keep their names, signatures and namespace, and a
+  guest-language AppHost keeps `useJavaScript()`/`useJava()`. Only where they come from changes.
+
+  Leaving a satellite reference in place does not keep working — it resolves a core that no longer
+  has a satellite to pair with. There is nothing to keep in step any more, though: the `NU1107`
+  lockstep between core and a satellite ([#79]) is gone with them, and the version of the hosting
+  package is yours to pick at or above the minimum above.
+
+  The dependency isolation the satellites existed for ([#89]) is unchanged, and is now enforced
+  without a package: core compiles against both hosting packages but references them with
+  `PrivateAssets="all"`, so they appear in no nuspec and an AppHost declaring no `javascript`
+  service inherits neither that package nor the Aspire floor it carries. Assemblies resolve
+  per-method at JIT time, so the assembly is needed only when a service of that kind actually
+  resolves.
+
+  Forget one and you are told which. A referenced version below the minimum fails the build with
+  `SERVICESOURCES001`, naming the package and the version that resolved. Missing entirely, the
+  first `AddService()` for a service of that kind fails with a message naming the package to
+  install — which is the only report a guest-language AppHost gets, since it consumes core through
+  a project reference the Aspire CLI generates and that imports no build-time checks.
+
 ## [0.4.0] - 2026-09-03
 
 ### Breaking
@@ -639,6 +679,7 @@ Targets `net10.0`.
 [#170]: https://github.com/flojon/aspire-servicesources/issues/170
 [#171]: https://github.com/flojon/aspire-servicesources/issues/171
 [#180]: https://github.com/flojon/aspire-servicesources/pull/180
+[#187]: https://github.com/flojon/aspire-servicesources/issues/187
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

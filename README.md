@@ -33,7 +33,7 @@ If every service your AppHost declares is a .NET project, this is the only packa
 dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources
 ```
 
-> **These packages floor Aspire at 13.5.2, so an AppHost still on 13.4.x gets a mixed Aspire
+> **This package floors Aspire at 13.5.2, so an AppHost still on 13.4.x gets a mixed Aspire
 > family.** NuGet takes the highest floor, so `Aspire.Hosting` is lifted to 13.5.2 while your
 > `Aspire.AppHost.Sdk`, `Aspire.Hosting.AppHost` and the DCP and dashboard packages the SDK
 > pins to it stay where they are. Nothing warns about it at restore. Move your AppHost's own
@@ -43,26 +43,32 @@ dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources
 > <Sdk Name="Aspire.AppHost.Sdk" Version="13.5.2" />
 > ```
 
-Services that aren't .NET projects need the satellite package for their language, so an
-AppHost only takes on the hosting dependencies it actually uses — see
+Services that aren't .NET projects need Aspire's hosting package for their language,
+referenced by your AppHost alongside this one — see
 [Non-.NET local services](#non-net-local-services-kind):
 
-| Language | Package |
-| --- | --- |
-| Java | `KoalaSoft.Aspire.Hosting.ServiceSources.Java` |
-| JavaScript | `KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript` |
-
-A satellite already depends on the core package, so add it *instead of* the core package
-rather than alongside it — restore brings the matching core in for you:
+| `kind` | Package | Minimum |
+| --- | --- | --- |
+| `java` | `CommunityToolkit.Aspire.Hosting.Java` | 13.3.0 |
+| `javascript` | `Aspire.Hosting.JavaScript` | 13.5.2 |
 
 ```bash
-dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript
+dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources
+dotnet add package Aspire.Hosting.JavaScript
 ```
 
-Two direct references mean two versions to move in step, because a satellite accepts core
-only within its own minor: bump one and not the other and restore fails with `NU1107`. A
-single reference has nothing to keep in step. Add a satellite per language you use; core
-still arrives once, transitively.
+Add one per language you actually use, and nothing for a language you don't. This package
+compiles against both but declares neither as a dependency, so an AppHost with no
+`javascript` service never sees `Aspire.Hosting.JavaScript`, nor the Aspire floor it carries
+— which is the point, because a mixed Aspire family restores clean and then throws
+`TypeLoadException` on first resolve. The version is yours to choose: pick any release at or
+above the minimum above, and the two need not match each other.
+
+Forget one and you are told which. Below the minimum, your build fails with
+`SERVICESOURCES001` naming the package and the version it resolved. Missing entirely, the
+first `AddService()` for a service of that kind fails with a message naming the package to
+install — the check that would have caught it at build time only runs for a project that
+consumes this package from NuGet.
 
 Or reference the project directly from your AppHost instead:
 
@@ -96,13 +102,11 @@ need is a token on your own account. It must be a **classic** personal access to
 ```bash
 dotnet nuget add source https://nuget.pkg.github.com/flojon/index.json \
   --name servicesources-preview --username <your-github-username> --password <your-pat>
-dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript --prerelease
+dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources --prerelease
 ```
 
-Add the satellite here too, not core alongside it — the feed carries a prerelease of all
-three packages per commit, so two direct references are two prereleases to keep in step.
-If you use no satellite at all, `dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources
---prerelease` is the single reference to add.
+One package, so one prerelease. The language hosting packages are Aspire's own and come from
+nuget.org as usual — a preview of this package does not imply a preview of those.
 
 ## Getting started
 
@@ -489,15 +493,16 @@ services:
 ```
 
 `kind: dotnet` (the default) uses the entry's `project` property and needs no options block.
-Any other kind is resolved by a handler that a satellite package registers, and its options
-live in a block named after the kind. Kind names are matched case-sensitively, and a kind with
-no registered handler fails at that service's `AddService()` call, before its checkout is used.
+Any other kind is resolved by a registered handler, and its options live in a block named after
+the kind. Kind names are matched case-sensitively, and a kind with no registered handler fails
+at that service's `AddService()` call, before its checkout is used.
 
 #### JavaScript: `kind: javascript`
 
-Provided by the `KoalaSoft.Aspire.Hosting.ServiceSources.JavaScript` package, which runs the
-checkout through [`Aspire.Hosting.JavaScript`](https://www.nuget.org/packages/Aspire.Hosting.JavaScript).
-Install it, then call `UseJavaScript()` once, before the first `AddService()` call:
+Runs the checkout through
+[`Aspire.Hosting.JavaScript`](https://www.nuget.org/packages/Aspire.Hosting.JavaScript), which
+your AppHost references itself (13.5.2 or newer — see [Installation](#installation)). Reference
+it, then call `UseJavaScript()` once, before the first `AddService()` call:
 
 ```csharp
 using Aspire.Hosting.ServiceSources;
@@ -569,9 +574,10 @@ that use them.
 
 #### Java: `kind: java`
 
-Provided by the `KoalaSoft.Aspire.Hosting.ServiceSources.Java` package, which runs the checkout
-through the .NET Aspire Community Toolkit's
-[Java integration](https://github.com/CommunityToolkit/Aspire). Install it, then call `UseJava()`
+Runs the checkout through the .NET Aspire Community Toolkit's
+[Java integration](https://github.com/CommunityToolkit/Aspire), which your AppHost references
+itself as `CommunityToolkit.Aspire.Hosting.Java` (13.3.0 or newer — see
+[Installation](#installation)). Reference it, then call `UseJava()`
 once, before the first `AddService()` call — `AddService()` resolves eagerly, so a `kind: java`
 service registered after it has already run has nowhere to look up its handler:
 
@@ -670,7 +676,7 @@ before `addService(...)` the same way.
 
 #### Implementing a kind
 
-A satellite package implements `ILocalResourceKind` and registers it from its own extension
+A kind implements `ILocalResourceKind` and registers it from an extension
 method:
 
 ```csharp
@@ -1047,7 +1053,7 @@ or just needing it reachable, not caring how:
 The `source` value is matched without regard to case, so `"local"`, `"Local"` and `"LOCAL"` all name
 the same source. A name none of the four has is refused at composition time, naming the ones that
 exist. (The `kind` names in `servicesources.yaml` are the exception — those *are* case-sensitive,
-because satellite packages register them and two packages must not be able to collide by spelling.)
+because anything may register one and two registrations must not be able to collide by spelling.)
 
 ### Overriding `servicesources.local.json`
 
@@ -1209,7 +1215,7 @@ var backend = builder.AddService("backend")
 ```
 
 `As<T>()` is the same cast without the callback, and reaches anything `Configure` would — including
-a satellite kind's own extension methods:
+a non-dotnet kind's own extension methods:
 
 ```csharp
 backend.As<JavaScriptAppResource>().WithRunScript("dev");
@@ -1289,7 +1295,7 @@ exposes is decided by whichever source resolved it:
 | Source | Endpoint name |
 |---|---|
 | `"local"`, `kind: dotnet` | whatever the launch profile's `applicationUrl` declares (`http`, `https`, or both) |
-| `"local"`, satellite kinds (`javascript`, `java`) | `http` |
+| `"local"`, non-dotnet kinds (`javascript`, `java`) | `http` |
 | `"url"` | the configured URL's scheme |
 | `"kubernetes"`, `"container"` | the configured `scheme`, `http` unless set |
 

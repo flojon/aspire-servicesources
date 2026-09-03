@@ -225,7 +225,7 @@ internal sealed class DeferredCheckout
     /// </summary>
     /// <remarks>
     /// Withholding is applied here rather than by the handler, and to every resource the handler
-    /// added rather than only the one it returned. A satellite integration is entitled to add
+    /// added rather than only the one it returned. A kind is entitled to add
     /// helpers of its own next to the service — <c>Aspire.Hosting.JavaScript</c> adds the
     /// <c>npm install</c> installer the app waits on — and every one of them would otherwise be
     /// started by DCP against a directory that does not exist yet. Making that core's job also keeps
@@ -716,7 +716,7 @@ internal sealed class DeferredCheckout
             }
 
             // Whatever this kind could only settle against a real working tree: the dotnet kind's
-            // launch profile, a satellite kind's DeferredLocalResource.ValidateCheckout.
+            // launch profile, a kind's DeferredLocalResource.ValidateCheckout.
             deferred.OnCheckoutLanded(deferred.Resource, repoRoot, logger);
 
             logger.LogInformation("Checkout ready at {RepoRoot}. Starting.", repoRoot);

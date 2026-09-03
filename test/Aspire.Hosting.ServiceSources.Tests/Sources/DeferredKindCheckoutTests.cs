@@ -9,7 +9,7 @@ namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 /// <summary>
 /// Deferral for the non-dotnet <c>"local"</c> kinds (#159): the part of the protocol core owns,
 /// exercised through a stand-in <see cref="ILocalResourceKind"/> rather than through the java or
-/// javascript satellites, so what is asserted here is what <em>any</em> kind can rely on.
+/// javascript kinds, so what is asserted here is what <em>any</em> kind can rely on.
 /// </summary>
 public class DeferredKindCheckoutTests
 {
@@ -170,7 +170,7 @@ public class DeferredKindCheckoutTests
     }
 
     /// <summary>
-    /// What a satellite kind hands back: an executable that is also service-discoverable, which
+    /// What a non-dotnet kind hands back: an executable that is also service-discoverable, which
     /// plain <see cref="ExecutableResource"/> is not — <c>JavaAppExecutableResource</c> and
     /// <c>JavaScriptAppResource</c> are the real ones.
     /// </summary>
@@ -277,7 +277,7 @@ public class DeferredKindCheckoutTests
     }
 
     /// <summary>
-    /// #76 for a satellite kind. <c>SupportsDeferredCheckout</c> is the question core can ask about
+    /// #76 for a non-dotnet kind. <c>SupportsDeferredCheckout</c> is the question core can ask about
     /// a service nobody has added — it touches no filesystem and registers nothing — so the prefetch
     /// can ask it too, and leave a would-be-deferred service's clone to the registration that will
     /// actually want it.
@@ -487,7 +487,7 @@ public class DeferredKindCheckoutTests
             new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
         await PublishNotStartedAsync(services, service.Resource);
 
-        // The failure isolation #159 wants for the satellite kinds: a java clone that fails today
+        // The failure isolation #159 wants for the guest-language kinds: a java clone that fails today
         // takes the whole AppHost down. Deferred, it is reported as this one service's state and
         // never as an exception on a task nobody awaits.
         await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
