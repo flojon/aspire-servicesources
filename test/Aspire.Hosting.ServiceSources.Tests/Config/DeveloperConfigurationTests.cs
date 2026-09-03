@@ -559,10 +559,9 @@ public class DeveloperConfigurationTests
     }
 
     /// <remarks>
-    /// The file's own root key is the one typo left silent after every key <em>inside</em> an entry
-    /// became an error: only the <c>services</c> subtree crosses into the AppHost's configuration,
-    /// so a misspelled root contributes nothing and the failure arrives as "nothing is configured"
-    /// — a description of an empty file, handed to a developer looking at a populated one.
+    /// Only the <c>services</c> subtree crosses into the AppHost's configuration, so a misspelled
+    /// root key contributes nothing at all: without this the failure is "nothing is configured" —
+    /// a description of an empty file, handed to a developer looking at a populated one.
     ///
     /// Reported as a near miss rather than by rejecting root keys the file does not recognize: the
     /// file is entitled to carry keys of its own (pinned by
