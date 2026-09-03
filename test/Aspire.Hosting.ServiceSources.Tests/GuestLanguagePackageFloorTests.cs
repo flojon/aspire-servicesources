@@ -4,7 +4,7 @@ namespace Aspire.Hosting.ServiceSources.Tests;
 
 /// <summary>
 /// The minimum version of each guest-language hosting package is stated in several places, because
-/// several different mechanisms need it: <c>build/KoalaSoft.Aspire.Hosting.ServiceSources.targets</c>
+/// several different mechanisms need it: <c>buildTransitive/KoalaSoft.Aspire.Hosting.ServiceSources.targets</c>
 /// fails a consumer's build, <see cref="GuestLanguagePackages"/> explains the runtime load failure
 /// for the consumers that file cannot reach, and the version core actually restores against lives in
 /// the repository's props files. Numbers that must agree and are edited in different files are
@@ -140,7 +140,7 @@ public class GuestLanguagePackageFloorTests
     }
 
     private static string TargetsPath() => Path.Combine(
-        RepositoryRoot(), "src", "Aspire.Hosting.ServiceSources", "build",
+        RepositoryRoot(), "src", "Aspire.Hosting.ServiceSources", "buildTransitive",
         "KoalaSoft.Aspire.Hosting.ServiceSources.targets");
 
     /// <summary>

@@ -491,7 +491,7 @@ jobs:
           # against is the oldest a consumer may bring, since the runtime rolls an assembly
           # reference forward but not back - so a raise is as deliberate as any other. This
           # file is where they are named as floors, so it is the second source of truth.
-          GUEST_FLOORS = "src/Aspire.Hosting.ServiceSources/build/KoalaSoft.Aspire.Hosting.ServiceSources.targets"
+          GUEST_FLOORS = "src/Aspire.Hosting.ServiceSources/buildTransitive/KoalaSoft.Aspire.Hosting.ServiceSources.targets"
 
           duplicates = []
 
@@ -528,11 +528,20 @@ jobs:
               if update.get("package-ecosystem") == "nuget":
                   ignored |= {e["dependency-name"] for e in update.get("ignore", [])}
 
+          # Each id remembers which file declares it, so a diagnostic points at the file the
+          # reader has to edit. Without that, a guest-language id would be annotated against
+          # FLOORS - the one file where those are deliberately not declared.
+          sources = {}
+
           with open(FLOORS) as f:
-              declared = set(re.findall(r'<PackageVersion\s+Include="([^"]+)"', f.read()))
+              for package in re.findall(r'<PackageVersion\s+Include="([^"]+)"', f.read()):
+                  sources.setdefault(package, FLOORS)
 
           with open(GUEST_FLOORS) as f:
               guest = set(re.findall(r"'%\(NuGetPackageId\)'\s*==\s*'([^']+)'", f.read()))
+
+          for package in guest:
+              sources.setdefault(package, GUEST_FLOORS)
 
           if not guest:
               print(
@@ -541,7 +550,7 @@ jobs:
               )
               failed = True
 
-          declared |= guest
+          declared = set(sources)
 
           # Not "nothing to check": an empty set compares clean against anything, so without
           # this the step passes for as long as it keeps reading the wrong file.
@@ -554,13 +563,13 @@ jobs:
 
           for package in sorted(declared - ignored):
               print(
-                  f"::error file={FLOORS}::{package} is declared here, so its version is a "
-                  f"floor consumers inherit, but {DEPENDABOT} does not ignore it - Dependabot "
-                  f"is free to raise it on a schedule. Add it to the ignore list."
+                  f"::error file={sources[package]}::{package} is a floor stated here, so it is "
+                  f"the oldest version a consumer may bring, but {DEPENDABOT} does not ignore it "
+                  f"- Dependabot is free to raise it on a schedule. Add it to the ignore list."
               )
               failed = True
 
-          print(f"{len(declared)} floors declared in {FLOORS}, {len(ignored)} ids ignored:")
+          print(f"{len(declared)} floors found, {len(ignored)} ids ignored:")
           for package in sorted(declared & ignored):
               print(f"  floor, ignored: {package}")
           for package in sorted(declared - ignored):

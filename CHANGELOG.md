@@ -53,7 +53,9 @@ nothing will fail to build to warn you.
   reaches a package reached transitively as well as a direct one. Missing entirely, the first
   `AddService()` for a service of that kind fails with a message naming the package to install —
   which is the only report a guest-language AppHost gets, since it consumes core through a project
-  reference the Aspire CLI generates and that imports no build-time checks.
+  reference the Aspire CLI generates and that imports no build-time checks. Where the package
+  arrived transitively and neither remedy is yours to apply, `ServiceSourcesSkipGuestLanguageFloorCheck=true`
+  turns the build-time check off for that project and leaves the run-time report standing.
 
 ## [0.4.0] - 2026-09-03
 

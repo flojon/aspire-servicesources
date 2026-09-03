@@ -61,7 +61,7 @@ updates:
     # Every floor is here, kept in sync by hand - there is no wildcard meaning "whatever
     # those files declare". Most come from src/Directory.Packages.props; the two
     # guest-language hosting packages are floors without being dependencies, and are named as
-    # such in src/Aspire.Hosting.ServiceSources/build/KoalaSoft.Aspire.Hosting.ServiceSources.targets
+    # such in src/Aspire.Hosting.ServiceSources/buildTransitive/KoalaSoft.Aspire.Hosting.ServiceSources.targets
     # (see the header). ci.yml's `verify repo invariants` job reads both files and fails if a
     # floor is missing from this list. These are floors regardless of publisher, not just the
     # Aspire ones. `ignore` blocks only version updates, so the header's security exception

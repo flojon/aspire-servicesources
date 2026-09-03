@@ -25,7 +25,7 @@ Published package:
 The `javascript` and `java` kinds compile against Aspire's hosting packages for those
 languages, referenced with `PrivateAssets="all"` so they reach no consumer's nuspec. Those are
 not released from here and have their own versions; the minimum each kind needs is enforced by
-`src/Aspire.Hosting.ServiceSources/build/KoalaSoft.Aspire.Hosting.ServiceSources.targets` and
+`src/Aspire.Hosting.ServiceSources/buildTransitive/KoalaSoft.Aspire.Hosting.ServiceSources.targets` and
 restated in `GuestLanguagePackages`, which a test keeps in agreement.
 
 Two feeds receive them:

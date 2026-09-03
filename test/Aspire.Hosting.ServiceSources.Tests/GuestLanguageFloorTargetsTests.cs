@@ -3,8 +3,8 @@ using System.Diagnostics;
 namespace Aspire.Hosting.ServiceSources.Tests;
 
 /// <summary>
-/// <c>build/KoalaSoft.Aspire.Hosting.ServiceSources.targets</c> is the only thing that reports a
-/// too-old hosting package before an AppHost runs, and it is the one piece of this package that
+/// <c>buildTransitive/KoalaSoft.Aspire.Hosting.ServiceSources.targets</c> is the only thing
+/// that reports a too-old hosting package before an AppHost runs, and it is the one piece of this package that
 /// executes in someone else's build rather than ours — so nothing else here covers it. It also has
 /// the shape that hides mistakes: a condition that is wrong in the permissive direction produces no
 /// error, which is indistinguishable from a version that was fine.
@@ -26,9 +26,10 @@ public class GuestLanguageFloorTargetsTests
     [InlineData("13.5.3", false)]                // newer
     [InlineData("13.5.3-preview.1.25", false)]   // a prerelease above the floor is still above it
     [InlineData("14.0.0", false)]                // a new major is not this gate's business
-    public void TheFloorGate_RejectsExactlyTheVersionsBelowTheFloor(string resolved, bool shouldReject)
+    public async Task TheFloorGate_RejectsExactlyTheVersionsBelowTheFloor(
+        string resolved, bool shouldReject)
     {
-        var (exitCode, output) = RunProbe("Aspire.Hosting.JavaScript", resolved);
+        var (exitCode, output) = await RunProbeAsync("Aspire.Hosting.JavaScript", resolved);
 
         if (shouldReject)
         {
@@ -52,9 +53,9 @@ public class GuestLanguageFloorTargetsTests
     [InlineData("13.3.0-beta.1", true)]
     [InlineData("13.3.0", false)]
     [InlineData("13.4.0", false)]
-    public void TheJavaFloorGate_UsesItsOwnFloorAndCode(string resolved, bool shouldReject)
+    public async Task TheJavaFloorGate_UsesItsOwnFloorAndCode(string resolved, bool shouldReject)
     {
-        var (exitCode, output) = RunProbe("CommunityToolkit.Aspire.Hosting.Java", resolved);
+        var (exitCode, output) = await RunProbeAsync("CommunityToolkit.Aspire.Hosting.Java", resolved);
 
         if (shouldReject)
         {
@@ -73,15 +74,16 @@ public class GuestLanguageFloorTargetsTests
     /// references neither package must build, because it declares no service of either kind.
     /// </summary>
     [Fact]
-    public void NoGuestLanguagePackageAtAll_IsAccepted()
+    public async Task NoGuestLanguagePackageAtAll_IsAccepted()
     {
-        var (exitCode, output) = RunProbe(packageId: null, resolved: null);
+        var (exitCode, output) = await RunProbeAsync(packageId: null, resolved: null);
 
         Assert.DoesNotContain("SERVICESOURCES00", output, StringComparison.Ordinal);
         Assert.Equal(0, exitCode);
     }
 
-    private static (int ExitCode, string Output) RunProbe(string? packageId, string? resolved)
+    private static async Task<(int ExitCode, string Output)> RunProbeAsync(
+        string? packageId, string? resolved)
     {
         var dir = Directory.CreateTempSubdirectory("floor-gate").FullName;
 
@@ -120,8 +122,16 @@ public class GuestLanguageFloorTargetsTests
                 RedirectStandardError = true,
             })!;
 
-            var output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
-            process.WaitForExit();
+            // Both pipes drained concurrently, and only then waited on. Reading one to the end
+            // before touching the other deadlocks the moment the child fills the pipe it is not
+            // being read from - which MSBuild can do without the probe being wrong at all, on an
+            // SDK resolution failure or a first-run NuGet message. That hangs the suite instead of
+            // failing it, which is the worse outcome of the two.
+            var stdout = process.StandardOutput.ReadToEndAsync();
+            var stderr = process.StandardError.ReadToEndAsync();
+
+            var output = await stdout + await stderr;
+            await process.WaitForExitAsync();
 
             return (process.ExitCode, output);
         }
@@ -143,7 +153,7 @@ public class GuestLanguageFloorTargetsTests
         Assert.NotNull(dir);
 
         return Path.Combine(
-            dir.FullName, "src", "Aspire.Hosting.ServiceSources", "build",
+            dir.FullName, "src", "Aspire.Hosting.ServiceSources", "buildTransitive",
             "KoalaSoft.Aspire.Hosting.ServiceSources.targets");
     }
 }

@@ -29,17 +29,20 @@
   </ItemGroup>
 
   <!-- The floor check for the two undeclared references, imported into a consuming project by
-       NuGet. Packed to both folders deliberately: build/ is imported only for a *direct*
-       PackageReference, so an AppHost that picks this package up through a shared conventions
-       package - the shape a team uses to centralise its Aspire setup - would get no check at all
-       and would meet the floor as a runtime load failure instead. buildTransitive/ is what reaches
-       that project. Both are shipped rather than buildTransitive/ alone so the direct case does not
-       depend on buildTransitive/ also being honoured for direct references. Shipping both is safe
-       because they are the same file: two imports declaring one target name leave one target, which
-       runs once. -->
+       NuGet.
+
+       buildTransitive/ only, and the folder name is not a preference: measured against a restored
+       package, NuGet's generated nuget.g.targets imports buildTransitive/ and nothing else for a
+       *direct* PackageReference as well as for a transitive one - buildTransitive/ supersedes
+       build/ rather than complementing it. A build/ copy would never be imported by anything, and
+       having both invites deleting the wrong one, which would silently stop the gate reaching an
+       AppHost that picks this package up through a shared conventions package. The directory here
+       is named to match the package path for the same reason.
+
+       Requires NuGet 5.0 or later, which every client able to restore a net8.0 package has. -->
   <ItemGroup>
-    <None Include="build\$(PackageId).targets" Pack="true" PackagePath="build\$(PackageId).targets" />
-    <None Include="build\$(PackageId).targets" Pack="true" PackagePath="buildTransitive\$(PackageId).targets" />
+    <None Include="buildTransitive\$(PackageId).targets" Pack="true"
+          PackagePath="buildTransitive\$(PackageId).targets" />
   </ItemGroup>
 
 </Project>

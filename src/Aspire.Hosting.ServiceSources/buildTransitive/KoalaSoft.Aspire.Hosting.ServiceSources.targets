@@ -10,6 +10,12 @@
     Only a package the AppHost actually references is checked. Not referencing one at all is the
     normal case - an AppHost that declares no javascript or java service never needs either
     assembly - and is reported at run time, by the kind that needed it, if a service does.
+
+    A package can also arrive transitively, from a graph the AppHost does not control, where
+    neither remedy in the message below is available. Setting
+    ServiceSourcesSkipGuestLanguageFloorCheck=true turns this off for that project, which is why
+    the message names it: the check is worth failing a build over, but not worth being unable to
+    get past. The run-time report in GuestLanguagePackages still stands behind it.
   -->
   <PropertyGroup>
     <ServiceSourcesJavaScriptMinVersion>13.5.2</ServiceSourcesJavaScriptMinVersion>
@@ -65,14 +71,14 @@
                            or ('%(_ServiceSourcesJavaScriptVersion.Prerelease)' == 'True'
                                and $([MSBuild]::VersionEquals('%(_ServiceSourcesJavaScriptVersion.Core)', '$(ServiceSourcesJavaScriptMinVersion)'))))"
            Code="SERVICESOURCES001"
-           Text="KoalaSoft.Aspire.Hosting.ServiceSources needs Aspire.Hosting.JavaScript $(ServiceSourcesJavaScriptMinVersion) or newer for services with kind 'javascript', but this project resolves %(_ServiceSourcesJavaScriptVersion.Identity). Raise the Aspire.Hosting.JavaScript version, or remove the reference if no service declares that kind." />
+           Text="KoalaSoft.Aspire.Hosting.ServiceSources needs Aspire.Hosting.JavaScript $(ServiceSourcesJavaScriptMinVersion) or newer for services with kind 'javascript', but this project resolves %(_ServiceSourcesJavaScriptVersion.Identity). Raise the Aspire.Hosting.JavaScript version, or remove the reference if no service declares that kind. If it arrived transitively and neither is yours to do, set ServiceSourcesSkipGuestLanguageFloorCheck=true to bypass this check - the failure is then reported at run time, by the service that needed it." />
 
     <Error Condition="'@(_ServiceSourcesJavaVersion)' != ''
                       and ($([MSBuild]::VersionLessThan('%(_ServiceSourcesJavaVersion.Core)', '$(ServiceSourcesJavaMinVersion)'))
                            or ('%(_ServiceSourcesJavaVersion.Prerelease)' == 'True'
                                and $([MSBuild]::VersionEquals('%(_ServiceSourcesJavaVersion.Core)', '$(ServiceSourcesJavaMinVersion)'))))"
            Code="SERVICESOURCES002"
-           Text="KoalaSoft.Aspire.Hosting.ServiceSources needs CommunityToolkit.Aspire.Hosting.Java $(ServiceSourcesJavaMinVersion) or newer for services with kind 'java', but this project resolves %(_ServiceSourcesJavaVersion.Identity). Raise the CommunityToolkit.Aspire.Hosting.Java version, or remove the reference if no service declares that kind." />
+           Text="KoalaSoft.Aspire.Hosting.ServiceSources needs CommunityToolkit.Aspire.Hosting.Java $(ServiceSourcesJavaMinVersion) or newer for services with kind 'java', but this project resolves %(_ServiceSourcesJavaVersion.Identity). Raise the CommunityToolkit.Aspire.Hosting.Java version, or remove the reference if no service declares that kind. If it arrived transitively and neither is yours to do, set ServiceSourcesSkipGuestLanguageFloorCheck=true to bypass this check - the failure is then reported at run time, by the service that needed it." />
   </Target>
 
 </Project>

@@ -75,6 +75,11 @@ with a message naming the package to install — which is the only report a gues
 gets, since the Aspire CLI hands it this package through a project reference and a project
 reference imports no build-time checks.
 
+The build-time check also fires for a package that arrived transitively, from a graph your AppHost
+does not control — where neither raising it nor removing it may be yours to do. Set
+`ServiceSourcesSkipGuestLanguageFloorCheck=true` in that project to turn the check off; the version
+problem is then reported at run time, by the service that needed it.
+
 Or reference the project directly from your AppHost instead:
 
 ```xml

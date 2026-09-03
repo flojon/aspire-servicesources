@@ -16,7 +16,7 @@ namespace Aspire.Hosting.ServiceSources;
 /// version, so it binds and then fails on the member that is not there yet. This turns both into
 /// something actionable.
 /// <para>
-/// <c>build/KoalaSoft.Aspire.Hosting.ServiceSources.targets</c> catches the too-old case earlier, at
+/// <c>buildTransitive/KoalaSoft.Aspire.Hosting.ServiceSources.targets</c> catches the too-old case earlier, at
 /// build time, but only for a project that consumes core as a NuGet package. A guest-language
 /// AppHost gets core through the <c>ProjectReference</c> the Aspire CLI generates, and a project
 /// reference imports no <c>build/</c> targets, so for those this is the only report there is.
@@ -26,7 +26,7 @@ internal static class GuestLanguagePackages
 {
     /// <summary>
     /// Keyed by assembly simple name, which is what a load failure carries. The version is the floor
-    /// the same package has in <c>build/KoalaSoft.Aspire.Hosting.ServiceSources.targets</c>;
+    /// the same package has in <c>buildTransitive/KoalaSoft.Aspire.Hosting.ServiceSources.targets</c>;
     /// <c>GuestLanguagePackageFloorTests</c> fails if those, these, and the versions the repository
     /// restores against ever part company.
     /// </summary>
