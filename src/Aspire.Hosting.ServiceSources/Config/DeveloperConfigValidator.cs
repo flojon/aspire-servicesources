@@ -372,7 +372,7 @@ internal static class DeveloperConfigValidator
     private static string NotValidHere(
         string serviceName, IConfigurationSection key, DeveloperConfigShape shape)
     {
-        var homes = shape.HomeBlocksOf(key.Key).Select(block => block.ToLowerInvariant()).ToArray();
+        var homes = shape.HomeBlocksOf(key.Key).Select(Spelled).ToArray();
 
         if (homes.Length == 1)
         {
@@ -396,7 +396,7 @@ internal static class DeveloperConfigValidator
         // candidates and stops rather than illustrating one of them as though it were the answer.
         if (near.Count == 1)
         {
-            var (field, block) = (near[0].Field.ToLowerInvariant(), near[0].Block.ToLowerInvariant());
+            var (field, block) = (Spelled(near[0].Field), Spelled(near[0].Block));
 
             return $"'{key.Key}' is not a valid key here. Did you mean '{field}', in the "
                 + $"'{block}' block: \"{serviceName}\": {{ ..., \"{block}\": {{ \"{field}\": ... }} }}?"
@@ -431,10 +431,10 @@ internal static class DeveloperConfigValidator
             candidates
                 .GroupBy(candidate => candidate.Field, StringComparer.OrdinalIgnoreCase)
                 .Select(group =>
-                    $"'{group.Key.ToLowerInvariant()}', in the "
+                    $"'{Spelled(group.Key)}', in the "
                     + string.Join(
                         " or ",
-                        group.Select(candidate => $"'{candidate.Block.ToLowerInvariant()}'")
+                        group.Select(candidate => $"'{Spelled(candidate.Block)}'")
                             .Order(StringComparer.Ordinal))
                     + " block"));
 
@@ -692,5 +692,24 @@ internal static class DeveloperConfigValidator
         + $"{$"{section.Path}:{exampleField}".Replace(":", "__", StringComparison.Ordinal)}.";
 
     private static string Quoted(IEnumerable<string> keys) =>
-        string.Join(", ", keys.Select(k => $"'{k.ToLowerInvariant()}'").Order(StringComparer.Ordinal));
+        string.Join(", ", keys.Select(k => $"'{Spelled(k)}'").Order(StringComparer.Ordinal));
+
+    /// <summary>
+    /// A key as a developer writes it, from the property name the shape derived it from.
+    /// </summary>
+    /// <remarks>
+    /// Lowercasing the whole name was invisible while every field in this file was a single word,
+    /// and stopped being invisible the moment one was not: `WindowsCommand` was advertised as
+    /// `windowscommand`, and `ConnectionString` — which predates it — as `connectionstring`. Both
+    /// bind, since configuration keys are case-insensitive, so the spelling was never wrong so much
+    /// as not the one the documentation uses, in the one sentence whose whole job is to tell a
+    /// developer what to type.
+    /// <para>
+    /// Applied only to names that came from the shape, never to a key echoed back from what the
+    /// developer wrote: this lowercases the first character and keeps the rest, which is right for a
+    /// PascalCase property and would mangle an oddly-cased key from a file.
+    /// </para>
+    /// </remarks>
+    private static string Spelled(string key) =>
+        key.Length == 0 ? key : char.ToLowerInvariant(key[0]) + key[1..];
 }

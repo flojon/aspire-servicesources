@@ -37,20 +37,54 @@ internal sealed class ProcessPrepareCommandRunner : IPrepareCommandRunner
 
         using var process = Start(startInfo, command[0]);
 
+        // The end of each stream, which is a different event from the process exiting — see Drain.
+        var stdoutEnded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stderrEnded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
         // Both streams, line by line as they arrive: the developer is watching a step that can take
         // minutes, and a command's progress is as likely to be on stderr as on stdout. Read through
         // the events rather than by blocking on one stream at a time, which deadlocks as soon as the
         // other one fills its pipe buffer.
-        process.OutputDataReceived += (_, e) => Forward(e.Data, onLine);
-        process.ErrorDataReceived += (_, e) => Forward(e.Data, onLine);
+        process.OutputDataReceived += (_, e) => Forward(e.Data, onLine, stdoutEnded);
+        process.ErrorDataReceived += (_, e) => Forward(e.Data, onLine, stderrEnded);
 
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
         Wait(process, cancellationToken);
+        Drain(stdoutEnded.Task, stderrEnded.Task);
 
         return process.ExitCode;
     }
+
+    /// <summary>
+    /// How long to keep waiting for the command's output after the command itself has exited.
+    /// </summary>
+    /// <remarks>
+    /// Bounded, and the bound is the whole point. A redirected stream ends when the last handle to
+    /// its write end closes — not when the process that was handed it exits — so a script that
+    /// starts a helper without redirecting the helper's output leaves this pipe held open by
+    /// something that may outlive the AppHost. Waiting for that unconditionally, which
+    /// <see cref="Process.WaitForExit()"/> does, hangs the caller, and on the eager path the caller
+    /// is composition: no timeout, nothing to cancel it. Measured rather than reasoned about — a
+    /// script whose only sin was <c>sleep 20 &amp;</c> held the runner for the whole twenty seconds.
+    /// <para>
+    /// Long enough to be irrelevant in the ordinary case, where the pipes close with the process and
+    /// this returns at once. What it costs in the pathological one is the tail of a command that has
+    /// already exited, which is the right way round.
+    /// </para>
+    /// </remarks>
+    private static readonly TimeSpan StreamDrainTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Waits for what the command wrote to have been forwarded, for as long as that is worth
+    /// waiting for.
+    /// </summary>
+    private static void Drain(params Task[] streamsEnded) =>
+        // The result is deliberately ignored: a timeout means a stream is still held open, which
+        // nothing reports, because nothing is wrong with the step — it ran and it exited. Disposing
+        // the process on the way out detaches the readers.
+        Task.WhenAll(streamsEnded).Wait(StreamDrainTimeout);
 
     /// <summary>
     /// Waits for the command, and kills it if the wait is cancelled.
@@ -62,32 +96,45 @@ internal sealed class ProcessPrepareCommandRunner : IPrepareCommandRunner
     /// alone would leave the download and the import running with nothing left to stop them.
     /// </para>
     /// <para>
-    /// The parameterless <see cref="Process.WaitForExit()"/> follows the cancellable wait, and is
-    /// not redundant: it is what waits for the redirected output readers to finish, so every line
-    /// the command wrote has reached <c>onLine</c> before this returns. On the cancelled path it
-    /// runs after the kill, for the same reason — the tail of what the command managed to say is
-    /// still worth having.
+    /// Waits for the process and for nothing else, which is the whole reason this polls rather than
+    /// awaiting. <b>Both</b> of the obvious waits also wait for the redirected streams to end — the
+    /// parameterless <see cref="Process.WaitForExit()"/> by documentation, and
+    /// <see cref="Process.WaitForExitAsync"/> because it is that method's async equivalent down to
+    /// the drain. Stream end is not process exit (see <see cref="StreamDrainTimeout"/>), so neither
+    /// is bounded by anything the command controls: measured, a script whose only sin was
+    /// <c>sleep 20 &amp;</c> held both. The integer overload is the one that waits for the process
+    /// alone, so it is the one used, and cancellation is checked between polls.
+    /// </para>
+    /// <para>
+    /// Draining is a separate, bounded step, and it is skipped entirely on the cancelled path:
+    /// nothing reads the output of a step the developer interrupted, and waiting for it is what
+    /// there was to avoid.
     /// </para>
     /// </remarks>
     private static void Wait(Process process, CancellationToken cancellationToken)
     {
-        try
+        while (!process.WaitForExit(ExitPollMilliseconds))
         {
-            // Blocking on the async wait rather than polling: this method is synchronous by design —
-            // both callers already block for as long as the step takes — and there is no
-            // synchronization context here to deadlock against.
-            process.WaitForExitAsync(cancellationToken).GetAwaiter().GetResult();
-        }
-        catch (OperationCanceledException)
-        {
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                continue;
+            }
+
             Kill(process);
-            process.WaitForExit();
 
-            throw;
+            cancellationToken.ThrowIfCancellationRequested();
         }
-
-        process.WaitForExit();
     }
+
+    /// <summary>
+    /// How often the wait above looks up to see whether it has been cancelled.
+    /// </summary>
+    /// <remarks>
+    /// The cost of not being able to await the one thing worth awaiting. Short enough that Ctrl-C
+    /// during a four-minute import feels immediate, and long enough that a step running for an hour
+    /// costs a few thousand handle waits and nothing else.
+    /// </remarks>
+    private const int ExitPollMilliseconds = 100;
 
     private static void Kill(Process process)
     {
@@ -103,13 +150,16 @@ internal sealed class ProcessPrepareCommandRunner : IPrepareCommandRunner
         }
     }
 
-    private static void Forward(string? line, Action<string> onLine)
+    private static void Forward(string? line, Action<string> onLine, TaskCompletionSource ended)
     {
         // The stream's end arrives as a null line.
-        if (line is not null)
+        if (line is null)
         {
-            onLine(line);
+            ended.TrySetResult();
+            return;
         }
+
+        onLine(line);
     }
 
     private static Process Start(ProcessStartInfo startInfo, string writtenProgram)

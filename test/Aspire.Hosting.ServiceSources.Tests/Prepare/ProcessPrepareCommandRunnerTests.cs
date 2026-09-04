@@ -117,6 +117,48 @@ public class ProcessPrepareCommandRunnerTests
         }
     }
 
+    /// <summary>
+    /// A command that leaves a helper holding the output pipe still returns.
+    /// </summary>
+    /// <remarks>
+    /// A redirected stream ends when the last handle to its write end closes, not when the process
+    /// that was handed it exits — so a script that starts a helper without redirecting the helper's
+    /// output leaves this pipe open behind it. The parameterless <see cref="Process.WaitForExit()"/>
+    /// waits for that, unconditionally: measured before the fix, the runner was still blocked eight
+    /// seconds after the script had exited, and on the eager path that is composition hanging with
+    /// no timeout and nothing to cancel it. The drain is bounded instead, so what a held pipe costs
+    /// is the tail of a command that has already finished.
+    /// </remarks>
+    [Fact]
+    public async Task ACommandThatLeavesAHelperHoldingThePipe_StillReturns()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var directory = Directory.CreateTempSubdirectory().FullName;
+        WriteScript(
+            Path.Combine(directory, "daemonize.sh"),
+            """
+            #!/bin/sh
+            sleep 120 &
+            echo parent-exiting
+            exit 3
+            """);
+
+        var started = Stopwatch.StartNew();
+        var exitCode = await Task.Run(() => ProcessPrepareCommandRunner.Instance.Run(
+            directory, ["./daemonize.sh"], CancellationToken.None, _ => { }))
+            .WaitAsync(TimeSpan.FromSeconds(60));
+
+        // Bounded by the drain rather than by the helper, which is still sleeping.
+        Assert.True(started.Elapsed < TimeSpan.FromSeconds(30), $"took {started.Elapsed}");
+
+        // And the command's own answer survives the bounded wait.
+        Assert.Equal(3, exitCode);
+    }
+
     [Fact]
     public async Task ACommandThatExits_ReportsItsOutputAndExitCode()
     {

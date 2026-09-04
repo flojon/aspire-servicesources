@@ -1038,6 +1038,18 @@ motivating case is a shell script that runs `curl` and then a JVM, either of whi
 outlive the AppHost it belonged to. Composition has no token to give, so the eager path passes none
 and a killed AppHost orphans the child there as it always has.
 
+Waiting for the command turned out to be the part with a trap in it, and it is worth recording
+because both obvious ways of doing it are wrong. A redirected stream ends when the last handle to
+its write end closes — *not* when the process handed that handle exits — so a script that starts a
+helper without redirecting the helper's output leaves the pipe held open behind it. Both
+`Process.WaitForExit()` and `Process.WaitForExitAsync` wait for that as well as for the process, the
+second being the async equivalent of the first down to the drain, so neither is bounded by anything
+the command controls: measured, a script whose only sin was `sleep 20 &` held the runner for the
+whole twenty seconds, and on the eager path that is composition hanging with no timeout and nothing
+to cancel it. The integer overload waits for the process alone, so the runner polls that and checks
+cancellation between polls, then drains the streams under a short bound of its own. What a held pipe
+costs is therefore the tail of a command that has already exited, which is the right way round.
+
 It also does not reach backing services, which since #144/#199 have a source of their own that is
 *also* spelled `"local"`. That one means "run this dependency locally, through the factory the
 AppHost handed in" — there is no repository, no checkout, and so nothing to bootstrap. `prepare`

@@ -294,6 +294,60 @@ public class CheckoutPreparationTests
         Assert.Single(fixture.Runner.Runs);
     }
 
+    // ---- would it run at all ------------------------------------------------
+
+    /// <summary>
+    /// The question the publish-mode skip asks before saying anything.
+    /// </summary>
+    /// <remarks>
+    /// Reporting the skip unconditionally named a step that was not going to run anyway — every
+    /// start after the first — and told the developer to materialize a checkout they already had.
+    /// Asked through the same decision <see cref="CheckoutPreparation.Run"/> makes, so the two
+    /// cannot drift apart about what "would run" means.
+    /// </remarks>
+    private static bool WouldRun(Fixture fixture, PrepareStep step, bool managedCheckout = true) =>
+        CheckoutPreparation.WouldRun(
+            ServiceName, step, fixture.RepoRoot, fixture.AppHostDirectory, managedCheckout, fixture.Git);
+
+    [Fact]
+    public void WouldRun_NoMarker_IsTrue() => Assert.True(WouldRun(NewFixture(), Step()));
+
+    [Fact]
+    public void WouldRun_AMarkerThatSatisfiesIt_IsFalse()
+    {
+        var fixture = NewFixture();
+        Run(fixture, Step());
+
+        Assert.False(WouldRun(fixture, Step()));
+    }
+
+    [Fact]
+    public void WouldRun_Always_IsTrueEvenWithAMarker()
+    {
+        var fixture = NewFixture();
+        Run(fixture, Step());
+
+        Assert.True(WouldRun(fixture, Step("always")));
+    }
+
+    [Fact]
+    public void WouldRun_Never_IsFalse() => Assert.False(WouldRun(NewFixture(), Step("never")));
+
+    /// <remarks>
+    /// Asking must not be the thing that runs it, since the caller is the path that has decided not
+    /// to.
+    /// </remarks>
+    [Fact]
+    public void WouldRun_RunsNothingAndRecordsNothing()
+    {
+        var fixture = NewFixture();
+
+        WouldRun(fixture, Step());
+
+        Assert.Empty(fixture.Runner.Runs);
+        Assert.False(File.Exists(fixture.MarkerPath));
+    }
+
     // ---- what is reported ---------------------------------------------------
 
     [Fact]

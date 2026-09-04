@@ -106,6 +106,33 @@ public class PreparePlanTests
         Assert.Contains("prepare.command is an empty list", ex.Message);
     }
 
+    /// <remarks>
+    /// A yaml <c>~</c> binds as a null element, and an argv element cannot be one: it reaches
+    /// <c>ArgumentList</c> as an <c>ArgumentNullException</c> and <c>Describe</c> as a dereference
+    /// of nothing, so this class's own diagnostics escaped as a crash for a mistake in a file.
+    /// </remarks>
+    [Fact]
+    public void ANullArgument_IsRejectedByName()
+    {
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Plan(new PrepareMetadata { Command = ["./prepare.sh", null!, "--full"] }));
+
+        Assert.Contains($"'{ServiceName}'", ex.Message);
+        Assert.Contains("element 2 of prepare.command", ex.Message);
+    }
+
+    /// <remarks>
+    /// An empty argument is not the same mistake: a command may genuinely take one, so it is passed
+    /// through where a null is refused.
+    /// </remarks>
+    [Fact]
+    public void AnEmptyArgument_IsAllowed()
+    {
+        var step = Plan(Catalog(["./prepare.sh", "", "--full"])).Step;
+
+        Assert.Equal<string[]>(["./prepare.sh", "", "--full"], [.. step!.Command]);
+    }
+
     [Fact]
     public void BlankProgram_IsRejected()
     {
@@ -294,6 +321,23 @@ public class PreparePlanTests
         // Carried verbatim, so it can be copied into the local file.
         Assert.Contains("\"./prepare.sh\"", plan.IgnoredCatalogNotice);
         Assert.Contains("local.path", plan.IgnoredCatalogNotice);
+    }
+
+    /// <summary>
+    /// A step the catalog has centrally disabled asks no <c>path</c> developer to copy it in.
+    /// </summary>
+    /// <remarks>
+    /// <c>mode: never</c> in the catalog says nothing should run anywhere. The notice exists to
+    /// offer a command the developer could adopt, so offering one the catalog has turned off is
+    /// advice against the catalog's own instruction — and it repeated on every start.
+    /// </remarks>
+    [Fact]
+    public void PathCheckout_ACatalogStepDisabledCentrally_SaysNothing()
+    {
+        var plan = Plan(Catalog(["./prepare.sh"], mode: "never"), managedCheckout: false);
+
+        Assert.Null(plan.Step);
+        Assert.Null(plan.IgnoredCatalogNotice);
     }
 
     [Fact]

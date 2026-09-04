@@ -673,7 +673,7 @@ public class DeveloperConfigValidatorTests
         Assert.Contains("'comand' is not a valid key in the 'local.prepare' block", ex.Message);
         Assert.Contains("'command'", ex.Message);
         Assert.Contains("'mode'", ex.Message);
-        Assert.Contains("'windowscommand'", ex.Message);
+        Assert.Contains("'windowsCommand'", ex.Message);
 
         // The block's rules are expressed in terms of a computed 'IsDeclared', which is a member and
         // not a key: offering it in the one sentence that exists to say what may be written would

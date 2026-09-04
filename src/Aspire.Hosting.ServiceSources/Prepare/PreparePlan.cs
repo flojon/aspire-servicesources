@@ -96,7 +96,7 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
 
         return managedCheckout
             ? ForManagedCheckout(serviceName, catalog, developer, catalogMode, developerMode, windows)
-            : ForPathCheckout(serviceName, catalog, developer, developerMode, windows);
+            : ForPathCheckout(serviceName, catalog, developer, catalogMode, developerMode, windows);
     }
 
     private static PreparePlan ForManagedCheckout(
@@ -140,6 +140,7 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
         string serviceName,
         PrepareMetadata? catalog,
         PrepareDeveloperConfig? developer,
+        PrepareMode? catalogMode,
         PrepareMode? developerMode,
         bool windows)
     {
@@ -152,7 +153,14 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
             // the duplication cheap enough to be the right trade. It repeats on every start until
             // the developer declares a block of their own, which is the only thing that resolves it
             // and so the only thing that silences it.
-            var inherited = SelectPlatform(catalog?.Command, catalog?.WindowsCommand, windows);
+            // The catalog's mode is consulted even though a `path` service inherits nothing else
+            // from the block, because it decides whether there is anything to be told about. A team
+            // that has centrally disabled the step with `mode: never` has said that nothing should
+            // run anywhere — asking every `path` developer, on every start, to copy in a command the
+            // catalog itself has turned off is advice against the catalog's own instruction.
+            var inherited = catalogMode == PrepareMode.Never
+                ? null
+                : SelectPlatform(catalog?.Command, catalog?.WindowsCommand, windows);
 
             return inherited is null
                 ? Nothing

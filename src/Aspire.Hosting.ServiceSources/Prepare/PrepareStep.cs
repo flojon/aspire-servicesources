@@ -91,6 +91,22 @@ internal sealed class PrepareStep
                 + "\"./prepare.sh\", or a name resolved through PATH, e.g. \"make\".");
         }
 
+        // Every element, not only the first. A yaml `~` or a JSON null binds as a null element, and
+        // an argv element cannot be one: it reaches ProcessStartInfo.ArgumentList as an
+        // ArgumentNullException, and Describe as a dereference of nothing — which is this class's
+        // own diagnostics escaping as a crash for a mistake in a file. An *empty* argument is
+        // deliberately allowed, since a command may genuinely take one.
+        for (var index = 1; index < command.Count; index++)
+        {
+            if (command[index] is null)
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Service '{serviceName}': element {index + 1} of {writtenAt}.command is empty — a yaml '~' "
+                    + "or a JSON null — which is not an argument. Remove it, or write it as \"\" if the command "
+                    + "really takes an empty one.");
+            }
+        }
+
         return new PrepareStep(
             [ConfineProgram(serviceName, program, writtenAt), .. command.Skip(1)], mode, windowsWithoutVariant);
     }

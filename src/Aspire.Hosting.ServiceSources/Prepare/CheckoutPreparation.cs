@@ -93,25 +93,18 @@ internal static class CheckoutPreparation
         IPrepareOutputSink sink,
         CancellationToken cancellationToken = default)
     {
-        var markerPath = PrepareMarker.LocationFor(serviceName, repoRoot, appHostDirectory, managedCheckout);
+        var decision = Decide(serviceName, step, repoRoot, appHostDirectory, managedCheckout, gitClient);
 
-        // The path a `path` marker is keyed on as well as the command and the commit: it is the one
-        // marker that does not live with the directory it describes, so re-pointing `local.path`
-        // elsewhere has to invalidate it, and two services sharing one directory have to keep
-        // independent markers.
-        var checkoutPath = managedCheckout ? null : PrepareMarker.NormalizeCheckoutPath(repoRoot);
-
-        // Read after the checkout has been reconciled onto its configured ref, so this is the commit
-        // the step actually runs against. Not read at all under `always`, which consults no marker
-        // and writes none, so there is nothing for it to be compared with or recorded in.
-        var commit = step.Mode == PrepareMode.Always ? null : gitClient.GetHeadCommitSha(repoRoot);
-
-        if (ReasonToRun(step, markerPath, commit, checkoutPath) is not { } reason)
+        if (decision.Reason is not { } reason)
         {
             // A decision to skip is not reported. Skipping is the ordinary case — every start after
             // the first — and the marker file already records it.
             return;
         }
+
+        var markerPath = decision.MarkerPath;
+        var checkoutPath = decision.CheckoutPath;
+        var commit = decision.Commit;
 
         sink.Report($"{Tag(serviceName)} {reason} Running: {step.Describe()}");
 
@@ -140,6 +133,60 @@ internal static class CheckoutPreparation
                 appHostDirectory,
                 managedCheckout);
         }
+    }
+
+    /// <summary>
+    /// Whether this step would run at all, for a caller that is not going to run it and wants to
+    /// know whether that is worth saying.
+    /// </summary>
+    /// <remarks>
+    /// The publish-mode skip is the caller. Reporting it unconditionally names a step that was not
+    /// going to run anyway — every start after the first, where the marker already satisfies it —
+    /// and the advice attached to it ("run the AppHost once to materialize the checkout") is then
+    /// about a checkout that is already materialized. Asked through the same decision the run makes,
+    /// so the two cannot disagree about what "would run" means.
+    /// </remarks>
+    public static bool WouldRun(
+        string serviceName,
+        PrepareStep step,
+        string repoRoot,
+        string appHostDirectory,
+        bool managedCheckout,
+        IGitClient gitClient) =>
+        Decide(serviceName, step, repoRoot, appHostDirectory, managedCheckout, gitClient).Reason is not null;
+
+    /// <param name="Reason">Why the step is about to run, or <see langword="null"/> when it is not.</param>
+    /// <param name="CheckoutPath">
+    /// The normalized checkout path a <c>path</c> marker is keyed on, or <see langword="null"/> for a
+    /// managed checkout, whose marker location is already the key.
+    /// </param>
+    /// <param name="Commit">The commit the step would run against, where that is knowable.</param>
+    private readonly record struct Decision(
+        string? Reason, string MarkerPath, string? CheckoutPath, string? Commit);
+
+    private static Decision Decide(
+        string serviceName,
+        PrepareStep step,
+        string repoRoot,
+        string appHostDirectory,
+        bool managedCheckout,
+        IGitClient gitClient)
+    {
+        var markerPath = PrepareMarker.LocationFor(serviceName, repoRoot, appHostDirectory, managedCheckout);
+
+        // The path a `path` marker is keyed on as well as the command and the commit: it is the one
+        // marker that does not live with the directory it describes, so re-pointing `local.path`
+        // elsewhere has to invalidate it, and two services sharing one directory have to keep
+        // independent markers.
+        var checkoutPath = managedCheckout ? null : PrepareMarker.NormalizeCheckoutPath(repoRoot);
+
+        // Read after the checkout has been reconciled onto its configured ref, so this is the commit
+        // the step actually runs against. Not read at all under `always`, which consults no marker
+        // and writes none, so there is nothing for it to be compared with or recorded in.
+        var commit = step.Mode == PrepareMode.Always ? null : gitClient.GetHeadCommitSha(repoRoot);
+
+        return new Decision(
+            ReasonToRun(step, markerPath, commit, checkoutPath), markerPath, checkoutPath, commit);
     }
 
     /// <summary>

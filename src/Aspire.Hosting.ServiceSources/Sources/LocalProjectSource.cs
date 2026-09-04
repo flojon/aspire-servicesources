@@ -141,8 +141,13 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
                     serviceName, step, repoRoot, builder.AppHostDirectory, managedCheckout, gitClient,
                     _prepareRunner, ConsolePrepareOutputSink.Instance);
             }
-            else
+            else if (CheckoutPreparation.WouldRun(
+                serviceName, step, repoRoot, builder.AppHostDirectory, managedCheckout, gitClient))
             {
+                // Only where the step would actually have run. A warm checkout whose marker already
+                // satisfies it was not going to run one anyway, and naming it there would report a
+                // skip that costs nothing while advising a developer to materialize a checkout they
+                // already have.
                 ConsolePrepareOutputSink.Instance.Report(
                     CheckoutPreparation.SkippedOutsideRunModeNotice(serviceName, step));
             }
