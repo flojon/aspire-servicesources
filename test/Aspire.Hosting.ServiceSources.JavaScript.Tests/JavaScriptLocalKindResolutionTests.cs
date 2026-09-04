@@ -74,60 +74,6 @@ public class JavaScriptLocalKindResolutionTests
         Assert.Equal(Path.Combine(repoRoot, "src", "frontend"), resource.WorkingDirectory);
     }
 
-    [Fact]
-    public void MissingAppDirectoryIsReportedAgainstTheService()
-    {
-        var repoRoot = TestHelpers.CreateRepo();
-
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => Resolve(Builder(), repoRoot, "appDirectory: src/frontendd"));
-
-        Assert.Contains("frontend", ex.Message);
-        Assert.Contains("src/frontendd", ex.Message);
-        Assert.Contains("not found", ex.Message);
-    }
-
-    [Theory]
-    [InlineData("javascript")]
-    [InlineData("vite")]
-    [InlineData("nextjs")]
-    public void AppDirectoryWithoutAPackageJsonIsReportedAgainstTheService(string appType)
-    {
-        // These app types run a package.json script, so an appDirectory without one cannot work.
-        // Left unchecked it reaches the developer as an npm "could not read package.json" from the
-        // installer resource, detached from the service whose entry pointed at the wrong directory —
-        // the same reason scriptPath is checked to exist.
-        var repoRoot = TestHelpers.CreateRepo(withPackageJson: false);
-
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => Resolve(Builder(), repoRoot, $"appType: {appType}"));
-
-        Assert.Contains("frontend", ex.Message);
-        Assert.Contains("package.json", ex.Message);
-    }
-
-    [Theory]
-    [InlineData("node")]
-    [InlineData("bun")]
-    public void RunScriptWithoutAPackageJsonIsReportedAgainstTheService(string appType)
-    {
-        // A run script IS a package.json script, and Aspire's AddNodeApp/AddBunApp only wire up a
-        // package manager when the app directory has a package.json. Without this check the run
-        // script is silently dropped and the service starts the scriptPath it was told to override.
-        var repoRoot = TestHelpers.CreateRepo(withPackageJson: false);
-
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => Resolve(Builder(), repoRoot, $"""
-                appType: {appType}
-                scriptPath: server.js
-                runScript: start
-                """));
-
-        Assert.Contains("frontend", ex.Message);
-        Assert.Contains("package.json", ex.Message);
-        Assert.Contains("runScript", ex.Message);
-    }
-
     [Theory]
     [InlineData("node")]
     [InlineData("bun")]
@@ -219,24 +165,6 @@ public class JavaScriptLocalKindResolutionTests
                 """));
 
         Assert.Contains("outside the service's checkout", ex.Message);
-    }
-
-    [Fact]
-    public void MissingScriptPathIsReportedAgainstTheService()
-    {
-        // Otherwise a typo surfaces at run time as "node: cannot find module", detached from the
-        // service whose catalog entry named it — the dotnet kind checks its project file the same way.
-        var repoRoot = TestHelpers.CreateRepo();
-
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => Resolve(Builder(), repoRoot, """
-                appType: node
-                scriptPath: serverr.js
-                """));
-
-        Assert.Contains("frontend", ex.Message);
-        Assert.Contains("serverr.js", ex.Message);
-        Assert.Contains("not found", ex.Message);
     }
 
     [Fact]

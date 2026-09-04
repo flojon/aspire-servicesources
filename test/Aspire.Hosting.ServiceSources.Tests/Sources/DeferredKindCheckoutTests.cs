@@ -507,10 +507,12 @@ public class DeferredKindCheckoutTests
             new LocalProjectSource(new FakeGitClient()).Resolve(builder, "frontend", Metadata("frontend"), DevConfig()));
 
         // Same wrapping the eager path gives a handler that throws something it shouldn't: the
-        // service and the kind are named, and the developer is pointed at Validate.
+        // service and the kind are named, and the developer is pointed at the place a check that
+        // needs the working tree belongs. Not at ILocalResourceKind.Validate, which core does not
+        // call on this path — there is no checkout for it to judge the service against yet.
         Assert.Contains("frontend", exception.Message);
         Assert.Contains(KindName, exception.Message);
-        Assert.Contains(nameof(ILocalResourceKind.Validate), exception.Message);
+        Assert.Contains(nameof(DeferredLocalResource.ValidateCheckout), exception.Message);
     }
 
     [Fact]
