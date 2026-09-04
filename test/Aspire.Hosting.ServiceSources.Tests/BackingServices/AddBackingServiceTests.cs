@@ -90,6 +90,29 @@ public class AddBackingServiceTests
         Assert.Equal(1, invocations);
     }
 
+    /// <summary>
+    /// Whitespace is refused rather than read as the default, which an empty value legitimately is.
+    /// </summary>
+    /// <remarks>
+    /// The same refusal every block field gets, and the reason is the same: whitespace is neither a
+    /// value nor the empty spelling that unsets a key, and it is nearly always the latter missed by
+    /// a character. Read as the default it started a database container for a developer who had
+    /// written a source, and said nothing about the spaces that lost it.
+    /// </remarks>
+    [Fact]
+    public void WhitespaceSource_IsRefusedRatherThanTakenForTheDefault()
+    {
+        var builder = CreateBuilder("""{ "backingServices": { "orders-db": { "source": "  " } } }""");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => builder.AddBackingService("orders-db", LocalFactory(builder)));
+
+        Assert.Contains("Backing service 'orders-db'", ex.Message);
+        Assert.Contains("'source'", ex.Message);
+        Assert.Contains("whitespace rather than a value", ex.Message);
+        Assert.Contains("empty value", ex.Message);
+    }
+
     [Fact]
     public void ExplicitLocalSource_InvokesTheLocalFactory()
     {
@@ -196,6 +219,30 @@ public class AddBackingServiceTests
 
         Assert.Contains("'{port}'", ex.Message);
         Assert.Contains("forwards nothing", ex.Message);
+
+        // The escape, for the reader who did not mean a placeholder at all — without it the message
+        // explains a substitution they never asked for and offers them nothing to write.
+        Assert.Contains("'{{port}}'", ex.Message);
+    }
+
+    /// <summary>
+    /// A doubled brace passes the placeholder through as text, so a connection string can carry
+    /// <c>{port}</c> literally.
+    /// </summary>
+    [Fact]
+    public async Task DirectSource_EscapedPlaceholder_ReachesTheAppAsText()
+    {
+        var builder = CreateBuilder("""
+            { "backingServices": { "orders-db": {
+                "source": "direct",
+                "direct": { "connectionString": "Host=localhost;Note={{port}}" } } } }
+            """);
+
+        var db = builder.AddBackingService("orders-db", LocalFactory(builder));
+
+        Assert.Equal(
+            "Host=localhost;Note={port}",
+            await db.Resource.ConnectionStringExpression.GetValueAsync(default));
     }
 
     [Fact]

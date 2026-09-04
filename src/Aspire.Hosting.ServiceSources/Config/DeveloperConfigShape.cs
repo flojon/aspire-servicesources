@@ -103,11 +103,16 @@ internal sealed class DeveloperConfigShape
     /// none does. Used to turn "that key does not go there" into "here is where it goes".
     /// </summary>
     /// <remarks>
-    /// A list rather than the single answer the service shape could always give. A backing service's
-    /// <c>connectionString</c> is declared by every source block that takes one, since each source
-    /// wants its own template — the <c>kubernetes</c> one carries a <c>{port}</c> placeholder that
-    /// would be dead text under <c>direct</c> — so a field written flat there has more than one home
-    /// and naming just the first would send the developer to a block they are not using.
+    /// A list rather than the single answer both shapes can give today, because a field name shared
+    /// by two blocks is coming and naming just the first would send the developer to a block they
+    /// are not using. Each source that takes a <c>connectionString</c> will declare its own, since
+    /// each wants its own template — the <c>kubernetes</c> one carries a <c>{port}</c> placeholder
+    /// that would be dead text under <c>direct</c> — and that source is the next one to be added.
+    /// <para>
+    /// So no shape has such a field yet, and every caller's several-homes branch is unreachable as
+    /// this ships. The list is still what the signature should be: the alternative is a lookup that
+    /// answers correctly only while the coincidence holds, and it holds for one more release.
+    /// </para>
     /// </remarks>
     public IReadOnlyList<string> HomeBlocksOf(string field) =>
         BlockFields
@@ -129,11 +134,11 @@ internal sealed class DeveloperConfigShape
     /// all.
     /// <para>
     /// Every tie is returned, not the closest one, for the two reasons ties happen: a typo can sit
-    /// the same distance from two differently-named fields, and a field name can be declared by
-    /// more than one block — which is the ordinary case for a backing service's
-    /// <c>connectionString</c>. <see cref="NearMiss.Nearest"/> orders the first kind, by the
-    /// spelling it was given; the second kind it cannot order at all, since the spellings are
-    /// equal, so the block is ordered on here too. The result is the same on every run either way.
+    /// the same distance from two differently-named fields, which happens now, and a field name can
+    /// be declared by more than one block, which no shape does yet — see
+    /// <see cref="HomeBlocksOf"/>. <see cref="NearMiss.Nearest"/> orders the first kind by the
+    /// spelling it was given; the second it cannot order at all, since the spellings are equal, so
+    /// the block is ordered on here too. The result is the same on every run either way.
     /// </para>
     /// </remarks>
     public IReadOnlyList<(string Field, string Block)> NearMissFieldsOf(string writtenKey) =>
@@ -142,10 +147,11 @@ internal sealed class DeveloperConfigShape
                 BlockFields.SelectMany(block => block.Value.Keys.Select(field => (Field: field, Block: block.Key))),
                 candidate => candidate.Field)
             // Ordered by block as well as field, because Nearest can only order by what it was
-            // given: two candidates sharing a field name keep the order they arrived in, which is
-            // Type.GetProperties()'s and not one the CLR promises to keep stable. This shape has
-            // exactly that pair — connectionString, declared by every source block that takes one —
-            // so without this the message would name the blocks in an order nothing guarantees.
+            // given: two candidates sharing a field name would keep the order they arrived in,
+            // which is Type.GetProperties()'s and not one the CLR promises to keep stable. No shape
+            // declares such a field today, so this changes no message now — it is here because the
+            // one that will, a source block's connectionString, is the next thing added, and a
+            // reordering nothing guarantees is not a thing to notice from a message.
             .OrderBy(candidate => candidate.Field, StringComparer.Ordinal)
             .ThenBy(candidate => candidate.Block, StringComparer.Ordinal)
             .ToArray();

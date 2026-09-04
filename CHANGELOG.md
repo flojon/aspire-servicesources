@@ -163,7 +163,22 @@ nothing will fail to build to warn you.
   strings such as `Driver={PostgreSQL}` pass through untouched. `{port}` and
   `{secret:<name>:<key>}` are recognised, reserved for the sources that can resolve them, and
   rejected under `"direct"` with a message saying why; a malformed one fails at startup naming the
-  backing service and the key, rather than reaching the app as text.
+  backing service and the key, rather than reaching the app as text. Doubling the braces passes a
+  placeholder through as text — `{{port}}` resolves to the literal `{port}` — for the rare
+  connection string that has to contain one.
+
+  A `source` of nothing but whitespace is refused rather than read as the default, the same way a
+  whitespace *field* has been refused since `0.4.0` and for the same reason: it is the empty
+  spelling that unsets a key, missed by a character. This also applies to a service's `source`,
+  which previously reported having no source configured without mentioning the spaces that caused
+  it.
+
+  **One gap worth knowing about.** An entry whose key matches no `AddBackingService()` call is not
+  reported, because a backing service with no entry legitimately runs locally — so a typo in the
+  *key* (`orders_db` against `orders-db`) silently reverts that backing service to the `"local"`
+  source, starting the container the developer was trying to avoid. Tracked as
+  [#206](https://github.com/flojon/aspire-servicesources/issues/206) along with the misspelled
+  `backingServices` root key, which fails the same way for the same reason.
 
 - **A service whose resource never runs is reported in the AppHost's own console** ([#150]). A
   `"local"` checkout that fails to compile used to produce nothing there at all: Aspire's build of

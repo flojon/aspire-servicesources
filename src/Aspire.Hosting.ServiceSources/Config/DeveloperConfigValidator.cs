@@ -124,6 +124,15 @@ internal static class DeveloperConfigValidator
                 {
                     problems.Add(ValueExpected(serviceName, key, block: null));
                 }
+                else if (key.Value is { Length: > 0 } blankSource && string.IsNullOrWhiteSpace(blankSource))
+                {
+                    // The same refusal every block field gets, and for the same reason: whitespace
+                    // is neither a value nor the empty spelling that unsets a key. Left out, it
+                    // reached the source dispatch as a value — which reads a blank source as "not
+                    // configured", so a backing service ran locally and a service reported having
+                    // no source at all, neither of them mentioning the spaces that caused it.
+                    problems.Add(Blank(key, block: null));
+                }
 
                 continue;
             }
@@ -259,9 +268,9 @@ internal static class DeveloperConfigValidator
     /// a reason to make the service kubernetes-sourced.
     /// <para>
     /// A field several blocks declare names all of them rather than picking one, since which of
-    /// them the developer meant is exactly what this message does not know. A backing service's
-    /// <c>connectionString</c> is the case: every source that takes one declares its own, because
-    /// the templates differ per source.
+    /// them the developer meant is exactly what this message does not know. No shape has such a
+    /// field yet, so that branch is unreachable as this ships; the field that will have it is a
+    /// source block's <c>connectionString</c>, since each source wants its own template.
     /// </para>
     /// <para>
     /// A key that is nearly a field gets the same sentence with the field named, because the list
@@ -324,14 +333,16 @@ internal static class DeveloperConfigValidator
     }
 
     /// <summary>
-    /// Near-miss candidates as prose: <c>'connectionString', in the 'direct' or 'kubernetes'
-    /// block</c>.
+    /// Near-miss candidates as prose: <c>'port', in the 'kubernetes' block, or 'path', in the
+    /// 'local' block</c>.
     /// </summary>
     /// <remarks>
-    /// Grouped by field name so that the common tie — one field several source blocks each declare
-    /// their own copy of — reads as one suggestion in more than one place rather than as the same
-    /// word twice. Candidates arrive already ordered by <see cref="NearMiss.Nearest"/>, so what is
-    /// added here is only the block ordering within a group.
+    /// Grouped by field name so that a field two blocks each declare their own copy of reads as one
+    /// suggestion in more than one place rather than as the same word twice — which no shape
+    /// produces yet, so today every group holds one candidate and the grouping is what keeps the
+    /// sentence right when one does. Candidates arrive already ordered by
+    /// <see cref="NearMiss.Nearest"/>, so what is added here is only the block ordering within a
+    /// group.
     /// </remarks>
     private static string DescribeNearMisses(IEnumerable<(string Field, string Block)> candidates) =>
         string.Join(
@@ -379,9 +390,9 @@ internal static class DeveloperConfigValidator
         if (alsoHasKeys)
         {
             return $"the entry carries the value {Escaped(value)} as well as its settings, and that "
-                + "value is inert: a scalar at a service's own key binds to nothing, so nothing "
-                + "reads it. If it was meant to choose the source, that is the 'source' key inside "
-                + "the entry."
+                + $"value is inert: a scalar at a {shape.Noun}'s own key binds to nothing, so "
+                + "nothing reads it. If it was meant to choose the source, that is the 'source' key "
+                + "inside the entry."
                 + SetAtBlock(entry, SourceKey);
         }
 
@@ -481,9 +492,14 @@ internal static class DeveloperConfigValidator
     /// and meet the identical error — and the value goes through <see cref="Escaped"/> for the
     /// same reason, since none of them can be told from a space by looking.
     /// </remarks>
-    private static string Blank(IConfigurationSection field, string block) =>
-        $"'{field.Key}' in the '{block}' block is set to {Escaped(field.Value)}, which is "
-        + "whitespace rather than a value. Set it to an empty value to leave the field unset."
+    /// <param name="block">
+    /// The block the field sits in, or <see langword="null"/> when it sits directly on the entry —
+    /// which is <c>source</c>, the one root key that takes a value.
+    /// </param>
+    private static string Blank(IConfigurationSection field, string? block) =>
+        $"'{field.Key}'{(block is null ? "" : $" in the '{block}' block")} is set to "
+        + $"{Escaped(field.Value)}, which is whitespace rather than a value. Set it to an empty "
+        + "value to leave the field unset."
         + SetAt(field);
 
     /// <summary>

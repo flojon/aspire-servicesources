@@ -1,3 +1,4 @@
+using System.Text;
 using Aspire.Hosting.ApplicationModel;
 
 namespace Aspire.Hosting.ServiceSources.BackingServices;
@@ -20,8 +21,12 @@ namespace Aspire.Hosting.ServiceSources.BackingServices;
 /// developer plainly meant one.
 /// </para>
 /// <para>
-/// There is no escape for a literal <c>{port}</c> or <c>{secret:a:b}</c>. Doubling the brace is the
-/// obvious spelling to add if a connection string ever needs one, and nothing needs one today.
+/// A doubled brace is that brace as text, which is the escape for the one string a connection
+/// string cannot otherwise contain: <c>{{port}}</c> resolves to the literal <c>{port}</c>. It is
+/// worth having even though wanting it is rare, because the alternative is not a limitation a
+/// developer can work around — it is a placeholder error telling them to write a port number, for a
+/// value they never meant as a placeholder. <c>{{</c> is also the spelling anyone reaches for first,
+/// so unhandled it produced that same error rather than the text asked for.
 /// </para>
 /// </remarks>
 internal sealed class ConnectionStringTemplate
@@ -78,42 +83,60 @@ internal sealed class ConnectionStringTemplate
     public static ConnectionStringTemplate Parse(string template, string backingServiceName, string configKey)
     {
         var segments = new List<Segment>();
-        var literalFrom = 0;
+
+        // Accumulated rather than sliced out of the template, because an escaped brace is one
+        // character where the template spells it with two: the literal a run produces is no longer
+        // a substring of what was written.
+        var literal = new StringBuilder();
         var at = 0;
 
         while (at < template.Length)
         {
-            var open = template.IndexOf('{', at);
+            var character = template[at];
 
-            if (open < 0)
+            // A doubled brace is that brace as text. Checked before anything else, so `{{port}}`
+            // never reaches the placeholder reader and the one string a template could not
+            // otherwise contain becomes writable.
+            if ((character is '{' or '}') && at + 1 < template.Length && template[at + 1] == character)
             {
-                break;
-            }
-
-            var close = template.IndexOf('}', open + 1);
-            var body = close < 0 ? template[(open + 1)..] : template[(open + 1)..close];
-
-            if (!TryReadPlaceholder(body, backingServiceName, configKey, close < 0, out var placeholder))
-            {
-                // Not a placeholder at all: a brace the connection string's own dialect uses. Left
-                // in the literal run, and the scan resumes after the brace rather than after the
-                // token, so that `{a{port}` still finds the placeholder inside it.
-                at = open + 1;
+                literal.Append(character);
+                at += 2;
                 continue;
             }
 
-            if (open > literalFrom)
+            if (character is not '{')
             {
-                segments.Add(new Literal(template[literalFrom..open]));
+                literal.Append(character);
+                at++;
+                continue;
+            }
+
+            var close = template.IndexOf('}', at + 1);
+            var body = close < 0 ? template[(at + 1)..] : template[(at + 1)..close];
+
+            if (!TryReadPlaceholder(body, backingServiceName, configKey, close < 0, out var placeholder))
+            {
+                // Not a placeholder at all: a brace the connection string's own dialect uses. Kept
+                // as text, and the scan resumes after the brace rather than after the token, so
+                // that `{a{port}` still finds the placeholder inside it.
+                literal.Append(character);
+                at++;
+                continue;
+            }
+
+            if (literal.Length > 0)
+            {
+                segments.Add(new Literal(literal.ToString()));
+                literal.Clear();
             }
 
             segments.Add(placeholder);
-            literalFrom = at = close + 1;
+            at = close + 1;
         }
 
-        if (literalFrom < template.Length)
+        if (literal.Length > 0)
         {
-            segments.Add(new Literal(template[literalFrom..]));
+            segments.Add(new Literal(literal.ToString()));
         }
 
         return new ConnectionStringTemplate(segments);

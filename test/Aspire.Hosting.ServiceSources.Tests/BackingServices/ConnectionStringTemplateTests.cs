@@ -96,6 +96,49 @@ public class ConnectionStringTemplateTests
     public void Parse_UnterminatedNonPlaceholder_StaysLiteral() =>
         Assert.Equal("Server={host", Assert.IsType<ConnectionStringTemplate.Literal>(Parse("Server={host").Segments.Single()).Text);
 
+    /// <summary>
+    /// A doubled brace is that brace as text, which is how a connection string carries the one
+    /// string it could not otherwise contain.
+    /// </summary>
+    /// <remarks>
+    /// Unhandled, <c>{{port}}</c> parsed the <c>{port}</c> inside it as a placeholder and failed
+    /// with an error about a port that cannot be substituted — for a value never meant as a
+    /// substitution, and with nothing the reader could write instead. Doubling is also the spelling
+    /// anyone reaches for first, having met it in every format string.
+    /// </remarks>
+    [Theory]
+    [InlineData("{{port}}", "{port}")]
+    [InlineData("{{secret:a:b}}", "{secret:a:b}")]
+    [InlineData("Port={{port}};Database=orders", "Port={port};Database=orders")]
+    [InlineData("{{}}", "{}")]
+    public void Parse_DoubledBraces_AreOneBraceOfText(string template, string expected) =>
+        Assert.Equal(expected, Assert.IsType<ConnectionStringTemplate.Literal>(Parse(template).Segments.Single()).Text);
+
+    /// <summary>
+    /// Escaping one placeholder leaves a real one beside it alone.
+    /// </summary>
+    [Fact]
+    public void Parse_EscapedAndRealPlaceholderTogether_KeepsBoth()
+    {
+        var segments = Parse("Note={{port}};Port={port}").Segments;
+
+        Assert.Collection(
+            segments,
+            segment => Assert.Equal("Note={port};Port=", Assert.IsType<ConnectionStringTemplate.Literal>(segment).Text),
+            segment => Assert.Null(Assert.IsType<ConnectionStringTemplate.Port>(segment).Name));
+    }
+
+    /// <remarks>
+    /// A single brace is already literal wherever it does not open a placeholder, so an ODBC string
+    /// needs no escaping and gains none: doubling collapses, and everything else is untouched.
+    /// </remarks>
+    [Fact]
+    public void Parse_SingleBracesInAnOdbcString_AreNotAltered() =>
+        Assert.Equal(
+            "Driver={PostgreSQL};Server={host}\\instance",
+            Assert.IsType<ConnectionStringTemplate.Literal>(
+                Parse("Driver={PostgreSQL};Server={host}\\instance").Segments.Single()).Text);
+
     [Fact]
     public void Parse_UnterminatedPlaceholder_IsRejected() =>
         Assert.Contains("no closing '}'", Rejects("Host=localhost;Port={port").Message);

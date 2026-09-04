@@ -1481,6 +1481,26 @@ for sources that can resolve them, and are rejected under `"direct"` with a mess
 A malformed placeholder — `{secret:orders-creds}`, with no key — fails when the AppHost starts,
 naming the backing service and the configuration key, rather than reaching the app as text.
 
+Doubling the braces passes a placeholder through as text, for the rare connection string that has
+to contain one: `"Note={{port}}"` reaches the app as `Note={port}`.
+
+### A typo in the entry key is not reported yet
+
+A backing service with no entry legitimately runs from its `local` factory, so an entry whose key
+matches no `AddBackingService()` call cannot be told apart from one that was never written:
+
+```jsonc
+"backingServices": {
+  "orders_db": { "source": "direct", "direct": { "connectionString": "…" } }  // note the underscore
+}
+```
+
+`orders-db` reverts to `"local"` and starts the container you were trying to avoid, and nothing
+says the entry went unread. A misspelled `backingServices` root key does the same to every backing
+service at once. Both are tracked in
+[#206](https://github.com/flojon/aspire-servicesources/issues/206); until then, the dashboard
+showing a database you did not expect is the signal.
+
 ### From a guest-language AppHost
 
 `addBackingService` is exported, and the local factory crosses the boundary as an ordinary callback:
