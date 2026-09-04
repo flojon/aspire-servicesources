@@ -221,7 +221,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
     /// </summary>
     internal static string ResolveProjectFile(string serviceName, string repoRoot, string project)
     {
-        var projectPath = Path.Combine(repoRoot, project);
+        var projectPath = ConfineProject(serviceName, repoRoot, project);
 
         if (!File.Exists(projectPath))
         {
@@ -230,5 +230,49 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         }
 
         return projectPath;
+    }
+
+    /// <summary>
+    /// Combines a service's <c>project</c> with its checkout, having confined it to that checkout.
+    /// The one place the value is turned into a path, because the eager path and
+    /// <see cref="DeferredCheckout"/> both resolve it and must not disagree about what it means.
+    /// </summary>
+    /// <remarks>
+    /// Confined for the reason <c>java.jarPath</c> and <c>javascript.appDirectory</c> are:
+    /// <c>servicesources.yaml</c> is shared team configuration a developer clones rather than writes,
+    /// so an absolute or climbing <c>project</c> would have the AppHost build — and MSBuild evaluate,
+    /// imports and inline tasks included — something from outside the checkout the catalog describes.
+    /// <see cref="Path.Combine(string, string)"/> gives no confinement of its own: it discards
+    /// <paramref name="repoRoot"/> outright for a rooted value and does nothing about <c>..</c>.
+    /// <para>
+    /// Lexical, so the verdict is the same on both paths — the deferred one judges the value in front
+    /// of a checkout that has not landed yet — and so an absolute path is reported as the absolute
+    /// path it is rather than as a file missing from a checkout it was never looked for in.
+    /// </para>
+    /// </remarks>
+    internal static string ConfineProject(string serviceName, string repoRoot, string project)
+    {
+        // The empty default of an unwritten 'project' is neither absolute nor climbing, and has a
+        // report of its own: the combine below leaves the checkout root, which is not a file, so
+        // ResolveProjectFile names the key as missing rather than as pointing somewhere it must not.
+        if (project.Length > 0)
+        {
+            if (CheckoutRelativePath.IsAbsolute(project))
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Service '{serviceName}': project '{project}' is an absolute path. 'project' has to be a path "
+                    + "relative to the service's checkout — it names a project the repository commits, not one "
+                    + "sitting elsewhere on a developer's machine.");
+            }
+
+            if (CheckoutRelativePath.EscapesRoot(project))
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Service '{serviceName}': project '{project}' points outside the service's checkout. It must "
+                    + "stay within the repository.");
+            }
+        }
+
+        return Path.Combine(repoRoot, CheckoutRelativePath.NormalizeSeparators(project));
     }
 }

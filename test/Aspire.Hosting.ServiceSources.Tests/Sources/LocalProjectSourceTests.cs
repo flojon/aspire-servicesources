@@ -718,6 +718,103 @@ public class LocalProjectSourceTests
     }
 
     [Fact]
+    public void ResolveProjectPath_ProjectIsAbsolute_IsRefusedRatherThanResolvedOutsideTheCheckout()
+    {
+        var repoDir = Directory.CreateTempSubdirectory().FullName;
+        var elsewhere = Path.Combine(Directory.CreateTempSubdirectory().FullName, "Evil.csproj");
+        File.WriteAllText(elsewhere, "<Project />");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveProjectPath(
+                ServiceName, Metadata(project: elsewhere), DevConfig(path: repoDir), UnusedAppHostDirectory,
+                new FakeGitClient()));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains(elsewhere, ex.Message);
+        Assert.Contains("absolute", ex.Message);
+    }
+
+    [Theory]
+    [InlineData(@"C:\repos\Evil.csproj")]
+    [InlineData(@"\\server\share\Evil.csproj")]
+    public void ResolveProjectPath_ProjectAbsoluteOnAnotherPlatform_IsStillRefusedAsAbsolute(string project)
+    {
+        var repoDir = Directory.CreateTempSubdirectory().FullName;
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveProjectPath(
+                ServiceName, Metadata(project: project), DevConfig(path: repoDir), UnusedAppHostDirectory,
+                new FakeGitClient()));
+
+        // Reported as the absolute path it is on whichever platform the AppHost runs, rather than as
+        // a file missing from the checkout — the distinction CheckoutRelativePath exists to keep.
+        Assert.Contains("absolute", ex.Message);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_ProjectClimbsOutOfTheCheckout_IsRefusedRatherThanResolvedOutsideIt()
+    {
+        var parent = Directory.CreateTempSubdirectory().FullName;
+        var repoDir = Directory.CreateDirectory(Path.Combine(parent, "orders")).FullName;
+        File.WriteAllText(Path.Combine(parent, "Evil.csproj"), "<Project />");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveProjectPath(
+                ServiceName, Metadata(project: "../Evil.csproj"), DevConfig(path: repoDir), UnusedAppHostDirectory,
+                new FakeGitClient()));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("../Evil.csproj", ex.Message);
+        Assert.Contains("outside", ex.Message);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_ProjectClimbsAndComesBack_StaysInsideAndIsAccepted()
+    {
+        var repoDir = Directory.CreateTempSubdirectory().FullName;
+        Directory.CreateDirectory(Path.Combine(repoDir, "src"));
+        File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
+
+        // Counted rather than pattern-matched: a '..' that a preceding segment pays for never leaves
+        // the checkout, so it is not the thing being refused.
+        var projectPath = ResolveProjectPath(
+            ServiceName, Metadata(project: "src/../Orders.csproj"), DevConfig(path: repoDir), UnusedAppHostDirectory,
+            new FakeGitClient());
+
+        Assert.Equal(Path.Combine(repoDir, "src", "..", "Orders.csproj"), projectPath);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_ProjectWrittenWithWindowsSeparators_ResolvesOnEveryPlatform()
+    {
+        var repoDir = Directory.CreateTempSubdirectory().FullName;
+        Directory.CreateDirectory(Path.Combine(repoDir, "src"));
+        File.WriteAllText(Path.Combine(repoDir, "src", "Orders.csproj"), "<Project />");
+
+        var projectPath = ResolveProjectPath(
+            ServiceName, Metadata(project: @"src\Orders.csproj"), DevConfig(path: repoDir), UnusedAppHostDirectory,
+            new FakeGitClient());
+
+        Assert.Equal(Path.Combine(repoDir, "src", "Orders.csproj"), projectPath);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_ProjectUnset_IsStillReportedAsMissingRatherThanRefused()
+    {
+        var repoDir = Directory.CreateTempSubdirectory().FullName;
+
+        // 'project' has no required-key check, so the empty default reaches the confinement checks;
+        // it is not absolute and does not climb, and the missing-file message is what reports it.
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveProjectPath(
+                ServiceName, Metadata(project: ""), DevConfig(path: repoDir), UnusedAppHostDirectory,
+                new FakeGitClient()));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("was not found", ex.Message);
+    }
+
+    [Fact]
     public void ResolveProjectPath_CloneFails_WrapsAsConfigurationExceptionNamingServiceAndRepository()
     {
         var appHostDirectory = Directory.CreateTempSubdirectory().FullName;

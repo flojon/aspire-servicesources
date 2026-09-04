@@ -180,6 +180,31 @@ public class DeferredCheckoutTests
     }
 
     [Fact]
+    public void OptedIn_ColdCheckout_ProjectClimbsOutOfTheCheckout_IsRefusedBeforeAnythingIsRegistered()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.UseDeferredCheckout();
+
+        var client = new FakeGitClient();
+
+        // The deferred path builds the project path itself, against a checkout that does not exist
+        // yet, so it has to make the same confinement check the eager path makes — the two resolve
+        // the same value and must not disagree about it.
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(client).Resolve(
+                builder, "orders", Metadata("orders", project: "../../Evil.csproj"), DevConfig()));
+
+        Assert.Contains("orders", ex.Message);
+        Assert.Contains("outside", ex.Message);
+
+        // Refused at composition: no resource stands against a path outside the checkout, and the
+        // clone that would have filled it was never worth starting.
+        Assert.DoesNotContain(builder.Resources, r => string.Equals(r.Name, "orders", StringComparison.Ordinal));
+        Assert.Empty(client.Cloned);
+    }
+
+    [Fact]
     public void OptedIn_WarmCheckout_ResolvesEagerlyWithFullLaunchProfileFidelity()
     {
         var dir = CreateAppHostDirectory("orders");

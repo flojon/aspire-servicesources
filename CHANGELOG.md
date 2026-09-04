@@ -11,6 +11,39 @@ nothing will fail to build to warn you.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-04
+
+A patch on top of `0.4.0`, cut from the `release/0.4.x` branch off the `v0.4.0` tag rather than
+from `main`: `main` has moved on to changes a patch must not carry. Nothing here breaks a working
+configuration.
+
+### Fixed
+
+- **A `project` that points outside the service's checkout is refused rather than built** ([#222]).
+  `project` was the one path a catalog names that was never confined to the checkout it is read
+  against. `Path.Combine` gives no confinement of its own — it discards the checkout root outright
+  for a rooted value, and does nothing about `..` — so `project: /home/dev/other/Evil.csproj` or
+  `project: ../../../Evil.csproj` resolved to a file outside the clone, which the AppHost then
+  handed to `AddProject`, where MSBuild evaluates it: a `.targets` import or an inline task away
+  from running code the catalog never described. Both the eager path and the deferred registration
+  did the same bare combine; both now go through the check `java.jarPath` and
+  `javascript.appDirectory` have always made, in one place they share, so the two cannot come to
+  different conclusions about the same value. An absolute path is reported as absolute and a
+  climbing one as pointing outside the repository, and neither reaches MSBuild.
+
+  Consistency and defence in depth rather than a boundary that moves: `kind: dotnet` builds the
+  checkout's own code regardless — nobody crosses a line here who was not already across it. What
+  is fixed is that the rule the codebase states for every other path a catalog names no longer has
+  a hole in it, and that the hole was on `dotnet`, the kind most catalogs use. Nothing that works
+  today changes: a `project` resolving inside its checkout keeps resolving to the same file.
+
+  Two smaller things fall out of using the shared check. A rejected path now says it was rejected
+  for leaving the checkout, where the old message claimed the file *was not found under* the
+  checkout — untrue on precisely these inputs, since it was never looked for there. And `project`
+  accepts Windows separators on Linux and macOS the way every other confined path does, so
+  `project: src\Orders.Api\Orders.Api.csproj` resolves instead of becoming one oddly-named path
+  reported as missing.
+
 ## [0.4.0] - 2026-09-03
 
 ### Breaking
@@ -587,7 +620,8 @@ Targets `net10.0`.
 - Fail-fast configuration validation with `ServiceSourcesConfigurationException`.
 - MIT license, README, symbol packages, and Trusted Publishing (OIDC) to nuget.org.
 
-[Unreleased]: https://github.com/flojon/aspire-servicesources/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/flojon/aspire-servicesources/compare/v0.4.1...release/0.4.x
+[0.4.1]: https://github.com/flojon/aspire-servicesources/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/flojon/aspire-servicesources/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/flojon/aspire-servicesources/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/flojon/aspire-servicesources/compare/v0.2.0...v0.3.0
@@ -639,6 +673,7 @@ Targets `net10.0`.
 [#170]: https://github.com/flojon/aspire-servicesources/issues/170
 [#171]: https://github.com/flojon/aspire-servicesources/issues/171
 [#180]: https://github.com/flojon/aspire-servicesources/pull/180
+[#222]: https://github.com/flojon/aspire-servicesources/issues/222
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

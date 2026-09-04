@@ -192,7 +192,12 @@ internal sealed class DeferredCheckout
         IGitClient gitClient)
     {
         var repoRoot = LocalGitCheckout.ManagedRepoRoot(builder.AppHostDirectory, serviceName);
-        var projectPath = Path.Combine(repoRoot, metadata.Project);
+
+        // Through the same confinement the eager path uses, and before anything is registered: the
+        // path named here is what DCP freezes into the executable spec and what MSBuild is later
+        // pointed at, so a 'project' that climbs out of the checkout has to be refused here too, and
+        // by the same code — see LocalProjectSource.ConfineProject.
+        var projectPath = LocalProjectSource.ConfineProject(serviceName, repoRoot, metadata.Project);
 
         var resource = new ProjectResource(serviceName);
 
