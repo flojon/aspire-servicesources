@@ -241,8 +241,8 @@ public static class BackingServiceBuilderExtensions
             + $"AddDatabase names them separately: 'AddDatabase(\"{name}\", \"orders\")' is a resource called "
             + $"'{name}' holding a database called 'orders'. Where the resource is not yours to rename, return "
             + $"one that forwards it: 'builder.AddConnectionString(\"{name}\", ReferenceExpression.Create($\"{{theResource}}\"))' "
-            + "— but a consumer's WaitFor on it is then satisfied immediately rather than waiting for what it "
-            + "forwards, so the start ordering is lost (#220).");
+            + "— a consumer's WaitFor still holds back for what it forwards, but is satisfied once that is "
+            + "running rather than healthy, so the health check stops gating it (#220).");
 
     /// <summary>
     /// The error for a <c>source</c> this package does not recognize.

@@ -65,6 +65,15 @@ public class BackingServiceWaitTests
     /// Nor does the forwarding wrapper the README offers when a factory's resource is not the
     /// caller's to rename, so it is the same shape as the one above.
     /// </summary>
+    /// <remarks>
+    /// The marker is all this pins, and the wrapper is where that limit bit twice. It says the wait
+    /// is honoured rather than dropped; it says nothing about what the wait then waits <i>for</i>.
+    /// <c>ConnectionStringResource</c> also implements <see cref="IValueWithReferences"/>, and
+    /// measured on a live host Aspire does follow that reference: the wrapper stays in
+    /// <c>Waiting</c> until the resource it forwards is running, so the consumer does hold back for
+    /// the database. What it loses is the database's health check, since the wrapper is satisfied by
+    /// running rather than healthy. Neither half is derivable from the interfaces below.
+    /// </remarks>
     [Fact]
     public void ForwardingWrapper_CarriesNoLifetimeMarker()
     {

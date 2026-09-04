@@ -1497,17 +1497,21 @@ across a source switch. This used to be the case `WithReference(db, connectionNa
 rule makes that unreachable for a backing service, since the throw happens first, so the wrap is
 what replaces it.
 
-> **It is not a drop-in: it costs you the wait.** What `AddBackingService` hands back is the
-> forwarding `ConnectionStringResource` rather than the database the factory built, and Aspire marks
-> a connection-string resource running as soon as its value is available. So a consumer's
-> `WaitFor(ordersDb)` is satisfied immediately rather than holding the app back until the database
-> is up — under `"local"`, where there really is a database starting, that is a wait you have
-> quietly lost.
+> **The wait mostly survives the wrap, but loses its health check.** What `AddBackingService` hands
+> back is the forwarding `ConnectionStringResource` rather than the database the factory built —
+> and Aspire does follow the reference: the wrapper itself sits in `Waiting` until the database it
+> forwards is running, so a consumer's `WaitFor(ordersDb)` still holds back for Postgres to start.
 >
-> So **rename the resource wherever you can**, and reach for the wrap only where you genuinely
-> cannot. The connection string itself is unaffected; only start ordering is. Tracked as
-> [#220](https://github.com/flojon/aspire-servicesources/issues/220), with the same effect on a
-> `"direct"`-sourced backing service.
+> What it stops honouring is the database's *health check*. Waiting on the database directly waits
+> for it to be healthy; waiting on the wrapper is satisfied once the database is merely running.
+> Measured on a live host with a real Postgres — the consumer waiting on the wrapper started about
+> seven seconds before the one waiting on the database, while a consumer waiting on nothing started
+> three seconds before either.
+>
+> So **rename the resource wherever you can**; the wrap is a smaller loss than it looks, but it is
+> not free. Tracked as [#220](https://github.com/flojon/aspire-servicesources/issues/220), together
+> with the `"direct"` case, where the connection string references nothing and the wait is therefore
+> satisfied at once.
 
 ### Connection-string placeholders
 
