@@ -110,13 +110,12 @@ public static class BackingServiceBuilderExtensions
     /// variable ordering, nothing more.
     /// </para>
     /// <para>
-    /// <b>The <c>WaitFor</c> in the example above does not survive a switch to <c>"direct"</c>
-    /// today (#220).</b> It works under <c>"local"</c>, where a real database resource sits behind
-    /// it; under <c>"direct"</c> the resource is a connection string with nothing to start, nothing
-    /// publishes a state for it, and the consumer waits for the life of the run. That is the one
-    /// place this method's own promise — the same AppHost code under either source — is not kept, so
-    /// it is named here rather than left to be discovered. Leave the wait off a backing service
-    /// anyone might point at an instance they already run, until that is fixed.
+    /// <b>The <c>WaitFor</c> in the example above stops meaning anything under <c>"direct"</c>
+    /// (#220).</b> It waits properly under <c>"local"</c>, where a real database resource sits
+    /// behind it. Under <c>"direct"</c> the resource is a connection string, the orchestrator marks
+    /// it running as soon as that string is available, and the wait is satisfied at once — so the
+    /// consumer starts without the remote instance having been checked at all. It does not hang, and
+    /// nothing goes wrong loudly; the ordering simply stops being enforced.
     /// </para>
     /// <para>
     /// Which of a consumer's configuration actually reaches it still depends on that consumer's own
@@ -242,8 +241,8 @@ public static class BackingServiceBuilderExtensions
             + $"AddDatabase names them separately: 'AddDatabase(\"{name}\", \"orders\")' is a resource called "
             + $"'{name}' holding a database called 'orders'. Where the resource is not yours to rename, return "
             + $"one that forwards it: 'builder.AddConnectionString(\"{name}\", ReferenceExpression.Create($\"{{theResource}}\"))' "
-            + "— but do not WaitFor a backing service resolved that way, because nothing publishes a state for it "
-            + "and the wait never resolves (#220).");
+            + "— but a consumer's WaitFor on it is then satisfied immediately rather than waiting for what it "
+            + "forwards, so the start ordering is lost (#220).");
 
     /// <summary>
     /// The error for a <c>source</c> this package does not recognize.

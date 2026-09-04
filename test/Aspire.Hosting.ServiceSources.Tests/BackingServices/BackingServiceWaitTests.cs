@@ -4,37 +4,32 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Aspire.Hosting.ServiceSources.Tests.BackingServices;
 
 /// <summary>
-/// What a consumer's <c>WaitFor</c> on a backing service actually does, measured rather than
-/// reasoned about: it hangs, and these pin that until it is fixed.
+/// Whether Aspire drops or honours a consumer's <see cref="WaitAnnotation"/> on a backing service.
 /// </summary>
 /// <remarks>
-/// Driven through <see cref="ResourceNotificationService.WaitForDependenciesAsync"/>, the method
-/// Aspire's own orchestrator calls to honour a <see cref="WaitAnnotation"/> — the same route
-/// <c>UrlConsumerWaitTests</c> takes, and the reason neither needs DCP to launch anything.
+/// Aspire drops a wait whose target is an <see cref="IResourceWithoutLifetime"/> and honours every
+/// other one, leaving it to resolve when the target publishes a state. A <c>"direct"</c>-sourced
+/// backing service is Aspire's <c>ConnectionStringResource</c>, which does not carry that marker, so
+/// its wait is honoured — unlike <see cref="Sources.ServiceUrlResource"/>, which declares the marker
+/// deliberately (#170) and is the contrast that gives these their meaning.
 /// <para>
-/// Worth measuring because the obvious reasoning was wrong. <c>DirectBackingServiceSource</c>'s
-/// remarks claimed Aspire's <c>ConnectionStringResource</c> is an <see cref="IResourceWithoutLifetime"/>,
-/// which is the marker that makes a wait resolve by being dropped (#170). It is not: on Aspire 13.5.2
-/// the type declares <see cref="IResourceWithConnectionString"/> and
-/// <see cref="IResourceWithWaitSupport"/> and no lifetime marker at all. With wait support present
-/// and the drop-me marker absent, the wait is accepted rather than short-circuited, and the
-/// plausible failure was a hang — the same one #170 was filed for.
+/// <b>Honoured is not the same as never-resolving, and the difference cost a wrong claim.</b> These
+/// run against a provider built from the builder's services, with no orchestrator publishing states
+/// for anything, so an honoured wait blocks here whatever its target is — an ordinary executable
+/// included. That was briefly read as "a direct backing service hangs". Measured against a live host
+/// it does not: the orchestrator publishes <c>Running</c> for the connection-string resource
+/// immediately and the consumer leaves <c>Waiting</c> in about a second. So the wait is honoured and
+/// then satisfied at once, which makes it a no-op rather than a hang — see
+/// <c>DirectBackingServiceSource</c>'s remarks for what that costs.
+/// </para>
+/// <para>
+/// Which is why these assert the marker rather than timing anything. The marker is what this
+/// package controls and what the wait behaviour follows from; how long a honoured wait then takes is
+/// the orchestrator's business and needs the orchestrator to answer.
 /// </para>
 /// </remarks>
 public class BackingServiceWaitTests
 {
-    /// <summary>
-    /// How long a wait is given before it counts as hanging.
-    /// </summary>
-    /// <remarks>
-    /// Short, because these tests pin hangs and every second of it is paid on every CI run. A wait
-    /// that resolves returns without waiting at all — the control below does — so this is orders of
-    /// magnitude above the passing case rather than a fine margin. It was measured at 30s first, and
-    /// all three hangs used the whole budget, which is what a hang looks like against a wait that
-    /// resolves immediately.
-    /// </remarks>
-    private static readonly TimeSpan ResolvesWithin = TimeSpan.FromSeconds(5);
-
     private static IDistributedApplicationBuilder CreateBuilder(string json)
     {
         var dir = Directory.CreateTempSubdirectory().FullName;
@@ -43,38 +38,17 @@ public class BackingServiceWaitTests
         return TestHelpers.CreateBuilderThatCanStart(dir);
     }
 
-    private static IResourceBuilder<ExecutableResource> Consumer(IDistributedApplicationBuilder builder) =>
-        builder.AddExecutable("worker", "dotnet", Directory.CreateTempSubdirectory().FullName);
-
-    /// <remarks>
-    /// <c>async</c> and awaited here rather than returning the task: a non-async version disposes
-    /// the <see cref="CancellationTokenSource"/> — and with it the timer that would fire the
-    /// cancellation — the moment it returns the task, so a hang runs forever instead of failing at
-    /// the timeout. Which is how it was written first, and is why the first run of this file had to
-    /// be killed rather than reporting anything.
-    /// </remarks>
-    private static async Task WaitAsync(IDistributedApplicationBuilder builder, IResource consumer)
-    {
-        var notifications = builder.Services.BuildServiceProvider()
-            .GetRequiredService<ResourceNotificationService>();
-
-        using var cts = new CancellationTokenSource(ResolvesWithin);
-
-        await notifications.WaitForDependenciesAsync(consumer, cts.Token);
-    }
-
     /// <summary>
-    /// The consumer never leaves <c>Waiting</c>, and the message names the backing service whose
-    /// state cannot be retrieved.
+    /// A <c>"direct"</c>-sourced backing service carries no lifetime marker, so its wait is honoured
+    /// rather than dropped.
     /// </summary>
     /// <remarks>
-    /// Asserted rather than merely observed, so the bug cannot be fixed or worsened unnoticed while
-    /// it is open. Nothing ever publishes a state for the resource: it is Aspire's
-    /// <c>ConnectionStringResource</c>, which has no process behind it, and the developer is pointing
-    /// at something they already run.
+    /// Pinned because the type's interfaces are the whole mechanism, and because
+    /// <c>DirectBackingServiceSource</c> asserted the opposite in prose for a long time without
+    /// anything checking.
     /// </remarks>
     [Fact]
-    public async Task DirectSourcedBackingService_WaitedOnByAConsumer_HangsToday()
+    public void DirectSourcedBackingService_CarriesNoLifetimeMarker()
     {
         var builder = CreateBuilder("""
             { "backingServices": { "orders-db": {
@@ -83,45 +57,16 @@ public class BackingServiceWaitTests
             """);
 
         var db = builder.AddBackingService("orders-db", () => builder.AddConnectionString("orders-db"));
-        var worker = Consumer(builder).WaitFor(db);
 
-        var ex = await Assert.ThrowsAsync<OperationCanceledException>(() => WaitAsync(builder, worker.Resource));
-
-        Assert.Contains("failed to wait for dependencies", ex.Message);
-        Assert.Contains("orders-db", ex.Message);
+        Assert.IsNotAssignableFrom<IResourceWithoutLifetime>(db.Resource);
     }
 
     /// <summary>
-    /// The same, for <c>WaitForCompletion</c> — the wait a resource with nothing to run can least
-    /// honour.
+    /// Nor does the forwarding wrapper the README offers when a factory's resource is not the
+    /// caller's to rename, so it is the same shape as the one above.
     /// </summary>
     [Fact]
-    public async Task DirectSourcedBackingService_WaitedOnForCompletion_HangsToday()
-    {
-        var builder = CreateBuilder("""
-            { "backingServices": { "orders-db": {
-                "source": "direct",
-                "direct": { "connectionString": "Host=shared-dev;Database=orders" } } } }
-            """);
-
-        var db = builder.AddBackingService("orders-db", () => builder.AddConnectionString("orders-db"));
-        var worker = Consumer(builder).WaitForCompletion(db);
-
-        await Assert.ThrowsAsync<OperationCanceledException>(() => WaitAsync(builder, worker.Resource));
-    }
-
-    /// <summary>
-    /// The forwarding wrapper the README recommends when the factory's resource is not the caller's
-    /// to rename hangs too, which is the worst of the three.
-    /// </summary>
-    /// <remarks>
-    /// The shape that matters most, because this package tells people to write it — and unlike the
-    /// two above there <i>is</i> a real resource behind the wrapper under <c>"local"</c>, so a
-    /// developer has every reason to expect the wait to reach through to it. It does not: the wait
-    /// lands on the wrapper, which never publishes a state.
-    /// </remarks>
-    [Fact]
-    public async Task ForwardingWrapper_WaitedOnByAConsumer_HangsToday()
+    public void ForwardingWrapper_CarriesNoLifetimeMarker()
     {
         var builder = CreateBuilder("""
             { "backingServices": { "orders-db": { "source": "local" } } }
@@ -135,17 +80,20 @@ public class BackingServiceWaitTests
             return builder.AddConnectionString("orders-db", ReferenceExpression.Create($"{shared}"));
         });
 
-        var worker = Consumer(builder).WaitFor(db);
-
-        await Assert.ThrowsAsync<OperationCanceledException>(() => WaitAsync(builder, worker.Resource));
+        Assert.IsNotAssignableFrom<IResourceWithoutLifetime>(db.Resource);
     }
 
     /// <summary>
-    /// The control: <c>ServiceUrlResource</c> declares the lifetime marker, so its wait is the shape
-    /// that is supposed to resolve. If this hangs, the harness is wrong rather than the subject.
+    /// A <c>"url"</c>-sourced service does carry the marker, and its wait resolves with nothing
+    /// running at all.
     /// </summary>
+    /// <remarks>
+    /// The contrast, and the only wait here that demonstrates resolving rather than merely being
+    /// honoured: Aspire drops the annotation outright, so this returns in a harness where an
+    /// honoured wait blocks.
+    /// </remarks>
     [Fact]
-    public async Task Control_UrlSourcedService_ResolvesRatherThanHanging()
+    public async Task UrlSourcedService_CarriesTheMarkerAndItsWaitResolves()
     {
         var dir = Directory.CreateTempSubdirectory().FullName;
         File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
@@ -161,8 +109,17 @@ public class BackingServiceWaitTests
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
 
         var inventory = builder.AddService("inventory");
-        var worker = Consumer(builder).WaitFor(inventory);
+        var worker = builder
+            .AddExecutable("worker", "dotnet", Directory.CreateTempSubdirectory().FullName)
+            .WaitFor(inventory);
 
-        await WaitAsync(builder, worker.Resource);
+        Assert.IsAssignableFrom<IResourceWithoutLifetime>(inventory.Resource);
+
+        var notifications = builder.Services.BuildServiceProvider()
+            .GetRequiredService<ResourceNotificationService>();
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        await notifications.WaitForDependenciesAsync(worker.Resource, cts.Token);
     }
 }

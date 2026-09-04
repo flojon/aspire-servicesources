@@ -126,12 +126,11 @@ nothing will fail to build to warn you.
       .Configure<IResourceWithWaitSupport>(r => r.WaitFor(ordersDb));
   ```
 
-  **Known limitation: that `WaitFor` does not survive a switch to `"direct"`** ([#220]). It works
-  under `"local"`, where a real database resource sits behind it. Under `"direct"` the resource is a
-  connection string with nothing to start, nothing publishes a state for it, and the consumer waits
-  for the life of the run instead of resolving. It is the one place this feature's own promise — the
-  same AppHost code under either source — is not kept, so leave the wait off a backing service anyone
-  might point at an instance they already run.
+  **Known limitation: that `WaitFor` stops meaning anything under `"direct"`** ([#220]). It waits
+  properly under `"local"`, where a real database resource sits behind it. Under `"direct"` the
+  resource is a connection string, which Aspire marks running as soon as the string is available, so
+  the wait is satisfied at once and the consumer starts without the instance you pointed at having
+  been checked. It does not hang and nothing fails; the ordering simply stops being enforced.
 
   Two sources ship in this release, configured under a new `backingServices:` section read through
   the same configuration layers as `services:`. `"local"` runs the factory the AppHost supplied and

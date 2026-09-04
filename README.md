@@ -1376,12 +1376,13 @@ builder.AddService("orders")
     .Configure<IResourceWithWaitSupport>(r => r.WaitFor(ordersDb));
 ```
 
-> **`WaitFor` on a backing service does not survive the source switch today.** The `WaitFor` above
-> works under `"local"`, where there is a real database resource behind it. Switch that backing
-> service to `"direct"` and the consumer never leaves `Waiting` — nothing publishes a state for a
-> connection-string resource, so the wait is accepted and never resolves. Measured and tracked as
-> [#220](https://github.com/flojon/aspire-servicesources/issues/220); until it is fixed, leave the
-> `WaitFor` off a backing service that anyone might point at an instance they already run.
+> **`WaitFor` stops meaning anything when the source changes.** The `WaitFor` above waits properly
+> under `"local"`, where a real database resource sits behind it. Switch that backing service to
+> `"direct"` and it is satisfied immediately instead: the resource is a connection string, and Aspire
+> marks it running as soon as that string is available — which is at once, without the instance you
+> pointed at having been checked. Nothing fails and nothing hangs; the consumer simply starts
+> earlier than you asked it to. Tracked as
+> [#220](https://github.com/flojon/aspire-servicesources/issues/220).
 
 Two things are different from `AddService()`:
 
@@ -1496,23 +1497,17 @@ across a source switch. This used to be the case `WithReference(db, connectionNa
 rule makes that unreachable for a backing service, since the throw happens first, so the wrap is
 what replaces it.
 
-> **It is not a drop-in, and today a `WaitFor` on it hangs.** What `AddBackingService` hands back is
-> the forwarding `ConnectionStringResource` rather than the database the factory built. Nothing ever
-> publishes a state for that resource, and a consumer waiting on it sits in `Waiting` for the life of
-> the run rather than resolving — measured, not inferred:
->
-> ```text
-> Resource 'worker' failed to wait for dependencies before the operation was cancelled.
-> - Current State: Waiting
-> - Waiting For:
->   - orders-db: Unable to retrieve current state.
-> ```
+> **It is not a drop-in: it costs you the wait.** What `AddBackingService` hands back is the
+> forwarding `ConnectionStringResource` rather than the database the factory built, and Aspire marks
+> a connection-string resource running as soon as its value is available. So a consumer's
+> `WaitFor(ordersDb)` is satisfied immediately rather than holding the app back until the database
+> is up — under `"local"`, where there really is a database starting, that is a wait you have
+> quietly lost.
 >
 > So **rename the resource wherever you can**, and reach for the wrap only where you genuinely
-> cannot — and then do not `WaitFor` the backing service. The connection string itself is
-> unaffected; only start ordering is. Tracked as
-> [#220](https://github.com/flojon/aspire-servicesources/issues/220), which covers the same hang on
-> a `"direct"`-sourced backing service.
+> cannot. The connection string itself is unaffected; only start ordering is. Tracked as
+> [#220](https://github.com/flojon/aspire-servicesources/issues/220), with the same effect on a
+> `"direct"`-sourced backing service.
 
 ### Connection-string placeholders
 
@@ -1567,11 +1562,14 @@ env 'ServiceSources__BackingServices__orders-db__Direct__ConnectionString=Host=d
 here — makes an environment variable name that is not a valid shell identifier, and both
 `export NAME=…` and the `NAME=… command` prefix refuse it outright. `env 'NAME=value' command`
 accepts any name, and so do docker-compose's `environment:`, `launchSettings.json` and a workflow's
-`env:` block, none of which involve a shell at all.
+`env:` block, none of which put the *name* through a shell.
 
-Nothing reports the mangled case, because what arrives is a valid template that simply has no
-placeholder in it — which is also what someone writing a literal port produces. In docker-compose
-the escape is `$${port}`.
+That is a separate question from the value. `launchSettings.json` leaves a value alone entirely;
+docker-compose does its own `${…}` interpolation, so escape it there as `$${port}`; and a workflow's
+`run:` block is a shell, so it needs the single quotes above.
+
+Nothing reports the mangled case either way, because what arrives is a valid template that simply
+has no placeholder in it — which is also what someone writing a literal port produces.
 
 This does not apply to `servicesources.local.json`, `appsettings.json` or user secrets, where `$` is
 an ordinary character — which is where a template normally lives.

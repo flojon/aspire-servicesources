@@ -15,22 +15,21 @@ namespace Aspire.Hosting.ServiceSources.BackingServices;
 /// already uses for an external HTTP service.
 /// <para>
 /// The resource this adds is Aspire's own <c>ConnectionStringResource</c>. There is nothing for
-/// Aspire to start behind it, so a <c>WaitFor</c> on one has nothing whose readiness it could track
-/// — a connectivity check that would make it mean something is a deliberate omission for now, since
-/// the developer is pointing at something they already run and the only thing a check buys them is a
-/// better diagnosis.
+/// Aspire to start behind it, so a consumer's <c>WaitFor</c> is honoured but empty: the orchestrator
+/// publishes <c>Running</c> for the resource as soon as its connection string is available, which is
+/// immediately, so the wait is satisfied without anything having been waited for. A connectivity
+/// check that would make it mean something is a deliberate omission for now, since the developer is
+/// pointing at something they already run and the only thing a check buys them is a better
+/// diagnosis (#220).
 /// </para>
 /// <para>
-/// <b>A consumer's <c>WaitFor</c> on one of these hangs today (#220).</b> This used to say the type
-/// is an <c>IResourceWithoutLifetime</c> and that a wait on it was "honoured but empty". It is not
-/// that type: on Aspire 13.5.2 it declares <c>IResourceWithConnectionString</c> and
-/// <c>IResourceWithWaitSupport</c> and no lifetime marker at all, read off the loaded assembly. The
-/// missing marker is the whole difference — it is what
-/// <see cref="Sources.ServiceUrlResource"/> declares to keep a wait on <i>it</i> from hanging
-/// (#170) — so with wait support present and the marker absent the wait is accepted and never
-/// resolves. Measured through <c>ResourceNotificationService.WaitForDependenciesAsync</c>, the same
-/// route the orchestrator takes, and pinned by <c>BackingServiceWaitTests</c>: the consumer stays in
-/// <c>Waiting</c> with "orders-db: Unable to retrieve current state".
+/// Two details of that are easy to get wrong in opposite directions, so both are measured. The type
+/// carries <c>IResourceWithConnectionString</c> and <c>IResourceWithWaitSupport</c> and <i>no</i>
+/// <c>IResourceWithoutLifetime</c>, read off the loaded assembly on Aspire 13.5.2 — so unlike
+/// <see cref="Sources.ServiceUrlResource"/>, which declares that marker deliberately (#170), the
+/// wait here is honoured rather than dropped, and <c>BackingServiceWaitTests</c> pins that. But
+/// honoured is not never-resolving: against a live host the consumer leaves <c>Waiting</c> in about
+/// a second. Reasoning from the marker alone says "hang", and that is wrong.
 /// </para>
 /// </remarks>
 internal sealed class DirectBackingServiceSource : IBackingServiceSource
