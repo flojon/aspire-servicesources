@@ -691,16 +691,14 @@ reported as such, rather than left to surface as a failure to start the app. On 
 run is `mvnw.cmd`/`gradlew.bat`, whether it was found by default or named by `wrapperPath`: the
 extensionless scripts beside them are POSIX shell scripts that Windows cannot exec.
 
-Every problem with the block bar two — unknown properties, a missing or out-of-range `port`, no run
-mode or more than one, a `workingDirectory`, `wrapperPath` or `jarPath` escaping the repository, a
-`wrapperPath` set alongside `jarPath` — is reported by the `AddService("catalog")` call itself,
-before the service has added anything to the app model. The two exceptions are a `workingDirectory`
-that doesn't exist in the checkout and a wrapper script that isn't there: both need the checkout on
-disk, which isn't cloned until the block itself has been checked, so they are reported a moment
-later, once the resource is being created. Under
-[`UseDeferredCheckout()`](#first-run-usedeferredcheckout) that moment is later still — after the
-clone lands, as this service's resource state — but it is the same two checks saying the same two
-things.
+Every problem with the block — unknown properties, a missing or out-of-range `port`, no run
+mode or more than one, a `workingDirectory`, `wrapperPath` or `jarPath` escaping the repository,
+a `wrapperPath` set alongside `jarPath`, a `workingDirectory` that isn't in the checkout, a
+wrapper script that isn't there — is reported by the `AddService("catalog")` call itself, before
+the service has added anything to the app model. The last two are read against the checkout, so
+under [`UseDeferredCheckout()`](#first-run-usedeferredcheckout), where there isn't one yet, they
+are reported after the clone lands as this service's resource state instead — the same two checks
+saying the same two things.
 
 **Reaching the rest of the Java integration.** The `java:` block covers how to start the app; it
 deliberately doesn't mirror every modifier the Community Toolkit offers. Anything else is reachable
@@ -735,11 +733,22 @@ public sealed class JavaScriptKind : ILocalResourceKind
         public string? RunScript { get; set; }
     }
 
-    // Optional, and worth implementing whenever Resolve parses rawConfig: this runs immediately
-    // before Resolve, and before this service's checkout, so a typo'd options block is reported
-    // without a half-created resource behind it and without paying for a clone first.
-    public void Validate(string serviceName, object? rawConfig) =>
-        LocalKindConfig.Parse<Options>(rawConfig, serviceName);
+    // Optional, and worth implementing whenever Resolve parses rawConfig or reads the checkout:
+    // this runs immediately before Resolve, against the same repoRoot, and before this service has
+    // added anything to the app model — so a typo'd options block, or one naming a directory the
+    // repository doesn't have, is reported without a half-created resource behind it. Not the only
+    // place to put these checks if your kind supports deferred checkouts — see below.
+    public void Validate(string serviceName, string repoRoot, object? rawConfig)
+    {
+        var options = LocalKindConfig.Parse<Options>(rawConfig, serviceName);
+
+        if (options?.AppDirectory is { } appDirectory
+            && !Directory.Exists(Path.Combine(repoRoot, appDirectory)))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': appDirectory '{appDirectory}' is not in the checkout.");
+        }
+    }
 
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig)
@@ -762,6 +771,16 @@ once, and cannot re-register `"dotnet"` or use a
 name that collides with a well-known service property (`repository`, `project`, `defaultRef`,
 `kind`, `kubernetes`, `url`, `container`) — a block by one of those names would be read as that
 property rather than as the kind's options.
+
+It also refuses a handler that declares a public `Validate` taking a service name first and an
+options block somewhere, which doesn't match the interface member — the pre-`repoRoot`
+`Validate(string, object?)`, the parameter added in the wrong position, the wrong return type —
+naming the kind and the method it found. `Validate` is a defaulted interface member, so any of
+those compile clean and simply stop implementing it, and everything they rejected would be silently
+accepted instead. Registration is the only place left to say so; the build won't. A `Validate` of
+your own is left alone unless it looks like that attempt: a private helper, one taking your own
+options type, and one like `Validate(string message)` that carries no options block at all all
+register exactly as they did before.
 
 **Supporting [`UseDeferredCheckout()`](#first-run-usedeferredcheckout).** Two more members, both
 optional and both defaulting to "no", decide whether a service of your kind can start before its
@@ -798,6 +817,15 @@ back as `ValidateCheckout`. Endpoints are the one thing that can't be added late
 can only learn its endpoints by reading the repository should return `null`. Holding the resource
 back and starting it once the checkout lands is core's job, and it covers every resource the call
 adds to the app model, not just the one returned as `Service`.
+
+> **Validate your options block here too.** `Validate` is paired with `Resolve`, and core calls
+> neither for a service it defers — there is no checkout for `Validate` to judge the service
+> against, so `ResolveDeferred` runs in their place. A kind that can answer `true` from
+> `SupportsDeferredCheckout` and rejects a bad block only in `Validate` has arranged for that block
+> never to be checked at all under `UseDeferredCheckout()`. Parse it here as well and throw
+> `ServiceSourcesConfigurationException`. Nothing warns you: implementing both `Validate` and
+> `ResolveDeferred` is the ordinary, correct arrangement — the built-in `java` kind does — so
+> there is no signal to refuse the way a mismatched `Validate` signature is refused.
 
 Returning `null` from `ResolveDeferred` after `SupportsDeferredCheckout` said `true` is honoured —
 legitimate for a kind that can only tell once it has looked at everything — but it isn't free. The

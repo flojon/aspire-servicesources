@@ -39,7 +39,8 @@ public sealed class DeferredLocalResource
     /// Only the checks that genuinely need the repository belong here. Anything settleable from the
     /// options block alone — a bad <c>appType</c>, a path that climbs out of the checkout — is a
     /// configuration error the developer should hear about from
-    /// <see cref="ILocalResourceKind.Validate"/>, before a cold clone is paid for.
+    /// <see cref="ILocalResourceKind.ResolveDeferred"/> itself, at composition, rather than from a
+    /// resource that failed once its clone had landed.
     /// </remarks>
     public Action? ValidateCheckout { get; init; }
 }
