@@ -131,15 +131,24 @@ internal sealed class DeveloperConfigShape
     /// Every tie is returned, not the closest one, for the two reasons ties happen: a typo can sit
     /// the same distance from two differently-named fields, and a field name can be declared by
     /// more than one block — which is the ordinary case for a backing service's
-    /// <c>connectionString</c>. <see cref="NearMiss.Nearest"/> orders them so the same answer comes
-    /// back on every run.
+    /// <c>connectionString</c>. <see cref="NearMiss.Nearest"/> orders the first kind, by the
+    /// spelling it was given; the second kind it cannot order at all, since the spellings are
+    /// equal, so the block is ordered on here too. The result is the same on every run either way.
     /// </para>
     /// </remarks>
     public IReadOnlyList<(string Field, string Block)> NearMissFieldsOf(string writtenKey) =>
         NearMiss.Nearest(
-            writtenKey,
-            BlockFields.SelectMany(block => block.Value.Keys.Select(field => (Field: field, Block: block.Key))),
-            candidate => candidate.Field);
+                writtenKey,
+                BlockFields.SelectMany(block => block.Value.Keys.Select(field => (Field: field, Block: block.Key))),
+                candidate => candidate.Field)
+            // Ordered by block as well as field, because Nearest can only order by what it was
+            // given: two candidates sharing a field name keep the order they arrived in, which is
+            // Type.GetProperties()'s and not one the CLR promises to keep stable. This shape has
+            // exactly that pair — connectionString, declared by every source block that takes one —
+            // so without this the message would name the blocks in an order nothing guarantees.
+            .OrderBy(candidate => candidate.Field, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.Block, StringComparer.Ordinal)
+            .ToArray();
 
     private static DeveloperConfigShape Of<TEntry>(
         string kind, string noun, IEnumerable<string> sourceNames) =>

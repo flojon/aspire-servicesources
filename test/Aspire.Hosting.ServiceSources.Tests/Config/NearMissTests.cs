@@ -66,6 +66,31 @@ public class NearMissTests
     public void Nearest_EquallyCloseCandidates_AreAllReturnedInOrdinalOrder() =>
         Assert.Equal(["bat", "cat"], NearMiss.Nearest("aat", ["cat", "bat"], name => name));
 
+    /// <summary>
+    /// Candidates that share a spelling are all returned, and their order between themselves is not
+    /// something this method decides.
+    /// </summary>
+    /// <remarks>
+    /// The reason a caller that wants one answer cannot simply take the first: ordering by the
+    /// spelling cannot separate two candidates spelled the same way — one field name declared by
+    /// two blocks — so they keep the order they arrived in, which for the config shapes is
+    /// <c>Type.GetProperties()</c>'s and therefore not guaranteed. Returning both is what forces the
+    /// caller to order by whatever does separate them; see
+    /// <see cref="DeveloperConfigShape.NearMissFieldsOf"/>.
+    /// </remarks>
+    [Fact]
+    public void Nearest_CandidatesSharingASpelling_AreAllReturned()
+    {
+        (string Field, string Block)[] candidates =
+            [("connectionString", "kubernetes"), ("connectionString", "direct")];
+
+        var nearest = NearMiss.Nearest("conectionString", candidates, candidate => candidate.Field);
+
+        Assert.Equal(2, nearest.Count);
+        Assert.All(nearest, candidate => Assert.Equal("connectionString", candidate.Field));
+        Assert.Equal(["direct", "kubernetes"], nearest.Select(candidate => candidate.Block).Order(StringComparer.Ordinal));
+    }
+
     [Fact]
     public void Nearest_NoCandidateResembles_ReturnsEmpty() =>
         Assert.Empty(NearMiss.Nearest("nonsense", ["path", "ref", "url", "namespace"], name => name));
