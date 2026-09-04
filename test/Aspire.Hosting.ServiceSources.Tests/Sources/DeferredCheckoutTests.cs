@@ -963,7 +963,14 @@ public class DeferredCheckoutTests
 
         var services = builder.Services.BuildServiceProvider();
 
+        // The two progress states are published back to back and only the second one is held, so
+        // the wait below is on the later of the two — which cannot prove the earlier one was seen
+        // (#212). The watcher has to be listening before the clone is triggered at all: see
+        // PlantSubscriptionProbeAsync.
+        var probe = await PlantSubscriptionProbeAsync(services);
+
         var states = new List<string>();
+        var subscribed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var reachedProgress = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var backToCheckingOut = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -974,6 +981,12 @@ public class DeferredCheckoutTests
                 await foreach (var published in services.GetRequiredService<ResourceNotificationService>()
                                    .WatchAsync(watching.Token))
                 {
+                    if (string.Equals(published.Resource.Name, probe.Name, StringComparison.Ordinal))
+                    {
+                        subscribed.TrySetResult();
+                        continue;
+                    }
+
                     if (!string.Equals(published.Resource.Name, "orders", StringComparison.Ordinal)
                         || published.Snapshot.State?.Text is not { } text)
                     {
@@ -996,6 +1009,8 @@ public class DeferredCheckoutTests
                 }
             },
             watching.Token);
+
+        await subscribed.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
         await builder.Eventing.PublishAsync(
             new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
@@ -1063,7 +1078,14 @@ public class DeferredCheckoutTests
 
         var services = builder.Services.BuildServiceProvider();
 
+        // The real client cannot be held open the way the fake can, so the watcher being late is
+        // the only thing that could cost this test the states it asserts on — see
+        // PlantSubscriptionProbeAsync.
+        var probe = await PlantSubscriptionProbeAsync(services);
+
         var states = new List<string>();
+        var subscribed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
         using var watching = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var watcher = Task.Run(
             async () =>
@@ -1071,7 +1093,11 @@ public class DeferredCheckoutTests
                 await foreach (var published in services.GetRequiredService<ResourceNotificationService>()
                                    .WatchAsync(watching.Token))
                 {
-                    if (string.Equals(published.Resource.Name, "orders", StringComparison.Ordinal)
+                    if (string.Equals(published.Resource.Name, probe.Name, StringComparison.Ordinal))
+                    {
+                        subscribed.TrySetResult();
+                    }
+                    else if (string.Equals(published.Resource.Name, "orders", StringComparison.Ordinal)
                         && published.Snapshot.State?.Text is { } text)
                     {
                         lock (states)
@@ -1082,6 +1108,8 @@ public class DeferredCheckoutTests
                 }
             },
             watching.Token);
+
+        await subscribed.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
         await builder.Eventing.PublishAsync(
             new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
@@ -1223,6 +1251,38 @@ public class DeferredCheckoutTests
         Assert.Equal(
             "Checking out",
             observed[(Array.LastIndexOf(observed, "Receiving objects 48% · 18.54 MiB") + 1)..].First());
+    }
+
+    /// <summary>
+    /// A resource of the tests' own, whose only job is to have a state for a watcher to hand back.
+    /// Nothing under test ever sees it, so no assertion has to allow for it.
+    /// </summary>
+    private sealed class SubscriptionProbe() : Resource("subscription-probe");
+
+    /// <summary>
+    /// Gives the notification service a state to replay, so that a watcher started afterwards has
+    /// something to hand back the moment it is listening — which is how a test learns that it is.
+    /// </summary>
+    /// <remarks>
+    /// <c>WatchAsync</c> registers its subscription inside the enumerator's first move and then
+    /// replays each resource's <i>current</i> snapshot, never the states it missed. So starting a
+    /// watcher says nothing about when it is listening, and any state published while its
+    /// <c>Task.Run</c> is still queued is gone for good (#212). A state coming back out is what
+    /// says so: awaiting the probe's replay before triggering the flow under test puts the
+    /// subscription provably ahead of every state the test asserts on, because the subscription is
+    /// registered before the replay that delivers the probe.
+    /// </remarks>
+    private static async Task<IResource> PlantSubscriptionProbeAsync(IServiceProvider services)
+    {
+        var probe = new SubscriptionProbe();
+
+        await services.GetRequiredService<ResourceNotificationService>()
+            .PublishUpdateAsync(probe, snapshot => snapshot with
+            {
+                State = new ResourceStateSnapshot("Probe", null),
+            });
+
+        return probe;
     }
 
     /// <summary>
