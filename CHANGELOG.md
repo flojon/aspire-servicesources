@@ -11,6 +11,8 @@ nothing will fail to build to warn you.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-04
+
 ### Fixed
 
 - **A service name is no longer able to place its checkout outside `.servicesources/checkouts/`**
@@ -611,7 +613,8 @@ Targets `net10.0`.
 - Fail-fast configuration validation with `ServiceSourcesConfigurationException`.
 - MIT license, README, symbol packages, and Trusted Publishing (OIDC) to nuget.org.
 
-[Unreleased]: https://github.com/flojon/aspire-servicesources/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/flojon/aspire-servicesources/compare/v0.4.1...release/0.4.x
+[0.4.1]: https://github.com/flojon/aspire-servicesources/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/flojon/aspire-servicesources/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/flojon/aspire-servicesources/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/flojon/aspire-servicesources/compare/v0.2.0...v0.3.0
