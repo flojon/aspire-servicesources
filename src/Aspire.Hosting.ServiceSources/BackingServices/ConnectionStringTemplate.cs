@@ -99,9 +99,11 @@ internal sealed class ConnectionStringTemplate
     {
         var segments = new List<Segment>();
 
-        // Accumulated rather than sliced out of the template, because an escaped brace is one
-        // character where the template spells it with two: the literal a run produces is no longer
-        // a substring of what was written.
+        // Accumulated rather than sliced out of the template. Every literal a run produces is a
+        // substring of what was written, so slicing would work — but it needs an index for where
+        // the run began, kept correct across the branch that finds a brace opening no placeholder
+        // and resumes one character in without ending the run. That invariant is the only thing
+        // either version can get wrong, and appending has no index to hold.
         var literal = new StringBuilder();
         var at = 0;
 
@@ -260,10 +262,25 @@ internal sealed class ConnectionStringTemplate
         expression.AppendLiteral(
             text.Replace("{", "{{", StringComparison.Ordinal).Replace("}", "}}", StringComparison.Ordinal));
 
+    /// <summary>
+    /// The error for a token this package recognizes the keyword of but cannot read.
+    /// </summary>
+    /// <remarks>
+    /// Says that the text cannot be kept, as well as what is wrong with it as a placeholder. This is
+    /// the path a value that was never meant as a placeholder arrives on — <c>PWD={secret}</c> is an
+    /// ODBC-quoted password that happens to be the word, and it is keyword-shaped, so it lands here
+    /// rather than passing through as text. Told only what a secret placeholder should look like,
+    /// its author would go on trying to write one; the fact they need is that the spelling is
+    /// unavailable to them whatever they do to it, since there is no escape. See the remarks on this
+    /// type for why there is not.
+    /// </remarks>
     private static ServiceSourcesConfigurationException Malformed(
         string backingServiceName, string configKey, string placeholder, string problem) =>
         new($"Backing service '{backingServiceName}': the connection string carries the placeholder "
             + $"'{placeholder}', which cannot be read — {problem} "
+            + $"If '{placeholder}' was meant as text, it cannot be: a '{{…}}' token beginning "
+            + $"'{PortKeyword}' or '{SecretKeyword}' is always read as a placeholder, and there is "
+            + "no escape for it. "
             + $"The key is '{configKey}', which any configuration layer can set: "
             + $"{Config.DeveloperConfiguration.FileName}, appsettings, user secrets, the environment "
             + $"variable {configKey.Replace(":", "__", StringComparison.Ordinal)}, or the command line.");

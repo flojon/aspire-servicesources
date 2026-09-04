@@ -105,8 +105,8 @@ public class ConnectionStringTemplateTests
     /// doubles an embedded <c>}</c>, so <c>PWD={pa}}ss}</c> is the password <c>pa}ss</c>; collapsing
     /// that <c>}}</c> gave <c>PWD={pa}ss}</c>, which the driver reads as ending at the brace, and
     /// the app connected with <c>pa</c> and trailing rubbish. It does not require doubling
-    /// <c>{</c>, so <c>PWD={{abc}</c> is the password <c>{abc}</c>'s cousin <c>{abc</c>, and
-    /// collapsing that dropped a character. Both were silent. Being unable to write a literal
+    /// <c>{</c>, so <c>PWD={{abc}</c> is the password <c>{abc</c>, and collapsing that <c>{{</c>
+    /// dropped its first character. Both were silent. Being unable to write a literal
     /// <c>{port}</c> is a limitation; rewriting a working connection string is a bug, so the
     /// limitation is what ships.
     /// </remarks>
@@ -188,4 +188,41 @@ public class ConnectionStringTemplateTests
         Assert.Contains(Key, message);
         Assert.Contains("ServiceSources__BackingServices__orders-db__Direct__ConnectionString", message);
     }
+
+    /// <summary>
+    /// A keyword-shaped token that was never meant as a placeholder is told that the text cannot be
+    /// kept, not only what a well-formed placeholder would look like.
+    /// </summary>
+    /// <remarks>
+    /// <c>PWD={secret}</c> is an ODBC-quoted password that happens to be the word, and it is
+    /// keyword-shaped, so it lands on the malformed path rather than passing through as text. Told
+    /// only that "a secret placeholder names a secret and a key inside it", its author would go on
+    /// trying to write one. The fact they need is that the spelling is unavailable whatever they do
+    /// to it — there is no escape, and doubling the braces is not one.
+    /// </remarks>
+    [Theory]
+    [InlineData("PWD={secret}")]
+    [InlineData("PWD={secret:a}")]
+    [InlineData("PWD={secret:a:b:c}")]
+    [InlineData("Port={port:}")]
+    [InlineData("Port={port:a:b}")]
+    public void Parse_KeywordShapedTextThatIsNotAPlaceholder_SaysTheTextCannotBeKept(string template)
+    {
+        var message = Rejects(template).Message;
+
+        Assert.Contains("was meant as text, it cannot be", message);
+        Assert.Contains("there is no escape for it", message);
+    }
+
+    /// <remarks>
+    /// The reserved shape is wider than the two well-formed spellings, because the keyword is
+    /// matched case-insensitively on the text before the first colon — the same way every other part
+    /// of an entry is matched, configuration keys being case-insensitive.
+    /// </remarks>
+    [Theory]
+    [InlineData("{PORT}")]
+    [InlineData("{Secret:a:b}")]
+    public void Parse_KeywordInAnyCasing_IsReserved(string template) =>
+        Assert.DoesNotContain(
+            Parse(template).Segments, segment => segment is ConnectionStringTemplate.Literal);
 }

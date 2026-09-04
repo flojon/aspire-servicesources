@@ -166,8 +166,12 @@ nothing will fail to build to warn you.
   backing service and the key, rather than reaching the app as text. Braces are never rewritten and
   there is no escape: every brace reaches the app as written, doubled ones included, so ODBC's own
   doubling rule stays intact — `PWD={pa}}ss}` is the password `pa}ss` and remains it. The cost is
-  that `{port}` and `{secret:a:b}` cannot be written as literal text, which the errors say outright
-  rather than leaving you to hunt for a spelling that does not exist.
+  one reserved shape: a `{…}` token whose text up to the first colon is `port` or `secret`, in any
+  casing, is always read as a placeholder, so `{PORT}`, `{port:amqp}`, `{secret}` and `{secret:a}`
+  are unavailable as literal text alongside the two well-formed spellings — which is what catches
+  `PWD={secret}`, an ODBC-quoted password that happens to be the word. Every other `{…}` is text.
+  The errors say the text cannot be kept rather than leaving you to hunt for a spelling that does
+  not exist.
 
   A `source` of nothing but whitespace is refused rather than read as the default, the same way a
   whitespace *field* has been refused since `0.4.0` and for the same reason: it is the empty
