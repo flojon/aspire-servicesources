@@ -55,7 +55,11 @@ public class JavaScriptPrepareStepTests
     {
         public int Runs { get; private set; }
 
-        public int Run(string workingDirectory, IReadOnlyList<string> command, Action<string> onLine)
+        public int Run(
+            string workingDirectory,
+            IReadOnlyList<string> command,
+            CancellationToken cancellationToken,
+            Action<string> onLine)
         {
             Runs++;
 

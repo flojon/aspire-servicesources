@@ -176,9 +176,15 @@ services:
     prepare:
       command: ["./prepare.sh"]
       windowsCommand: ["pwsh", "-File", "prepare.ps1"]  # optional; overrides command on Windows
-      mode: once                                  # oncePerCommit (default) | once | always | never
-                                                  # `once` here: the jar version is pinned by the
-                                                  # filename below, not by the repository's commit
+      mode: oncePerCommit                         # the default | once | always | never
+                                                  # the default even though `jarPath` below looks
+                                                  # pinned: prepare.sh is committed and hardcodes
+                                                  # the version itself, so bumping it moves the
+                                                  # commit while the command stays the same, and
+                                                  # `once` would strand every developer on the old
+                                                  # jar. Verified against the real repository when
+                                                  # this shipped; the sketch said `once` and the
+                                                  # sketch was wrong.
     java:
       jarPath: graphhopper-web-11.0.jar
       args: ["server", "gh-config-local.yml"]
@@ -428,7 +434,8 @@ console, because the task holds the service's `ILogger` and publishes its state 
 *Execution and output*.
 
 What is untouched: a `path` override (finding 9), a warm checkout, publish mode — which #136
-restricts deferral out of, so `aspire publish` and manifest generation always take the eager path —
+restricts deferral out of, so `aspire publish` and manifest generation always take the eager path,
+where the step is now skipped outright; see [Publish mode](#publish-mode) —
 and a `node`/`bun` service that cannot promise a `package.json` without looking at one: #164 has it
 decline deferral rather than register an app with no installer. Each of those prepares eagerly, and
 nothing in [`path` checkouts](#path-checkouts) interacts with deferral at all.
@@ -837,6 +844,31 @@ to make or break the feature: a country-sized import has to read as an initializ
 than as an apparent hang. The deferred path delivers exactly that, and since #164 it is the path the
 motivating case takes on the run that needs it — its first.
 
+#### Publish mode
+
+The step does not run outside run mode, which was added during implementation rather than designed
+here, and is worth recording because the two facts that made it necessary compose badly. #136
+restricts deferral to run mode, so in publish mode **every** `"local"` service takes the eager path
+— and that is the path the step sits on. Unguarded, an `aspire publish` over a cold checkout
+therefore paid the whole bootstrap: for the motivating case, hundreds of megabytes and a
+country-sized import, to emit a manifest that describes none of it, with the output going to a
+console nobody is watching. On a CI machine that is every publish.
+
+Nothing in a manifest depends on it. A bootstrap produces what a service needs in order to *run*,
+and publish composes the model, writes the manifest and exits. So the step is gated on
+`ExecutionContext.IsRunMode`, exactly as `ShouldDefer` is and for a related reason.
+
+Only the execution is gated. The block is still parsed and validated in every mode, so a typo'd
+`mode` or a command climbing out of the checkout still fails a publish — which is the right way
+round for a check whose whole value is being made early.
+
+The skip is reported, and reported immediately rather than buffered to `BeforeStartEvent` as this
+package's other notices are. It has one consequence: the step runs *before* the kind judges the
+checkout, so a service whose committed files are not sufficient for its kind on their own — a
+generated `.csproj`, a generated project directory — is rejected during composition, and a notice
+waiting for an event that composition never reaches would never be read. The remedy is to run the
+AppHost once and publish afterwards.
+
 ### Failure
 
 A non-zero exit throws `ServiceSourcesConfigurationException` naming the service, the resolved
@@ -996,8 +1028,15 @@ repository at all, so tracking the catalog's command is a questionable default t
 ### What this deliberately does not do
 
 No general task runner, no dependency ordering between prepare steps, no caching of produced
-artifacts across developers, no timeout (Ctrl-C works, and a country-sized routing graph has no
-defensible default), and no injected environment variables. One command, one marker, per service.
+artifacts across developers, no timeout (a country-sized routing graph has no defensible default),
+and no injected environment variables. One command, one marker, per service.
+
+"Ctrl-C works" is load-bearing for the no-timeout decision, so it is arranged rather than assumed:
+the runner takes the deferred path's own shutdown token and kills the command's whole process tree
+on cancellation. Killing only the command would not do — a bootstrap starts other programs, and the
+motivating case is a shell script that runs `curl` and then a JVM, either of which would otherwise
+outlive the AppHost it belonged to. Composition has no token to give, so the eager path passes none
+and a killed AppHost orphans the child there as it always has.
 
 It also does not reach backing services, which since #144/#199 have a source of their own that is
 *also* spelled `"local"`. That one means "run this dependency locally, through the factory the

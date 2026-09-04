@@ -15,7 +15,11 @@ internal sealed class ProcessPrepareCommandRunner : IPrepareCommandRunner
     {
     }
 
-    public int Run(string workingDirectory, IReadOnlyList<string> command, Action<string> onLine)
+    public int Run(
+        string workingDirectory,
+        IReadOnlyList<string> command,
+        CancellationToken cancellationToken,
+        Action<string> onLine)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -43,9 +47,60 @@ internal sealed class ProcessPrepareCommandRunner : IPrepareCommandRunner
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
-        process.WaitForExit();
+        Wait(process, cancellationToken);
 
         return process.ExitCode;
+    }
+
+    /// <summary>
+    /// Waits for the command, and kills it if the wait is cancelled.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The whole process <em>tree</em>, because what a bootstrap does is start other programs: the
+    /// motivating case is a shell script that runs <c>curl</c> and then a JVM, and killing the shell
+    /// alone would leave the download and the import running with nothing left to stop them.
+    /// </para>
+    /// <para>
+    /// The parameterless <see cref="Process.WaitForExit()"/> follows the cancellable wait, and is
+    /// not redundant: it is what waits for the redirected output readers to finish, so every line
+    /// the command wrote has reached <c>onLine</c> before this returns. On the cancelled path it
+    /// runs after the kill, for the same reason — the tail of what the command managed to say is
+    /// still worth having.
+    /// </para>
+    /// </remarks>
+    private static void Wait(Process process, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Blocking on the async wait rather than polling: this method is synchronous by design —
+            // both callers already block for as long as the step takes — and there is no
+            // synchronization context here to deadlock against.
+            process.WaitForExitAsync(cancellationToken).GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException)
+        {
+            Kill(process);
+            process.WaitForExit();
+
+            throw;
+        }
+
+        process.WaitForExit();
+    }
+
+    private static void Kill(Process process)
+    {
+        try
+        {
+            process.Kill(entireProcessTree: true);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException)
+        {
+            // It exited between the cancellation and the kill, or this platform cannot enumerate the
+            // tree. Either way there is nothing left for this to do, and a shutdown must not fail
+            // over the way it was noticed.
+        }
     }
 
     private static void Forward(string? line, Action<string> onLine)

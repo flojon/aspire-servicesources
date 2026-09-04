@@ -24,9 +24,20 @@ internal sealed class PrepareMetadata
 
     /// <summary>
     /// Replaces <see cref="Command"/> on Windows. Optional: with none set, <see cref="Command"/>
-    /// runs there too, which is correct for the many cross-platform cases (<c>npm</c>, <c>make</c>,
-    /// <c>python</c>, <c>dotnet</c>).
+    /// runs there too, which is correct for a program that exists as an executable on every platform
+    /// — <c>make</c>, <c>python</c>, <c>dotnet</c>.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A program that is a <c>.cmd</c> or <c>.bat</c> shim on Windows is <em>not</em> one of those,
+    /// and <c>npm</c> is the case to know about: there is no <c>npm.exe</c>, only <c>npm.cmd</c>.
+    /// Nothing here goes through a shell, and Windows resolves a bare name on <c>PATH</c> by
+    /// appending <c>.exe</c> rather than by walking <c>PATHEXT</c>, so <c>["npm", "ci"]</c> fails to
+    /// start there. Such a command needs the variant — <c>["npm.cmd", "ci"]</c> — and the same goes
+    /// for <c>yarn</c>, <c>pnpm</c> and <c>tsc</c>. The launch failure names this as the likely
+    /// cause when it happens.
+    /// </para>
+    /// </remarks>
     /// <remarks>
     /// It exists because one <c>servicesources.yaml</c> is committed and shared by a team on every
     /// platform, so each value can only be spelled one way, and <c>./prepare.sh</c> is not

@@ -125,7 +125,7 @@ nothing will fail to build to warn you.
       prepare:
         command: ["./prepare.sh"]
         windowsCommand: ["pwsh", "-File", "prepare.ps1"]   # optional; replaces command on Windows
-        mode: once                                         # oncePerCommit (default) | once | always | never
+        mode: oncePerCommit                                # the default | once | always | never
       java:
         jarPath: graphhopper-web-11.0.jar
         port: 8989
@@ -155,7 +155,18 @@ nothing will fail to build to warn you.
   the service's own resource log and the service carries a **Preparing** state while it runs, so a
   country-sized import reads as an initialization phase rather than as a hang — and a failure there
   costs that one service rather than the AppHost. Every other run reports to the AppHost's standard
-  output.
+  output. **Ctrl-C during that run reaches the command's own process tree**, so interrupting a long
+  import ends it rather than leaving it, and its children, running with no AppHost to belong to.
+  There is no timeout: a legitimate bootstrap can take an hour.
+
+  **`aspire publish` does not run it.** Publish composes the model, writes the manifest and exits,
+  and a bootstrap produces what a service needs in order to *run* — so nothing in a manifest depends
+  on it, and paying a multi-gigabyte download on every CI publish to emit one would be pure cost.
+  The block is still validated there, so a typo'd mode or a command pointing outside the checkout
+  still fails a publish; only the execution is gated. The skip is reported, because it has one
+  consequence worth naming: the step runs *before* the kind judges the checkout, so a service whose
+  committed files are not enough for its kind on their own — a generated `.csproj`, a generated
+  project directory — is reported as missing them. Run the AppHost once, then publish.
 
   A service resolved through `local.path` **never inherits the catalog's block**: nothing establishes
   that the directory is even a checkout of the repository the catalog names, and it is the

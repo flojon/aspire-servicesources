@@ -15,11 +15,29 @@ internal interface IPrepareCommandRunner
     /// relative to <paramref name="workingDirectory"/> — already confined to it by
     /// <see cref="PrepareStep"/>.
     /// </param>
+    /// <param name="cancellationToken">
+    /// Stops the command. An implementation has to end the <em>process</em> and not merely the wait
+    /// for it: a bootstrap can legitimately run for an hour, so interrupting is how a long one
+    /// ordinarily ends, and a runner that only stopped waiting would leave a download or a
+    /// country-sized import running with no host left to belong to.
+    /// </param>
+    /// <param name="onLine">
+    /// Called for each line, and called concurrently: a process has two streams and they are read
+    /// independently, so an implementation is free to invoke this from more than one thread and the
+    /// caller guards accordingly.
+    /// </param>
     /// <exception cref="PrepareLaunchException">
     /// The command could not be started at all, which is a different thing to tell a developer than
     /// a command that ran and failed.
     /// </exception>
-    int Run(string workingDirectory, IReadOnlyList<string> command, Action<string> onLine);
+    /// <exception cref="OperationCanceledException">
+    /// <paramref name="cancellationToken"/> fired and the command was stopped.
+    /// </exception>
+    int Run(
+        string workingDirectory,
+        IReadOnlyList<string> command,
+        CancellationToken cancellationToken,
+        Action<string> onLine);
 }
 
 /// <summary>

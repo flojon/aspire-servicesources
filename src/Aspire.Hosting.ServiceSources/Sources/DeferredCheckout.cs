@@ -769,7 +769,14 @@ internal sealed class DeferredCheckout
                     managedCheckout: true,
                     deferred.GitClient,
                     deferred.PrepareRunner,
-                    new LoggerPrepareOutputSink(logger));
+                    new LoggerPrepareOutputSink(logger),
+                    // The same token the rest of this task uses, handed all the way to the child
+                    // process. A bootstrap is the longest thing this package waits for, so Ctrl-C
+                    // during one is the ordinary case rather than the edge: without this the
+                    // download or the import would go on running after the host it belongs to had
+                    // gone. Cancellation surfaces as the OperationCanceledException this method
+                    // already treats as the shutdown it is.
+                    stoppingToken);
             }
 
             // Whatever this kind could only settle against a real working tree: the dotnet kind's

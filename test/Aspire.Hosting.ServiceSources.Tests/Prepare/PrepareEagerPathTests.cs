@@ -57,7 +57,11 @@ public class PrepareEagerPathTests
 
         public int ExitCode { get; set; }
 
-        public int Run(string workingDirectory, IReadOnlyList<string> command, Action<string> onLine)
+        public int Run(
+            string workingDirectory,
+            IReadOnlyList<string> command,
+            CancellationToken cancellationToken,
+            Action<string> onLine)
         {
             RanIn.Add(workingDirectory);
             SawInCheckout.AddRange(
@@ -233,6 +237,47 @@ public class PrepareEagerPathTests
         Assert.Contains("'routing'", ex.Message);
         Assert.Contains("prepare step failed", ex.Message);
         Assert.Contains("code 3", ex.Message);
+    }
+
+    /// <summary>
+    /// Publish mode composes a manifest and runs nothing, so it does not pay the bootstrap.
+    /// </summary>
+    /// <remarks>
+    /// The two facts that made this matter compose badly: deferral is refused outside run mode, so
+    /// <em>every</em> <c>"local"</c> service takes this path there — which for the motivating case
+    /// meant an <c>aspire publish</c> over a cold checkout downloading hundreds of megabytes and
+    /// importing a country-sized graph to emit a manifest that describes none of it.
+    /// </remarks>
+    [Fact]
+    public void InPublishMode_TheStepDoesNotRun()
+    {
+        var dir = CreateAppHostDirectory("routing");
+        var builder = TestHelpers.CreatePublishingBuilder(dir);
+        builder.AddLocalKind(KindName, new StandInKind("prepare.sh"));
+
+        var runner = new FakeRunner(produces: "app.jar");
+        new LocalProjectSource(new FakeGitClient(), runner)
+            .Resolve(builder, "routing", Metadata("routing", prepare: Prepare()), DevConfig());
+
+        Assert.Empty(runner.RanIn);
+    }
+
+    /// <remarks>
+    /// Validation still runs everywhere, so a manifest build catches a mistake in the block rather
+    /// than deferring it to whoever next runs the AppHost. Only execution is gated on the mode.
+    /// </remarks>
+    [Fact]
+    public void InPublishMode_TheBlockIsStillValidated()
+    {
+        var dir = CreateAppHostDirectory("routing");
+        var builder = TestHelpers.CreatePublishingBuilder(dir);
+        builder.AddLocalKind(KindName, new StandInKind("prepare.sh"));
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => new LocalProjectSource(new FakeGitClient(), new FakeRunner()).Resolve(
+                builder, "routing", Metadata("routing", prepare: Prepare("../../escape.sh")), DevConfig()));
+
+        Assert.Contains("points outside the service's checkout", ex.Message);
     }
 
     // ---- path checkouts -----------------------------------------------------

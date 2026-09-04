@@ -674,6 +674,22 @@ public class DeveloperConfigValidatorTests
         Assert.Contains("'command'", ex.Message);
         Assert.Contains("'mode'", ex.Message);
         Assert.Contains("'windowscommand'", ex.Message);
+
+        // The block's rules are expressed in terms of a computed 'IsDeclared', which is a member and
+        // not a key: offering it in the one sentence that exists to say what may be written would
+        // name something a developer cannot set.
+        Assert.DoesNotContain("isdeclared", ex.Message);
+    }
+
+    [Fact]
+    public void Validate_AComputedMemberOfABlock_IsNotAValidKey()
+    {
+        var ex = Load("""
+            { "services": { "orders": { "source": "local", "local": {
+                "prepare": { "command": ["./prepare.sh"], "isDeclared": true } } } } }
+            """);
+
+        Assert.Contains("'isDeclared' is not a valid key in the 'local.prepare' block", ex.Message);
     }
 
     [Fact]

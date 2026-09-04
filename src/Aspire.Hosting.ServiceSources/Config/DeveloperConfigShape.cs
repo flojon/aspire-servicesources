@@ -44,14 +44,16 @@ internal sealed class DeveloperConfigShape
             .Where(p => DeveloperConfigField.BlockFieldsOf(p.PropertyType) is not null)
             .ToArray();
 
-        RootKeys = entry.GetProperties()
-            .Select(p => p.Name)
+        RootKeys = DeveloperConfigField.BlockFieldsOf(entry)!.Keys
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        // Read through the same method the validator asks about a block field with, rather than
+        // enumerating the properties again here: two derivations of "what may be written inside
+        // this" agree only until one of them learns something, and the one that learned to leave
+        // out a computed property did.
         BlockFields = Blocks.ToDictionary(
             block => block.Name,
-            block => (IReadOnlyDictionary<string, Type>)block.PropertyType.GetProperties()
-                .ToDictionary(field => field.Name, field => field.PropertyType, StringComparer.OrdinalIgnoreCase),
+            block => DeveloperConfigField.BlockFieldsOf(block.PropertyType)!,
             StringComparer.OrdinalIgnoreCase);
     }
 

@@ -37,10 +37,50 @@ internal static class CheckoutPreparation
     private const int OutputTailLines = 20;
 
     /// <summary>
+    /// The line a service gets instead of its step when the AppHost is not running anything.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Publish mode composes the model, writes the manifest and exits. A bootstrap produces what a
+    /// service needs in order to <em>run</em> — a jar, a routing graph, an installed dependency tree
+    /// — and a manifest describes what to deploy rather than depending on any of it having been
+    /// produced on this machine. So the most expensive thing this package can do is the one thing it
+    /// should not do there: on a cold checkout in CI, an <c>aspire publish</c> would otherwise pay a
+    /// full download and import on every run, with its output going to a console nobody is watching.
+    /// </para>
+    /// <para>
+    /// Reported rather than silent, and reported <em>now</em> rather than buffered to
+    /// <c>BeforeStartEvent</c> like this package's other notices, because the failure it explains
+    /// can come first: the step runs before the kind judges the checkout, so a service whose
+    /// committed files are not enough for its kind — a generated <c>.csproj</c>, a generated project
+    /// directory — is rejected during composition, and a notice waiting for an event that
+    /// composition never reaches would never be read.
+    /// </para>
+    /// </remarks>
+    public static string SkippedOutsideRunModeNotice(string serviceName, PrepareStep step) =>
+        $"{Tag(serviceName)} Not running the prepare step '{step.Describe()}': this AppHost is composing a "
+        + "manifest rather than running anything, and a bootstrap produces what the service needs in order to "
+        + "run. If the service is then reported as missing a file its prepare step would have produced, that "
+        + "is why — run the AppHost once to materialize the checkout.";
+
+    /// <summary>
     /// Runs <paramref name="step"/> if its mode and marker say it should, and records the completion.
     /// </summary>
+    /// <param name="cancellationToken">
+    /// Stops the command. A step can legitimately run for an hour, so the developer interrupting is
+    /// the ordinary way a long one ends: the deferred path hands its shutdown token straight to the
+    /// child process, which is the difference between Ctrl-C ending the import and Ctrl-C leaving a
+    /// JVM behind with no host to belong to. Composition has no token to give — nothing exists yet
+    /// that would carry one — so the eager path passes none and a killed AppHost orphans the child
+    /// there as it always has.
+    /// </param>
     /// <exception cref="ServiceSourcesConfigurationException">
     /// The command exited non-zero, or could not be started at all.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">
+    /// <paramref name="cancellationToken"/> fired, so the command was killed. Deliberately not
+    /// wrapped: the deferred start task treats it as the shutdown it is, with nothing to report and
+    /// nobody to report it to.
     /// </exception>
     public static void Run(
         string serviceName,
@@ -50,7 +90,8 @@ internal static class CheckoutPreparation
         bool managedCheckout,
         IGitClient gitClient,
         IPrepareCommandRunner runner,
-        IPrepareOutputSink sink)
+        IPrepareOutputSink sink,
+        CancellationToken cancellationToken = default)
     {
         var markerPath = PrepareMarker.LocationFor(serviceName, repoRoot, appHostDirectory, managedCheckout);
 
@@ -75,7 +116,7 @@ internal static class CheckoutPreparation
         sink.Report($"{Tag(serviceName)} {reason} Running: {step.Describe()}");
 
         var tail = new Queue<string>(OutputTailLines);
-        var exitCode = Launch(serviceName, step, repoRoot, runner, sink, tail);
+        var exitCode = Launch(serviceName, step, repoRoot, runner, sink, tail, cancellationToken);
 
         if (exitCode != 0)
         {
@@ -113,6 +154,15 @@ internal static class CheckoutPreparation
     private static string? ReasonToRun(
         PrepareStep step, string markerPath, string? commit, string? checkoutPath)
     {
+        // `never` should not reach here at all: it means "no step", so PreparePlan resolves it to
+        // one and this is never handed a step carrying it. Checked anyway, because the cost of
+        // being wrong about that is running a command in a directory the developer manages — and a
+        // plan that returned such a step once already did.
+        if (step.Mode == PrepareMode.Never)
+        {
+            return null;
+        }
+
         if (step.Mode == PrepareMode.Always)
         {
             return "its prepare step runs on every start (mode: always).";
@@ -150,13 +200,14 @@ internal static class CheckoutPreparation
         string repoRoot,
         IPrepareCommandRunner runner,
         IPrepareOutputSink sink,
-        Queue<string> tail)
+        Queue<string> tail,
+        CancellationToken cancellationToken)
     {
         var tag = Tag(serviceName);
 
         try
         {
-            return runner.Run(repoRoot, step.Command, line =>
+            return runner.Run(repoRoot, step.Command, cancellationToken, line =>
             {
                 // Both of the command's streams are read, and a process-backed runner reads them on
                 // separate threads, so this callback is re-entered concurrently. The queue is not
@@ -213,7 +264,11 @@ internal static class CheckoutPreparation
         + "to be a path to something executable inside the checkout, or the name of a program on PATH."
         + (step.WindowsWithoutVariant
             ? " This AppHost is running on Windows and the block declares no 'windowsCommand', so the command "
-              + "above is the cross-platform one — if it names a POSIX script, add a 'windowsCommand' variant "
-              + "beside it, e.g. [\"pwsh\", \"-File\", \"prepare.ps1\"]."
+              + "above is the cross-platform one, and that is the likely cause. Nothing runs through a shell, "
+              + "and Windows resolves a bare name on PATH by appending '.exe' rather than by walking PATHEXT — "
+              + "so a program that is a '.cmd' or '.bat' shim there needs naming in full ('npm.cmd' rather "
+              + "than 'npm'), and a POSIX script needs an interpreter, e.g. "
+              + "[\"pwsh\", \"-File\", \"prepare.ps1\"]. Either one goes in a 'windowsCommand' beside the "
+              + "command above."
             : "");
 }

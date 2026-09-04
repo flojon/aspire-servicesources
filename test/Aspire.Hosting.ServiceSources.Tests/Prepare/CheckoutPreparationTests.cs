@@ -27,8 +27,16 @@ public class CheckoutPreparationTests
         /// <summary>Runs while the command is notionally still running.</summary>
         public Action? DuringRun { get; set; }
 
-        public int Run(string workingDirectory, IReadOnlyList<string> command, Action<string> onLine)
+        public int Run(
+            string workingDirectory,
+            IReadOnlyList<string> command,
+            CancellationToken cancellationToken,
+            Action<string> onLine)
         {
+            // A cancelled token means the command should not start, which is what a real runner
+            // answers by never reaching Process.Start.
+            cancellationToken.ThrowIfCancellationRequested();
+
             Runs.Add((workingDirectory, [.. command]));
 
             if (LaunchException is not null)
@@ -110,10 +118,14 @@ public class CheckoutPreparationTests
     private static Fixture NewFixture() =>
         new(CreateManagedCheckout(), Directory.CreateTempSubdirectory().FullName, new(), new(), new());
 
-    private static void Run(Fixture fixture, PrepareStep step, bool managedCheckout = true) =>
+    private static void Run(
+        Fixture fixture,
+        PrepareStep step,
+        bool managedCheckout = true,
+        CancellationToken cancellationToken = default) =>
         CheckoutPreparation.Run(
             ServiceName, step, fixture.RepoRoot, fixture.AppHostDirectory, managedCheckout,
-            fixture.Git, fixture.Runner, fixture.Sink);
+            fixture.Git, fixture.Runner, fixture.Sink, cancellationToken);
 
     // ---- the marker ---------------------------------------------------------
 
@@ -182,6 +194,26 @@ public class CheckoutPreparationTests
         Run(fixture, Step("once"));
 
         Assert.Single(fixture.Runner.Runs);
+    }
+
+    /// <summary>
+    /// The executor's own refusal to run a <c>never</c> step, which should never reach it.
+    /// </summary>
+    /// <remarks>
+    /// Defence in depth rather than a path the plan takes: <c>PrepareMode.Never</c> means "no step",
+    /// so a plan resolves it to one. It is asserted because the cost of a plan being wrong about
+    /// that is a command running in a directory the developer manages — and one already was.
+    /// </remarks>
+    [Fact]
+    public void Never_RunsNothingAndWritesNothing()
+    {
+        var fixture = NewFixture();
+
+        Run(fixture, Step("never"));
+
+        Assert.Empty(fixture.Runner.Runs);
+        Assert.Empty(fixture.Sink.Lines);
+        Assert.False(File.Exists(fixture.MarkerPath));
     }
 
     [Fact]
@@ -383,7 +415,11 @@ public class CheckoutPreparationTests
     {
         public const int PerStream = 500;
 
-        public int Run(string workingDirectory, IReadOnlyList<string> command, Action<string> onLine)
+        public int Run(
+            string workingDirectory,
+            IReadOnlyList<string> command,
+            CancellationToken cancellationToken,
+            Action<string> onLine)
         {
             var streams = Enumerable.Range(0, 2).Select(stream => Task.Run(() =>
             {
@@ -397,6 +433,28 @@ public class CheckoutPreparationTests
 
             return 0;
         }
+    }
+
+    /// <summary>
+    /// Cancellation travels out as itself, and records nothing.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not wrapped in a configuration exception: the deferred start task already treats
+    /// <see cref="OperationCanceledException"/> as the shutdown it is — nothing left to start and
+    /// nobody to tell — where a wrapped one would be reported as this service having failed. And no
+    /// marker, because an interrupted step did not complete.
+    /// </remarks>
+    [Fact]
+    public void Cancellation_TravelsOutUnwrappedAndRecordsNothing()
+    {
+        var fixture = NewFixture();
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+
+        Assert.ThrowsAny<OperationCanceledException>(
+            () => Run(fixture, Step(), cancellationToken: cancelled.Token));
+
+        Assert.False(File.Exists(fixture.MarkerPath));
     }
 
     // ---- failure ------------------------------------------------------------

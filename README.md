@@ -241,7 +241,7 @@ services:
     prepare:
       command: ["./prepare.sh"]
       windowsCommand: ["pwsh", "-File", "prepare.ps1"]   # optional; replaces command on Windows
-      mode: once                                         # oncePerCommit (default) | once | always | never
+      mode: oncePerCommit                                # the default | once | always | never
     java:
       jarPath: graphhopper-web-11.0.jar
       args: ["server", "gh-config-local.yml"]
@@ -257,8 +257,14 @@ services:
   clone rather than write.
 - `windowsCommand` replaces `command` when the AppHost runs on Windows. It exists because one
   catalog is committed and shared by a team across platforms, so each value can only be spelled one
-  way, and `./prepare.sh` isn't executable on Windows. Leave it out for the many cross-platform
-  cases (`npm`, `make`, `python`, `dotnet`) — the command runs there unchanged.
+  way, and `./prepare.sh` isn't executable on Windows. Leave it out for a program that exists as an
+  executable everywhere (`make`, `python`, `dotnet`) — the command runs there unchanged.
+
+  **`npm` is not one of those, and it's the case to know about.** There is no `npm.exe`, only
+  `npm.cmd`; nothing here goes through a shell, and Windows resolves a bare name on `PATH` by
+  appending `.exe` rather than by walking `PATHEXT`. So `["npm", "ci"]` starts fine on Linux and
+  macOS and fails to start on Windows, and wants `windowsCommand: ["npm.cmd", "ci"]` beside it. The
+  same goes for `yarn`, `pnpm` and `tsc`. The launch failure names this as the likely cause.
 - The command runs with the checkout as its working directory, with no shell between it and the
   tool, and both its streams are relayed line by line as they arrive, tagged with the service:
 
@@ -278,6 +284,18 @@ services:
 - A non-zero exit fails the service, naming it, the resolved command, the exit code and the tail of
   the output. During composition that fails the AppHost, exactly as a bad `repository` or a missing
   `project` does; on a deferred first run it costs that one service and nothing else.
+- **Ctrl-C stops it.** On a deferred first run the shutdown signal reaches the command's own process
+  tree, so interrupting a long import ends the import rather than leaving it — and its children —
+  running with no AppHost left to belong to. There is no timeout: a legitimate bootstrap can take an
+  hour, and there is no defensible default to cut it off at.
+- **`aspire publish` doesn't run it.** Publish composes the model, writes the manifest and exits,
+  and a bootstrap produces what a service needs in order to *run* — so a manifest doesn't depend on
+  it, and paying a multi-gigabyte download on every CI publish to emit one would be nothing but
+  cost. The block is still validated there, so a typo'd mode or a command pointing outside the
+  checkout still fails a publish. The skip is reported, because it has one consequence worth naming:
+  the step runs *before* the kind judges the checkout, so a service whose committed files aren't
+  enough for its kind on their own — a generated `.csproj`, a generated project directory — is
+  reported as missing them. Run the AppHost once to materialize the checkout, then publish.
 
 **Choosing a mode.** All four answer one question — how often does this run — and the guards nest:
 
@@ -289,14 +307,21 @@ services:
 | `never` | — | opting out of a step the catalog declared |
 
 The `once` vs `oncePerCommit` question is **"does the repository define this step?"** rather than
-"how often". If `prepare.sh` lives in the repository, a team bumping it to fetch GraphHopper 12
-moves the commit, and under `once` every developer would silently keep running the 11 jar until
-someone thought to delete a marker they have never heard of. If instead the jar is pinned by the
-filename in the catalog and the data has nothing to do with the commit — the GraphHopper case above
-— `once` is right, and a developer committing a one-line README fix shouldn't pay a four-minute
-graph import. The default errs the other way on purpose: an unexpected re-run is annoying and
-immediately visible, where a stale artifact is invisible and surfaces later as a confusing runtime
-failure.
+"how often" — and the test is where the *version* is written, not where the expensive part is.
+
+The example above is the default for that reason, even though its `java.jarPath` looks pinned.
+`prepare.sh` is committed in that repository and hardcodes the GraphHopper version inside itself, so
+a team bumping it to 12 moves the commit while the catalog's command stays `["./prepare.sh"]`. Under
+`once` the marker would never invalidate, and every developer would keep serving the 11 jar until
+someone thought to delete a marker they have never heard of. The catalog's `jarPath` naming a
+version is what makes `once` *look* right here; the download is pinned in the script.
+
+Reach for `once` when the command itself carries everything that decides what it produces, so a
+commit cannot change the answer — `["./fetch-model.sh", "--release", "v4.2"]`, or a step whose whole
+input is a URL the catalog spells out. Then a developer committing a one-line README fix shouldn't
+pay the download, and under `once` they don't. The default errs the other way on purpose: an
+unexpected re-run is annoying and immediately visible, where a stale artifact is invisible and
+surfaces later as a confusing runtime failure.
 
 **The command must be safe to re-run.** Under `always` that's self-evident. Under the two guarded
 modes it is equally required and less obvious: the completion is recorded **only on success**, so a

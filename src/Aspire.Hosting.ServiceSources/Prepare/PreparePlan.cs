@@ -161,34 +161,46 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
 
         var mode = developerMode ?? PrepareModes.Default;
 
-        var command = SelectPlatform(developer!.Command, developer.WindowsCommand, windows);
-
-        if (command is not null)
-        {
-            return new PreparePlan(
-                PrepareStep.Create(
-                    serviceName, command, mode, DeveloperBlock,
-                    WindowsWithoutVariant(developer.WindowsCommand, windows)),
-                null);
-        }
-
-        // `never` is the one mode that means something without a command — run nothing — so silence
-        // is exactly what was asked for rather than the failure it would be under the other three.
+        // Before the command is so much as looked at, exactly as the managed branch checks it:
+        // `never` means run nothing, and it means that whether or not a command sits beside it. A
+        // developer who declares both has disabled their own step — the same gesture that disables
+        // an inherited one — and reading the command first would hand back a step to run in a
+        // directory this tool does not own, which is the one thing 'path' plus `never` says will
+        // not happen.
         if (mode == PrepareMode.Never)
         {
             return Nothing;
         }
 
-        // The developer wrote the half of the block that cannot stand alone, and the catalog's
-        // command is not there to attach it to, so the alternative is silence where they expected a
-        // step. Scoped to `path` deliberately: for a managed checkout the identical block is the
-        // designed way to disable or force an inherited step.
-        throw new ServiceSourcesConfigurationException(
-            $"Service '{serviceName}': {DeveloperBlock}.mode is set to "
-            + $"'{PrepareModes.Written(mode)}' but {DeveloperBlock}.command is not, and this service resolves "
-            + "through 'local.path' — a checkout you manage yourself, which never inherits the catalog's "
-            + $"'{CatalogBlock}' block, so there is no command for the mode to apply to. Add "
-            + $"{DeveloperBlock}.command, or set the mode to 'never' to declare that nothing should run there.");
+        // The half of the block that cannot stand alone: a mode with no command anywhere in it.
+        // Asked of the block as written rather than of the platform selection below, so a developer
+        // who declared only a `windowsCommand` is not told about a mode they never set — on POSIX
+        // their block simply has nothing to run, which is what the same block does on a managed
+        // checkout. Scoped to `path` deliberately: there, a mode has no inherited command to apply
+        // to, where for a managed checkout the identical block is the designed way to disable or
+        // force one.
+        if (developer!.Command is null && developer.WindowsCommand is null)
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': {DeveloperBlock}.mode is set to "
+                + $"'{PrepareModes.Written(mode)}' but {DeveloperBlock}.command is not, and this service resolves "
+                + "through 'local.path' — a checkout you manage yourself, which never inherits the catalog's "
+                + $"'{CatalogBlock}' block, so there is no command for the mode to apply to. Add "
+                + $"{DeveloperBlock}.command, or set the mode to 'never' to declare that nothing should run there.");
+        }
+
+        var command = SelectPlatform(developer.Command, developer.WindowsCommand, windows);
+
+        // Nothing for this platform. A block carrying only the variant for the other one is a
+        // deliberate statement — "on Windows run this, and I have no POSIX command" — so it runs
+        // there and does nothing here, which is how the managed branch reads the same block.
+        return command is null
+            ? Nothing
+            : new PreparePlan(
+                PrepareStep.Create(
+                    serviceName, command, mode, DeveloperBlock,
+                    WindowsWithoutVariant(developer.WindowsCommand, windows)),
+                null);
     }
 
     /// <summary>

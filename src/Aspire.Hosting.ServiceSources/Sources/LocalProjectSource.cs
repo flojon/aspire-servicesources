@@ -128,9 +128,24 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         // was about to produce. Neither kind knows this exists.
         if (prepare.Step is { } step)
         {
-            CheckoutPreparation.Run(
-                serviceName, step, repoRoot, builder.AppHostDirectory, managedCheckout, gitClient,
-                _prepareRunner, ConsolePrepareOutputSink.Instance);
+            // Run mode only, which is the same gate DeferredCheckout.ShouldDefer applies and for a
+            // related reason: publish mode composes the model, writes the manifest and exits, and a
+            // bootstrap produces what a service needs in order to run. Without this, deferral being
+            // refused in publish mode means every "local" service takes this path, so an
+            // `aspire publish` over a cold checkout pays the full download and import — for the
+            // motivating case, hundreds of megabytes and a multi-minute graph build — to emit a
+            // manifest that describes none of it.
+            if (builder.ExecutionContext.IsRunMode)
+            {
+                CheckoutPreparation.Run(
+                    serviceName, step, repoRoot, builder.AppHostDirectory, managedCheckout, gitClient,
+                    _prepareRunner, ConsolePrepareOutputSink.Instance);
+            }
+            else
+            {
+                ConsolePrepareOutputSink.Instance.Report(
+                    CheckoutPreparation.SkippedOutsideRunModeNotice(serviceName, step));
+            }
         }
 
         if (isDotnetKind)

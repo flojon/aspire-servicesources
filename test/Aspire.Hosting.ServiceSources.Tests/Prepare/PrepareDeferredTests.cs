@@ -4,6 +4,7 @@ using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Prepare;
 using Aspire.Hosting.ServiceSources.Sources;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Prepare;
 
@@ -110,14 +111,31 @@ public class PrepareDeferredTests
         /// <summary>Held open until the returned gate is set, so two steps can be caught overlapping.</summary>
         public ManualResetEventSlim? Gate { get; set; }
 
+        /// <summary>Waits for the token instead of the gate, to see whether one ever arrives.</summary>
+        public bool WaitsForCancellation { get; set; }
+
+        /// <summary>Whether the token this runner was handed was ever signalled.</summary>
+        public bool WasCancelled { get; private set; }
+
         public int Runs;
 
-        public int Run(string workingDirectory, IReadOnlyList<string> command, Action<string> onLine)
+        public int Run(
+            string workingDirectory,
+            IReadOnlyList<string> command,
+            CancellationToken cancellationToken,
+            Action<string> onLine)
         {
             Interlocked.Increment(ref Runs);
             journal.Add($"prepare:{Path.GetFileName(workingDirectory)}");
 
             onLine("bootstrapping");
+
+            if (WaitsForCancellation)
+            {
+                cancellationToken.WaitHandle.WaitOne(TimeSpan.FromSeconds(30));
+                WasCancelled = cancellationToken.IsCancellationRequested;
+                cancellationToken.ThrowIfCancellationRequested();
+            }
 
             Gate?.Wait(TimeSpan.FromSeconds(30));
 
@@ -207,6 +225,19 @@ public class PrepareDeferredTests
         new() { Command = ["./prepare.sh"], Mode = mode };
 
     private static ServiceDeveloperConfig DevConfig() => new() { Source = "local", Local = new() };
+
+    /// <summary>
+    /// Waits for something a background task is about to make true. Polled rather than signalled,
+    /// because what is being waited for is a counter a fake runner bumps.
+    /// </summary>
+    private static async Task WaitUntilAsync(Func<bool> condition, CancellationToken cancellationToken)
+    {
+        while (!condition())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await Task.Delay(20, cancellationToken);
+        }
+    }
 
     private static Task PublishNotStartedAsync(IServiceProvider services, IResource resource) =>
         services.GetRequiredService<ResourceNotificationService>()
@@ -492,16 +523,16 @@ public class PrepareDeferredTests
         await PublishNotStartedAsync(services, routing.Resource);
         await PublishNotStartedAsync(services, tiles.Resource);
 
-        // The quick service's step finishes while the slow one is still running, which is the whole
-        // claim: nothing gates one on the other.
+        // Waited for in this order, which is what makes the claim rather than races it: first until
+        // the slow step has begun — it then sits on its gate, so it is provably still in flight —
+        // and only then until the quick one has run. A quick step observed to have run while the
+        // slow one is held is a quick step nothing gated on it.
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        while (quick.Runs == 0)
-        {
-            deadline.Token.ThrowIfCancellationRequested();
-            await Task.Delay(20, deadline.Token);
-        }
 
-        Assert.Equal(1, slow.Runs);
+        await WaitUntilAsync(() => slow.Runs == 1, deadline.Token);
+        await WaitUntilAsync(() => quick.Runs == 1, deadline.Token);
+
+        Assert.False(held.IsSet, "the slow step should still be held when the quick one has run");
 
         held.Set();
         await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
@@ -613,6 +644,52 @@ public class PrepareDeferredTests
         Assert.Equal(
             KnownResourceStates.FailedToStart,
             await StateOfAsync(services, orders.Resource, TimeSpan.FromSeconds(30)));
+    }
+
+    /// <summary>
+    /// Ctrl-C during a long step reaches the command itself.
+    /// </summary>
+    /// <remarks>
+    /// A bootstrap is the longest thing this package waits for — minutes for the motivating case —
+    /// so interrupting one is the ordinary way it ends rather than an edge. The token is the same
+    /// one <c>StartDeferredAsync</c> builds from <c>ApplicationStopping</c> for everything else it
+    /// does, which is what the process runner turns into a kill of the command's whole tree.
+    /// Without it a download and an import would go on running with no host left to belong to.
+    /// </remarks>
+    [Fact]
+    public async Task HostShutdownDuringTheStep_ReachesTheCommand()
+    {
+        var dir = CreateAppHostDirectory("routing");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.UseDeferredCheckout();
+
+        var journal = new Journal();
+        builder.AddLocalKind(KindName, new StandInKind(journal, "app.jar"));
+
+        var runner = new FakeRunner(journal) { WaitsForCancellation = true };
+        var routing = new LocalProjectSource(new FakeGitClient(), runner)
+            .Resolve(builder, "routing", Metadata("routing", Prepare()), DevConfig());
+
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)),
+            CancellationToken.None);
+        await PublishNotStartedAsync(services, routing.Resource);
+
+        // Wait until the step is genuinely running, so the shutdown lands during it rather than
+        // before it.
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await WaitUntilAsync(() => runner.Runs > 0, deadline.Token);
+
+        services.GetRequiredService<IHostApplicationLifetime>().StopApplication();
+
+        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.True(runner.WasCancelled, "the shutdown did not reach the prepare command");
+
+        // And the interruption is not reported as this service having failed: it is a shutdown, with
+        // nothing left to start and nobody to tell.
+        Assert.Equal(["prepare:routing"], journal.Entries);
     }
 
     /// <remarks>

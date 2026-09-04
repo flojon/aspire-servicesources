@@ -663,6 +663,17 @@ internal static class DeveloperConfigValidator
         + $"{section.Path.Replace(":", "__", StringComparison.Ordinal)}, or the command line.";
 
     /// <summary>
+    /// The same, for a key that has to hold a list. The flat providers carry one leaf each, so an
+    /// element is set through its index — which is also how such a layer's value merges over one in
+    /// the file, per index rather than wholesale.
+    /// </summary>
+    private static string SetAtList(IConfigurationSection section) =>
+        $" The key is '{section.Path}', which any configuration layer can set: "
+        + $"{DeveloperConfiguration.FileName}, appsettings, user secrets, the environment or the "
+        + "command line — the flat layers an element at a time, as "
+        + $"{$"{section.Path}:0".Replace(":", "__", StringComparison.Ordinal)}.";
+
+    /// <summary>
     /// The same, for a key that has to hold a block of settings rather than a value.
     /// </summary>
     /// <remarks>
@@ -674,17 +685,6 @@ internal static class DeveloperConfigValidator
     /// changes is the spelling, which has to be of a field inside the block rather than of the
     /// block.
     /// </remarks>
-    /// <summary>
-    /// The same, for a key that has to hold a list. The flat providers carry one leaf each, so an
-    /// element is set through its index — which is also how such a layer's value merges over one in
-    /// the file, per index rather than wholesale.
-    /// </summary>
-    private static string SetAtList(IConfigurationSection section) =>
-        $" The key is '{section.Path}', which any configuration layer can set: "
-        + $"{DeveloperConfiguration.FileName}, appsettings, user secrets, the environment or the "
-        + "command line — the flat layers an element at a time, as "
-        + $"{$"{section.Path}:0".Replace(":", "__", StringComparison.Ordinal)}.";
-
     private static string SetAtBlock(IConfigurationSection section, string exampleField) =>
         $" The key is '{section.Path}', which any configuration layer can set: "
         + $"{DeveloperConfiguration.FileName}, appsettings, user secrets, the environment or the "

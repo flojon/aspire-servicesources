@@ -338,6 +338,65 @@ public class PreparePlanTests
         Assert.Null(plan.IgnoredCatalogNotice);
     }
 
+    /// <summary>
+    /// <c>never</c> beside a command of the developer's own still means run nothing.
+    /// </summary>
+    /// <remarks>
+    /// The combination is how a developer disables a step they wrote themselves — the same gesture
+    /// that disables an inherited one — and it is the one that has to hold, because the alternative
+    /// is a command running in a directory this tool does not own, which is precisely what 'path'
+    /// plus <c>never</c> says will not happen.
+    /// </remarks>
+    [Fact]
+    public void PathCheckout_ModeNeverBesideACommand_StillRunsNothing()
+    {
+        var plan = Plan(
+            Catalog(["./prepare.sh"]),
+            Developer(["make", "bootstrap"], mode: "never"),
+            managedCheckout: false);
+
+        Assert.Null(plan.Step);
+        Assert.Null(plan.IgnoredCatalogNotice);
+    }
+
+    [Fact]
+    public void ManagedCheckout_ModeNeverBesideACommand_StillRunsNothing() =>
+        Assert.Null(Plan(Catalog(["./prepare.sh"]), Developer(["make", "bootstrap"], mode: "never")).Step);
+
+    /// <summary>
+    /// A <c>path</c> service declaring only the Windows variant does nothing on POSIX, rather than
+    /// being refused for a mode the developer never set.
+    /// </summary>
+    /// <remarks>
+    /// The block is a deliberate statement — "on Windows run this, and I have no POSIX command" —
+    /// and it is the same statement the managed branch reads silently. The refusal below it is for a
+    /// mode with no command <em>anywhere</em> in the block, which is the half that cannot stand
+    /// alone.
+    /// </remarks>
+    [Fact]
+    public void PathCheckout_WindowsCommandOnly_DoesNothingOnPosixRatherThanFailing()
+    {
+        var plan = Plan(
+            Catalog(["./prepare.sh"]),
+            Developer(windowsCommand: ["pwsh", "-File", "prepare.ps1"]),
+            managedCheckout: false);
+
+        Assert.Null(plan.Step);
+        Assert.Null(plan.IgnoredCatalogNotice);
+    }
+
+    [Fact]
+    public void PathCheckout_WindowsCommandOnly_RunsOnWindows()
+    {
+        var plan = Plan(
+            Catalog(["./prepare.sh"]),
+            Developer(windowsCommand: ["pwsh", "-File", "prepare.ps1"]),
+            managedCheckout: false,
+            windows: true);
+
+        Assert.Equal<string[]>(["pwsh", "-File", "prepare.ps1"], [.. plan.Step!.Command]);
+    }
+
     /// <remarks>
     /// An empty block is not a declaration: it cannot be told from an absent one by looking, and it
     /// says nothing about what should run — so it neither inherits nor silences.

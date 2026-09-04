@@ -54,7 +54,11 @@ public class JavaPrepareStepTests
     {
         public int Runs { get; private set; }
 
-        public int Run(string workingDirectory, IReadOnlyList<string> command, Action<string> onLine)
+        public int Run(
+            string workingDirectory,
+            IReadOnlyList<string> command,
+            CancellationToken cancellationToken,
+            Action<string> onLine)
         {
             Runs++;
 
@@ -197,7 +201,11 @@ public class JavaPrepareStepTests
     /// <summary>A step whose output is the project directory the kind requires.</summary>
     private sealed class GeneratingRunner : IPrepareCommandRunner
     {
-        public int Run(string workingDirectory, IReadOnlyList<string> command, Action<string> onLine)
+        public int Run(
+            string workingDirectory,
+            IReadOnlyList<string> command,
+            CancellationToken cancellationToken,
+            Action<string> onLine)
         {
             var generated = Directory.CreateDirectory(Path.Combine(workingDirectory, "generated")).FullName;
             File.WriteAllText(Path.Combine(generated, "app.jar"), "a jar");

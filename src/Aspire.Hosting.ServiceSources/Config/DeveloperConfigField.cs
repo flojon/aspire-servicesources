@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Reflection;
 
 namespace Aspire.Hosting.ServiceSources.Config;
 
@@ -42,6 +43,26 @@ internal static class DeveloperConfigField
         }
 
         return type.GetProperties()
+            .Where(IsConfigurable)
             .ToDictionary(field => field.Name, field => field.PropertyType, StringComparer.OrdinalIgnoreCase);
     }
+
+    /// <summary>
+    /// Whether configuration could put a value at this property — which is what makes it a key
+    /// rather than merely a member.
+    /// </summary>
+    /// <remarks>
+    /// A computed property is not a key, and offering one is worse than cosmetic: the validator
+    /// accepts it, and its "valid keys there are …" list — the sentence that exists to tell a
+    /// developer what they may write — names something they cannot. <c>PrepareDeveloperConfig</c>
+    /// carries the first such member in this file, an <c>IsDeclared</c> the block's own rules are
+    /// expressed in terms of.
+    /// <para>
+    /// A setter is what settles it for a value and for a list. A nested block needs none, because
+    /// the binder populates the instance a block property already holds rather than replacing it —
+    /// which is how every source block in an entry binds today.
+    /// </para>
+    /// </remarks>
+    private static bool IsConfigurable(PropertyInfo property) =>
+        property.CanWrite || BlockFieldsOf(property.PropertyType) is not null;
 }

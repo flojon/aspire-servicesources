@@ -1,0 +1,173 @@
+using System.Diagnostics;
+using Aspire.Hosting.ServiceSources.Prepare;
+
+namespace Aspire.Hosting.ServiceSources.Tests.Prepare;
+
+/// <summary>
+/// The one place a test in this repository launches a real prepare command. Everything else
+/// substitutes <see cref="IPrepareCommandRunner"/>, which is what keeps the suite free of processes
+/// — but what this class asserts cannot be asserted against a substitute: that cancelling the step
+/// ends the command, and its children, rather than merely ending the wait for it.
+/// </summary>
+public class ProcessPrepareCommandRunnerTests
+{
+    /// <summary>
+    /// Writes an executable shell script. The mode call is guarded rather than left to the callers'
+    /// own POSIX-only guards, because the platform analyzer reads this method on its own.
+    /// </summary>
+    private static void WriteScript(string path, string body)
+    {
+        File.WriteAllText(path, body);
+
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(
+                path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    /// <summary>
+    /// A script that backgrounds a long-lived child, records its pid, and waits — so the test can
+    /// ask whether the whole tree died or only the shell at the top of it.
+    /// </summary>
+    private static void WriteSpawningScript(string directory) =>
+        WriteScript(
+            Path.Combine(directory, "spawn.sh"),
+            """
+            #!/bin/sh
+            sleep 120 &
+            echo $! > child.pid
+            echo spawned
+            wait
+            """);
+
+    private static bool IsAlive(int pid)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            return !process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            // No process with that id, which is what a reaped child looks like.
+            return false;
+        }
+    }
+
+    private static async Task<int> WaitForChildPidAsync(string directory)
+    {
+        var pidFile = Path.Combine(directory, "child.pid");
+
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        while (true)
+        {
+            deadline.Token.ThrowIfCancellationRequested();
+
+            if (File.Exists(pidFile)
+                && int.TryParse(File.ReadAllText(pidFile).Trim(), out var pid)
+                && pid > 0)
+            {
+                return pid;
+            }
+
+            await Task.Delay(50, deadline.Token);
+        }
+    }
+
+    /// <remarks>
+    /// The case the design cares about is a committed script that runs <c>curl</c> and then a JVM:
+    /// killing the shell alone would leave the download and the import running with no AppHost left
+    /// to belong to. POSIX only — the script is a shell script, and what is under test is the kill
+    /// rather than the platform.
+    /// </remarks>
+    [Fact]
+    public async Task Cancellation_KillsTheCommandAndItsChildren()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var directory = Directory.CreateTempSubdirectory().FullName;
+        WriteSpawningScript(directory);
+
+        using var cancellation = new CancellationTokenSource();
+
+        var started = Stopwatch.StartNew();
+        var run = Task.Run(() => Assert.ThrowsAny<OperationCanceledException>(
+            () => ProcessPrepareCommandRunner.Instance.Run(
+                directory, ["./spawn.sh"], cancellation.Token, _ => { })));
+
+        var child = await WaitForChildPidAsync(directory);
+        Assert.True(IsAlive(child), "the backgrounded child should be running before cancellation");
+
+        await cancellation.CancelAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Promptly, rather than after the 120 seconds the child was going to sleep for.
+        Assert.True(started.Elapsed < TimeSpan.FromSeconds(30), $"took {started.Elapsed}");
+
+        // And the grandchild is gone, which is the whole claim: the tree, not just the shell.
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        while (IsAlive(child))
+        {
+            deadline.Token.ThrowIfCancellationRequested();
+            await Task.Delay(50, deadline.Token);
+        }
+    }
+
+    [Fact]
+    public async Task ACommandThatExits_ReportsItsOutputAndExitCode()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var directory = Directory.CreateTempSubdirectory().FullName;
+        WriteScript(
+            Path.Combine(directory, "both-streams.sh"),
+            """
+            #!/bin/sh
+            echo on-stdout
+            echo on-stderr >&2
+            exit 7
+            """);
+
+        var lines = new List<string>();
+        var exitCode = await Task.Run(() => ProcessPrepareCommandRunner.Instance.Run(
+            directory,
+            ["./both-streams.sh"],
+            CancellationToken.None,
+            line =>
+            {
+                lock (lines)
+                {
+                    lines.Add(line);
+                }
+            }));
+
+        Assert.Equal(7, exitCode);
+
+        // Both streams, and every line flushed before Run returned — which is what the second,
+        // parameterless wait is for.
+        Assert.Contains("on-stdout", lines);
+        Assert.Contains("on-stderr", lines);
+    }
+
+    /// <remarks>
+    /// A program that does not exist is a different thing to tell a developer than a command that
+    /// ran and failed, so it arrives as its own exception type rather than as an exit code.
+    /// </remarks>
+    [Fact]
+    public void AProgramThatDoesNotExist_IsALaunchFailure()
+    {
+        var directory = Directory.CreateTempSubdirectory().FullName;
+
+        var ex = Assert.Throws<PrepareLaunchException>(() => ProcessPrepareCommandRunner.Instance.Run(
+            directory, ["./not-there.sh"], CancellationToken.None, _ => { }));
+
+        Assert.Contains("not-there.sh", ex.Message);
+    }
+}
