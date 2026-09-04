@@ -152,14 +152,41 @@ internal sealed class DeveloperConfiguration
     {
         foreach (var block in shape.Blocks)
         {
-            var instance = block.GetValue(config);
-
-            foreach (var field in block.PropertyType.GetProperties().Where(f => f.PropertyType == typeof(string)))
+            if (block.GetValue(config) is { } instance)
             {
-                if (field.GetValue(instance) is string { Length: 0 })
+                NormalizeBlockBlankToAbsent(instance);
+            }
+        }
+    }
+
+    /// <summary>
+    /// <see cref="NormalizeBlankToAbsent"/> for one block, and for any block nested inside it.
+    /// </summary>
+    /// <remarks>
+    /// Recursive because <c>local.prepare</c> is a block inside a block, and the gesture has to mean
+    /// the same thing at every depth: a higher layer blanking <c>local:prepare:mode</c> is dropping
+    /// the mode the file below set, exactly as blanking <c>local:path</c> drops the path. A walk that
+    /// stopped at the first level would leave that as the empty string, which the mode parse would
+    /// then have to treat as a value nobody wrote.
+    /// </remarks>
+    private static void NormalizeBlockBlankToAbsent(object block)
+    {
+        foreach (var field in block.GetType().GetProperties())
+        {
+            if (field.PropertyType == typeof(string))
+            {
+                if (field.GetValue(block) is string { Length: 0 })
                 {
-                    field.SetValue(instance, null);
+                    field.SetValue(block, null);
                 }
+
+                continue;
+            }
+
+            if (DeveloperConfigField.BlockFieldsOf(field.PropertyType) is not null
+                && field.GetValue(block) is { } nested)
+            {
+                NormalizeBlockBlankToAbsent(nested);
             }
         }
     }

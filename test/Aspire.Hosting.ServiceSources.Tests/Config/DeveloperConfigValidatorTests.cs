@@ -619,4 +619,144 @@ public class DeveloperConfigValidatorTests
         Assert.Contains("'ref'", ex.Message);
         Assert.DoesNotContain("Did you mean", ex.Message);
     }
+
+    /// <summary>
+    /// The service's developer config as the package actually reads it, for the cases that have to
+    /// be <em>accepted</em> — the half of a validator's job no thrown message can show.
+    /// </summary>
+    private static ServiceDeveloperConfig Resolve(string json)
+    {
+        var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory(json));
+        return ServiceSourcesConfigCache.ResolveService(builder, "orders").DeveloperConfig;
+    }
+
+    [Fact]
+    public void Validate_PrepareBlockInsideLocal_Binds()
+    {
+        var config = Resolve("""
+            { "services": { "orders": { "source": "local", "local": {
+                "prepare": { "command": ["./prepare.sh", "--full"], "mode": "once" } } } } }
+            """);
+
+        var prepare = config.Local.Prepare;
+        Assert.NotNull(prepare);
+        Assert.Equal<string[]>(["./prepare.sh", "--full"], prepare!.Command!);
+        Assert.Equal("once", prepare.Mode);
+        Assert.True(prepare.IsDeclared);
+    }
+
+    /// <remarks>
+    /// The trap the extra level brings with it. <c>string[]</c> is a class, so a list asked about as
+    /// a block is classified as one and answered with "takes a value, not a block of settings" —
+    /// about a field whose value is neither. Both halves are asserted here, because the message this
+    /// stops producing would have made the correct spelling unwritable.
+    /// </remarks>
+    [Fact]
+    public void Validate_CommandList_IsNotReportedAsABlock()
+    {
+        var config = Resolve("""
+            { "services": { "orders": { "source": "local", "local": {
+                "prepare": { "command": ["make", "bootstrap"] } } } } }
+            """);
+
+        Assert.Equal<string[]>(["make", "bootstrap"], config.Local.Prepare!.Command!);
+    }
+
+    [Fact]
+    public void Validate_UnknownKeyInsidePrepare_NamesTheNestedBlock()
+    {
+        var ex = Load("""
+            { "services": { "orders": { "source": "local", "local": {
+                "prepare": { "comand": ["./prepare.sh"] } } } } }
+            """);
+
+        Assert.Contains("'comand' is not a valid key in the 'local.prepare' block", ex.Message);
+        Assert.Contains("'command'", ex.Message);
+        Assert.Contains("'mode'", ex.Message);
+        Assert.Contains("'windowscommand'", ex.Message);
+    }
+
+    [Fact]
+    public void Validate_CommandWrittenAsAScalar_IsRejected()
+    {
+        var ex = Load("""
+            { "services": { "orders": { "source": "local", "local": {
+                "prepare": { "command": "./prepare.sh" } } } } }
+            """);
+
+        Assert.Contains("'command' in the 'local.prepare' block takes a list of values", ex.Message);
+        Assert.Contains("'./prepare.sh'", ex.Message);
+        // The flat layers carry one leaf each, so an element is set through its index.
+        Assert.Contains("__prepare__command__0", ex.Message);
+    }
+
+    [Fact]
+    public void Validate_PrepareWrittenAsAValue_IsRejected()
+    {
+        var ex = Load("""
+            { "services": { "orders": { "source": "local", "local": { "prepare": "./prepare.sh" } } } }
+            """);
+
+        Assert.Contains("'prepare' takes a block of settings, not a value", ex.Message);
+        Assert.Contains("\"local\": { ..., \"prepare\": { ... } }", ex.Message);
+    }
+
+    [Fact]
+    public void Validate_WhitespaceModeInsidePrepare_IsRejectedLikeAnyOtherField()
+    {
+        var ex = Load("""
+            { "services": { "orders": { "source": "local", "local": {
+                "prepare": { "mode": "   " } } } } }
+            """);
+
+        Assert.Contains("'mode' in the 'local.prepare' block is set to", ex.Message);
+        Assert.Contains("whitespace rather than a value", ex.Message);
+    }
+
+    /// <remarks>
+    /// An empty value is how a higher configuration layer drops what the file below set — the one
+    /// gesture it has — so it has to reach the mode parse as absent rather than as a value nobody
+    /// wrote, one level down as much as at the top.
+    /// </remarks>
+    [Fact]
+    public void Validate_EmptyModeInsidePrepare_ReadsAsAbsent()
+    {
+        var config = Resolve("""
+            { "services": { "orders": { "source": "local", "local": {
+                "prepare": { "command": ["./prepare.sh"], "mode": "" } } } } }
+            """);
+
+        Assert.Null(config.Local.Prepare!.Mode);
+    }
+
+    /// <remarks>
+    /// Inert rather than an error, which is the point of the per-source block layout: a
+    /// <c>prepare</c> block under a service resolved through another source is a key inside a block
+    /// nothing reads, so a higher layer switching the source away cannot leave a step behind it.
+    /// </remarks>
+    [Fact]
+    public void Validate_PrepareUnderANonLocalSource_IsInert()
+    {
+        var config = Resolve("""
+            { "services": { "orders": { "source": "container", "container": { "tag": "1.2.3" },
+                "local": { "prepare": { "command": ["./prepare.sh"] } } } } }
+            """);
+
+        Assert.Equal("container", config.Source);
+    }
+
+    /// <remarks>
+    /// The field is now a valid key one level down, so the entry root can point at where it goes
+    /// rather than listing keys that cannot contain the word the developer was reaching for.
+    /// </remarks>
+    [Fact]
+    public void Validate_PrepareAtTheEntryRoot_NamesTheBlockItBelongsUnder()
+    {
+        var ex = Load("""
+            { "services": { "orders": { "source": "local", "prepare": { "command": ["./prepare.sh"] } } } }
+            """);
+
+        Assert.Contains("'prepare' is not a valid key here", ex.Message);
+        Assert.Contains("'local' block", ex.Message);
+    }
 }

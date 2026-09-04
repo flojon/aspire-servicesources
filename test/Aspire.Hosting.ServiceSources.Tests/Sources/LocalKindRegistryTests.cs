@@ -87,6 +87,7 @@ public class LocalKindRegistryTests
     [InlineData("kubernetes")]
     [InlineData("repository")]
     [InlineData("kind")]
+    [InlineData("prepare")]
     public void Register_KindNameCollidingWithAWellKnownServiceProperty_Throws(string reserved)
     {
         var builder = CreateBuilder();

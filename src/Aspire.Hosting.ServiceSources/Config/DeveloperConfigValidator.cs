@@ -148,42 +148,123 @@ internal static class DeveloperConfigValidator
                 continue;
             }
 
-            foreach (var field in key.GetChildren())
-            {
-                if (!fields.TryGetValue(field.Key, out var fieldType))
-                {
-                    problems.Add(NotValidInBlock(field, key.Key, fields));
-                    continue;
-                }
-
-                // The mirror of the check above: a block written where a field's value goes. Like
-                // a non-scalar `source`, it binds to nothing and costs the entry every other key
-                // it carries, so the service reads downstream as one nobody configured at all.
-                if (HasChildren(field))
-                {
-                    problems.Add(ValueExpected(serviceName, field, key.Key.ToLowerInvariant()));
-                    continue;
-                }
-
-                // A value of one or more spaces, whatever type the field takes. Refused rather than
-                // read as absent — which is what a string field would otherwise become, since it
-                // binds and the blank-to-absent walk in DeveloperConfiguration then drops it, so a
-                // whitespace `local.path` sent the service to its managed checkout instead of the
-                // developer's directory and said nothing about it.
-                if (field.Value is { Length: > 0 } spaces && string.IsNullOrWhiteSpace(spaces))
-                {
-                    problems.Add(Blank(field, key.Key.ToLowerInvariant()));
-                    continue;
-                }
-
-                if (field.Value is { } value && !BindsTo(fieldType, value))
-                {
-                    problems.Add(NotBindable(field, key.Key.ToLowerInvariant(), fieldType, value));
-                }
-            }
+            CollectBlock(problems, serviceName, key, key.Key.ToLowerInvariant(), fields);
         }
 
         return problems;
+    }
+
+    /// <summary>
+    /// Every problem inside one block of settings — a source block, or a block nested in one.
+    /// </summary>
+    /// <param name="blockPath">
+    /// How the block is named in a message, dotted for a nested one: <c>local</c>,
+    /// <c>local.prepare</c>.
+    /// </param>
+    /// <remarks>
+    /// Recursive because <c>local.prepare</c> is the first block inside a block this file has held.
+    /// Nothing about the walk is specific to that depth, so it is the same code rather than a second
+    /// copy for level two — which is also what keeps a nested block's diagnostics identical to a
+    /// top-level one's rather than a thinner version of them.
+    /// </remarks>
+    private static void CollectBlock(
+        List<string> problems,
+        string serviceName,
+        IConfigurationSection block,
+        string blockPath,
+        IReadOnlyDictionary<string, Type> fields)
+    {
+        foreach (var field in block.GetChildren())
+        {
+            if (!fields.TryGetValue(field.Key, out var fieldType))
+            {
+                problems.Add(NotValidInBlock(field, blockPath, fields));
+                continue;
+            }
+
+            // Asked before the block question below, and it has to be: a list arrives from
+            // IConfiguration as indexed children, and its type is a class, so a list asked about as
+            // a block is classified as one and answered with "takes a value, not a block of
+            // settings" — about a field whose value is neither.
+            if (DeveloperConfigField.IsList(fieldType))
+            {
+                CollectList(problems, field, blockPath);
+                continue;
+            }
+
+            if (DeveloperConfigField.BlockFieldsOf(fieldType) is { } nested)
+            {
+                // The same mistake one level down as a block name carrying a value: it binds to
+                // nothing, and the binder giving up takes the surrounding block with it.
+                if (field.Value is not null)
+                {
+                    problems.Add(BlockExpected(blockPath, field, nested));
+                    continue;
+                }
+
+                CollectBlock(
+                    problems, serviceName, field, $"{blockPath}.{field.Key.ToLowerInvariant()}", nested);
+                continue;
+            }
+
+            // The mirror of the check above: a block written where a field's value goes. Like
+            // a non-scalar `source`, it binds to nothing and costs the entry every other key
+            // it carries, so the service reads downstream as one nobody configured at all.
+            if (HasChildren(field))
+            {
+                problems.Add(ValueExpected(serviceName, field, blockPath));
+                continue;
+            }
+
+            // A value of one or more spaces, whatever type the field takes. Refused rather than
+            // read as absent — which is what a string field would otherwise become, since it
+            // binds and the blank-to-absent walk in DeveloperConfiguration then drops it, so a
+            // whitespace `local.path` sent the service to its managed checkout instead of the
+            // developer's directory and said nothing about it.
+            if (field.Value is { Length: > 0 } spaces && string.IsNullOrWhiteSpace(spaces))
+            {
+                problems.Add(Blank(field, blockPath));
+                continue;
+            }
+
+            if (field.Value is { } value && !BindsTo(fieldType, value))
+            {
+                problems.Add(NotBindable(field, blockPath, fieldType, value));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Every problem with a field whose value is a list of values.
+    /// </summary>
+    /// <remarks>
+    /// Only the shape is checked here. Whether the list is long enough to be a command, and whether
+    /// its first element points where it is allowed to, belong to whoever reads it — a message about
+    /// those can name the service and what the list is for, which this walk cannot.
+    /// <para>
+    /// An empty list is left alone for the same reason an empty value is: it is what a higher
+    /// configuration layer writes to drop what the file below said.
+    /// </para>
+    /// </remarks>
+    private static void CollectList(List<string> problems, IConfigurationSection field, string blockPath)
+    {
+        if (!HasChildren(field))
+        {
+            if (field.Value is { Length: > 0 } written)
+            {
+                problems.Add(string.IsNullOrWhiteSpace(written) ? Blank(field, blockPath) : ListExpected(field, blockPath));
+            }
+
+            return;
+        }
+
+        foreach (var element in field.GetChildren())
+        {
+            if (HasChildren(element))
+            {
+                problems.Add(ListElementExpected(field, element, blockPath));
+            }
+        }
     }
 
     /// <summary>
@@ -416,13 +497,17 @@ internal static class DeveloperConfigValidator
     /// exception — so that message's fallback branch would call the key invalid and then list it
     /// among the valid ones.
     /// </remarks>
+    /// <param name="container">
+    /// What the block sits in, as the message shows it: the service's own name for a source block,
+    /// and the enclosing block's path for one nested inside it.
+    /// </param>
     private static string BlockExpected(
-        string serviceName, IConfigurationSection key, IReadOnlyDictionary<string, Type> fields)
+        string container, IConfigurationSection key, IReadOnlyDictionary<string, Type> fields)
     {
         var block = key.Key.ToLowerInvariant();
 
         return $"'{key.Key}' takes a block of settings, not a value: "
-            + $"\"{serviceName}\": {{ ..., \"{block}\": {{ ... }} }}. "
+            + $"\"{container}\": {{ ..., \"{block}\": {{ ... }} }}. "
             + $"Valid keys there are {Quoted(fields.Keys)}."
             // FirstOrDefault rather than First: every block declares at least one field, but a
             // message builder that can throw would replace the configuration error being reported
@@ -447,6 +532,28 @@ internal static class DeveloperConfigValidator
         $"'{key.Key}'{(block is null ? "" : $" in the '{block}' block")} "
         + $"takes a value, not a block of settings: \"{block ?? serviceName}\": {{ \"{key.Key}\": ... }}."
         + SetAt(key);
+
+    /// <summary>
+    /// The error for a list field written as a single value — <c>"command": "./prepare.sh"</c>.
+    /// </summary>
+    /// <remarks>
+    /// A list has no scalar spelling that binds, so the fix is the brackets rather than a different
+    /// value, and the remedy names the indexed key each flat configuration layer sets an element
+    /// through.
+    /// </remarks>
+    private static string ListExpected(IConfigurationSection field, string block) =>
+        $"'{field.Key}' in the '{block}' block takes a list of values, not the single value "
+        + $"{Escaped(field.Value)}: \"{field.Key}\": [ ... ]."
+        + SetAtList(field);
+
+    /// <summary>
+    /// The error for an element of a list field that is itself a block of settings.
+    /// </summary>
+    private static string ListElementExpected(
+        IConfigurationSection field, IConfigurationSection element, string block) =>
+        $"'{field.Key}' in the '{block}' block is a list of values, but its element at "
+        + $"'{element.Key}' is a block of settings. Every element has to be a value."
+        + SetAt(element);
 
     /// <summary>
     /// The error for a value the binder could not turn into the field's type — a key that is valid
@@ -567,6 +674,17 @@ internal static class DeveloperConfigValidator
     /// changes is the spelling, which has to be of a field inside the block rather than of the
     /// block.
     /// </remarks>
+    /// <summary>
+    /// The same, for a key that has to hold a list. The flat providers carry one leaf each, so an
+    /// element is set through its index — which is also how such a layer's value merges over one in
+    /// the file, per index rather than wholesale.
+    /// </summary>
+    private static string SetAtList(IConfigurationSection section) =>
+        $" The key is '{section.Path}', which any configuration layer can set: "
+        + $"{DeveloperConfiguration.FileName}, appsettings, user secrets, the environment or the "
+        + "command line — the flat layers an element at a time, as "
+        + $"{$"{section.Path}:0".Replace(":", "__", StringComparison.Ordinal)}.";
+
     private static string SetAtBlock(IConfigurationSection section, string exampleField) =>
         $" The key is '{section.Path}', which any configuration layer can set: "
         + $"{DeveloperConfiguration.FileName}, appsettings, user secrets, the environment or the "
