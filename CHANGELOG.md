@@ -182,6 +182,12 @@ nothing will fail to build to warn you.
   escape; `$` is not otherwise special, so `$${port}` is available as one if anything ever needs it
   ([#207]).
 
+  **Setting a template through an environment variable needs single quotes.** `${…}` is also what a
+  POSIX shell, docker-compose and a GitHub Actions `run:` block expand, and double quotes do not
+  protect it — they cover the `;` and not the `${`. A template that loses its placeholder that way
+  arrives as a valid template with no placeholder in it, which nothing can report. The file,
+  appsettings and user secrets are unaffected, and are where a template normally lives.
+
   A `source` of nothing but whitespace is refused rather than read as the default, the same way a
   whitespace *field* has been refused since `0.4.0` and for the same reason: it is the empty
   spelling that unsets a key, missed by a character. This also applies to a service's `source`,

@@ -49,6 +49,18 @@ namespace Aspire.Hosting.ServiceSources.BackingServices;
 /// placeholder today — so it is available as an escape the day something does, carrying none of the
 /// ambiguity brace-doubling carried.
 /// </para>
+/// <para>
+/// <b>The cost the syntax carries instead is the shell.</b> <c>${…}</c> is what a POSIX shell,
+/// docker-compose and a GitHub Actions <c>run:</c> block use for their own variables, so a template
+/// set through an environment variable can be expanded before it reaches here — and double quotes
+/// do not help, since they protect the <c>;</c> and not the <c>${</c>. What arrives is a valid
+/// template with no placeholder in it, which nothing can report, because that is also what a
+/// developer who wanted a literal port writes. Single quotes are the answer and the README says so.
+/// Weighed against the alternatives and kept: the file is where a template normally lives and
+/// <c>$</c> is ordinary there, every other sigil trades this trap for another transport's — <c>%</c>
+/// is cmd's, <c>&lt;</c> is redirection — and an unquoted connection string is already mangled by
+/// its own <c>;</c> and by any <c>$</c> in a password.
+/// </para>
 /// </remarks>
 internal sealed class ConnectionStringTemplate
 {
@@ -305,5 +317,7 @@ internal sealed class ConnectionStringTemplate
             + $"'{placeholder}', which cannot be read — {problem} "
             + $"The key is '{configKey}', which any configuration layer can set: "
             + $"{Config.DeveloperConfiguration.FileName}, appsettings, user secrets, the environment "
-            + $"variable {configKey.Replace(":", "__", StringComparison.Ordinal)}, or the command line.");
+            + $"variable {configKey.Replace(":", "__", StringComparison.Ordinal)}, or the command line. "
+            + "Setting it from a shell or a docker-compose file needs single quotes, since '${...}' is "
+            + "what those expand themselves — double quotes do not protect it.");
 }

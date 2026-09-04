@@ -123,6 +123,22 @@ stays documented, along with the fact that `$` is not otherwise special, so `$${
 available the day something wants it — which is a cheaper sentence to write than the escape it
 describes.
 
+**The cost this trades for, which the first draft of this design did not weigh.** `${…}` is what a
+POSIX shell, docker-compose and a GitHub Actions `run:` block expand, so a template set through an
+environment variable — a route these very error messages recommend — can lose its placeholder before
+the AppHost sees it, and double quotes do not protect it. The failure is silent, because what arrives
+is a valid template with no placeholder in it, which is also what someone writing a literal port
+produces.
+
+Documented rather than designed around, and the reasoning is worth keeping because it was a close
+call. The file, appsettings and user secrets are where a template normally lives and `$` is ordinary
+in all three; no placeholder is usable at all under `"direct"`, the only source shipping here, so the
+exposure begins with stage 2's cluster templates; every alternative sigil trades this trap for
+another transport's (`%` is cmd's, `<` is redirection in both bash and cmd); and an unquoted
+connection string is already mangled by its own `;` and by any `$` in a password, so quoting is
+table stakes rather than a new requirement. The README carries a worked example of the wrong and
+right spellings, and the message that names the environment variable now says so too.
+
 **Unknown `${…}` stays literal.** Only a token whose first word is exactly `port` or `secret` is
 claimed; `${DB_PASS}` passes through as text. Rejecting unknown `${…}` as a misspelled placeholder
 would read well and would give near-miss suggestions a home, but it breaks an AppHost whose own

@@ -1524,6 +1524,26 @@ placeholder today.
 > write. Escaping could not fix it: doubling is the syntax ODBC already uses, and collapsing it
 > silently corrupted working connection strings in both directions.
 
+#### Setting a template from a shell: quote it with single quotes
+
+`${…}` is also what a POSIX shell, docker-compose and a GitHub Actions `run:` block use for their
+own variables, so a template set through an environment variable can be expanded away before the
+AppHost ever sees it. **Double quotes do not help** — they protect the `;` and not the `${`:
+
+```bash
+# Wrong: the shell substitutes ${port} (unset) and the AppHost receives "Host=db;Port="
+export ServiceSources__BackingServices__orders-db__Direct__ConnectionString="Host=db;Port=${port}"
+
+# Right
+export ServiceSources__BackingServices__orders-db__Direct__ConnectionString='Host=db;Port=${port}'
+```
+
+Nothing reports this, because what arrives is a valid template that simply has no placeholder in it.
+In docker-compose the escape is `$${port}`; in a workflow, prefer single quotes.
+
+This does not apply to `servicesources.local.json`, `appsettings.json` or user secrets, where `$` is
+an ordinary character — which is where a template normally lives.
+
 ### Configuration that nothing reads is reported
 
 A backing service with no entry legitimately runs from its `local` factory, so an entry whose key
