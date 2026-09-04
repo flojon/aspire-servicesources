@@ -131,6 +131,30 @@ nothing will fail to build to warn you.
   `UseDeferredCheckout()` nothing moves — those checks still run after the clone lands, as the
   service's resource state.
 
+### Fixed
+
+- **A field misspelled at a service entry's root now names the field it was reaching for**
+  ([#182]). Spelled correctly, a field written flat at the entry root is walked through the move
+  into its block: *'path' is not a valid key here. It belongs in the 'local' block: `"orders": {
+  ..., "local": { "path": ... } }`.* One letter off, it fell off a cliff — *'pth' is not a valid
+  key. Valid keys are 'container', 'kubernetes', 'local', 'source', 'url'* — a list that could
+  never contain `path`, because the keys valid at an entry's root are `source` and the block names,
+  and `path` is a field one level down. The reader got five words, none of them the answer, and no
+  hint the key existed at all. It now reads *'pth' is not a valid key here. Did you mean 'path', in
+  the 'local' block: `"orders": { ..., "local": { "path": ... } }`?*
+
+  This matters most now: `0.4.0` moved every field out of the entry root and into a block named for
+  its source, so "a field written flat at the entry root" is the shape of every file written
+  against an earlier version — and the shape a developer retyping one gets wrong.
+
+  The tolerance scales with the length of the field being matched: one edit for a name of four
+  letters or fewer, two for anything longer. Two edits from `ref` or `tag` reaches a large part of
+  the alphabet, so a flat tolerance would confidently misname fields, which is worse than the list
+  — the list is at least true. So `schma` is answered with `scheme` and `namspce` with `namespace`,
+  while a key two edits from a three-letter field is still answered with the list. The same
+  misspelling *inside* a block keeps its own message, which already prints that block's two to four
+  valid keys, one of which is the answer.
+
 ## [0.4.0] - 2026-09-03
 
 ### Breaking
@@ -760,6 +784,7 @@ Targets `net10.0`.
 [#170]: https://github.com/flojon/aspire-servicesources/issues/170
 [#171]: https://github.com/flojon/aspire-servicesources/issues/171
 [#180]: https://github.com/flojon/aspire-servicesources/pull/180
+[#182]: https://github.com/flojon/aspire-servicesources/issues/182
 [#187]: https://github.com/flojon/aspire-servicesources/issues/187
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507

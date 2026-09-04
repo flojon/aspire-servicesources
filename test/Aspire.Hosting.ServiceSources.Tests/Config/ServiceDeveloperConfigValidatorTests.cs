@@ -502,4 +502,97 @@ public class ServiceDeveloperConfigValidatorTests
         Assert.Contains("'path' is not a valid key here", ex.Message);
         Assert.Contains("'ref' is not a valid key here", ex.Message);
     }
+
+    /// <summary>
+    /// A field misspelled at an entry's root names the field it was reaching for, rather than the
+    /// keys valid at the root — which cannot include it, since it is a field of a block.
+    /// </summary>
+    /// <remarks>
+    /// The shape of every unmigrated file: before the release that moved fields into blocks, all of
+    /// them sat at the entry root, so this is what a developer retyping one gets wrong. Spelled
+    /// correctly the same key is walked through the move; one letter off, it used to fall off a
+    /// cliff.
+    /// </remarks>
+    [Fact]
+    public void Validate_MisspelledFieldAtEntryRoot_NamesTheFieldAndItsBlock()
+    {
+        var ex = Load("""{ "services": { "orders": { "source": "local", "pth": "/src/orders" } } }""");
+
+        Assert.Contains("'pth' is not a valid key here", ex.Message);
+        Assert.Contains("Did you mean 'path'", ex.Message);
+        Assert.Contains("'local' block", ex.Message);
+
+        // The shape to write, as the exact-match message gives it.
+        Assert.Contains("""{ "path": ... }""", ex.Message);
+
+        // The old message, which listed keys that cannot contain the answer.
+        Assert.DoesNotContain("Valid keys are", ex.Message);
+    }
+
+    /// <remarks>
+    /// Two edits, which only a name long enough to afford them gets: <c>namespace</c> is nine
+    /// letters, where a doubled or transposed letter is the usual mistake and one edit is stingy.
+    /// The companion test below is the other half of that rule.
+    /// </remarks>
+    [Fact]
+    public void Validate_MisspelledLongFieldAtEntryRoot_IsRecognizedAtTwoEdits()
+    {
+        var ex = Load("""{ "services": { "orders": { "source": "kubernetes", "namspce": "orders" } } }""");
+
+        Assert.Contains("Did you mean 'namespace'", ex.Message);
+        Assert.Contains("'kubernetes' block", ex.Message);
+    }
+
+    /// <summary>
+    /// Two edits from a three-letter field is not a near miss, and is answered with the list rather
+    /// than a guess.
+    /// </summary>
+    /// <remarks>
+    /// The tolerance scales with the candidate's length deliberately. Two edits from <c>ref</c> or
+    /// <c>tag</c> reaches a large part of the alphabet, so a flat tolerance would confidently
+    /// misname fields — which is worse than the list, because the list is at least true.
+    /// </remarks>
+    [Fact]
+    public void Validate_KeyTwoEditsFromAShortField_IsNotGuessedAt()
+    {
+        var ex = Load("""{ "services": { "orders": { "source": "local", "rap": "x" } } }""");
+
+        Assert.Contains("'rap' is not a valid key", ex.Message);
+        Assert.Contains("Valid keys are", ex.Message);
+        Assert.DoesNotContain("Did you mean", ex.Message);
+    }
+
+    /// <summary>
+    /// A misspelled <em>block</em> name at the root still gets the list, which does contain the
+    /// answer — and is not sent to a field it never resembled.
+    /// </summary>
+    [Fact]
+    public void Validate_MisspelledBlockNameAtEntryRoot_ListsTheValidKeys()
+    {
+        var ex = Load("""{ "services": { "orders": { "source": "local", "locl": { "path": "/src" } } } }""");
+
+        Assert.Contains("'locl' is not a valid key", ex.Message);
+        Assert.Contains("'local'", ex.Message);
+        Assert.DoesNotContain("Did you mean", ex.Message);
+    }
+
+    /// <summary>
+    /// The same misspelling <em>inside</em> a block keeps its own message, which lists the block's
+    /// keys instead of guessing.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not given the near-miss treatment: there are two to four valid keys there and
+    /// they are all printed, so a guess adds nothing a reader cannot already see, and would name a
+    /// field they did not mean whenever the typo lands closer to a different one.
+    /// </remarks>
+    [Fact]
+    public void Validate_MisspelledFieldInsideItsBlock_ListsTheBlocksKeys()
+    {
+        var ex = Load("""{ "services": { "orders": { "source": "local", "local": { "pth": "/src" } } } }""");
+
+        Assert.Contains("'pth' is not a valid key in the 'local' block", ex.Message);
+        Assert.Contains("'path'", ex.Message);
+        Assert.Contains("'ref'", ex.Message);
+        Assert.DoesNotContain("Did you mean", ex.Message);
+    }
 }

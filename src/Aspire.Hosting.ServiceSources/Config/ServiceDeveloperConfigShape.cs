@@ -54,4 +54,38 @@ internal static class ServiceDeveloperConfigShape
     /// </summary>
     public static string? HomeBlockOf(string field) =>
         BlockFields.FirstOrDefault(block => block.Value.ContainsKey(field)).Key;
+
+    /// <summary>
+    /// The field <paramref name="writtenKey"/> looks like a misspelling of, and the block it lives
+    /// in — or <see langword="null"/> when it resembles no field.
+    /// </summary>
+    /// <remarks>
+    /// The fuzzy counterpart of <see cref="HomeBlockOf"/>, and asked only after that has come back
+    /// empty. Spelled correctly, a field written at an entry's root is answered with the block it
+    /// belongs in; one letter off, it used to be answered with the list of keys valid at the root,
+    /// which cannot contain the word the developer was reaching for — the field is a level down. So
+    /// the reader got five words, none of them the answer, and no hint the key existed at all.
+    /// <para>
+    /// One answer rather than every tie, because no two blocks declare a field by the same name
+    /// today. Ties are possible even so — a typo can sit one edit from fields in two blocks — so
+    /// the closest candidates are ordered here by field <em>and</em> block before one is taken.
+    /// <see cref="NearMiss.Nearest"/> orders by the spelling it was given, which separates two
+    /// differently-named fields but not one field name declared by two blocks; for that pair it
+    /// leaves the order it received, and what it received is
+    /// <see cref="System.Type.GetProperties()"/>'s, which the CLR does not promise to keep stable.
+    /// Ordering by the block as well makes the answer total, so the same one is named on every run
+    /// whichever kind of tie it is — and a section that does declare a field in two blocks, which
+    /// is the ordinary case for a backing service's <c>connectionString</c>, cannot reintroduce the
+    /// question.
+    /// </para>
+    /// </remarks>
+    public static (string Field, string Block)? NearMissFieldOf(string writtenKey) =>
+        NearMiss.Nearest(
+                writtenKey,
+                BlockFields.SelectMany(block => block.Value.Keys.Select(field => (Field: field, Block: block.Key))),
+                candidate => candidate.Field)
+            .OrderBy(candidate => candidate.Field, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.Block, StringComparer.Ordinal)
+            .Select(candidate => ((string, string)?)candidate)
+            .FirstOrDefault();
 }
