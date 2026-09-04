@@ -111,6 +111,83 @@ nothing will fail to build to warn you.
 
 ### Added
 
+- **`AddBackingService()` — the database, broker or cache a service connects to, source-switched
+  the same way the service is** ([#144]). A service usually depends on a database, and a developer
+  wants the same choice for it that they have for the service: run it locally, or connect to the one
+  already running. The AppHost declares it once, and each developer decides in their own
+  `servicesources.local.json`:
+
+  ```csharp
+  var ordersDb = builder.AddBackingService("orders-db",
+      local: () => builder.AddPostgres("orders-pg").AddDatabase("orders-db", "orders"));
+
+  builder.AddService("orders")
+      .Configure<IResourceWithEnvironment>(r => r.WithReference(ordersDb))
+      .Configure<IResourceWithWaitSupport>(r => r.WaitFor(ordersDb));
+  ```
+
+  Two sources ship in this release, configured under a new `backingServices:` section read through
+  the same configuration layers as `services:`. `"local"` runs the factory the AppHost supplied and
+  returns its result unchanged — it is the default, so a backing service with no entry runs as the
+  AppHost reads. `"direct"` connects to a `direct.connectionString` the developer supplies, which
+  covers both a database they started by hand and a cluster database published through an ingress:
+  from the AppHost's side both are an address with no process to manage. A `"kubernetes"` source
+  that opens a `kubectl port-forward` is the next stage of the same issue and is not in this
+  release.
+
+  There is no catalog side to this. A backing service is declared by the `AddBackingService()` call
+  itself, so `servicesources.yaml` is untouched — and an AppHost that only connects to a database
+  needs no catalog file at all. Local provisioning stays the AppHost's own code, because
+  `builder.AddPostgres(...)` already expresses it better than catalog fields would; that also means
+  it works unchanged for anything carrying a connection string, `AddRabbitMQ` and `AddRedis`
+  included.
+
+  **Name the resource your local factory returns after the backing service.** Aspire's
+  `WithReference(...)` keys the connection string on the referenced resource's own name, which under
+  `"local"` is whatever the factory built — so `() => builder.AddPostgres("pg").AddDatabase("orders")`
+  behind a backing service called `orders-db` gives a consumer `ConnectionStrings__orders` locally
+  and `ConnectionStrings__orders-db` under `"direct"`, moving the key the app reads when the
+  developer switches. `AddDatabase("orders-db", "orders")` names the resource and the database
+  separately. Nothing enforces this yet. A consumer that needs a particular key can also pin it from
+  its own side — `WithReference(ordersDb, "OrdersDb")` gives `ConnectionStrings__OrdersDb` under
+  every source, whatever the factory named its resource — which is the answer when the app already
+  reads a given name, or when the factory is not yours to rename.
+
+  **Write `direct.connectionString` as an address reached from outside Aspire.** It is handed on as
+  written; nothing about it is rewritten. The case that catches people out is pointing `"direct"` at
+  a container the same AppHost runs: the host and port the dashboard and `aspire describe` report
+  for a container endpoint belong to Aspire's endpoint proxy, which lives only as long as that
+  AppHost and is reassigned on the next start — not to the container's own published port.
+
+  `direct.connectionString` is normally a literal, and a brace in it stays a brace, so ODBC-style
+  strings such as `Driver={PostgreSQL}` pass through untouched. `{port}` and
+  `{secret:<name>:<key>}` are recognised, reserved for the sources that can resolve them, and
+  rejected under `"direct"` with a message saying why; a malformed one fails at startup naming the
+  backing service and the key, rather than reaching the app as text. Braces are never rewritten and
+  there is no escape: every brace reaches the app as written, doubled ones included, so ODBC's own
+  doubling rule stays intact — `PWD={pa}}ss}` is the password `pa}ss` and remains it. The cost is
+  one reserved shape: a `{` begins a placeholder whenever the word after it — up to the first `:` or
+  `}`, or to the end — is *exactly* `port` or `secret`, in any casing, so `{PORT}`, `{port:amqp}`,
+  `{secret}` and
+  `{secret:a}` are unavailable as literal text alongside the two well-formed spellings — which is
+  what catches `PWD={secret}`, an ODBC-quoted password that happens to be the word. Equality rather
+  than a prefix, so `{portal}`, `{secretariat}` and `{secrets:a}` are text like every other brace.
+  The errors say the text cannot be kept, quoting the spelling you wrote, rather than leaving you to
+  hunt for one that does not exist.
+
+  A `source` of nothing but whitespace is refused rather than read as the default, the same way a
+  whitespace *field* has been refused since `0.4.0` and for the same reason: it is the empty
+  spelling that unsets a key, missed by a character. This also applies to a service's `source`,
+  which previously reported having no source configured without mentioning the spaces that caused
+  it.
+
+  **One gap worth knowing about.** An entry whose key matches no `AddBackingService()` call is not
+  reported, because a backing service with no entry legitimately runs locally — so a typo in the
+  *key* (`orders_db` against `orders-db`) silently reverts that backing service to the `"local"`
+  source, starting the container the developer was trying to avoid. Tracked as
+  [#206](https://github.com/flojon/aspire-servicesources/issues/206) along with the misspelled
+  `backingServices` root key, which fails the same way for the same reason.
+
 - **A service whose resource never runs is reported in the AppHost's own console** ([#150]). A
   `"local"` checkout that fails to compile used to produce nothing there at all: Aspire's build of
   a checkout is `dotnet run`'s own, so the compiler's output goes to that resource's console in the
@@ -820,6 +897,7 @@ Targets `net10.0`.
 [#125]: https://github.com/flojon/aspire-servicesources/issues/125
 [#130]: https://github.com/flojon/aspire-servicesources/issues/130
 [#131]: https://github.com/flojon/aspire-servicesources/issues/131
+[#144]: https://github.com/flojon/aspire-servicesources/issues/144
 [#150]: https://github.com/flojon/aspire-servicesources/issues/150
 [#159]: https://github.com/flojon/aspire-servicesources/issues/159
 [#160]: https://github.com/flojon/aspire-servicesources/issues/160

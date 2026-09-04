@@ -29,6 +29,24 @@ internal static class DeveloperConfigFileSource
     /// <summary>The key the file uses at its own root, before its entries are re-rooted below.</summary>
     private const string FileServicesKey = "services";
 
+    /// <summary>The same, for the backing services a service connects to.</summary>
+    private const string FileBackingServicesKey = "backingServices";
+
+    /// <summary>
+    /// Every subtree of the file that crosses into the AppHost's configuration, and the key it
+    /// lands under.
+    /// </summary>
+    /// <remarks>
+    /// A list rather than a special case per section, so that adding one is adding a line. Both
+    /// keys are too generic to occupy at the root of the AppHost's configuration, which is why
+    /// neither crosses over under the name the file gives it.
+    /// </remarks>
+    private static readonly (string FileKey, string ConfigurationKey)[] ReRootedSections =
+    [
+        (FileServicesKey, DeveloperConfiguration.ServicesKey),
+        (FileBackingServicesKey, DeveloperConfiguration.BackingServicesKey),
+    ];
+
     private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, Registration> Registrations = new();
 
     /// <summary>
@@ -86,14 +104,15 @@ internal static class DeveloperConfigFileSource
     }
 
     /// <remarks>
-    /// The file's own root is <c>services</c>, too generic a key to occupy at the root of the
-    /// AppHost's configuration, so its entries are re-keyed under <c>ServiceSources</c> as they are
-    /// handed over — the file's shape on disk is unchanged, which is what keeps a TypeScript
-    /// AppHost, with no natural place to author .NET configuration, working exactly as before.
-    /// Parsing still goes through the JSON configuration provider; only the key prefix is ours.
-    /// Only the <c>services</c> subtree crosses over. Anything else the file happens to carry is
-    /// the file's own business, and re-rooting it wholesale would make this the route by which an
-    /// unrelated key reaches the AppHost's live configuration under our prefix.
+    /// The file's own roots — <c>services</c> and <c>backingServices</c> — are too generic to
+    /// occupy at the root of the AppHost's configuration, so their entries are re-keyed under
+    /// <c>ServiceSources</c> as they are handed over. The file's shape on disk is unchanged, which
+    /// is what keeps a TypeScript AppHost, with no natural place to author .NET configuration,
+    /// working exactly as before. Parsing still goes through the JSON configuration provider; only
+    /// the key prefix is ours. Only the subtrees in <see cref="ReRootedSections"/> cross over.
+    /// Anything else the file happens to carry is the file's own business, and re-rooting it
+    /// wholesale would make this the route by which an unrelated key reaches the AppHost's live
+    /// configuration under our prefix.
     /// </remarks>
     private static MemoryConfigurationSource ReadFileSource(string path)
     {
@@ -104,14 +123,16 @@ internal static class DeveloperConfigFileSource
         using (file as IDisposable)
         {
             // Relative paths, so each entry is named the way it sits under the file's own root and
-            // the key it lands on is built from ServicesKey itself. Spelling the destination prefix
-            // out here instead would be a second place that has to agree with the key the reader
-            // asks for, and disagreeing costs nothing at build time and nothing at run time: the
-            // section simply comes back empty, and every service reports that it is configured
-            // nowhere while the file sits there fully populated.
-            var reRooted = file.GetSection(FileServicesKey).AsEnumerable(makePathsRelative: true)
-                .Where(entry => entry.Value is not null)
-                .ToDictionary(entry => $"{DeveloperConfiguration.ServicesKey}:{entry.Key}", entry => entry.Value);
+            // the key it lands on is built from the destination key itself. Spelling the prefix out
+            // here instead would be a second place that has to agree with the key the reader asks
+            // for, and disagreeing costs nothing at build time and nothing at run time: the section
+            // simply comes back empty, and every service reports that it is configured nowhere
+            // while the file sits there fully populated.
+            var reRooted = ReRootedSections
+                .SelectMany(section => file.GetSection(section.FileKey).AsEnumerable(makePathsRelative: true)
+                    .Where(entry => entry.Value is not null)
+                    .Select(entry => ($"{section.ConfigurationKey}:{entry.Key}", entry.Value)))
+                .ToDictionary(entry => entry.Item1, entry => entry.Item2);
 
             return new MemoryConfigurationSource { InitialData = reRooted };
         }

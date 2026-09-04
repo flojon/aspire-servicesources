@@ -1,10 +1,67 @@
 # Aspire.Hosting.ServiceSources — Backing Service Source Design
 
-**Status:** Accepted — ready to implement. Revised 2026-08-22 against `main` at #62, which removed the `ServiceResource` facade and shipped `Configure<T>`/`As<T>`; the proposed `AddService(configure:)` parameter and `WaitFor` shim are withdrawn as a result, and `AddBackingService` is now the design's only new public surface. Revised again 2026-08-30, when the supposed guest-language gap turned out not to exist. Earlier questions were settled by prototype and against a `kind` cluster, and the three team decisions that remained were all made on 2026-08-30. See Revision Notes.
-**Date:** 2026-08-15 (revised 2026-08-21, 2026-08-22, 2026-08-30)
+**Status:** Stage 1 implemented (2026-09-03) — `"local"` and `"direct"`, the `backingServices:` config section and the ATS export; stages 2 (`"kubernetes"`) and 3 (secrets) remain. Accepted. Revised 2026-08-22 against `main` at #62, which removed the `ServiceResource` facade and shipped `Configure<T>`/`As<T>`; the proposed `AddService(configure:)` parameter and `WaitFor` shim are withdrawn as a result, and `AddBackingService` is now the design's only new public surface. Revised again 2026-08-30, when the supposed guest-language gap turned out not to exist. Earlier questions were settled by prototype and against a `kind` cluster, and the three team decisions that remained were all made on 2026-08-30. See Revision Notes.
+**Date:** 2026-08-15 (revised 2026-08-21, 2026-08-22, 2026-08-30, 2026-09-03)
 **Scope:** Extends the local-vs-kubernetes source-switching model from services to the backing resources a service connects to: databases (Postgres, SQL Server) and, on exactly the same mechanism, message brokers and caches (RabbitMQ, Redis, …). The mechanism is connection-string-based and backend-agnostic — see [Generalization](#generalization-beyond-databases), where this is verified rather than assumed. Closes out the "Database/queue source switching" item from the [phase 2 reference doc](2026-08-09-servicesources-phase2-future-work.md) and [issue #10](https://github.com/flojon/aspire-servicesources/issues/10).
 
 ## Revision Notes
+
+### 2026-09-03 — stage 1 implemented; three claims corrected by measurement
+
+Stage 1 (`"local"` + `"direct"`, the config section, the ATS export) is implemented. Three things
+this document asserts turned out to be wrong or incomplete, each found by building it.
+
+**The config schema is nested, not flat.** This document specifies a flat
+`BackingServiceDeveloperConfig` carrying `Source`, `Service`, `Port`, `Context`, `Namespace` and
+`ConnectionString` side by side. It predates #161/#176, which moved every *service* field into a
+block named for its source — and the reason applies here unchanged: `IConfiguration` merges layers
+per key rather than per object, so with the fields flat, a higher layer setting `source: local`
+leaves a lower layer's `connectionString` sitting alongside it, read by nothing and impossible to
+remove. The implemented shape is `{ "source": "direct", "direct": { "connectionString": … } }`, and
+`connectionString` is declared by each source block that takes one rather than once at the entry
+root, because the templates differ per source — the `"kubernetes"` one carries a `{port}` that
+`"direct"` has no way to resolve. That makes it the first field two blocks both declare, which is
+what the tie rule in #182 exists for.
+
+**`ASPIREEXPORT010` does not follow a call through an interface, so it cannot be relied on
+unconditionally.** This document treats the analyzer as the thing that keeps
+`RunSyncOnBackgroundThread` from being dropped, and the issue asks for a build-time assertion that
+it does not fire. Measured on Aspire 13.5.2 (this repo's floor, above the 13.5.1 the callback spike
+ran on): the analyzer fires for a delegate invoked in the exported method's own body, and for one
+invoked a single static hop away — but **not** for one invoked behind an interface dispatch. The
+first implementation passed the factory to an `IBackingServiceSource` and invoked it there, and the
+build was clean with the attribute *and without it*: the assertion the issue asks for would have
+passed while asserting nothing.
+
+The remedy is structural rather than a suppression. `AddBackingService` invokes the factory in its
+own body for the `"local"` branch, and the source interface does not receive the factory at all —
+which is the better contract anyway, since every source behind it connects to something already
+running and must never call it. A reflection test asserts the attribute directly as well, because
+that survives a later rearrangement of the call graph that would silently re-disarm the analyzer.
+
+**A brace in a connection-string template needs escaping before it reaches
+`ReferenceExpressionBuilder`.** `AppendLiteral` takes text that is already a `string.Format` format
+string and appends it unchanged, so a template holding a literal brace — `Driver={PostgreSQL}` is
+ordinary ODBC, and a generated password may hold one anywhere — throws a `FormatException` on
+resolution, at app start, naming neither the connection string nor the backing service.
+`AppendFormatted(string)` is not a way around it: it appends to the format as well and fails
+identically. Doubling the braces resolves back to exactly what was configured. The templating
+section below says nothing about this, and should be read as requiring it.
+
+**One acceptance criterion does not hold as written.** "Switching a backing service between all
+three sources needs no AppHost code change" is true of the AppHost and false of the app: Aspire's
+`WithReference` keys the connection string on the referenced resource's *own* name, which under
+`"local"` is whatever the factory built. This document's own example —
+`AddBackingService("orders-db", local: () => builder.AddPostgres("pg").AddDatabase("orders"))` —
+therefore gives a consumer `ConnectionStrings__orders` locally and `ConnectionStrings__orders-db`
+under `"direct"`. Naming the factory's resource after the backing service fixes it; whether to
+enforce that is filed as its own decision (#200), since it constrains AppHost code on a public API.
+
+Two smaller notes. The `kubernetes` block is deliberately absent until stage 2 implements the source
+that reads it, rather than binding fields nothing can consult. And `servicesources.yaml` is not
+merely untouched, as the Config Schema section says, but not loaded at all for a backing service —
+the catalog loader throws when the file is missing, so sharing the existing cached load would have
+required an empty catalog to satisfy a lookup that never happens.
 
 ### 2026-08-30 (later) — every open question is settled
 

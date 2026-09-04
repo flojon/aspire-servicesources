@@ -57,7 +57,7 @@ internal static class NearMiss
     /// different blocks — are left in the order they were supplied, since nothing here can tell
     /// them apart. A caller taking the first of those has to order by whatever separates them
     /// first, or it is relying on its own enumeration order; see
-    /// <see cref="ServiceDeveloperConfigShape.NearMissFieldOf"/>, which orders by block as well for
+    /// <see cref="DeveloperConfigShape.NearMissFieldsOf"/>, which orders by block as well for
     /// exactly that reason.
     /// </para>
     /// <para>

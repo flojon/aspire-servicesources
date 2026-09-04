@@ -88,7 +88,7 @@ public class NearMissTests
     /// two blocks — so they keep the order they arrived in, which for the config shapes is
     /// <c>Type.GetProperties()</c>'s and therefore not guaranteed. Returning both is what forces the
     /// caller to order by whatever does separate them; see
-    /// <see cref="ServiceDeveloperConfigShape.NearMissFieldOf"/>.
+    /// <see cref="DeveloperConfigShape.NearMissFieldsOf"/>.
     /// </remarks>
     [Fact]
     public void Nearest_CandidatesSharingASpelling_AreAllReturned()
