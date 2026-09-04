@@ -43,14 +43,26 @@ public class NearMissTests
     public void Nearest_TwoEditsFromALongName_Matches() =>
         Assert.Equal(["namespace"], NearMiss.Nearest("namspce", ["namespace", "scheme"], name => name));
 
+    /// <summary>
+    /// The tolerance applied is each candidate's own, so a long name two edits away is suggested
+    /// while a short name the same distance from a different key is not.
+    /// </summary>
     /// <remarks>
-    /// The tolerance is the candidate's, so a long name two edits away beats a short name that is
-    /// closer in raw distance but outside its own tolerance. Filtering after taking the minimum
-    /// would let the short one win and then be discarded, leaving no suggestion at all.
+    /// What this does <em>not</em> pin is the order of the filter and the minimum inside
+    /// <see cref="NearMiss.Nearest"/>: under the two tiers <see cref="NearMiss.MaxEdits"/> has, the
+    /// two orders cannot disagree. They differ only when every candidate at the smallest distance
+    /// fails its own tolerance while a strictly farther one passes; failing a tolerance takes at
+    /// least two edits, so the farther one would have to be at three or more, which no tolerance
+    /// admits. It becomes observable only if a tier above two is added, and there is no way to
+    /// write a test for it until then.
     /// </remarks>
     [Fact]
-    public void Nearest_PrefersACandidateWithinItsOwnTolerance() =>
-        Assert.Equal(["context"], NearMiss.Nearest("contxt", ["context", "tag"], name => name));
+    public void Nearest_AppliesEachCandidatesOwnTolerance()
+    {
+        // Two edits: inside `namespace`'s tolerance, outside a short name's.
+        Assert.Equal(["namespace"], NearMiss.Nearest("namspce", ["namespace", "ref"], name => name));
+        Assert.Empty(NearMiss.Nearest("rap", ["ref", "namespace"], name => name));
+    }
 
     /// <summary>
     /// A tie returns every candidate, in ordinal order, so a caller that names one names the same
@@ -108,16 +120,68 @@ public class NearMissTests
     [InlineData("", "", 0)]
     [InlineData("path", "path", 0)]
     [InlineData("pth", "path", 1)]
-    [InlineData("paht", "path", 2)]
+    [InlineData("paht", "path", 1)]
     [InlineData("", "path", 4)]
-    public void EditDistance_CountsInsertsDeletesAndSubstitutions(string from, string to, int expected) =>
+    public void EditDistance_CountsInsertsDeletesSubstitutionsAndSwaps(string from, string to, int expected) =>
         Assert.Equal(expected, NearMiss.EditDistance(from, to));
 
+    /// <summary>
+    /// The restricted form: no substring is edited twice, so <c>ca</c> to <c>abc</c> is three rather
+    /// than the two the unrestricted algorithm would give.
+    /// </summary>
     /// <remarks>
-    /// A transposition costs two here, which is the Levenshtein answer rather than the Damerau one,
-    /// and is why anything but a short name is allowed two edits.
+    /// Recorded rather than fixed. The unrestricted variant costs an alphabet-sized table to change
+    /// an answer no vocabulary here can produce, and the answer only has to order candidates by
+    /// resemblance — nothing depends on the distance being metric.
     /// </remarks>
     [Fact]
-    public void EditDistance_TransposedPair_CostsTwo() =>
-        Assert.Equal(2, NearMiss.EditDistance("paht", "path"));
+    public void EditDistance_SwapWithAnEditInsideIt_IsNotCountedAsOne() =>
+        Assert.Equal(3, NearMiss.EditDistance("ca", "abc"));
+
+    /// <summary>
+    /// A swapped adjacent pair costs one edit, not the two a substitution each way would.
+    /// </summary>
+    /// <remarks>
+    /// The reason it has to: the fields this matches against are short, so they get a single edit,
+    /// and at two every transposition in the vocabulary fell outside tolerance. See
+    /// <see cref="Nearest_TransposedPairInAShortField_IsRecognized"/> for what that cost.
+    /// </remarks>
+    [Fact]
+    public void EditDistance_TransposedPair_CostsOne() =>
+        Assert.Equal(1, NearMiss.EditDistance("paht", "path"));
+
+    /// <summary>
+    /// Every short field in the real vocabulary is reachable by swapping a pair of its letters.
+    /// </summary>
+    /// <remarks>
+    /// Transposition is the commonest typo there is, and these are the most-typed fields in the
+    /// file, so this is the case the feature exists for. Plain Levenshtein charged the swap two
+    /// edits and a short name's tolerance is one, so every one of these printed the bare
+    /// "Valid keys are …" list — while <c>pth</c>, a dropped letter in the same word, was answered.
+    /// A reader hitting that saw no rule, only an arbitrary difference.
+    /// </remarks>
+    [Theory]
+    [InlineData("paht", "path")]
+    [InlineData("prot", "port")]
+    [InlineData("tga", "tag")]
+    [InlineData("erf", "ref")]
+    [InlineData("rul", "url")]
+    public void Nearest_TransposedPairInAShortField_IsRecognized(string written, string field) =>
+        Assert.Equal(
+            [field],
+            NearMiss.Nearest(written, ["path", "ref", "url", "port", "tag", "scheme", "context", "namespace"], name => name));
+
+    /// <summary>
+    /// The transposition does not widen what a substitution reaches: two substitutions in a short
+    /// name still get no suggestion.
+    /// </summary>
+    /// <remarks>
+    /// The length rule is there to stop the guessing being confident and wrong, and charging a swap
+    /// one edit was meant to answer a typo class rather than to relax that. <c>rap</c> is two
+    /// substitutions from both <c>ref</c> and <c>tag</c> and a swap of neither.
+    /// </remarks>
+    [Fact]
+    public void Nearest_TwoSubstitutionsInAShortField_IsStillNotRecognized() =>
+        Assert.Empty(NearMiss.Nearest(
+            "rap", ["path", "ref", "url", "port", "tag", "scheme", "context", "namespace"], name => name));
 }

@@ -182,9 +182,21 @@ nothing will fail to build to warn you.
   letters or fewer, two for anything longer. Two edits from `ref` or `tag` reaches a large part of
   the alphabet, so a flat tolerance would confidently misname fields, which is worse than the list
   — the list is at least true. So `schma` is answered with `scheme` and `namspce` with `namespace`,
-  while a key two edits from a three-letter field is still answered with the list. The same
+  while a key two substitutions from a three-letter field is still answered with the list. The same
   misspelling *inside* a block keeps its own message, which already prints that block's two to four
   valid keys, one of which is the answer.
+
+  A swapped pair of letters counts as **one** edit, not two, which is what puts a transposition
+  inside a short field's tolerance: `paht`, `prot`, `tga`, `erf` and `rul` are answered with `path`,
+  `port`, `tag`, `ref` and `url`. Charging two for it left the commonest typo of the most-typed
+  fields getting the bare list while `pth` — a dropped letter in the same word — was walked to the
+  answer, and nothing about the rule explained the difference. It does not widen what a
+  *substitution* reaches: two substitutions in a short name still get the list.
+
+  One knock-on where the same rule is used on the file's root key: `serivces` is now a one-edit
+  misspelling of `services` rather than a two-edit one, so a file carrying both `serivces` and
+  `service` has two equally close candidates instead of a clear winner. The message names the
+  ordinally first, as it already did for any exact tie, so it stays the same on every run.
 
 ## [0.4.0] - 2026-09-03
 
