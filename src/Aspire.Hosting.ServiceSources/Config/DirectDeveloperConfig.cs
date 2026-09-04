@@ -16,5 +16,13 @@ internal sealed class DirectDeveloperConfig
     /// The connection string to hand consumers, optionally carrying placeholders. Required by this
     /// source: it is the whole of what the source supplies.
     /// </summary>
+    /// <remarks>
+    /// Handed on as written, so the address has to be one reached from outside Aspire. The case
+    /// that catches people out is pointing this at a container the same AppHost runs: the host and
+    /// port the dashboard and <c>aspire describe</c> report for a container endpoint belong to
+    /// Aspire's endpoint proxy, which exists only while that AppHost runs and is reassigned on the
+    /// next start — not to the container's own published port. Nothing here can detect that; the
+    /// value is opaque to this source by design.
+    /// </remarks>
     public string? ConnectionString { get; set; }
 }

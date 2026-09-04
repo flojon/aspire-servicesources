@@ -148,7 +148,16 @@ nothing will fail to build to warn you.
   behind a backing service called `orders-db` gives a consumer `ConnectionStrings__orders` locally
   and `ConnectionStrings__orders-db` under `"direct"`, moving the key the app reads when the
   developer switches. `AddDatabase("orders-db", "orders")` names the resource and the database
-  separately. Nothing enforces this yet.
+  separately. Nothing enforces this yet. A consumer that needs a particular key can also pin it from
+  its own side — `WithReference(ordersDb, "OrdersDb")` gives `ConnectionStrings__OrdersDb` under
+  every source, whatever the factory named its resource — which is the answer when the app already
+  reads a given name, or when the factory is not yours to rename.
+
+  **Write `direct.connectionString` as an address reached from outside Aspire.** It is handed on as
+  written; nothing about it is rewritten. The case that catches people out is pointing `"direct"` at
+  a container the same AppHost runs: the host and port the dashboard and `aspire describe` report
+  for a container endpoint belong to Aspire's endpoint proxy, which lives only as long as that
+  AppHost and is reassigned on the next start — not to the container's own published port.
 
   `direct.connectionString` is normally a literal, and a brace in it stays a brace, so ODBC-style
   strings such as `Driver={PostgreSQL}` pass through untouched. `{port}` and

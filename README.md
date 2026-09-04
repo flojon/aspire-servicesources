@@ -1422,6 +1422,18 @@ Each source's settings live in a block named for it, exactly as a service entry'
 configuration layer can switch `source` without a field from the source you switched away from
 being read alongside it.
 
+> **Write the address as reached from outside Aspire.** `"direct"` hands the connection string to
+> consumers as given — nothing about it is rewritten, because there is nothing for this AppHost to
+> manage. That is worth spelling out for the case a developer reaches for while experimenting:
+> pointing `"direct"` at a container the *same* AppHost runs. The host and port shown for a
+> container endpoint in the dashboard, and by `aspire describe`, are Aspire's
+> [endpoint proxy](https://learn.microsoft.com/dotnet/aspire/fundamentals/networking-overview) —
+> not the container's own published port. The proxy listens only while that AppHost is running, and
+> a fresh run assigns it a new port, so a connection string written against it stops working as
+> soon as either changes. Take the real published port from your container runtime
+> (`docker port` / `podman port`) — or keep `"local"`, which is what "a database this AppHost runs"
+> already means.
+
 ### Name the local factory's resource after the backing service
 
 Aspire's `WithReference(...)` keys the connection string on the **referenced resource's own name**,
@@ -1440,6 +1452,21 @@ builder.AddBackingService("orders-db", () => builder.AddPostgres("pg").AddDataba
 `AddDatabase("orders-db", "orders")` names the Aspire resource and the actual database separately,
 which is what to reach for when the two want different names. Nothing enforces this yet — the app
 is what reports it, by starting and finding no connection string where it looked.
+
+**Or pin the key at the consumer**, which settles it whatever the factory named its resource:
+
+```csharp
+builder.AddService("orders")
+    .Configure<IResourceWithEnvironment>(r => r.WithReference(ordersDb, "OrdersDb"));
+// → ConnectionStrings__OrdersDb, under every source
+```
+
+`WithReference`'s second argument overrides the source resource's name for the connection string,
+so both sources agree without the factory having to cooperate. Reach for it when the app already
+reads a particular name, or when the factory is not yours to rename — a shared helper, or a
+resource handed to you. The two answers are not exclusive: naming the resource well is what keeps
+the *default* right for every consumer, and this is what a consumer with its own requirement does
+about it.
 
 ### Connection-string placeholders
 

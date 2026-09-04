@@ -73,6 +73,14 @@ public static class BackingServiceBuilderExtensions
     /// connection string. <c>AddDatabase("orders-db", "orders")</c> names the resource and the
     /// database separately where the two want different names.
     /// </para>
+    /// <para>
+    /// A consumer can settle it from its own side instead, by passing <c>WithReference</c> a
+    /// <c>connectionName</c> — <c>WithReference(ordersDb, "OrdersDb")</c> gives
+    /// <c>ConnectionStrings__OrdersDb</c> under every source, whatever this factory named its
+    /// resource. That is the answer when the app already reads a particular name, or when the
+    /// factory is not the caller's to rename; naming the resource after the backing service remains
+    /// what keeps the default right for consumers that ask for nothing.
+    /// </para>
     /// </param>
     /// <returns>
     /// A handle to the resource that carries the connection string, to be passed to a consumer's
