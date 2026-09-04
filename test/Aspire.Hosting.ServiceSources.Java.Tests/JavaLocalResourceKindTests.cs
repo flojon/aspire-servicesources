@@ -21,6 +21,17 @@ public class JavaLocalResourceKindTests
         Assert.IsType<JavaAppExecutableResource>(
             new JavaLocalResourceKind().Resolve(builder, "java-api", repoRoot, Block(block)).Resource);
 
+    /// <summary>
+    /// The checks core runs against the resolved checkout, immediately before <c>Resolve</c>. That
+    /// throwing here keeps the service out of the app model is what the matching
+    /// <c>UseJavaTests</c> cases establish: <c>ILocalResourceKind.Validate</c> isn't handed a
+    /// builder, so it can't be asserted from this side.
+    /// </summary>
+    private static ServiceSourcesConfigurationException RejectedByValidate(
+        string repoRoot, params (string Key, object Value)[] block) =>
+        Assert.Throws<ServiceSourcesConfigurationException>(
+            () => new JavaLocalResourceKind().Validate("java-api", repoRoot, Block(block)));
+
     [Fact]
     public void Resolve_MavenGoal_AddsJavaAppRootedAtTheCheckout()
     {
@@ -74,8 +85,8 @@ public class JavaLocalResourceKindTests
     {
         var builder = CreateBuilder();
 
-        // No wrapper anywhere in this checkout, deliberately: "java -jar" needs none, so the wrapper
-        // check must not reach jar mode.
+        // No wrapper anywhere in this checkout, deliberately: "java -jar" runs none, so nothing
+        // about jar mode may depend on one being there.
         var repoRoot = CreateRepoRoot();
 
         var resource = ResolveResource(builder, repoRoot,
@@ -87,36 +98,32 @@ public class JavaLocalResourceKindTests
     }
 
     [Fact]
-    public void Resolve_MavenGoalWithoutTheWrapperInTheCheckout_ThrowsNamingThePathAndTheOverride()
+    public void Validate_MavenGoalWithoutTheWrapperInTheCheckout_ThrowsNamingThePathAndTheOverride()
     {
-        var builder = CreateBuilder();
         var repoRoot = CreateRepoRoot();
 
         // Without this the resource is added happily and DCP fails much later, execing a path the
         // developer never wrote.
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ResolveResource(builder, repoRoot,
+        var ex = RejectedByValidate(repoRoot,
             ("mavenGoal", "spring-boot:run"),
-            ("port", 8080)));
+            ("port", 8080));
 
         Assert.Contains("java-api", ex.Message);
         Assert.Contains(Path.GetFullPath(Path.Combine(repoRoot, MavenWrapperName)), ex.Message);
         Assert.Contains("wrapperPath", ex.Message);
-        Assert.DoesNotContain(builder.Resources, r => r.Name == "java-api");
     }
 
     [Fact]
-    public void Resolve_GradleTaskWithoutTheWrapperInTheCheckout_ThrowsNamingThePathAndTheOverride()
+    public void Validate_GradleTaskWithoutTheWrapperInTheCheckout_ThrowsNamingThePathAndTheOverride()
     {
-        var builder = CreateBuilder();
         var repoRoot = CreateRepoRoot();
 
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ResolveResource(builder, repoRoot,
+        var ex = RejectedByValidate(repoRoot,
             ("gradleTask", "bootRun"),
-            ("port", 8080)));
+            ("port", 8080));
 
         Assert.Contains(Path.GetFullPath(Path.Combine(repoRoot, GradleWrapperName)), ex.Message);
         Assert.Contains("wrapperPath", ex.Message);
-        Assert.DoesNotContain(builder.Resources, r => r.Name == "java-api");
     }
 
     [Fact]
@@ -158,20 +165,18 @@ public class JavaLocalResourceKindTests
     }
 
     [Fact]
-    public void Resolve_WrapperPathThatIsNotThere_ThrowsNamingTheConfiguredValue()
+    public void Validate_WrapperPathThatIsNotThere_ThrowsNamingTheConfiguredValue()
     {
-        var builder = CreateBuilder();
         var repoRoot = CreateRepoRoot();
 
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ResolveResource(builder, repoRoot,
+        var ex = RejectedByValidate(repoRoot,
             ("mavenGoal", "spring-boot:run"),
             ("wrapperPath", "tools/mvnw"),
-            ("port", 8080)));
+            ("port", 8080));
 
         Assert.Contains("java-api", ex.Message);
         Assert.Contains("tools/mvnw", ex.Message);
         Assert.Contains(Path.GetFullPath(Path.Combine(repoRoot, "tools", "mvnw")), ex.Message);
-        Assert.DoesNotContain(builder.Resources, r => r.Name == "java-api");
     }
 
     [Fact]
@@ -237,22 +242,17 @@ public class JavaLocalResourceKindTests
     }
 
     [Fact]
-    public void Resolve_MissingWorkingDirectory_ThrowsNamingTheServiceAndTheResolvedPath()
+    public void Validate_MissingWorkingDirectory_ThrowsNamingTheServiceAndTheResolvedPath()
     {
-        var builder = CreateBuilder();
         var repoRoot = CreateRepoRoot();
 
-        // Reported from Resolve because no checkout exists yet when Validate runs — core calls
-        // Validate before resolving the repo root, so a bad block fails without paying for a clone.
-        // See JavaLocalResourceKind.ResolveWorkingDirectory.
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ResolveResource(builder, repoRoot,
+        var ex = RejectedByValidate(repoRoot,
             ("workingDirectory", "services/api"),
             ("mavenGoal", "spring-boot:run"),
-            ("port", 8080)));
+            ("port", 8080));
 
         Assert.Contains("java-api", ex.Message);
         Assert.Contains("services/api", ex.Message);
-        Assert.DoesNotContain(builder.Resources, r => r.Name == "java-api");
     }
 
     [Fact]
@@ -290,19 +290,28 @@ public class JavaLocalResourceKindTests
     [Fact]
     public void Validate_GoodBlock_DoesNotThrow()
     {
-        new JavaLocalResourceKind().Validate("java-api", Block(
+        var repoRoot = CreateRepoRoot();
+        WriteWrapper(repoRoot, MavenWrapperName);
+
+        new JavaLocalResourceKind().Validate("java-api", repoRoot, Block(
             ("mavenGoal", "spring-boot:run"),
+            ("port", 8080)));
+    }
+
+    [Fact]
+    public void Validate_JarPath_NeedsNoWrapperInTheCheckout()
+    {
+        // "java -jar" runs no wrapper script, so the wrapper check must not reach jar mode — this
+        // checkout holds nothing at all.
+        new JavaLocalResourceKind().Validate("java-api", CreateRepoRoot(), Block(
+            ("jarPath", "target/app.jar"),
             ("port", 8080)));
     }
 
     [Fact]
     public void Validate_MalformedBlock_ThrowsNamingTheService()
     {
-        // That throwing here keeps the service out of the app model is what
-        // UseJavaTests.AddService_MalformedJavaBlock_ThrowsWithoutAddingAnyResource establishes:
-        // ILocalResourceKind.Validate isn't handed a builder, so it can't be asserted from here.
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => new JavaLocalResourceKind().Validate("java-api", Block(("port", 8080))));
+        var ex = RejectedByValidate(CreateRepoRoot(), ("port", 8080));
 
         Assert.Contains("java-api", ex.Message);
     }

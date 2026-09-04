@@ -67,11 +67,41 @@ public class GuestLanguageKindIsolationTests
         var handler = (ILocalResourceKind)Activator.CreateInstance(type, nonPublic: true)!;
 
         var rawConfig = new Dictionary<object, object> { [typo] = "dev" };
+        var repoRoot = Directory.CreateTempSubdirectory("servicesources-isolation-").FullName;
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => handler.Validate("svc", rawConfig));
+            () => handler.Validate("svc", repoRoot, rawConfig));
 
         Assert.Contains(typo, ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The other half of that: a block with nothing wrong with it has to get all the way through
+    /// <see cref="ILocalResourceKind.Validate"/> with the assembly absent. Core calls Validate
+    /// before <see cref="ILocalResourceKind.Resolve"/>, and reports what it throws as thrown — so a
+    /// hosting type reached from the validation path would tell an AppHost missing the package that
+    /// its configuration is wrong, from the one call that does not translate the load failure into
+    /// the name of the package to install.
+    /// </summary>
+    [Theory]
+    [InlineData("Aspire.Hosting.ServiceSources.JavaScriptLocalKind", "appType", "vite")]
+    [InlineData("Aspire.Hosting.ServiceSources.Java.JavaLocalResourceKind", "mavenGoal", "spring-boot:run")]
+    public void AValidOptionsBlockPassesValidationWithoutTheHostingAssembly(
+        string typeName, string runModeKey, string runModeValue)
+    {
+        var type = typeof(LocalKindConfig).Assembly.GetType(typeName, throwOnError: true)!;
+        var handler = (ILocalResourceKind)Activator.CreateInstance(type, nonPublic: true)!;
+
+        // A checkout holding what either kind looks for at the root it defaults to: a package.json
+        // for javascript, the Maven wrapper this platform execs for java.
+        var repoRoot = Directory.CreateTempSubdirectory("servicesources-isolation-").FullName;
+        File.WriteAllText(Path.Combine(repoRoot, "package.json"), """{ "scripts": { "dev": "vite" } }""");
+        File.WriteAllText(
+            Path.Combine(repoRoot, OperatingSystem.IsWindows() ? "mvnw.cmd" : "mvnw"), "");
+
+        var rawConfig = new Dictionary<object, object> { [runModeKey] = runModeValue, ["port"] = 8080 };
+
+        handler.Validate("svc", repoRoot, rawConfig);
     }
 
     /// <summary>

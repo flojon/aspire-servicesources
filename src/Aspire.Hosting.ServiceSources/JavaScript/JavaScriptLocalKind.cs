@@ -19,19 +19,18 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
     /// </summary>
     public const string KindName = "javascript";
 
-    public void Validate(string serviceName, object? rawConfig) => ResolveOptions(serviceName, rawConfig);
+    /// <summary>
+    /// The whole verdict on a service's <c>javascript:</c> block, the paths in it included: core
+    /// calls this against the resolved checkout, immediately before <see cref="Resolve"/> and before
+    /// the service has added anything, so an <c>appDirectory</c> that names nothing is reported here
+    /// rather than as an npm failure from a resource much later.
+    /// </summary>
+    public void Validate(string serviceName, string repoRoot, object? rawConfig) =>
+        Plan(serviceName, repoRoot, rawConfig).RequireCheckout();
 
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
-        IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig)
-    {
-        var plan = Plan(serviceName, repoRoot, rawConfig);
-
-        // Checked before anything reaches the app model, so an appDirectory that names nothing is
-        // reported from here rather than as an npm failure from a resource much later.
-        plan.RequireCheckout();
-
-        return plan.Add(builder, deferred: false);
-    }
+        IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) =>
+        Plan(serviceName, repoRoot, rawConfig).Add(builder, deferred: false);
 
     /// <summary>
     /// Answered from the options block alone, and without touching the checkout — see
@@ -93,7 +92,8 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
     /// <summary>
     /// Everything decidable without the repository on disk: the options block, and the absolute
     /// paths the resource will run from — including the containment checks, which are pure path
-    /// arithmetic and so belong on this side of the split, before a cold clone is paid for.
+    /// arithmetic and so belong on this side of the split, where they also hold for a checkout that
+    /// has not landed yet and let <see cref="ResolveDeferred"/> reject an escaping path outright.
     /// </summary>
     private static JavaScriptPlan Plan(string serviceName, string repoRoot, object? rawConfig)
     {
@@ -119,9 +119,9 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
 
     /// <summary>
     /// A resolved javascript service: the paths it will run from, the checks that need those paths
-    /// to exist, and the resource itself. Split that way because the two callers need the halves in
-    /// different orders — the eager path checks then builds, the deferred path builds now and checks
-    /// once the clone has landed.
+    /// to exist, and the resource itself. Split that way because the two callers need the halves at
+    /// different moments — the eager path checks from <see cref="Validate"/> and builds from
+    /// <see cref="Resolve"/>, the deferred path builds now and checks once the clone has landed.
     /// </summary>
     private sealed record JavaScriptPlan(
         string ServiceName,
@@ -131,15 +131,11 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
         string? ScriptPath)
     {
         /// <summary>
-        /// The checks that need the repository on disk. On the eager path these run before anything
-        /// reaches the app model; on the deferred path core runs them after the clone, where they
-        /// surface as the service's resource state rather than as an exception out of composition.
+        /// The checks that need the repository on disk. On the eager path they are what
+        /// <see cref="ILocalResourceKind.Validate"/> runs, before anything reaches the app model; on
+        /// the deferred path core runs them after the clone, where they surface as the service's
+        /// resource state rather than as an exception out of composition.
         /// </summary>
-        /// <remarks>
-        /// These cannot move into <see cref="ILocalResourceKind.Validate"/>, which is deliberately
-        /// not given the checkout path — core calls it before resolving the repo root so that a
-        /// malformed options block fails without first paying for a cold clone.
-        /// </remarks>
         public void RequireCheckout()
         {
             if (!Directory.Exists(AppDirectory))
@@ -319,10 +315,10 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
     }
 
     /// <summary>
-    /// Parses and fully validates the options block, applying every default. Shared by
-    /// <see cref="Validate"/> and <see cref="Resolve"/> so a service whose options are wrong is
-    /// rejected from <see cref="Validate"/> — which core calls first, and before this service's
-    /// checkout — rather than part-way through creating its resource.
+    /// Parses and fully validates the options block, applying every default. Reached from every
+    /// entry point the handler has, so a service whose options are wrong is rejected from
+    /// <see cref="Validate"/> — which core calls before <see cref="Resolve"/> — rather than part-way
+    /// through creating its resource.
     /// </summary>
     private static ResolvedOptions ResolveOptions(string serviceName, object? rawConfig)
     {

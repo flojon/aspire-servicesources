@@ -47,6 +47,33 @@ public class MissingHostingPackageTests
     }
 
     /// <summary>
+    /// <see cref="ILocalResourceKind.Validate"/> resolves the whole options block and makes every
+    /// check a kind has against its checkout, so it reaches a hosting type exactly as
+    /// <see cref="ILocalResourceKind.Resolve"/> can — and it is the call core makes first. The
+    /// translation has to cover it, or which of the two methods happened to touch the type decides
+    /// whether the developer is told to install a package or handed a raw load error.
+    /// </summary>
+    [Theory]
+    [InlineData("javascript", "Aspire.Hosting.JavaScript")]
+    [InlineData("java", "CommunityToolkit.Aspire.Hosting.Java")]
+    public void KindWhoseHostingAssemblyIsMissingFromValidate_IsReportedTheSameWay(
+        string kind, string packageId)
+    {
+        var repoRoot = Directory.CreateTempSubdirectory().FullName;
+        var builder = TestHelpers.CreateBuilder(repoRoot);
+        builder.AddLocalKind(kind, new AssemblyMissingKind(packageId, fromValidate: true));
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new UnusedGitClient())
+                .Resolve(builder, ServiceName, Metadata(kind), DevConfig(repoRoot)));
+
+        Assert.Contains(ServiceName, ex.Message, StringComparison.Ordinal);
+        Assert.Contains(kind, ex.Message, StringComparison.Ordinal);
+        Assert.Contains(packageId, ex.Message, StringComparison.Ordinal);
+        Assert.IsType<FileNotFoundException>(ex.InnerException);
+    }
+
+    /// <summary>
     /// A handler failing for its own reasons must keep the generic message: this translation is
     /// only allowed to claim a missing package when the runtime actually failed to load one of the
     /// two assemblies core references privately.
@@ -230,11 +257,22 @@ public class MissingHostingPackageTests
     /// with the assembly's simple name as <see cref="FileNotFoundException.FileName"/> the way the
     /// runtime does, since that — not the message — is what the translation reads.
     /// </summary>
-    private sealed class AssemblyMissingKind(string assemblyName) : ILocalResourceKind
+    private sealed class AssemblyMissingKind(string assemblyName, bool fromValidate = false) : ILocalResourceKind
     {
+        public void Validate(string serviceName, string repoRoot, object? rawConfig)
+        {
+            if (fromValidate)
+            {
+                throw LoadFailure();
+            }
+        }
+
         public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
             IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) =>
-            throw new FileNotFoundException(
+            throw LoadFailure();
+
+        private FileNotFoundException LoadFailure() =>
+            new(
                 $"Could not load file or assembly '{assemblyName}, Version=13.5.2.0, Culture=neutral, "
                 + "PublicKeyToken=cc7b13ffcd2ddd51'. The system cannot find the file specified.",
                 $"{assemblyName}, Version=13.5.2.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51");

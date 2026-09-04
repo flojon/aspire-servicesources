@@ -13,6 +13,58 @@ nothing will fail to build to warn you.
 
 ### Breaking
 
+- **`ILocalResourceKind.Validate` takes the service's resolved checkout directory**
+  ([#63]). The signature gains a `repoRoot` parameter in the position `Resolve` already has it:
+
+  ```csharp
+  public void Validate(string serviceName, object? rawConfig)                  // before
+  public void Validate(string serviceName, string repoRoot, object? rawConfig)  // after
+  ```
+
+  **Nothing fails to build, so read this even though your AppHost still compiles.** `Validate` is
+  a defaulted interface member: a kind still declaring the old two-parameter method compiles clean
+  against the new interface, it simply stops implementing it, and core calls the do-nothing default
+  in its place. Every rejection that method made would quietly stop running, and the typo'd options
+  block it used to name would reach `Resolve` and surface as "the handler failed while creating its
+  resource" instead. There is no compiler diagnostic for that, so `AddLocalKind` now refuses a
+  handler that declares a `Validate` not matching the interface member, naming the kind and the
+  method it found. Registering the kind is what tells you; the build will not.
+
+  To migrate, add the parameter. A kind that only parsed its options block needs nothing else. A
+  kind that never implemented `Validate` at all is unaffected — the default stands, and the check
+  above says nothing about it, as it does not about a migrated kind that keeps an old-shaped method
+  of its own. `Resolve`, `SupportsDeferredCheckout` and `ResolveDeferred` are untouched.
+
+  **A second silent change, and this one has no registration-time refusal to catch it: `Validate`
+  is no longer called for a service on the deferred path.** It is paired with `Resolve`, which core
+  does not call there either — under
+  [`UseDeferredCheckout()`](README.md#first-run-usedeferredcheckout) there is no checkout for it to
+  judge the service against, so `ResolveDeferred` is called instead. **If your kind can answer
+  `true` from `SupportsDeferredCheckout` and validates its options block only in `Validate`, that
+  block stops being validated at all for a deferred service.** Parse and reject it from
+  `ResolveDeferred` too, and hand the working-tree checks back as
+  `DeferredLocalResource.ValidateCheckout` as before. No trip wire is possible for this one:
+  implementing both `Validate` and `ResolveDeferred` is the ordinary, correct arrangement — the
+  built-in `java` kind is one — so anything detectable here would fire on working code. Saying it
+  is the only warning there is. Both shipped kinds already validate in `ResolveDeferred` and are
+  unaffected; a kind that leaves `SupportsDeferredCheckout` at its `false` default never reaches
+  this path at all.
+
+  What the parameter buys is the check a kind could not make before: `repoRoot` is the same
+  directory `Resolve` is about to get, already cloned and checked out, so a `workingDirectory`,
+  an entry-point file or a lockfile that the repository doesn't actually have can be reported from
+  `Validate` — where nothing of the service is in the app model yet — instead of from halfway
+  through building the resource. That is what the built-in `dotnet` kind has always done with its
+  `project` file, and core's "report it from `ILocalResourceKind.Validate` instead" message is now
+  advice a handler author can act on.
+
+  Handing it a checkout that has to be there is also what drops `Validate` off the deferred path
+  above, and it moves the call: core runs `Validate` after resolving the checkout rather than
+  before. That changes when a bad options block is reported, for **every** `"local"` service and
+  not just the first — see the **Changed** entry below. The "the handler failed while creating its
+  resource" wrapper on the deferred path now points at `DeferredLocalResource.ValidateCheckout`
+  rather than at `Validate`, which core does not call there.
+
 - **The `.JavaScript` and `.Java` satellite packages are gone. Their kinds ship in
   `KoalaSoft.Aspire.Hosting.ServiceSources`, and your AppHost references Aspire's hosting
   package for the language directly** ([#187]). To migrate, drop the satellite, reference core,
@@ -103,6 +155,28 @@ nothing will fail to build to warn you.
   `{secret:<name>:<key>}` are recognised, reserved for the sources that can resolve them, and
   rejected under `"direct"` with a message saying why; a malformed one fails at startup naming the
   backing service and the key, rather than reaching the app as text.
+
+### Changed
+
+- **A `"local"` service with a non-`dotnet` kind now waits for its checkout before its options block
+  is checked** ([#63]). `AddService()` used to reject a typo'd `java:` or `javascript:` block
+  without waiting for any clone to finish; `Validate` needs the checkout to judge the block's paths
+  against, so it now runs after it. Two visible consequences, for every such service rather than
+  only the first: a service that is *both* misconfigured *and* pointed at a repository that cannot
+  be reached reports the clone failure instead of the configuration error, and on a cold clone you
+  wait the clone out before being told about the typo. A bad block on the *first* `AddService()`
+  also no longer stops the speculative clones: they used to be started just after `Validate`, so
+  aborting there meant nothing was cloned at all, and they now start before the block is parsed —
+  visible only as checkouts left on disk by a run that failed. An unregistered or misspelled `kind`
+  is unaffected — that lookup needs no working tree and still runs first — as is `dotnet`, which
+  has always checked its `project` file against the resolved checkout.
+
+- The `java` and `javascript` kinds report a path missing from the checkout — `workingDirectory`
+  and the `mvnw`/`gradlew` wrapper for `java`, `appDirectory`, `scriptPath` and `package.json` for
+  `javascript` — from `Validate` rather than from `Resolve` ([#63]). Same messages, same
+  `AddService()` call, one step earlier: the service is never partly built. Under
+  `UseDeferredCheckout()` nothing moves — those checks still run after the clone lands, as the
+  service's resource state.
 
 ### Fixed
 
@@ -730,6 +804,7 @@ Targets `net10.0`.
 [#59]: https://github.com/flojon/aspire-servicesources/pull/59
 [#60]: https://github.com/flojon/aspire-servicesources/pull/60
 [#62]: https://github.com/flojon/aspire-servicesources/pull/62
+[#63]: https://github.com/flojon/aspire-servicesources/issues/63
 [#64]: https://github.com/flojon/aspire-servicesources/pull/64
 [#67]: https://github.com/flojon/aspire-servicesources/pull/67
 [#68]: https://github.com/flojon/aspire-servicesources/pull/68

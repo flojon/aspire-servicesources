@@ -17,17 +17,23 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
 
         var isDotnetKind = string.Equals(metadata.Kind, LocalKinds.Dotnet, StringComparison.Ordinal);
 
-        // Settle everything configuration alone can settle before paying for a checkout. Looking
-        // the kind up is a dictionary probe against registry state; the handler's own Validate
-        // only reads the kind config. Neither needs a working tree, and running them after the
-        // clone would make a typo'd kind — or a kind nobody registered — cost a cold
-        // clone of this repository before saying so.
+        // Settled before paying for a checkout: looking the kind up is a dictionary probe against
+        // registry state, needs no working tree, and running it after the clone would make a typo'd
+        // kind — or a kind nobody registered — cost a cold clone of this repository before saying
+        // so. Only the first "local" AddService gets even that ahead of every clone: the prefetch
+        // below starts the speculative ones at once, so once any service has been resolved they are
+        // already in flight and this check no longer runs in front of them.
         //
-        // Only the first "local" AddService gets that for free across the board: the prefetch below
-        // starts the speculative clones at once, so once any service has been resolved those clones
-        // are already in flight and this check no longer runs ahead of them.
+        // The handler's own Validate used to sit here and cannot any more: it is handed the
+        // resolved checkout to judge the service's paths against, so it runs below, after
+        // GetRepoRoot and immediately before Resolve. That costs every service and not only the
+        // first — an options block used to be rejected without waiting on any clone at all, and now
+        // each service blocks on its own checkout before its block is so much as parsed. A service
+        // that is both misconfigured and pointed at a repository that cannot be reached reports the
+        // clone failure rather than the configuration error, and on a cold clone the typo is
+        // reported only once the clone has finished. Paid deliberately: a kind's paths are relative
+        // to the checkout, so without one in hand the check cannot be made at all.
         var handler = isDotnetKind ? null : ResolveKindHandler(builder, serviceName, metadata);
-        handler?.Validate(serviceName, metadata.KindConfig);
 
         // Starts the checkouts an AddService call would have to block on — every "local" service
         // whose first clone nothing else is going to run — at once, on background threads, and
@@ -110,6 +116,13 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
             return ResolvedService.Tag(builder.AddProject(serviceName, projectPath), serviceName, "local");
         }
 
+        // The handler's verdict on the service's configuration, now that there is a checkout to
+        // judge it against — the same thing ResolveProjectFile just did for the dotnet kind, and
+        // for the same reason: a kind's paths are relative to this directory, so a wrong one can
+        // only be recognised here. Immediately before Resolve, and before this service has added
+        // anything, so a handler reports it without a half-created resource behind it.
+        ValidateWithKindHandler(serviceName, metadata, repoRoot, handler!);
+
         return InvokeKindHandler(builder, serviceName, metadata, repoRoot, handler!);
     }
 
@@ -154,7 +167,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         {
             throw new ServiceSourcesConfigurationException(
                 GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, metadata.Kind)
-                    ?? HandlerFailedMessage(serviceName, metadata.Kind),
+                    ?? DeferredHandlerFailedMessage(serviceName, metadata.Kind),
                 ex);
         }
 
@@ -193,7 +206,57 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
     private static string HandlerFailedMessage(string serviceName, string kind) =>
         $"Service '{serviceName}': the handler for kind '{kind}' failed while creating its " +
         $"resource. If this is a configuration problem, report it from " +
-        $"{nameof(ILocalResourceKind)}.{nameof(ILocalResourceKind.Validate)} instead, which runs first.";
+        $"{nameof(ILocalResourceKind)}.{nameof(ILocalResourceKind.Validate)} instead, which core calls " +
+        "immediately before this against the same checkout — including for a path that has to be in " +
+        "the repository — and before the service has added anything to the app model.";
+
+    /// <summary>
+    /// The deferred counterpart of <see cref="HandlerFailedMessage"/>. It cannot point at
+    /// <see cref="ILocalResourceKind.Validate"/>: there is no checkout to validate against on this
+    /// path, which is why core does not call it here.
+    /// </summary>
+    private static string DeferredHandlerFailedMessage(string serviceName, string kind) =>
+        $"Service '{serviceName}': the handler for kind '{kind}' failed while creating its resource for a " +
+        $"checkout that has not landed yet. A check that needs the working tree belongs in " +
+        $"{nameof(DeferredLocalResource)}.{nameof(DeferredLocalResource.ValidateCheckout)}, which core runs " +
+        "once the clone is there; anything settleable from the options block alone should be reported as a " +
+        $"{nameof(ServiceSourcesConfigurationException)} naming the service.";
+
+    /// <summary>
+    /// Asks the handler to pass judgement on the service's configuration against its resolved
+    /// checkout, before anything is built from it. Wrapped like every other call core makes into a
+    /// handler: this one resolves the whole options block and makes every check the kind has against
+    /// the working tree, so it reaches a language's hosting package exactly as
+    /// <see cref="InvokeKindHandler"/> does — and the identical failure must not report as a bare
+    /// load error just because it happened one call earlier.
+    /// </summary>
+    private static void ValidateWithKindHandler(
+        string serviceName, ServiceMetadata metadata, string repoRoot, ILocalResourceKind handler)
+    {
+        try
+        {
+            handler.Validate(serviceName, repoRoot, metadata.KindConfig);
+        }
+        catch (Exception ex) when (ex is not ServiceSourcesConfigurationException)
+        {
+            throw new ServiceSourcesConfigurationException(
+                GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, metadata.Kind)
+                    ?? ValidateFailedMessage(serviceName, metadata.Kind),
+                ex);
+        }
+    }
+
+    /// <summary>
+    /// For a handler that faulted in <see cref="ILocalResourceKind.Validate"/> rather than reporting
+    /// something. Unlike <see cref="HandlerFailedMessage"/> it has nowhere better to point the
+    /// author at: this <em>is</em> the place a configuration problem belongs.
+    /// </summary>
+    private static string ValidateFailedMessage(string serviceName, string kind) =>
+        $"Service '{serviceName}': the handler for kind '{kind}' failed while checking the service's " +
+        $"configuration against its checkout. A configuration problem should be reported from " +
+        $"{nameof(ILocalResourceKind)}.{nameof(ILocalResourceKind.Validate)} as a " +
+        $"{nameof(ServiceSourcesConfigurationException)} naming the service; anything else out of that " +
+        "call is a fault in the handler.";
 
     private static IResourceBuilder<IResourceWithServiceDiscovery> InvokeKindHandler(
         IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, string repoRoot,

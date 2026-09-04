@@ -124,10 +124,32 @@ public class UseJavaTests
     }
 
     [Fact]
+    public void AddService_WorkingDirectoryMissingFromTheCheckout_ThrowsWithoutAddingAnyResource()
+    {
+        // The checkout is created without 'services/api' in it. Reported from Validate, which core
+        // runs against the resolved checkout before this service touches the app model — the only
+        // reason it can be: the directory is named relative to that checkout.
+        var (appHostDirectory, _) = CreateAppHost("""
+                  workingDirectory: services/api
+                  mavenGoal: spring-boot:run
+                  port: 8080
+            """);
+        var builder = CreateBuilder(appHostDirectory);
+        builder.UseJava();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => builder.AddService("java-api"));
+
+        Assert.Contains("java-api", ex.Message);
+        Assert.Contains("services/api", ex.Message);
+        Assert.DoesNotContain(builder.Resources, r => r.Name == "java-api");
+    }
+
+    [Fact]
     public void AddService_WrapperMissingFromTheCheckout_ThrowsWithoutAddingAnyResource()
     {
         // No wrapper written into the checkout: the failure a developer would otherwise only see
-        // once DCP tried to exec it.
+        // once DCP tried to exec it. Reported from Validate, like the working directory above.
         var (appHostDirectory, _) = CreateAppHost("""
                   gradleTask: bootRun
                   port: 8080

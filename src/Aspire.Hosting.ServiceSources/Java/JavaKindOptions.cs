@@ -45,11 +45,11 @@ internal sealed class JavaKindOptions
     public int? Port { get; set; }
 
     /// <summary>
-    /// Parses and fully validates a service's <c>java:</c> block. Called from both
-    /// <see cref="JavaLocalResourceKind.Validate"/> (so a bad block is reported before this service
-    /// has put anything in the app model) and <see cref="JavaLocalResourceKind.Resolve"/> — it is
-    /// cheap and side-effect free, so parsing twice is preferable to smuggling state between the two
-    /// calls.
+    /// Parses and fully validates a service's <c>java:</c> block. Reached from every entry point the
+    /// handler has — <see cref="JavaLocalResourceKind.Validate"/> (so a bad block is reported before
+    /// this service has put anything in the app model), <see cref="JavaLocalResourceKind.Resolve"/>
+    /// and <see cref="JavaLocalResourceKind.ResolveDeferred"/> — because it is cheap and side-effect
+    /// free, so parsing again is preferable to smuggling state between the calls.
     /// </summary>
     /// <exception cref="ServiceSourcesConfigurationException">
     /// The block is missing, malformed, contains an unknown property, names no run mode or more
@@ -272,13 +272,14 @@ internal sealed class JavaKindOptions
 
     /// <summary>
     /// Whether <paramref name="relativePath"/> climbs above the directory it is relative to. Checked
-    /// lexically rather than against the resolved path, because
-    /// <see cref="JavaLocalResourceKind.Validate"/> isn't handed the checkout directory — a purely
-    /// lexical check is what lets an escaping value be rejected there, before the service has put
-    /// anything in the app model, rather than from <c>Resolve</c>. Both separators count regardless
-    /// of platform, so a Windows-style relative value ('..\sibling') is still rejected on
-    /// Linux/macOS; a rooted one ('C:\repos') never reaches here, being caught by
-    /// <see cref="IsAbsolutePath"/> first.
+    /// lexically rather than against the resolved path, so the verdict does not depend on a checkout
+    /// being there to resolve against: <see cref="JavaLocalResourceKind.ResolveDeferred"/> parses the
+    /// block for a clone that has not happened yet, and a value pointing outside the repository is a
+    /// mistake in shared team configuration whichever way the checkout went. It also keeps the two
+    /// failures apart — "points outside the checkout" is a different thing to tell a developer than
+    /// "is not in the checkout". Both separators count regardless of platform, so a Windows-style
+    /// relative value ('..\sibling') is still rejected on Linux/macOS; a rooted one ('C:\repos')
+    /// never reaches here, being caught by <see cref="IsAbsolutePath"/> first.
     /// </summary>
     private static bool EscapesRoot(string relativePath)
     {
