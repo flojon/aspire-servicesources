@@ -43,7 +43,9 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// </para>
 /// <list type="bullet">
 /// <item>
-/// A checkout there is nothing to clone for. A working tree already on disk, or a
+/// A checkout there is nothing to clone for — the complement of
+/// <see cref="LocalGitCheckout.IsColdManagedCheckout"/>, which is the rule the deferral decision
+/// is built on too. A working tree already on disk, or a
 /// <c>local.path</c> override naming the developer's own directory: speculating over one costs a
 /// <c>Directory.Exists</c>, buys no parallelism, and — for a stale override — invents a failure
 /// about a repository nobody was going to download. <see cref="GetRepoRoot"/> resolves these
@@ -532,7 +534,8 @@ internal sealed class LocalCheckoutPrefetch
             // Only checkouts there is something to clone for. Everything else resolves to the same
             // answer in GetRepoRoot for a fraction of the code, and reaches nobody at all when the
             // service is never added — which is where speculating over one used to go wrong.
-            .Where(candidate => IsColdManagedCheckout(candidate.Name, candidate.Config, appHostDirectory))
+            .Where(candidate => LocalGitCheckout.IsColdManagedCheckout(
+                appHostDirectory, candidate.Name, candidate.Config))
             // ...minus the ones a deferred registration would clone for itself.
             .Where(candidate => !WouldBeDeferredIfAdded(
                 builder, deferred, kinds, candidate.Name, candidate.Metadata, candidate.Config))
@@ -549,22 +552,6 @@ internal sealed class LocalCheckoutPrefetch
                 candidate.Name, candidate.Metadata, candidate.Config, appHostDirectory, gitClient);
         }
     }
-
-    /// <summary>
-    /// Whether there is anything for a clone to do here: a package-managed checkout directory with
-    /// nothing in it yet. A <c>local.path</c> override is the developer's own directory and is never
-    /// cloned into, and a working tree already on disk is one
-    /// <see cref="LocalGitCheckout.PrepareRepoRoot"/> deliberately leaves alone.
-    /// </summary>
-    /// <remarks>
-    /// Pure configuration plus one <c>Directory.Exists</c> — the same question
-    /// <see cref="DeferredCheckout.ShouldDefer"/> asks, for the same reason: it has to be answerable
-    /// about a service nobody has added.
-    /// </remarks>
-    private static bool IsColdManagedCheckout(
-        string serviceName, ServiceDeveloperConfig config, string appHostDirectory) =>
-        config.Local.Path is null
-        && !Directory.Exists(LocalGitCheckout.ManagedRepoRoot(appHostDirectory, serviceName));
 
     /// <summary>
     /// Whether this service would be registered deferred if the AppHost added it — in which case its

@@ -21,19 +21,18 @@ internal sealed class JavaLocalResourceKind : ILocalResourceKind
     private const string GradleWrapper = "gradlew";
     private const string GradleWindowsExtension = ".bat";
 
-    public void Validate(string serviceName, object? rawConfig) => JavaKindOptions.Parse(serviceName, rawConfig);
+    /// <summary>
+    /// The whole verdict on a service's <c>java:</c> block, the paths in it included: core calls
+    /// this against the resolved checkout, immediately before <see cref="Resolve"/> and before the
+    /// service has added anything, so a <c>workingDirectory</c> or a wrapper script that is not in
+    /// the repository is reported here rather than as a bare exec failure from DCP much later.
+    /// </summary>
+    public void Validate(string serviceName, string repoRoot, object? rawConfig) =>
+        Plan(serviceName, repoRoot, rawConfig).RequireCheckout();
 
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
-        IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig)
-    {
-        var plan = Plan(serviceName, repoRoot, rawConfig);
-
-        // Checked before anything reaches the app model, so a wrapper that isn't in the checkout is
-        // reported from here rather than as a bare exec failure from DCP much later.
-        plan.RequireCheckout();
-
-        return plan.Add(builder);
-    }
+        IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) =>
+        Plan(serviceName, repoRoot, rawConfig).Add(builder);
 
     /// <summary>
     /// Unconditional: every java options block builds the same resource cold as warm, for the
@@ -114,9 +113,9 @@ internal sealed class JavaLocalResourceKind : ILocalResourceKind
 
     /// <summary>
     /// A resolved java service: the paths it will run from, the checks that need those paths to
-    /// exist, and the resource itself. Split that way because the two callers need the halves in
-    /// different orders — the eager path checks then builds, the deferred path builds now and checks
-    /// once the clone has landed.
+    /// exist, and the resource itself. Split that way because the two callers need the halves at
+    /// different moments — the eager path checks from <see cref="Validate"/> and builds from
+    /// <see cref="Resolve"/>, the deferred path builds now and checks once the clone has landed.
     /// </summary>
     private sealed record JavaPlan(
         string ServiceName,
@@ -125,18 +124,11 @@ internal sealed class JavaLocalResourceKind : ILocalResourceKind
         PlannedWrapper? Wrapper)
     {
         /// <summary>
-        /// The checks that need the repository on disk. On the eager path these run before anything
-        /// reaches the app model; on the deferred path core runs them after the clone, where they
-        /// surface as the service's resource state rather than as an exception out of composition.
+        /// The checks that need the repository on disk. On the eager path they are what
+        /// <see cref="ILocalResourceKind.Validate"/> runs, before anything reaches the app model; on
+        /// the deferred path core runs them after the clone, where they surface as the service's
+        /// resource state rather than as an exception out of composition.
         /// </summary>
-        /// <remarks>
-        /// These cannot move into <see cref="ILocalResourceKind.Validate"/>: core calls that
-        /// <em>before</em> resolving the repo root, deliberately, so that an unregistered kind or a
-        /// malformed block fails without first paying for a cold clone (see
-        /// <c>LocalProjectSource.Resolve</c>). Handing <see cref="ILocalResourceKind.Validate"/> a
-        /// <c>repoRoot</c> (flojon/aspire-servicesources#63) would not on its own let this move,
-        /// since that ordering would have to be given up with it.
-        /// </remarks>
         public void RequireCheckout()
         {
             if (!Directory.Exists(WorkingDirectory))
