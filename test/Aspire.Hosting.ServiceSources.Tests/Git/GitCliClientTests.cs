@@ -359,4 +359,38 @@ public class GitCliClientTests
     [InlineData("remote: Repository not found.")]
     public void ResolvedNoCredentials_ACredentialWasOffered_ReturnsFalse(string message) =>
         Assert.False(GitCliClient.ResolvedNoCredentials(message));
+
+    [Fact]
+    public void GetHeadCommitSha_ReturnsTheCommitHeadSitsOn()
+    {
+        var (client, _, destination) = ClonedRepository();
+
+        var sha = client.GetHeadCommitSha(destination);
+
+        Assert.NotNull(sha);
+        Assert.Equal(TestRepository.At(destination).Git("rev-parse", "HEAD").Trim(), sha);
+    }
+
+    [Fact]
+    public void GetHeadCommitSha_MovesWithTheCheckout()
+    {
+        var (client, _, destination) = ClonedRepository();
+
+        var before = client.GetHeadCommitSha(destination);
+        TestRepository.At(destination).Commit("another.txt", "more", "a second commit");
+
+        Assert.NotEqual(before, client.GetHeadCommitSha(destination));
+    }
+
+    /// <summary>
+    /// The answer a <c>prepare</c> step's marker has to read as "run it" rather than as "assume
+    /// done" — the case a <c>path</c> override pointed at a plain unpacked directory is in.
+    /// </summary>
+    [Fact]
+    public void GetHeadCommitSha_NotARepository_IsNull()
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+
+        Assert.Null(Client().GetHeadCommitSha(dir));
+    }
 }

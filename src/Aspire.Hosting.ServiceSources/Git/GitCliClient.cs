@@ -180,6 +180,14 @@ internal sealed partial class GitCliClient(
         return result.Succeeded ? result.FirstLine : null;
     }
 
+    public string? GetHeadCommitSha(string repositoryPath)
+    {
+        // --quiet so an unborn HEAD, and a directory that is no repository, both come back as a
+        // plain failure rather than as an error on stderr this would then have to read.
+        var result = TryRun(repositoryPath, ["rev-parse", "--verify", "--quiet", "HEAD"]);
+        return result.Succeeded && result.FirstLine.Length > 0 ? result.FirstLine : null;
+    }
+
     /// <summary>
     /// The commit <paramref name="reference"/> names, looked up locally and with no network access,
     /// or <see langword="null"/> if it names nothing.

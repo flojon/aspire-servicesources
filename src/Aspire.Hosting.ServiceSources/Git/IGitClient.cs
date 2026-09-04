@@ -66,4 +66,23 @@ internal interface IGitClient
     /// (e.g. no "origin" remote is configured). Never performs any network operation.
     /// </summary>
     string? GetOriginUrl(string repositoryPath);
+
+    /// <summary>
+    /// The commit currently checked out at <paramref name="repositoryPath"/>, or
+    /// <see langword="null"/> when it cannot be determined — an unborn HEAD, or a directory that is
+    /// not a git repository at all. Never performs any network operation.
+    /// </summary>
+    /// <remarks>
+    /// Read by a <c>prepare</c> step's completion marker, which keys on it so that a checkout moving
+    /// to another commit re-runs the step. Every caller has to treat <see langword="null"/> as "run
+    /// it": "cannot verify" must not be allowed to mean "assume done". It arises routinely for a
+    /// <c>path</c> checkout, which need not be a repository — and never for a managed one, which is
+    /// always a real clone.
+    /// <para>
+    /// Defaulted to <see langword="null"/> for the reason <see cref="EnsureAvailable"/> is a no-op:
+    /// the test doubles that stand in for a real git are about cloning, and one that says nothing
+    /// about the commit gets the fail-safe answer rather than having to spell it out.
+    /// </para>
+    /// </remarks>
+    string? GetHeadCommitSha(string repositoryPath) => null;
 }

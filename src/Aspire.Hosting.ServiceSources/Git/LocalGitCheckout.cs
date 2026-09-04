@@ -36,7 +36,7 @@ internal static class LocalGitCheckout
     /// package places.
     /// </remarks>
     public static string ManagedRepoRoot(string appHostDirectory, string serviceName) =>
-        Path.Combine(appHostDirectory, ".servicesources", "checkouts", serviceName);
+        Path.Combine(ToolDirectory.PathIn(appHostDirectory), "checkouts", serviceName);
 
     /// <summary>
     /// Whether this package owns the checkout directory, and so has a
@@ -560,42 +560,18 @@ internal static class LocalGitCheckout
               "SERVICESOURCES_GIT_TOKEN environment variables.";
 
     /// <summary>
-    /// Creates the tool-owned <c>.servicesources</c> directory and the files it owns outright: the
-    /// <c>.gitignore</c> that keeps checkouts out of the AppHost's repository, and the
-    /// <see cref="CheckoutBuildBarrier"/> that keeps that repository's build settings out of the
-    /// checkouts.
+    /// Creates the tool-owned <c>.servicesources</c> directory a checkout is about to land under,
+    /// and the <see cref="CheckoutBuildBarrier"/> that keeps the AppHost repository's build settings
+    /// out of the checkouts.
     /// </summary>
-    private static void EnsureToolDirectory(string appHostDirectory)
-    {
-        var dir = Path.Combine(appHostDirectory, ".servicesources");
-        Directory.CreateDirectory(dir);
-
-        EnsureGitignore(dir);
-        CheckoutBuildBarrier.Ensure(dir);
-    }
-
-    private static void EnsureGitignore(string dir)
-    {
-        var gitignorePath = Path.Combine(dir, ".gitignore");
-        try
-        {
-            // FileMode.CreateNew is atomic: it fails if the file already exists, which makes
-            // this safe against concurrent resolution of multiple services (see
-            // Sources.LocalCheckoutPrefetch, which clones them in parallel) racing to create it.
-            using var stream = new FileStream(gitignorePath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-            using var writer = new StreamWriter(stream);
-            writer.Write("*\n!.gitignore\n");
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // Already created by a concurrent resolution or a prior run — leave it as-is. A
-            // directory that cannot be written to at all reaches here as UnauthorizedAccessException
-            // rather than IOException, and it must be tolerated for the same reason
-            // CheckoutBuildBarrier tolerates it: what these files buy is a checkout kept out of the
-            // AppHost's git status and out of its build settings, and neither is worth failing
-            // service resolution over.
-        }
-    }
+    /// <remarks>
+    /// The directory itself and its <c>.gitignore</c> belong to <see cref="ToolDirectory"/>, which a
+    /// <c>prepare</c> step's marker for a <c>path</c> checkout also reaches without ever cloning
+    /// anything. The barrier stays here: it is about the checkouts, so nothing that is not going to
+    /// clone one should write it.
+    /// </remarks>
+    private static void EnsureToolDirectory(string appHostDirectory) =>
+        CheckoutBuildBarrier.Ensure(ToolDirectory.Ensure(appHostDirectory));
 
     // GitUrl.Identity reduces both URL forms (https://host/path) and scp-like SSH syntax
     // ([user@]host:path, e.g. git@github.com:example/orders) down to "host/path", so an HTTPS
