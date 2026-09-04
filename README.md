@@ -1573,6 +1573,14 @@ builder.AddService("orders")
     .Configure<IResourceWithWaitSupport>(r => r.WaitFor(ordersDb));
 ```
 
+> **`WaitFor` stops meaning anything when the source changes.** The `WaitFor` above waits properly
+> under `"local"`, where a real database resource sits behind it. Switch that backing service to
+> `"direct"` and it is satisfied immediately instead: the resource is a connection string, and Aspire
+> marks it running as soon as that string is available — which is at once, without the instance you
+> pointed at having been checked. Nothing fails and nothing hangs; the consumer simply starts
+> earlier than you asked it to. Tracked as
+> [#220](https://github.com/flojon/aspire-servicesources/issues/220).
+
 Two things are different from `AddService()`:
 
 - **There is no catalog.** A backing service is declared by the `AddBackingService()` call itself,
@@ -1631,26 +1639,29 @@ being read alongside it.
 > (`docker port` / `podman port`) — or keep `"local"`, which is what "a database this AppHost runs"
 > already means.
 
-### Name the local factory's resource after the backing service
+### The local factory's resource must be named after the backing service
 
 Aspire's `WithReference(...)` keys the connection string on the **referenced resource's own name**,
-and under `"local"` that resource is whatever your factory built. So:
+and under `"local"` that resource is whatever your factory built. So the names have to agree, and
+`AddBackingService` refuses them when they do not:
 
 ```csharp
 // Good — one name everywhere. Switching source changes the value and nothing else.
 builder.AddBackingService("orders-db", () => builder.AddPostgres("pg").AddDatabase("orders-db", "orders"));
 // → ConnectionStrings__orders-db, under every source
 
-// Trouble — the key moves when the developer switches source.
+// Refused at startup, naming both names.
 builder.AddBackingService("orders-db", () => builder.AddPostgres("pg").AddDatabase("orders"));
-// → ConnectionStrings__orders under "local", ConnectionStrings__orders-db under "direct"
+// → would be ConnectionStrings__orders under "local", ConnectionStrings__orders-db under "direct"
 ```
 
 `AddDatabase("orders-db", "orders")` names the Aspire resource and the actual database separately,
-which is what to reach for when the two want different names. Nothing enforces this yet — the app
-is what reports it, by starting and finding no connection string where it looked.
+which is what to reach for when the two want different names. **Casing counts.** .NET folds it when
+reading configuration, so a .NET consumer would not notice — but the environment variable itself
+differs, and a JavaScript or Java service reads `process.env` / `System.getenv` case-sensitively.
 
-**Or pin the key at the consumer**, which settles it whatever the factory named its resource:
+This is a rule rather than advice because the alternative remedy is not available everywhere. In
+C# a consumer can pin the key from its own side:
 
 ```csharp
 builder.AddService("orders")
@@ -1658,50 +1669,117 @@ builder.AddService("orders")
 // → ConnectionStrings__OrdersDb, under every source
 ```
 
-`WithReference`'s second argument overrides the source resource's name for the connection string,
-so both sources agree without the factory having to cooperate. Reach for it when the app already
-reads a particular name, or when the factory is not yours to rename — a shared helper, or a
-resource handed to you. The two answers are not exclusive: naming the resource well is what keeps
-the *default* right for every consumer, and this is what a consumer with its own requirement does
-about it.
+`WithReference`'s second argument overrides the source resource's name for the connection string.
+Reach for it when the app already reads a particular name — but note it is C#-only today, because
+the generated shim takes the source alone
+([#209](https://github.com/flojon/aspire-servicesources/issues/209)). That is this package's gap
+rather than a limit of guest languages: a project's own `withReference` already accepts
+`{ connectionName }` from TypeScript. Until the shim offers the same, naming the factory's resource
+after the backing service is the one answer every AppHost can give, which is why it is the one
+enforced.
+
+**If the resource is not yours to rename** — a shared helper, or one handed to you — return a
+connection string of your own that forwards it:
+
+```csharp
+builder.AddBackingService("orders-db", () =>
+{
+    var shared = SharedHelpers.AddOrdersDatabase(builder);   // names its resource whatever it likes
+    return builder.AddConnectionString("orders-db", ReferenceExpression.Create($"{shared}"));
+});
+```
+
+The forwarding resource carries the same value under the name the rule wants, so the key stays put
+across a source switch. This used to be the case `WithReference(db, connectionName)` covered; the
+rule makes that unreachable for a backing service, since the throw happens first, so the wrap is
+what replaces it.
+
+> **The wait mostly survives the wrap, but loses its health check.** What `AddBackingService` hands
+> back is the forwarding `ConnectionStringResource` rather than the database the factory built —
+> and Aspire does follow the reference: the wrapper itself sits in `Waiting` until the database it
+> forwards is running, so a consumer's `WaitFor(ordersDb)` still holds back for Postgres to start.
+>
+> What it stops honouring is the database's *health check*. Waiting on the database directly waits
+> for it to be healthy; waiting on the wrapper is satisfied once the database is merely running.
+> Measured on a live host with a real Postgres — the consumer waiting on the wrapper started about
+> seven seconds before the one waiting on the database, while a consumer waiting on nothing started
+> three seconds before either.
+>
+> So **rename the resource wherever you can**; the wrap is a smaller loss than it looks, but it is
+> not free. Tracked as [#220](https://github.com/flojon/aspire-servicesources/issues/220), together
+> with the `"direct"` case, where the connection string references nothing and the wait is therefore
+> satisfied at once.
 
 ### Connection-string placeholders
 
-`direct.connectionString` is normally a literal, and a brace in it stays a brace — `Driver={PostgreSQL}`
-and other ODBC-style strings pass through untouched. Two placeholders are recognised and reserved
-for sources that can resolve them, and are rejected under `"direct"` with a message saying why:
+`direct.connectionString` is normally a literal. **Braces reserve nothing** — `Driver={PostgreSQL}`,
+`Server={host}\instance` and `PWD={secret}` all pass through exactly as written, doubled braces
+included, so ODBC values keep their own doubling rule intact (`PWD={pa}}ss}` is the password
+`pa}ss`, and stays that).
 
-- `{port}`, or `{port:<name>}` — a local port the AppHost forwards. `"direct"` forwards nothing, so
-  write the port the backing service already listens on.
-- `{secret:<name>:<key>}` — a value read from a Kubernetes secret. Not supported yet.
+Placeholders open on `${`, which no connection-string dialect uses. Two are recognised and reserved
+for the sources that can resolve them, and are rejected under `"direct"` with a message saying why:
 
-A malformed placeholder — `{secret:orders-creds}`, with no key — fails when the AppHost starts,
+- `${port}`, or `${port:<name>}` — a local port the AppHost forwards. `"direct"` forwards nothing,
+  so write the port the backing service already listens on.
+- `${secret:<name>:<key>}` — a value read from a Kubernetes secret. Not supported yet.
+
+A malformed placeholder — `${secret:orders-creds}`, with no key — fails when the AppHost starts,
 naming the backing service and the configuration key, rather than reaching the app as text.
 
-**Braces are never rewritten, and there is no escape.** Every brace you write reaches the app as
-you wrote it, doubled ones included — so ODBC values keep their own doubling rule intact
-(`PWD={pa}}ss}` is the password `pa}ss`, and stays that).
+**A `${` begins a placeholder only when the word after it — up to the first `:` or `}`, or to the
+end — is *exactly* `port` or `secret`, in any casing.** Equality, not a prefix, so everything else
+is text: `${portal}`, `${secretariat}`, `${secrets:a}` and `${DB_PASS}` all pass through untouched —
+which is what keeps a connection string working when something else in your toolchain is the one
+expanding `${…}`.
 
-The cost is one reserved shape. **A `{` begins a placeholder whenever the word after it — up to the
-first `:` or `}`, or to the end — is *exactly* `port` or `secret`, in any casing** — so `{port}`,
-`{PORT}`, `{port:amqp}`,
-`{secret}`, `{secret:a}` and `{secret:a:b:c}` are all unavailable as literal text, not just the two
-well-formed spellings. A token of that shape which is *not* a placeholder this package can read
-fails at startup rather than passing through, which is what catches `PWD={secret}` — an ODBC-quoted
-password that happens to be the word.
+The remaining cost is that `${port}` and `${secret:…}` themselves cannot be written as literal text
+in any casing: a keyword-shaped token that this package cannot read fails at startup rather than
+passing through, and there is no escape. Nothing has wanted one. `$` is not otherwise special, so
+`$${port}` is available as an escape if that ever changes — it is a literal `$` followed by a
+placeholder today.
 
-Equality, not a prefix, so everything else is text: `Driver={PostgreSQL}`, `{host}`, `{p0rt}`,
-`{portal}`, `{secretariat}` and `{secrets:a}` all pass through untouched.
+> The syntax was `{port}` during development and moved before release
+> ([#207](https://github.com/flojon/aspire-servicesources/issues/207)). Reserving a shape inside
+> braces left `PWD={secret}` — ODBC for a password that happens to be the word — impossible to
+> write. Escaping could not fix it: doubling is the syntax ODBC already uses, and collapsing it
+> silently corrupted working connection strings in both directions.
 
-Doubling the braces does not escape any of it. An escape by doubling was tried and withdrawn,
-because that is exactly the syntax ODBC already uses and collapsing it silently corrupted working
-connection strings in both directions; a syntax braces do not use can be added if something ever
-needs one.
+#### Setting a template from a shell: quote it with single quotes
 
-### A typo in the entry key is not reported yet
+`${…}` is also what a POSIX shell, docker-compose and a GitHub Actions `run:` block use for their
+own variables, so a template set through an environment variable can be expanded away before the
+AppHost ever sees it. **Double quotes do not help** — they protect the `;` and not the `${`:
+
+```bash
+# Wrong: double quotes, so the shell substitutes ${port} (unset) and the AppHost gets "Host=db;Port="
+env "ServiceSources__BackingServices__orders-db__Direct__ConnectionString=Host=db;Port=${port}" aspire run
+
+# Right: single quotes, so ${port} reaches the AppHost intact
+env 'ServiceSources__BackingServices__orders-db__Direct__ConnectionString=Host=db;Port=${port}' aspire run
+```
+
+`env` rather than `export`, because a backing service whose name contains a hyphen — `orders-db`
+here — makes an environment variable name that is not a valid shell identifier, and both
+`export NAME=…` and the `NAME=… command` prefix refuse it outright. `env 'NAME=value' command`
+accepts any name, and so do docker-compose's `environment:`, `launchSettings.json` and a workflow's
+`env:` block, none of which put the *name* through a shell.
+
+That is a separate question from the value. `launchSettings.json` leaves a value alone entirely;
+docker-compose does its own `${…}` interpolation, so escape it there as `$${port}`; and a workflow's
+`run:` block is a shell, so it needs the single quotes above.
+
+Nothing reports the mangled case either way, because what arrives is a valid template that simply
+has no placeholder in it — which is also what someone writing a literal port produces.
+
+This does not apply to `servicesources.local.json`, `appsettings.json` or user secrets, where `$` is
+an ordinary character — which is where a template normally lives.
+
+### Configuration that nothing reads is reported
 
 A backing service with no entry legitimately runs from its `local` factory, so an entry whose key
-matches no `AddBackingService()` call cannot be told apart from one that was never written:
+matches no `AddBackingService()` call cannot be told apart at read time from one that was never
+written:
 
 ```jsonc
 "backingServices": {
@@ -1709,11 +1787,16 @@ matches no `AddBackingService()` call cannot be told apart from one that was nev
 }
 ```
 
-`orders-db` reverts to `"local"` and starts the container you were trying to avoid, and nothing
-says the entry went unread. A misspelled `backingServices` root key does the same to every backing
-service at once. Both are tracked in
-[#206](https://github.com/flojon/aspire-servicesources/issues/206); until then, the dashboard
-showing a database you did not expect is the signal.
+`orders-db` would revert to `"local"` and start the container you were trying to avoid. Once the
+AppHost is composed the set of names `AddBackingService()` was called with is known, so this is
+reported as a warning at startup, naming the entry and the declared name it resembles. A misspelled
+`backingServices` root key — which does the same to every backing service at once — is reported the
+same way.
+
+Both are warnings rather than errors, because a shared `servicesources.local.json` may legitimately
+carry entries for backing services only some configurations add. There is no way to switch them off;
+if you find yourself wanting one, say so on
+[#206](https://github.com/flojon/aspire-servicesources/issues/206).
 
 ### From a guest-language AppHost
 

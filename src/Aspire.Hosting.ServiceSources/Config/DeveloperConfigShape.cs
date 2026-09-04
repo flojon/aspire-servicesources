@@ -110,7 +110,7 @@ internal sealed class DeveloperConfigShape
     /// A list rather than the single answer both shapes can give today, because a field name shared
     /// by two blocks is coming and naming just the first would send the developer to a block they
     /// are not using. Each source that takes a <c>connectionString</c> will declare its own, since
-    /// each wants its own template — the <c>kubernetes</c> one carries a <c>{port}</c> placeholder
+    /// each wants its own template — the <c>kubernetes</c> one carries a <c>${port}</c> placeholder
     /// that would be dead text under <c>direct</c> — and that source is the next one to be added.
     /// <para>
     /// So no shape has such a field yet, and every caller's several-homes branch is unreachable as

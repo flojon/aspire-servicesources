@@ -7,7 +7,7 @@ namespace Aspire.Hosting.ServiceSources.Prepare;
 /// <remarks>
 /// An interface because the two paths have different reporting surfaces available, and this design
 /// uses each one's best rather than reducing both to the console. During composition there is no
-/// <c>ILogger</c> yet — both <c>LocalCheckoutPrefetch</c> and <c>ServiceConfigurationWarnings</c>
+/// <c>ILogger</c> yet — both <c>LocalCheckoutPrefetch</c> and <c>ServiceSourcesWarnings</c>
 /// buffer their notices to <c>BeforeStartEvent</c> for that reason — so the eager path writes to the
 /// console. A deferred service is the opposite case: its checkout runs on a task that already holds
 /// <c>ResourceLoggerService.GetLogger(resource)</c> and publishes resource state, so the same lines

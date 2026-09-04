@@ -121,7 +121,7 @@ public class ServiceConfigurationExtensionsTests
 
         AddUrlService(builder).Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B"));
 
-        var message = Assert.Single(ServiceConfigurationWarnings.For(builder).Messages);
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
         Assert.Contains("inventory", message);
         Assert.Contains("'url'", message);
         Assert.Contains("servicesources.local.json", message);
@@ -143,7 +143,7 @@ public class ServiceConfigurationExtensionsTests
 
         service.Configure<IResourceWithWaitSupport>(_ => { });
 
-        var message = Assert.Single(ServiceConfigurationWarnings.For(builder).Messages);
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
         // "calls" rather than "Configure calls": the same message also stands for a consumer's
         // dropped WaitFor, so the tally names each call and the summary only counts them.
         Assert.Contains("26 calls", message);
@@ -162,7 +162,7 @@ public class ServiceConfigurationExtensionsTests
             .Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B"));
 
         // Grouping is per service, not global — each service names itself and its own remedy.
-        Assert.Equal(2, ServiceConfigurationWarnings.For(builder).Messages.Count);
+        Assert.Equal(2, ServiceSourcesWarnings.For(builder).Messages.Count);
     }
 
     [Fact]
@@ -178,7 +178,7 @@ public class ServiceConfigurationExtensionsTests
         service.Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B"));
 
         Assert.Empty(service.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>());
-        Assert.Contains("port-forward", Assert.Single(ServiceConfigurationWarnings.For(builder).Messages));
+        Assert.Contains("port-forward", Assert.Single(ServiceSourcesWarnings.For(builder).Messages));
     }
 
     [Fact]
@@ -197,7 +197,7 @@ public class ServiceConfigurationExtensionsTests
         service.Configure<IResourceWithWaitSupport>(r => r.WaitForCompletion(migrations));
 
         Assert.NotEmpty(service.Resource.Annotations.OfType<WaitAnnotation>());
-        Assert.Empty(ServiceConfigurationWarnings.For(builder).Messages);
+        Assert.Empty(ServiceSourcesWarnings.For(builder).Messages);
     }
 
     [Fact]
@@ -211,7 +211,7 @@ public class ServiceConfigurationExtensionsTests
 
         // A "url" service's resource is never registered, so there is no process to hold back.
         Assert.Empty(service.Resource.Annotations.OfType<WaitAnnotation>());
-        Assert.Single(ServiceConfigurationWarnings.For(builder).Messages);
+        Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
     }
 
     [Fact]
@@ -235,7 +235,7 @@ public class ServiceConfigurationExtensionsTests
         var ex = await Record.ExceptionAsync(() => TestHelpers.PublishBeforeStartEventAsync(builder));
 
         Assert.Null(ex);
-        Assert.Single(ServiceConfigurationWarnings.For(builder).Messages);
+        Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
     }
 
     [Fact]

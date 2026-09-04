@@ -130,18 +130,25 @@ public class BackingServiceConsumerTests
     }
 
     /// <summary>
-    /// The variable is named after the resource the factory returns, not after the backing service —
-    /// so a factory that names its resource something else moves the key the app reads.
+    /// A factory naming its resource something other than the backing service is refused, because
+    /// that is what would move the key the app reads.
     /// </summary>
     /// <remarks>
     /// Aspire's own <c>WithReference</c> keys the variable on the referenced resource's name, and
-    /// under <c>"local"</c> that resource is whatever the AppHost's factory built. This is what
-    /// makes naming the factory's resource after the backing service the thing to do, and it is
-    /// asserted here rather than only documented because the failure is silent: the service starts,
-    /// and reads a connection string that is not there.
+    /// under <c>"local"</c> that resource is whatever the AppHost's factory built — so a factory
+    /// returning <c>something-else</c> gives the app <c>ConnectionStrings__something-else</c> while
+    /// every other source gives it <c>ConnectionStrings__orders-db</c>. Switching source would then
+    /// move the key, and the failure is silent: the AppHost is happy, the variable is set, and the
+    /// app starts and finds nothing where it looked.
+    /// <para>
+    /// This was documented and pinned as behaviour until #200. It is a rule now because the remedy
+    /// has to be one every AppHost can reach: C# could settle it at the consumer with
+    /// <c>WithReference(db, "orders-db")</c>, but the generated shim takes no such argument (#209),
+    /// so renaming the factory's resource is a guest language's only route.
+    /// </para>
     /// </remarks>
     [Fact]
-    public async Task LocalFactoryNamingItsResourceDifferently_MovesTheVariable()
+    public void LocalFactoryNamingItsResourceDifferently_IsRefused()
     {
         var builder = CreateBuilder("""
             {
@@ -150,9 +157,78 @@ public class BackingServiceConsumerTests
             }
             """);
 
-        var db = builder.AddBackingService(
-            "orders-db",
-            () => builder.AddConnectionString("something-else", ReferenceExpression.Create($"Host=localhost")));
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => builder.AddBackingService(
+                "orders-db",
+                () => builder.AddConnectionString("something-else", ReferenceExpression.Create($"Host=localhost"))));
+
+        Assert.Contains("Backing service 'orders-db'", ex.Message);
+        Assert.Contains("'something-else'", ex.Message);
+    }
+
+    /// <summary>
+    /// A resource whose name differs only by case is refused too, because the environment variable
+    /// differs by case and not every consumer folds it.
+    /// </summary>
+    /// <remarks>
+    /// The comparison was written as <c>OrdinalIgnoreCase</c> on the grounds that a configuration
+    /// key folds case, which is true of .NET's <c>IConfiguration</c> and of nothing else here. This
+    /// package runs JavaScript and Java services as well, and <c>process.env</c> and
+    /// <c>System.getenv</c> are both case-sensitive — so a factory named <c>Orders-DB</c> behind
+    /// <c>orders-db</c> hands a Node app <c>ConnectionStrings__Orders-DB</c> under <c>"local"</c>
+    /// and <c>ConnectionStrings__orders-db</c> under <c>"direct"</c>, which is exactly the silent
+    /// key move #200 exists to prevent, narrowed to casing.
+    /// <para>
+    /// Both names are literals in the AppHost's own code, so requiring them to agree exactly costs
+    /// the author nothing.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void LocalFactoryNamingItsResourceInAnotherCasing_IsRefused()
+    {
+        var builder = CreateBuilder("""
+            {
+              "services": { "orders": { "source": "local" } },
+              "backingServices": { "orders-db": { "source": "local" } }
+            }
+            """);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => builder.AddBackingService(
+                "orders-db",
+                () => builder.AddConnectionString("Orders-DB", ReferenceExpression.Create($"Host=localhost"))));
+
+        Assert.Contains("'Orders-DB'", ex.Message);
+    }
+
+    /// <summary>
+    /// A factory whose resource cannot be renamed satisfies the rule by returning a connection string
+    /// that forwards it under the right name.
+    /// </summary>
+    /// <remarks>
+    /// The remedy the README and the error message both name, so it has to work. It is what replaces
+    /// <c>WithReference(db, connectionName)</c> for the case that overload used to cover — a shared
+    /// helper, or a resource handed to the caller — which the rule makes unreachable, since the throw
+    /// happens before a consumer gets to say anything.
+    /// </remarks>
+    [Fact]
+    public async Task LocalFactoryForwardingAResourceItCannotRename_IsAcceptedAndKeepsTheValue()
+    {
+        var builder = CreateBuilder("""
+            {
+              "services": { "orders": { "source": "local" } },
+              "backingServices": { "orders-db": { "source": "local" } }
+            }
+            """);
+
+        var db = builder.AddBackingService("orders-db", () =>
+        {
+            // Stands in for whatever a shared helper would have named its resource.
+            var shared = builder.AddConnectionString(
+                "some-helpers-own-name", ReferenceExpression.Create($"Host=localhost;Database=orders"));
+
+            return builder.AddConnectionString("orders-db", ReferenceExpression.Create($"{shared}"));
+        });
 
         var orders = builder.AddService("orders");
         var beforeTheReference = EnvironmentCallbackCount(orders.Resource);
@@ -161,7 +237,18 @@ public class BackingServiceConsumerTests
 
         var environment = await MaterializeEnvironmentAsync(orders.Resource, beforeTheReference);
 
-        Assert.Contains("ConnectionStrings__something-else", environment.Keys);
-        Assert.DoesNotContain("ConnectionStrings__orders-db", environment.Keys);
+        Assert.Equal("Host=localhost;Database=orders", environment["ConnectionStrings__orders-db"]);
+
+        // The substitution the README and the error message both warn about: what a consumer ends
+        // up holding is the forwarding resource, not the resource the factory built, so a WaitFor
+        // on it is a wait on the forwarder.
+        //
+        // Asserted as identity against the inner resource, which is the only form that can fail. A
+        // predicate combining reference equality with the inner resource's name cannot be satisfied
+        // by anything — the wrapper is the sole reference match and carries the outer name — so it
+        // would pass whatever this returned.
+        var inner = Assert.Single(builder.Resources, resource => resource.Name == "some-helpers-own-name");
+
+        Assert.NotSame(inner, db.Resource);
     }
 }

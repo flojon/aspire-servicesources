@@ -134,7 +134,7 @@ public class ServiceConfigurationExportsTests
         var service = UrlService(builder).WithServiceEnvironment("A", "B");
 
         Assert.Empty(service.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>());
-        Assert.Contains("inventory", Assert.Single(ServiceConfigurationWarnings.For(builder).Messages));
+        Assert.Contains("inventory", Assert.Single(ServiceSourcesWarnings.For(builder).Messages));
     }
 
     [Fact]

@@ -63,23 +63,29 @@ public static class BackingServiceBuilderExtensions
     /// this developer's configured source is <c>"local"</c>, so a developer pointing the AppHost at
     /// an instance they already run does not also start a container of it.
     /// <para>
-    /// <b>Name the resource it returns after the backing service.</b> Aspire's
-    /// <c>WithReference(...)</c> keys the connection string on the referenced resource's own name,
-    /// which under this source is whatever this factory built — so a factory returning a resource
-    /// named <c>orders</c> gives a consumer <c>ConnectionStrings__orders</c>, while every other
-    /// source gives it <c>ConnectionStrings__<paramref name="name"/></c>. Named alike, switching
-    /// source changes the connection string's value and nothing else; named differently, it also
-    /// moves the key the app reads, and the app is what reports that — by starting and finding no
-    /// connection string. <c>AddDatabase("orders-db", "orders")</c> names the resource and the
-    /// database separately where the two want different names.
+    /// <b>The resource it returns must be named <paramref name="name"/></b>, after the backing
+    /// service, and this method throws when it is not. Aspire's <c>WithReference(...)</c> keys the
+    /// connection string on the referenced resource's own name, which under this source is whatever
+    /// this factory built — so a factory returning a resource named <c>orders</c> would give a
+    /// consumer <c>ConnectionStrings__orders</c> while every other source gives it
+    /// <c>ConnectionStrings__<paramref name="name"/></c>. Named alike, switching source changes the
+    /// connection string's value and nothing else, which is the property this method exists to
+    /// provide; named differently, it also moves the key the app reads, and the app is what reports
+    /// that — by starting and finding no connection string. <c>AddDatabase("orders-db", "orders")</c>
+    /// names the resource and the database separately where the two want different names. Casing
+    /// counts: .NET folds it when reading configuration, but the environment variable itself does
+    /// not, and a JavaScript or Java service reads that variable case-sensitively.
     /// </para>
     /// <para>
-    /// A consumer can settle it from its own side instead, by passing <c>WithReference</c> a
+    /// A consumer can still choose a different key deliberately, by passing <c>WithReference</c> a
     /// <c>connectionName</c> — <c>WithReference(ordersDb, "OrdersDb")</c> gives
-    /// <c>ConnectionStrings__OrdersDb</c> under every source, whatever this factory named its
-    /// resource. That is the answer when the app already reads a particular name, or when the
-    /// factory is not the caller's to rename; naming the resource after the backing service remains
-    /// what keeps the default right for consumers that ask for nothing.
+    /// <c>ConnectionStrings__OrdersDb</c> under every source. That is the answer when the app
+    /// already reads a particular name. It is not a way around the rule above, because the exported
+    /// shim takes the source alone and a guest-language AppHost has no way to pass the name through
+    /// it. That is this package's own gap rather than a platform limit — Aspire projects an options
+    /// bag perfectly well, and a project's <c>withReference</c> already accepts
+    /// <c>{ connectionName }</c> — but until the shim grows one (#209), renaming the factory's
+    /// resource is the one remedy every AppHost has.
     /// </para>
     /// </param>
     /// <returns>
@@ -102,6 +108,14 @@ public static class BackingServiceBuilderExtensions
     /// <para>
     /// Call this before the <c>AddService</c> whose <c>Configure</c> references it — ordinary C#
     /// variable ordering, nothing more.
+    /// </para>
+    /// <para>
+    /// <b>The <c>WaitFor</c> in the example above stops meaning anything under <c>"direct"</c>
+    /// (#220).</b> It waits properly under <c>"local"</c>, where a real database resource sits
+    /// behind it. Under <c>"direct"</c> the resource is a connection string, the orchestrator marks
+    /// it running as soon as that string is available, and the wait is satisfied at once — so the
+    /// consumer starts without the remote instance having been checked at all. It does not hang, and
+    /// nothing goes wrong loudly; the ordering simply stops being enforced.
     /// </para>
     /// <para>
     /// Which of a consumer's configuration actually reaches it still depends on that consumer's own
@@ -147,6 +161,12 @@ public static class BackingServiceBuilderExtensions
         // something successfully.
         DeveloperConfigFileSource.EnsureRegistered(builder);
 
+        // Before the resolution too, and unconditionally: the audit this feeds is about entries
+        // nothing read, so a call that goes on to fail still has to count as having named its
+        // backing service. Recording it only on the way out would report a configured entry as
+        // orphaned because the call that would have read it threw.
+        BackingServiceConfigAudit.Record(builder, name);
+
         var config = ServiceSourcesConfigCache.ResolveBackingService(builder, name);
 
         // Blank means unconfigured, and unconfigured means local — see ResolveBackingService. The
@@ -156,11 +176,25 @@ public static class BackingServiceBuilderExtensions
 
         if (sourceName.Equals(DefaultSource, StringComparison.OrdinalIgnoreCase))
         {
-            return local()
+            var resource = local()
                 ?? throw new ServiceSourcesConfigurationException(
                     $"Backing service '{name}': the factory passed to AddBackingService returned null. It has to "
                     + "return the resource that carries the connection string, as "
-                    + "'() => builder.AddPostgres(\"pg\").AddDatabase(\"orders\")' does.");
+                    + "'() => builder.AddPostgres(\"pg\").AddDatabase(\"orders-db\", \"orders\")' does.");
+
+            // Ordinal, so casing counts. It is tempting to fold it — .NET's IConfiguration does, so
+            // a .NET consumer reads 'ConnectionStrings__Orders-DB' and 'ConnectionStrings__orders-db'
+            // alike — but the variable itself is what differs, and this package runs JavaScript and
+            // Java services too, where process.env and System.getenv are both case-sensitive. A
+            // folded comparison would let exactly the key move this check exists to prevent through,
+            // narrowed to casing and therefore harder to see. Both names are literals in the
+            // AppHost's own code, so requiring them to agree exactly costs the author nothing.
+            if (!string.Equals(resource.Resource.Name, name, StringComparison.Ordinal))
+            {
+                throw MisnamedLocalResourceError(name, resource.Resource.Name);
+            }
+
+            return resource;
         }
 
         if (!Sources.TryGetValue(sourceName, out var source))
@@ -173,6 +207,42 @@ public static class BackingServiceBuilderExtensions
         // developer asked this AppHost not to run.
         return source.Resolve(builder, name, config);
     }
+
+    /// <summary>
+    /// The error for a <c>"local"</c> factory whose resource is not named after the backing service.
+    /// </summary>
+    /// <remarks>
+    /// One remedy, and it is the rename. C# has a second — <c>WithReference(db, "orders-db")</c>
+    /// names the connection from the consumer's side — but the exported shim takes the source alone,
+    /// so a guest-language AppHost cannot reach it (#209). A message offering a fix that half its
+    /// readers cannot reach would send them looking for an argument that is not there, so it offers
+    /// the one that always works.
+    /// <para>
+    /// Worth stating precisely, because the obvious explanation is wrong in a way that would
+    /// discourage fixing it: Aspire's Type System does erase overloads, but that is not what closes
+    /// the door here. Aspire's own answer to that erasure is an options bag, which projects fine —
+    /// a project's <c>withReference</c> already takes <c>{ connectionName }</c> from TypeScript. The
+    /// missing argument is this package's, not the platform's.
+    /// </para>
+    /// <para>
+    /// <c>AddDatabase</c> is named in the message because it is where the constraint most often
+    /// bites: the Aspire resource and the database itself frequently want different names, and the
+    /// two-argument overload is what separates them.
+    /// </para>
+    /// </remarks>
+    private static ServiceSourcesConfigurationException MisnamedLocalResourceError(
+        string name, string resourceName) =>
+        new($"Backing service '{name}': the factory passed to AddBackingService returned a resource named "
+            + $"'{resourceName}'. It has to be named '{name}', after the backing service, because Aspire keys a "
+            + $"consumer's connection string on the referenced resource's own name — so this factory gives the app "
+            + $"'ConnectionStrings__{resourceName}' while every other source gives it 'ConnectionStrings__{name}', "
+            + "and switching source would move the key the app reads without anything reporting it. Rename the "
+            + $"resource to '{name}'. Where the Aspire resource and the database itself want different names, "
+            + $"AddDatabase names them separately: 'AddDatabase(\"{name}\", \"orders\")' is a resource called "
+            + $"'{name}' holding a database called 'orders'. Where the resource is not yours to rename, return "
+            + $"one that forwards it: 'builder.AddConnectionString(\"{name}\", ReferenceExpression.Create($\"{{theResource}}\"))' "
+            + "— a consumer's WaitFor still holds back for what it forwards, but is satisfied once that is "
+            + "running rather than healthy, so the health check stops gating it (#220).");
 
     /// <summary>
     /// The error for a <c>source</c> this package does not recognize.

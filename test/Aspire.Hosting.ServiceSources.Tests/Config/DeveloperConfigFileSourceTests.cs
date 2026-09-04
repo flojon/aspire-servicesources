@@ -89,7 +89,8 @@ public class DeveloperConfigFileSourceTests
     {
         var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory(yaml: null));
 
-        builder.AddBackingService("orders-db", () => builder.AddConnectionString("orders-db-local"));
+        // Named after the backing service, as a "local" factory has to be — see #200.
+        builder.AddBackingService("orders-db", () => builder.AddConnectionString("orders-db"));
 
         Assert.Equal("local", builder.Configuration[SourceKey]);
     }

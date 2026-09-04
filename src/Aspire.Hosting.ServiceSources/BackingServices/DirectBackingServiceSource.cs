@@ -14,11 +14,22 @@ namespace Aspire.Hosting.ServiceSources.BackingServices;
 /// <c>"remote"</c> — the common use is emphatically local — and not <c>"external"</c>, which Aspire
 /// already uses for an external HTTP service.
 /// <para>
-/// The resource this adds is Aspire's own <c>ConnectionStringResource</c>, which is an
-/// <c>IResourceWithoutLifetime</c>: there is nothing to start, so nothing to wait for.
-/// <c>WaitFor</c> on one of these is therefore honoured but empty — a connectivity check that would
-/// make it mean something is a deliberate omission for now, since the developer is pointing at
-/// something they already run and the only thing a check buys them is a better diagnosis.
+/// The resource this adds is Aspire's own <c>ConnectionStringResource</c>. There is nothing for
+/// Aspire to start behind it, so a consumer's <c>WaitFor</c> is honoured but empty: the orchestrator
+/// publishes <c>Running</c> for the resource as soon as its connection string is available, which is
+/// immediately, so the wait is satisfied without anything having been waited for. A connectivity
+/// check that would make it mean something is a deliberate omission for now, since the developer is
+/// pointing at something they already run and the only thing a check buys them is a better
+/// diagnosis (#220).
+/// </para>
+/// <para>
+/// Both halves of that are measured rather than inferred, because the type's interfaces imply
+/// neither. It carries <c>IResourceWithConnectionString</c> and <c>IResourceWithWaitSupport</c> and
+/// <i>no</i> <c>IResourceWithoutLifetime</c>, read off the loaded assembly on Aspire 13.5.2 — so
+/// unlike <see cref="Sources.ServiceUrlResource"/>, which declares that marker deliberately (#170),
+/// the wait here is honoured rather than dropped, and <c>BackingServiceWaitTests</c> pins that.
+/// Honoured says nothing about how long it then takes: on a live host the consumer leaves
+/// <c>Waiting</c> in about a second, because the value references nothing that has to start first.
 /// </para>
 /// </remarks>
 internal sealed class DirectBackingServiceSource : IBackingServiceSource
@@ -43,7 +54,7 @@ internal sealed class DirectBackingServiceSource : IBackingServiceSource
         var template = ConnectionStringTemplate.Parse(config.Direct.ConnectionString, name, configKey);
 
         // Parsed before this check rather than after, so that a malformed placeholder is reported as
-        // malformed. Telling a developer who wrote `{secret:orders-creds}` that secrets are
+        // malformed. Telling a developer who wrote `${secret:orders-creds}` that secrets are
         // unsupported would send them to work around a limit while their real mistake — the missing
         // key — went unmentioned.
         var text = new System.Text.StringBuilder();
@@ -56,29 +67,24 @@ internal sealed class DirectBackingServiceSource : IBackingServiceSource
                     text.Append(literal.Text);
                     break;
 
-                // Both messages say outright that the text cannot be kept, rather than only
-                // explaining why the substitution cannot happen. A placeholder this source cannot
-                // resolve is nearly always one the developer meant as a placeholder — but when it
-                // is not, the rest of the message answers a question they did not ask, and the one
-                // thing they need to know is that there is no spelling to reach for.
+                // Neither message explains that the text cannot be kept as written, which both used
+                // to. Under the brace syntax a value that was never meant as a placeholder could
+                // land here — `PWD={secret}` is ODBC for a password that happens to be the word —
+                // so the reader had to be told no spelling would help. Placeholders open on `${`
+                // now, which no connection-string dialect uses, so anything arriving here was
+                // written as a placeholder and the paragraph would answer a question nobody asked.
                 case ConnectionStringTemplate.Port port:
                     throw new ServiceSourcesConfigurationException(
                         $"Backing service '{name}': the connection string carries '{port.AsWritten}', but source "
                         + "'direct' forwards nothing, so there is no local port to substitute. Write the port the "
-                        + $"backing service already listens on. If '{port.AsWritten}' was meant as text, it cannot "
-                        + "be: a '{' begins a placeholder whenever the word after it — up to the first ':' or '}', "
-                        + "or to the end — is exactly 'port' or 'secret' in any casing, and there is no escape for "
-                        + $"it. The key is '{configKey}'.");
+                        + $"backing service already listens on. The key is '{configKey}'.");
 
                 case ConnectionStringTemplate.Secret secret:
                     throw new ServiceSourcesConfigurationException(
                         $"Backing service '{name}': the connection string carries '{secret.AsWritten}', and reading "
                         + "a value out of a Kubernetes secret is not supported yet. Put the value in the connection "
                         + "string, or set the whole connection string from a configuration layer that already holds "
-                        + $"it — user secrets, or {configKey.Replace(":", "__", StringComparison.Ordinal)}. If "
-                        + $"'{secret.AsWritten}' was meant as text, it cannot be: a '{{' begins a placeholder "
-                        + "whenever the word after it — up to the first ':' or '}', or to the end — is exactly "
-                        + "'port' or 'secret' in any casing, and there is no escape for it.");
+                        + $"it — user secrets, or {configKey.Replace(":", "__", StringComparison.Ordinal)}.");
 
                 default:
                     throw new InvalidOperationException($"Unhandled template segment '{segment.GetType().Name}'.");

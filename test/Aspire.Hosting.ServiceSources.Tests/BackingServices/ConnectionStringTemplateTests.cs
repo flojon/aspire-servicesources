@@ -5,7 +5,7 @@ namespace Aspire.Hosting.ServiceSources.Tests.BackingServices;
 /// <summary>
 /// A backing service's <c>connectionString</c> is split at <c>AddBackingService</c> time, so that a
 /// malformed placeholder is a startup failure naming the backing service rather than a connection
-/// string that reaches the app with <c>{secret:orders-creds}</c> still in it.
+/// string that reaches the app with <c>${secret:orders-creds}</c> still in it.
 /// </summary>
 public class ConnectionStringTemplateTests
 {
@@ -30,10 +30,30 @@ public class ConnectionStringTemplateTests
     [Fact]
     public void Parse_EmptyTemplate_HasNoSegments() => Assert.Empty(Parse("").Segments);
 
+    /// <summary>
+    /// A brace-quoted value that happens to be a keyword is text, because braces reserve nothing.
+    /// </summary>
+    /// <remarks>
+    /// The case #207 was filed for. ODBC quotes a value in braces, so <c>PWD={secret}</c> is a
+    /// password that happens to be the word — and under the brace syntax it was keyword-shaped,
+    /// claimed as a placeholder, and rejected, with no spelling that made it text. Placeholders open
+    /// on <c>${</c> instead, which no connection-string dialect uses, so the whole class of
+    /// collision is gone rather than escaped.
+    /// </remarks>
+    [Fact]
+    public void Parse_OdbcBraceQuotedKeywordValue_IsText()
+    {
+        const string template = "Driver={SQL Server};UID=sa;PWD={secret}";
+
+        Assert.Equal(
+            template,
+            Assert.IsType<ConnectionStringTemplate.Literal>(Assert.Single(Parse(template).Segments)).Text);
+    }
+
     [Fact]
     public void Parse_PortPlaceholder_IsRecognized()
     {
-        var segments = Parse("Host=localhost;Port={port};Database=orders").Segments;
+        var segments = Parse("Host=localhost;Port=${port};Database=orders").Segments;
 
         Assert.Collection(
             segments,
@@ -50,12 +70,12 @@ public class ConnectionStringTemplateTests
     public void Parse_NamedPortPlaceholder_KeepsTheName() =>
         Assert.Equal(
             "amqp",
-            Assert.IsType<ConnectionStringTemplate.Port>(Parse("{port:amqp}").Segments.Single()).Name);
+            Assert.IsType<ConnectionStringTemplate.Port>(Parse("${port:amqp}").Segments.Single()).Name);
 
     [Fact]
     public void Parse_SecretPlaceholder_KeepsTheSecretAndKey()
     {
-        var secret = Assert.IsType<ConnectionStringTemplate.Secret>(Parse("{secret:orders-creds:password}").Segments.Single());
+        var secret = Assert.IsType<ConnectionStringTemplate.Secret>(Parse("${secret:orders-creds:password}").Segments.Single());
 
         Assert.Equal("orders-creds", secret.Name);
         Assert.Equal("password", secret.Key);
@@ -65,32 +85,55 @@ public class ConnectionStringTemplateTests
     public void Parse_SeveralPlaceholders_AreAllFound() =>
         Assert.Equal(
             2,
-            Parse("amqp://dev:{secret:rabbit:password}@localhost:{port:amqp}/").Segments
+            Parse("amqp://dev:${secret:rabbit:password}@localhost:${port:amqp}/").Segments
                 .Count(segment => segment is not ConnectionStringTemplate.Literal));
 
     /// <summary>
-    /// A brace that does not open one of our placeholders is literal text.
+    /// A brace reserves nothing at all — the keywords included, since a placeholder opens on
+    /// <c>${</c>.
     /// </summary>
     /// <remarks>
     /// <c>Driver={PostgreSQL}</c> is an ordinary ODBC connection string and <c>{host}</c> is a
-    /// perfectly good literal in one. A parser that claimed every <c>{…}</c> would reject both, so
-    /// only a token whose first word is a keyword this package defines is read as a placeholder.
+    /// perfectly good literal in one. The last two rows are the ones that changed in #207: under
+    /// the brace syntax they were keyword-shaped and rejected, with no spelling that made them
+    /// text.
     /// </remarks>
     [Theory]
     [InlineData("Driver={PostgreSQL};Database=orders")]
     [InlineData("Server={host}\\instance")]
     [InlineData("Password={p0rt}")]
+    [InlineData("Port={port}")]
+    [InlineData("PWD={secret:a}")]
     public void Parse_BraceThatIsNotAPlaceholder_StaysLiteral(string template) =>
         Assert.Equal(template, Assert.IsType<ConnectionStringTemplate.Literal>(Parse(template).Segments.Single()).Text);
 
+    /// <summary>
+    /// A <c>${…}</c> whose first word is not one of our keywords is text, so an AppHost whose own
+    /// tooling expands <c>${…}</c> keeps working.
+    /// </summary>
     /// <remarks>
-    /// An unterminated brace is only a mistake once the keyword says a placeholder was meant:
-    /// <c>Server={host</c> is a connection string that happens to end mid-brace, while
-    /// <c>Port={port</c> is a placeholder someone forgot to close.
+    /// The reason unknown <c>${…}</c> is not rejected as a misspelled placeholder, which would
+    /// otherwise read well and would give near-miss suggestions somewhere to go: a connection string
+    /// carrying <c>${DB_PASS}</c> for something else to substitute is a connection string this
+    /// package has no business failing.
     /// </remarks>
-    [Fact]
-    public void Parse_UnterminatedNonPlaceholder_StaysLiteral() =>
-        Assert.Equal("Server={host", Assert.IsType<ConnectionStringTemplate.Literal>(Parse("Server={host").Segments.Single()).Text);
+    [Theory]
+    [InlineData("Password=${DB_PASS}")]
+    [InlineData("Host=${host};Port=5432")]
+    public void Parse_ForeignInterpolation_StaysLiteral(string template) =>
+        Assert.Equal(template, Assert.IsType<ConnectionStringTemplate.Literal>(Parse(template).Segments.Single()).Text);
+
+    /// <remarks>
+    /// An unterminated token is only a mistake once the keyword says a placeholder was meant:
+    /// <c>Server=${host</c> is text that happens to end mid-brace, while <c>Port=${port</c> is a
+    /// placeholder someone forgot to close.
+    /// </remarks>
+    [Theory]
+    [InlineData("Server={host")]
+    [InlineData("Server=${host")]
+    [InlineData("Password=$")]
+    public void Parse_UnterminatedNonPlaceholder_StaysLiteral(string template) =>
+        Assert.Equal(template, Assert.IsType<ConnectionStringTemplate.Literal>(Parse(template).Segments.Single()).Text);
 
     /// <summary>
     /// Braces are never rewritten — doubled ones included — because a connection string uses them
@@ -118,39 +161,60 @@ public class ConnectionStringTemplateTests
             Assert.IsType<ConnectionStringTemplate.Literal>(Parse(template).Segments.Single()).Text);
 
     /// <summary>
-    /// Doubling a placeholder's braces does not escape it — it is still read as a placeholder, with
-    /// the extra braces as text around it.
+    /// <c>$$</c> is not an escape. It is a literal <c>$</c> followed by whatever comes next, which
+    /// for <c>$${port}</c> is a placeholder.
     /// </summary>
     /// <remarks>
-    /// Pinned because doubling is what a developer reaches for first, so this is the behaviour they
-    /// meet. It is why the errors for an unresolvable placeholder say there is no escape rather than
-    /// leaving them to infer one.
+    /// Pinned so that the claim on <see cref="ConnectionStringTemplate"/> — that <c>$${port}</c> is
+    /// <em>available</em> as an escape the day something wants one — cannot quietly become the claim
+    /// that it already is one. It also fixes what a password containing <c>$$</c> does: nothing, and
+    /// that is the whole reason the collapse a brace escape would have needed was rejected.
     /// </remarks>
     [Fact]
-    public void Parse_DoubledBracesAroundAPlaceholder_StillReadThePlaceholder()
+    public void Parse_DoubledDollarBeforeAPlaceholder_IsNotAnEscape()
     {
-        var segments = Parse("Port={{port}}").Segments;
+        var segments = Parse("Port=$${port}").Segments;
 
         Assert.Collection(
             segments,
-            segment => Assert.Equal("Port={", Assert.IsType<ConnectionStringTemplate.Literal>(segment).Text),
-            segment => Assert.Null(Assert.IsType<ConnectionStringTemplate.Port>(segment).Name),
-            segment => Assert.Equal("}", Assert.IsType<ConnectionStringTemplate.Literal>(segment).Text));
+            segment => Assert.Equal("Port=$", Assert.IsType<ConnectionStringTemplate.Literal>(segment).Text),
+            segment => Assert.Null(Assert.IsType<ConnectionStringTemplate.Port>(segment).Name));
+    }
+
+    [Fact]
+    public void Parse_DoubledDollarInAPassword_IsLeftAlone() =>
+        Assert.Equal(
+            "PWD=pa$$word",
+            Assert.IsType<ConnectionStringTemplate.Literal>(Assert.Single(Parse("PWD=pa$$word").Segments)).Text);
+
+    /// <summary>
+    /// A <c>${</c> that opens no placeholder is text, and the scan resumes one character in, so a
+    /// placeholder nested behind one is still found.
+    /// </summary>
+    [Fact]
+    public void Parse_PlaceholderBehindANonPlaceholder_IsStillFound()
+    {
+        var segments = Parse("${a${port}").Segments;
+
+        Assert.Collection(
+            segments,
+            segment => Assert.Equal("${a", Assert.IsType<ConnectionStringTemplate.Literal>(segment).Text),
+            segment => Assert.Null(Assert.IsType<ConnectionStringTemplate.Port>(segment).Name));
     }
 
     [Fact]
     public void Parse_UnterminatedPlaceholder_IsRejected() =>
-        Assert.Contains("no closing '}'", Rejects("Host=localhost;Port={port").Message);
+        Assert.Contains("no closing '}'", Rejects("Host=localhost;Port=${port").Message);
 
     [Theory]
-    [InlineData("{secret}")]
-    [InlineData("{secret:orders-creds}")]
+    [InlineData("${secret}")]
+    [InlineData("${secret:orders-creds}")]
     public void Parse_SecretMissingItsKey_IsRejected(string template) =>
         Assert.Contains("names a secret and a key", Rejects(template).Message);
 
     [Theory]
-    [InlineData("{secret::password}")]
-    [InlineData("{secret:orders-creds:}")]
+    [InlineData("${secret::password}")]
+    [InlineData("${secret:orders-creds:}")]
     public void Parse_SecretWithAnEmptyPart_IsRejected(string template) =>
         Assert.Contains("must both be given", Rejects(template).Message);
 
@@ -161,15 +225,15 @@ public class ConnectionStringTemplateTests
     /// </remarks>
     [Fact]
     public void Parse_SecretWithTooManyParts_IsRejected() =>
-        Assert.Contains("exactly a name and a key", Rejects("{secret:a:b:c}").Message);
+        Assert.Contains("exactly a name and a key", Rejects("${secret:a:b:c}").Message);
 
     [Fact]
     public void Parse_PortWithAnEmptyName_IsRejected() =>
-        Assert.Contains("port name after 'port:' is empty", Rejects("{port:}").Message);
+        Assert.Contains("port name after 'port:' is empty", Rejects("${port:}").Message);
 
     [Fact]
     public void Parse_PortWithTooManyParts_IsRejected() =>
-        Assert.Contains("at most one name", Rejects("{port:a:b}").Message);
+        Assert.Contains("at most one name", Rejects("${port:a:b}").Message);
 
     /// <summary>
     /// Every rejection names the backing service and the configuration key, since the file is only
@@ -178,7 +242,7 @@ public class ConnectionStringTemplateTests
     [Fact]
     public void Parse_Rejection_NamesTheBackingServiceAndTheKey()
     {
-        var message = Rejects("{secret:orders-creds}").Message;
+        var message = Rejects("${secret:orders-creds}").Message;
 
         Assert.Contains($"Backing service '{Name}'", message);
         Assert.Contains(Key, message);
@@ -186,29 +250,42 @@ public class ConnectionStringTemplateTests
     }
 
     /// <summary>
-    /// A keyword-shaped token that was never meant as a placeholder is told that the text cannot be
-    /// kept, not only what a well-formed placeholder would look like.
+    /// A rejection says what is wrong with the token and stops — it no longer has to say that the
+    /// text cannot be kept.
     /// </summary>
     /// <remarks>
-    /// <c>PWD={secret}</c> is an ODBC-quoted password that happens to be the word, and it is
-    /// keyword-shaped, so it lands on the malformed path rather than passing through as text. Told
-    /// only that "a secret placeholder names a secret and a key inside it", its author would go on
-    /// trying to write one. The fact they need is that the spelling is unavailable whatever they do
-    /// to it — there is no escape, and doubling the braces is not one.
+    /// Under the brace syntax that paragraph was load-bearing, because <c>PWD={secret}</c> — an
+    /// ODBC-quoted password that happens to be the word — landed on this path rather than passing
+    /// through, and its author had to be told no spelling would help. That string is text now
+    /// (<see cref="Parse_OdbcBraceQuotedKeywordValue_IsText"/>), so anything reaching a rejection was
+    /// written as a placeholder, and the paragraph would answer a question nobody asked. Pinned so
+    /// it is not reintroduced by habit.
+    /// </remarks>
+    [Fact]
+    public void Parse_Rejection_DoesNotExplainAnEscapeThatIsNotNeeded()
+    {
+        var message = Rejects("${secret:orders-creds}").Message;
+
+        Assert.DoesNotContain("was meant as text", message);
+        Assert.DoesNotContain("no escape", message);
+    }
+
+    /// <summary>
+    /// The reserved shape did not go away with the braces: a keyword-shaped <c>${…}</c> that cannot
+    /// be read still fails rather than passing through as text.
+    /// </summary>
+    /// <remarks>
+    /// What the type's remarks and the README claim, which is the honest half of the #207 change.
+    /// Moving to <c>${</c> made the collision vanishingly unlikely; it did not add an escape.
     /// </remarks>
     [Theory]
-    [InlineData("PWD={secret}")]
-    [InlineData("PWD={secret:a}")]
-    [InlineData("PWD={secret:a:b:c}")]
-    [InlineData("Port={port:}")]
-    [InlineData("Port={port:a:b}")]
-    public void Parse_KeywordShapedTextThatIsNotAPlaceholder_SaysTheTextCannotBeKept(string template)
-    {
-        var message = Rejects(template).Message;
-
-        Assert.Contains("was meant as text, it cannot be", message);
-        Assert.Contains("there is no escape for it", message);
-    }
+    [InlineData("PWD=${secret}")]
+    [InlineData("PWD=${secret:a}")]
+    [InlineData("PWD=${secret:a:b:c}")]
+    [InlineData("Port=${port:}")]
+    [InlineData("Port=${port:a:b}")]
+    public void Parse_KeywordShapedTokenThatCannotBeRead_IsRejectedNotText(string template) =>
+        Assert.Contains("which cannot be read", Rejects(template).Message);
 
     /// <summary>
     /// The keyword is matched case-insensitively, so an upper-case token is a placeholder rather
@@ -220,15 +297,15 @@ public class ConnectionStringTemplateTests
     /// all.
     /// </remarks>
     [Theory]
-    [InlineData("{PORT}")]
-    [InlineData("{Port}")]
-    [InlineData("{PORT:amqp}")]
+    [InlineData("${PORT}")]
+    [InlineData("${Port}")]
+    [InlineData("${PORT:amqp}")]
     public void Parse_PortKeywordInAnyCasing_IsAPlaceholder(string template) =>
         Assert.IsType<ConnectionStringTemplate.Port>(Assert.Single(Parse(template).Segments));
 
     [Theory]
-    [InlineData("{SECRET:a:b}")]
-    [InlineData("{Secret:a:b}")]
+    [InlineData("${SECRET:a:b}")]
+    [InlineData("${Secret:a:b}")]
     public void Parse_SecretKeywordInAnyCasing_IsAPlaceholder(string template) =>
         Assert.IsType<ConnectionStringTemplate.Secret>(Assert.Single(Parse(template).Segments));
 
@@ -237,14 +314,15 @@ public class ConnectionStringTemplateTests
     /// text.
     /// </summary>
     /// <remarks>
-    /// The claim the README makes when it says `{PORT}` and `{secret}` alike are unavailable: it
-    /// holds only if the casing reaches the malformed path too, which nothing pinned.
+    /// The claim the README makes when it says <c>${PORT}</c> and <c>${secret}</c> alike are
+    /// unavailable: it holds only if the casing reaches the malformed path too, which nothing
+    /// pinned.
     /// </remarks>
     [Theory]
-    [InlineData("PWD={SECRET}")]
-    [InlineData("Port={PORT:}")]
+    [InlineData("PWD=${SECRET}")]
+    [InlineData("Port=${PORT:}")]
     public void Parse_UnreadableKeywordInAnyCasing_IsStillRejected(string template) =>
-        Assert.Contains("there is no escape for it", Rejects(template).Message);
+        Assert.Contains("which cannot be read", Rejects(template).Message);
 
     /// <summary>
     /// A message quotes the token as the developer spelled it, not as the keyword constants spell
@@ -252,16 +330,16 @@ public class ConnectionStringTemplateTests
     /// </summary>
     /// <remarks>
     /// Rebuilding the token from the constants normalized the casing, so a message about
-    /// <c>{PORT}</c> quoted <c>'{port}'</c> — a spelling nowhere in the file, and silent about the
+    /// <c>${PORT}</c> quoted <c>'${port}'</c> — a spelling nowhere in the file, and silent about the
     /// one that is.
     /// </remarks>
     [Fact]
     public void Parse_Rejection_QuotesTheTokenAsWritten()
     {
-        var message = Rejects("PWD={SECRET:a}").Message;
+        var message = Rejects("PWD=${SECRET:a}").Message;
 
-        Assert.Contains("'{SECRET:a}'", message);
-        Assert.DoesNotContain("'{secret:a}'", message);
+        Assert.Contains("'${SECRET:a}'", message);
+        Assert.DoesNotContain("'${secret:a}'", message);
     }
 
     /// <summary>
@@ -269,13 +347,13 @@ public class ConnectionStringTemplateTests
     /// </summary>
     /// <remarks>
     /// The rule the messages and the docs state. Claimed as a prefix, they would send someone whose
-    /// password is <c>{secretstore}</c> off to rewrite a connection string that works.
+    /// password is <c>${secretstore}</c> off to rewrite a connection string that works.
     /// </remarks>
     [Theory]
-    [InlineData("{portal}")]
-    [InlineData("{secretariat}")]
-    [InlineData("{secrets:a}")]
-    [InlineData("Driver={secretstore}")]
+    [InlineData("${portal}")]
+    [InlineData("${secretariat}")]
+    [InlineData("${secrets:a}")]
+    [InlineData("Driver=${secretstore}")]
     public void Parse_TokenMerelyStartingWithAKeyword_IsText(string template) =>
         Assert.Equal(
             template,

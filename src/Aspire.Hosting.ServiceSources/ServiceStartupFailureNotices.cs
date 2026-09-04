@@ -49,7 +49,7 @@ namespace Aspire.Hosting.ServiceSources;
 internal sealed class ServiceStartupFailureNotices
 {
     /// <summary>
-    /// The package's own log category, shared with <see cref="ServiceConfigurationWarnings"/> and
+    /// The package's own log category, shared with <see cref="ServiceSourcesWarnings"/> and
     /// <see cref="Sources.LocalCheckoutPrefetch"/> so that everything this package says in the
     /// AppHost's console can be filtered — or silenced — as one thing.
     /// </summary>
@@ -116,7 +116,7 @@ internal sealed class ServiceStartupFailureNotices
         // The factory stays free of side effects: ConditionalWeakTable.GetValue may run it
         // concurrently for the same key and keep only one of the results, so subscribing in there
         // could leave a discarded instance's subscription behind. Same shape as
-        // ServiceConfigurationWarnings.
+        // ServiceSourcesWarnings.
         var notices = Cache.GetValue(builder, static _ => new ServiceStartupFailureNotices());
 
         notices.EnsureSubscribed(builder);
