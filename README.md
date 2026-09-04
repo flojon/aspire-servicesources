@@ -1376,6 +1376,13 @@ builder.AddService("orders")
     .Configure<IResourceWithWaitSupport>(r => r.WaitFor(ordersDb));
 ```
 
+> **`WaitFor` on a backing service does not survive the source switch today.** The `WaitFor` above
+> works under `"local"`, where there is a real database resource behind it. Switch that backing
+> service to `"direct"` and the consumer never leaves `Waiting` — nothing publishes a state for a
+> connection-string resource, so the wait is accepted and never resolves. Measured and tracked as
+> [#220](https://github.com/flojon/aspire-servicesources/issues/220); until it is fixed, leave the
+> `WaitFor` off a backing service that anyone might point at an instance they already run.
+
 Two things are different from `AddService()`:
 
 - **There is no catalog.** A backing service is declared by the `AddBackingService()` call itself,
@@ -1489,14 +1496,23 @@ across a source switch. This used to be the case `WithReference(db, connectionNa
 rule makes that unreachable for a backing service, since the throw happens first, so the wrap is
 what replaces it.
 
-> **It is not a drop-in: you lose the wait.** What `AddBackingService` hands back is now the
-> forwarding `ConnectionStringResource` rather than the database the factory built, and that
-> resource has nothing to start — so a consumer's `WaitFor(ordersDb)` no longer holds the app back
-> until the database is up. Under `"direct"` there was never a local process to wait for, but under
-> `"local"` this is a real loss: the container is still starting and nothing is waiting for it.
+> **It is not a drop-in, and today a `WaitFor` on it hangs.** What `AddBackingService` hands back is
+> the forwarding `ConnectionStringResource` rather than the database the factory built. Nothing ever
+> publishes a state for that resource, and a consumer waiting on it sits in `Waiting` for the life of
+> the run rather than resolving — measured, not inferred:
 >
-> So rename the resource wherever you can, and reach for the wrap only when you genuinely cannot.
-> The connection string itself is unaffected — only the start ordering is.
+> ```text
+> Resource 'worker' failed to wait for dependencies before the operation was cancelled.
+> - Current State: Waiting
+> - Waiting For:
+>   - orders-db: Unable to retrieve current state.
+> ```
+>
+> So **rename the resource wherever you can**, and reach for the wrap only where you genuinely
+> cannot — and then do not `WaitFor` the backing service. The connection string itself is
+> unaffected; only start ordering is. Tracked as
+> [#220](https://github.com/flojon/aspire-servicesources/issues/220), which covers the same hang on
+> a `"direct"`-sourced backing service.
 
 ### Connection-string placeholders
 

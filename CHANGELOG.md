@@ -126,6 +126,13 @@ nothing will fail to build to warn you.
       .Configure<IResourceWithWaitSupport>(r => r.WaitFor(ordersDb));
   ```
 
+  **Known limitation: that `WaitFor` does not survive a switch to `"direct"`** ([#220]). It works
+  under `"local"`, where a real database resource sits behind it. Under `"direct"` the resource is a
+  connection string with nothing to start, nothing publishes a state for it, and the consumer waits
+  for the life of the run instead of resolving. It is the one place this feature's own promise — the
+  same AppHost code under either source — is not kept, so leave the wait off a backing service anyone
+  might point at an instance they already run.
+
   Two sources ship in this release, configured under a new `backingServices:` section read through
   the same configuration layers as `services:`. `"local"` runs the factory the AppHost supplied and
   returns its result unchanged — it is the default, so a backing service with no entry runs as the
@@ -928,6 +935,7 @@ Targets `net10.0`.
 [#206]: https://github.com/flojon/aspire-servicesources/issues/206
 [#207]: https://github.com/flojon/aspire-servicesources/issues/207
 [#209]: https://github.com/flojon/aspire-servicesources/issues/209
+[#220]: https://github.com/flojon/aspire-servicesources/issues/220
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

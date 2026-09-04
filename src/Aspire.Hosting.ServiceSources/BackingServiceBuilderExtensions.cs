@@ -110,6 +110,15 @@ public static class BackingServiceBuilderExtensions
     /// variable ordering, nothing more.
     /// </para>
     /// <para>
+    /// <b>The <c>WaitFor</c> in the example above does not survive a switch to <c>"direct"</c>
+    /// today (#220).</b> It works under <c>"local"</c>, where a real database resource sits behind
+    /// it; under <c>"direct"</c> the resource is a connection string with nothing to start, nothing
+    /// publishes a state for it, and the consumer waits for the life of the run. That is the one
+    /// place this method's own promise — the same AppHost code under either source — is not kept, so
+    /// it is named here rather than left to be discovered. Leave the wait off a backing service
+    /// anyone might point at an instance they already run, until that is fixed.
+    /// </para>
+    /// <para>
     /// Which of a consumer's configuration actually reaches it still depends on that consumer's own
     /// source, and <see cref="ServiceConfigurationExtensions.Configure{T}"/> is what decides:
     /// <c>WithReference</c> is skipped with a warning for a <c>"kubernetes"</c>-sourced service,
@@ -233,7 +242,8 @@ public static class BackingServiceBuilderExtensions
             + $"AddDatabase names them separately: 'AddDatabase(\"{name}\", \"orders\")' is a resource called "
             + $"'{name}' holding a database called 'orders'. Where the resource is not yours to rename, return "
             + $"one that forwards it: 'builder.AddConnectionString(\"{name}\", ReferenceExpression.Create($\"{{theResource}}\"))' "
-            + "— at the cost of a consumer's WaitFor, since a connection-string resource has nothing to start.");
+            + "— but do not WaitFor a backing service resolved that way, because nothing publishes a state for it "
+            + "and the wait never resolves (#220).");
 
     /// <summary>
     /// The error for a <c>source</c> this package does not recognize.
