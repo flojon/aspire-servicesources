@@ -677,12 +677,43 @@ public class DeveloperConfigurationTests
     }
 
     /// <remarks>
-    /// Two candidates in one file, which the message has to choose between. The closest one wins,
-    /// and an exact tie is broken by the key itself, so the message names the same key on every run
-    /// rather than whichever the configuration provider happened to enumerate first.
+    /// Two candidates in one file, which the message has to choose between. <c>service</c> is one
+    /// edit away — a dropped letter — and <c>servcs</c> is two, so the nearer one wins.
     /// </remarks>
     [Fact]
     public void ResolveService_FileCarriesTwoMisspellingsOfServices_NamesTheClosestOne()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """
+            {
+              "servcs": { "orders": { "source": "url" } },
+              "service": { "orders": { "source": "local" } }
+            }
+            """);
+
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.Contains("'service'", ex.Message);
+        Assert.DoesNotContain("'servcs'", ex.Message);
+    }
+
+    /// <summary>
+    /// Candidates the same distance away are separated by the key itself, so the message names the
+    /// same one on every run rather than whichever the configuration provider enumerated first.
+    /// </summary>
+    /// <remarks>
+    /// These two used to be one and two edits apart, which is what the test above was written
+    /// around. Charging a swapped pair one edit rather than two — the change that lets a transposed
+    /// <c>path</c> or <c>port</c> be recognised at all — makes <c>serivces</c> a one-edit
+    /// misspelling too, so the pair became a genuine tie and the tie-break is what decides it.
+    /// Ordinally <c>serivces</c> comes first, its <c>i</c> against the other's <c>v</c>.
+    /// </remarks>
+    [Fact]
+    public void ResolveService_FileCarriesTwoEquallyCloseMisspellings_NamesTheSameOneEveryRun()
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
@@ -698,7 +729,6 @@ public class DeveloperConfigurationTests
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
 
-        Assert.Contains("'service'", ex.Message);
-        Assert.DoesNotContain("'serivces'", ex.Message);
+        Assert.Contains("'serivces'", ex.Message);
     }
 }
