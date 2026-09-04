@@ -85,16 +85,16 @@ internal static class BackingServiceConfigAudit
 
                 builder.Eventing.Subscribe<BeforeStartEvent>((@event, _) =>
                 {
-                    var warnings = ServiceSourcesWarnings.For(builder);
-
-                    Report(builder, Snapshot(), warnings);
-
-                    // Flushed here rather than left to the warnings class's own BeforeStartEvent
-                    // handler, which may already have run: Aspire dispatches handlers for one event
-                    // in subscription order with no way to ask to go last. Flush reports each entry
-                    // once, so the two paths cannot double-log — the same arrangement UrlSource
-                    // makes for a skip it records during the event.
-                    warnings.Flush(@event.Services);
+                    // ReportNow rather than Flush, and the distinction matters. This handler is
+                    // subscribed at the first AddBackingService, which is usually one of an
+                    // AppHost's first lines, so it tends to run before every other subscriber —
+                    // including UrlSource, which records a dropped wait during this same event and
+                    // needs it grouped with that service's earlier skipped Configure calls. A Flush
+                    // here would report those calls first and leave the dropped wait to arrive as a
+                    // second message, undoing the ordering UrlSource arranges deliberately.
+                    // Reporting only what this audit produced leaves everything else outstanding for
+                    // whoever owns it.
+                    ServiceSourcesWarnings.For(builder).ReportNow(@event.Services, Report(builder, Snapshot()));
 
                     return Task.CompletedTask;
                 });
@@ -111,50 +111,50 @@ internal static class BackingServiceConfigAudit
     }
 
     /// <summary>
-    /// Adds a warning for whichever of the two shapes this AppHost has, if either.
+    /// The warnings this AppHost's backing-service configuration has earned, if any.
     /// </summary>
     /// <remarks>
-    /// They are mutually exclusive by construction: an orphaned entry means the section bound
-    /// something, and the root-key check only asks about a section that bound nothing.
+    /// The two checks are independent, and were briefly written as if they excluded each other —
+    /// the root-key check gated on the bound section being empty. That section is the <em>merged</em>
+    /// view across every configuration layer, so a single environment variable setting one entry
+    /// suppressed the report that the developer's whole file was going unread. Whether the file's
+    /// root key is a typo is a property of the file alone, and no other layer has a root key to
+    /// answer it with, so it is asked unconditionally — the lookup returns nothing when the file has
+    /// the key, has nothing resembling it, or is not there.
+    /// <para>
+    /// Both are reached only with at least one <c>AddBackingService</c> call behind them, since
+    /// nothing else subscribes this handler. An AppHost that adds no backing services never hears
+    /// about the section it is not using.
+    /// </para>
     /// </remarks>
-    private static void Report(
-        IDistributedApplicationBuilder builder,
-        HashSet<string> declared,
-        ServiceSourcesWarnings warnings)
+    private static IReadOnlyList<string> Report(IDistributedApplicationBuilder builder, HashSet<string> declared)
     {
-        var configured = ServiceSourcesConfigCache.BackingServicesFor(builder);
+        var reasons = new List<string>();
 
-        if (configured.Count == 0)
+        if (DeveloperConfigFileSource.NearMissForBackingServicesKey(builder) is { } nearMiss)
         {
-            // Only reached with at least one AddBackingService call behind it, since nothing else
-            // subscribes this handler. An AppHost that adds no backing services never hears about
-            // the section it is not using.
-            var nearMiss = DeveloperConfigFileSource.NearMissForBackingServicesKey(builder);
-
-            if (nearMiss is not null)
-            {
-                warnings.AddWarning(MisspelledRootKeyReason(builder, nearMiss));
-            }
-
-            return;
+            reasons.Add(MisspelledRootKeyReason(builder, nearMiss));
         }
 
         // Ordinal ordering so a file with several orphans names them in the same order every run,
         // rather than whichever order the providers merged them in.
-        var orphans = configured.Keys
+        var orphans = ServiceSourcesConfigCache.BackingServicesFor(builder).Keys
             .Where(key => !declared.Contains(key))
             .OrderBy(key => key, StringComparer.Ordinal)
             .ToArray();
 
         if (orphans.Length > 0)
         {
-            warnings.AddWarning(OrphanedEntriesReason(orphans, declared));
+            reasons.Add(OrphanedEntriesReason(orphans, declared));
         }
+
+        return reasons;
     }
 
     /// <summary>
     /// Explains entries nobody read, in terms of what they cost: not the absence of a setting, but a
-    /// backing service that started locally when the developer was pointing the AppHost away from it.
+    /// backing service resolved from the AppHost's own factory when the developer was pointing it
+    /// somewhere else.
     /// </summary>
     /// <remarks>
     /// One message for all of them rather than one each, which is the rule the warnings channel
@@ -180,10 +180,11 @@ internal static class BackingServiceConfigAudit
         return $"Backing service configuration that nothing read: {string.Join(", ", described)}. "
             + $"No AddBackingService() call names {(orphans.Count == 1 ? "it" : "them")}, so "
             + $"{(orphans.Count == 1 ? "the entry was" : "the entries were")} never looked up, and each backing "
-            + "service they were meant to configure fell back to its 'local' source and started an instance of its "
-            + $"own. This AppHost adds: {string.Join(", ", candidates.Select(name => $"'{name}'"))}. Correct the key "
-            + $"under \"{FileBackingServicesKey}\" in '{DeveloperConfiguration.FileName}', or wherever a higher "
-            + "layer set it, or remove the entry if it is deliberately unused.";
+            + "service they were meant to configure resolved to its 'local' source instead — running from the "
+            + "factory this AppHost supplies rather than from the entry. This AppHost adds: "
+            + $"{string.Join(", ", candidates.Select(name => $"'{name}'"))}. Correct the key under "
+            + $"\"{DeveloperConfigFileSource.FileBackingServicesKey}\" in '{DeveloperConfiguration.FileName}', or "
+            + "wherever a higher layer set it, or remove the entry if it is deliberately unused.";
     }
 
     /// <summary>
@@ -196,10 +197,8 @@ internal static class BackingServiceConfigAudit
     /// </remarks>
     private static string MisspelledRootKeyReason(IDistributedApplicationBuilder builder, string nearMiss) =>
         $"'{Path.Combine(builder.AppHostDirectory, DeveloperConfiguration.FileName)}' has a top-level key "
-        + $"'{nearMiss}', and no '{FileBackingServicesKey}' key. Did you mean '{FileBackingServicesKey}'? Nothing "
-        + "read it, so every backing service this AppHost adds fell back to its 'local' source and started an "
-        + "instance of its own.";
-
-    /// <summary>The file's own root key for these entries, as a developer writes it.</summary>
-    private const string FileBackingServicesKey = "backingServices";
+        + $"'{nearMiss}', and no '{DeveloperConfigFileSource.FileBackingServicesKey}' key. Did you mean "
+        + $"'{DeveloperConfigFileSource.FileBackingServicesKey}'? Nothing read it, so nothing in it configured "
+        + "anything — every backing service this AppHost adds takes its source from elsewhere, and any that has "
+        + "no source elsewhere resolves to 'local', running from the factory this AppHost supplies.";
 }

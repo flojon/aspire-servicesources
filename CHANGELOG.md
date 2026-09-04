@@ -149,7 +149,9 @@ nothing will fail to build to warn you.
   service called `orders-db` would give a consumer `ConnectionStrings__orders` locally and
   `ConnectionStrings__orders-db` under `"direct"`, moving the key the app reads when the developer
   switches, with only the app to report it. `AddDatabase("orders-db", "orders")` names the resource
-  and the database separately; casing is not a difference, since a configuration key folds case.
+  and the database separately. Casing counts: .NET folds it when reading configuration, but the
+  environment variable itself does not, and this package runs JavaScript and Java services, where
+  `process.env` and `System.getenv` are case-sensitive.
 
   A consumer that needs a particular key can still pin it from its own side —
   `WithReference(ordersDb, "OrdersDb")` gives `ConnectionStrings__OrdersDb` under every source. That

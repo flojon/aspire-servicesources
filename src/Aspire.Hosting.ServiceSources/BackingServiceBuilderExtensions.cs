@@ -72,8 +72,9 @@ public static class BackingServiceBuilderExtensions
     /// connection string's value and nothing else, which is the property this method exists to
     /// provide; named differently, it also moves the key the app reads, and the app is what reports
     /// that — by starting and finding no connection string. <c>AddDatabase("orders-db", "orders")</c>
-    /// names the resource and the database separately where the two want different names, and the
-    /// comparison folds case, since a configuration key does.
+    /// names the resource and the database separately where the two want different names. Casing
+    /// counts: .NET folds it when reading configuration, but the environment variable itself does
+    /// not, and a JavaScript or Java service reads that variable case-sensitively.
     /// </para>
     /// <para>
     /// A consumer can still choose a different key deliberately, by passing <c>WithReference</c> a
@@ -170,10 +171,14 @@ public static class BackingServiceBuilderExtensions
                     + "return the resource that carries the connection string, as "
                     + "'() => builder.AddPostgres(\"pg\").AddDatabase(\"orders-db\", \"orders\")' does.");
 
-            // OrdinalIgnoreCase, because the name is only interesting as a configuration key and
-            // those fold case: a factory returning 'Orders-DB' for 'orders-db' produces the key the
-            // app already reads, so refusing it would refuse something that works.
-            if (!string.Equals(resource.Resource.Name, name, StringComparison.OrdinalIgnoreCase))
+            // Ordinal, so casing counts. It is tempting to fold it — .NET's IConfiguration does, so
+            // a .NET consumer reads 'ConnectionStrings__Orders-DB' and 'ConnectionStrings__orders-db'
+            // alike — but the variable itself is what differs, and this package runs JavaScript and
+            // Java services too, where process.env and System.getenv are both case-sensitive. A
+            // folded comparison would let exactly the key move this check exists to prevent through,
+            // narrowed to casing and therefore harder to see. Both names are literals in the
+            // AppHost's own code, so requiring them to agree exactly costs the author nothing.
+            if (!string.Equals(resource.Resource.Name, name, StringComparison.Ordinal))
             {
                 throw MisnamedLocalResourceError(name, resource.Resource.Name);
             }

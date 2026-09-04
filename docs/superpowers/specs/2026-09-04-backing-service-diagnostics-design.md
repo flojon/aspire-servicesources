@@ -45,9 +45,12 @@ Making the key stable ourselves, by surfacing the factory's resource under the b
 name, was rejected: it needs a wrapper resource or a rename, which reintroduces the facade #62
 deliberately removed.
 
-The comparison is `OrdinalIgnoreCase`. Configuration keys fold case, so a factory returning
-`Orders-Db` for `orders-db` produces a key that is genuinely the same key, and rejecting it would
-be rejecting something that works.
+The comparison is `Ordinal`. It was written as `OrdinalIgnoreCase` on the reasoning that
+configuration keys fold case, which is true of .NET's `IConfiguration` and of nothing else in reach:
+this package runs JavaScript and Java services, and `process.env` and `System.getenv` are both
+case-sensitive. A folded comparison would admit exactly the key move this check exists to prevent,
+narrowed to casing and therefore harder to see. Both names are literals in the AppHost's own code,
+so requiring them to agree exactly costs the author nothing.
 
 The check runs only in the `"local"` branch, because only that branch invokes the factory. That is
 the right coverage rather than a gap: `"local"` is what an AppHost nobody has configured resolves
@@ -174,10 +177,19 @@ private sealed record Skip(string ServiceName, string Source, string Capability)
 private sealed record Message(string Text) : Entry;
 ```
 
-One list keeps `_reported` a single index into it, which is what makes `Flush` report each entry
-exactly once however many handlers call it. `Describe` groups the `Skip`s by `(service, source)` as
-it does today and passes `Message` texts through in the order they were added; skips are described
-first, so the grouping is unaffected by interleaving.
+Each entry carries a `Reported` flag, which is what makes reporting exactly-once however many
+handlers ask for it. A single "how far have we got" index would do for `Flush` alone, and does not
+survive `ReportNow` below, which has to report one entry while leaving the entries around it
+outstanding. `Describe` groups the `Skip`s by `(service, source)` as it does today and passes
+`Message` texts through in the order they were added; skips are described first, so the grouping is
+unaffected by interleaving.
+
+`ReportNow(services, messages)` reports just its caller's messages and leaves everything else
+buffered. The audit needs it rather than `Flush`: its handler is subscribed at the first
+`AddBackingService`, usually one of an AppHost's first lines, so it runs before `UrlSource` records
+the dropped wait that belongs in the same grouped message as that service's earlier skipped
+`Configure` calls. A `Flush` there empties the buffer in between and splits one message into two,
+undoing the subscription ordering `UrlSource` arranges on purpose.
 
 The class is renamed `ServiceSourcesWarnings`. It is internal, the rename is mechanical across the
 eight files that name it — five in `src`, three in `test` — and "service configuration" stops being
@@ -190,11 +202,15 @@ table actually kept.
 
 **The audit.** `AddBackingService` subscribes once per builder to `BeforeStartEvent`. The handler
 diffs the configured entry keys, from `ServiceSourcesConfigCache.BackingServicesFor(builder)`,
-against the declared names under `OrdinalIgnoreCase`, adds a message for anything left over, and
-then calls `warnings.Flush(@event.Services)` itself. Flushing here rather than leaving it to the
-warnings class's own handler is the pattern `UrlSource` already establishes: Aspire dispatches
-handlers for one event in subscription order with no way to ask to go last, and `Flush` reports each
-entry once, so whichever handler runs second reports what the first had not seen.
+against the declared names under `OrdinalIgnoreCase` — the entry key is a configuration key, which
+does fold case, unlike the environment variable in #200 — and reports a message for anything left
+over through `ReportNow`.
+
+The root-key check is asked unconditionally rather than gated on the bound section being empty. That
+section is the *merged* view across every configuration layer, so gating on it meant a single
+environment variable setting one entry suppressed the report that the developer's whole file was
+going unread. The two questions are independent, and the near-miss lookup already answers with
+nothing when the file has the key, has nothing resembling it, or is not there.
 
 One message for all orphans rather than one each, which is the anti-noise rule the class already
 follows for skips. It names each orphaned key, says what happened as a consequence — the backing
@@ -206,10 +222,11 @@ the root keys it saw and keeps them on the per-builder `Registration`. `NearMiss
 becomes a lookup over those captured keys, parameterised by which file key is being asked about, and
 `NothingConfiguredError`'s existing use of it stops paying for a second parse of the file.
 
-The audit asks for a `backingServices` near miss only when the section bound empty *and* at least
-one `AddBackingService()` call was made — with no calls there is nothing the key would have fed.
-Cross-contamination between the two root keys is not possible: `services` and `backingServices` are
-seven edits apart against a `NearMiss.MaxEdits` tolerance of two.
+The audit asks for a `backingServices` near miss whenever at least one `AddBackingService()` call was
+made — with no calls there is nothing the key would have fed, and an AppHost that uses no backing
+services should never hear about the section. Cross-contamination between the two root keys is not
+possible: `services` and `backingServices` are seven edits apart against a `NearMiss.MaxEdits`
+tolerance of two.
 
 ## Testing
 
@@ -222,15 +239,19 @@ Every part is covered by unit tests in the existing suites, following the arrang
   literals rather than cases that survive a rule.
 - **#200.** `BackingServiceConsumerTests.LocalFactoryNamingItsResourceDifferently_MovesTheVariable`
   pins the behaviour being removed and is replaced by a test that the call throws, naming both
-  names, plus one that a factory whose resource differs only by case is accepted. The acceptance
+  names, plus one that a factory whose resource differs only by *case* is refused too — the row that
+  would have passed under the folded comparison this design first specified. The acceptance
   criterion itself — the same key under `"local"` and `"direct"` — is already pinned by
   `SwitchingTheBackingServiceToDirect_ChangesOnlyTheValue` and its sibling, so it needs no new test;
   what it lacked was the rule that keeps it true.
 - **#206.** An orphaned entry warns and suggests the declared name it resembles; an entry matching a
-  declared name in any casing does not; a misspelled root key warns when the section bound empty and
-  a call was made; the same file warns nothing when no `AddBackingService()` call exists; and a
-  healthy all-local AppHost produces no warning at all, which is the regression that would matter
-  most.
+  declared name in any casing does not; a misspelled root key warns, including when another
+  configuration layer has contributed an entry of its own; the same file warns nothing when no
+  `AddBackingService()` call exists; and a healthy all-local AppHost produces no warning at all,
+  which is the regression that would matter most.
+- **The channel.** `UrlConsumerWaitTests.DroppedWait_StillGroupsWhenTheAppHostAlsoAddsABackingService`
+  pins that adding a backing service does not split the url service's one grouped warning into two.
+  Verified by reverting the audit to `Flush` and watching it fail with exactly two messages.
 
 ## Delivery
 

@@ -43,7 +43,7 @@ internal sealed class DirectBackingServiceSource : IBackingServiceSource
         var template = ConnectionStringTemplate.Parse(config.Direct.ConnectionString, name, configKey);
 
         // Parsed before this check rather than after, so that a malformed placeholder is reported as
-        // malformed. Telling a developer who wrote `{secret:orders-creds}` that secrets are
+        // malformed. Telling a developer who wrote `${secret:orders-creds}` that secrets are
         // unsupported would send them to work around a limit while their real mistake — the missing
         // key — went unmentioned.
         var text = new System.Text.StringBuilder();

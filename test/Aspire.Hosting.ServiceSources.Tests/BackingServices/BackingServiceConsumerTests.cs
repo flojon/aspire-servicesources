@@ -167,11 +167,24 @@ public class BackingServiceConsumerTests
     }
 
     /// <summary>
-    /// A resource whose name differs only by case is accepted, because configuration keys fold case
-    /// and it is therefore the same key.
+    /// A resource whose name differs only by case is refused too, because the environment variable
+    /// differs by case and not every consumer folds it.
     /// </summary>
+    /// <remarks>
+    /// The comparison was written as <c>OrdinalIgnoreCase</c> on the grounds that a configuration
+    /// key folds case, which is true of .NET's <c>IConfiguration</c> and of nothing else here. This
+    /// package runs JavaScript and Java services as well, and <c>process.env</c> and
+    /// <c>System.getenv</c> are both case-sensitive — so a factory named <c>Orders-DB</c> behind
+    /// <c>orders-db</c> hands a Node app <c>ConnectionStrings__Orders-DB</c> under <c>"local"</c>
+    /// and <c>ConnectionStrings__orders-db</c> under <c>"direct"</c>, which is exactly the silent
+    /// key move #200 exists to prevent, narrowed to casing.
+    /// <para>
+    /// Both names are literals in the AppHost's own code, so requiring them to agree exactly costs
+    /// the author nothing.
+    /// </para>
+    /// </remarks>
     [Fact]
-    public async Task LocalFactoryNamingItsResourceInAnotherCasing_IsAccepted()
+    public void LocalFactoryNamingItsResourceInAnotherCasing_IsRefused()
     {
         var builder = CreateBuilder("""
             {
@@ -180,17 +193,11 @@ public class BackingServiceConsumerTests
             }
             """);
 
-        var db = builder.AddBackingService(
-            "orders-db",
-            () => builder.AddConnectionString("Orders-DB", ReferenceExpression.Create($"Host=localhost")));
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => builder.AddBackingService(
+                "orders-db",
+                () => builder.AddConnectionString("Orders-DB", ReferenceExpression.Create($"Host=localhost"))));
 
-        var orders = builder.AddService("orders");
-        var beforeTheReference = EnvironmentCallbackCount(orders.Resource);
-
-        orders.Configure<IResourceWithEnvironment>(service => service.WithReference(db));
-
-        var environment = await MaterializeEnvironmentAsync(orders.Resource, beforeTheReference);
-
-        Assert.Contains("ConnectionStrings__Orders-DB", environment.Keys);
+        Assert.Contains("'Orders-DB'", ex.Message);
     }
 }

@@ -1,4 +1,5 @@
 using Aspire.Hosting.ApplicationModel;
+using Microsoft.Extensions.Configuration;
 
 namespace Aspire.Hosting.ServiceSources.Tests.BackingServices;
 
@@ -160,6 +161,36 @@ public class BackingServiceConfigAuditTests
 
         Assert.Contains("backingSerivces", warning);
         Assert.Contains("backingServices", warning);
+    }
+
+    /// <summary>
+    /// A misspelled root key is still reported when another configuration layer has contributed an
+    /// entry of its own.
+    /// </summary>
+    /// <remarks>
+    /// The check used to be gated on the bound section being empty, which is the <em>merged</em>
+    /// view across every layer — so a single environment variable setting one entry hid the fact
+    /// that the developer's whole file was going unread. The two questions are independent: whether
+    /// the file's root key is a typo is a property of the file alone, and no other layer has a root
+    /// key to answer it with.
+    /// </remarks>
+    [Fact]
+    public async Task MisspelledRootKeyWithAnEntryFromAnotherLayer_IsStillReported()
+    {
+        var builder = CreateBuilder("""
+            { "backingSerivces": { "orders-db": { "source": "direct" } } }
+            """);
+
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ServiceSources:BackingServices:orders-db:Source"] = "local",
+        });
+
+        builder.AddBackingService("orders-db", Factory(builder, "orders-db"));
+
+        var warning = Assert.Single(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+
+        Assert.Contains("backingSerivces", warning);
     }
 
     /// <summary>

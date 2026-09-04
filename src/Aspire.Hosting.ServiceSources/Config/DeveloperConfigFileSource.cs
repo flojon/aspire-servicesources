@@ -30,7 +30,13 @@ internal static class DeveloperConfigFileSource
     private const string FileServicesKey = "services";
 
     /// <summary>The same, for the backing services a service connects to.</summary>
-    private const string FileBackingServicesKey = "backingServices";
+    /// <remarks>
+    /// Internal rather than private because a message that tells a developer which key to write has
+    /// to name the key that is actually read. A second copy of the spelling somewhere else is a
+    /// copy that can drift from this one, and the drift would be invisible: the section would go on
+    /// being read under this spelling while the advice named the other.
+    /// </remarks>
+    internal const string FileBackingServicesKey = "backingServices";
 
     /// <summary>
     /// Every subtree of the file that crosses into the AppHost's configuration, and the key it

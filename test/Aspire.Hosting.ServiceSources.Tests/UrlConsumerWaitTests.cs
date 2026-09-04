@@ -318,6 +318,36 @@ public class UrlConsumerWaitTests
     }
 
     /// <summary>
+    /// The grouping above survives an AppHost that also adds a backing service, whose audit
+    /// subscribes to the same event ahead of everything else.
+    /// </summary>
+    /// <remarks>
+    /// <c>AddBackingService</c> is usually one of an AppHost's first lines, so the backing-service
+    /// audit's <c>BeforeStartEvent</c> handler is usually the first to run. It has something of its
+    /// own to report during the event, and reporting it by flushing the whole channel emptied the
+    /// buffer before the dropped wait above was recorded — splitting one grouped message into two.
+    /// <c>ServiceSourcesWarnings.ReportNow</c> is what keeps the two concerns apart; this pins that
+    /// they stay apart.
+    /// </remarks>
+    [Fact]
+    public async Task DroppedWait_StillGroupsWhenTheAppHostAlsoAddsABackingService()
+    {
+        var builder = TestHelpers.CreateBuilderThatCanStart(AppHostDirectory("url"));
+
+        builder.AddBackingService("orders-db", () => builder.AddConnectionString("orders-db"));
+
+        var inventory = builder.AddService("inventory")
+            .Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B"));
+        Consumer(builder, "worker").WaitFor(inventory);
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        var warning = Assert.Single(warnings);
+        Assert.Contains("2 calls", warning);
+        Assert.Contains("WaitFor from 'worker'", warning);
+    }
+
+    /// <summary>
     /// The ordering above cannot be relied on in every AppHost: a skip recorded before any
     /// <c>"url"</c> service exists registers the warnings' flush first, and it then runs before the
     /// wait is dropped. The drop still has to be reported — once — which is why the flush reports

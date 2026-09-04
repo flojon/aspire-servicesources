@@ -37,23 +37,29 @@ internal sealed class ServiceSourcesWarnings
 
     private readonly List<Entry> _entries = [];
 
-    /// <summary>
-    /// How much of <see cref="_entries"/> <see cref="Flush"/> has already reported. A count rather
-    /// than a per-entry flag because the list is only ever appended to.
-    /// </summary>
-    private int _reported;
-
     private bool _subscribed;
 
     /// <summary>One thing worth telling the developer about.</summary>
     /// <remarks>
     /// Two shapes rather than one, in one list. A <see cref="Skip"/> is a record that is described
     /// on the way out, because several of them collapse into a single message; a
-    /// <see cref="Message"/> is already the sentence. Keeping them in the same list is what lets
-    /// <see cref="_reported"/> stay a single index into it, which is the whole of the report-once
-    /// guarantee <see cref="Flush"/> makes.
+    /// <see cref="Message"/> is already the sentence.
     /// </remarks>
-    private abstract record Entry;
+    private abstract record Entry
+    {
+        /// <summary>
+        /// Whether this entry has been written to the log, which is what makes reporting
+        /// exactly-once.
+        /// </summary>
+        /// <remarks>
+        /// A flag per entry rather than a count of how far <see cref="Flush"/> has got. The count
+        /// was equivalent while flushing meant "everything outstanding", and stopped being so once
+        /// <see cref="ReportNow"/> existed: reporting one entry out of order has to leave the
+        /// entries around it outstanding, and an index cannot express that. See that method for why
+        /// it is needed.
+        /// </remarks>
+        public bool Reported { get; set; }
+    }
 
     private sealed record Skip(string ServiceName, string Source, string Capability) : Entry;
 
@@ -170,10 +176,57 @@ internal sealed class ServiceSourcesWarnings
 
         lock (_gate)
         {
-            messages = Describe(_entries.Skip(_reported));
-            _reported = _entries.Count;
+            var pending = _entries.Where(entry => !entry.Reported).ToArray();
+
+            foreach (var entry in pending)
+            {
+                entry.Reported = true;
+            }
+
+            messages = Describe(pending);
         }
 
+        Write(services, messages);
+    }
+
+    /// <summary>
+    /// Reports <paramref name="messages"/> immediately, leaving everything else buffered for
+    /// whoever flushes next.
+    /// </summary>
+    /// <remarks>
+    /// For a caller that has something to say during <c>BeforeStartEvent</c> but has no claim on
+    /// anything else outstanding. <see cref="Flush"/> would report the lot, and that is destructive
+    /// this early in the event: a skip recorded <i>later</i> in the same event — <see
+    /// cref="Sources.UrlSource"/> drops a consumer's wait on a <c>"url"</c> service once the whole
+    /// model is visible — belongs in the same grouped message as that service's skipped
+    /// <c>Configure</c> calls, and a flush in between splits it into two. <see cref="Sources.UrlSource"/>
+    /// takes care to subscribe ahead of this class's own flush handler for exactly that reason, and
+    /// a handler that flushed everything before it ran would undo the arrangement.
+    /// <para>
+    /// The messages are recorded as already reported rather than not recorded at all, so that
+    /// <see cref="Messages"/> still shows them and a later <see cref="Flush"/> does not repeat them.
+    /// </para>
+    /// </remarks>
+    public void ReportNow(IServiceProvider services, IReadOnlyList<string> messages)
+    {
+        if (messages.Count == 0)
+        {
+            return;
+        }
+
+        lock (_gate)
+        {
+            foreach (var message in messages)
+            {
+                _entries.Add(new Message(message) { Reported = true });
+            }
+        }
+
+        Write(services, messages);
+    }
+
+    private static void Write(IServiceProvider services, IReadOnlyList<string> messages)
+    {
         if (messages.Count == 0)
         {
             return;

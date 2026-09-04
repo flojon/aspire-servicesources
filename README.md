@@ -1451,8 +1451,9 @@ builder.AddBackingService("orders-db", () => builder.AddPostgres("pg").AddDataba
 ```
 
 `AddDatabase("orders-db", "orders")` names the Aspire resource and the actual database separately,
-which is what to reach for when the two want different names. Casing does not count as a
-difference, since a configuration key folds case.
+which is what to reach for when the two want different names. **Casing counts.** .NET folds it when
+reading configuration, so a .NET consumer would not notice — but the environment variable itself
+differs, and a JavaScript or Java service reads `process.env` / `System.getenv` case-sensitively.
 
 This is a rule rather than advice because the alternative remedy is not available everywhere. In
 C# a consumer can pin the key from its own side:
