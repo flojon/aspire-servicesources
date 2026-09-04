@@ -334,6 +334,32 @@ nothing will fail to build to warn you.
 
 ### Fixed
 
+- **A `project` that points outside the service's checkout is refused rather than built** ([#222]).
+  `project` was the one path a catalog names that was never confined to the checkout it is read
+  against. `Path.Combine` gives no confinement of its own — it discards the checkout root outright
+  for a rooted value, and does nothing about `..` — so `project: /home/dev/other/Evil.csproj` or
+  `project: ../../../Evil.csproj` resolved to a file outside the clone, which the AppHost then
+  handed to `AddProject`, where MSBuild evaluates it: a `.targets` import or an inline task away
+  from running code the catalog never described. Both the eager path and the deferred registration
+  did the same bare combine; both now go through the check `prepare.command` and `java.jarPath` have
+  always used, in one place they share, so the two cannot come to different conclusions about the
+  same value. An absolute path is reported as absolute and a climbing one as pointing outside the
+  repository, and neither reaches MSBuild.
+
+  Consistency and defence in depth rather than a boundary that moves: a catalog that can set
+  `project` can already set `prepare.command`, and `kind: dotnet` builds the checkout's own code
+  regardless — nobody crosses a line here who was not already across it. What is fixed is that the
+  rule the codebase states everywhere else no longer has a hole in it, and that the hole was on
+  `dotnet`, the kind most catalogs use. Nothing that works today changes: a `project` resolving
+  inside its checkout keeps resolving to the same file.
+
+  Two smaller things fall out of using the shared check. A rejected path now says it was rejected
+  for leaving the checkout, where the old message claimed the file *was not found under* the
+  checkout — untrue on precisely these inputs, since it was never looked for there. And `project`
+  accepts Windows separators on Linux and macOS the way every other confined path does, so
+  `project: src\Orders.Api\Orders.Api.csproj` resolves instead of becoming one oddly-named path
+  reported as missing.
+
 - **A field misspelled at a service entry's root now names the field it was reaching for**
   ([#182]). Spelled correctly, a field written flat at the entry root is walked through the move
   into its block: *'path' is not a valid key here. It belongs in the 'local' block: `"orders": {
@@ -1007,6 +1033,7 @@ Targets `net10.0`.
 [#207]: https://github.com/flojon/aspire-servicesources/issues/207
 [#209]: https://github.com/flojon/aspire-servicesources/issues/209
 [#220]: https://github.com/flojon/aspire-servicesources/issues/220
+[#222]: https://github.com/flojon/aspire-servicesources/issues/222
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
