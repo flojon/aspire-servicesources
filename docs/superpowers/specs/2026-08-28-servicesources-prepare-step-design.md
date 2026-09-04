@@ -70,8 +70,8 @@ own text, which is why they are recorded here rather than left implicit.
    and normalizes separators; it performs no `File.Exists`. Since #63/#197 the kind does make
    existence checks against the working tree — `JavaPlan.RequireCheckout`, reached from `Validate`
    on the eager path and from `ValidateCheckout` on the deferred one, requires `workingDirectory` to
-   exist and requires the wrapper script for the Maven and Gradle run modes. The jar mode is exactly
-   the branch it returns early from, since `java -jar` runs no wrapper. So the motivating failure is
+   exist under every run mode, and then requires the wrapper script — which is the check the jar mode
+   is exactly the early return from, since `java -jar` runs no wrapper. So the motivating failure is
    still `java -jar` failing at run time rather than the composition-time existence check #118
    describes — but there is now a seam where such a check would go, and a prepare step has to have
    run before it.
@@ -112,9 +112,10 @@ own text, which is why they are recorded here rather than left implicit.
    have different reporting surfaces available, so this design uses each one's best rather than
    reducing both to the console.
 
-7. **`IGitClient` cannot report the checked-out commit.** It exposes `Clone`, `Checkout`, `Fetch`,
-   `HasUncommittedChanges`, `IsRefCheckedOut` and `GetOriginUrl`. Keying a completion marker on the
-   resolved commit requires one new member.
+7. **`IGitClient` cannot report the checked-out commit.** It exposes `EnsureAvailable`, `Clone`,
+   `Checkout`, `Fetch`, `HasUncommittedChanges`, `IsRefCheckedOut` and `GetOriginUrl`, and nothing
+   that answers "which commit is this". Keying a completion marker on the resolved commit requires
+   one new member.
 
 8. **Both files now reject unknown keys — one level deep.** `ServiceCatalogLoader` derives its
    expected sets from the metadata types by reflection and rejects unknown keys at the root, at the
@@ -233,9 +234,18 @@ It also lands one level deeper than anything that file holds today, and it carri
 finding 8, `DeveloperConfigShape` and `DeveloperConfigValidator` therefore both need a level: the
 shape to describe a block field that is itself a block, the validator to walk into it and to accept
 indexed children where a field's type is a collection rather than reporting them as "takes a value,
-not a block". That is a real cost this design adds to code it did not write — shared with the
-backing-service entry shape since #144/#199 — and it is the price of the typo rejection finding 8
-now gets for free. It should land with `prepare`, since nothing else needs it. Nothing here depends
+not a block".
+
+One trap comes with the level rather than with the walk. `DeveloperConfigShape` decides what is a
+block by asking whether the property's type `IsClass` and is not `string` — a test written where
+every candidate was a settings object, and one that `string[]` also passes. Derived a third time
+with the same predicate, `command` is classified as a nested block and reported with precisely the
+message this level is being added to stop it producing. The collection case has to be recognized
+ahead of the block case, in the shape as much as in the validator.
+
+That is a real cost this design adds to code it did not write — shared with the backing-service
+entry shape since #144/#199 — and it is the price of the typo rejection finding 8 now gets for
+free. It should land with `prepare`, since nothing else needs it. Nothing here depends
 on the wording of the validator's messages, which have moved on since (#182/#194, #205).
 
 The developer's block is merged over the catalog's **per field**, with one exception: `mode`
@@ -418,6 +428,25 @@ and a `node`/`bun` service that cannot promise a `package.json` without looking 
 decline deferral rather than register an app with no installer. Each of those prepares eagerly, and
 nothing in [`path` checkouts](#path-checkouts) interacts with deferral at all.
 
+That list is longer than it looks, because a warm checkout is not a corner: `ShouldDefer` is
+`IsColdManagedCheckout` — no `path` override, and no directory at the managed root — so a checkout
+that exists resolves eagerly, and a checkout exists from the second start onwards. **The deferred
+path therefore carries a prepare step exactly once per checkout, and the eager path carries every
+repeat** — including every re-run this design's own modes exist to ask for: an `oncePerCommit` step
+running again because `ref` moved, and every start of an `always` step.
+
+Both halves of that are worth stating, and they point in opposite directions. The one run deferral
+covers is the first, which is the cold clone, the empty `data/` and the four-minute import — the
+run whose progress most needs somewhere to go, and it gets the best surface there is. But the
+console presentation described under *Execution and output* is then the steady state rather than a
+fallback, which is why the question of whether `aspire run` buffers the AppHost's output has to be
+answered before the rest of the step is built rather than discovered afterwards.
+
+Deferral is also opt-in. `UseDeferredCheckout()` is off by default, so an AppHost that has not
+asked for it has no deferred path at all and finding 2 stands for it unamended: a prepare step that
+exits non-zero fails composition. #118's "failure is per-service" is delivered wherever the resource
+model can express it, and today that is a flag the developer turns on.
+
 #### Prepare steps are serial on the eager path and concurrent on the deferred one
 
 `DeferredCheckout.StartAll` launches one `Task.Run` per deferred service and awaits none of them,
@@ -443,9 +472,22 @@ excludes by name.
 
 What is guaranteed, and what the README must say:
 
-- **A service's prepare step never runs concurrently with itself.** A service resolves on exactly
-  one of the two paths, and has exactly one task on it. So the marker never has two writers, which
-  is the race that could actually corrupt state.
+- **A service's prepare step never runs concurrently with itself, within one AppHost.** A service
+  resolves on exactly one of the two paths and has exactly one task on it, so nothing this process
+  starts can race itself.
+
+  Two AppHosts are the case that rule does not reach, and this package already treats them as
+  real: `LocalGitCheckout` handles a clone that loses the race to a concurrent AppHost, and
+  `CheckoutBuildBarrier` exists for the same reason. Two `aspire run`s over one AppHost directory
+  resolve the same managed `repoRoot`, and therefore the same marker path — so both halves of the
+  guarantee are off there: two copies of the command can run in one working tree, and two writers
+  can reach one marker file. The marker half is ours and is answered here: it is written to a
+  temporary file in the same directory and renamed over the old one, so a reader sees the previous
+  record or the new one and never a half-written file, which is also what makes the "unreadable
+  marker runs rather than throws" rule a fallback rather than a routine. The command half is not
+  ours — it is the exposure a developer already has running two AppHosts against one checkout, and
+  the answer is the one this design gives everywhere else: a step that must not overlap takes its
+  own lock.
 - **Two services never prepare in the same directory.** Managed checkouts are per-service clones
   (see *Once per checkout, not once per repository*), so two managed services off one repository
   have two working trees. The one arrangement that shares a tree is two services pointed at one
@@ -457,14 +499,25 @@ What is guaranteed, and what the README must say:
 
 The residual cost is real and accepted: two expensive steps on one laptop contend for CPU, disk and
 memory where they would previously have queued. It is the same cost Aspire's concurrent resource
-launch already imposes on the builds those services run, and the remedy is the one this design
-points at everywhere else — the script owns the question. A step that genuinely must not overlap
-with another can take its own lock, which is the mutual-exclusion form of *Change detection belongs
-to the script*.
+launch already imposes on the builds those services run.
+
+Contention is not the whole of it, and the shared caches are where it stops being merely slow. A
+Maven local repository is not concurrency-safe — two `mvn` invocations resolving the same artifact
+into `~/.m2` can leave a partial download behind them, which is why Gradle and `mvnd` lock it —
+where NuGet's global packages folder and npm's cache are built to be written by several processes
+at once. This is the one hazard the decision above introduces rather than inherits: on the eager
+path those two steps queued. It is named here rather than fixed here, because a lock this design
+took would have to be a lock over a directory it does not own, and the remedy is the one this
+design points at everywhere else — the script owns the question. A step that genuinely must not
+overlap with another can take its own lock, which is the mutual-exclusion form of *Change detection
+belongs to the script*.
 
 ### Once-ness and the marker
 
-Marker file, written only on success. Where it lives depends on who owns the directory:
+Marker file, written only on success, and replaced by writing a temporary file beside it and
+renaming over the old one rather than by writing in place — see
+[Concurrency](#prepare-steps-are-serial-on-the-eager-path-and-concurrent-on-the-deferred-one) for
+the reason. Where it lives depends on who owns the directory:
 
 ```
 managed:  <repoRoot>/.git/servicesources-prepare.json
@@ -484,7 +537,9 @@ Inside `.git` deliberately. It is invisible to the service repository's `git sta
 mistaken for the developer's own file or accidentally committed, and it dies with the checkout — so a
 deleted-and-recloned checkout re-prepares even at the same commit, which a marker stored beside the
 checkout would get wrong. For a managed checkout `.git` is always a directory: `PrepareRepoRoot`
-refuses a linked worktree or a `--separate-git-dir` clone before ever getting here.
+takes a checkout as warm only when `.git` is one, and anything else falls through to
+`CloneIntoPlace`, which refuses a linked worktree and a `--separate-git-dir` clone by name before
+this step ever gets here.
 
 For a `path` checkout none of that is available, and the part that is would be unwelcome. `.git`
 is a *file* rather than a directory for a linked worktree and for a `--separate-git-dir` clone —
@@ -747,7 +802,9 @@ the service:
 On the eager path those lines go to the console rather than to a logger, because there is no logger
 yet (finding 6). This is the one part of the design carrying an unmeasured risk: whether `aspire run`
 buffers the AppHost's standard output, which would mute the stream during composition. It should be
-checked against a throwaway AppHost early in implementation. If it buffers, the fallback is to
+checked against a throwaway AppHost before the rest of the step is built — and it is not a rare
+path being hedged against: per *Deferred checkouts*, every re-run of every prepare step is eager, so
+this is what a developer sees on all but the first start. If it buffers, the fallback is to
 capture the output and emit a start line, a periodic "still running (Nm)" heartbeat, and the tail of
 the output on failure — same mechanism, different presentation.
 
@@ -758,7 +815,7 @@ and the service carries a state of its own while it runs — "Preparing", alongs
 that #131 publishes during the clone. That is what #118 asks for in the sentence it calls most likely
 to make or break the feature: a country-sized import has to read as an initialization phase rather
 than as an apparent hang. The deferred path delivers exactly that, and since #164 it is the path the
-motivating case is on.
+motivating case takes on the run that needs it — its first.
 
 ### Failure
 
@@ -775,9 +832,13 @@ behaviour; this design delivers it wherever the resource model can express it, a
 that during composition it cannot.
 
 A deferred failure is not confined to the dashboard, and needs nothing from this design to escape
-it. `ServiceStartupFailureNotices` (#150/#198) reads resource state at `BeforeStartEvent` and writes
-one line per service that is not running into the AppHost's own console, naming the service, the
-state reported for it, and the dashboard as the place that says why. It reads *state* rather than
+it. `ServiceStartupFailureNotices` (#150/#198) subscribes at `BeforeStartEvent` and then watches the
+notification stream until the application stops, writing one line into the AppHost's own console for
+each service reported as not running — naming the service, the state reported for it, and the
+dashboard as the place that says why. That it watches rather than reads a snapshot is what makes it
+reach this step at all: a prepare step that fails four minutes into a deferred start publishes its
+state long after composition returned, where a point-in-time read at `BeforeStartEvent` — taken
+before anything has started — would have seen nothing to report. And it reads *state* rather than
 any one failure path, so it already covers a prepare step that exits non-zero — and it settles the
 division of labour this design assumed: detail belongs to the resource's own log and state, while
 the terminal carries one line saying which service failed and where to look.
@@ -877,8 +938,15 @@ repository at all, so tracking the catalog's command is a questionable default t
 - **Serial on the eager path only.** A second eagerly-resolved service with a slow prepare step adds
   its full duration to startup, and parallelizing *there* would mean moving into the speculative
   phase, which finding 1 forbids. Deferred services prepare concurrently instead — faster, and the
-  accepted trade is that two expensive steps can contend for one machine. See
+  accepted trade is that two expensive steps contend for one machine and for whatever package
+  caches they share, one of which (`~/.m2`) is not safe to write from two processes at once. See
   [Concurrency](#prepare-steps-are-serial-on-the-eager-path-and-concurrent-on-the-deferred-one).
+- **The dashboard surface is first-run-only.** Deferral covers a cold managed checkout, so a
+  prepare step reaches the dashboard on the run that creates the checkout and nowhere else; every
+  re-run afterwards is eager and reports to the console. That is the right way round — the first
+  run is the expensive one — but it means the console presentation, and the buffering question
+  attached to it, is what a developer sees on all but one start. See
+  [Deferred checkouts](#deferred-checkouts).
 - **Duplicated work for two services off one repository.** Each has its own checkout, so each pays
   for its own prepare — twice the download, twice the disk. Correct rather than merely tolerable
   (see *Once per checkout, not once per repository*), but a developer running both halves of a
@@ -924,15 +992,18 @@ injection, which `LocalProjectSourceTests` already exercises with a fake. No tes
 process.
 
 The deferred path needs the same substitution one level further in, since it runs the step from
-`DeferredCheckout` rather than from `LocalProjectSource`. Whichever way that runner reaches it, both
-paths must share one implementation: the marker, the modes, the command resolution and the failure
-text are the same code called from two places, and the point of the tests below is that only *where*
-the step runs differs.
+`DeferredCheckout` rather than from `LocalProjectSource`. The route is already there: the per-service
+`Deferred` record carries the `IGitClient` this service resolved with, so a runner travels the same
+way and arrives beside it in `StartDeferredAsync`, substitutable by the same test that substitutes
+that client. However it gets there, both paths must share one implementation: the marker, the modes,
+the command resolution and the failure text are the same code called from two places, and the point
+of the tests below is that only *where* the step runs differs.
 
 - **Marker** — absent, runs; present and matching, skips; command changed, re-runs; commit changed,
   re-runs; platform variant changed, re-runs; written only on success, so a failed step re-runs;
   an unreadable or malformed marker runs rather than throws; a null commit from `GetHeadCommitSha`
-  runs rather than skips.
+  runs rather than skips; and the write goes through a temporary file and a rename, so a marker
+  left behind by an interrupted write is never a partial one.
 - **Modes** — `oncePerCommit` is the default when unspecified; `once` skips on a matching command
   even when the commit has moved, and re-runs when the command changes; `oncePerCommit` re-runs on a
   moved commit; `always` ignores a matching marker; `never` runs nothing and writes nothing.
@@ -973,7 +1044,8 @@ the step runs differs.
   a sequence of intermediate snapshots — a resource watch replays only the current one, which is
   what made the #189 tests flake.
 - **Concurrency** — two deferred services prepare without either waiting on the other; a single
-  service's step is never entered twice concurrently.
+  service's step is never entered twice concurrently within one AppHost; and a marker written while
+  another reader is reading yields the old record or the new one, never a truncated file.
 - **Failure** — non-zero exit names service, command and exit code; a command that cannot be launched
   is distinguished.
 - **Confinement** — a first element climbing out of the checkout is rejected; a bare name is left for
