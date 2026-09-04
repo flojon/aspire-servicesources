@@ -26,9 +26,9 @@ internal sealed class DeveloperConfiguration
     public required bool FileFound { get; init; }
 
     /// <summary>
-    /// A root key of the file that looks like a misspelling of <c>services</c>, when the file has no
-    /// <c>services</c> key of its own and nothing is configured anywhere. Read by
-    /// <see cref="NothingConfiguredError"/>, which is the one failure it explains.
+    /// A root key of the file that looks like a misspelling of <c>services</c>, when the file writes
+    /// nothing under a <c>services</c> key of its own. Read by both failures below, since both are
+    /// reached by a developer whose file is going unread.
     /// </summary>
     public required string? NearMissRootKey { get; init; }
 
@@ -76,17 +76,16 @@ internal sealed class DeveloperConfiguration
             Services = services,
             FilePath = path,
             FileFound = File.Exists(path),
-            // Only meaningful when nothing is configured, which is the only state that reaches the
-            // error naming it — so it is only asked for there, and stays null rather than holding a
-            // suggestion nothing would print.
+            // Asked unconditionally. It was gated on nothing being configured, which reads as the
+            // state that needs it and is not: `services` here is the merged view across every
+            // configuration layer, so a single environment variable pinning one service hid the fact
+            // that a misspelled root key was costing the developer their whole file. What they got
+            // instead was the per-service error below, telling them to add an entry to a file
+            // nothing reads.
             //
-            // It used to buy more than that: the lookup re-read the file, and this gate kept that
-            // parse off the path of an AppHost that starts. It no longer does — the root keys are
-            // captured while the file is parsed for its values — so what remains is the meaning,
-            // not the cost.
-            NearMissRootKey = services.Count == 0
-                ? DeveloperConfigFileSource.NearMissForServicesKey(builder)
-                : null,
+            // The gate also used to pay for itself, since the lookup re-read the file. It no longer
+            // does: the root keys are captured while the file is parsed for its values.
+            NearMissRootKey = DeveloperConfigFileSource.NearMissForServicesKey(builder),
         };
     }
 
@@ -267,7 +266,30 @@ internal sealed class DeveloperConfiguration
                 + (FileFound
                     ? $"add \"{serviceName}\": {{ \"source\": \"...\" }} under \"services\" in '{FilePath}', "
                     : $"create '{FilePath}' with {{ \"services\": {{ \"{serviceName}\": {{ \"source\": \"...\" }} }} }}, ")
-                + $"or set the environment variable {EnvironmentVariableFor(serviceName)}.");
+                + $"or set the environment variable {EnvironmentVariableFor(serviceName)}."
+                + MisspelledRootKeyNote());
+
+    /// <summary>
+    /// The warning that the file the advice above points at is not being read, when its root key is
+    /// a misspelling.
+    /// </summary>
+    /// <remarks>
+    /// Reached when something <i>else</i> — an environment variable, user secrets — has configured a
+    /// service, so the AppHost is part-way working while the file contributes nothing. Without this
+    /// the message tells the developer to add an entry to a file whose entries are all going unread,
+    /// which is advice that cannot work and gives no hint why.
+    /// <para>
+    /// Appended rather than replacing the advice, because the file may genuinely not be where this
+    /// service is meant to be configured — CI pins every service from the environment. So the
+    /// message keeps saying what to set and adds what is wrong with the file.
+    /// </para>
+    /// </remarks>
+    private string MisspelledRootKeyNote() =>
+        NearMissRootKey is null
+            ? ""
+            : $" Note that '{FilePath}' has a top-level key '{NearMissRootKey}' and no 'services' key, "
+              + "so nothing in that file is being read — whatever is configured is coming from another "
+              + "layer. Did you mean 'services'?";
 
     /// <summary>
     /// A typo in a key, or a file that was never created, yields an empty section rather than a

@@ -200,4 +200,43 @@ public class BackingServiceConsumerTests
 
         Assert.Contains("'Orders-DB'", ex.Message);
     }
+
+    /// <summary>
+    /// A factory whose resource cannot be renamed satisfies the rule by returning a connection string
+    /// that forwards it under the right name.
+    /// </summary>
+    /// <remarks>
+    /// The remedy the README and the error message both name, so it has to work. It is what replaces
+    /// <c>WithReference(db, connectionName)</c> for the case that overload used to cover — a shared
+    /// helper, or a resource handed to the caller — which the rule makes unreachable, since the throw
+    /// happens before a consumer gets to say anything.
+    /// </remarks>
+    [Fact]
+    public async Task LocalFactoryForwardingAResourceItCannotRename_IsAcceptedAndKeepsTheValue()
+    {
+        var builder = CreateBuilder("""
+            {
+              "services": { "orders": { "source": "local" } },
+              "backingServices": { "orders-db": { "source": "local" } }
+            }
+            """);
+
+        var db = builder.AddBackingService("orders-db", () =>
+        {
+            // Stands in for whatever a shared helper would have named its resource.
+            var shared = builder.AddConnectionString(
+                "some-helpers-own-name", ReferenceExpression.Create($"Host=localhost;Database=orders"));
+
+            return builder.AddConnectionString("orders-db", ReferenceExpression.Create($"{shared}"));
+        });
+
+        var orders = builder.AddService("orders");
+        var beforeTheReference = EnvironmentCallbackCount(orders.Resource);
+
+        orders.Configure<IResourceWithEnvironment>(service => service.WithReference(db));
+
+        var environment = await MaterializeEnvironmentAsync(orders.Resource, beforeTheReference);
+
+        Assert.Equal("Host=localhost;Database=orders", environment["ConnectionStrings__orders-db"]);
+    }
 }

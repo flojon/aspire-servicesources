@@ -587,6 +587,41 @@ public class DeveloperConfigurationTests
         Assert.Contains(Path.Combine(dir, "servicesources.local.json"), ex.Message);
     }
 
+    /// <summary>
+    /// A misspelled root key is still named when another configuration layer has configured a
+    /// service, so the file's entries are unread while the AppHost is otherwise working.
+    /// </summary>
+    /// <remarks>
+    /// The near miss used to be read only when <em>nothing</em> was configured anywhere, which is the
+    /// merged view across every layer — so one environment variable pinning one service hid the fact
+    /// that the developer's whole file was going unread. What they got instead was the per-service
+    /// error, which tells them to add an entry to that same file: advice that cannot work, since
+    /// nothing in it is being read.
+    /// <para>
+    /// The same gating bug as the backing-service side of #206, in the section that has shipped.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ResolveService_RootKeyMisspelledButAnotherLayerConfiguresAService_StillNamesTheRootKey()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """{ "serivces": { "orders": { "source": "local" } } }""");
+
+        var builder = CreateBuilder(dir);
+
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ServiceSources:Services:billing:Source"] = "url",
+        });
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.Contains("'serivces'", ex.Message);
+        Assert.Contains("'services'", ex.Message);
+    }
+
     /// <remarks>
     /// Configuration keys are case-insensitive, so a root key differing from <c>services</c> only
     /// by case is not a near miss but the key itself, and the file loads. Pinned because the near
@@ -650,13 +685,31 @@ public class DeveloperConfigurationTests
         Assert.Equal("local", config.Source);
     }
 
+    /// <summary>
+    /// An empty <c>services</c> beside a near miss that carries the entries names the near miss.
+    /// </summary>
     /// <remarks>
-    /// The same rule where <c>services</c> is present but empty. The near miss explains an empty
-    /// section and nothing else, and an empty <c>services</c> is a file whose root key is right and
-    /// whose entries are missing — a different mistake, already reported as such.
+    /// <b>This reverses a decision, so the reasoning is worth keeping.</b> It used to report
+    /// "nothing configured" and deliberately withhold the suggestion, on the grounds that an empty
+    /// <c>services</c> is a file whose root key is right and whose entries are missing — a different
+    /// mistake, already reported as such. That holds for a file carrying <c>services</c> alone. It
+    /// does not hold for this one: the entries are right there under <c>service</c>, and a message
+    /// saying the file "configures no services" while a populated near miss sits beside the empty
+    /// section describes the file as emptier than it is.
+    /// <para>
+    /// The rule that replaces it is narrower rather than looser, because a key is now "present" only
+    /// when something is written under it — on both sides of the comparison. So a suggestion is
+    /// offered exactly when the correct key configures nothing <em>and</em> a resembling key
+    /// configures something, and two empty sections still say nothing.
+    /// </para>
+    /// <para>
+    /// It could not be left alone in any case: the same presence test decides the backing-service
+    /// root key, where <c>"backingServices": { }</c> beside a misspelled key holding the real
+    /// entries silently disabled the whole of #206's root-key half.
+    /// </para>
     /// </remarks>
     [Fact]
-    public void ResolveService_ServicesIsEmptyAndANearMissCarriesTheEntries_ReportsNothingConfiguredWithoutASuggestion()
+    public void ResolveService_ServicesIsEmptyAndANearMissCarriesTheEntries_NamesTheNearMiss()
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
@@ -664,6 +717,35 @@ public class DeveloperConfigurationTests
             {
               "services": { },
               "service": { "orders": { "source": "local" } }
+            }
+            """);
+
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.Contains("'service'", ex.Message);
+        Assert.Contains("'services'", ex.Message);
+    }
+
+    /// <summary>
+    /// Two empty sections say nothing, since neither configures anything for the other to be a
+    /// misspelling of.
+    /// </summary>
+    /// <remarks>
+    /// The half of the old rule that survives: a file whose root key is right and whose entries are
+    /// simply missing is reported as configuring nothing, with no suggestion to chase.
+    /// </remarks>
+    [Fact]
+    public void ResolveService_ServicesIsEmptyAndSoIsTheNearMiss_ReportsNothingConfiguredWithoutASuggestion()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """
+            {
+              "services": { },
+              "service": { }
             }
             """);
 

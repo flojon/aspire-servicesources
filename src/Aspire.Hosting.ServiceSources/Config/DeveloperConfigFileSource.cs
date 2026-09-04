@@ -93,12 +93,17 @@ internal static class DeveloperConfigFileSource
         private IReadOnlyList<string> _rootKeys = [];
 
         /// <summary>
-        /// The root keys the file carried, captured while it was read.
+        /// The root keys the file wrote something under, captured while it was read.
         /// </summary>
         /// <remarks>
         /// Kept because the near-miss checks want them and the file has already been parsed by the
         /// time anything asks: reading them back off disk is a second parse of a file whose contents
         /// cannot have changed, on the path of an AppHost that is starting normally.
+        /// <para>
+        /// A key with nothing under it is not in here — see the reasoning where this is built. That
+        /// is the difference between "the file mentions this key" and "the file configures anything
+        /// through it", and only the second answers whether a near miss is worth reporting.
+        /// </para>
         /// </remarks>
         public IReadOnlyList<string> RootKeys
         {
@@ -175,11 +180,24 @@ internal static class DeveloperConfigFileSource
                     .Select(entry => ($"{section.ConfigurationKey}:{entry.Key}", entry.Value)))
                 .ToDictionary(entry => entry.Item1, entry => entry.Item2);
 
-            // Captured here because the file is open here. A root key with no values under it —
-            // `"backingServices": {}` — contributes no configuration entry and so appears in
-            // neither list, which is correct for both readers: nothing crossed over, and an empty
-            // section is not a misspelling of anything.
-            var rootKeys = file.GetChildren().Select(section => section.Key).ToArray();
+            // Captured here because the file is open here, and taken from the entries that carry a
+            // value rather than from GetChildren().
+            //
+            // The difference is the whole check. `"backingServices": { }` contributes nothing to
+            // the configuration above — AsEnumerable over it yields no values — but the JSON parser
+            // still emits the key itself as a null-valued entry, so GetChildren() returns it. Asking
+            // that list "does the file have this key?" answered yes for a section that configures
+            // nothing, and the near-miss search stopped there: a file whose real entries sat under a
+            // misspelled key beside an empty correct one was told nothing at all.
+            //
+            // Read this way, a key is present when something is written under it, which is the
+            // question both callers are actually asking. A scalar at the root — `"services": "oops"`
+            // — counts as present too, and should: it is a key someone wrote, not a misspelling.
+            var rootKeys = file.AsEnumerable()
+                .Where(entry => entry.Value is not null)
+                .Select(entry => entry.Key.Split(':')[0])
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
 
             return (new MemoryConfigurationSource { InitialData = reRooted }, rootKeys);
         }

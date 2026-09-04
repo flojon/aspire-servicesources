@@ -231,7 +231,8 @@ public static class BackingServiceBuilderExtensions
             + "and switching source would move the key the app reads without anything reporting it. Rename the "
             + $"resource to '{name}'. Where the Aspire resource and the database itself want different names, "
             + $"AddDatabase names them separately: 'AddDatabase(\"{name}\", \"orders\")' is a resource called "
-            + $"'{name}' holding a database called 'orders'.");
+            + $"'{name}' holding a database called 'orders'. Where the resource is not yours to rename, return "
+            + $"one that forwards it: 'builder.AddConnectionString(\"{name}\", ReferenceExpression.Create($\"{{theResource}}\"))'.");
 
     /// <summary>
     /// The error for a <c>source</c> this package does not recognize.

@@ -194,6 +194,34 @@ public class BackingServiceConfigAuditTests
     }
 
     /// <summary>
+    /// An empty <c>backingServices</c> section does not count as having the key, so a misspelling
+    /// beside it is still reported.
+    /// </summary>
+    /// <remarks>
+    /// The shape that defeated this check: <c>"backingServices": { }</c> contributes no configuration
+    /// values, but it <em>is</em> returned by <c>GetChildren()</c> as a null-valued entry, so a
+    /// presence test over those keys saw the key and stopped looking. A developer whose real entries
+    /// sat under a misspelled key beside it was told nothing at all — the exact failure the root-key
+    /// half of #206 exists to catch, hidden by the section it was written next to.
+    /// </remarks>
+    [Fact]
+    public async Task EmptySectionBesideAMisspelledRootKey_StillReportsTheMisspelling()
+    {
+        var builder = CreateBuilder("""
+            {
+              "backingServices": { },
+              "backingService": { "orders-db": { "source": "direct" } }
+            }
+            """);
+
+        builder.AddBackingService("orders-db", Factory(builder, "orders-db"));
+
+        var warning = Assert.Single(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+
+        Assert.Contains("backingService'", warning);
+    }
+
+    /// <summary>
     /// A root key resembling nothing is left alone, since the file is allowed keys of its own.
     /// </summary>
     [Fact]

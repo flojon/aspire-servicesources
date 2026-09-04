@@ -1473,6 +1473,22 @@ rather than a limit of guest languages: a project's own `withReference` already 
 after the backing service is the one answer every AppHost can give, which is why it is the one
 enforced.
 
+**If the resource is not yours to rename** — a shared helper, or one handed to you — return a
+connection string of your own that forwards it:
+
+```csharp
+builder.AddBackingService("orders-db", () =>
+{
+    var shared = SharedHelpers.AddOrdersDatabase(builder);   // names its resource whatever it likes
+    return builder.AddConnectionString("orders-db", ReferenceExpression.Create($"{shared}"));
+});
+```
+
+The forwarding resource carries the same value under the name the rule wants, so the key stays put
+across a source switch. This used to be the case `WithReference(db, connectionName)` covered; the
+rule makes that unreachable for a backing service, since the throw happens first, so the wrap is
+what replaces it.
+
 ### Connection-string placeholders
 
 `direct.connectionString` is normally a literal. **Braces reserve nothing** — `Driver={PostgreSQL}`,
