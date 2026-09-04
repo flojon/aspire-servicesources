@@ -528,6 +528,13 @@ internal sealed class LocalCheckoutPrefetch
             // checked out and isn't this phase's problem to report — AddService still rejects it
             // properly if the AppHost actually asks for it.
             .Where(entry => config.Catalog.Services.ContainsKey(entry.Key))
+            // ...and only the ones whose key can be the directory name a checkout is placed under
+            // (#224). Asked rather than left to LocalGitCheckout.ManagedRepoRoot, which refuses the
+            // same key by throwing: everything below builds that path, and speculation must never
+            // be what fails an AddService() call. Skipped rather than reported, like the two
+            // filters around it — a service the AppHost turns out to ask for is refused there, by
+            // name, on the thread that asked.
+            .Where(entry => LocalGitCheckout.IsContainedCheckoutDirectoryName(entry.Key))
             .Select(entry => (Name: entry.Key, Metadata: config.Catalog.Services[entry.Key], Config: entry.Value))
             // Only checkouts there is something to clone for. Everything else resolves to the same
             // answer in GetRepoRoot for a fraction of the code, and reaches nobody at all when the

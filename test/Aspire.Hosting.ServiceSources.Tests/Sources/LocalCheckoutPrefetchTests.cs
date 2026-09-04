@@ -367,6 +367,77 @@ public class LocalCheckoutPrefetchTests
         Assert.Equal(["https://example.com/orders.git"], git.Cloned);
     }
 
+    /// <summary>
+    /// The prefetch enumerates raw developer-config keys, which have never been through the
+    /// <c>[ResourceName]</c> validation the argument of an <c>AddService()</c> call gets. A key
+    /// containing <c>..</c> reached <see cref="LocalGitCheckout.ManagedRepoRoot"/> and put the clone
+    /// outside <c>.servicesources/checkouts/</c> — outside the ignore file and the build barrier
+    /// that are there to keep a checkout out of the AppHost's source-control status and build
+    /// settings (#224).
+    /// </summary>
+    [Fact]
+    public void ServiceNameThatWouldEscapeTheCheckoutDirectory_IsSkippedByThePrefetch()
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.yaml"),
+            """
+            services:
+              orders:
+                repository: https://example.com/orders.git
+                project: Service.csproj
+              "../escapee":
+                repository: https://example.com/escapee.git
+                project: Service.csproj
+            """);
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.local.json"),
+            """{ "services": { "orders": { "source": "local" }, "../escapee": { "source": "local" } } }""");
+
+        var builder = TestHelpers.CreateBuilder(dir);
+        var git = new FakeGitClient();
+
+        var service = new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+
+        // Skipped, not fatal: the prefetch is speculative, and this AppHost never asked for the
+        // malformed service. The one it did ask for still resolves.
+        Assert.NotNull(service);
+        Assert.Equal(["https://example.com/orders.git"], git.Cloned);
+        Assert.False(Directory.Exists(Path.Combine(dir, ".servicesources", "escapee")));
+    }
+
+    /// <summary>
+    /// The same key written with a Windows separator, which relocates the clone on Windows and names
+    /// one oddly-spelled directory on Linux and macOS. Skipped on all three: this configuration is
+    /// shared across a team, so the verdict cannot depend on who reads the file.
+    /// </summary>
+    [Fact]
+    public void ServiceNameThatWouldEscapeOnlyOnWindows_IsSkippedByThePrefetchEverywhere()
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.yaml"),
+            """
+            services:
+              orders:
+                repository: https://example.com/orders.git
+                project: Service.csproj
+              '..\escapee':
+                repository: https://example.com/escapee.git
+                project: Service.csproj
+            """);
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.local.json"),
+            """{ "services": { "orders": { "source": "local" }, "..\\escapee": { "source": "local" } } }""");
+
+        var builder = TestHelpers.CreateBuilder(dir);
+        var git = new FakeGitClient();
+
+        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+
+        Assert.Equal(["https://example.com/orders.git"], git.Cloned);
+    }
+
     [Fact]
     public void RegisteredNonDotnetKind_ReceivesTheCheckoutAndItsResourceIsRegistered()
     {
