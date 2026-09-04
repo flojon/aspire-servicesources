@@ -112,12 +112,17 @@ internal sealed record PrepareMarker(
         }
 
         var directory = System.IO.Path.GetDirectoryName(markerPath)!;
-        Directory.CreateDirectory(directory);
-
         var scratch = System.IO.Path.Combine(directory, $".incoming-prepare-{Guid.NewGuid():N}.json");
 
         try
         {
+            // Inside the try with the write it exists for: creating the directory can fail for the
+            // same reasons writing can — a read-only tree, or a '.git' that is a file rather than a
+            // directory, which a managed checkout cannot be but a directory handed to this code
+            // could be — and an exception escaping here would turn "the completion could not be
+            // recorded" into "the service does not start", after the step had already succeeded.
+            Directory.CreateDirectory(directory);
+
             File.WriteAllText(scratch, JsonSerializer.Serialize(marker, SerializerOptions));
             File.Move(scratch, markerPath, overwrite: true);
         }

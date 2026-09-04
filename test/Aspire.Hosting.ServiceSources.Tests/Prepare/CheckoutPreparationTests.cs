@@ -357,6 +357,48 @@ public class CheckoutPreparationTests
             fixture.Sink.Lines.Skip(1));
     }
 
+    /// <remarks>
+    /// A process-backed runner reads the command's two streams on separate threads, so the callback
+    /// is re-entered concurrently — which the output tail, a plain queue, cannot survive unguarded.
+    /// Reproduced with a runner that reports from two threads at once, as the real one does.
+    /// </remarks>
+    [Fact]
+    public void OutputReportedFromTwoThreads_IsNeitherLostNorCorrupting()
+    {
+        var fixture = NewFixture();
+        var runner = new ConcurrentlyReportingRunner();
+
+        CheckoutPreparation.Run(
+            ServiceName, Step(), fixture.RepoRoot, fixture.AppHostDirectory, managedCheckout: true,
+            fixture.Git, runner, fixture.Sink);
+
+        // The announcement plus every line both streams wrote, and nothing torn.
+        Assert.Equal(
+            1 + (ConcurrentlyReportingRunner.PerStream * 2),
+            fixture.Sink.Lines.Count);
+        Assert.All(fixture.Sink.Lines, line => Assert.StartsWith("[prepare routing]", line));
+    }
+
+    private sealed class ConcurrentlyReportingRunner : IPrepareCommandRunner
+    {
+        public const int PerStream = 500;
+
+        public int Run(string workingDirectory, IReadOnlyList<string> command, Action<string> onLine)
+        {
+            var streams = Enumerable.Range(0, 2).Select(stream => Task.Run(() =>
+            {
+                for (var i = 0; i < PerStream; i++)
+                {
+                    onLine($"stream {stream} line {i}");
+                }
+            }));
+
+            Task.WaitAll([.. streams]);
+
+            return 0;
+        }
+    }
+
     // ---- failure ------------------------------------------------------------
 
     [Fact]

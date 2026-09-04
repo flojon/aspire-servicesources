@@ -158,12 +158,19 @@ internal static class CheckoutPreparation
         {
             return runner.Run(repoRoot, step.Command, line =>
             {
-                sink.Report($"{tag} {line}");
-
-                tail.Enqueue(line);
-                if (tail.Count > OutputTailLines)
+                // Both of the command's streams are read, and a process-backed runner reads them on
+                // separate threads, so this callback is re-entered concurrently. The queue is not
+                // thread-safe, and reporting is serialized alongside it so two half-lines cannot be
+                // interleaved into one.
+                lock (tail)
                 {
-                    tail.Dequeue();
+                    sink.Report($"{tag} {line}");
+
+                    tail.Enqueue(line);
+                    if (tail.Count > OutputTailLines)
+                    {
+                        tail.Dequeue();
+                    }
                 }
             });
         }
