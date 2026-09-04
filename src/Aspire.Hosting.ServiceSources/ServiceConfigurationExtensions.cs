@@ -40,7 +40,7 @@ public static class ServiceConfigurationExtensions
     /// <code>
     /// builder.AddService("backend")
     ///        .Configure&lt;IResourceWithEnvironment&gt;(r => r
-    ///            .WithReference(planningDb)
+    ///            .WithReference(ordersDb)
     ///            .WithEnvironment("DBPASSWORD", postgres.Resource.PasswordParameter))
     ///        .Configure&lt;IResourceWithWaitSupport&gt;(r => r.WaitForCompletion(migrations));
     /// </code>

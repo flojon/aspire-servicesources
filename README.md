@@ -1282,7 +1282,7 @@ capability you need and it is checked at composition time:
 ```csharp
 var backend = builder.AddService("backend")
     .Configure<IResourceWithEnvironment>(r => r
-        .WithReference(planningDb)
+        .WithReference(ordersDb)
         .WithEnvironment("DBPASSWORD", postgres.Resource.PasswordParameter)
         .WithEnvironment("ENCRYPTIONKEY", builder.AddParameter("EncryptionKey", new GenerateParameterDefault(), secret: true))
         .WithEnvironment("Services__CommonAuth", commonAuth.GetServiceEndpoint()))
@@ -1637,7 +1637,7 @@ survives a source switch:
 ```csharp
 var commonAuth = builder.AddService("common-auth");
 
-builder.AddProject<Projects.Core>("planning-core")
+builder.AddProject<Projects.Web>("web")
     .WithEnvironment("Services__CommonAuth", commonAuth.GetServiceEndpoint());
 ```
 
@@ -1754,7 +1754,7 @@ before Aspire starts, so that message *is* the error output. It prints as the me
 line per underlying cause:
 
 ```
-Unhandled exception. Service 'reportdata': failed to clone repository 'https://github.com/acme/planning' into
+Unhandled exception. Service 'reportdata': failed to clone repository 'https://github.com/acme/reportdata' into
 '/src/report-service/src/Report.AppHost/.servicesources/checkouts/reportdata' — authentication failed, or the
 repository is not visible to the credentials in use. Configure credentials via a git credential helper (`git
 credential fill` must resolve them for this host) or the SERVICESOURCES_GIT_USERNAME/SERVICESOURCES_GIT_TOKEN
