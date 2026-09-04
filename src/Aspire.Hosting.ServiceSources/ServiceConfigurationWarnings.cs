@@ -35,10 +35,26 @@ internal sealed class ServiceConfigurationWarnings
     private readonly List<Skip> _skips = [];
 
     /// <summary>
+    /// Notices that are already whole sentences, buffered for the same reason a skip is: there is no
+    /// <see cref="ILogger"/> during <c>AddService()</c>.
+    /// </summary>
+    /// <remarks>
+    /// Kept apart from <see cref="_skips"/> because those are grouped and rephrased per (service,
+    /// source) — the shape a couple of dozen <c>Configure</c> calls needs — and a notice about
+    /// something else entirely has nothing to group with. The <c>prepare</c> step's is the first:
+    /// a <c>path</c> service does not inherit its catalog's step, and the notice says which command
+    /// was not run so it can be copied into the developer's own file.
+    /// </remarks>
+    private readonly List<string> _notices = [];
+
+    /// <summary>
     /// How much of <see cref="_skips"/> <see cref="Flush"/> has already reported. A count rather
     /// than a per-skip flag because the list is only ever appended to.
     /// </summary>
     private int _reported;
+
+    /// <summary>The same for <see cref="_notices"/>.</summary>
+    private int _noticesReported;
 
     private bool _subscribed;
 
@@ -54,7 +70,7 @@ internal sealed class ServiceConfigurationWarnings
         {
             lock (_gate)
             {
-                return Describe(_skips);
+                return [.. Describe(_skips), .. _notices];
             }
         }
     }
@@ -112,6 +128,27 @@ internal sealed class ServiceConfigurationWarnings
     }
 
     /// <summary>
+    /// Records <paramref name="notice"/> to be written verbatim once there is a logger.
+    /// </summary>
+    /// <remarks>
+    /// For a notice that already names its own service and its own remedy, so there is nothing here
+    /// to group it with or rephrase it into.
+    /// </remarks>
+    public void AddNotice(string notice)
+    {
+        lock (_gate)
+        {
+            // Once per AppHost, however many times it is recorded. The prepare notice is settled per
+            // service from configuration, so a service resolved twice would produce the identical
+            // sentence twice, which reads as two problems.
+            if (!_notices.Contains(notice, StringComparer.Ordinal))
+            {
+                _notices.Add(notice);
+            }
+        }
+    }
+
+    /// <summary>
     /// Reports every skip added since the last call, and is safe to call more than once.
     /// </summary>
     /// <remarks>
@@ -128,8 +165,9 @@ internal sealed class ServiceConfigurationWarnings
 
         lock (_gate)
         {
-            messages = Describe(_skips.Skip(_reported));
+            messages = [.. Describe(_skips.Skip(_reported)), .. _notices.Skip(_noticesReported)];
             _reported = _skips.Count;
+            _noticesReported = _notices.Count;
         }
 
         if (messages.Count == 0)
