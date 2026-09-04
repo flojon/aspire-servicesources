@@ -359,4 +359,61 @@ public class GitCliClientTests
     [InlineData("remote: Repository not found.")]
     public void ResolvedNoCredentials_ACredentialWasOffered_ReturnsFalse(string message) =>
         Assert.False(GitCliClient.ResolvedNoCredentials(message));
+
+    [Fact]
+    public void GetHeadCommitSha_ReturnsTheCommitHeadSitsOn()
+    {
+        var (client, _, destination) = ClonedRepository();
+
+        var sha = client.GetHeadCommitSha(destination);
+
+        Assert.NotNull(sha);
+        Assert.Equal(TestRepository.At(destination).Git("rev-parse", "HEAD").Trim(), sha);
+    }
+
+    [Fact]
+    public void GetHeadCommitSha_MovesWithTheCheckout()
+    {
+        var (client, _, destination) = ClonedRepository();
+
+        var before = client.GetHeadCommitSha(destination);
+        TestRepository.At(destination).Commit("another.txt", "more", "a second commit");
+
+        Assert.NotEqual(before, client.GetHeadCommitSha(destination));
+    }
+
+    /// <summary>
+    /// The answer a <c>prepare</c> step's marker has to read as "run it" rather than as "assume
+    /// done" — the case a <c>path</c> override pointed at a plain unpacked directory is in.
+    /// </summary>
+    [Fact]
+    public void GetHeadCommitSha_NotARepository_IsNull()
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+
+        Assert.Null(Client().GetHeadCommitSha(dir));
+    }
+
+    /// <summary>
+    /// A plain directory <em>inside</em> a repository still answers null.
+    /// </summary>
+    /// <remarks>
+    /// <c>-C</c> changes directory without stopping repository discovery, so the tool walks up from
+    /// there and reports whichever repository encloses it. That answer is about a repository nobody
+    /// named: a <c>local.path</c> pointed at an unpacked directory which happens to sit inside some
+    /// checkout would re-run its bootstrap for every commit made anywhere in that checkout, and
+    /// record it as "once per commit". The test above passes with or without the fix, because a
+    /// temporary directory has no enclosing repository to find — which is what made it a weak test.
+    /// </remarks>
+    [Fact]
+    public void GetHeadCommitSha_APlainDirectoryInsideARepository_IsStillNull()
+    {
+        var (client, _, destination) = ClonedRepository();
+
+        // Real, and really inside the clone's working tree.
+        var inside = Directory.CreateDirectory(Path.Combine(destination, "unpacked", "data")).FullName;
+
+        Assert.NotNull(client.GetHeadCommitSha(destination));
+        Assert.Null(client.GetHeadCommitSha(inside));
+    }
 }

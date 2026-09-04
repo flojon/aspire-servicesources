@@ -295,9 +295,10 @@ jobs:
   smoketest-local-source:
     name: 📦 local source smoke test
     runs-on: ubuntu-latest
-    # Longer than the config-layers job: each of its three runs clones a repository and lets
-    # Aspire restore and build the checkout before anything starts.
-    timeout-minutes: 25
+    # Longer than the config-layers job: each of its runs clones a repository and lets Aspire
+    # restore and build the checkout before anything starts. Six of them now — the three source
+    # cases, plus the three the prepare step needs to show it runs once and re-runs on demand.
+    timeout-minutes: 35
     permissions:
       contents: read
 

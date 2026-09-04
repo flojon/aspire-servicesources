@@ -416,7 +416,7 @@ public class AddBackingServiceTests
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => builder.AddBackingService("orders-db", LocalFactory(builder)));
 
-        Assert.Contains("Did you mean 'connectionstring'", ex.Message);
+        Assert.Contains("Did you mean 'connectionString'", ex.Message);
         Assert.Contains("'direct' block", ex.Message);
     }
 

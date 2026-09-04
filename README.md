@@ -222,6 +222,203 @@ service pointed at your own directory with `path` needs no git at all.
   checkout that already exists is never touched on behalf of an entry you don't `AddService()`, so
   work in progress on a branch there is safe.
 
+#### `prepare`: a checkout that has to bootstrap itself
+
+A managed checkout is assumed to be runnable the moment it is cloned. That holds for a `dotnet`
+project, and for a Maven/Gradle service whose wrapper builds it as part of running — but not for a
+repository whose runnable artifact or data asset is produced by a script the repository commits and
+then gitignores. Such a checkout resolves cleanly and then fails, because the thing the catalog
+names isn't there.
+
+`prepare` is a command run **inside the materialized checkout, before the kind is allowed to judge
+it**:
+
+```yaml
+services:
+  routing:
+    repository: https://github.com/example/routing
+    kind: java
+    prepare:
+      command: ["./prepare.sh"]
+      windowsCommand: ["pwsh", "-File", "prepare.ps1"]   # optional; replaces command on Windows
+      mode: oncePerCommit                                # the default | once | always | never
+    java:
+      jarPath: graphhopper-web-11.0.jar
+      args: ["server", "gh-config-local.yml"]
+      port: 8989
+```
+
+- `command` is a **list, not a string**. There is no shell, so there are no quoting or
+  word-splitting rules to get wrong and an argument containing spaces needs no escaping. The first
+  element is either a path inside the checkout (`./prepare.sh`, `scripts/bootstrap`) or a bare
+  program name resolved through `PATH` (`make`, `npm`, `bash`). A path is confined to the checkout:
+  an absolute one, or one that climbs out with `..`, is rejected by name — the same rule
+  `java.jarPath` follows, and for the same reason, since the catalog is shared configuration you
+  clone rather than write.
+- `windowsCommand` replaces `command` when the AppHost runs on Windows. It exists because one
+  catalog is committed and shared by a team across platforms, so each value can only be spelled one
+  way, and `./prepare.sh` isn't executable on Windows. Leave it out for a program that exists as an
+  executable everywhere (`make`, `python`, `dotnet`) — the command runs there unchanged.
+
+  **`npm` is not one of those, and it's the case to know about.** There is no `npm.exe`, only
+  `npm.cmd`; nothing here goes through a shell, and Windows resolves a bare name on `PATH` by
+  appending `.exe` rather than by walking `PATHEXT`. So `["npm", "ci"]` starts fine on Linux and
+  macOS and fails to start on Windows, and wants `windowsCommand: ["npm.cmd", "ci"]` beside it. The
+  same goes for `yarn`, `pnpm` and `tsc`. The launch failure names this as the likely cause.
+- The command runs with the checkout as its working directory, with no shell between it and the
+  tool, and both its streams are relayed line by line as they arrive, tagged with the service:
+
+  ```
+  [prepare routing] Downloading graphhopper-web-11.0.jar...
+  [prepare routing] Importing sweden-latest.osm.pbf
+  [prepare routing] done in 4m12s
+  ```
+
+  On the run that creates the checkout under
+  [`UseDeferredCheckout()`](#first-run-usedeferredcheckout) those lines are the service's own
+  resource log, visible in the dashboard, and the service shows a **Preparing** state while the step
+  runs — which is what a four-minute import needs, so that it reads as an initialization phase
+  rather than as a hang. Every other run reports to the AppHost's standard output: under
+  `dotnet run` that is your terminal, and under `aspire run` the CLI relays it, live, into its own
+  log under `~/.aspire/logs/` rather than printing it.
+- A non-zero exit fails the service, naming it, the resolved command, the exit code and the tail of
+  the output. During composition that fails the AppHost, exactly as a bad `repository` or a missing
+  `project` does; on a deferred first run it costs that one service and nothing else.
+- **Ctrl-C stops it.** On a deferred first run the shutdown signal reaches the command's own process
+  tree, so interrupting a long import ends the import rather than leaving it — and its children —
+  running with no AppHost left to belong to. There is no timeout: a legitimate bootstrap can take an
+  hour, and there is no defensible default to cut it off at.
+- **`aspire publish` doesn't run it.** Publish composes the model, writes the manifest and exits,
+  and a bootstrap produces what a service needs in order to *run* — so a manifest doesn't depend on
+  it, and paying a multi-gigabyte download on every CI publish to emit one would be nothing but
+  cost. The block is still validated there, so a typo'd mode or a command pointing outside the
+  checkout still fails a publish. The skip is reported, because it has one consequence worth naming:
+  the step runs *before* the kind judges the checkout, so a service whose committed files aren't
+  enough for its kind on their own — a generated `.csproj`, a generated project directory — is
+  reported as missing them. Run the AppHost once to materialize the checkout, then publish.
+
+**Choosing a mode.** All four answer one question — how often does this run — and the guards nest:
+
+| Mode | Re-runs when | For |
+| --- | --- | --- |
+| `oncePerCommit` *(default)* | the command changes, or the checkout moves to another commit | a bootstrap **defined by a script the repository commits** |
+| `once` | the command changes | an expensive bootstrap **independent of the commit** |
+| `always` | every start | an incremental script that decides its own work |
+| `never` | — | opting out of a step the catalog declared |
+
+The `once` vs `oncePerCommit` question is **"does the repository define this step?"** rather than
+"how often" — and the test is where the *version* is written, not where the expensive part is.
+
+The example above is the default for that reason, even though its `java.jarPath` looks pinned.
+`prepare.sh` is committed in that repository and hardcodes the GraphHopper version inside itself, so
+a team bumping it to 12 moves the commit while the catalog's command stays `["./prepare.sh"]`. Under
+`once` the marker would never invalidate, and every developer would keep serving the 11 jar until
+someone thought to delete a marker they have never heard of. The catalog's `jarPath` naming a
+version is what makes `once` *look* right here; the download is pinned in the script.
+
+Reach for `once` when the command itself carries everything that decides what it produces, so a
+commit cannot change the answer — `["./fetch-model.sh", "--release", "v4.2"]`, or a step whose whole
+input is a URL the catalog spells out. Then a developer committing a one-line README fix shouldn't
+pay the download, and under `once` they don't. The default errs the other way on purpose: an
+unexpected re-run is annoying and immediately visible, where a stale artifact is invisible and
+surfaces later as a confusing runtime failure.
+
+**The command must be safe to re-run.** Under `always` that's self-evident. Under the two guarded
+modes it is equally required and less obvious: the completion is recorded **only on success**, so a
+step that fails halfway runs again from the beginning on the next start, against a checkout that
+already holds whatever the first attempt managed to produce. A command that can't tolerate that is
+incorrect under every mode.
+
+Nothing here detects that a step's *outputs* are stale — at most that the checkout moved. That is
+deliberate: nothing in the catalog says what your script reads and writes, hashing the working tree
+is expensive and answers wrongly in both directions, and re-running whenever the tree is dirty would
+pay the full bootstrap on every start for exactly the developer `"local"` exists to serve.
+Incremental rebuild is a solved problem with real dependency graphs behind it — `make`, Gradle,
+MSBuild, `npm ci` — so `mode: always` with a command that guards itself delegates to them:
+
+```sh
+[ -f graphhopper-web-11.0.jar ] && [ -d data ] && exit 0
+```
+
+**How completion is recorded, and how to force a re-run.** A managed checkout keeps a marker at
+`<checkout>/.git/servicesources-prepare.json`, holding a hash of the resolved command and the commit
+it ran against. Inside `.git` deliberately: it's invisible to the service repository's `git status`,
+so it can't be committed by accident, and it dies with the checkout — so a deleted-and-recloned
+checkout re-prepares even at the same commit. Delete the file to force a re-run. Each service's
+checkout keeps its own, so two services from one repository each pay for their own bootstrap; that
+is correct rather than merely tolerable, since a jar downloaded into one clone is not in the other.
+
+Every decision to run says why — no completion recorded, the command changed, the commit moved, the
+commit couldn't be determined, or the mode is `always`. A decision to *skip* says nothing: that's
+the ordinary case, and the marker already records it.
+
+**A `path` checkout declares its own step.** A service resolved through `local.path` **never
+inherits the catalog's `prepare` block**. Nothing establishes that your directory is even a checkout
+of the repository the catalog names — `path` is validated by "does it exist" and nothing else — so a
+catalog command like `["npm", "ci"]` would run perfectly happily in a tree that has nothing to do
+with it. And it's your working tree, holding your in-flight work, where a repository's own bootstrap
+script is entitled to run `git clean`. So the command that runs there has to be one you wrote:
+
+```json
+{
+  "services": {
+    "routing": {
+      "source": "local",
+      "local": {
+        "path": "/home/dev/code/routing",
+        "prepare": { "command": ["./prepare.sh"] }
+      }
+    }
+  }
+}
+```
+
+A catalog block on such a service is **ignored, not rejected** — it's the team's field and applies
+correctly to every developer on a managed checkout, so your local override must not turn it into a
+failure. Instead a notice at startup names the service and the command that was not run, verbatim,
+so you can paste it into the file above. It repeats on every start until you declare a block of your
+own, and **any** declared block silences it — including `{ "prepare": { "mode": "never" } }`, which
+is how you say that nothing should run there. (A `mode` with no `command` is otherwise rejected on a
+`path` service: you'd have written the half of the block that can't stand alone, and there is no
+catalog command for it to apply to.) The marker for such a checkout lives in the tool's own tree, at
+`<AppHostDirectory>/.servicesources/prepare/<service>.json`, keyed on the resolved path as well as
+the command — writing into a directory this tool doesn't own is the one thing `path` promises never
+to happen.
+
+**Overriding a catalog step per developer.** Your block is merged over the catalog's **per field**,
+with one exception: `mode` overrides on its own, and `command`/`windowsCommand` are replaced
+*together* if you supply either. Splitting the pair is never what anyone means — you'd run your own
+command on Linux and the team's on Windows.
+
+| You write in `servicesources.local.json` | Effect |
+| --- | --- |
+| `{"mode": "never"}` | the catalog's step is disabled; nothing runs |
+| `{"mode": "always"}` | the catalog's command runs on every start |
+| `{"command": ["make", "bootstrap"]}` | the catalog's `command` **and** `windowsCommand` are both replaced, so `make` runs on Windows too. Mode kept |
+| `{"command": [...], "windowsCommand": [...]}` | both replaced, mode kept |
+| *(absent)* | the catalog's block stands |
+
+A block with no catalog block behind it stands on its own: you may introduce a step the catalog never
+declared.
+
+**Two steps can run at once.** Eagerly-resolved services prepare one after another, because
+`AddService()` is serial. Deferred ones don't: `UseDeferredCheckout()` gives each service a task of
+its own precisely so that one slow checkout isn't the start of every other, and serializing the step
+inside it would put that coupling straight back. So a prepare command has to tolerate running
+alongside a *different* service's command. What those two share is the machine and whatever package
+caches they use — never a working tree, since managed checkouts are per-service clones and the one
+arrangement that shares a tree (two services on one `path`) never defers. Most caches are built for
+that (`~/.nuget/packages`, npm's); a Maven local repository is not, so a step that resolves into
+`~/.m2` and must not overlap with another should take its own lock. A service never prepares
+concurrently with *itself*.
+
+**What this deliberately isn't.** One command, one marker, per service: no task runner, no ordering
+between steps, no caching of produced artifacts across developers, no timeout (Ctrl-C works, and a
+country-sized routing graph has no defensible default) and no injected environment variables.
+`prepare` also belongs to the `"local"` *service* source; the `"local"` source a
+[backing service](#backing-services-databases-brokers-and-caches) can have means something else
+entirely, with no repository and so nothing to bootstrap.
+
 #### Aspire builds a checkout, on every start
 
 Nothing in this package compiles a checkout, and nothing needs to. A `dotnet` service is

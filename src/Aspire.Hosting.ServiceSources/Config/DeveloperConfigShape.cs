@@ -41,17 +41,19 @@ internal sealed class DeveloperConfigShape
         SourceNames = sourceNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         Blocks = entry.GetProperties()
-            .Where(p => p.PropertyType.IsClass && p.PropertyType != typeof(string))
+            .Where(p => DeveloperConfigField.BlockFieldsOf(p.PropertyType) is not null)
             .ToArray();
 
-        RootKeys = entry.GetProperties()
-            .Select(p => p.Name)
+        RootKeys = DeveloperConfigField.BlockFieldsOf(entry)!.Keys
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        // Read through the same method the validator asks about a block field with, rather than
+        // enumerating the properties again here: two derivations of "what may be written inside
+        // this" agree only until one of them learns something, and the one that learned to leave
+        // out a computed property did.
         BlockFields = Blocks.ToDictionary(
             block => block.Name,
-            block => (IReadOnlyDictionary<string, Type>)block.PropertyType.GetProperties()
-                .ToDictionary(field => field.Name, field => field.PropertyType, StringComparer.OrdinalIgnoreCase),
+            block => DeveloperConfigField.BlockFieldsOf(block.PropertyType)!,
             StringComparer.OrdinalIgnoreCase);
     }
 
@@ -80,7 +82,9 @@ internal sealed class DeveloperConfigShape
     /// <remarks>
     /// Tested for positively rather than by excluding <see cref="string"/> alone, so that a scalar
     /// added at the entry root later — a <c>bool?</c> or an <c>int?</c> — is not silently taken for
-    /// a block and walked for fields it does not have.
+    /// a block and walked for fields it does not have. A list is excluded by the same test, since
+    /// <see cref="string"/><c>[]</c> is a class and would otherwise be walked for the fields an
+    /// array does not have.
     /// </remarks>
     public IReadOnlyList<PropertyInfo> Blocks { get; }
 

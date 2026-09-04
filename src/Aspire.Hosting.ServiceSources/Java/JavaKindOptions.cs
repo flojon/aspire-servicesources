@@ -145,7 +145,7 @@ internal sealed class JavaKindOptions
             return ".";
         }
 
-        if (IsAbsolutePath(trimmed))
+        if (CheckoutRelativePath.IsAbsolute(trimmed))
         {
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}': java.workingDirectory '{trimmed}' is an absolute path, but it must be " +
@@ -153,14 +153,14 @@ internal sealed class JavaKindOptions
                 "servicesources.local.json to point at a checkout somewhere else on disk.");
         }
 
-        if (EscapesRoot(trimmed))
+        if (CheckoutRelativePath.EscapesRoot(trimmed))
         {
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}': java.workingDirectory '{trimmed}' points outside the service's checkout. " +
                 "It must stay within the repository.");
         }
 
-        return NormalizeSeparators(trimmed);
+        return CheckoutRelativePath.NormalizeSeparators(trimmed);
     }
 
     /// <summary>
@@ -188,7 +188,7 @@ internal sealed class JavaKindOptions
         // Already trimmed and known non-blank by ResolveRunMode.
         var jarPath = runMode.Value;
 
-        if (IsAbsolutePath(jarPath))
+        if (CheckoutRelativePath.IsAbsolute(jarPath))
         {
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}': java.jarPath '{jarPath}' is an absolute path, but it must be relative to " +
@@ -199,14 +199,14 @@ internal sealed class JavaKindOptions
         // Against the working directory, not the bare jarPath: '../app.jar' escapes a project at the
         // repository root but not one two directories down. '/' is a separator to EscapesRoot on
         // every platform, so joining with it is safe whichever way workingDirectory was written.
-        if (EscapesRoot($"{workingDirectory}/{jarPath}"))
+        if (CheckoutRelativePath.EscapesRoot($"{workingDirectory}/{jarPath}"))
         {
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}': java.jarPath '{jarPath}', read relative to java.workingDirectory " +
                 $"'{workingDirectory}', points outside the service's checkout. It must stay within the repository.");
         }
 
-        return runMode with { Value = NormalizeSeparators(jarPath) };
+        return runMode with { Value = CheckoutRelativePath.NormalizeSeparators(jarPath) };
     }
 
     /// <summary>
@@ -229,7 +229,7 @@ internal sealed class JavaKindOptions
                 "'mavenGoal' or 'gradleTask' instead.");
         }
 
-        if (IsAbsolutePath(trimmed))
+        if (CheckoutRelativePath.IsAbsolute(trimmed))
         {
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}': java.wrapperPath '{trimmed}' is an absolute path, but it must be relative " +
@@ -237,74 +237,14 @@ internal sealed class JavaKindOptions
                 "a Maven or Gradle installation on the developer's machine.");
         }
 
-        if (EscapesRoot(trimmed))
+        if (CheckoutRelativePath.EscapesRoot(trimmed))
         {
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}': java.wrapperPath '{trimmed}' points outside the service's checkout. " +
                 "It must stay within the repository.");
         }
 
-        return NormalizeSeparators(trimmed);
-    }
-
-    /// <summary>
-    /// Rewrites the separators of an accepted relative path for the platform the app host is running
-    /// on. The validation above counts <c>'\'</c> as a separator so a Windows-style value is judged
-    /// as the path it is, which means such a value is <em>accepted</em> on Linux and macOS too; every
-    /// one of these fields is then handed to <see cref="Path.Combine(string, string)"/>, where an
-    /// unrewritten <c>'services\catalog'</c> would resolve to a single oddly-named directory and be
-    /// reported as missing from the checkout. Only <c>'\'</c> needs rewriting: Windows accepts
-    /// <c>'/'</c> as a separator, so on Windows this is a no-op.
-    /// </summary>
-    private static string NormalizeSeparators(string relativePath) =>
-        relativePath.Replace('\\', Path.DirectorySeparatorChar);
-
-    /// <summary>
-    /// Whether <paramref name="path"/> is absolute on <em>any</em> platform, rather than only on this
-    /// one. <see cref="Path.IsPathRooted"/> alone is platform-dependent, so a Windows-style value
-    /// ('C:\repos\api', '\\server\share') sails past it on Linux/macOS and is then reported as a
-    /// directory missing from the checkout instead of as the absolute path it is.
-    /// </summary>
-    private static bool IsAbsolutePath(string path) =>
-        Path.IsPathRooted(path)
-        || path[0] is '/' or '\\'
-        || (path.Length >= 2 && path[1] == ':' && char.IsAsciiLetter(path[0]));
-
-    /// <summary>
-    /// Whether <paramref name="relativePath"/> climbs above the directory it is relative to. Checked
-    /// lexically rather than against the resolved path, so the verdict does not depend on a checkout
-    /// being there to resolve against: <see cref="JavaLocalResourceKind.ResolveDeferred"/> parses the
-    /// block for a clone that has not happened yet, and a value pointing outside the repository is a
-    /// mistake in shared team configuration whichever way the checkout went. It also keeps the two
-    /// failures apart — "points outside the checkout" is a different thing to tell a developer than
-    /// "is not in the checkout". Both separators count regardless of platform, so a Windows-style
-    /// relative value ('..\sibling') is still rejected on Linux/macOS; a rooted one ('C:\repos')
-    /// never reaches here, being caught by <see cref="IsAbsolutePath"/> first.
-    /// </summary>
-    private static bool EscapesRoot(string relativePath)
-    {
-        var depth = 0;
-        foreach (var segment in relativePath.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries))
-        {
-            if (segment == ".")
-            {
-                continue;
-            }
-
-            if (segment == "..")
-            {
-                if (--depth < 0)
-                {
-                    return true;
-                }
-            }
-            else
-            {
-                depth++;
-            }
-        }
-
-        return false;
+        return CheckoutRelativePath.NormalizeSeparators(trimmed);
     }
 }
 

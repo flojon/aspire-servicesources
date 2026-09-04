@@ -148,42 +148,190 @@ internal static class DeveloperConfigValidator
                 continue;
             }
 
-            foreach (var field in key.GetChildren())
-            {
-                if (!fields.TryGetValue(field.Key, out var fieldType))
-                {
-                    problems.Add(NotValidInBlock(field, key.Key, fields));
-                    continue;
-                }
-
-                // The mirror of the check above: a block written where a field's value goes. Like
-                // a non-scalar `source`, it binds to nothing and costs the entry every other key
-                // it carries, so the service reads downstream as one nobody configured at all.
-                if (HasChildren(field))
-                {
-                    problems.Add(ValueExpected(serviceName, field, key.Key.ToLowerInvariant()));
-                    continue;
-                }
-
-                // A value of one or more spaces, whatever type the field takes. Refused rather than
-                // read as absent — which is what a string field would otherwise become, since it
-                // binds and the blank-to-absent walk in DeveloperConfiguration then drops it, so a
-                // whitespace `local.path` sent the service to its managed checkout instead of the
-                // developer's directory and said nothing about it.
-                if (field.Value is { Length: > 0 } spaces && string.IsNullOrWhiteSpace(spaces))
-                {
-                    problems.Add(Blank(field, key.Key.ToLowerInvariant()));
-                    continue;
-                }
-
-                if (field.Value is { } value && !BindsTo(fieldType, value))
-                {
-                    problems.Add(NotBindable(field, key.Key.ToLowerInvariant(), fieldType, value));
-                }
-            }
+            CollectBlock(problems, serviceName, key, key.Key.ToLowerInvariant(), fields);
         }
 
         return problems;
+    }
+
+    /// <summary>
+    /// Every problem inside one block of settings — a source block, or a block nested in one.
+    /// </summary>
+    /// <param name="blockPath">
+    /// How the block is named in a message, dotted for a nested one: <c>local</c>,
+    /// <c>local.prepare</c>.
+    /// </param>
+    /// <remarks>
+    /// Recursive because <c>local.prepare</c> is the first block inside a block this file has held.
+    /// Nothing about the walk is specific to that depth, so it is the same code rather than a second
+    /// copy for level two — which is also what keeps a nested block's diagnostics identical to a
+    /// top-level one's rather than a thinner version of them.
+    /// </remarks>
+    private static void CollectBlock(
+        List<string> problems,
+        string serviceName,
+        IConfigurationSection block,
+        string blockPath,
+        IReadOnlyDictionary<string, Type> fields)
+    {
+        foreach (var field in block.GetChildren())
+        {
+            if (!fields.TryGetValue(field.Key, out var fieldType))
+            {
+                problems.Add(NotValidInBlock(field, blockPath, fields));
+                continue;
+            }
+
+            // Asked before the block question below, and it has to be: a list arrives from
+            // IConfiguration as indexed children, and its type is a class, so a list asked about as
+            // a block is classified as one and answered with "takes a value, not a block of
+            // settings" — about a field whose value is neither.
+            if (DeveloperConfigField.IsList(fieldType))
+            {
+                CollectList(problems, field, blockPath);
+                continue;
+            }
+
+            if (DeveloperConfigField.BlockFieldsOf(fieldType) is { } nested)
+            {
+                // The same mistake one level down as a block name carrying a value: it binds to
+                // nothing, and the binder giving up takes the surrounding block with it.
+                if (field.Value is not null)
+                {
+                    problems.Add(BlockExpected(blockPath, field, nested));
+                    continue;
+                }
+
+                CollectBlock(
+                    problems, serviceName, field, $"{blockPath}.{field.Key.ToLowerInvariant()}", nested);
+                continue;
+            }
+
+            // The mirror of the check above: a block written where a field's value goes. Like
+            // a non-scalar `source`, it binds to nothing and costs the entry every other key
+            // it carries, so the service reads downstream as one nobody configured at all.
+            if (HasChildren(field))
+            {
+                problems.Add(ValueExpected(serviceName, field, blockPath));
+                continue;
+            }
+
+            // A value of one or more spaces, whatever type the field takes. Refused rather than
+            // read as absent — which is what a string field would otherwise become, since it
+            // binds and the blank-to-absent walk in DeveloperConfiguration then drops it, so a
+            // whitespace `local.path` sent the service to its managed checkout instead of the
+            // developer's directory and said nothing about it.
+            if (field.Value is { Length: > 0 } spaces && string.IsNullOrWhiteSpace(spaces))
+            {
+                problems.Add(Blank(field, blockPath));
+                continue;
+            }
+
+            if (field.Value is { } value && !BindsTo(fieldType, value))
+            {
+                problems.Add(NotBindable(field, blockPath, fieldType, value));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Every problem with a field whose value is a list of values.
+    /// </summary>
+    /// <remarks>
+    /// Only the shape is checked here. Whether the list is long enough to be a command, and whether
+    /// its first element points where it is allowed to, belong to whoever reads it — a message about
+    /// those can name the service and what the list is for, which this walk cannot. An empty list
+    /// reaches that reader and is refused there by name, which is why nothing is said about it here;
+    /// it is <em>not</em> a way to drop what a layer below wrote, because it binds to an empty array
+    /// rather than to absent, and the flat providers cannot express one at all.
+    /// <para>
+    /// A null element is the exception, and it has to be caught here because it does not survive to
+    /// the reader: the JSON provider records the key with a null value, and the binder then omits it
+    /// from the array entirely, so the list <em>shortens</em> and every argument after it shifts
+    /// down. <c>["mvn", null, "-Pprod"]</c> runs <c>mvn -Pprod</c>. Nothing downstream can report
+    /// what it never receives.
+    /// </para>
+    /// </remarks>
+    private static void CollectList(List<string> problems, IConfigurationSection field, string blockPath)
+    {
+        if (!HasChildren(field))
+        {
+            if (field.Value is { Length: > 0 } written)
+            {
+                problems.Add(string.IsNullOrWhiteSpace(written) ? Blank(field, blockPath) : ListExpected(field, blockPath));
+            }
+
+            return;
+        }
+
+        var elements = field.GetChildren().ToArray();
+
+        foreach (var element in elements)
+        {
+            if (HasChildren(element))
+            {
+                problems.Add(ListElementExpected(field, element, blockPath));
+            }
+            else if (element.Value is null)
+            {
+                problems.Add(ListElementMissing(field, element, blockPath));
+            }
+        }
+
+        // A list is keyed by position, so a position that is missing is an element that is missing.
+        // The one that produces it is a null written in the file: the re-rooting that hands this
+        // file over drops a null-valued key, because that is what an intermediate node looks like
+        // too, so index 1 of a three-element list simply is not here — and the binder then closes
+        // the gap, shortening the command and shifting every argument after it down a place.
+        // `["mvn", null, "-Pprod"]` runs `mvn -Pprod`. Checked by shape rather than by cause, so a
+        // hole from any other direction — a layer setting only `command:2` — is reported too.
+        if (FirstMissingIndex(elements) is { } missing)
+        {
+            // The section for the position that is absent, rather than one of the positions that is
+            // present: it has no value, which is the point, but it does have the key path the
+            // remedy has to name — and naming element 0's instead sends the reader to a key that is
+            // perfectly fine.
+            problems.Add(ListElementMissing(field, field.GetSection(missing.ToString()), blockPath));
+        }
+    }
+
+    /// <summary>
+    /// The lowest position below the highest one present that no element occupies, or
+    /// <see langword="null"/> when the positions run 0, 1, 2 … as a list's must.
+    /// </summary>
+    /// <remarks>
+    /// Answers <see langword="null"/> for anything whose keys are not positions at all rather than
+    /// guessing at it: a list always arrives keyed by index, so a key that is not one means this is
+    /// not the shape being reasoned about and something else is already reporting it.
+    /// </remarks>
+    private static int? FirstMissingIndex(IConfigurationSection[] elements)
+    {
+        var present = new HashSet<int>(elements.Length);
+
+        foreach (var element in elements)
+        {
+            if (!int.TryParse(element.Key, out var index))
+            {
+                return null;
+            }
+
+            present.Add(index);
+        }
+
+        if (present.Count == 0)
+        {
+            return null;
+        }
+
+        for (var index = 0; index < present.Max(); index++)
+        {
+            if (!present.Contains(index))
+            {
+                return index;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -291,7 +439,7 @@ internal static class DeveloperConfigValidator
     private static string NotValidHere(
         string serviceName, IConfigurationSection key, DeveloperConfigShape shape)
     {
-        var homes = shape.HomeBlocksOf(key.Key).Select(block => block.ToLowerInvariant()).ToArray();
+        var homes = shape.HomeBlocksOf(key.Key).Select(Spelled).ToArray();
 
         if (homes.Length == 1)
         {
@@ -315,7 +463,7 @@ internal static class DeveloperConfigValidator
         // candidates and stops rather than illustrating one of them as though it were the answer.
         if (near.Count == 1)
         {
-            var (field, block) = (near[0].Field.ToLowerInvariant(), near[0].Block.ToLowerInvariant());
+            var (field, block) = (Spelled(near[0].Field), Spelled(near[0].Block));
 
             return $"'{key.Key}' is not a valid key here. Did you mean '{field}', in the "
                 + $"'{block}' block: \"{serviceName}\": {{ ..., \"{block}\": {{ \"{field}\": ... }} }}?"
@@ -350,10 +498,10 @@ internal static class DeveloperConfigValidator
             candidates
                 .GroupBy(candidate => candidate.Field, StringComparer.OrdinalIgnoreCase)
                 .Select(group =>
-                    $"'{group.Key.ToLowerInvariant()}', in the "
+                    $"'{Spelled(group.Key)}', in the "
                     + string.Join(
                         " or ",
-                        group.Select(candidate => $"'{candidate.Block.ToLowerInvariant()}'")
+                        group.Select(candidate => $"'{Spelled(candidate.Block)}'")
                             .Order(StringComparer.Ordinal))
                     + " block"));
 
@@ -416,13 +564,17 @@ internal static class DeveloperConfigValidator
     /// exception — so that message's fallback branch would call the key invalid and then list it
     /// among the valid ones.
     /// </remarks>
+    /// <param name="container">
+    /// What the block sits in, as the message shows it: the service's own name for a source block,
+    /// and the enclosing block's path for one nested inside it.
+    /// </param>
     private static string BlockExpected(
-        string serviceName, IConfigurationSection key, IReadOnlyDictionary<string, Type> fields)
+        string container, IConfigurationSection key, IReadOnlyDictionary<string, Type> fields)
     {
         var block = key.Key.ToLowerInvariant();
 
         return $"'{key.Key}' takes a block of settings, not a value: "
-            + $"\"{serviceName}\": {{ ..., \"{block}\": {{ ... }} }}. "
+            + $"\"{container}\": {{ ..., \"{block}\": {{ ... }} }}. "
             + $"Valid keys there are {Quoted(fields.Keys)}."
             // FirstOrDefault rather than First: every block declares at least one field, but a
             // message builder that can throw would replace the configuration error being reported
@@ -447,6 +599,48 @@ internal static class DeveloperConfigValidator
         $"'{key.Key}'{(block is null ? "" : $" in the '{block}' block")} "
         + $"takes a value, not a block of settings: \"{block ?? serviceName}\": {{ \"{key.Key}\": ... }}."
         + SetAt(key);
+
+    /// <summary>
+    /// The error for a list field written as a single value — <c>"command": "./prepare.sh"</c>.
+    /// </summary>
+    /// <remarks>
+    /// A list has no scalar spelling that binds, so the fix is the brackets rather than a different
+    /// value, and the remedy names the indexed key each flat configuration layer sets an element
+    /// through.
+    /// </remarks>
+    private static string ListExpected(IConfigurationSection field, string block) =>
+        $"'{field.Key}' in the '{block}' block takes a list of values, not the single value "
+        + $"{Escaped(field.Value)}: \"{field.Key}\": [ ... ]."
+        + SetAtList(field);
+
+    /// <summary>
+    /// The error for a null element of a list — a JSON <c>null</c>, or a key a provider recorded
+    /// with no value.
+    /// </summary>
+    /// <remarks>
+    /// Its own message rather than <see cref="Blank"/>'s, because what is wrong is not the value but
+    /// what becomes of the list: the binder omits a null element, so everything after it moves down
+    /// a place and the command that runs is one argument shorter than the one that was written. An
+    /// empty element is a different thing and is allowed, since a command may take an empty
+    /// argument — which is also the spelling this suggests, being what someone writing <c>null</c>
+    /// most likely meant.
+    /// </remarks>
+    private static string ListElementMissing(
+        IConfigurationSection field, IConfigurationSection element, string block) =>
+        $"'{field.Key}' in the '{block}' block has no value at element '{element.Key}'. A null element is "
+        + "dropped rather than passed on, which shortens the list and shifts every element after it down a "
+        + "place — so the command that ran would be missing an argument, with nothing to say so. Remove the "
+        + "element, or write it as \"\" if the command really takes an empty one."
+        + SetAt(element);
+
+    /// <summary>
+    /// The error for an element of a list field that is itself a block of settings.
+    /// </summary>
+    private static string ListElementExpected(
+        IConfigurationSection field, IConfigurationSection element, string block) =>
+        $"'{field.Key}' in the '{block}' block is a list of values, but its element at "
+        + $"'{element.Key}' is a block of settings. Every element has to be a value."
+        + SetAt(element);
 
     /// <summary>
     /// The error for a value the binder could not turn into the field's type — a key that is valid
@@ -556,6 +750,17 @@ internal static class DeveloperConfigValidator
         + $"{section.Path.Replace(":", "__", StringComparison.Ordinal)}, or the command line.";
 
     /// <summary>
+    /// The same, for a key that has to hold a list. The flat providers carry one leaf each, so an
+    /// element is set through its index — which is also how such a layer's value merges over one in
+    /// the file, per index rather than wholesale.
+    /// </summary>
+    private static string SetAtList(IConfigurationSection section) =>
+        $" The key is '{section.Path}', which any configuration layer can set: "
+        + $"{DeveloperConfiguration.FileName}, appsettings, user secrets, the environment or the "
+        + "command line — the flat layers an element at a time, as "
+        + $"{$"{section.Path}:0".Replace(":", "__", StringComparison.Ordinal)}.";
+
+    /// <summary>
     /// The same, for a key that has to hold a block of settings rather than a value.
     /// </summary>
     /// <remarks>
@@ -574,5 +779,24 @@ internal static class DeveloperConfigValidator
         + $"{$"{section.Path}:{exampleField}".Replace(":", "__", StringComparison.Ordinal)}.";
 
     private static string Quoted(IEnumerable<string> keys) =>
-        string.Join(", ", keys.Select(k => $"'{k.ToLowerInvariant()}'").Order(StringComparer.Ordinal));
+        string.Join(", ", keys.Select(k => $"'{Spelled(k)}'").Order(StringComparer.Ordinal));
+
+    /// <summary>
+    /// A key as a developer writes it, from the property name the shape derived it from.
+    /// </summary>
+    /// <remarks>
+    /// Lowercasing the whole name was invisible while every field in this file was a single word,
+    /// and stopped being invisible the moment one was not: `WindowsCommand` was advertised as
+    /// `windowscommand`, and `ConnectionString` — which predates it — as `connectionstring`. Both
+    /// bind, since configuration keys are case-insensitive, so the spelling was never wrong so much
+    /// as not the one the documentation uses, in the one sentence whose whole job is to tell a
+    /// developer what to type.
+    /// <para>
+    /// Applied only to names that came from the shape, never to a key echoed back from what the
+    /// developer wrote: this lowercases the first character and keeps the rest, which is right for a
+    /// PascalCase property and would mangle an oddly-cased key from a file.
+    /// </para>
+    /// </remarks>
+    private static string Spelled(string key) =>
+        key.Length == 0 ? key : char.ToLowerInvariant(key[0]) + key[1..];
 }
