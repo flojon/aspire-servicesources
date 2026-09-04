@@ -20,8 +20,16 @@ internal static class NearMiss
     /// <c>port</c> — and two edits from a three-letter word reaches a large part of the alphabet, so
     /// a flat tolerance would confidently misname fields. Four is the boundary because it keeps
     /// every one of those on one edit while leaving <c>scheme</c>, <c>context</c> and
-    /// <c>namespace</c> — where a doubled or transposed letter is the usual mistake and one edit is
-    /// stingy — on two.
+    /// <c>namespace</c> on two, where a longer word leaves more room to go wrong and one edit is
+    /// stingy.
+    /// <para>
+    /// A transposition is what makes one edit enough for the short names rather than stingy in its
+    /// turn: <see cref="EditDistance"/> charges a swapped pair one edit, not two, so <c>paht</c>,
+    /// <c>prot</c> and <c>tga</c> are all inside a short name's tolerance. Charging two for it —
+    /// which plain Levenshtein does — left the commonest typo of the commonest fields unanswered
+    /// while <c>pth</c>, a dropped letter, was answered, and the difference is invisible to whoever
+    /// hit it.
+    /// </para>
     /// </remarks>
     private const int ShortName = 4;
 
@@ -69,9 +77,15 @@ internal static class NearMiss
                 entry.Candidate,
                 entry.Spelling,
                 Distance: EditDistance(lowered, entry.Spelling.ToLowerInvariant())))
-            // Filtered before the minimum is taken, since the tolerance differs per candidate: a
-            // long name one edit away qualifies where a short name the same distance from a
-            // different key does not, and comparing raw distances would let the second win.
+            // Filtered before the minimum is taken, since the tolerance differs per candidate:
+            // taking the minimum first would let a candidate outside its own tolerance win and then
+            // be discarded, losing a suggestion a longer candidate had earned.
+            //
+            // Under the two tiers MaxEdits has today the two orders cannot actually disagree — the
+            // closest candidate is at distance 0 or 1, which every tolerance admits, and for a
+            // farther one to be excluded while a farther one still qualifies needs a tier above
+            // two. So this is the order that stays correct if a tier is added, not a difference
+            // anything can observe now, and no test pins it because none can.
             .Where(entry => entry.Distance <= MaxEdits(entry.Spelling))
             .ToArray();
 
@@ -90,16 +104,27 @@ internal static class NearMiss
     }
 
     /// <summary>
-    /// The Levenshtein distance between <paramref name="from"/> and <paramref name="to"/>: how many
-    /// single-character inserts, deletes and substitutions separate them.
+    /// The distance between <paramref name="from"/> and <paramref name="to"/>: how many
+    /// single-character inserts, deletes, substitutions and swaps of an adjacent pair separate them.
     /// </summary>
     /// <remarks>
-    /// Two rows rather than the full matrix, since only the previous row is ever read. A transposed
-    /// pair costs two edits here where the Damerau variant charges one, which is why
-    /// <see cref="MaxEdits"/> allows two for anything but a short name.
+    /// Levenshtein plus the transposition of the Damerau variant, which charges a swapped pair one
+    /// edit rather than the two a substitution each way would cost. That is the whole reason the
+    /// transposition is here: it is the commonest typo there is, and the fields this matches against
+    /// are short enough that <see cref="MaxEdits"/> gives them a single edit — so at two, every
+    /// swap in the vocabulary was outside tolerance and got no suggestion at all, while a dropped
+    /// letter in the same word got one.
+    /// <para>
+    /// Three rows rather than the full matrix: a transposition reads the row two above, and nothing
+    /// reads further back. The restricted form — no substring is edited more than once, so
+    /// <c>ca</c> to <c>abc</c> is three rather than two — because the answer only has to order
+    /// candidates by resemblance, and the unrestricted algorithm costs an alphabet-sized table to
+    /// change an answer no vocabulary here can produce.
+    /// </para>
     /// </remarks>
     public static int EditDistance(string from, string to)
     {
+        var beforePrevious = new int[to.Length + 1];
         var previous = new int[to.Length + 1];
         var current = new int[to.Length + 1];
 
@@ -115,10 +140,22 @@ internal static class NearMiss
             for (var j = 1; j <= to.Length; j++)
             {
                 var substitution = previous[j - 1] + (from[i - 1] == to[j - 1] ? 0 : 1);
-                current[j] = Math.Min(Math.Min(current[j - 1] + 1, previous[j] + 1), substitution);
+                var best = Math.Min(Math.Min(current[j - 1] + 1, previous[j] + 1), substitution);
+
+                // The swapped pair, charged as one edit. Guarded on i and j rather than reaching for
+                // a row that isn't there: on the first row there is nothing two above, and
+                // beforePrevious still holds the zeroes it was allocated with.
+                if (i > 1 && j > 1 && from[i - 1] == to[j - 2] && from[i - 2] == to[j - 1])
+                {
+                    best = Math.Min(best, beforePrevious[j - 2] + 1);
+                }
+
+                current[j] = best;
             }
 
-            (previous, current) = (current, previous);
+            // Rotated so the row just finished becomes the previous one, the previous becomes the
+            // row two above, and the oldest buffer is reused for the next row.
+            (beforePrevious, previous, current) = (previous, current, beforePrevious);
         }
 
         return previous[to.Length];

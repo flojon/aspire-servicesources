@@ -529,10 +529,34 @@ public class ServiceDeveloperConfigValidatorTests
         Assert.DoesNotContain("Valid keys are", ex.Message);
     }
 
+    /// <summary>
+    /// A field whose letters were swapped is named too, which is the commonest typo of all and the
+    /// one the short fields could not afford while a swap cost two edits.
+    /// </summary>
+    /// <remarks>
+    /// <c>path</c> is four letters, so its tolerance is one edit; plain Levenshtein charges a
+    /// swapped pair two, so <c>paht</c> used to print the bare list of root keys while <c>pth</c>
+    /// — a dropped letter in the same word — was walked to the answer. Nothing about the rule
+    /// explained the difference to whoever hit it.
+    /// </remarks>
+    [Theory]
+    [InlineData("paht", "path", "local")]
+    [InlineData("prot", "port", "kubernetes")]
+    [InlineData("tga", "tag", "container")]
+    [InlineData("rul", "url", "url")]
+    public void Validate_TransposedFieldAtEntryRoot_NamesTheFieldAndItsBlock(
+        string written, string field, string block)
+    {
+        var ex = Load($$"""{ "services": { "orders": { "source": "local", "{{written}}": "x" } } }""");
+
+        Assert.Contains($"Did you mean '{field}'", ex.Message);
+        Assert.Contains($"'{block}' block", ex.Message);
+    }
+
     /// <remarks>
     /// Two edits, which only a name long enough to afford them gets: <c>namespace</c> is nine
-    /// letters, where a doubled or transposed letter is the usual mistake and one edit is stingy.
-    /// The companion test below is the other half of that rule.
+    /// letters, where a longer word leaves more room to go wrong and one edit is stingy. The
+    /// companion test below is the other half of that rule.
     /// </remarks>
     [Fact]
     public void Validate_MisspelledLongFieldAtEntryRoot_IsRecognizedAtTwoEdits()
