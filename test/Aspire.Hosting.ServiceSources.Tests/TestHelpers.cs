@@ -1,3 +1,4 @@
+using System.Threading.Channels;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Microsoft.Extensions.Configuration;
@@ -72,8 +73,7 @@ internal static class TestHelpers
     public static async Task<IReadOnlyList<string>> PublishBeforeStartEventCapturingWarningsAsync(
         IDistributedApplicationBuilder builder)
     {
-        var captured = new List<string>();
-        builder.Services.AddSingleton<ILoggerProvider>(new CapturingLoggerProvider(captured));
+        var captured = CaptureServiceSourcesWarnings(builder);
 
         await PublishBeforeStartEventAsync(builder);
 
@@ -83,17 +83,55 @@ internal static class TestHelpers
         }
     }
 
-    private sealed class CapturingLoggerProvider(List<string> captured) : ILoggerProvider
+    /// <summary>
+    /// Attaches a capturing logger to <paramref name="builder"/>'s services and hands back the list
+    /// the package's own warnings land in.
+    /// </summary>
+    private static List<string> CaptureServiceSourcesWarnings(IDistributedApplicationBuilder builder)
+    {
+        var captured = new List<string>();
+
+        builder.Services.AddSingleton<ILoggerProvider>(new CapturingLoggerProvider(message =>
+        {
+            lock (captured)
+            {
+                captured.Add(message);
+            }
+        }));
+
+        return captured;
+    }
+
+    /// <summary>
+    /// The package's own warnings, delivered as they are written rather than collected once
+    /// something has finished.
+    /// </summary>
+    /// <remarks>
+    /// For a notice written from a background loop that runs for the life of the host: there is no
+    /// task whose completion means the line has been written, so the line itself is what the test
+    /// awaits.
+    /// </remarks>
+    public static ChannelReader<string> StreamServiceSourcesWarnings(IDistributedApplicationBuilder builder)
+    {
+        var channel = Channel.CreateUnbounded<string>();
+
+        builder.Services.AddSingleton<ILoggerProvider>(
+            new CapturingLoggerProvider(message => channel.Writer.TryWrite(message)));
+
+        return channel.Reader;
+    }
+
+    private sealed class CapturingLoggerProvider(Action<string> write) : ILoggerProvider
     {
         public ILogger CreateLogger(string categoryName) =>
-            categoryName == ServiceSourcesCategory ? new CapturingLogger(captured) : NullLogger.Instance;
+            categoryName == ServiceSourcesCategory ? new CapturingLogger(write) : NullLogger.Instance;
 
         public void Dispose()
         {
         }
     }
 
-    private sealed class CapturingLogger(List<string> captured) : ILogger
+    private sealed class CapturingLogger(Action<string> write) : ILogger
     {
         public IDisposable? BeginScope<TState>(TState state)
             where TState : notnull => null;
@@ -112,10 +150,7 @@ internal static class TestHelpers
                 return;
             }
 
-            lock (captured)
-            {
-                captured.Add(formatter(state, exception));
-            }
+            write(formatter(state, exception));
         }
     }
 }

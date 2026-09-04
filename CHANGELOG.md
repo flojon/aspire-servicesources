@@ -156,6 +156,35 @@ nothing will fail to build to warn you.
   rejected under `"direct"` with a message saying why; a malformed one fails at startup naming the
   backing service and the key, rather than reaching the app as text.
 
+- **A service whose resource never runs is reported in the AppHost's own console** ([#150]). A
+  `"local"` checkout that fails to compile used to produce nothing there at all: Aspire's build of
+  a checkout is `dotnet run`'s own, so the compiler's output goes to that resource's console in the
+  dashboard, and from the terminal the service simply never appeared. There is now one line per
+  failing resource, naming the service, naming the state Aspire reported for it, and pointing at
+  the dashboard:
+
+  ```text
+  fail: Aspire.Hosting.ServiceSources[0]
+        Service 'orders' is configured as 'local' and its resource is not running: it reported
+        'Finished' with exit code 1. This console does not carry that resource's output, so
+        nothing here says why — its own console in the Aspire dashboard does, at the dashboard
+        URL logged above. …
+  ```
+
+  Read off the resource's state rather than off any one failure path, so it covers a build that
+  won't compile, a deferred clone that never landed, and a service of any source — not `"local"`
+  alone. Reported for `FailedToStart` and for a terminal state with a non-zero exit code, one line
+  per failing replica.
+
+  It errs towards silence rather than towards a false alarm, since a channel that sometimes lies is
+  one developers learn to ignore. Not reported: a terminal state whose exit code was never
+  reported, an orderly Ctrl-C, a resource stopped from the dashboard, and `RuntimeUnhealthy` —
+  which names an unreachable container runtime rather than a failed service, and which an AppHost
+  started before its container runtime is up reports for every container-backed service before
+  starting them all normally. It says only *that* the service isn't running: the output that says
+  why belongs to the process Aspire launched, whose streams this package does not own. Needs no
+  opt-in, and nothing about how a failure reaches the dashboard changes.
+
 ### Changed
 
 - **A `"local"` service with a non-`dotnet` kind now waits for its checkout before its options block
@@ -825,6 +854,7 @@ Targets `net10.0`.
 [#130]: https://github.com/flojon/aspire-servicesources/issues/130
 [#131]: https://github.com/flojon/aspire-servicesources/issues/131
 [#144]: https://github.com/flojon/aspire-servicesources/issues/144
+[#150]: https://github.com/flojon/aspire-servicesources/issues/150
 [#159]: https://github.com/flojon/aspire-servicesources/issues/159
 [#160]: https://github.com/flojon/aspire-servicesources/issues/160
 [#161]: https://github.com/flojon/aspire-servicesources/issues/161
