@@ -17,7 +17,7 @@ public static class ServiceEndpointExtensions
     /// <code>
     /// var commonAuth = builder.AddService("common-auth");
     ///
-    /// builder.AddProject&lt;Projects.Core&gt;("planning-core")
+    /// builder.AddProject&lt;Projects.Web&gt;("web")
     ///        .WithEnvironment("Services__CommonAuth", commonAuth.GetServiceEndpoint());
     /// </code>
     /// </example>
