@@ -182,8 +182,29 @@ internal sealed partial class GitCliClient(
 
     public string? GetHeadCommitSha(string repositoryPath)
     {
-        // --quiet so an unborn HEAD, and a directory that is no repository, both come back as a
-        // plain failure rather than as an error on stderr this would then have to read.
+        // `git -C <dir>` changes directory. It does not stop repository *discovery*, so from a
+        // directory that is not itself a working tree git walks up and answers about whichever
+        // repository encloses it — a commit that has nothing to do with the directory asked about.
+        // Verified rather than assumed: a plain subdirectory of a clone came back with the clone's
+        // own HEAD, where this method's contract says null.
+        //
+        // What that would cost is a marker keyed on an unrelated repository: a `local.path` pointed
+        // at an unpacked directory that happens to sit inside some checkout would re-run its
+        // bootstrap for every commit made anywhere in that checkout, and call it "once per commit".
+        //
+        // Requiring a '.git' entry at the path itself is what scopes the answer to it. With one,
+        // discovery finds that repository and no other; without one, this is not the root of a
+        // working tree and "cannot tell" is the honest answer — which every caller reads as "run
+        // the step". A managed checkout always has one, and a '.git' file rather than a directory
+        // (a linked worktree, a --separate-git-dir clone) is a working tree root too, so both count.
+        if (!Directory.Exists(Path.Combine(repositoryPath, ".git"))
+            && !File.Exists(Path.Combine(repositoryPath, ".git")))
+        {
+            return null;
+        }
+
+        // --quiet so an unborn HEAD comes back as a plain failure rather than as an error on stderr
+        // this would then have to read.
         var result = TryRun(repositoryPath, ["rev-parse", "--verify", "--quiet", "HEAD"]);
         return result.Succeeded && result.FirstLine.Length > 0 ? result.FirstLine : null;
     }

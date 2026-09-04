@@ -159,6 +159,54 @@ public class ProcessPrepareCommandRunnerTests
         Assert.Equal(3, exitCode);
     }
 
+    /// <summary>
+    /// A command that reads stdin sees the end of it rather than waiting for a human.
+    /// </summary>
+    /// <remarks>
+    /// Left unredirected, the command inherits the AppHost's own stdin and a prompting bootstrap
+    /// waits forever — with no timeout, and under <c>aspire run</c> no visible prompt either, since
+    /// the CLI does not print the AppHost's output. <c>GitCommand</c> closes stdin for exactly this
+    /// reason. The script here blocks on <c>read</c>, so without the close this test hangs rather
+    /// than fails.
+    /// </remarks>
+    [Fact]
+    public async Task ACommandThatReadsStdin_IsNotLeftWaitingForAHuman()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var directory = Directory.CreateTempSubdirectory().FullName;
+        WriteScript(
+            Path.Combine(directory, "prompt.sh"),
+            """
+            #!/bin/sh
+            echo "continue? "
+            read answer
+            echo "got '$answer'"
+            """);
+
+        var lines = new List<string>();
+        await Task.Run(() => ProcessPrepareCommandRunner.Instance.Run(
+            directory,
+            ["./prompt.sh"],
+            CancellationToken.None,
+            line =>
+            {
+                lock (lines)
+                {
+                    lines.Add(line);
+                }
+            }))
+            .WaitAsync(TimeSpan.FromSeconds(30));
+
+        // It ran past the `read` rather than sitting on it, and read nothing — which is what the
+        // end of a closed stdin looks like to a shell. The exit code is the trailing echo's and says
+        // nothing about any of this.
+        Assert.Contains("got ''", lines);
+    }
+
     [Fact]
     public async Task ACommandThatExits_ReportsItsOutputAndExitCode()
     {

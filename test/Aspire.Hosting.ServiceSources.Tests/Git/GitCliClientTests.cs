@@ -393,4 +393,27 @@ public class GitCliClientTests
 
         Assert.Null(Client().GetHeadCommitSha(dir));
     }
+
+    /// <summary>
+    /// A plain directory <em>inside</em> a repository still answers null.
+    /// </summary>
+    /// <remarks>
+    /// <c>-C</c> changes directory without stopping repository discovery, so the tool walks up from
+    /// there and reports whichever repository encloses it. That answer is about a repository nobody
+    /// named: a <c>local.path</c> pointed at an unpacked directory which happens to sit inside some
+    /// checkout would re-run its bootstrap for every commit made anywhere in that checkout, and
+    /// record it as "once per commit". The test above passes with or without the fix, because a
+    /// temporary directory has no enclosing repository to find — which is what made it a weak test.
+    /// </remarks>
+    [Fact]
+    public void GetHeadCommitSha_APlainDirectoryInsideARepository_IsStillNull()
+    {
+        var (client, _, destination) = ClonedRepository();
+
+        // Real, and really inside the clone's working tree.
+        var inside = Directory.CreateDirectory(Path.Combine(destination, "unpacked", "data")).FullName;
+
+        Assert.NotNull(client.GetHeadCommitSha(destination));
+        Assert.Null(client.GetHeadCommitSha(inside));
+    }
 }

@@ -28,6 +28,14 @@ internal sealed class ProcessPrepareCommandRunner : IPrepareCommandRunner
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+
+            // Redirected so it can be closed below. Left alone, the command inherits the AppHost's
+            // own stdin, and a bootstrap that asks a question — a package manager confirming, a
+            // tool prompting for a credential — then waits on a human who is not there. That wait
+            // has no timeout and, under `aspire run`, no visible prompt either, since the CLI does
+            // not print the AppHost's output. GitCommand redirects and closes it for exactly this
+            // reason: never block an AppHost's startup on a human.
+            RedirectStandardInput = true,
         };
 
         foreach (var argument in command.Skip(1))
@@ -50,6 +58,11 @@ internal sealed class ProcessPrepareCommandRunner : IPrepareCommandRunner
 
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
+
+        // Closed immediately rather than held open: a command that reads stdin should see the end
+        // of it and get on with whatever it does without an answer, rather than blocking on input
+        // that is never coming.
+        process.StandardInput.Close();
 
         Wait(process, cancellationToken);
         Drain(stdoutEnded.Task, stderrEnded.Task);

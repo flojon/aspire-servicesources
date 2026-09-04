@@ -240,10 +240,16 @@ internal static class DeveloperConfigValidator
     /// <remarks>
     /// Only the shape is checked here. Whether the list is long enough to be a command, and whether
     /// its first element points where it is allowed to, belong to whoever reads it — a message about
-    /// those can name the service and what the list is for, which this walk cannot.
+    /// those can name the service and what the list is for, which this walk cannot. An empty list
+    /// reaches that reader and is refused there by name, which is why nothing is said about it here;
+    /// it is <em>not</em> a way to drop what a layer below wrote, because it binds to an empty array
+    /// rather than to absent, and the flat providers cannot express one at all.
     /// <para>
-    /// An empty list is left alone for the same reason an empty value is: it is what a higher
-    /// configuration layer writes to drop what the file below said.
+    /// A null element is the exception, and it has to be caught here because it does not survive to
+    /// the reader: the JSON provider records the key with a null value, and the binder then omits it
+    /// from the array entirely, so the list <em>shortens</em> and every argument after it shifts
+    /// down. <c>["mvn", null, "-Pprod"]</c> runs <c>mvn -Pprod</c>. Nothing downstream can report
+    /// what it never receives.
     /// </para>
     /// </remarks>
     private static void CollectList(List<string> problems, IConfigurationSection field, string blockPath)
@@ -258,13 +264,70 @@ internal static class DeveloperConfigValidator
             return;
         }
 
-        foreach (var element in field.GetChildren())
+        var elements = field.GetChildren().ToArray();
+
+        foreach (var element in elements)
         {
             if (HasChildren(element))
             {
                 problems.Add(ListElementExpected(field, element, blockPath));
             }
+            else if (element.Value is null)
+            {
+                problems.Add(ListElementMissing(field, element, element.Key, blockPath));
+            }
         }
+
+        // A list is keyed by position, so a position that is missing is an element that is missing.
+        // The one that produces it is a null written in the file: the re-rooting that hands this
+        // file over drops a null-valued key, because that is what an intermediate node looks like
+        // too, so index 1 of a three-element list simply is not here — and the binder then closes
+        // the gap, shortening the command and shifting every argument after it down a place.
+        // `["mvn", null, "-Pprod"]` runs `mvn -Pprod`. Checked by shape rather than by cause, so a
+        // hole from any other direction — a layer setting only `command:2` — is reported too.
+        if (FirstMissingIndex(elements) is { } missing)
+        {
+            problems.Add(ListElementMissing(field, elements[0], missing.ToString(), blockPath));
+        }
+    }
+
+    /// <summary>
+    /// The lowest position below the highest one present that no element occupies, or
+    /// <see langword="null"/> when the positions run 0, 1, 2 … as a list's must.
+    /// </summary>
+    /// <remarks>
+    /// Answers <see langword="null"/> for anything whose keys are not positions at all rather than
+    /// guessing at it: a list always arrives keyed by index, so a key that is not one means this is
+    /// not the shape being reasoned about and something else is already reporting it.
+    /// </remarks>
+    private static int? FirstMissingIndex(IConfigurationSection[] elements)
+    {
+        var present = new HashSet<int>(elements.Length);
+
+        foreach (var element in elements)
+        {
+            if (!int.TryParse(element.Key, out var index))
+            {
+                return null;
+            }
+
+            present.Add(index);
+        }
+
+        if (present.Count == 0)
+        {
+            return null;
+        }
+
+        for (var index = 0; index < present.Max(); index++)
+        {
+            if (!present.Contains(index))
+            {
+                return index;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -545,6 +608,26 @@ internal static class DeveloperConfigValidator
         $"'{field.Key}' in the '{block}' block takes a list of values, not the single value "
         + $"{Escaped(field.Value)}: \"{field.Key}\": [ ... ]."
         + SetAtList(field);
+
+    /// <summary>
+    /// The error for a null element of a list — a JSON <c>null</c>, or a key a provider recorded
+    /// with no value.
+    /// </summary>
+    /// <remarks>
+    /// Its own message rather than <see cref="Blank"/>'s, because what is wrong is not the value but
+    /// what becomes of the list: the binder omits a null element, so everything after it moves down
+    /// a place and the command that runs is one argument shorter than the one that was written. An
+    /// empty element is a different thing and is allowed, since a command may take an empty
+    /// argument — which is also the spelling this suggests, being what someone writing <c>null</c>
+    /// most likely meant.
+    /// </remarks>
+    private static string ListElementMissing(
+        IConfigurationSection field, IConfigurationSection sibling, string index, string block) =>
+        $"'{field.Key}' in the '{block}' block has no value at element '{index}'. A null element is dropped "
+        + "rather than passed on, which shortens the list and shifts every element after it down a place — so "
+        + "the command that ran would be missing an argument, with nothing to say so. Remove the element, or "
+        + "write it as \"\" if the command really takes an empty one."
+        + SetAt(sibling);
 
     /// <summary>
     /// The error for an element of a list field that is itself a block of settings.

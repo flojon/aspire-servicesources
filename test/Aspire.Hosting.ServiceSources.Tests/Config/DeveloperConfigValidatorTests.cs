@@ -692,6 +692,44 @@ public class DeveloperConfigValidatorTests
         Assert.Contains("'isDeclared' is not a valid key in the 'local.prepare' block", ex.Message);
     }
 
+    /// <summary>
+    /// A null element in the command is rejected rather than silently dropped.
+    /// </summary>
+    /// <remarks>
+    /// This one has to be caught here, because it does not survive to the reader that catches an
+    /// empty list or a climbing first element: the JSON provider records the key with a null value
+    /// and the binder then omits it, so the array <em>shortens</em> and every argument after it
+    /// shifts down. Measured on the real provider: <c>["./prepare.sh", null, "--full"]</c> bound to
+    /// two elements and the plan accepted it, so the command that ran was missing an argument the
+    /// developer had written and nothing said so.
+    /// </remarks>
+    [Fact]
+    public void Validate_ANullElementInTheCommand_IsRejected()
+    {
+        var ex = Load("""
+            { "services": { "orders": { "source": "local", "local": {
+                "prepare": { "command": ["./prepare.sh", null, "--full"] } } } } }
+            """);
+
+        Assert.Contains("'command' in the 'local.prepare' block has no value at element '1'", ex.Message);
+        Assert.Contains("shifts every element after it down a place", ex.Message);
+    }
+
+    /// <remarks>
+    /// An empty element is a different thing: a command may genuinely take an empty argument, and it
+    /// survives the binder intact, so it is accepted where a null is refused.
+    /// </remarks>
+    [Fact]
+    public void Validate_AnEmptyElementInTheCommand_IsAccepted()
+    {
+        var config = Resolve("""
+            { "services": { "orders": { "source": "local", "local": {
+                "prepare": { "command": ["./prepare.sh", "", "--full"] } } } } }
+            """);
+
+        Assert.Equal<string[]>(["./prepare.sh", "", "--full"], config.Local.Prepare!.Command!);
+    }
+
     [Fact]
     public void Validate_CommandWrittenAsAScalar_IsRejected()
     {

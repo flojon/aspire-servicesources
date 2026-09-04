@@ -113,7 +113,18 @@ internal static class CheckoutPreparation
 
         if (exitCode != 0)
         {
-            throw new ServiceSourcesConfigurationException(FailedMessage(serviceName, step, exitCode, tail));
+            // Snapshotted under the same lock the callback enqueues through. The runner's callback
+            // can still be firing here: a stream held open by something the command started outlives
+            // the command, so the drain is bounded and can return with readers still going — and
+            // reading the queue while one appends turns a report about a failed command into a
+            // "Collection was modified" of our own.
+            string[] quoted;
+            lock (tail)
+            {
+                quoted = [.. tail];
+            }
+
+            throw new ServiceSourcesConfigurationException(FailedMessage(serviceName, step, exitCode, quoted));
         }
 
         // `always` records nothing: it is the mode whose command decides its own work, so a marker
@@ -284,11 +295,13 @@ internal static class CheckoutPreparation
     /// </summary>
     private static string Tag(string serviceName) => $"[prepare {serviceName}]";
 
+    /// <param name="quoted">
+    /// The output tail, already snapshotted by the caller — this must not enumerate the live queue,
+    /// which a still-running stream reader can be appending to.
+    /// </param>
     private static string FailedMessage(
-        string serviceName, PrepareStep step, int exitCode, IEnumerable<string> tail)
+        string serviceName, PrepareStep step, int exitCode, string[] quoted)
     {
-        var quoted = tail.ToArray();
-
         return $"Service '{serviceName}': its prepare step failed. The command '{step.Describe()}' exited with "
             + $"code {exitCode}, so the checkout was left as the command found it and nothing was recorded as "
             + "completed — the step will run again from the beginning on the next start."

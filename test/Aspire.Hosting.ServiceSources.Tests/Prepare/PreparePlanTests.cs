@@ -340,6 +340,31 @@ public class PreparePlanTests
         Assert.Null(plan.IgnoredCatalogNotice);
     }
 
+    /// <summary>
+    /// The snippet the notice offers is JSON that parses, whatever the command contains.
+    /// </summary>
+    /// <remarks>
+    /// The whole value of the notice is that it can be pasted into a JSON file. A Windows command
+    /// carries backslashes, and wrapping an argument in quotes by hand produces either invalid JSON
+    /// or — worse, because it parses — a different string: <c>C:\temp\x</c> written raw contains
+    /// <c>\t</c>, which JSON reads as a tab.
+    /// </remarks>
+    [Fact]
+    public void PathCheckout_TheNoticesSnippet_IsValidJson()
+    {
+        var plan = Plan(
+            Catalog(["pwsh", "-File", @"C:\tools\prepare.ps1", "--label", "say \"hi\""]),
+            managedCheckout: false);
+
+        var snippet = plan.IgnoredCatalogNotice!;
+        var array = snippet[snippet.IndexOf("[", StringComparison.Ordinal)..(snippet.IndexOf("]", StringComparison.Ordinal) + 1)];
+
+        var parsed = System.Text.Json.JsonSerializer.Deserialize<string[]>(array);
+
+        Assert.Equal<string[]>(
+            ["pwsh", "-File", @"C:\tools\prepare.ps1", "--label", "say \"hi\""], parsed!);
+    }
+
     [Fact]
     public void PathCheckout_NoCatalogStepEither_SaysNothing()
     {

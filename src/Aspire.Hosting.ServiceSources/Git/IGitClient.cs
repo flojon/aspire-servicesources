@@ -70,8 +70,16 @@ internal interface IGitClient
     /// <summary>
     /// The commit currently checked out at <paramref name="repositoryPath"/>, or
     /// <see langword="null"/> when it cannot be determined — an unborn HEAD, or a directory that is
-    /// not a git repository at all. Never performs any network operation.
+    /// not itself the root of a working tree. Never performs any network operation.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// "Not itself the root" rather than "not a git repository at all", and the difference is
+    /// load-bearing: a directory nested inside some unrelated checkout must answer
+    /// <see langword="null"/> rather than that checkout's HEAD, or a marker keyed on the answer is
+    /// keyed on a repository nobody named.
+    /// </para>
+    /// </remarks>
     /// <remarks>
     /// Read by a <c>prepare</c> step's completion marker, which keys on it so that a checkout moving
     /// to another commit re-runs the step. Every caller has to treat <see langword="null"/> as "run

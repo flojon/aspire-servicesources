@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Aspire.Hosting.ServiceSources.Config;
 
 namespace Aspire.Hosting.ServiceSources.Prepare;
@@ -231,10 +232,19 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
         written is null ? null : PrepareModes.Parse(serviceName, written, $"{block}.mode");
 
     /// <remarks>
+    /// <para>
     /// Deliberately not the hard error that <c>ref</c> plus <c>path</c> is. Those are both the
     /// developer's own fields, so combining them is the developer contradicting themselves in a
     /// single file; a catalog <c>prepare</c> block is the team's and applies correctly to every
     /// developer on a managed checkout.
+    /// </para>
+    /// <para>
+    /// Each argument is serialized as JSON rather than wrapped in quotes, because the whole value of
+    /// this notice is that the snippet can be pasted into a JSON file. A Windows command carries
+    /// backslashes and quoting them by hand produces either invalid JSON or — worse, since it parses
+    /// — a different string: <c>C:\temp\x</c> written raw contains <c>\t</c>, which JSON reads as a
+    /// tab.
+    /// </para>
     /// </remarks>
     private static string IgnoredCatalogStepNotice(string serviceName, IReadOnlyList<string> command) =>
         $"Service '{serviceName}': its catalog entry declares a '{CatalogBlock}' step, which was not run — "
@@ -242,7 +252,7 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
         + "command in a directory this tool does not own unless you asked for it there. Nothing establishes "
         + "that the directory is even a checkout of the repository the catalog names. To run it, copy it into "
         + $"{DeveloperConfiguration.FileName}: \"{serviceName}\": {{ ..., \"local\": {{ \"{CatalogBlock}\": "
-        + $"{{ \"command\": [{string.Join(", ", command.Select(argument => $"\"{argument}\""))}] }} }} }} — or "
+        + $"{{ \"command\": [{string.Join(", ", command.Select(a => JsonSerializer.Serialize<string>(a)))}] }} }} }} — or "
         + $"declare {{ \"{CatalogBlock}\": {{ \"mode\": \"never\" }} }} to say that nothing should run there. "
         + "Either one silences this notice; it repeats on every start until one of them is there.";
 }
