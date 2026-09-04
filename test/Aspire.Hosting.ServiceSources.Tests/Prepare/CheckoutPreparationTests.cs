@@ -572,6 +572,47 @@ public class CheckoutPreparationTests
     private static string PathMarkerPath(string appHostDirectory) =>
         Path.Combine(appHostDirectory, ".servicesources", "prepare", $"{ServiceName}.json");
 
+    /// <summary>
+    /// A step that succeeded is not undone by a marker that cannot be written.
+    /// </summary>
+    /// <remarks>
+    /// The recovery this asserts is the whole reason the write is best-effort: the command has
+    /// already done its work, so failing the service now would turn "the completion could not be
+    /// recorded" into "the service does not start". A <c>path</c> checkout is the case that reaches
+    /// it, because its marker goes in the AppHost's own tree — and acquiring that tree sat outside
+    /// the recovery, so a read-only AppHost directory did exactly what the recovery forbids. What it
+    /// costs instead is a step that runs again next start, which every mode's command has to
+    /// tolerate anyway.
+    /// </remarks>
+    [Fact]
+    public void AMarkerThatCannotBeWritten_DoesNotFailTheStep()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            // The mode bits below are POSIX, and what is under test is the recovery, not the
+            // platform.
+            return;
+        }
+
+        var fixture = NewFixture();
+        var readOnly = UnixFileMode.UserRead | UnixFileMode.UserExecute;
+
+        File.SetUnixFileMode(fixture.AppHostDirectory, readOnly);
+
+        try
+        {
+            Run(fixture, Step(), managedCheckout: false);
+        }
+        finally
+        {
+            File.SetUnixFileMode(fixture.AppHostDirectory, readOnly | UnixFileMode.UserWrite);
+        }
+
+        // It ran, and nothing threw: the tool directory could not be created, so no marker exists.
+        Assert.Single(fixture.Runner.Runs);
+        Assert.False(Directory.Exists(Path.Combine(fixture.AppHostDirectory, ".servicesources")));
+    }
+
     [Fact]
     public void APathCheckout_KeepsItsMarkerInTheToolsOwnTree()
     {

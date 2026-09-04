@@ -365,6 +365,33 @@ public class PreparePlanTests
             ["pwsh", "-File", @"C:\tools\prepare.ps1", "--label", "say \"hi\""], parsed!);
     }
 
+    /// <summary>
+    /// A catalog command this tool would refuse is not offered for the developer to adopt.
+    /// </summary>
+    /// <remarks>
+    /// The two branches disagreed about whether an empty command is a mistake: the managed one
+    /// rejected it by name while this one printed <c>"command": []</c> and invited someone to paste
+    /// a value that would then be refused. The inherited command now goes through the same checks a
+    /// step that runs goes through, so an empty list, a null element and a first element that climbs
+    /// out of the checkout are all mistakes in the catalog whichever path the service takes — which
+    /// is already how a mode that is not a mode is treated.
+    /// </remarks>
+    [Fact]
+    public void PathCheckout_AnEmptyCatalogCommand_IsRejectedRatherThanOffered()
+    {
+        var ex = Rejects(Catalog([]), managedCheckout: false);
+
+        Assert.Contains("prepare.command is an empty list", ex.Message);
+    }
+
+    [Fact]
+    public void PathCheckout_ACatalogCommandThatClimbsOut_IsRejectedRatherThanOffered()
+    {
+        var ex = Rejects(Catalog(["../../escape.sh"]), managedCheckout: false);
+
+        Assert.Contains("points outside the service's checkout", ex.Message);
+    }
+
     [Fact]
     public void PathCheckout_NoCatalogStepEither_SaysNothing()
     {

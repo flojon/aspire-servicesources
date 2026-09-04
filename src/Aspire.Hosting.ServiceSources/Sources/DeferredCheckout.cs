@@ -810,11 +810,18 @@ internal sealed class DeferredCheckout
         }
         catch (OperationCanceledException)
         {
-            // The host is shutting down. This is reached from the wait for NotStarted or from the
-            // start command, never from the clone in between: LocalCheckoutPrefetch takes no
-            // cancellation token, so a shutdown that arrives mid-clone is not noticed until that
-            // clone has finished on its own. Either way there is nothing left to start and nobody
-            // to tell.
+            // The host is shutting down. Three places reach here: the wait for NotStarted, the
+            // prepare step, and the start command. Not the clone — LocalCheckoutPrefetch takes no
+            // cancellation token, so a shutdown arriving mid-clone is not noticed until that clone
+            // has finished on its own.
+            //
+            // The prepare step is the one worth naming, because it is the one that can be running
+            // for minutes when Ctrl-C arrives: CheckoutPreparation.Run hands the token to the
+            // command's own process and lets the cancellation out unwrapped, precisely so it lands
+            // here rather than in the handler below, which would report an interrupted bootstrap as
+            // this service having failed.
+            //
+            // Either way there is nothing left to start and nobody to tell.
         }
         catch (Exception ex)
         {

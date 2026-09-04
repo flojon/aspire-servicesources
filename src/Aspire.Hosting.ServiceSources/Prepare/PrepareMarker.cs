@@ -102,25 +102,31 @@ internal sealed record PrepareMarker(
     public static void Write(
         string markerPath, PrepareMarker marker, string appHostDirectory, bool managedCheckout)
     {
-        // For a `path` checkout this is the point the tool directory is acquired at all: an AppHost
-        // whose services all use `path` and declare no step should never grow one, and the
-        // .gitignore that comes with it is not optional here — without it the marker becomes the one
-        // tool-managed file a developer would see listed as untracked in their own repository.
-        if (!managedCheckout)
-        {
-            ToolDirectory.Ensure(appHostDirectory);
-        }
-
         var directory = System.IO.Path.GetDirectoryName(markerPath)!;
         var scratch = System.IO.Path.Combine(directory, $".incoming-prepare-{Guid.NewGuid():N}.json");
 
         try
         {
-            // Inside the try with the write it exists for: creating the directory can fail for the
-            // same reasons writing can — a read-only tree, or a '.git' that is a file rather than a
-            // directory, which a managed checkout cannot be but a directory handed to this code
-            // could be — and an exception escaping here would turn "the completion could not be
-            // recorded" into "the service does not start", after the step had already succeeded.
+            // For a `path` checkout this is the point the tool directory is acquired at all: an
+            // AppHost whose services all use `path` and declare no step should never grow one, and
+            // the .gitignore that comes with it is not optional here — without it the marker becomes
+            // the one tool-managed file a developer would see listed as untracked in their own
+            // repository.
+            //
+            // Inside the try, like everything else here: this creates a directory, which fails for
+            // the same reasons writing does, and it is the caller that must not care. It sat outside
+            // once, which made a read-only AppHost directory turn a prepare step that had already
+            // succeeded into a service that does not start.
+            if (!managedCheckout)
+            {
+                ToolDirectory.Ensure(appHostDirectory);
+            }
+
+            // Creating the marker's own directory can fail for the same reasons — a read-only tree,
+            // or a '.git' that is a file rather than a directory, which a managed checkout cannot be
+            // but a directory handed to this code could be. An exception escaping here would turn
+            // "the completion could not be recorded" into "the service does not start", after the
+            // step had already done its work.
             Directory.CreateDirectory(directory);
 
             File.WriteAllText(scratch, JsonSerializer.Serialize(marker, SerializerOptions));

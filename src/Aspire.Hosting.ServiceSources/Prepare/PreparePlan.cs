@@ -163,9 +163,29 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
                 ? null
                 : SelectPlatform(catalog?.Command, catalog?.WindowsCommand, windows);
 
-            return inherited is null
-                ? Nothing
-                : new PreparePlan(null, IgnoredCatalogStepNotice(serviceName, inherited));
+            if (inherited is null)
+            {
+                return Nothing;
+            }
+
+            // Validated before it is offered, through the same checks a step that runs goes through.
+            // The notice exists to hand the developer a command to adopt, so a command this tool
+            // would refuse is not one to recommend — and an empty list is exactly that: the managed
+            // branch rejects it by name while this one used to print `"command": []` and invite
+            // someone to paste it. A null element and a first element that climbs out of the
+            // checkout are the same story. All three are mistakes in the catalog whichever path the
+            // service takes, which is already how a mode that is not a mode is treated.
+            //
+            // The result is discarded: what is wanted is the judgement, not the step. Nothing runs
+            // for a `path` service that has not declared its own.
+            _ = PrepareStep.Create(
+                serviceName,
+                inherited,
+                catalogMode ?? PrepareModes.Default,
+                CatalogBlock,
+                WindowsWithoutVariant(catalog?.WindowsCommand, windows));
+
+            return new PreparePlan(null, IgnoredCatalogStepNotice(serviceName, inherited));
         }
 
         var mode = developerMode ?? PrepareModes.Default;

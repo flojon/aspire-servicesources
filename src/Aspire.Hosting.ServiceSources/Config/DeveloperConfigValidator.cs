@@ -274,7 +274,7 @@ internal static class DeveloperConfigValidator
             }
             else if (element.Value is null)
             {
-                problems.Add(ListElementMissing(field, element, element.Key, blockPath));
+                problems.Add(ListElementMissing(field, element, blockPath));
             }
         }
 
@@ -287,7 +287,11 @@ internal static class DeveloperConfigValidator
         // hole from any other direction — a layer setting only `command:2` — is reported too.
         if (FirstMissingIndex(elements) is { } missing)
         {
-            problems.Add(ListElementMissing(field, elements[0], missing.ToString(), blockPath));
+            // The section for the position that is absent, rather than one of the positions that is
+            // present: it has no value, which is the point, but it does have the key path the
+            // remedy has to name — and naming element 0's instead sends the reader to a key that is
+            // perfectly fine.
+            problems.Add(ListElementMissing(field, field.GetSection(missing.ToString()), blockPath));
         }
     }
 
@@ -622,12 +626,12 @@ internal static class DeveloperConfigValidator
     /// most likely meant.
     /// </remarks>
     private static string ListElementMissing(
-        IConfigurationSection field, IConfigurationSection sibling, string index, string block) =>
-        $"'{field.Key}' in the '{block}' block has no value at element '{index}'. A null element is dropped "
-        + "rather than passed on, which shortens the list and shifts every element after it down a place — so "
-        + "the command that ran would be missing an argument, with nothing to say so. Remove the element, or "
-        + "write it as \"\" if the command really takes an empty one."
-        + SetAt(sibling);
+        IConfigurationSection field, IConfigurationSection element, string block) =>
+        $"'{field.Key}' in the '{block}' block has no value at element '{element.Key}'. A null element is "
+        + "dropped rather than passed on, which shortens the list and shifts every element after it down a "
+        + "place — so the command that ran would be missing an argument, with nothing to say so. Remove the "
+        + "element, or write it as \"\" if the command really takes an empty one."
+        + SetAt(element);
 
     /// <summary>
     /// The error for an element of a list field that is itself a block of settings.

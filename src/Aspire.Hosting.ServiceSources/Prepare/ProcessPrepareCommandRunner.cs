@@ -155,11 +155,16 @@ internal sealed class ProcessPrepareCommandRunner : IPrepareCommandRunner
         {
             process.Kill(entireProcessTree: true);
         }
-        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException)
+        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException
+                                       or Win32Exception or AggregateException)
         {
-            // It exited between the cancellation and the kill, or this platform cannot enumerate the
-            // tree. Either way there is nothing left for this to do, and a shutdown must not fail
-            // over the way it was noticed.
+            // It exited between the cancellation and the kill (InvalidOperationException), this
+            // platform cannot do it (NotSupportedException), the process could not be terminated
+            // (Win32Exception), or some of the tree could not be (AggregateException). Every one of
+            // those is a shutdown that has already been decided, so none of them may throw: this
+            // runs on the way out of a cancelled step, and an exception here reaches the deferred
+            // start task's general handler and paints the service as failed — reporting "your
+            // service failed" for a Ctrl-C, which is the opposite of what cancelling meant.
         }
     }
 
