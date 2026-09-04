@@ -540,6 +540,124 @@ public class CheckoutPreparationTests
         Assert.Contains("wrote no output", ex.Message);
     }
 
+    /// <summary>
+    /// The output tail a failure quotes is snapshotted under the same lock the callback enqueues
+    /// through, so a stream reader still delivering a line is waited for rather than raced.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Reachable because the drain is bounded: a stream held open by something the command started
+    /// outlives the command, so the runner returns while a reader is still appending. Reading the
+    /// queue unguarded then either throws over the top of a report about someone else's failed
+    /// command, or quietly quotes a tail missing the line that was arriving.
+    /// </para>
+    /// <para>
+    /// Nothing here exists only for the test. The sink is called from inside that lock in production
+    /// — it is how a line reaches the developer before it reaches the tail — so a sink that stops
+    /// there is a reader caught mid-append, and a runner that returns while it is stopped is the
+    /// bounded drain returning early. Both assertions then say the same thing from two directions:
+    /// unguarded, the snapshot is already finished by the time the reader is let go, and the tail it
+    /// took has no line in it.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task AFailureWhileALineIsStillArriving_WaitsForItRatherThanQuotingAroundIt()
+    {
+        const string StillArriving = "the line the bounded drain did not wait for";
+
+        var fixture = NewFixture();
+        using var insideTheCallback = new ManualResetEventSlim();
+        using var releaseTheCallback = new ManualResetEventSlim();
+
+        var sink = new StoppingSink(StillArriving, insideTheCallback, releaseTheCallback);
+        var runner = new ExitsWhileStillReportingRunner(StillArriving, insideTheCallback);
+
+        var run = Task.Run(() => CheckoutPreparation.Run(
+            ServiceName, Step(), fixture.RepoRoot, fixture.AppHostDirectory, managedCheckout: true,
+            fixture.Git, runner, sink));
+
+        Assert.True(insideTheCallback.Wait(Rendezvous), "the reader never reached the sink");
+
+        // The reader is inside the callback holding the lock, with its line reported but not yet
+        // enqueued, and the command has already exited non-zero — so the failure message is being
+        // built right now. Guarded, it cannot be: the snapshot waits for the append it interrupted.
+        await Task.WhenAny(run, Task.Delay(Unguarded));
+
+        Assert.False(
+            run.IsCompleted,
+            "the failure message was built while a reader was still appending to the output tail");
+
+        releaseTheCallback.Set();
+
+        var ex = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(() => run);
+
+        Assert.Contains(StillArriving, ex.Message);
+
+        await runner.Reporting.WaitAsync(Rendezvous);
+    }
+
+    /// <summary>
+    /// How long a hand-off in the test above may take before the test gives up rather than hanging.
+    /// </summary>
+    private static readonly TimeSpan Rendezvous = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// How long the snapshot is given to prove it is not waiting.
+    /// </summary>
+    /// <remarks>
+    /// A bound rather than a sleep, and it can only ever err into a pass. The guarded snapshot is
+    /// blocked on a lock that nothing releases until the assertion has run, so no amount of load
+    /// makes it finish early; the unguarded one is a queue copy and a string concatenation past the
+    /// runner returning, and with the lock taken out it fails this in tens of milliseconds.
+    /// </remarks>
+    private static readonly TimeSpan Unguarded = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// A runner whose command exits while one of its streams is still delivering a line — what the
+    /// bounded drain leaves behind, without a process to hold a pipe open.
+    /// </summary>
+    private sealed class ExitsWhileStillReportingRunner(string line, ManualResetEventSlim reported)
+        : IPrepareCommandRunner
+    {
+        /// <summary>The reader, still going after <see cref="Run"/> has returned.</summary>
+        public Task Reporting { get; private set; } = Task.CompletedTask;
+
+        public int Run(
+            string workingDirectory,
+            IReadOnlyList<string> command,
+            CancellationToken cancellationToken,
+            Action<string> onLine)
+        {
+            Reporting = Task.Run(() => onLine(line), CancellationToken.None);
+
+            // Returning with the reader still inside the callback, which is the whole of what a
+            // drain that timed out hands back to the caller.
+            Assert.True(reported.Wait(Rendezvous), "the reader never reached the sink");
+
+            return 1;
+        }
+    }
+
+    /// <summary>
+    /// A sink that stops on one particular line, and so stops inside the lock the callback reporting
+    /// it is holding.
+    /// </summary>
+    private sealed class StoppingSink(
+        string line, ManualResetEventSlim reached, ManualResetEventSlim release) : IPrepareOutputSink
+    {
+        public void Report(string reported)
+        {
+            if (!reported.EndsWith(line, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            reached.Set();
+
+            Assert.True(release.Wait(Rendezvous), "the test never released the reader");
+        }
+    }
+
     [Fact]
     public void ACommandThatCannotBeLaunched_IsDistinguishedFromOneThatFailed()
     {
