@@ -334,6 +334,28 @@ nothing will fail to build to warn you.
 
 ### Fixed
 
+- **A service name is no longer able to place its checkout outside `.servicesources/checkouts/`**
+  ([#224]). The name is used verbatim as the directory the clone goes into, so one containing `..`
+  put the checkout somewhere else — outside the ignore file and the build-barrier files this
+  package writes into that directory precisely to keep a checkout out of the AppHost's
+  source-control status and out of its build settings. The name is now required to be a single
+  directory name of its own: no `/` or `\` separator, no `:`, and not `.` or `..`. A well-formed
+  name is unaffected.
+
+  Two routes reached it, and neither was checked. The speculative prefetch enumerates the keys of
+  `servicesources.local.json` directly and never saw any validation at all; it now skips a key it
+  cannot use rather than reporting it, matching the filters either side of it — speculation about
+  a service the AppHost may never mention must never be what fails an `AddService()` call. The
+  ordinary `AddService(name)` route looked safe on the strength of Aspire's `[ResourceName]`
+  attribute, but that is an analyzer attribute, and the runtime validation behind it happens when
+  the resource is added to the application model — which is *after* the checkout it needs has been
+  cloned. Both now go through one refusal, in the function that builds the path, which names the
+  service and the two files to rename it in.
+
+  Reaching either needed write access to `servicesources.yaml` and `servicesources.local.json`, or
+  to the AppHost's own source — all files that are already trusted — so this is hardening rather
+  than a hole reachable from outside. Found during a security review.
+
 - **A field misspelled at a service entry's root now names the field it was reaching for**
   ([#182]). Spelled correctly, a field written flat at the entry root is walked through the move
   into its block: *'path' is not a valid key here. It belongs in the 'local' block: `"orders": {
@@ -1007,6 +1029,7 @@ Targets `net10.0`.
 [#207]: https://github.com/flojon/aspire-servicesources/issues/207
 [#209]: https://github.com/flojon/aspire-servicesources/issues/209
 [#220]: https://github.com/flojon/aspire-servicesources/issues/220
+[#224]: https://github.com/flojon/aspire-servicesources/issues/224
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

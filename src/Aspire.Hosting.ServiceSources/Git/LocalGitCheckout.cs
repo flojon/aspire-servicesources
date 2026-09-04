@@ -35,8 +35,57 @@ internal static class LocalGitCheckout
     /// to a <c>path</c> override, which is the developer's own directory rather than one this
     /// package places.
     /// </remarks>
-    public static string ManagedRepoRoot(string appHostDirectory, string serviceName) =>
-        Path.Combine(ToolDirectory.PathIn(appHostDirectory), "checkouts", serviceName);
+    /// <exception cref="ServiceSourcesConfigurationException">
+    /// <paramref name="serviceName"/> is not a directory name of its own, and so names a location
+    /// this package does not own. See <see cref="IsContainedCheckoutDirectoryName"/>.
+    /// </exception>
+    public static string ManagedRepoRoot(string appHostDirectory, string serviceName)
+    {
+        if (!IsContainedCheckoutDirectoryName(serviceName))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}' cannot be given a checkout: a service's name is the name of the "
+                + "directory its checkout is cloned into, so it has to be a single directory name — no '/' "
+                + "or '\\' separator, no ':', and not '.' or '..'. Rename the service in "
+                + $"'servicesources.yaml' and '{Config.DeveloperConfiguration.FileName}'.");
+        }
+
+        return Path.Combine(ToolDirectory.PathIn(appHostDirectory), "checkouts", serviceName);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="serviceName"/> can be the single directory name a managed checkout is
+    /// placed under, rather than a value that puts the checkout somewhere else entirely.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A service name reaches this package two ways, and only one of them has been checked. From
+    /// <c>AddService(string)</c> it carries Aspire's <c>[ResourceName]</c> — but that is an analyzer
+    /// attribute, and the runtime validation behind it happens when the resource is added to the
+    /// application model, which is <em>after</em> the checkout it needs has been cloned. From the
+    /// developer configuration it is a raw key that nothing has looked at. Either way the value is
+    /// combined into <c>.servicesources/checkouts/</c> first, so a name containing <c>..</c> clones
+    /// outside the directory that the ignore file and the <see cref="CheckoutBuildBarrier"/> files
+    /// <c>EnsureToolDirectory</c> writes exist to cover — which puts the checkout back into the
+    /// AppHost's source-control status and inside its build settings (#224).
+    /// </para>
+    /// <para>
+    /// Containment rather than a copy of Aspire's name rules, which are not public to call and would
+    /// reject spellings that say nothing about where the clone lands. Both separators and the volume
+    /// separator count on every platform, for the reason
+    /// <see cref="CheckoutRelativePath.IsAbsolute"/> gives: this configuration is shared across a
+    /// team, and a value that only escapes on Windows still escapes.
+    /// </para>
+    /// <para>
+    /// Callers that ask on behalf of a service nobody has added filter on this rather than letting
+    /// <see cref="ManagedRepoRoot"/> throw — see <see cref="Sources.LocalCheckoutPrefetch"/>, whose
+    /// speculation must never be what fails an <c>AddService()</c> call.
+    /// </para>
+    /// </remarks>
+    public static bool IsContainedCheckoutDirectoryName(string serviceName) =>
+        !string.IsNullOrWhiteSpace(serviceName)
+        && serviceName is not ("." or "..")
+        && serviceName.IndexOfAny(['/', '\\', ':']) < 0;
 
     /// <summary>
     /// Whether this package owns the checkout directory, and so has a
