@@ -6,14 +6,17 @@ using Microsoft.Extensions.Logging;
 namespace Aspire.Hosting.ServiceSources;
 
 /// <summary>
-/// Collects configuration that was skipped because the service resolved to an out-of-band source,
-/// and reports it once the app host has a logger.
+/// Collects what the developer should be told but should not be stopped for, and reports it once the
+/// app host has a logger.
 /// </summary>
 /// <remarks>
-/// Skipping rather than throwing is what keeps a shared <c>Program.cs</c> working when one developer
-/// flips a service to <c>"kubernetes"</c> or <c>"url"</c> in their own
+/// Two things arrive here. Configuration skipped because a service resolved to an out-of-band
+/// source: skipping rather than throwing is what keeps a shared <c>Program.cs</c> working when one
+/// developer flips a service to <c>"kubernetes"</c> or <c>"url"</c> in their own
 /// <c>servicesources.local.json</c> — the whole point of this package. But silently dropping
-/// configuration is the failure mode issue #53 was filed about, so every skip is reported.
+/// configuration is the failure mode issue #53 was filed about, so every skip is reported. And
+/// backing-service configuration that nothing read (#206), which cannot be an error either, because
+/// a shared file may legitimately carry entries for backing services only some configurations add.
 /// <para>
 /// Buffered rather than written immediately because <c>AddService()</c> runs while the AppHost is
 /// still being composed, before there is an <see cref="ILogger"/> to write to. <c>BeforeStartEvent</c>
@@ -26,27 +29,38 @@ namespace Aspire.Hosting.ServiceSources;
 /// which reads as noise and buries the one fact that matters.
 /// </para>
 /// </remarks>
-internal sealed class ServiceConfigurationWarnings
+internal sealed class ServiceSourcesWarnings
 {
-    private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, ServiceConfigurationWarnings> Cache = new();
+    private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, ServiceSourcesWarnings> Cache = new();
 
     private readonly object _gate = new();
 
-    private readonly List<Skip> _skips = [];
+    private readonly List<Entry> _entries = [];
 
     /// <summary>
-    /// How much of <see cref="_skips"/> <see cref="Flush"/> has already reported. A count rather
-    /// than a per-skip flag because the list is only ever appended to.
+    /// How much of <see cref="_entries"/> <see cref="Flush"/> has already reported. A count rather
+    /// than a per-entry flag because the list is only ever appended to.
     /// </summary>
     private int _reported;
 
     private bool _subscribed;
 
-    private sealed record Skip(string ServiceName, string Source, string Capability);
+    /// <summary>One thing worth telling the developer about.</summary>
+    /// <remarks>
+    /// Two shapes rather than one, in one list. A <see cref="Skip"/> is a record that is described
+    /// on the way out, because several of them collapse into a single message; a
+    /// <see cref="Message"/> is already the sentence. Keeping them in the same list is what lets
+    /// <see cref="_reported"/> stay a single index into it, which is the whole of the report-once
+    /// guarantee <see cref="Flush"/> makes.
+    /// </remarks>
+    private abstract record Entry;
+
+    private sealed record Skip(string ServiceName, string Source, string Capability) : Entry;
+
+    private sealed record Message(string Text) : Entry;
 
     /// <summary>
-    /// Everything reported so far, one message per (service, source), for tests — the log itself
-    /// isn't observable in-process.
+    /// Everything reported so far, for tests — the log itself isn't observable in-process.
     /// </summary>
     public IReadOnlyList<string> Messages
     {
@@ -54,27 +68,38 @@ internal sealed class ServiceConfigurationWarnings
         {
             lock (_gate)
             {
-                return Describe(_skips);
+                return Describe(_entries);
             }
         }
     }
 
     /// <summary>
-    /// One message per (service, source) over <paramref name="skips"/>.
+    /// One message per (service, source) over the skips in <paramref name="entries"/>, followed by
+    /// the ready-made messages in the order they were added.
     /// </summary>
-    private static IReadOnlyList<string> Describe(IEnumerable<Skip> skips) =>
-        skips
+    /// <remarks>
+    /// Skips first rather than interleaved, so that the grouping does not depend on what else
+    /// happened to be recorded between two of them.
+    /// </remarks>
+    private static IReadOnlyList<string> Describe(IEnumerable<Entry> entries)
+    {
+        var materialized = entries.ToArray();
+
+        var skips = materialized
+            .OfType<Skip>()
             .GroupBy(skip => (skip.ServiceName, skip.Source))
             .Select(group => SkipReason(
-                group.Key.ServiceName, group.Key.Source, [.. group.Select(skip => skip.Capability)]))
-            .ToArray();
+                group.Key.ServiceName, group.Key.Source, [.. group.Select(skip => skip.Capability)]));
 
-    public static ServiceConfigurationWarnings For(IDistributedApplicationBuilder builder)
+        return [.. skips, .. materialized.OfType<Message>().Select(message => message.Text)];
+    }
+
+    public static ServiceSourcesWarnings For(IDistributedApplicationBuilder builder)
     {
         // The factory stays free of side effects: ConditionalWeakTable.GetValue may run it
         // concurrently for the same key and keep only one of the results, so subscribing in there
         // could leave a discarded instance's subscription behind — flushing warnings nobody added.
-        var warnings = Cache.GetValue(builder, static _ => new ServiceConfigurationWarnings());
+        var warnings = Cache.GetValue(builder, static _ => new ServiceSourcesWarnings());
 
         warnings.EnsureSubscribed(builder);
 
@@ -107,7 +132,24 @@ internal sealed class ServiceConfigurationWarnings
     {
         lock (_gate)
         {
-            _skips.Add(new Skip(serviceName, source, capability));
+            _entries.Add(new Skip(serviceName, source, capability));
+        }
+    }
+
+    /// <summary>
+    /// Records a warning that is already a sentence, for something that is not a skipped call.
+    /// </summary>
+    /// <remarks>
+    /// The route for configuration nothing read (#206), which has no service and no capability to
+    /// group by — its subject is an entry in the file rather than a call on a resource. Written by
+    /// its caller rather than assembled here, because the callers that need this each know
+    /// something about their own subject that a shared formatter would have to be told anyway.
+    /// </remarks>
+    public void AddWarning(string message)
+    {
+        lock (_gate)
+        {
+            _entries.Add(new Message(message));
         }
     }
 
@@ -128,8 +170,8 @@ internal sealed class ServiceConfigurationWarnings
 
         lock (_gate)
         {
-            messages = Describe(_skips.Skip(_reported));
-            _reported = _skips.Count;
+            messages = Describe(_entries.Skip(_reported));
+            _reported = _entries.Count;
         }
 
         if (messages.Count == 0)

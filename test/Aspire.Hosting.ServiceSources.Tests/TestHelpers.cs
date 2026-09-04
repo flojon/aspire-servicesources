@@ -55,7 +55,7 @@ internal static class TestHelpers
             builder.Services.BuildServiceProvider(), new DistributedApplicationModel(builder.Resources)));
 
     /// <summary>
-    /// The package's own log category, which is what <c>ServiceConfigurationWarnings</c> writes
+    /// The package's own log category, which is what <c>ServiceSourcesWarnings</c> writes
     /// under.
     /// </summary>
     private const string ServiceSourcesCategory = "Aspire.Hosting.ServiceSources";
@@ -65,7 +65,7 @@ internal static class TestHelpers
     /// package wrote while it ran.
     /// </summary>
     /// <remarks>
-    /// Distinct from reading <c>ServiceConfigurationWarnings.Messages</c>, which is the buffer: this
+    /// Distinct from reading <c>ServiceSourcesWarnings.Messages</c>, which is the buffer: this
     /// is what a developer would actually see at startup, so it also covers <i>whether</i> the
     /// buffer was flushed. That matters for skips recorded during the event itself, where the flush
     /// depends on which subscriber runs first.

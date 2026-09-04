@@ -118,7 +118,7 @@ internal sealed class UrlSource : IServiceSource
                     "Tracked as issue #72; it depends on microsoft/aspire#9965.");
             }
 
-            var warnings = ServiceConfigurationWarnings.For(builder);
+            var warnings = ServiceSourcesWarnings.For(builder);
 
             DropWaitsOnUrlServices(@event.Model, warnings);
 
@@ -135,7 +135,7 @@ internal sealed class UrlSource : IServiceSource
         // Created eagerly, and after the subscription above so that its flush handler is registered
         // behind this one. That ordering is what keeps a dropped wait in the *same* grouped message
         // as the service's skipped Configure calls instead of a second one after them.
-        _ = ServiceConfigurationWarnings.For(builder);
+        _ = ServiceSourcesWarnings.For(builder);
     }
 
     /// <summary>
@@ -165,11 +165,11 @@ internal sealed class UrlSource : IServiceSource
     /// it silently is the failure mode issue #53 was filed about: the developer who set
     /// <c>Source=url</c> in their own <c>servicesources.local.json</c> is not usually the one who
     /// wrote the wait, and without a warning the consumer simply starts early with nothing said.
-    /// See <see cref="ServiceConfigurationWarnings"/>.
+    /// See <see cref="ServiceSourcesWarnings"/>.
     /// </para>
     /// </remarks>
     private static void DropWaitsOnUrlServices(
-        DistributedApplicationModel model, ServiceConfigurationWarnings warnings)
+        DistributedApplicationModel model, ServiceSourcesWarnings warnings)
     {
         foreach (var resource in model.Resources)
         {

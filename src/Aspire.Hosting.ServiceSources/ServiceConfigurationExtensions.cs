@@ -66,7 +66,7 @@ public static class ServiceConfigurationExtensions
         // per-developer switch is the point of the package. The skip is logged rather than silent.
         if (annotation is not null && IsUnreachable<T>(annotation.Source))
         {
-            ServiceConfigurationWarnings.For(service.ApplicationBuilder)
+            ServiceSourcesWarnings.For(service.ApplicationBuilder)
                 .AddSkip(annotation.ServiceName, annotation.Source, $"Configure<{typeof(T).Name}>");
             return service;
         }

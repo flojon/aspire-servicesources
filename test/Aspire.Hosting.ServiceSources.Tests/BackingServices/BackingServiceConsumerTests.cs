@@ -130,18 +130,48 @@ public class BackingServiceConsumerTests
     }
 
     /// <summary>
-    /// The variable is named after the resource the factory returns, not after the backing service —
-    /// so a factory that names its resource something else moves the key the app reads.
+    /// A factory naming its resource something other than the backing service is refused, because
+    /// that is what would move the key the app reads.
     /// </summary>
     /// <remarks>
     /// Aspire's own <c>WithReference</c> keys the variable on the referenced resource's name, and
-    /// under <c>"local"</c> that resource is whatever the AppHost's factory built. This is what
-    /// makes naming the factory's resource after the backing service the thing to do, and it is
-    /// asserted here rather than only documented because the failure is silent: the service starts,
-    /// and reads a connection string that is not there.
+    /// under <c>"local"</c> that resource is whatever the AppHost's factory built — so a factory
+    /// returning <c>something-else</c> gives the app <c>ConnectionStrings__something-else</c> while
+    /// every other source gives it <c>ConnectionStrings__orders-db</c>. Switching source would then
+    /// move the key, and the failure is silent: the AppHost is happy, the variable is set, and the
+    /// app starts and finds nothing where it looked.
+    /// <para>
+    /// This was documented and pinned as behaviour until #200. It is a rule now because the remedy
+    /// has to be one every AppHost can reach: C# could settle it at the consumer with
+    /// <c>WithReference(db, "orders-db")</c>, but the generated shim takes no such argument (#209),
+    /// so renaming the factory's resource is a guest language's only route.
+    /// </para>
     /// </remarks>
     [Fact]
-    public async Task LocalFactoryNamingItsResourceDifferently_MovesTheVariable()
+    public void LocalFactoryNamingItsResourceDifferently_IsRefused()
+    {
+        var builder = CreateBuilder("""
+            {
+              "services": { "orders": { "source": "local" } },
+              "backingServices": { "orders-db": { "source": "local" } }
+            }
+            """);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => builder.AddBackingService(
+                "orders-db",
+                () => builder.AddConnectionString("something-else", ReferenceExpression.Create($"Host=localhost"))));
+
+        Assert.Contains("Backing service 'orders-db'", ex.Message);
+        Assert.Contains("'something-else'", ex.Message);
+    }
+
+    /// <summary>
+    /// A resource whose name differs only by case is accepted, because configuration keys fold case
+    /// and it is therefore the same key.
+    /// </summary>
+    [Fact]
+    public async Task LocalFactoryNamingItsResourceInAnotherCasing_IsAccepted()
     {
         var builder = CreateBuilder("""
             {
@@ -152,7 +182,7 @@ public class BackingServiceConsumerTests
 
         var db = builder.AddBackingService(
             "orders-db",
-            () => builder.AddConnectionString("something-else", ReferenceExpression.Create($"Host=localhost")));
+            () => builder.AddConnectionString("Orders-DB", ReferenceExpression.Create($"Host=localhost")));
 
         var orders = builder.AddService("orders");
         var beforeTheReference = EnvironmentCallbackCount(orders.Resource);
@@ -161,7 +191,6 @@ public class BackingServiceConsumerTests
 
         var environment = await MaterializeEnvironmentAsync(orders.Resource, beforeTheReference);
 
-        Assert.Contains("ConnectionStrings__something-else", environment.Keys);
-        Assert.DoesNotContain("ConnectionStrings__orders-db", environment.Keys);
+        Assert.Contains("ConnectionStrings__Orders-DB", environment.Keys);
     }
 }

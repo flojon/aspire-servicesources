@@ -53,12 +53,23 @@ internal static class DeveloperConfigFileSource
     /// Registers the file on <paramref name="builder"/>'s configuration if it isn't registered
     /// already. Cheap and safe to call from every entry point, and from every read.
     /// </summary>
-    public static void EnsureRegistered(IDistributedApplicationBuilder builder) =>
+    public static void EnsureRegistered(IDistributedApplicationBuilder builder) => RegistrationFor(builder);
+
+    /// <summary>
+    /// The registration for <paramref name="builder"/>, registered.
+    /// </summary>
+    private static Registration RegistrationFor(IDistributedApplicationBuilder builder)
+    {
         // The factory has to stay free of side effects. ConditionalWeakTable.GetValue may run it
         // concurrently for the same key and keep only one of the results, but every caller is handed
         // the one it kept — so the registration itself, guarded by that instance, happens once even
         // though the instance may be built twice.
-        Registrations.GetValue(builder, static _ => new Registration()).Register(builder);
+        var registration = Registrations.GetValue(builder, static _ => new Registration());
+
+        registration.Register(builder);
+
+        return registration;
+    }
 
     /// <summary>
     /// One builder's slot in <see cref="Registrations"/>. The insert must happen exactly once: a
@@ -72,6 +83,27 @@ internal static class DeveloperConfigFileSource
         private readonly object _gate = new();
 
         private bool _registered;
+
+        private IReadOnlyList<string> _rootKeys = [];
+
+        /// <summary>
+        /// The root keys the file carried, captured while it was read.
+        /// </summary>
+        /// <remarks>
+        /// Kept because the near-miss checks want them and the file has already been parsed by the
+        /// time anything asks: reading them back off disk is a second parse of a file whose contents
+        /// cannot have changed, on the path of an AppHost that is starting normally.
+        /// </remarks>
+        public IReadOnlyList<string> RootKeys
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _rootKeys;
+                }
+            }
+        }
 
         /// <summary>
         /// A registration that throws — a malformed file is the case — leaves the slot unset, so the
@@ -90,7 +122,10 @@ internal static class DeveloperConfigFileSource
                 // Reading the file is the part that can fail on the file's own account, and it
                 // touches nothing on the builder, so a malformed file throws with the slot still
                 // unset and the chain still untouched.
-                var source = ReadFileSource(Path.Combine(builder.AppHostDirectory, DeveloperConfiguration.FileName));
+                var (source, rootKeys) = ReadFileSource(
+                    Path.Combine(builder.AppHostDirectory, DeveloperConfiguration.FileName));
+
+                _rootKeys = rootKeys;
 
                 // Set before the insert rather than after. Inserting mutates the source list and
                 // then rebuilds every provider on it, so a fault raised by some unrelated provider's
@@ -114,7 +149,7 @@ internal static class DeveloperConfigFileSource
     /// wholesale would make this the route by which an unrelated key reaches the AppHost's live
     /// configuration under our prefix.
     /// </remarks>
-    private static MemoryConfigurationSource ReadFileSource(string path)
+    private static (MemoryConfigurationSource Source, IReadOnlyList<string> RootKeys) ReadFileSource(string path)
     {
         var file = new ConfigurationBuilder().AddJsonFile(path, optional: true).Build();
 
@@ -134,58 +169,82 @@ internal static class DeveloperConfigFileSource
                     .Select(entry => ($"{section.ConfigurationKey}:{entry.Key}", entry.Value)))
                 .ToDictionary(entry => entry.Item1, entry => entry.Item2);
 
-            return new MemoryConfigurationSource { InitialData = reRooted };
+            // Captured here because the file is open here. A root key with no values under it —
+            // `"backingServices": {}` — contributes no configuration entry and so appears in
+            // neither list, which is correct for both readers: nothing crossed over, and an empty
+            // section is not a misspelling of anything.
+            var rootKeys = file.GetChildren().Select(section => section.Key).ToArray();
+
+            return (new MemoryConfigurationSource { InitialData = reRooted }, rootKeys);
         }
     }
 
     /// <summary>
-    /// The root key of the file at <paramref name="path"/> that looks like a misspelling of
+    /// The root key of <paramref name="builder"/>'s file that looks like a misspelling of
     /// <c>services</c>, or <see langword="null"/> when the file has a <c>services</c> key, has no
     /// key resembling one, or is not there.
     /// </summary>
+    public static string? NearMissForServicesKey(IDistributedApplicationBuilder builder) =>
+        NearMissForRootKey(builder, FileServicesKey);
+
+    /// <summary>
+    /// The same for <c>backingServices</c>, which is the half of #206 that a misspelling costs every
+    /// backing service at once.
+    /// </summary>
+    public static string? NearMissForBackingServicesKey(IDistributedApplicationBuilder builder) =>
+        NearMissForRootKey(builder, FileBackingServicesKey);
+
+    /// <summary>
+    /// The root key of <paramref name="builder"/>'s file that looks like a misspelling of
+    /// <paramref name="fileKey"/>, or <see langword="null"/> when the file has that key, has no key
+    /// resembling it, or is not there.
+    /// </summary>
     /// <remarks>
     /// A near miss rather than a check that every root key is one this file recognizes. Only the
-    /// <c>services</c> subtree crosses into the AppHost's configuration precisely so that the file
-    /// can carry keys of its own, which makes an unrecognized root key indistinguishable from a
-    /// typo by validity — resemblance to the one key that is read is the only thing that separates
-    /// them.
+    /// subtrees in <see cref="ReRootedSections"/> cross into the AppHost's configuration precisely
+    /// so that the file can carry keys of its own, which makes an unrecognized root key
+    /// indistinguishable from a typo by validity — resemblance to a key that <i>is</i> read is the
+    /// only thing that separates them.
     /// <para>
-    /// Asked only when nothing is configured anywhere, so the parse below is never on the path of
-    /// an AppHost that starts. A file carrying <c>services</c> as well is not a typo whatever else
-    /// it carries: its entries are being read, so there is nothing to correct.
+    /// Reads the keys captured when the file was parsed for its values, rather than parsing it
+    /// again. The re-parse was affordable while this was asked only from inside a failure; the
+    /// backing-service audit asks it from an AppHost that is starting normally, which is a cost
+    /// nobody should pay twice for a file whose contents cannot have changed in between.
+    /// </para>
+    /// <para>
+    /// A file carrying <paramref name="fileKey"/> as well is not a typo whatever else it carries:
+    /// its entries are being read, so there is nothing to correct.
     /// </para>
     /// </remarks>
-    public static string? NearMissForServicesKey(string path)
+    private static string? NearMissForRootKey(IDistributedApplicationBuilder builder, string fileKey)
     {
-        var file = new ConfigurationBuilder().AddJsonFile(path, optional: true).Build();
+        var rootKeys = RegistrationFor(builder).RootKeys;
 
-        using (file as IDisposable)
+        // Folded, because a root key differing only by case is not a near miss but the key itself:
+        // configuration keys are case-insensitive, so `Services` is already read.
+        if (rootKeys.Any(key => key.Equals(fileKey, StringComparison.OrdinalIgnoreCase)))
         {
-            var rootKeys = file.GetChildren().Select(section => section.Key).ToArray();
-
-            // Folded, because a root key differing only by case is not a near miss but the key
-            // itself: configuration keys are case-insensitive, so `Services` is already read.
-            if (rootKeys.Any(key => key.Equals(FileServicesKey, StringComparison.OrdinalIgnoreCase)))
-            {
-                return null;
-            }
-
-            // Closest first, then ordinal, so a file with two candidates names the same one every
-            // run rather than whichever the provider happened to enumerate first.
-            //
-            // The tolerance is taken from the key being looked for rather than from the one the
-            // developer wrote, which is the direction NearMiss.MaxEdits is meant to be asked in:
-            // `services` is the fixed vocabulary here. For an eight-letter word it is the two edits
-            // this check has always allowed — a dropped or doubled letter, or a transposed pair.
-            return rootKeys
-                .Select(key => (
-                    Key: key,
-                    Distance: NearMiss.EditDistance(key.ToLowerInvariant(), FileServicesKey)))
-                .Where(candidate => candidate.Distance <= NearMiss.MaxEdits(FileServicesKey))
-                .OrderBy(candidate => candidate.Distance)
-                .ThenBy(candidate => candidate.Key, StringComparer.Ordinal)
-                .Select(candidate => candidate.Key)
-                .FirstOrDefault();
+            return null;
         }
+
+        // Both sides folded, since the vocabulary itself is not all lower case — `backingServices`
+        // compared against a lower-cased candidate would never match its own spelling.
+        var folded = fileKey.ToLowerInvariant();
+
+        // Closest first, then ordinal, so a file with two candidates names the same one every run
+        // rather than whichever the provider happened to enumerate first.
+        //
+        // The tolerance is taken from the key being looked for rather than from the one the
+        // developer wrote, which is the direction NearMiss.MaxEdits is meant to be asked in: the
+        // file's own root keys are the fixed vocabulary here. It is what keeps the two apart, too —
+        // `services` and `backingServices` are seven edits from each other, far outside any
+        // tolerance, so neither is ever offered as a correction of the other.
+        return rootKeys
+            .Select(key => (Key: key, Distance: NearMiss.EditDistance(key.ToLowerInvariant(), folded)))
+            .Where(candidate => candidate.Distance <= NearMiss.MaxEdits(fileKey))
+            .OrderBy(candidate => candidate.Distance)
+            .ThenBy(candidate => candidate.Key, StringComparer.Ordinal)
+            .Select(candidate => candidate.Key)
+            .FirstOrDefault();
     }
 }

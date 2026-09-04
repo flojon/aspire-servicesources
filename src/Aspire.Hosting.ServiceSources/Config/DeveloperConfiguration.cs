@@ -79,7 +79,7 @@ internal sealed class DeveloperConfiguration
             // Read only when nothing is configured, which is the only state that reaches the error
             // naming it — so an AppHost that starts never pays for the extra parse.
             NearMissRootKey = services.Count == 0
-                ? DeveloperConfigFileSource.NearMissForServicesKey(path)
+                ? DeveloperConfigFileSource.NearMissForServicesKey(builder)
                 : null,
         };
     }

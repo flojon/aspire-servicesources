@@ -40,12 +40,19 @@ public class AddBackingServiceTests
     /// A stand-in for whatever the AppHost would really provision — <c>AddPostgres(…)</c>,
     /// <c>AddRabbitMQ(…)</c> — that neither pulls an image nor needs a container runtime.
     /// </summary>
+    /// <param name="resourceName">
+    /// What the factory names its resource. <c>"orders-db"</c> by default, since a <c>"local"</c>
+    /// factory has to name its resource after the backing service — the rule #200 added. A test
+    /// whose source is not <c>"local"</c> passes a distinct name instead, so that asserting the
+    /// resource is absent says something: the factory is never invoked there, so the rule never
+    /// applies to it.
+    /// </param>
     private static Func<IResourceBuilder<IResourceWithConnectionString>> LocalFactory(
-        IDistributedApplicationBuilder builder, Action? onInvoke = null) =>
+        IDistributedApplicationBuilder builder, Action? onInvoke = null, string resourceName = "orders-db") =>
         () =>
         {
             onInvoke?.Invoke();
-            return builder.AddConnectionString("orders-db-local");
+            return builder.AddConnectionString(resourceName);
         };
 
     [Fact]
@@ -57,7 +64,7 @@ public class AddBackingServiceTests
         var db = builder.AddBackingService("orders-db", LocalFactory(builder, () => invocations++));
 
         Assert.Equal(1, invocations);
-        Assert.Equal("orders-db-local", db.Resource.Name);
+        Assert.Equal("orders-db", db.Resource.Name);
     }
 
     /// <summary>
@@ -70,7 +77,7 @@ public class AddBackingServiceTests
 
         builder.AddBackingService("orders-db", LocalFactory(builder));
 
-        Assert.Equal(["orders-db-local"], builder.Resources.Select(resource => resource.Name));
+        Assert.Equal(["orders-db"], builder.Resources.Select(resource => resource.Name));
     }
 
     /// <remarks>
@@ -138,7 +145,10 @@ public class AddBackingServiceTests
             """);
         var invocations = 0;
 
-        builder.AddBackingService("orders-db", LocalFactory(builder, () => invocations++));
+        // A distinct resource name, so the absence asserted below is the factory's resource rather
+        // than a name the "direct" source adds anyway. Safe here precisely because the factory is
+        // never invoked, which is what makes #200's naming rule inapplicable to it.
+        builder.AddBackingService("orders-db", LocalFactory(builder, () => invocations++, "orders-db-local"));
 
         Assert.Equal(0, invocations);
         Assert.DoesNotContain("orders-db-local", builder.Resources.Select(resource => resource.Name));
@@ -162,19 +172,22 @@ public class AddBackingServiceTests
     }
 
     /// <summary>
-    /// A brace that does not open a placeholder is literal text, so an ODBC-style connection string
-    /// survives intact.
+    /// Braces are literal text end to end, so an ODBC-style connection string reaches the app
+    /// exactly as configured.
     /// </summary>
     /// <remarks>
-    /// <c>Driver={PostgreSQL}</c> and <c>Server={host}\instance</c> are ordinary connection strings.
-    /// A parser that claimed every <c>{…}</c> would reject them, and one that dropped the braces
-    /// while building the reference expression would corrupt them silently — which is the failure
-    /// worth a test, since the string only stops working once something tries to connect with it.
+    /// <c>Driver={PostgreSQL}</c> and <c>Server={host}\instance</c> are ordinary connection strings,
+    /// and <c>PWD={secret}</c> is a password that happens to be the word — the case #207 was filed
+    /// for, which the brace syntax could not express at all. Worth asserting here as well as at the
+    /// parser, because a template that parses correctly can still be corrupted while the reference
+    /// expression is built, and that failure only shows up once something tries to connect.
     /// </remarks>
     [Theory]
     [InlineData(@"Driver={PostgreSQL};Server={host}\instance")]
     [InlineData("PWD={pa}}ss}")]
     [InlineData("PWD={{abc}")]
+    [InlineData("Driver={SQL Server};UID=sa;PWD={secret}")]
+    [InlineData("Port={port}")]
     public async Task DirectSource_ConnectionStringWithLiteralBraces_IsUnchanged(string connectionString)
     {
         var builder = CreateBuilder($$"""
@@ -212,27 +225,27 @@ public class AddBackingServiceTests
         var builder = CreateBuilder("""
             { "backingServices": { "orders-db": {
                 "source": "direct",
-                "direct": { "connectionString": "Host=localhost;Port={port}" } } } }
+                "direct": { "connectionString": "Host=localhost;Port=${port}" } } } }
             """);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => builder.AddBackingService("orders-db", LocalFactory(builder)));
 
-        Assert.Contains("'{port}'", ex.Message);
+        Assert.Contains("'${port}'", ex.Message);
         Assert.Contains("forwards nothing", ex.Message);
 
-        // Said outright, for the reader who did not mean a placeholder at all: without it the
-        // message explains a substitution they never asked for and leaves them hunting for an
-        // escape that does not exist.
-        Assert.Contains("there is no escape", ex.Message);
+        // The message used to add that the text could not be kept, for the reader who never meant a
+        // placeholder. Braces reserve nothing now, so that reader does not arrive here at all — see
+        // ConnectionStringTemplateTests.Parse_OdbcBraceQuotedKeywordValue_IsText.
+        Assert.DoesNotContain("no escape", ex.Message);
     }
 
     /// <summary>
     /// The rejection quotes the placeholder as the developer spelled it, casing and all.
     /// </summary>
     /// <remarks>
-    /// The token used to be rebuilt from the keyword constants, so a message about <c>{PORT}</c>
-    /// quoted <c>'{port}'</c> — a spelling nowhere in their file, while saying nothing about the one
+    /// The token used to be rebuilt from the keyword constants, so a message about <c>${PORT}</c>
+    /// quoted <c>'${port}'</c> — a spelling nowhere in their file, while saying nothing about the one
     /// that is. A reader searching the file for what the message named would find nothing.
     /// </remarks>
     [Fact]
@@ -241,14 +254,14 @@ public class AddBackingServiceTests
         var builder = CreateBuilder("""
             { "backingServices": { "orders-db": {
                 "source": "direct",
-                "direct": { "connectionString": "Host=localhost;Port={PORT}" } } } }
+                "direct": { "connectionString": "Host=localhost;Port=${PORT}" } } } }
             """);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => builder.AddBackingService("orders-db", LocalFactory(builder)));
 
-        Assert.Contains("'{PORT}'", ex.Message);
-        Assert.DoesNotContain("'{port}'", ex.Message);
+        Assert.Contains("'${PORT}'", ex.Message);
+        Assert.DoesNotContain("'${port}'", ex.Message);
     }
 
     [Fact]
@@ -257,13 +270,13 @@ public class AddBackingServiceTests
         var builder = CreateBuilder("""
             { "backingServices": { "orders-db": {
                 "source": "direct",
-                "direct": { "connectionString": "Password={secret:orders-creds:password}" } } } }
+                "direct": { "connectionString": "Password=${secret:orders-creds:password}" } } } }
             """);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => builder.AddBackingService("orders-db", LocalFactory(builder)));
 
-        Assert.Contains("'{secret:orders-creds:password}'", ex.Message);
+        Assert.Contains("'${secret:orders-creds:password}'", ex.Message);
         Assert.Contains("not supported yet", ex.Message);
     }
 
@@ -271,7 +284,7 @@ public class AddBackingServiceTests
     /// A malformed placeholder is reported as malformed, ahead of the "not supported yet" above.
     /// </summary>
     /// <remarks>
-    /// Order matters: telling a developer who wrote <c>{secret:orders-creds}</c> that secrets are
+    /// Order matters: telling a developer who wrote <c>${secret:orders-creds}</c> that secrets are
     /// unsupported would send them off to work around a limit while their actual mistake — the
     /// missing key — went unmentioned.
     /// </remarks>
@@ -281,7 +294,7 @@ public class AddBackingServiceTests
         var builder = CreateBuilder("""
             { "backingServices": { "orders-db": {
                 "source": "direct",
-                "direct": { "connectionString": "Password={secret:orders-creds}" } } } }
+                "direct": { "connectionString": "Password=${secret:orders-creds}" } } } }
             """);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(

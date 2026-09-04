@@ -155,7 +155,7 @@ internal sealed class LocalCheckoutPrefetch
 
             _started = true;
 
-            // Buffered to BeforeStartEvent for the same reason ServiceConfigurationWarnings is:
+            // Buffered to BeforeStartEvent for the same reason ServiceSourcesWarnings is:
             // AddService() runs while the AppHost is still being composed, before there is an
             // ILogger to write to. It is also the first point at which the notice can be correct —
             // only once every AddService() call has happened is the unused set known.
