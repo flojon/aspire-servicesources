@@ -138,6 +138,14 @@ internal sealed class DeferredCheckout
     /// eagerly. Scoped tightly on purpose: a warm checkout keeps today's path exactly, with full
     /// launch-profile fidelity, so the blast radius is first-run-only.
     /// </summary>
+    /// <remarks>
+    /// Two decisions layered, in this order: the policy this type owns — opted in, run mode — and
+    /// then <see cref="LocalGitCheckout.IsColdManagedCheckout"/>, which is where "is there
+    /// anything to clone here" is answered for every caller that needs it. The speculative
+    /// prefetch is the other one, and it drops a candidate from its clone set on the strength of
+    /// that predicate before leaving the real decision to this method, so the filesystem half has
+    /// to be the same rule in both places rather than two that happen to agree.
+    /// </remarks>
     public bool ShouldDefer(
         IDistributedApplicationBuilder builder, string serviceName, ServiceDeveloperConfig config)
     {
@@ -165,18 +173,15 @@ internal sealed class DeferredCheckout
             return false;
         }
 
-        // A 'path' override points at a checkout the developer manages themselves. There is nothing
+        // Deferral claims exactly the case where a clone still has to happen, and nothing else.
+        //
+        // A 'path' override points at a checkout the developer manages themselves: there is nothing
         // to clone, so there is nothing to wait for — and nothing this package is entitled to
-        // create at that path if it turns out to be missing.
-        if (config.Local.Path is not null)
-        {
-            return false;
-        }
-
-        // Anything already on disk — a complete checkout, or debris from an interrupted clone —
-        // goes down the eager path, which is the one that knows how to tell those apart and what to
-        // do about each. Deferral only claims the case where there is nothing there at all.
-        return !Directory.Exists(LocalGitCheckout.ManagedRepoRoot(builder.AppHostDirectory, serviceName));
+        // create at that path if it turns out to be missing. Anything already on disk at the
+        // managed root — a complete checkout, or debris from an interrupted clone — goes down the
+        // eager path, which is the one that knows how to tell those apart and what to do about
+        // each.
+        return LocalGitCheckout.IsColdManagedCheckout(builder.AppHostDirectory, serviceName, config);
     }
 
     /// <summary>
