@@ -111,6 +111,66 @@ nothing will fail to build to warn you.
 
 ### Added
 
+- **`prepare` — a `"local"` checkout can bootstrap itself before its kind judges it** ([#118]). A
+  managed checkout is assumed to be runnable the moment it is cloned, which is not true of a
+  repository whose runnable artifact or data asset is produced by a script it commits and then
+  gitignores. Such a checkout resolved cleanly and then failed, and nothing in the catalog could ask
+  the repository to produce what it is perfectly capable of producing:
+
+  ```yaml
+  services:
+    routing:
+      repository: https://github.com/example/planning-routing
+      kind: java
+      prepare:
+        command: ["./prepare.sh"]
+        windowsCommand: ["pwsh", "-File", "prepare.ps1"]   # optional; replaces command on Windows
+        mode: once                                         # oncePerCommit (default) | once | always | never
+      java:
+        jarPath: graphhopper-web-11.0.jar
+        port: 8989
+  ```
+
+  The command runs inside the materialized checkout, with the checkout as its working directory and
+  no shell in between, at the one point that works: after the working tree is complete and
+  reconciled onto its configured `ref`, and before the kind is allowed to judge it — so a kind
+  cannot reject a checkout for missing precisely the files the step was about to produce. It sits
+  there on both resolution paths, and no kind knows it exists. `command` is a list rather than a
+  string, so there is nothing to quote; a first element that looks like a path is confined to the
+  checkout, and a bare name goes through `PATH`.
+
+  **It runs once, not per start.** A hash of the resolved command and the commit it ran against is
+  recorded — only on success — at `<checkout>/.git/servicesources-prepare.json`, which is invisible
+  to the service repository's `git status` and dies with the checkout, so a deleted-and-recloned
+  checkout re-prepares. `mode` picks how coarse the guard is, and the choice between `once` and
+  `oncePerCommit` is the question "does the repository define this step?" rather than "how often":
+  a bootstrap whose script the repository commits wants `oncePerCommit`, so a team bumping it
+  reaches every developer, while one pinned by the catalog wants `once`, so a one-line README commit
+  doesn't cost a four-minute graph import. `always` is for a command that decides its own work,
+  which is what this delegates incremental rebuild to rather than approximating it. **Whatever the
+  mode, the command has to be safe to re-run**: nothing is recorded for a step that failed halfway,
+  so the next start runs it again against a checkout holding whatever the first attempt produced.
+
+  On the run that creates the checkout under `UseDeferredCheckout()`, the step's output streams into
+  the service's own resource log and the service carries a **Preparing** state while it runs, so a
+  country-sized import reads as an initialization phase rather than as a hang — and a failure there
+  costs that one service rather than the AppHost. Every other run reports to the AppHost's standard
+  output.
+
+  A service resolved through `local.path` **never inherits the catalog's block**: nothing establishes
+  that the directory is even a checkout of the repository the catalog names, and it is the
+  developer's own working tree. The catalog's block is ignored rather than rejected — it is the
+  team's field and correct for every developer on a managed checkout — and a startup notice names
+  the command that was not run, verbatim, so it can be pasted into `servicesources.local.json`. Any
+  block declared there silences it, `{"mode": "never"}` included. That file can also override a
+  catalog step per developer: `mode` on its own, or the `command`/`windowsCommand` pair replaced
+  together.
+
+  Not included, deliberately: no task runner, no ordering between steps, no cross-developer caching
+  of what a step produced, no timeout, and no injected environment variables. One command, one
+  marker, per service. See the
+  [`prepare` section](README.md#prepare-a-checkout-that-has-to-bootstrap-itself).
+
 - **`AddBackingService()` — the database, broker or cache a service connects to, source-switched
   the same way the service is** ([#144]). A service usually depends on a database, and a developer
   wants the same choice for it that they have for the service: run it locally, or connect to the one
@@ -892,6 +952,7 @@ Targets `net10.0`.
 [#89]: https://github.com/flojon/aspire-servicesources/issues/89
 [#112]: https://github.com/flojon/aspire-servicesources/pull/112
 [#117]: https://github.com/flojon/aspire-servicesources/pull/117
+[#118]: https://github.com/flojon/aspire-servicesources/issues/118
 [#119]: https://github.com/flojon/aspire-servicesources/issues/119
 [#122]: https://github.com/flojon/aspire-servicesources/issues/122
 [#125]: https://github.com/flojon/aspire-servicesources/issues/125

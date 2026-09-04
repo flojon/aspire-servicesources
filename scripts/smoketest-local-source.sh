@@ -21,6 +21,10 @@ set -euo pipefail
 # the clone was not merely made but built and run: a console project has no port to curl, and a
 # child process's stdout goes to Aspire's log pipeline rather than to this script's.
 MARKER_FILE="servicesources-smoketest-ran.txt"
+# What the repository's own bootstrap script appends a line to on each run, inside the checkout.
+# Counting its lines is how the test tells "ran once" from "ran again", which is the whole of what
+# the completion marker is for.
+PREPARE_LOG="prepare-runs.log"
 MAIN_MARKER="from-main"
 BRANCH_MARKER="from-branch"
 OTHER_BRANCH="feature/other-ref"
@@ -119,7 +123,7 @@ EOF
 
 write_program() {
   # $1 = marker text this branch's build should leave behind
-  cat > "$seed_tree/SampleService/Program.cs" <<EOF
+  cat > "$seed_tree/SampleService/Program.cs" <<PROGRAM_EOF
 using System;
 using System.IO;
 using System.Threading;
@@ -133,7 +137,28 @@ File.WriteAllText(
 
 Console.WriteLine("SampleService started ($1)");
 Thread.Sleep(Timeout.Infinite);
-EOF
+PROGRAM_EOF
+}
+
+# The bootstrap script the repository commits, of the shape #118 is about: it produces something
+# into the checkout and gitignores it, so the checkout is complete only after it has run. Appends
+# rather than overwrites, so the test can count runs.
+write_prepare_script() {
+  cat > "$seed_tree/prepare.sh" <<'PREPARE_EOF'
+#!/usr/bin/env sh
+set -eu
+
+# Named by the catalog entry, so a wrong working directory or lost argument shows up here rather
+# than as a mysteriously absent file.
+if [ "${1:-}" != "--from-catalog" ]; then
+  echo "prepare.sh: expected the argument the catalog passes, got '${1:-}'" >&2
+  exit 64
+fi
+
+echo "prepare.sh: bootstrapping in $(pwd)"
+echo "ran" >> prepare-runs.log
+PREPARE_EOF
+  chmod +x "$seed_tree/prepare.sh"
 }
 
 # -b main so the bare repository's HEAD names a branch that exists once the pushes land;
@@ -145,6 +170,7 @@ git init -q --bare -b main "$origin_repo"
   git config user.email smoketest@example.invalid
   git config user.name "ServiceSources smoke test"
   write_program "$MAIN_MARKER"
+  write_prepare_script
   git add -A
   git commit -q -m "SampleService on main"
   git checkout -q -b "$OTHER_BRANCH"
@@ -163,19 +189,33 @@ git init -q --bare -b main "$origin_repo"
 # Replaces the sample's catalog, so it still has to declare every service Program.cs calls
 # AddService for. `orders` is the subject; the other two resolve to "url", which starts nothing.
 log "pointing DemoAppHost's 'orders' service at $origin_repo"
-cat > "$apphost_dir/servicesources.yaml" <<EOF
+
+write_catalog() {
+  # $1 = a `mode:` value for orders' prepare block, or omitted for a catalog with no block at all.
+  local prepare=""
+  if [[ -n "${1:-}" ]]; then
+    prepare="    prepare:
+      command: [\"./prepare.sh\", \"--from-catalog\"]
+      mode: $1
+"
+  fi
+
+  cat > "$apphost_dir/servicesources.yaml" <<EOF
 services:
   orders:
     repository: $origin_repo
     project: SampleService/SampleService.csproj
     defaultRef: main
-  inventory:
+$prepare  inventory:
     url:
       url: http://unused.invalid
   payments:
     url:
       url: http://unused.invalid
 EOF
+}
+
+write_catalog
 
 write_local_json() {
   # $1 = the body of orders' "local" block, or omitted for an entry with no block at all.
@@ -295,4 +335,76 @@ marker="$(run_until_marker "path override" "$self_managed" \
   || fail "a 'local.path' override must not create a managed checkout, but $checkout_dir exists"
 printf '    ran from the self-managed clone, and cloned nothing into .servicesources\n'
 
-log "PASS: the local source cloned, reconciled a ref, honoured a path override, and ran the project in every case"
+# ---------------------------------------------------------------------------
+# 4. A prepare step runs the repository's own bootstrap, once, before the build
+# ---------------------------------------------------------------------------
+# The only real prepare command anything in this repository launches: the unit tests substitute
+# the runner, so this is what proves the arguments, the working directory, the exit code and the
+# completion marker work against an actual process.
+log "4. a prepare step bootstraps the checkout"
+rm -rf "$checkout_dir" "$self_managed"
+write_catalog oncePerCommit
+write_local_json ""
+
+prepare_runs() {
+  # Lines in the log the script appends to, or 0 before it has ever run.
+  local log_path="$checkout_dir/$PREPARE_LOG"
+  [[ -f "$log_path" ]] && wc -l < "$log_path" | tr -d ' ' || echo 0
+}
+
+marker="$(run_until_marker "prepare step" "$checkout_dir")"
+[[ "$marker" == "$MAIN_MARKER" ]] \
+  || fail "prepare step: expected '$MAIN_MARKER', got '$marker'"
+
+runs="$(prepare_runs)"
+[[ "$runs" == "1" ]] \
+  || fail "prepare step: expected the bootstrap to have run once, its log says $runs"
+printf '    the repository'"'"'s own prepare.sh ran once, inside the checkout\n'
+
+# Inside .git deliberately: invisible to the service repository's own git status, and gone with the
+# checkout, so a deleted-and-recloned checkout re-prepares even at the same commit.
+[[ -f "$checkout_dir/.git/servicesources-prepare.json" ]] \
+  || fail "prepare step: no completion marker at $checkout_dir/.git/servicesources-prepare.json"
+grep -q '"commit"' "$checkout_dir/.git/servicesources-prepare.json" \
+  || fail "prepare step: the completion marker records no commit"
+printf '    completion recorded inside the checkout'"'"'s own .git\n'
+
+# Streamed rather than swallowed: the step's own output reaches the AppHost's standard output as it
+# is written, tagged with the service, which is the whole of what a developer watching a slow
+# bootstrap has to go on during composition. Also the one place the reason-it-ran line is checked
+# against a real run.
+apphost_log="$cache_dir/local-source-apphost.log"
+grep -q '\[prepare orders\] prepare.sh: bootstrapping in' "$apphost_log" \
+  || fail_with_apphost_log "prepare step: the command's output did not reach the AppHost's stdout"
+grep -q '\[prepare orders\].*no completed prepare step is recorded' "$apphost_log" \
+  || fail_with_apphost_log "prepare step: the reason it ran was not reported"
+printf '    its output and the reason it ran reached the AppHost'"'"'s stdout\n'
+
+# ---------------------------------------------------------------------------
+# 4b. The second start skips it: same command, same commit, warm checkout
+# ---------------------------------------------------------------------------
+log "4b. the second start skips the step"
+find "$checkout_dir" -name "$MARKER_FILE" -delete
+marker="$(run_until_marker "warm prepare" "$checkout_dir")"
+[[ "$marker" == "$MAIN_MARKER" ]] || fail "warm prepare: expected '$MAIN_MARKER', got '$marker'"
+
+runs="$(prepare_runs)"
+[[ "$runs" == "1" ]] \
+  || fail "warm prepare: the step should have been skipped, but its log says it has run $runs times"
+printf '    skipped, on the strength of the marker alone\n'
+
+# ---------------------------------------------------------------------------
+# 4c. mode: always runs it again, consulting no marker
+# ---------------------------------------------------------------------------
+log "4c. mode: always runs it on every start"
+write_catalog always
+find "$checkout_dir" -name "$MARKER_FILE" -delete
+marker="$(run_until_marker "always prepare" "$checkout_dir")"
+[[ "$marker" == "$MAIN_MARKER" ]] || fail "always prepare: expected '$MAIN_MARKER', got '$marker'"
+
+runs="$(prepare_runs)"
+[[ "$runs" == "2" ]] \
+  || fail "always prepare: expected a second run, its log says $runs"
+printf '    ran again, ignoring the marker\n'
+
+log "PASS: the local source cloned, reconciled a ref, honoured a path override, bootstrapped a checkout with a prepare step, and ran the project in every case"
