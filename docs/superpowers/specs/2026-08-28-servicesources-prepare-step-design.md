@@ -1,7 +1,12 @@
 # Aspire.Hosting.ServiceSources — The `prepare` Step
 
 **Date:** 2026-08-28
-**Status:** Design — ready for implementation planning. Amended 2026-08-30 to settle #123, and
+**Status:** Implemented — see
+[the implementation plan](../plans/2026-09-04-servicesources-prepare-step.md). Everything below
+describes the shipped behaviour, with one correction against measurement: *Execution and output*'s
+open question about `aspire run` buffering the AppHost's standard output is answered there, and the
+fallback presentation it used to reserve was not needed.
+Amended 2026-08-30 to settle #123, and
 2026-09-04 against the code that has landed since: the nested developer config (#161/#171),
 deferred checkouts reaching every kind (#136, #159/#164), and `ILocalResourceKind.Validate`
 moving below the checkout (#63/#197), which is what settles where this step is validated.
@@ -166,14 +171,20 @@ complete, before the kind is allowed to judge it. See [Where the step runs](#whe
 ```yaml
 services:
   routing:
-    repository: https://github.com/example/planning-routing
+    repository: https://github.com/example/routing
     kind: java
     prepare:
       command: ["./prepare.sh"]
       windowsCommand: ["pwsh", "-File", "prepare.ps1"]  # optional; overrides command on Windows
-      mode: once                                  # oncePerCommit (default) | once | always | never
-                                                  # `once` here: the jar version is pinned by the
-                                                  # filename below, not by the repository's commit
+      mode: oncePerCommit                         # the default | once | always | never
+                                                  # the default even though `jarPath` below looks
+                                                  # pinned: prepare.sh is committed and hardcodes
+                                                  # the version itself, so bumping it moves the
+                                                  # commit while the command stays the same, and
+                                                  # `once` would strand every developer on the old
+                                                  # jar. Verified against the real repository when
+                                                  # this shipped; the sketch said `once` and the
+                                                  # sketch was wrong.
     java:
       jarPath: graphhopper-web-11.0.jar
       args: ["server", "gh-config-local.yml"]
@@ -310,7 +321,7 @@ counterpart alongside the kind methods, carrying the same fields the yaml block 
 
 ```csharp
 catalog.AddService("routing")
-    .FromRepository("https://github.com/example/planning-routing")
+    .FromRepository("https://github.com/example/routing")
     .WithPrepare(["./prepare.sh"], windowsCommand: ["pwsh", "-File", "prepare.ps1"], mode: PrepareMode.Once)
     .WithJava(jarPath: "graphhopper-web-11.0.jar", port: 8989);
 ```
@@ -423,7 +434,8 @@ console, because the task holds the service's `ILogger` and publishes its state 
 *Execution and output*.
 
 What is untouched: a `path` override (finding 9), a warm checkout, publish mode — which #136
-restricts deferral out of, so `aspire publish` and manifest generation always take the eager path —
+restricts deferral out of, so `aspire publish` and manifest generation always take the eager path,
+where the step is now skipped outright; see [Publish mode](#publish-mode) —
 and a `node`/`bun` service that cannot promise a `package.json` without looking at one: #164 has it
 decline deferral rather than register an app with no installer. Each of those prepares eagerly, and
 nothing in [`path` checkouts](#path-checkouts) interacts with deferral at all.
@@ -439,8 +451,9 @@ Both halves of that are worth stating, and they point in opposite directions. Th
 covers is the first, which is the cold clone, the empty `data/` and the four-minute import — the
 run whose progress most needs somewhere to go, and it gets the best surface there is. But the
 console presentation described under *Execution and output* is then the steady state rather than a
-fallback, which is why the question of whether `aspire run` buffers the AppHost's output has to be
-answered before the rest of the step is built rather than discovered afterwards.
+fallback, which is why the question of whether `aspire run` buffers the AppHost's output was
+answered before the rest of the step was built rather than discovered afterwards. It does not; see
+*Execution and output* for what it does instead.
 
 Deferral is also opt-in. `UseDeferredCheckout()` is off by default, so an AppHost that has not
 asked for it has no deferred path at all and finding 2 stands for it unamended: a prepare step that
@@ -800,13 +813,27 @@ the service:
 ```
 
 On the eager path those lines go to the console rather than to a logger, because there is no logger
-yet (finding 6). This is the one part of the design carrying an unmeasured risk: whether `aspire run`
-buffers the AppHost's standard output, which would mute the stream during composition. It should be
-checked against a throwaway AppHost before the rest of the step is built — and it is not a rare
-path being hedged against: per *Deferred checkouts*, every re-run of every prepare step is eager, so
-this is what a developer sees on all but the first start. If it buffers, the fallback is to
-capture the output and emit a start line, a periodic "still running (Nm)" heartbeat, and the tail of
-the output on failure — same mechanism, different presentation.
+yet (finding 6). This was the one part of the design carrying an unmeasured risk — whether
+`aspire run` buffers the AppHost's standard output, which would mute the stream during composition —
+and it mattered because the eager presentation is the steady state rather than a fallback: per
+*Deferred checkouts*, every re-run of every prepare step is eager, so it is what a developer sees on
+all but the first start.
+
+**Measured, against a probe AppHost writing three lines eight seconds apart during composition
+(Aspire CLI 13.5.1).** It does not buffer, and it does not print the AppHost's output either. The
+CLI captures the stream and relays it, live, into its own log at
+`~/.aspire/logs/cli_<timestamp>.log`, tagged `[AppHost]` — the three lines were recorded there at
++0.0s, +8.0s and +16.0s, each at the moment it was written, while `aspire run`'s own terminal output
+showed none of them. Under `dotnet run`, which is how this repository's own smoke tests launch an
+AppHost, they go to the terminal as written.
+
+So the risk resolves in the direction that needs nothing added: the stream flows as it is written,
+and the fallback this section used to describe — capture, a periodic "still running (Nm)" heartbeat,
+and the tail on failure — would buy nothing, because there is no interval during which the lines are
+being held. What differs between the two launchers is only where a developer reads them, which is
+worth saying in the README and is not a design decision. The tail on failure is kept regardless, for
+a different reason: an exception message has to carry enough to act on, wherever the streamed lines
+went.
 
 On the deferred path that risk does not arise, and the presentation is better than the console could
 be. The step runs on the task that already holds the service's `ILogger` and publishes its resource
@@ -816,6 +843,31 @@ that #131 publishes during the clone. That is what #118 asks for in the sentence
 to make or break the feature: a country-sized import has to read as an initialization phase rather
 than as an apparent hang. The deferred path delivers exactly that, and since #164 it is the path the
 motivating case takes on the run that needs it — its first.
+
+#### Publish mode
+
+The step does not run outside run mode, which was added during implementation rather than designed
+here, and is worth recording because the two facts that made it necessary compose badly. #136
+restricts deferral to run mode, so in publish mode **every** `"local"` service takes the eager path
+— and that is the path the step sits on. Unguarded, an `aspire publish` over a cold checkout
+therefore paid the whole bootstrap: for the motivating case, hundreds of megabytes and a
+country-sized import, to emit a manifest that describes none of it, with the output going to a
+console nobody is watching. On a CI machine that is every publish.
+
+Nothing in a manifest depends on it. A bootstrap produces what a service needs in order to *run*,
+and publish composes the model, writes the manifest and exits. So the step is gated on
+`ExecutionContext.IsRunMode`, exactly as `ShouldDefer` is and for a related reason.
+
+Only the execution is gated. The block is still parsed and validated in every mode, so a typo'd
+`mode` or a command climbing out of the checkout still fails a publish — which is the right way
+round for a check whose whole value is being made early.
+
+The skip is reported, and reported immediately rather than buffered to `BeforeStartEvent` as this
+package's other notices are. It has one consequence: the step runs *before* the kind judges the
+checkout, so a service whose committed files are not sufficient for its kind on their own — a
+generated `.csproj`, a generated project directory — is rejected during composition, and a notice
+waiting for an event that composition never reaches would never be read. The remedy is to run the
+AppHost once and publish afterwards.
 
 ### Failure
 
@@ -944,9 +996,9 @@ repository at all, so tracking the catalog's command is a questionable default t
 - **The dashboard surface is first-run-only.** Deferral covers a cold managed checkout, so a
   prepare step reaches the dashboard on the run that creates the checkout and nowhere else; every
   re-run afterwards is eager and reports to the console. That is the right way round — the first
-  run is the expensive one — but it means the console presentation, and the buffering question
-  attached to it, is what a developer sees on all but one start. See
-  [Deferred checkouts](#deferred-checkouts).
+  run is the expensive one — but it means the console presentation is what a developer sees on all
+  but one start, and under `aspire run` that means the CLI's log rather than their terminal. See
+  [Deferred checkouts](#deferred-checkouts) and *Execution and output*.
 - **Duplicated work for two services off one repository.** Each has its own checkout, so each pays
   for its own prepare — twice the download, twice the disk. Correct rather than merely tolerable
   (see *Once per checkout, not once per repository*), but a developer running both halves of a
@@ -976,8 +1028,27 @@ repository at all, so tracking the catalog's command is a questionable default t
 ### What this deliberately does not do
 
 No general task runner, no dependency ordering between prepare steps, no caching of produced
-artifacts across developers, no timeout (Ctrl-C works, and a country-sized routing graph has no
-defensible default), and no injected environment variables. One command, one marker, per service.
+artifacts across developers, no timeout (a country-sized routing graph has no defensible default),
+and no injected environment variables. One command, one marker, per service.
+
+"Ctrl-C works" is load-bearing for the no-timeout decision, so it is arranged rather than assumed:
+the runner takes the deferred path's own shutdown token and kills the command's whole process tree
+on cancellation. Killing only the command would not do — a bootstrap starts other programs, and the
+motivating case is a shell script that runs `curl` and then a JVM, either of which would otherwise
+outlive the AppHost it belonged to. Composition has no token to give, so the eager path passes none
+and a killed AppHost orphans the child there as it always has.
+
+Waiting for the command turned out to be the part with a trap in it, and it is worth recording
+because both obvious ways of doing it are wrong. A redirected stream ends when the last handle to
+its write end closes — *not* when the process handed that handle exits — so a script that starts a
+helper without redirecting the helper's output leaves the pipe held open behind it. Both
+`Process.WaitForExit()` and `Process.WaitForExitAsync` wait for that as well as for the process, the
+second being the async equivalent of the first down to the drain, so neither is bounded by anything
+the command controls: measured, a script whose only sin was `sleep 20 &` held the runner for the
+whole twenty seconds, and on the eager path that is composition hanging with no timeout and nothing
+to cancel it. The integer overload waits for the process alone, so the runner polls that and checks
+cancellation between polls, then drains the streams under a short bound of its own. What a held pipe
+costs is therefore the tail of a command that has already exited, which is the right way round.
 
 It also does not reach backing services, which since #144/#199 have a source of their own that is
 *also* spelled `"local"`. That one means "run this dependency locally, through the factory the

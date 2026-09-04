@@ -580,4 +580,87 @@ public class ServiceCatalogLoaderTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public void Load_ParsesPrepareBlockFromYaml()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              routing:
+                repository: https://github.com/example/routing
+                project: Routing.csproj
+                prepare:
+                  command: ["./prepare.sh", "--full"]
+                  windowsCommand: ["pwsh", "-File", "prepare.ps1"]
+                  mode: once
+            """);
+
+        try
+        {
+            var prepare = ServiceCatalogLoader.Load(path).Services["routing"].Prepare;
+
+            Assert.NotNull(prepare);
+            Assert.Equal<string[]>(["./prepare.sh", "--full"], prepare!.Command!);
+            Assert.Equal<string[]>(["pwsh", "-File", "prepare.ps1"], prepare.WindowsCommand!);
+            Assert.Equal("once", prepare.Mode);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_NoPrepareBlock_LeavesItAbsent()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+            """);
+
+        try
+        {
+            Assert.Null(ServiceCatalogLoader.Load(path).Services["orders"].Prepare);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// The typo rejection the block gets for free by being a typed nested one, exactly as
+    /// <c>kubernetes:</c> already does.
+    /// </summary>
+    [Fact]
+    public void Load_UnknownPropertyInsidePrepare_ThrowsNamingExpectedSet()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              routing:
+                repository: https://github.com/example/routing
+                project: Routing.csproj
+                prepare:
+                  comand: ["./prepare.sh"]
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("unknown property 'comand' inside 'prepare'", ex.Message);
+            Assert.Contains("command", ex.Message);
+            Assert.Contains("windowsCommand", ex.Message);
+            Assert.Contains("mode", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

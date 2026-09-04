@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Prepare;
 using Aspire.Hosting.ServiceSources.Git;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -74,6 +75,18 @@ internal sealed class DeferredCheckout
     private const string CheckingOutState = "Checking out";
 
     /// <summary>
+    /// What the State column says while the service's <c>prepare</c> step is running — the phase
+    /// after the clone and before anything of this service starts.
+    /// </summary>
+    /// <remarks>
+    /// Its own phase rather than more "Checking out", because it is a different wait with a
+    /// different cause: the clone is over, and what is taking minutes now is the repository's own
+    /// bootstrap. The step's output goes to the resource log alongside it, so the State column says
+    /// which phase and the log says how far into it.
+    /// </remarks>
+    private const string PreparingState = "Preparing";
+
+    /// <summary>
     /// The shortest gap between two published progress updates within one phase. See
     /// <see cref="ReportCloneProgressAsync"/>.
     /// </summary>
@@ -105,6 +118,8 @@ internal sealed class DeferredCheckout
         string AppHostDirectory,
         LocalCheckoutPrefetch Prefetch,
         IGitClient GitClient,
+        PrepareStep? PrepareStep,
+        IPrepareCommandRunner PrepareRunner,
         Action<IResource, string, ILogger> OnCheckoutLanded)
     {
         /// <summary>Everything withheld for this service, in the order it must be started.</summary>
@@ -194,7 +209,9 @@ internal sealed class DeferredCheckout
         ServiceMetadata metadata,
         ServiceDeveloperConfig config,
         LocalCheckoutPrefetch prefetch,
-        IGitClient gitClient)
+        IGitClient gitClient,
+        PrepareStep? prepareStep,
+        IPrepareCommandRunner prepareRunner)
     {
         var repoRoot = LocalGitCheckout.ManagedRepoRoot(builder.AppHostDirectory, serviceName);
         var projectPath = Path.Combine(repoRoot, metadata.Project);
@@ -214,7 +231,8 @@ internal sealed class DeferredCheckout
 #pragma warning restore ASPIREPROJECTS001
 
         Add(
-            builder, serviceName, resource, [], repoRoot, metadata, config, prefetch, gitClient,
+            builder, serviceName, resource, [], repoRoot, metadata, config, prefetch, gitClient, prepareStep,
+            prepareRunner,
             (deferredResource, checkoutRoot, logger) =>
                 RestoreLaunchProfile(deferredResource, metadata.Project, checkoutRoot, logger));
 
@@ -243,6 +261,8 @@ internal sealed class DeferredCheckout
         ServiceDeveloperConfig config,
         LocalCheckoutPrefetch prefetch,
         IGitClient gitClient,
+        PrepareStep? prepareStep,
+        IPrepareCommandRunner prepareRunner,
         Func<string, DeferredLocalResource?> resolveDeferred)
     {
         var repoRoot = LocalGitCheckout.ManagedRepoRoot(builder.AppHostDirectory, serviceName);
@@ -320,7 +340,8 @@ internal sealed class DeferredCheckout
         }
 
         Add(
-            builder, serviceName, resource, heldBack, repoRoot, metadata, config, prefetch, gitClient,
+            builder, serviceName, resource, heldBack, repoRoot, metadata, config, prefetch, gitClient, prepareStep,
+            prepareRunner,
             (_, checkoutRoot, logger) =>
                 RunCheckoutValidation(registration, serviceName, metadata.Kind, checkoutRoot, logger));
 
@@ -411,6 +432,8 @@ internal sealed class DeferredCheckout
         ServiceDeveloperConfig config,
         LocalCheckoutPrefetch prefetch,
         IGitClient gitClient,
+        PrepareStep? prepareStep,
+        IPrepareCommandRunner prepareRunner,
         Action<IResource, string, ILogger> onCheckoutLanded)
     {
         // The clone starts here, not in the speculative phase: the prefetch leaves a service that
@@ -426,7 +449,7 @@ internal sealed class DeferredCheckout
         {
             _deferred.Add(new Deferred(
                 serviceName, resource, heldBack, repoRoot, metadata, config, builder.AppHostDirectory, prefetch,
-                gitClient, onCheckoutLanded));
+                gitClient, prepareStep, prepareRunner, onCheckoutLanded));
         }
 
         EnsureSubscribed(builder);
@@ -721,6 +744,41 @@ internal sealed class DeferredCheckout
                     "cannot be changed afterwards.");
             }
 
+            // The checkout is complete and nothing has judged it yet, which is where a prepare step
+            // belongs on this path exactly as it does on the eager one. Before OnCheckoutLanded,
+            // which is where a kind's ValidateCheckout runs and where the dotnet kind reads its
+            // landed launch profile — and therefore before the held-back helpers start too: an
+            // installer resource core starts ahead of the app reads a package.json a prepare step is
+            // entitled to have generated.
+            //
+            // This is where the step lands better than the console could. The task already holds the
+            // service's logger and publishes its resource state, so a country-sized import reads as
+            // an initialization phase in the dashboard rather than as an apparent hang, and a
+            // failure becomes this one service's state instead of an exception out of composition.
+            if (deferred.PrepareStep is { } step)
+            {
+                await PublishStateAsync(notifications, deferred.Resource, PreparingState).ConfigureAwait(false);
+
+                CheckoutPreparation.Run(
+                    deferred.ServiceName,
+                    step,
+                    repoRoot,
+                    deferred.AppHostDirectory,
+                    // A 'path' override never defers (DeferredCheckout.ShouldDefer refuses one), so
+                    // a checkout reaching this point is always one this package manages.
+                    managedCheckout: true,
+                    deferred.GitClient,
+                    deferred.PrepareRunner,
+                    new LoggerPrepareOutputSink(logger),
+                    // The same token the rest of this task uses, handed all the way to the child
+                    // process. A bootstrap is the longest thing this package waits for, so Ctrl-C
+                    // during one is the ordinary case rather than the edge: without this the
+                    // download or the import would go on running after the host it belongs to had
+                    // gone. Cancellation surfaces as the OperationCanceledException this method
+                    // already treats as the shutdown it is.
+                    stoppingToken);
+            }
+
             // Whatever this kind could only settle against a real working tree: the dotnet kind's
             // launch profile, a kind's DeferredLocalResource.ValidateCheckout.
             deferred.OnCheckoutLanded(deferred.Resource, repoRoot, logger);
@@ -752,11 +810,18 @@ internal sealed class DeferredCheckout
         }
         catch (OperationCanceledException)
         {
-            // The host is shutting down. This is reached from the wait for NotStarted or from the
-            // start command, never from the clone in between: LocalCheckoutPrefetch takes no
-            // cancellation token, so a shutdown that arrives mid-clone is not noticed until that
-            // clone has finished on its own. Either way there is nothing left to start and nobody
-            // to tell.
+            // The host is shutting down. Three places reach here: the wait for NotStarted, the
+            // prepare step, and the start command. Not the clone — LocalCheckoutPrefetch takes no
+            // cancellation token, so a shutdown arriving mid-clone is not noticed until that clone
+            // has finished on its own.
+            //
+            // The prepare step is the one worth naming, because it is the one that can be running
+            // for minutes when Ctrl-C arrives: CheckoutPreparation.Run hands the token to the
+            // command's own process and lets the cancellation out unwrapped, precisely so it lands
+            // here rather than in the handler below, which would report an interrupted bootstrap as
+            // this service having failed.
+            //
+            // Either way there is nothing left to start and nobody to tell.
         }
         catch (Exception ex)
         {
@@ -869,10 +934,23 @@ internal sealed class DeferredCheckout
     }
 
     private static Task PublishCheckingOutAsync(ResourceNotificationService notifications, IResource resource) =>
+        PublishStateAsync(notifications, resource, CheckingOutState);
+
+    private static Task PublishStateAsync(
+        ResourceNotificationService notifications, IResource resource, string state) =>
         notifications.PublishUpdateAsync(resource, snapshot => snapshot with
         {
-            State = new ResourceStateSnapshot(CheckingOutState, KnownResourceStateStyles.Info),
+            State = new ResourceStateSnapshot(state, KnownResourceStateStyles.Info),
         });
+
+    /// <summary>
+    /// The deferred path's <see cref="IPrepareOutputSink"/>: every line a <c>prepare</c> step
+    /// reports reaches the service's own resource log as it arrives, and so the dashboard.
+    /// </summary>
+    private sealed class LoggerPrepareOutputSink(ILogger logger) : IPrepareOutputSink
+    {
+        public void Report(string line) => logger.LogInformation("{PrepareOutput}", line);
+    }
 
     /// <param name="started">
     /// The resources whose start command already succeeded, which this failure is therefore not

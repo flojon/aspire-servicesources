@@ -16,6 +16,13 @@ internal sealed class ServiceMetadata
 
     public ContainerMetadata? Container { get; set; }
 
+    /// <summary>
+    /// A bootstrap command the <c>"local"</c> source runs inside the materialized checkout, before
+    /// the kind is allowed to judge it. Absent for the services — most of them — whose checkout is
+    /// runnable the moment it is cloned.
+    /// </summary>
+    public PrepareMetadata? Prepare { get; set; }
+
     public string Kind { get; set; } = LocalKinds.Dotnet;
 
     /// <summary>

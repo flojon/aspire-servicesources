@@ -94,6 +94,20 @@ internal static class GitCommand
             startInfo.Environment["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes";
         }
 
+        // Every command here names the repository it means, with "-C" or with a path argument, and
+        // these two would override that: GIT_DIR points git at a repository outright and
+        // GIT_WORK_TREE at a working tree, both ahead of anything discovered from the directory.
+        // Inherited, so they are set for whatever the AppHost was launched from — a git hook is the
+        // realistic case, since a hook runs with both pointing at the hook's own repository. That
+        // would send a clone, a checkout or a status into a repository nobody named.
+        //
+        // It also becomes a correctness question rather than a hygiene one with
+        // GitCliClient.GetHeadCommitSha, whose contract is that a directory which is not the root of
+        // a working tree answers null. That rests on discovery starting at the directory it was
+        // given, which an inherited GIT_DIR simply bypasses.
+        startInfo.Environment.Remove("GIT_DIR");
+        startInfo.Environment.Remove("GIT_WORK_TREE");
+
         if (environmentOverrides is not null)
         {
             foreach (var (name, value) in environmentOverrides)

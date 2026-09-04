@@ -11,4 +11,16 @@ internal sealed class LocalDeveloperConfig
 
     /// <summary>The ref a managed checkout sits on. Cannot be combined with <see cref="Path"/>.</summary>
     public string? Ref { get; set; }
+
+    /// <summary>
+    /// This developer's own <c>prepare</c> step, merged over the catalog's block per field — or the
+    /// whole of the step for a <c>path</c> checkout, which inherits nothing.
+    /// </summary>
+    /// <remarks>
+    /// Nullable, unlike the source blocks on <see cref="ServiceDeveloperConfig"/>, because there is
+    /// something for absent to mean here: on a <c>path</c> service "the developer declared no block"
+    /// is a different answer from "the developer declared one", and it decides whether a notice asks
+    /// them to.
+    /// </remarks>
+    public PrepareDeveloperConfig? Prepare { get; set; }
 }
