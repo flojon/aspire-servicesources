@@ -49,11 +49,12 @@ public class NearMissTests
     /// </summary>
     /// <remarks>
     /// What this does <em>not</em> pin is the order of the filter and the minimum inside
-    /// <see cref="NearMiss.Nearest"/>, which an earlier version of this test claimed to: under the
-    /// two tiers <see cref="NearMiss.MaxEdits"/> has, the two orders cannot disagree. The closest
-    /// candidate is always at distance 0 or 1, which every tolerance admits, so no candidate can be
-    /// both the closest and excluded. It becomes observable only if a tier above two is added, and
-    /// there is no way to write a test for it until then.
+    /// <see cref="NearMiss.Nearest"/>: under the two tiers <see cref="NearMiss.MaxEdits"/> has, the
+    /// two orders cannot disagree. They differ only when every candidate at the smallest distance
+    /// fails its own tolerance while a strictly farther one passes; failing a tolerance takes at
+    /// least two edits, so the farther one would have to be at three or more, which no tolerance
+    /// admits. It becomes observable only if a tier above two is added, and there is no way to
+    /// write a test for it until then.
     /// </remarks>
     [Fact]
     public void Nearest_AppliesEachCandidatesOwnTolerance()

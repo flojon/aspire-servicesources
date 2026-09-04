@@ -81,11 +81,13 @@ internal static class NearMiss
             // taking the minimum first would let a candidate outside its own tolerance win and then
             // be discarded, losing a suggestion a longer candidate had earned.
             //
-            // Under the two tiers MaxEdits has today the two orders cannot actually disagree — the
-            // closest candidate is at distance 0 or 1, which every tolerance admits, and for a
-            // farther one to be excluded while a farther one still qualifies needs a tier above
-            // two. So this is the order that stays correct if a tier is added, not a difference
-            // anything can observe now, and no test pins it because none can.
+            // Under the two tiers MaxEdits has today the two orders cannot actually disagree: they
+            // differ only when every candidate at the smallest distance fails its own tolerance
+            // while a strictly farther one passes; failing a tolerance takes at least two edits,
+            // so the farther one would have to be at three or more — further than any tolerance
+            // admits. A tier above two would make it observable. So this is the order that stays
+            // correct if a tier is added, not a difference anything can observe now, and no test
+            // pins it because none can.
             .Where(entry => entry.Distance <= MaxEdits(entry.Spelling))
             .ToArray();
 
