@@ -120,7 +120,7 @@ nothing will fail to build to warn you.
   ```yaml
   services:
     routing:
-      repository: https://github.com/example/planning-routing
+      repository: https://github.com/example/routing
       kind: java
       prepare:
         command: ["./prepare.sh"]

@@ -236,7 +236,7 @@ it**:
 ```yaml
 services:
   routing:
-    repository: https://github.com/example/planning-routing
+    repository: https://github.com/example/routing
     kind: java
     prepare:
       command: ["./prepare.sh"]
@@ -365,7 +365,7 @@ script is entitled to run `git clean`. So the command that runs there has to be 
     "routing": {
       "source": "local",
       "local": {
-        "path": "/home/dev/code/planning-routing",
+        "path": "/home/dev/code/routing",
         "prepare": { "command": ["./prepare.sh"] }
       }
     }

@@ -171,7 +171,7 @@ complete, before the kind is allowed to judge it. See [Where the step runs](#whe
 ```yaml
 services:
   routing:
-    repository: https://github.com/example/planning-routing
+    repository: https://github.com/example/routing
     kind: java
     prepare:
       command: ["./prepare.sh"]
@@ -321,7 +321,7 @@ counterpart alongside the kind methods, carrying the same fields the yaml block 
 
 ```csharp
 catalog.AddService("routing")
-    .FromRepository("https://github.com/example/planning-routing")
+    .FromRepository("https://github.com/example/routing")
     .WithPrepare(["./prepare.sh"], windowsCommand: ["pwsh", "-File", "prepare.ps1"], mode: PrepareMode.Once)
     .WithJava(jarPath: "graphhopper-web-11.0.jar", port: 8989);
 ```

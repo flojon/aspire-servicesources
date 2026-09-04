@@ -78,7 +78,7 @@ public class JavaPrepareStepTests
 
         File.WriteAllText(
             Path.Combine(dir, "servicesources.yaml"),
-            $"services:\n  {ServiceName}:\n    repository: https://github.com/example/planning-routing\n"
+            $"services:\n  {ServiceName}:\n    repository: https://github.com/example/routing\n"
             + "    kind: java\n");
 
         File.WriteAllText(
@@ -91,7 +91,7 @@ public class JavaPrepareStepTests
     private static ServiceMetadata Metadata(PrepareMetadata? prepare, params (string Key, object Value)[] block) =>
         new()
         {
-            Repository = "https://github.com/example/planning-routing",
+            Repository = "https://github.com/example/routing",
             Kind = "java",
             Prepare = prepare,
             KindConfig = Block(block),

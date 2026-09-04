@@ -588,7 +588,7 @@ public class ServiceCatalogLoaderTests
         File.WriteAllText(path, """
             services:
               routing:
-                repository: https://github.com/example/planning-routing
+                repository: https://github.com/example/routing
                 project: Routing.csproj
                 prepare:
                   command: ["./prepare.sh", "--full"]
@@ -643,7 +643,7 @@ public class ServiceCatalogLoaderTests
         File.WriteAllText(path, """
             services:
               routing:
-                repository: https://github.com/example/planning-routing
+                repository: https://github.com/example/routing
                 project: Routing.csproj
                 prepare:
                   comand: ["./prepare.sh"]
