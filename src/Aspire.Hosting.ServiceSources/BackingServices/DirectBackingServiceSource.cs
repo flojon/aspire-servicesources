@@ -14,11 +14,20 @@ namespace Aspire.Hosting.ServiceSources.BackingServices;
 /// <c>"remote"</c> — the common use is emphatically local — and not <c>"external"</c>, which Aspire
 /// already uses for an external HTTP service.
 /// <para>
-/// The resource this adds is Aspire's own <c>ConnectionStringResource</c>, which is an
-/// <c>IResourceWithoutLifetime</c>: there is nothing to start, so nothing to wait for.
-/// <c>WaitFor</c> on one of these is therefore honoured but empty — a connectivity check that would
-/// make it mean something is a deliberate omission for now, since the developer is pointing at
-/// something they already run and the only thing a check buys them is a better diagnosis.
+/// The resource this adds is Aspire's own <c>ConnectionStringResource</c>. There is nothing for
+/// Aspire to start behind it, so a <c>WaitFor</c> on one has nothing whose readiness it could track
+/// — a connectivity check that would make it mean something is a deliberate omission for now, since
+/// the developer is pointing at something they already run and the only thing a check buys them is a
+/// better diagnosis.
+/// </para>
+/// <para>
+/// This used to say the type is an <c>IResourceWithoutLifetime</c>, which it is not: on Aspire
+/// 13.5.2 it declares <c>IResourceWithConnectionString</c> and <c>IResourceWithWaitSupport</c> and
+/// no lifetime marker at all, read off the loaded assembly rather than inferred. That marker is what
+/// <see cref="Sources.ServiceUrlResource"/> declares to keep a wait on <i>it</i> from hanging
+/// (#170), so the difference is worth not misremembering. What a wait on this resource actually does
+/// at run time has not been measured against a live host, and the claim has been narrowed to what
+/// was verified rather than restated.
 /// </para>
 /// </remarks>
 internal sealed class DirectBackingServiceSource : IBackingServiceSource

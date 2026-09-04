@@ -1489,6 +1489,15 @@ across a source switch. This used to be the case `WithReference(db, connectionNa
 rule makes that unreachable for a backing service, since the throw happens first, so the wrap is
 what replaces it.
 
+> **It is not a drop-in: you lose the wait.** What `AddBackingService` hands back is now the
+> forwarding `ConnectionStringResource` rather than the database the factory built, and that
+> resource has nothing to start — so a consumer's `WaitFor(ordersDb)` no longer holds the app back
+> until the database is up. Under `"direct"` there was never a local process to wait for, but under
+> `"local"` this is a real loss: the container is still starting and nothing is waiting for it.
+>
+> So rename the resource wherever you can, and reach for the wrap only when you genuinely cannot.
+> The connection string itself is unaffected — only the start ordering is.
+
 ### Connection-string placeholders
 
 `direct.connectionString` is normally a literal. **Braces reserve nothing** — `Driver={PostgreSQL}`,
@@ -1531,15 +1540,22 @@ own variables, so a template set through an environment variable can be expanded
 AppHost ever sees it. **Double quotes do not help** — they protect the `;` and not the `${`:
 
 ```bash
-# Wrong: the shell substitutes ${port} (unset) and the AppHost receives "Host=db;Port="
-export ServiceSources__BackingServices__orders-db__Direct__ConnectionString="Host=db;Port=${port}"
+# Wrong: double quotes, so the shell substitutes ${port} (unset) and the AppHost gets "Host=db;Port="
+env "ServiceSources__BackingServices__orders-db__Direct__ConnectionString=Host=db;Port=${port}" aspire run
 
-# Right
-export ServiceSources__BackingServices__orders-db__Direct__ConnectionString='Host=db;Port=${port}'
+# Right: single quotes, so ${port} reaches the AppHost intact
+env 'ServiceSources__BackingServices__orders-db__Direct__ConnectionString=Host=db;Port=${port}' aspire run
 ```
 
-Nothing reports this, because what arrives is a valid template that simply has no placeholder in it.
-In docker-compose the escape is `$${port}`; in a workflow, prefer single quotes.
+`env` rather than `export`, because a backing service whose name contains a hyphen — `orders-db`
+here — makes an environment variable name that is not a valid shell identifier, and both
+`export NAME=…` and the `NAME=… command` prefix refuse it outright. `env 'NAME=value' command`
+accepts any name, and so do docker-compose's `environment:`, `launchSettings.json` and a workflow's
+`env:` block, none of which involve a shell at all.
+
+Nothing reports the mangled case, because what arrives is a valid template that simply has no
+placeholder in it — which is also what someone writing a literal port produces. In docker-compose
+the escape is `$${port}`.
 
 This does not apply to `servicesources.local.json`, `appsettings.json` or user secrets, where `$` is
 an ordinary character — which is where a template normally lives.

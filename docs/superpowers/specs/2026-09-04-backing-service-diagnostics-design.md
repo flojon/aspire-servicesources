@@ -174,7 +174,7 @@ syntax reserves, why braces are no longer part of it, and why doubling was not t
 In `AddBackingService`'s `"local"` branch, after the existing null check:
 
 ```csharp
-if (!string.Equals(resource.Resource.Name, name, StringComparison.OrdinalIgnoreCase))
+if (!string.Equals(resource.Resource.Name, name, StringComparison.Ordinal))
 {
     throw MisnamedLocalResource(name, resource.Resource.Name);
 }

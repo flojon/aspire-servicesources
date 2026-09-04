@@ -275,9 +275,15 @@ internal sealed class DeveloperConfiguration
     /// </summary>
     /// <remarks>
     /// Reached when something <i>else</i> — an environment variable, user secrets — has configured a
-    /// service, so the AppHost is part-way working while the file contributes nothing. Without this
-    /// the message tells the developer to add an entry to a file whose entries are all going unread,
-    /// which is advice that cannot work and gives no hint why.
+    /// service, so the AppHost is part-way working while the file's service entries contribute
+    /// nothing. Without this the message tells the developer to add an entry to a file whose service
+    /// entries are all going unread, which is advice that cannot work and gives no hint why.
+    /// <para>
+    /// Scoped to the service entries, and deliberately: the root key that is misspelled is
+    /// <c>services</c>, and the same file's <c>backingServices</c> section may be spelled correctly
+    /// and in force. Saying "nothing in that file is being read" would be wrong for a file that is
+    /// resolving every backing service the AppHost has.
+    /// </para>
     /// <para>
     /// Appended rather than replacing the advice, because the file may genuinely not be where this
     /// service is meant to be configured — CI pins every service from the environment. So the
@@ -287,9 +293,9 @@ internal sealed class DeveloperConfiguration
     private string MisspelledRootKeyNote() =>
         NearMissRootKey is null
             ? ""
-            : $" Note that '{FilePath}' has a top-level key '{NearMissRootKey}' and no 'services' key, "
-              + "so nothing in that file is being read — whatever is configured is coming from another "
-              + "layer. Did you mean 'services'?";
+            : $" Note that '{FilePath}' has a top-level key '{NearMissRootKey}' and configures no services "
+              + "under 'services', so none of the service entries in that file are being read — whatever "
+              + "is configured is coming from another layer. Did you mean 'services'?";
 
     /// <summary>
     /// A typo in a key, or a file that was never created, yields an empty section rather than a

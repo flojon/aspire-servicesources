@@ -92,18 +92,15 @@ internal static class DeveloperConfigFileSource
 
         private IReadOnlyList<string> _rootKeys = [];
 
+        private IReadOnlySet<string> _configuringRootKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         /// <summary>
-        /// The root keys the file wrote something under, captured while it was read.
+        /// Every root key the file mentions, captured while it was read.
         /// </summary>
         /// <remarks>
         /// Kept because the near-miss checks want them and the file has already been parsed by the
         /// time anything asks: reading them back off disk is a second parse of a file whose contents
         /// cannot have changed, on the path of an AppHost that is starting normally.
-        /// <para>
-        /// A key with nothing under it is not in here — see the reasoning where this is built. That
-        /// is the difference between "the file mentions this key" and "the file configures anything
-        /// through it", and only the second answers whether a near miss is worth reporting.
-        /// </para>
         /// </remarks>
         public IReadOnlyList<string> RootKeys
         {
@@ -112,6 +109,26 @@ internal static class DeveloperConfigFileSource
                 lock (_gate)
                 {
                     return _rootKeys;
+                }
+            }
+        }
+
+        /// <summary>
+        /// The root keys the file writes something under, which is a subset of <see cref="RootKeys"/>.
+        /// </summary>
+        /// <remarks>
+        /// The distinction is "the file mentions this key" against "the file configures anything
+        /// through it", and the near-miss check needs both: the second decides whether the key being
+        /// looked for is really there, the first decides what could be a misspelling of it. Using
+        /// one for both gets the other wrong — see where these are built.
+        /// </remarks>
+        public IReadOnlySet<string> ConfiguringRootKeys
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _configuringRootKeys;
                 }
             }
         }
@@ -133,10 +150,11 @@ internal static class DeveloperConfigFileSource
                 // Reading the file is the part that can fail on the file's own account, and it
                 // touches nothing on the builder, so a malformed file throws with the slot still
                 // unset and the chain still untouched.
-                var (source, rootKeys) = ReadFileSource(
+                var (source, rootKeys, configuringRootKeys) = ReadFileSource(
                     Path.Combine(builder.AppHostDirectory, DeveloperConfiguration.FileName));
 
                 _rootKeys = rootKeys;
+                _configuringRootKeys = configuringRootKeys;
 
                 // Set before the insert rather than after. Inserting mutates the source list and
                 // then rebuilds every provider on it, so a fault raised by some unrelated provider's
@@ -160,7 +178,10 @@ internal static class DeveloperConfigFileSource
     /// wholesale would make this the route by which an unrelated key reaches the AppHost's live
     /// configuration under our prefix.
     /// </remarks>
-    private static (MemoryConfigurationSource Source, IReadOnlyList<string> RootKeys) ReadFileSource(string path)
+    private static (
+        MemoryConfigurationSource Source,
+        IReadOnlyList<string> RootKeys,
+        IReadOnlySet<string> ConfiguringRootKeys) ReadFileSource(string path)
     {
         var file = new ConfigurationBuilder().AddJsonFile(path, optional: true).Build();
 
@@ -180,26 +201,29 @@ internal static class DeveloperConfigFileSource
                     .Select(entry => ($"{section.ConfigurationKey}:{entry.Key}", entry.Value)))
                 .ToDictionary(entry => entry.Item1, entry => entry.Item2);
 
-            // Captured here because the file is open here, and taken from the entries that carry a
-            // value rather than from GetChildren().
+            // Two lists, because the near-miss check asks two different questions and collapsing
+            // them into one gets one of them wrong whichever way it is collapsed.
             //
-            // The difference is the whole check. `"backingServices": { }` contributes nothing to
-            // the configuration above — AsEnumerable over it yields no values — but the JSON parser
-            // still emits the key itself as a null-valued entry, so GetChildren() returns it. Asking
-            // that list "does the file have this key?" answered yes for a section that configures
-            // nothing, and the near-miss search stopped there: a file whose real entries sat under a
-            // misspelled key beside an empty correct one was told nothing at all.
-            //
-            // Read this way, a key is present when something is written under it, which is the
-            // question both callers are actually asking. A scalar at the root — `"services": "oops"`
-            // — counts as present too, and should: it is a key someone wrote, not a misspelling.
-            var rootKeys = file.AsEnumerable()
+            // Every root key the file mentions, for the candidates. A misspelling is worth naming
+            // whether or not anything is written under it yet: `"serivces": { "orders": { } }` is a
+            // developer part-way through, and `"serivces": { }` is one about to be, and neither
+            // carries a leaf value.
+            var rootKeys = file.GetChildren().Select(section => section.Key).ToArray();
+
+            // The subset that actually configures something, for deciding whether the key being
+            // looked for is there. `"backingServices": { }` contributes nothing to the configuration
+            // above — AsEnumerable over it yields no values — but the JSON parser still emits the key
+            // as a null-valued entry, so it appears in the list above. Asking that list "does the
+            // file have this key?" answered yes for a section configuring nothing, and the search
+            // stopped: a file whose real entries sat under a misspelled key beside an empty correct
+            // one was told nothing at all. A scalar at the root — `"services": "oops"` — counts as
+            // configuring, and should: it is a value someone wrote.
+            var configuringRootKeys = file.AsEnumerable()
                 .Where(entry => entry.Value is not null)
                 .Select(entry => entry.Key.Split(':')[0])
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            return (new MemoryConfigurationSource { InitialData = reRooted }, rootKeys);
+            return (new MemoryConfigurationSource { InitialData = reRooted }, rootKeys, configuringRootKeys);
         }
     }
 
@@ -236,20 +260,31 @@ internal static class DeveloperConfigFileSource
     /// nobody should pay twice for a file whose contents cannot have changed in between.
     /// </para>
     /// <para>
-    /// A file carrying <paramref name="fileKey"/> as well is not a typo whatever else it carries:
-    /// its entries are being read, so there is nothing to correct.
+    /// A file <em>configuring</em> something under <paramref name="fileKey"/> is not a typo whatever
+    /// else it carries: those entries are being read, so there is nothing to correct. Mentioning the
+    /// key is not enough — an empty section configures nothing, and a file whose real entries sit
+    /// under a misspelling beside one still wants to hear about it.
     /// </para>
     /// </remarks>
     private static string? NearMissForRootKey(IDistributedApplicationBuilder builder, string fileKey)
     {
-        var rootKeys = RegistrationFor(builder).RootKeys;
+        var registration = RegistrationFor(builder);
 
-        // Folded, because a root key differing only by case is not a near miss but the key itself:
+        // Asked of the keys that configure something, not of every key the file mentions. Folded,
+        // because a root key differing only by case is not a near miss but the key itself:
         // configuration keys are case-insensitive, so `Services` is already read.
-        if (rootKeys.Any(key => key.Equals(fileKey, StringComparison.OrdinalIgnoreCase)))
+        if (registration.ConfiguringRootKeys.Contains(fileKey))
         {
             return null;
         }
+
+        // Candidates come from every key the file mentions, which is the other question — a
+        // misspelling is worth naming before its entries have any values in them. The key being
+        // looked for is excluded explicitly: it is at distance zero from itself, so an empty
+        // `services` beside a populated `service` would otherwise be offered as a correction of
+        // itself.
+        var rootKeys = registration.RootKeys
+            .Where(key => !key.Equals(fileKey, StringComparison.OrdinalIgnoreCase));
 
         // Both sides folded, since the vocabulary itself is not all lower case — `backingServices`
         // compared against a lower-cased candidate would never match its own spelling.

@@ -730,22 +730,46 @@ public class DeveloperConfigurationTests
     }
 
     /// <summary>
-    /// Two empty sections say nothing, since neither configures anything for the other to be a
-    /// misspelling of.
+    /// A misspelled root key is named before its entries have any values in them.
     /// </summary>
     /// <remarks>
-    /// The half of the old rule that survives: a file whose root key is right and whose entries are
-    /// simply missing is reported as configuring nothing, with no suggestion to chase.
+    /// Candidates are drawn from every root key the file mentions, while the key being looked for
+    /// has to <em>configure</em> something to count as present. Collapsing those two into one list
+    /// gets one of them wrong whichever way it collapses: reading both as "mentions" put the
+    /// backing-service blind spot back, and reading both as "configures" lost the suggestion here —
+    /// a developer part-way through writing entries under a key they misspelled, which is exactly
+    /// when the hint is worth most.
     /// </remarks>
+    [Theory]
+    [InlineData("""{ "service": { "orders": { } } }""")]
+    [InlineData("""{ "service": { } }""")]
+    [InlineData("""{ "services": { }, "service": { "orders": { } } }""")]
+    public void ResolveService_MisspelledRootKeyWithNoValuesUnderIt_IsStillNamed(string json)
+    {
+        var dir = CreateAppHostDirectory(OrdersCatalog, json);
+
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.Contains("'service'", ex.Message);
+        Assert.Contains("'services'", ex.Message);
+    }
+
+    /// <summary>
+    /// A file with nothing resembling <c>services</c> still reports configuring nothing, with no
+    /// suggestion to chase.
+    /// </summary>
     [Fact]
-    public void ResolveService_ServicesIsEmptyAndSoIsTheNearMiss_ReportsNothingConfiguredWithoutASuggestion()
+    public void ResolveService_ServicesIsEmptyAndNothingResemblesIt_ReportsNothingConfigured()
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
             """
             {
               "services": { },
-              "service": { }
+              "myOwnSettings": { "anything": "at all" }
             }
             """);
 
@@ -755,7 +779,7 @@ public class DeveloperConfigurationTests
             () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
 
         Assert.Contains("empty in every configuration source", ex.Message);
-        Assert.DoesNotContain("'service'", ex.Message);
+        Assert.DoesNotContain("myOwnSettings", ex.Message);
     }
 
     /// <remarks>

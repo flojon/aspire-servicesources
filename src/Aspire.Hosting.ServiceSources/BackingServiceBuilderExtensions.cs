@@ -232,7 +232,8 @@ public static class BackingServiceBuilderExtensions
             + $"resource to '{name}'. Where the Aspire resource and the database itself want different names, "
             + $"AddDatabase names them separately: 'AddDatabase(\"{name}\", \"orders\")' is a resource called "
             + $"'{name}' holding a database called 'orders'. Where the resource is not yours to rename, return "
-            + $"one that forwards it: 'builder.AddConnectionString(\"{name}\", ReferenceExpression.Create($\"{{theResource}}\"))'.");
+            + $"one that forwards it: 'builder.AddConnectionString(\"{name}\", ReferenceExpression.Create($\"{{theResource}}\"))' "
+            + "— at the cost of a consumer's WaitFor, since a connection-string resource has nothing to start.");
 
     /// <summary>
     /// The error for a <c>source</c> this package does not recognize.
