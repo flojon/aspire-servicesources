@@ -199,6 +199,18 @@ the dropped wait that belongs in the same grouped message as that service's earl
 `Configure` calls. A `Flush` there empties the buffer in between and splits one message into two,
 undoing the subscription ordering `UrlSource` arranges on purpose.
 
+`ReportNow` is the *only* way free text enters the channel — there is no buffering counterpart to
+`AddSkip`. One was written and then had no callers once the audit moved to `ReportNow`, which is
+worth recording as a decision rather than leaving as a gap to fill: buffered free text would be
+reported by the flush handler, and the audit is precisely the caller that must not wait for it.
+
+The audit takes the instance through `ReporterFor` rather than `For`, which is the same distinction
+seen from the other side. `For` subscribes the flush handler, and subscribing from inside
+`BeforeStartEvent` is not merely late but inert, because Aspire snapshots an event's subscription
+list before dispatching. Nothing is lost by that today — the audit reports immediately, and anything
+holding buffered entries subscribed while the AppHost was still being composed — but a subscription
+that cannot run is a trap for whoever buffers next, so the audit asks for the instance without it.
+
 The class is renamed `ServiceSourcesWarnings`. It is internal, the rename is mechanical across the
 eight files that name it — five in `src`, three in `test` — and "service configuration" stops being
 true once it carries a message about a backing service.

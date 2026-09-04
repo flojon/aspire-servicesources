@@ -94,7 +94,11 @@ internal static class BackingServiceConfigAudit
                     // second message, undoing the ordering UrlSource arranges deliberately.
                     // Reporting only what this audit produced leaves everything else outstanding for
                     // whoever owns it.
-                    ServiceSourcesWarnings.For(builder).ReportNow(@event.Services, Report(builder, Snapshot()));
+                    //
+                    // ReporterFor rather than For for a related reason: For would subscribe the
+                    // warnings class's flush handler from inside the event it handles, which Aspire
+                    // has already snapshotted, so the handler would never run. See that method.
+                    ServiceSourcesWarnings.ReporterFor(builder).ReportNow(@event.Services, Report(builder, Snapshot()));
 
                     return Task.CompletedTask;
                 });

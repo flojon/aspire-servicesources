@@ -102,15 +102,34 @@ internal sealed class ServiceSourcesWarnings
 
     public static ServiceSourcesWarnings For(IDistributedApplicationBuilder builder)
     {
-        // The factory stays free of side effects: ConditionalWeakTable.GetValue may run it
-        // concurrently for the same key and keep only one of the results, so subscribing in there
-        // could leave a discarded instance's subscription behind — flushing warnings nobody added.
-        var warnings = Cache.GetValue(builder, static _ => new ServiceSourcesWarnings());
+        var warnings = Instance(builder);
 
         warnings.EnsureSubscribed(builder);
 
         return warnings;
     }
+
+    /// <summary>
+    /// The instance for <paramref name="builder"/>, without the flush handler <see cref="For"/>
+    /// subscribes.
+    /// </summary>
+    /// <remarks>
+    /// For a caller that only ever uses <see cref="ReportNow"/>, and specifically for one calling
+    /// from inside <c>BeforeStartEvent</c>. Subscribing during that event's own dispatch is not
+    /// merely late, it is inert: Aspire snapshots the subscription list before dispatching, so the
+    /// handler is registered and never runs. Nothing is lost by that today — the only caller in that
+    /// position reports immediately, and anything with entries to flush subscribed while the AppHost
+    /// was still being composed — but a subscription that cannot run is a trap laid for whoever
+    /// buffers next, and asking for the instance without it means the trap is not there to spring.
+    /// </remarks>
+    public static ServiceSourcesWarnings ReporterFor(IDistributedApplicationBuilder builder) =>
+        Instance(builder);
+
+    // The factory stays free of side effects: ConditionalWeakTable.GetValue may run it concurrently
+    // for the same key and keep only one of the results, so subscribing in there could leave a
+    // discarded instance's subscription behind — flushing warnings nobody added.
+    private static ServiceSourcesWarnings Instance(IDistributedApplicationBuilder builder) =>
+        Cache.GetValue(builder, static _ => new ServiceSourcesWarnings());
 
     private void EnsureSubscribed(IDistributedApplicationBuilder builder)
     {
@@ -139,23 +158,6 @@ internal sealed class ServiceSourcesWarnings
         lock (_gate)
         {
             _entries.Add(new Skip(serviceName, source, capability));
-        }
-    }
-
-    /// <summary>
-    /// Records a warning that is already a sentence, for something that is not a skipped call.
-    /// </summary>
-    /// <remarks>
-    /// The route for configuration nothing read (#206), which has no service and no capability to
-    /// group by — its subject is an entry in the file rather than a call on a resource. Written by
-    /// its caller rather than assembled here, because the callers that need this each know
-    /// something about their own subject that a shared formatter would have to be told anyway.
-    /// </remarks>
-    public void AddWarning(string message)
-    {
-        lock (_gate)
-        {
-            _entries.Add(new Message(message));
         }
     }
 

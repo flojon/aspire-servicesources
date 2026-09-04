@@ -76,8 +76,14 @@ internal sealed class DeveloperConfiguration
             Services = services,
             FilePath = path,
             FileFound = File.Exists(path),
-            // Read only when nothing is configured, which is the only state that reaches the error
-            // naming it — so an AppHost that starts never pays for the extra parse.
+            // Only meaningful when nothing is configured, which is the only state that reaches the
+            // error naming it — so it is only asked for there, and stays null rather than holding a
+            // suggestion nothing would print.
+            //
+            // It used to buy more than that: the lookup re-read the file, and this gate kept that
+            // parse off the path of an AppHost that starts. It no longer does — the root keys are
+            // captured while the file is parsed for its values — so what remains is the meaning,
+            // not the cost.
             NearMissRootKey = services.Count == 0
                 ? DeveloperConfigFileSource.NearMissForServicesKey(builder)
                 : null,
