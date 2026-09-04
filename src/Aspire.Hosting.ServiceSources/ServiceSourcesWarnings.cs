@@ -191,6 +191,31 @@ internal sealed class ServiceSourcesWarnings
     }
 
     /// <summary>
+    /// Records <paramref name="notice"/> to be written verbatim once there is a logger.
+    /// </summary>
+    /// <remarks>
+    /// For a notice that already names its own service and its own remedy, so there is nothing here
+    /// to group it with or rephrase it into. The <c>prepare</c> step's is the first: a <c>path</c>
+    /// service does not inherit its catalog's step, and the notice says which command was not run so
+    /// it can be copied into the developer's own file.
+    /// <para>
+    /// Recorded once per AppHost however many times it is offered. The prepare notice is settled per
+    /// service from configuration, so a service resolved twice would produce the identical sentence
+    /// twice, which reads as two problems.
+    /// </para>
+    /// </remarks>
+    public void AddNotice(string notice)
+    {
+        lock (_gate)
+        {
+            if (!_entries.OfType<Message>().Any(entry => string.Equals(entry.Text, notice, StringComparison.Ordinal)))
+            {
+                _entries.Add(new Message(notice));
+            }
+        }
+    }
+
+    /// <summary>
     /// Reports <paramref name="messages"/> immediately, leaving everything else buffered for
     /// whoever flushes next.
     /// </summary>

@@ -64,7 +64,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
             // rejected: it is the team's, and applies correctly to every developer on a managed
             // checkout, so one developer's override must not turn a shared catalog field into a
             // failure. Buffered because there is no logger yet.
-            ServiceConfigurationWarnings.For(builder).AddNotice(ignored);
+            ServiceSourcesWarnings.For(builder).AddNotice(ignored);
         }
 
         // Starts the checkouts an AddService call would have to block on — every "local" service
