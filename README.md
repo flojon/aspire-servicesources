@@ -1485,13 +1485,15 @@ naming the backing service and the configuration key, rather than reaching the a
 you wrote it, doubled ones included — so ODBC values keep their own doubling rule intact
 (`PWD={pa}}ss}` is the password `pa}ss`, and stays that).
 
-The cost is one reserved shape. **A `{…}` token whose text up to the first colon is `port` or
-`secret`, in any casing, is always read as a placeholder** — so `{port}`, `{PORT}`,
-`{port:amqp}`, `{secret}`, `{secret:a}` and `{secret:a:b:c}` are all unavailable as literal text,
-not just the two well-formed spellings. A token that is keyword-shaped but not a placeholder this
-package can read fails at startup rather than passing through, which is what catches
-`PWD={secret}` — an ODBC-quoted password that happens to be the word. Every other `{…}` is text:
-`Driver={PostgreSQL}`, `{host}`, `{p0rt}` all pass through.
+The cost is one reserved shape. **A `{` begins a placeholder whenever the word after it — up to the
+first `:` or `}` — is *exactly* `port` or `secret`, in any casing** — so `{port}`, `{PORT}`, `{port:amqp}`,
+`{secret}`, `{secret:a}` and `{secret:a:b:c}` are all unavailable as literal text, not just the two
+well-formed spellings. A token of that shape which is *not* a placeholder this package can read
+fails at startup rather than passing through, which is what catches `PWD={secret}` — an ODBC-quoted
+password that happens to be the word.
+
+Equality, not a prefix, so everything else is text: `Driver={PostgreSQL}`, `{host}`, `{p0rt}`,
+`{portal}`, `{secretariat}` and `{secrets:a}` all pass through untouched.
 
 Doubling the braces does not escape any of it. An escape by doubling was tried and withdrawn,
 because that is exactly the syntax ODBC already uses and collapsing it silently corrupted working

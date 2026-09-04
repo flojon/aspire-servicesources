@@ -214,15 +214,74 @@ public class ConnectionStringTemplateTests
         Assert.Contains("there is no escape for it", message);
     }
 
+    /// <summary>
+    /// The keyword is matched case-insensitively, so an upper-case token is a placeholder rather
+    /// than text.
+    /// </summary>
     /// <remarks>
-    /// The reserved shape is wider than the two well-formed spellings, because the keyword is
-    /// matched case-insensitively on the text before the first colon — the same way every other part
-    /// of an entry is matched, configuration keys being case-insensitive.
+    /// Asserted as "the single segment is this placeholder" rather than as "no segment is a
+    /// literal", which an empty segment list satisfies without the template having been read at
+    /// all.
     /// </remarks>
     [Theory]
     [InlineData("{PORT}")]
+    [InlineData("{Port}")]
+    [InlineData("{PORT:amqp}")]
+    public void Parse_PortKeywordInAnyCasing_IsAPlaceholder(string template) =>
+        Assert.IsType<ConnectionStringTemplate.Port>(Assert.Single(Parse(template).Segments));
+
+    [Theory]
+    [InlineData("{SECRET:a:b}")]
     [InlineData("{Secret:a:b}")]
-    public void Parse_KeywordInAnyCasing_IsReserved(string template) =>
-        Assert.DoesNotContain(
-            Parse(template).Segments, segment => segment is ConnectionStringTemplate.Literal);
+    public void Parse_SecretKeywordInAnyCasing_IsAPlaceholder(string template) =>
+        Assert.IsType<ConnectionStringTemplate.Secret>(Assert.Single(Parse(template).Segments));
+
+    /// <summary>
+    /// An upper-case token that is keyword-shaped but unreadable is rejected, not passed through as
+    /// text.
+    /// </summary>
+    /// <remarks>
+    /// The claim the README makes when it says `{PORT}` and `{secret}` alike are unavailable: it
+    /// holds only if the casing reaches the malformed path too, which nothing pinned.
+    /// </remarks>
+    [Theory]
+    [InlineData("PWD={SECRET}")]
+    [InlineData("Port={PORT:}")]
+    public void Parse_UnreadableKeywordInAnyCasing_IsStillRejected(string template) =>
+        Assert.Contains("there is no escape for it", Rejects(template).Message);
+
+    /// <summary>
+    /// A message quotes the token as the developer spelled it, not as the keyword constants spell
+    /// it.
+    /// </summary>
+    /// <remarks>
+    /// Rebuilding the token from the constants normalized the casing, so a message about
+    /// <c>{PORT}</c> quoted <c>'{port}'</c> — a spelling nowhere in the file, and silent about the
+    /// one that is.
+    /// </remarks>
+    [Fact]
+    public void Parse_Rejection_QuotesTheTokenAsWritten()
+    {
+        var message = Rejects("PWD={SECRET:a}").Message;
+
+        Assert.Contains("'{SECRET:a}'", message);
+        Assert.DoesNotContain("'{secret:a}'", message);
+    }
+
+    /// <summary>
+    /// The keyword has to match the whole word, so a token that merely starts with one is text.
+    /// </summary>
+    /// <remarks>
+    /// The rule the messages and the docs state. Claimed as a prefix, they would send someone whose
+    /// password is <c>{secretstore}</c> off to rewrite a connection string that works.
+    /// </remarks>
+    [Theory]
+    [InlineData("{portal}")]
+    [InlineData("{secretariat}")]
+    [InlineData("{secrets:a}")]
+    [InlineData("Driver={secretstore}")]
+    public void Parse_TokenMerelyStartingWithAKeyword_IsText(string template) =>
+        Assert.Equal(
+            template,
+            Assert.IsType<ConnectionStringTemplate.Literal>(Assert.Single(Parse(template).Segments)).Text);
 }

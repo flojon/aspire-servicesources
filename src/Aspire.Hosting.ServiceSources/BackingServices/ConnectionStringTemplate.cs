@@ -16,15 +16,19 @@ namespace Aspire.Hosting.ServiceSources.BackingServices;
 /// <para>
 /// A brace that does not open a placeholder is literal text, deliberately: <c>Driver={PostgreSQL}</c>
 /// and <c>Server={host}\instance</c> are ordinary ODBC connection strings, and a parser that
-/// claimed every <c>{…}</c> would reject them. Only a token whose first word is one this package
-/// defines is read as a placeholder — and then it is read strictly, because at that point a
-/// developer plainly meant one.
+/// claimed every <c>{…}</c> would reject them. A <c>{</c> begins a placeholder only when the word
+/// after it — up to the first <c>:</c> or <c>}</c>, or to the end — is <em>exactly</em> a keyword
+/// this package defines, and then it is read strictly, because at that point a developer plainly
+/// meant one. Equality rather than a prefix, so <c>{portal}</c>, <c>{secretariat}</c> and
+/// <c>{secrets:a}</c> are all text.
 /// </para>
 /// <para>
-/// <b>There is no escape, and a doubled brace is not one.</b> The text <c>{port}</c> cannot appear
-/// literally in a template; it is always read as a placeholder. That is a real limitation, and the
-/// errors that hit it say so rather than sending the reader to look for a spelling that does not
-/// exist.
+/// <b>There is no escape, and a doubled brace is not one.</b> That reserves one shape rather than
+/// two spellings: <c>{port}</c>, <c>{PORT}</c>, <c>{port:amqp}</c>, <c>{secret}</c> and
+/// <c>{secret:a}</c> alike cannot appear as literal text, since the keyword is matched
+/// case-insensitively and a keyword-shaped token that cannot be read fails rather than passing
+/// through. That is a real limitation, and the errors that hit it say so rather than sending the
+/// reader to look for a spelling that does not exist.
 /// </para>
 /// <para>
 /// The obvious escape — doubling the brace, as every format string does — was tried and withdrawn,
@@ -60,7 +64,17 @@ internal sealed class ConnectionStringTemplate
     /// <summary>One piece of a template.</summary>
     public abstract record Segment
     {
-        /// <summary>How the piece was written, for a message that has to point at it.</summary>
+        /// <summary>
+        /// How the piece was written, verbatim, for a message that has to point at it.
+        /// </summary>
+        /// <remarks>
+        /// Verbatim, not rebuilt from the keyword constants. The keyword is matched with
+        /// <see cref="StringComparison.OrdinalIgnoreCase"/>, so a rebuilt token quietly changes the
+        /// casing: a message about <c>Port={PORT}</c> quoted <c>'{port}'</c>, a spelling nowhere in
+        /// the developer's file, and said nothing about the one that is. Anything echoing a value
+        /// back has to echo what was written — the same rule the config validator's own
+        /// value-escaping follows.
+        /// </remarks>
         public abstract string AsWritten { get; }
     }
 
@@ -76,13 +90,19 @@ internal sealed class ConnectionStringTemplate
     /// </summary>
     public sealed record Port(string? Name) : Segment
     {
-        public override string AsWritten => Name is null ? $"{{{PortKeyword}}}" : $"{{{PortKeyword}:{Name}}}";
+        /// <summary>The token as the template spelled it, casing and all.</summary>
+        public required string Token { get; init; }
+
+        public override string AsWritten => Token;
     }
 
     /// <summary>One key of one Kubernetes secret — <c>{secret:orders-creds:password}</c>.</summary>
     public sealed record Secret(string Name, string Key) : Segment
     {
-        public override string AsWritten => $"{{{SecretKeyword}:{Name}:{Key}}}";
+        /// <summary>The token as the template spelled it, casing and all.</summary>
+        public required string Token { get; init; }
+
+        public override string AsWritten => Token;
     }
 
     /// <summary>
@@ -180,33 +200,35 @@ internal sealed class ConnectionStringTemplate
         var parts = body.Split(':');
         var keyword = parts[0];
 
+        // Equality, not a prefix: `{portal}` and `{secrets:a}` are text, and only a token whose
+        // word before the first colon *is* the keyword is claimed.
         if (!keyword.Equals(PortKeyword, StringComparison.OrdinalIgnoreCase)
             && !keyword.Equals(SecretKeyword, StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
 
+        // Reassembled from the template's own text rather than from the keyword constants, so every
+        // message about this token quotes the spelling the developer wrote — see Segment.AsWritten.
+        var token = unterminated ? $"{{{body}" : $"{{{body}}}";
+
         if (unterminated)
         {
-            throw Malformed(
-                backingServiceName,
-                configKey,
-                $"{{{body}",
-                "it has no closing '}'.");
+            throw Malformed(backingServiceName, configKey, token, "it has no closing '}'.");
         }
 
         if (keyword.Equals(PortKeyword, StringComparison.OrdinalIgnoreCase))
         {
             placeholder = parts.Length switch
             {
-                1 => new Port(Name: null),
-                2 when IsNamed(parts[1]) => new Port(parts[1]),
+                1 => new Port(Name: null) { Token = token },
+                2 when IsNamed(parts[1]) => new Port(parts[1]) { Token = token },
                 2 => throw Malformed(
-                    backingServiceName, configKey, $"{{{body}}}",
+                    backingServiceName, configKey, token,
                     "the port name after 'port:' is empty. Write '{port}' for the only forwarded port, "
                     + "or '{port:<name>}' to name one of several."),
                 _ => throw Malformed(
-                    backingServiceName, configKey, $"{{{body}}}",
+                    backingServiceName, configKey, token,
                     $"a port placeholder takes at most one name, and this has {parts.Length - 1} "
                     + "colon-separated parts after 'port'."),
             };
@@ -216,15 +238,15 @@ internal sealed class ConnectionStringTemplate
 
         placeholder = parts.Length switch
         {
-            3 when IsNamed(parts[1]) && IsNamed(parts[2]) => new Secret(parts[1], parts[2]),
+            3 when IsNamed(parts[1]) && IsNamed(parts[2]) => new Secret(parts[1], parts[2]) { Token = token },
             3 => throw Malformed(
-                backingServiceName, configKey, $"{{{body}}}",
+                backingServiceName, configKey, token,
                 "the secret name and key must both be given: '{secret:<name>:<key>}'."),
             < 3 => throw Malformed(
-                backingServiceName, configKey, $"{{{body}}}",
+                backingServiceName, configKey, token,
                 "a secret placeholder names a secret and a key inside it: '{secret:<name>:<key>}'."),
             _ => throw Malformed(
-                backingServiceName, configKey, $"{{{body}}}",
+                backingServiceName, configKey, token,
                 $"a secret placeholder takes exactly a name and a key, and this has {parts.Length - 1} "
                 + "colon-separated parts after 'secret'."),
         };
@@ -278,9 +300,9 @@ internal sealed class ConnectionStringTemplate
         string backingServiceName, string configKey, string placeholder, string problem) =>
         new($"Backing service '{backingServiceName}': the connection string carries the placeholder "
             + $"'{placeholder}', which cannot be read — {problem} "
-            + $"If '{placeholder}' was meant as text, it cannot be: a '{{…}}' token beginning "
-            + $"'{PortKeyword}' or '{SecretKeyword}' is always read as a placeholder, and there is "
-            + "no escape for it. "
+            + $"If '{placeholder}' was meant as text, it cannot be: a '{{' begins a placeholder "
+            + $"whenever the word after it — up to the first ':' or '}}', or to the end — is exactly "
+            + $"'{PortKeyword}' or '{SecretKeyword}' in any casing, and there is no escape for it. "
             + $"The key is '{configKey}', which any configuration layer can set: "
             + $"{Config.DeveloperConfiguration.FileName}, appsettings, user secrets, the environment "
             + $"variable {configKey.Replace(":", "__", StringComparison.Ordinal)}, or the command line.");

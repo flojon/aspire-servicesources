@@ -227,6 +227,30 @@ public class AddBackingServiceTests
         Assert.Contains("there is no escape", ex.Message);
     }
 
+    /// <summary>
+    /// The rejection quotes the placeholder as the developer spelled it, casing and all.
+    /// </summary>
+    /// <remarks>
+    /// The token used to be rebuilt from the keyword constants, so a message about <c>{PORT}</c>
+    /// quoted <c>'{port}'</c> — a spelling nowhere in their file, while saying nothing about the one
+    /// that is. A reader searching the file for what the message named would find nothing.
+    /// </remarks>
+    [Fact]
+    public void DirectSource_WithUpperCasePortPlaceholder_QuotesItAsWritten()
+    {
+        var builder = CreateBuilder("""
+            { "backingServices": { "orders-db": {
+                "source": "direct",
+                "direct": { "connectionString": "Host=localhost;Port={PORT}" } } } }
+            """);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => builder.AddBackingService("orders-db", LocalFactory(builder)));
+
+        Assert.Contains("'{PORT}'", ex.Message);
+        Assert.DoesNotContain("'{port}'", ex.Message);
+    }
+
     [Fact]
     public void DirectSource_WithSecretPlaceholder_FailsSayingItIsNotSupportedYet()
     {

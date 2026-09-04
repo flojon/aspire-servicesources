@@ -66,8 +66,9 @@ internal sealed class DirectBackingServiceSource : IBackingServiceSource
                         $"Backing service '{name}': the connection string carries '{port.AsWritten}', but source "
                         + "'direct' forwards nothing, so there is no local port to substitute. Write the port the "
                         + $"backing service already listens on. If '{port.AsWritten}' was meant as text, it cannot "
-                        + "be — that spelling is always read as a placeholder and there is no escape for it. The "
-                        + $"key is '{configKey}'.");
+                        + "be: a '{' begins a placeholder whenever the word after it — up to the first ':' or '}', "
+                        + "or to the end — is exactly 'port' or 'secret' in any casing, and there is no escape for "
+                        + $"it. The key is '{configKey}'.");
 
                 case ConnectionStringTemplate.Secret secret:
                     throw new ServiceSourcesConfigurationException(
@@ -75,8 +76,9 @@ internal sealed class DirectBackingServiceSource : IBackingServiceSource
                         + "a value out of a Kubernetes secret is not supported yet. Put the value in the connection "
                         + "string, or set the whole connection string from a configuration layer that already holds "
                         + $"it — user secrets, or {configKey.Replace(":", "__", StringComparison.Ordinal)}. If "
-                        + $"'{secret.AsWritten}' was meant as text, it cannot be — that spelling is always read as a "
-                        + "placeholder and there is no escape for it.");
+                        + $"'{secret.AsWritten}' was meant as text, it cannot be: a '{{' begins a placeholder "
+                        + "whenever the word after it — up to the first ':' or '}', or to the end — is exactly "
+                        + "'port' or 'secret' in any casing, and there is no escape for it.");
 
                 default:
                     throw new InvalidOperationException($"Unhandled template segment '{segment.GetType().Name}'.");
