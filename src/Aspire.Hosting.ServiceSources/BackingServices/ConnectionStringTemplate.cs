@@ -21,12 +21,27 @@ namespace Aspire.Hosting.ServiceSources.BackingServices;
 /// developer plainly meant one.
 /// </para>
 /// <para>
-/// A doubled brace is that brace as text, which is the escape for the one string a connection
-/// string cannot otherwise contain: <c>{{port}}</c> resolves to the literal <c>{port}</c>. It is
-/// worth having even though wanting it is rare, because the alternative is not a limitation a
-/// developer can work around — it is a placeholder error telling them to write a port number, for a
-/// value they never meant as a placeholder. <c>{{</c> is also the spelling anyone reaches for first,
-/// so unhandled it produced that same error rather than the text asked for.
+/// <b>There is no escape, and a doubled brace is not one.</b> The text <c>{port}</c> cannot appear
+/// literally in a template; it is always read as a placeholder. That is a real limitation, and the
+/// errors that hit it say so rather than sending the reader to look for a spelling that does not
+/// exist.
+/// </para>
+/// <para>
+/// The obvious escape — doubling the brace, as every format string does — was tried and withdrawn,
+/// because a connection string already uses braces <i>with its own doubling rule</i> and the two
+/// collide in both directions. ODBC quotes a value in braces and doubles an embedded <c>}</c>, so
+/// <c>PWD={pa}}ss}</c> is the password <c>pa}ss</c>: collapsing that <c>}}</c> yields
+/// <c>PWD={pa}ss}</c>, which the driver reads as ending at the brace, and the app connects with
+/// <c>pa</c> and trailing rubbish. It does not require doubling <c>{</c>, so <c>PWD={{abc}</c> is
+/// the password <c>{abc</c>, and collapsing that <c>{{</c> silently drops a character from it.
+/// Either way a working connection string is rewritten and nothing says so — much worse than
+/// being unable to write a literal <c>{port}</c>, which nothing has yet wanted.
+/// </para>
+/// <para>
+/// Scoping the escape to the parts of the string outside a brace-quoted value would fix it and is
+/// not on offer: it means knowing each backend's grammar, which is the thing the placeholder design
+/// exists to avoid. A syntax braces do not use — a backslash, say — would work, and can be added
+/// the day something needs it.
 /// </para>
 /// </remarks>
 internal sealed class ConnectionStringTemplate
@@ -94,16 +109,9 @@ internal sealed class ConnectionStringTemplate
         {
             var character = template[at];
 
-            // A doubled brace is that brace as text. Checked before anything else, so `{{port}}`
-            // never reaches the placeholder reader and the one string a template could not
-            // otherwise contain becomes writable.
-            if ((character is '{' or '}') && at + 1 < template.Length && template[at + 1] == character)
-            {
-                literal.Append(character);
-                at += 2;
-                continue;
-            }
-
+            // A doubled brace is two braces, not one. Nothing here escapes anything — see the
+            // remarks on the type for why a brace-doubling escape cannot be added to a connection
+            // string.
             if (character is not '{')
             {
                 literal.Append(character);

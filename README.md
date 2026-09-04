@@ -1481,8 +1481,13 @@ for sources that can resolve them, and are rejected under `"direct"` with a mess
 A malformed placeholder — `{secret:orders-creds}`, with no key — fails when the AppHost starts,
 naming the backing service and the configuration key, rather than reaching the app as text.
 
-Doubling the braces passes a placeholder through as text, for the rare connection string that has
-to contain one: `"Note={{port}}"` reaches the app as `Note={port}`.
+**Braces are never rewritten, and there is no escape.** Every brace you write reaches the app as
+you wrote it, doubled ones included — so ODBC values keep their own doubling rule intact
+(`PWD={pa}}ss}` is the password `pa}ss`, and stays that). The cost is that `{port}` and
+`{secret:a:b}` cannot appear as literal text: those two spellings are always read as placeholders.
+Doubling the braces does not escape them. An escape by doubling was tried and withdrawn, because
+that is exactly the syntax ODBC already uses and collapsing it silently corrupted working
+connection strings; a syntax braces do not use can be added if something ever needs one.
 
 ### A typo in the entry key is not reported yet
 

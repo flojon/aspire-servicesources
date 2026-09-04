@@ -163,9 +163,11 @@ nothing will fail to build to warn you.
   strings such as `Driver={PostgreSQL}` pass through untouched. `{port}` and
   `{secret:<name>:<key>}` are recognised, reserved for the sources that can resolve them, and
   rejected under `"direct"` with a message saying why; a malformed one fails at startup naming the
-  backing service and the key, rather than reaching the app as text. Doubling the braces passes a
-  placeholder through as text — `{{port}}` resolves to the literal `{port}` — for the rare
-  connection string that has to contain one.
+  backing service and the key, rather than reaching the app as text. Braces are never rewritten and
+  there is no escape: every brace reaches the app as written, doubled ones included, so ODBC's own
+  doubling rule stays intact — `PWD={pa}}ss}` is the password `pa}ss` and remains it. The cost is
+  that `{port}` and `{secret:a:b}` cannot be written as literal text, which the errors say outright
+  rather than leaving you to hunt for a spelling that does not exist.
 
   A `source` of nothing but whitespace is refused rather than read as the default, the same way a
   whitespace *field* has been refused since `0.4.0` and for the same reason: it is the empty

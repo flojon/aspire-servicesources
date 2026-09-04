@@ -97,47 +97,50 @@ public class ConnectionStringTemplateTests
         Assert.Equal("Server={host", Assert.IsType<ConnectionStringTemplate.Literal>(Parse("Server={host").Segments.Single()).Text);
 
     /// <summary>
-    /// A doubled brace is that brace as text, which is how a connection string carries the one
-    /// string it could not otherwise contain.
+    /// Braces are never rewritten — doubled ones included — because a connection string uses them
+    /// with a doubling rule of its own.
     /// </summary>
     /// <remarks>
-    /// Unhandled, <c>{{port}}</c> parsed the <c>{port}</c> inside it as a placeholder and failed
-    /// with an error about a port that cannot be substituted — for a value never meant as a
-    /// substitution, and with nothing the reader could write instead. Doubling is also the spelling
-    /// anyone reaches for first, having met it in every format string.
+    /// A brace-doubling escape was added here and withdrawn. ODBC quotes a value in braces and
+    /// doubles an embedded <c>}</c>, so <c>PWD={pa}}ss}</c> is the password <c>pa}ss</c>; collapsing
+    /// that <c>}}</c> gave <c>PWD={pa}ss}</c>, which the driver reads as ending at the brace, and
+    /// the app connected with <c>pa</c> and trailing rubbish. It does not require doubling
+    /// <c>{</c>, so <c>PWD={{abc}</c> is the password <c>{abc}</c>'s cousin <c>{abc</c>, and
+    /// collapsing that dropped a character. Both were silent. Being unable to write a literal
+    /// <c>{port}</c> is a limitation; rewriting a working connection string is a bug, so the
+    /// limitation is what ships.
     /// </remarks>
     [Theory]
-    [InlineData("{{port}}", "{port}")]
-    [InlineData("{{secret:a:b}}", "{secret:a:b}")]
-    [InlineData("Port={{port}};Database=orders", "Port={port};Database=orders")]
-    [InlineData("{{}}", "{}")]
-    public void Parse_DoubledBraces_AreOneBraceOfText(string template, string expected) =>
-        Assert.Equal(expected, Assert.IsType<ConnectionStringTemplate.Literal>(Parse(template).Segments.Single()).Text);
+    [InlineData("PWD={pa}}ss}")]
+    [InlineData("PWD={{abc}")]
+    [InlineData("Driver={PostgreSQL};Server={host}\\instance")]
+    [InlineData("PWD={a{{b}}c}")]
+    [InlineData("{{}}")]
+    public void Parse_BracesInAConnectionString_AreNeverRewritten(string template) =>
+        Assert.Equal(
+            template,
+            Assert.IsType<ConnectionStringTemplate.Literal>(Parse(template).Segments.Single()).Text);
 
     /// <summary>
-    /// Escaping one placeholder leaves a real one beside it alone.
+    /// Doubling a placeholder's braces does not escape it — it is still read as a placeholder, with
+    /// the extra braces as text around it.
     /// </summary>
+    /// <remarks>
+    /// Pinned because doubling is what a developer reaches for first, so this is the behaviour they
+    /// meet. It is why the errors for an unresolvable placeholder say there is no escape rather than
+    /// leaving them to infer one.
+    /// </remarks>
     [Fact]
-    public void Parse_EscapedAndRealPlaceholderTogether_KeepsBoth()
+    public void Parse_DoubledBracesAroundAPlaceholder_StillReadThePlaceholder()
     {
-        var segments = Parse("Note={{port}};Port={port}").Segments;
+        var segments = Parse("Port={{port}}").Segments;
 
         Assert.Collection(
             segments,
-            segment => Assert.Equal("Note={port};Port=", Assert.IsType<ConnectionStringTemplate.Literal>(segment).Text),
-            segment => Assert.Null(Assert.IsType<ConnectionStringTemplate.Port>(segment).Name));
+            segment => Assert.Equal("Port={", Assert.IsType<ConnectionStringTemplate.Literal>(segment).Text),
+            segment => Assert.Null(Assert.IsType<ConnectionStringTemplate.Port>(segment).Name),
+            segment => Assert.Equal("}", Assert.IsType<ConnectionStringTemplate.Literal>(segment).Text));
     }
-
-    /// <remarks>
-    /// A single brace is already literal wherever it does not open a placeholder, so an ODBC string
-    /// needs no escaping and gains none: doubling collapses, and everything else is untouched.
-    /// </remarks>
-    [Fact]
-    public void Parse_SingleBracesInAnOdbcString_AreNotAltered() =>
-        Assert.Equal(
-            "Driver={PostgreSQL};Server={host}\\instance",
-            Assert.IsType<ConnectionStringTemplate.Literal>(
-                Parse("Driver={PostgreSQL};Server={host}\\instance").Segments.Single()).Text);
 
     [Fact]
     public void Parse_UnterminatedPlaceholder_IsRejected() =>

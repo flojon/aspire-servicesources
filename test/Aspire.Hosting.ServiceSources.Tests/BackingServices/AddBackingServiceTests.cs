@@ -171,20 +171,21 @@ public class AddBackingServiceTests
     /// while building the reference expression would corrupt them silently — which is the failure
     /// worth a test, since the string only stops working once something tries to connect with it.
     /// </remarks>
-    [Fact]
-    public async Task DirectSource_ConnectionStringWithLiteralBraces_IsUnchanged()
+    [Theory]
+    [InlineData(@"Driver={PostgreSQL};Server={host}\instance")]
+    [InlineData("PWD={pa}}ss}")]
+    [InlineData("PWD={{abc}")]
+    public async Task DirectSource_ConnectionStringWithLiteralBraces_IsUnchanged(string connectionString)
     {
-        var builder = CreateBuilder("""
+        var builder = CreateBuilder($$"""
             { "backingServices": { "orders-db": {
                 "source": "direct",
-                "direct": { "connectionString": "Driver={PostgreSQL};Server={host}\\instance" } } } }
+                "direct": { "connectionString": "{{connectionString.Replace(@"\", @"\\")}}" } } } }
             """);
 
         var db = builder.AddBackingService("orders-db", LocalFactory(builder));
 
-        Assert.Equal(
-            @"Driver={PostgreSQL};Server={host}\instance",
-            await db.Resource.ConnectionStringExpression.GetValueAsync(default));
+        Assert.Equal(connectionString, await db.Resource.ConnectionStringExpression.GetValueAsync(default));
     }
 
     [Fact]
@@ -220,29 +221,10 @@ public class AddBackingServiceTests
         Assert.Contains("'{port}'", ex.Message);
         Assert.Contains("forwards nothing", ex.Message);
 
-        // The escape, for the reader who did not mean a placeholder at all — without it the message
-        // explains a substitution they never asked for and offers them nothing to write.
-        Assert.Contains("'{{port}}'", ex.Message);
-    }
-
-    /// <summary>
-    /// A doubled brace passes the placeholder through as text, so a connection string can carry
-    /// <c>{port}</c> literally.
-    /// </summary>
-    [Fact]
-    public async Task DirectSource_EscapedPlaceholder_ReachesTheAppAsText()
-    {
-        var builder = CreateBuilder("""
-            { "backingServices": { "orders-db": {
-                "source": "direct",
-                "direct": { "connectionString": "Host=localhost;Note={{port}}" } } } }
-            """);
-
-        var db = builder.AddBackingService("orders-db", LocalFactory(builder));
-
-        Assert.Equal(
-            "Host=localhost;Note={port}",
-            await db.Resource.ConnectionStringExpression.GetValueAsync(default));
+        // Said outright, for the reader who did not mean a placeholder at all: without it the
+        // message explains a substitution they never asked for and leaves them hunting for an
+        // escape that does not exist.
+        Assert.Contains("there is no escape", ex.Message);
     }
 
     [Fact]

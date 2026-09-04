@@ -56,25 +56,27 @@ internal sealed class DirectBackingServiceSource : IBackingServiceSource
                     text.Append(literal.Text);
                     break;
 
-                // Both messages end by naming the escape. A placeholder this source cannot resolve
-                // is nearly always one the developer meant as a placeholder — but when it is not,
-                // nothing else in the message helps: it explains at length why a substitution
-                // cannot happen for a value that was never meant to be substituted, and the reader
-                // has no way to say so.
+                // Both messages say outright that the text cannot be kept, rather than only
+                // explaining why the substitution cannot happen. A placeholder this source cannot
+                // resolve is nearly always one the developer meant as a placeholder — but when it
+                // is not, the rest of the message answers a question they did not ask, and the one
+                // thing they need to know is that there is no spelling to reach for.
                 case ConnectionStringTemplate.Port port:
                     throw new ServiceSourcesConfigurationException(
                         $"Backing service '{name}': the connection string carries '{port.AsWritten}', but source "
                         + "'direct' forwards nothing, so there is no local port to substitute. Write the port the "
-                        + $"backing service already listens on, or double the braces — '{{{port.AsWritten}}}' — to "
-                        + $"pass '{port.AsWritten}' through as text. The key is '{configKey}'.");
+                        + $"backing service already listens on. If '{port.AsWritten}' was meant as text, it cannot "
+                        + "be — that spelling is always read as a placeholder and there is no escape for it. The "
+                        + $"key is '{configKey}'.");
 
                 case ConnectionStringTemplate.Secret secret:
                     throw new ServiceSourcesConfigurationException(
                         $"Backing service '{name}': the connection string carries '{secret.AsWritten}', and reading "
                         + "a value out of a Kubernetes secret is not supported yet. Put the value in the connection "
                         + "string, or set the whole connection string from a configuration layer that already holds "
-                        + $"it — user secrets, or {configKey.Replace(":", "__", StringComparison.Ordinal)}. To pass "
-                        + $"'{secret.AsWritten}' through as text, double the braces: '{{{secret.AsWritten}}}'.");
+                        + $"it — user secrets, or {configKey.Replace(":", "__", StringComparison.Ordinal)}. If "
+                        + $"'{secret.AsWritten}' was meant as text, it cannot be — that spelling is always read as a "
+                        + "placeholder and there is no escape for it.");
 
                 default:
                     throw new InvalidOperationException($"Unhandled template segment '{segment.GetType().Name}'.");
