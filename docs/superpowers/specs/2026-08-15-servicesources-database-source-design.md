@@ -19,7 +19,7 @@ per key rather than per object, so with the fields flat, a higher layer setting 
 leaves a lower layer's `connectionString` sitting alongside it, read by nothing and impossible to
 remove. The implemented shape is `{ "source": "direct", "direct": { "connectionString": … } }`, and
 `connectionString` is declared by each source block that takes one rather than once at the entry
-root, because the templates differ per source — the `"kubernetes"` one carries a `{port}` that
+root, because the templates differ per source — the `"kubernetes"` one carries a `${port}` that
 `"direct"` has no way to resolve. That makes it the first field two blocks both declare, which is
 what the tie rule in #182 exists for.
 
@@ -144,7 +144,7 @@ Resolves `name`'s developer config (local.json only — see Config Schema) and d
 
 - **`"local"`** (default when no entry, or `"source": "local"`) — invokes the caller-supplied `local` factory as-is and returns its result. No catalog, no provisioning logic of our own — this is exactly `builder.AddPostgres("orders-pg").AddDatabase("orders")` or similar, written by the AppHost author like any other Aspire resource.
 - **`"direct"`** — builds a `ReferenceExpression` from the config's `connectionString` (after placeholder substitution — see Templating) and calls Aspire's own `ConnectionStringBuilderExtensions.AddConnectionString(builder, name, expression)`, which returns a real `IResourceBuilder<ConnectionStringResource>`. Covers both a manually-run local instance and a cluster database reachable directly through an ingress/gateway — from Aspire's perspective these are identical: "connect to this host:port," no process to manage.
-- **`"kubernetes"`** — same `AddConnectionString(...)` mechanism as `"direct"`, but first allocates a local port (`IPortAllocator`, existing seam) and adds a `kubectl port-forward` `AddExecutable(...)` (same shape as `KubernetesSource`), then substitutes `{port}` in the connection-string template with the allocated port before building the expression. **It must also attach a TCP health check on that local port via `.WithHealthCheck(...)`** — without it a consumer's `.WaitFor(...)` does not actually wait for the tunnel, which was measured, not assumed (see [Resolved by Prototype](#resolved-by-prototype)).
+- **`"kubernetes"`** — same `AddConnectionString(...)` mechanism as `"direct"`, but first allocates a local port (`IPortAllocator`, existing seam) and adds a `kubectl port-forward` `AddExecutable(...)` (same shape as `KubernetesSource`), then substitutes `${port}` in the connection-string template with the allocated port before building the expression. **It must also attach a TCP health check on that local port via `.WithHealthCheck(...)`** — without it a consumer's `.WaitFor(...)` does not actually wait for the tunnel, which was measured, not assumed (see [Resolved by Prototype](#resolved-by-prototype)).
 
 Called once per logical backing service; the returned builder is reused across every consumer, exactly like vanilla Aspire (`var db = builder.AddPostgres(...); a.WithReference(db); b.WithReference(db);`) — no caching/memoization needed on our side.
 
@@ -280,12 +280,12 @@ Func<IResourceBuilder<IResourceWithConnectionString>> rabbit = () => b.AddRabbit
 Func<IResourceBuilder<IResourceWithConnectionString>> redis  = () => b.AddRedis("cache");
 ```
 
-All four compile against Aspire 13.4.2. The `"direct"` and `"kubernetes"` branches are equally indifferent — `amqp://user:pass@localhost:{port}/` and `localhost:{port},password=…` are just connection-string templates like any other.
+All four compile against Aspire 13.4.2. The `"direct"` and `"kubernetes"` branches are equally indifferent — `amqp://user:pass@localhost:${port}/` and `localhost:${port},password=…` are just connection-string templates like any other.
 
 Two caveats, neither structural:
 
 - **Connection-string syntax varies**, so *parsing and rewriting* a whole connection string gets worse the more backends are in scope (ADO.NET `Host=`/`Port=` vs. AMQP/Redis URI authority sections). This argues for the per-field-placeholder approach, and is why the whole-string mode adopted in [Resolved Against a Real Cluster](#whole-string-mode-same-port-forwarding-host-token-rewrite) replaces the host token rather than parsing the string.
-- **Multi-port backends** (RabbitMQ's AMQP 5672 plus management 15672) need one port-forward per port if both are wanted. The current shape allocates one `{port}` per backing service; a second entry is the workaround, or `{port:<name>}` if this turns out to matter.
+- **Multi-port backends** (RabbitMQ's AMQP 5672 plus management 15672) need one port-forward per port if both are wanted. The current shape allocates one `${port}` per backing service; a second entry is the workaround, or `${port:<name>}` if this turns out to matter.
 
 The practical consequence is naming, not architecture: hence `AddBackingService` over `AddDatabase`, and `backingServices:` over `databases:` in config.
 
@@ -304,7 +304,7 @@ The practical consequence is naming, not architecture: hence `AddBackingService`
       "port": 5432,
       "context": "dev-west",
       "namespace": "orders",
-      "connectionString": "Host=localhost;Port={port};Database=orders;Username=dev;Password={secret:orders-creds:password}"
+      "connectionString": "Host=localhost;Port=${port};Database=orders;Username=dev;Password=${secret:orders-creds:password}"
     }
   }
 }
@@ -319,16 +319,23 @@ New config model classes: `BackingServiceDeveloperConfig` (`Source`, `Service`, 
 
 ## Templating
 
+> **Syntax updated 2026-09-04.** This document was written with `{port}` and `{secret:…}`, and the
+> spellings below have been moved to `${port}` and `${secret:…}` to match what shipped. Reserving a
+> shape inside braces made `PWD={secret}` — ODBC, where braces quote a value — impossible to write,
+> and escaping could not fix it, because doubling is the syntax ODBC itself uses. See
+> [#207](https://github.com/flojon/aspire-servicesources/issues/207) and the remarks on
+> `ConnectionStringTemplate`. Nothing else about the templating design changed.
+
 Two placeholder kinds inside `connectionString`:
 
-- **`{port}`** — the locally-allocated port from `IPortAllocator`, substituted as a literal during `AddBackingService()`. Meaningful (and required) only for `"kubernetes"`.
-- **`{secret:<name>:<key>}`** — a Kubernetes secret value, fetched via `kubectl get secret <name> -n <namespace> --context <context> -o jsonpath='{.data.<key>}'` and base64-decoded, through a new `IKubernetesSecretReader` seam (mirrors `IGitClient`/`IPortAllocator` — fake-able in unit tests, no real `kubectl` invocation there). Usable by both `"direct"` and `"kubernetes"`.
+- **`${port}`** — the locally-allocated port from `IPortAllocator`, substituted as a literal during `AddBackingService()`. Meaningful (and required) only for `"kubernetes"`.
+- **`${secret:<name>:<key>}`** — a Kubernetes secret value, fetched via `kubectl get secret <name> -n <namespace> --context <context> -o jsonpath='{.data.<key>}'` and base64-decoded, through a new `IKubernetesSecretReader` seam (mirrors `IGitClient`/`IPortAllocator` — fake-able in unit tests, no real `kubectl` invocation there). Usable by both `"direct"` and `"kubernetes"`.
 
 ### Secret fetches are deferred, not synchronous
 
-The first draft resolved `{secret:...}` synchronously during `AddBackingService()`. That is the wrong default: it runs a `kubectl` process during AppHost construction, on the same code path that `main` deliberately moved *off* of when local project resolution became deferred and parallel. It also fails the whole AppHost at construction time when a developer is merely not logged into the cluster.
+The first draft resolved `${secret:...}` synchronously during `AddBackingService()`. That is the wrong default: it runs a `kubectl` process during AppHost construction, on the same code path that `main` deliberately moved *off* of when local project resolution became deferred and parallel. It also fails the whole AppHost at construction time when a developer is merely not logged into the cluster.
 
-**Aspire supports deferral directly, and it is a better fit.** Each `{secret:...}` placeholder becomes a `ParameterResource` created with the lazy-callback overload, interpolated into the `ReferenceExpression` rather than substituted as text:
+**Aspire supports deferral directly, and it is a better fit.** Each `${secret:...}` placeholder becomes a `ParameterResource` created with the lazy-callback overload, interpolated into the `ReferenceExpression` rather than substituted as text:
 
 ```csharp
 var password = builder.AddParameter($"{name}-{secretName}-{key}",
@@ -347,9 +354,9 @@ Verified behavior against Aspire 13.4.2:
 - Aspire **memoizes** it: resolving the same expression twice invoked the callback exactly once, so N consumers of one backing service produce one `kubectl` call, not N.
 - `secret: true` also gets dashboard masking for free.
 
-Consequences for the rest of the design: the connection string is assembled at `AddBackingService()` time as a `ReferenceExpression` (structure fixed early, values late), `{port}` stays an eager literal substitution (the port is known synchronously), and secret-fetch failures surface at start time as a failed parameter resolution rather than as a constructor throw. The `IKubernetesSecretReader` seam is synchronous (`Func<string>` is the only callback shape `AddParameter` offers), so a fetch blocks one start-time resolution; that is acceptable, but the reader should carry its own timeout rather than inheriting `kubectl`'s default.
+Consequences for the rest of the design: the connection string is assembled at `AddBackingService()` time as a `ReferenceExpression` (structure fixed early, values late), `${port}` stays an eager literal substitution (the port is known synchronously), and secret-fetch failures surface at start time as a failed parameter resolution rather than as a constructor throw. The `IKubernetesSecretReader` seam is synchronous (`Func<string>` is the only callback shape `AddParameter` offers), so a fetch blocks one start-time resolution; that is acceptable, but the reader should carry its own timeout rather than inheriting `kubectl`'s default.
 
-This mechanism reuses one path for both "just the password is secret" (`Password={secret:orders-creds:password}`) and, for `"direct"`, "the whole connection string is one secret value" (`connectionString: "{secret:orders-full-cs:connectionString}"`). The whole-string case needs one extra mechanism to reach `"kubernetes"` — same-port forwarding plus a host-token rewrite — described in [Resolved Against a Real Cluster](#whole-string-mode-same-port-forwarding-host-token-rewrite).
+This mechanism reuses one path for both "just the password is secret" (`Password=${secret:orders-creds:password}`) and, for `"direct"`, "the whole connection string is one secret value" (`connectionString: "${secret:orders-full-cs:connectionString}"`). The whole-string case needs one extra mechanism to reach `"kubernetes"` — same-port forwarding plus a host-token rewrite — described in [Resolved Against a Real Cluster](#whole-string-mode-same-port-forwarding-host-token-rewrite).
 
 ## Error Handling
 
@@ -357,8 +364,8 @@ Fail fast at `AddBackingService()`-call time, naming the backing service and the
 
 - `"kubernetes"` missing `service`, `port`, `context`, or `connectionString`.
 - `"direct"` missing `connectionString`.
-- A `{port}` placeholder present for a source where it isn't resolvable, or a `{secret:...}` placeholder with no `context`/`namespace` to resolve it against.
-- A malformed placeholder (e.g. `{secret:name}` with no key) — caught by parsing at `Add`-time even though the *fetch* is deferred.
+- A `${port}` placeholder present for a source where it isn't resolvable, or a `${secret:...}` placeholder with no `context`/`namespace` to resolve it against.
+- A malformed placeholder (e.g. `${secret:name}` with no key) — caught by parsing at `Add`-time even though the *fetch* is deferred.
 - Whole-string mode selected but the local port matching the configured remote `port` is already in use — named explicitly, since this mode deliberately bypasses `IPortAllocator`.
 
 Runtime errors (`kubectl` not on `PATH`, secret not found, invalid context) surface at app start: for the port-forward, through the `ExecutableResource`'s own state/logs; for a secret fetch, as a failed `ParameterResource` resolution, which Aspire reports against that parameter in the dashboard. The error message should name the backing service, the secret, and the key, since the parameter name alone won't be obvious to the developer.
@@ -366,13 +373,13 @@ Runtime errors (`kubectl` not on `PATH`, secret not found, invalid context) surf
 ## Testing
 
 - Config parsing: new `backingServices:` section, each fail-fast path, leftover-field rejection.
-- Placeholder handling: `{port}` literal substitution and `{secret:name:key}` → `ParameterResource` wiring, including multiple placeholders and mixed use, via fake `IPortAllocator`/`IKubernetesSecretReader` — no real socket or `kubectl` calls.
+- Placeholder handling: `${port}` literal substitution and `${secret:name:key}` → `ParameterResource` wiring, including multiple placeholders and mixed use, via fake `IPortAllocator`/`IKubernetesSecretReader` — no real socket or `kubectl` calls.
 - **Deferral:** assert the fake secret reader is *not* called during `AddBackingService()`, is called on first expression resolution, and is called exactly once across repeated resolutions.
 - Source dispatch: `"local"` invokes the given factory and nothing else; `"direct"`/`"kubernetes"` build the expected `ConnectionStringResource`; `"kubernetes"` additionally builds the expected port-forward `AddExecutable` args (reusing `KubernetesSource.BuildPortForwardArgs`-style coverage).
 - Consumption through the shipped `Configure<T>`: `Configure<IResourceWithEnvironment>(r => r.WithReference(db))` reaches a `"local"`- and a `"container"`-sourced service, and is skipped-and-warned for `"kubernetes"`/`"url"`; `Configure<IResourceWithWaitSupport>(r => r.WaitFor(db))` is additionally honoured for `"kubernetes"`. These assert existing behaviour against a backing-service argument rather than testing new code, and exist to catch a regression in the interaction.
 - The `WaitFor` shim: exercised through both a project-sourced and a container-sourced service, asserting the cast never throws.
 - `"kubernetes"` attaches a health check annotation to the returned resource (regression guard for the `WaitFor` gap found by prototype).
-- Whole-string mode: a template that is exactly one `{secret:...}` placeholder selects same-port forwarding; the resolved value has every in-cluster host form (`<service>`, `.<namespace>`, `.svc`, `.svc.cluster.local`) replaced and the port left untouched; a mixed template does not select the mode; an occupied local port fails fast with the backing service and port named.
+- Whole-string mode: a template that is exactly one `${secret:...}` placeholder selects same-port forwarding; the resolved value has every in-cluster host form (`<service>`, `.<namespace>`, `.svc`, `.svc.cluster.local`) replaced and the port left untouched; a mixed template does not select the mode; an occupied local port fails fast with the backing service and port named.
 - End-to-end, in the style of `AddServiceIntegrationTests`: a `"local"`-sourced service configured with `.Configure<IResourceWithEnvironment>(r => r.WithReference(db))` has `ConnectionStrings__<name>` in its materialised environment.
 - The ATS export shape: a build-time assertion that `AddBackingService` raises no `ASPIREEXPORT010`, since dropping `RunSyncOnBackgroundThread` deadlocks guest-language AppHosts at run time rather than failing anything C# — the same class of silent gap #88 exists to close for the rest of the export surface. Whether this belongs in CI alongside #88 or as a warnings-as-errors setting is an implementation call.
 
@@ -428,7 +435,7 @@ The fix avoids connection-string parsing entirely. If the local port equals the 
 
 Verified end-to-end: the sealed `postgresql://orders_app:…@orders-pg-rw.default:5432/orders`, forwarded with `kubectl port-forward service/orders-pg-rw 5432:5432`, with `orders-pg-rw.default` replaced by the local host and nothing else touched, authenticated against the real database and returned `db=orders, usr=orders_app`.
 
-Selection happens at `Add`-time from the *template shape*, which is local config and therefore known early even though the secret value is not: **if the whole `connectionString` template is exactly one `{secret:...}` placeholder, use whole-string mode.** Then:
+Selection happens at `Add`-time from the *template shape*, which is local config and therefore known early even though the secret value is not: **if the whole `connectionString` template is exactly one `${secret:...}` placeholder, use whole-string mode.** Then:
 
 - Allocate the local port as the *same number* as the configured remote `port`, bypassing `IPortAllocator`.
 - Fail fast, naming the backing service and port, if that local port is already in use. This is the real cost of the mode — it gives up the collision avoidance `IPortAllocator` exists to provide — and a clear error is what makes it tolerable.
@@ -450,18 +457,18 @@ kubectl port-forward service/broker 25672:5672 35672:15672
 
 Both forwarded ports carried real traffic to their respective listeners. So the earlier suggestion — "a second backing-service entry is the workaround" — is unnecessary and would be actively worse, since two entries means two `kubectl` processes and two tunnels to the same Service.
 
-**Decision: `port` accepts either a single port or a named map, and `{port:<name>}` resolves against it.** One `AddExecutable`, one process, one health check per forwarded port.
+**Decision: `port` accepts either a single port or a named map, and `${port:<name>}` resolves against it.** One `AddExecutable`, one process, one health check per forwarded port.
 
 ```json
 "orders-events": {
   "source": "kubernetes",
   "service": "rabbitmq",
   "port": { "amqp": 5672, "management": 15672 },
-  "connectionString": "amqp://dev:{secret:rabbit-creds:password}@localhost:{port:amqp}/"
+  "connectionString": "amqp://dev:${secret:rabbit-creds:password}@localhost:${port:amqp}/"
 }
 ```
 
-The single-port form stays the common case and keeps `{port}` as a shorthand for it.
+The single-port form stays the common case and keeps `${port}` as a shorthand for it.
 
 ### End-to-end tunnel check
 
@@ -471,7 +478,7 @@ Port-forwarding the operator-created `orders-pg-rw` Service to a local port and 
 
 The three questions this design left open were settled on 2026-08-30. None was an unknown — each was a call about config ergonomics or scope.
 
-**The catalog carries no backing-service config: `servicesources.local.json` only.** The alternative was to put the `connectionString` template — which may hold no literal secret material, since credentials can come from `{secret:name:key}` placeholders — along with `service`/`port` into `servicesources.yaml` as shared, committed, team-wide data, mirroring the services split of *catalog = shared identity, local.json = per-developer environment choice*.
+**The catalog carries no backing-service config: `servicesources.local.json` only.** The alternative was to put the `connectionString` template — which may hold no literal secret material, since credentials can come from `${secret:name:key}` placeholders — along with `service`/`port` into `servicesources.yaml` as shared, committed, team-wide data, mirroring the services split of *catalog = shared identity, local.json = per-developer environment choice*.
 
 Rejected because #134 is moving the catalog **out** of yaml and into the AppHost's own language, on the grounds that removing yaml is a goal of Aspire itself. Adding a new yaml section here would work against that direction and then have to be migrated back out. If a shared connection-string template proves worth having, it belongs in the code catalog #134 builds, not in yaml.
 

@@ -105,7 +105,10 @@ Reentrancy works. The dashboard came up and the app ran.
 
 - The "Guest-language exports" section's conclusion — that the `"local"` branch has no
   guest-language equivalent — does not hold. A TypeScript AppHost can write
-  `await builder.addBackingService('orders-db', async () => builder.addPostgres('pg').addDatabase('orders'))`.
+  `await builder.addBackingService('orders-db', async () => builder.addPostgres('pg').addDatabase('orders-db', 'orders'))`.
+  (The resource is named after the backing service because #200 made that a rule; the spike itself
+  predates it and used `addDatabase('orders')`, which the callback mechanism this finding is about
+  is indifferent to.)
 - Two of the doc's open questions shrink or disappear. The largest one (how guest languages declare
   a `"local"` backing service) is answered by the callback itself. The catalog-vs-local.json
   question no longer has "a declarative local spec has to live somewhere" pushing on it, so it can

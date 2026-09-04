@@ -222,9 +222,10 @@ Every part is covered by unit tests in the existing suites, following the arrang
   literals rather than cases that survive a rule.
 - **#200.** `BackingServiceConsumerTests.LocalFactoryNamingItsResourceDifferently_MovesTheVariable`
   pins the behaviour being removed and is replaced by a test that the call throws, naming both
-  names. Two more: a factory whose resource differs only by case is accepted, and a matched pair
-  produces `ConnectionStrings__orders-db` under both `"local"` and `"direct"` — the acceptance
-  criterion #144 claimed and #200 found untrue.
+  names, plus one that a factory whose resource differs only by case is accepted. The acceptance
+  criterion itself — the same key under `"local"` and `"direct"` — is already pinned by
+  `SwitchingTheBackingServiceToDirect_ChangesOnlyTheValue` and its sibling, so it needs no new test;
+  what it lacked was the rule that keeps it true.
 - **#206.** An orphaned entry warns and suggests the declared name it resembles; an entry matching a
   declared name in any casing does not; a misspelled root key warns when the section bound empty and
   a call was made; the same file warns nothing when no `AddBackingService()` call exists; and a
@@ -236,6 +237,13 @@ Every part is covered by unit tests in the existing suites, following the arrang
 One PR closing all three, on `worktree-backing-service-diagnostics-200-206-207`. They touch the same
 README and changelog region, and separating them would mean resolving that three times for no
 reviewer benefit.
+
+Two docs beyond the README and changelog carry the old placeholder spelling and are updated with it:
+`2026-08-15-servicesources-database-source-design.md`, which is forward-looking rather than
+historical — it specifies the `"kubernetes"` stage, so leaving `{port}` there would misdirect
+whoever implements it — and `2026-08-30-ats-callback-spike-findings.md`, whose TypeScript example
+names a resource the new rule refuses. Both carry a note saying what changed rather than being
+silently rewritten.
 
 The changelog entries for `AddBackingService` and the placeholder syntax are **edited in place**
 under `## [Unreleased]`. Neither gets a **Breaking** entry: nothing has been released that could

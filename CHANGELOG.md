@@ -142,16 +142,20 @@ nothing will fail to build to warn you.
   it works unchanged for anything carrying a connection string, `AddRabbitMQ` and `AddRedis`
   included.
 
-  **Name the resource your local factory returns after the backing service.** Aspire's
-  `WithReference(...)` keys the connection string on the referenced resource's own name, which under
-  `"local"` is whatever the factory built — so `() => builder.AddPostgres("pg").AddDatabase("orders")`
-  behind a backing service called `orders-db` gives a consumer `ConnectionStrings__orders` locally
-  and `ConnectionStrings__orders-db` under `"direct"`, moving the key the app reads when the
-  developer switches. `AddDatabase("orders-db", "orders")` names the resource and the database
-  separately. Nothing enforces this yet. A consumer that needs a particular key can also pin it from
-  its own side — `WithReference(ordersDb, "OrdersDb")` gives `ConnectionStrings__OrdersDb` under
-  every source, whatever the factory named its resource — which is the answer when the app already
-  reads a given name, or when the factory is not yours to rename.
+  **The resource your local factory returns must be named after the backing service**, and
+  `AddBackingService` refuses it otherwise ([#200]). Aspire's `WithReference(...)` keys the
+  connection string on the referenced resource's own name, which under `"local"` is whatever the
+  factory built — so `() => builder.AddPostgres("pg").AddDatabase("orders")` behind a backing
+  service called `orders-db` would give a consumer `ConnectionStrings__orders` locally and
+  `ConnectionStrings__orders-db` under `"direct"`, moving the key the app reads when the developer
+  switches, with only the app to report it. `AddDatabase("orders-db", "orders")` names the resource
+  and the database separately; casing is not a difference, since a configuration key folds case.
+
+  A consumer that needs a particular key can still pin it from its own side —
+  `WithReference(ordersDb, "OrdersDb")` gives `ConnectionStrings__OrdersDb` under every source. That
+  is not a way around the rule: Aspire's Type System drops overloads, so the exported shim takes the
+  source alone and a guest-language AppHost has no such argument ([#209]). Renaming the factory's
+  resource is the one remedy every AppHost has, which is why it is the one enforced.
 
   **Write `direct.connectionString` as an address reached from outside Aspire.** It is handed on as
   written; nothing about it is rewritten. The case that catches people out is pointing `"direct"` at
@@ -159,21 +163,20 @@ nothing will fail to build to warn you.
   for a container endpoint belong to Aspire's endpoint proxy, which lives only as long as that
   AppHost and is reassigned on the next start — not to the container's own published port.
 
-  `direct.connectionString` is normally a literal, and a brace in it stays a brace, so ODBC-style
-  strings such as `Driver={PostgreSQL}` pass through untouched. `{port}` and
-  `{secret:<name>:<key>}` are recognised, reserved for the sources that can resolve them, and
+  `direct.connectionString` is normally a literal, and **braces reserve nothing** — `Driver={PostgreSQL}`,
+  `Server={host}\instance` and `PWD={secret}` all reach the app exactly as written, doubled braces
+  included, so ODBC's own doubling rule stays intact: `PWD={pa}}ss}` is the password `pa}ss` and
+  remains it. Placeholders open on `${`, which no connection-string dialect uses. `${port}` and
+  `${secret:<name>:<key>}` are recognised, reserved for the sources that can resolve them, and
   rejected under `"direct"` with a message saying why; a malformed one fails at startup naming the
-  backing service and the key, rather than reaching the app as text. Braces are never rewritten and
-  there is no escape: every brace reaches the app as written, doubled ones included, so ODBC's own
-  doubling rule stays intact — `PWD={pa}}ss}` is the password `pa}ss` and remains it. The cost is
-  one reserved shape: a `{` begins a placeholder whenever the word after it — up to the first `:` or
-  `}`, or to the end — is *exactly* `port` or `secret`, in any casing, so `{PORT}`, `{port:amqp}`,
-  `{secret}` and
-  `{secret:a}` are unavailable as literal text alongside the two well-formed spellings — which is
-  what catches `PWD={secret}`, an ODBC-quoted password that happens to be the word. Equality rather
-  than a prefix, so `{portal}`, `{secretariat}` and `{secrets:a}` are text like every other brace.
-  The errors say the text cannot be kept, quoting the spelling you wrote, rather than leaving you to
-  hunt for one that does not exist.
+  backing service and the key, quoting the spelling you wrote, rather than reaching the app as text.
+  A `${` begins a placeholder only when the word after it — up to the first `:` or `}`, or to the
+  end — is *exactly* `port` or `secret`, in any casing. Equality rather than a prefix, so
+  `${portal}`, `${secretariat}`, `${secrets:a}` and `${DB_PASS}` are text, which keeps a connection
+  string working when something else in your toolchain expands `${…}`. What stays reserved is
+  `${port}` and `${secret:…}` themselves, which cannot be written as literal text and have no
+  escape; `$` is not otherwise special, so `$${port}` is available as one if anything ever needs it
+  ([#207]).
 
   A `source` of nothing but whitespace is refused rather than read as the default, the same way a
   whitespace *field* has been refused since `0.4.0` and for the same reason: it is the empty
@@ -181,12 +184,15 @@ nothing will fail to build to warn you.
   which previously reported having no source configured without mentioning the spaces that caused
   it.
 
-  **One gap worth knowing about.** An entry whose key matches no `AddBackingService()` call is not
-  reported, because a backing service with no entry legitimately runs locally — so a typo in the
-  *key* (`orders_db` against `orders-db`) silently reverts that backing service to the `"local"`
-  source, starting the container the developer was trying to avoid. Tracked as
-  [#206](https://github.com/flojon/aspire-servicesources/issues/206) along with the misspelled
-  `backingServices` root key, which fails the same way for the same reason.
+  **Configuration that nothing reads is reported** ([#206]). A backing service with no entry
+  legitimately runs locally, so an entry whose key matches no `AddBackingService()` call cannot be
+  told apart at read time from one that was never written — a typo in the *key* (`orders_db` against
+  `orders-db`) would silently revert that backing service to `"local"`, starting the container the
+  developer was trying to avoid. Once the AppHost is composed the declared names are known, so this
+  is warned about at startup, naming the entry and the declared name it resembles. A misspelled
+  `backingServices` root key, which does the same to every backing service at once, is warned about
+  the same way. Warnings rather than errors, because a shared file may legitimately carry entries
+  for backing services only some configurations add; there is no opt-out.
 
 - **A service whose resource never runs is reported in the AppHost's own console** ([#150]). A
   `"local"` checkout that fails to compile used to produce nothing there at all: Aspire's build of
@@ -908,6 +914,10 @@ Targets `net10.0`.
 [#180]: https://github.com/flojon/aspire-servicesources/pull/180
 [#182]: https://github.com/flojon/aspire-servicesources/issues/182
 [#187]: https://github.com/flojon/aspire-servicesources/issues/187
+[#200]: https://github.com/flojon/aspire-servicesources/issues/200
+[#206]: https://github.com/flojon/aspire-servicesources/issues/206
+[#207]: https://github.com/flojon/aspire-servicesources/issues/207
+[#209]: https://github.com/flojon/aspire-servicesources/issues/209
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
