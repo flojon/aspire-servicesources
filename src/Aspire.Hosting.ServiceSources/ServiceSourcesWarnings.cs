@@ -52,11 +52,10 @@ internal sealed class ServiceSourcesWarnings
         /// exactly-once.
         /// </summary>
         /// <remarks>
-        /// A flag per entry rather than a count of how far <see cref="Flush"/> has got. The count
-        /// was equivalent while flushing meant "everything outstanding", and stopped being so once
-        /// <see cref="ReportNow"/> existed: reporting one entry out of order has to leave the
-        /// entries around it outstanding, and an index cannot express that. See that method for why
-        /// it is needed.
+        /// A flag per entry rather than a count of how far <see cref="Flush"/> has got. A count is
+        /// enough only while every report takes everything outstanding; <see cref="ReportNow"/>
+        /// reports one caller's entries and leaves the ones around them pending, which an index into
+        /// the list cannot express. See that method for why it reports that way.
         /// </remarks>
         public bool Reported { get; set; }
     }

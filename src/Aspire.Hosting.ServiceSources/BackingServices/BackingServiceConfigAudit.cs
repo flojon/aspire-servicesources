@@ -118,13 +118,13 @@ internal static class BackingServiceConfigAudit
     /// The warnings this AppHost's backing-service configuration has earned, if any.
     /// </summary>
     /// <remarks>
-    /// The two checks are independent, and were briefly written as if they excluded each other —
-    /// the root-key check gated on the bound section being empty. That section is the <em>merged</em>
-    /// view across every configuration layer, so a single environment variable setting one entry
-    /// suppressed the report that the developer's whole file was going unread. Whether the file's
-    /// root key is a typo is a property of the file alone, and no other layer has a root key to
-    /// answer it with, so it is asked unconditionally — the lookup returns nothing when the file has
-    /// the key, has nothing resembling it, or is not there.
+    /// The two checks are independent, and the root-key one is asked unconditionally rather than
+    /// gated on the bound section being empty. That section is the <em>merged</em> view across every
+    /// configuration layer, so gating on it lets a single environment variable setting one entry
+    /// suppress the report that the developer's whole file is going unread. Whether the file's root
+    /// key is a typo is a property of the file alone, and no other layer has a root key to answer it
+    /// with. The lookup returns nothing when the file has the key, has nothing resembling it, or is
+    /// not there, so asking always costs nothing.
     /// <para>
     /// Both are reached only with at least one <c>AddBackingService</c> call behind them, since
     /// nothing else subscribes this handler. An AppHost that adds no backing services never hears

@@ -25,10 +25,10 @@ namespace Aspire.Hosting.ServiceSources.BackingServices;
 /// keeps working for an AppHost whose own tooling expands <c>${…}</c>.
 /// </para>
 /// <para>
-/// <b>The syntax was <c>{port}</c>, and was changed before it shipped</b> (#207). Braces are one of
-/// the few things a connection string carries for real, so reserving a shape inside them left
-/// <c>PWD={secret}</c> unwritable with no escape to reach for. Escaping was tried first and does not
-/// work here: ODBC has a doubling rule of its own, so <c>PWD={pa}}ss}</c> is the password
+/// <b>Braces cannot carry this syntax, which is why <c>${</c> does</b> (#207). They are one of the
+/// few things a connection string uses for real, so reserving a shape inside them leaves
+/// <c>PWD={secret}</c> unwritable with no escape to reach for. Escaping does not rescue it: ODBC has
+/// a doubling rule of its own, so <c>PWD={pa}}ss}</c> is the password
 /// <c>pa}ss</c>, and collapsing that <c>}}</c> yields a string the driver reads as ending at the
 /// brace — the app connects with <c>pa</c> and trailing rubbish. It does not require doubling
 /// <c>{</c>, so <c>PWD={{abc}</c> is the password <c>{abc</c>, and collapsing that drops a
@@ -37,9 +37,8 @@ namespace Aspire.Hosting.ServiceSources.BackingServices;
 /// <para>
 /// Scoping the collapse to tokens that would otherwise be placeholders repairs those two and still
 /// gets <c>PWD={{port}}}</c> — ODBC for the password <c>{port}</c> — wrong, turning a loud failure
-/// into a quiet rewrite. Moving off braces removes the collision instead of papering over it, and
-/// that is only cheap while the syntax is unreleased, which is why it was done now rather than the
-/// day something needed it.
+/// into a quiet rewrite. Opening on <c>${</c> removes the collision instead of papering over it,
+/// which is the whole reason the syntax is not brace-based.
 /// </para>
 /// <para>
 /// What stays reserved is <c>${port}</c> and <c>${secret:…}</c> themselves, in any casing: the

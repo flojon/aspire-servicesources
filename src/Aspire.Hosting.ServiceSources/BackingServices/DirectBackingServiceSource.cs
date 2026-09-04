@@ -23,13 +23,13 @@ namespace Aspire.Hosting.ServiceSources.BackingServices;
 /// diagnosis (#220).
 /// </para>
 /// <para>
-/// Two details of that are easy to get wrong in opposite directions, so both are measured. The type
-/// carries <c>IResourceWithConnectionString</c> and <c>IResourceWithWaitSupport</c> and <i>no</i>
-/// <c>IResourceWithoutLifetime</c>, read off the loaded assembly on Aspire 13.5.2 — so unlike
-/// <see cref="Sources.ServiceUrlResource"/>, which declares that marker deliberately (#170), the
-/// wait here is honoured rather than dropped, and <c>BackingServiceWaitTests</c> pins that. But
-/// honoured is not never-resolving: against a live host the consumer leaves <c>Waiting</c> in about
-/// a second. Reasoning from the marker alone says "hang", and that is wrong.
+/// Both halves of that are measured rather than inferred, because the type's interfaces imply
+/// neither. It carries <c>IResourceWithConnectionString</c> and <c>IResourceWithWaitSupport</c> and
+/// <i>no</i> <c>IResourceWithoutLifetime</c>, read off the loaded assembly on Aspire 13.5.2 — so
+/// unlike <see cref="Sources.ServiceUrlResource"/>, which declares that marker deliberately (#170),
+/// the wait here is honoured rather than dropped, and <c>BackingServiceWaitTests</c> pins that.
+/// Honoured says nothing about how long it then takes: on a live host the consumer leaves
+/// <c>Waiting</c> in about a second, because the value references nothing that has to start first.
 /// </para>
 /// </remarks>
 internal sealed class DirectBackingServiceSource : IBackingServiceSource

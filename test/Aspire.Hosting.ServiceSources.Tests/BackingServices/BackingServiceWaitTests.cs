@@ -13,19 +13,17 @@ namespace Aspire.Hosting.ServiceSources.Tests.BackingServices;
 /// its wait is honoured — unlike <see cref="Sources.ServiceUrlResource"/>, which declares the marker
 /// deliberately (#170) and is the contrast that gives these their meaning.
 /// <para>
-/// <b>Honoured is not the same as never-resolving, and the difference cost a wrong claim.</b> These
-/// run against a provider built from the builder's services, with no orchestrator publishing states
-/// for anything, so an honoured wait blocks here whatever its target is — an ordinary executable
-/// included. That was briefly read as "a direct backing service hangs". Measured against a live host
-/// it does not: the orchestrator publishes <c>Running</c> for the connection-string resource
-/// immediately and the consumer leaves <c>Waiting</c> in about a second. So the wait is honoured and
-/// then satisfied at once, which makes it a no-op rather than a hang — see
-/// <c>DirectBackingServiceSource</c>'s remarks for what that costs.
+/// <b>These assert the marker and never a timing.</b> They run against a provider built from the
+/// builder's services, with no orchestrator publishing states for anything, so an honoured wait
+/// blocks here whatever its target is — an ordinary executable included. Blocking in this harness
+/// therefore means the wait was not dropped, and nothing more; it is not evidence that anything
+/// hangs.
 /// </para>
 /// <para>
-/// Which is why these assert the marker rather than timing anything. The marker is what this
-/// package controls and what the wait behaviour follows from; how long a honoured wait then takes is
-/// the orchestrator's business and needs the orchestrator to answer.
+/// What an honoured wait then waits for is the orchestrator's business and needs a live host to
+/// answer. Measured there (#220): a <c>"direct"</c> backing service is satisfied at once, because
+/// its connection string references nothing, while a wrapper forwarding another resource waits for
+/// that resource to be running. Neither follows from the interfaces asserted below.
 /// </para>
 /// </remarks>
 public class BackingServiceWaitTests
@@ -66,13 +64,13 @@ public class BackingServiceWaitTests
     /// caller's to rename, so it is the same shape as the one above.
     /// </summary>
     /// <remarks>
-    /// The marker is all this pins, and the wrapper is where that limit bit twice. It says the wait
-    /// is honoured rather than dropped; it says nothing about what the wait then waits <i>for</i>.
-    /// <c>ConnectionStringResource</c> also implements <see cref="IValueWithReferences"/>, and
-    /// measured on a live host Aspire does follow that reference: the wrapper stays in
-    /// <c>Waiting</c> until the resource it forwards is running, so the consumer does hold back for
-    /// the database. What it loses is the database's health check, since the wrapper is satisfied by
-    /// running rather than healthy. Neither half is derivable from the interfaces below.
+    /// The marker is all this pins: the wait is honoured rather than dropped, and nothing about what
+    /// it then waits <i>for</i>. <c>ConnectionStringResource</c> also implements
+    /// <see cref="IValueWithReferences"/>, and measured on a live host Aspire follows that reference
+    /// — the wrapper stays in <c>Waiting</c> until the resource it forwards is running, so a
+    /// consumer does hold back for the database. What it loses is the database's health check, since
+    /// the wrapper is satisfied by running rather than healthy. Neither half is derivable from the
+    /// interfaces below, which is why they are measured rather than reasoned about.
     /// </remarks>
     [Fact]
     public void ForwardingWrapper_CarriesNoLifetimeMarker()

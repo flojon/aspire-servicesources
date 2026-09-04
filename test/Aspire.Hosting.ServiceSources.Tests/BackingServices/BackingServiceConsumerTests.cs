@@ -239,14 +239,14 @@ public class BackingServiceConsumerTests
 
         Assert.Equal("Host=localhost;Database=orders", environment["ConnectionStrings__orders-db"]);
 
-        // The cost the README and the error message both warn about, pinned so the warning stays
-        // true: what a consumer ends up holding is the forwarding resource, not the resource the
-        // factory built, so a WaitFor on it is a wait on the forwarder.
+        // The substitution the README and the error message both warn about: what a consumer ends
+        // up holding is the forwarding resource, not the resource the factory built, so a WaitFor
+        // on it is a wait on the forwarder.
         //
-        // Asserted as identity against the inner resource. A previous version tested
-        // `ReferenceEquals(r, db.Resource) && r.Name == "some-helpers-own-name"`, which no resource
-        // can satisfy — the wrapper is the only reference match and it is named 'orders-db' — so it
-        // passed whatever AddBackingService returned and pinned nothing.
+        // Asserted as identity against the inner resource, which is the only form that can fail. A
+        // predicate combining reference equality with the inner resource's name cannot be satisfied
+        // by anything — the wrapper is the sole reference match and carries the outer name — so it
+        // would pass whatever this returned.
         var inner = Assert.Single(builder.Resources, resource => resource.Name == "some-helpers-own-name");
 
         Assert.NotSame(inner, db.Resource);

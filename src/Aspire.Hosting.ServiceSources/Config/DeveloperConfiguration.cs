@@ -76,15 +76,15 @@ internal sealed class DeveloperConfiguration
             Services = services,
             FilePath = path,
             FileFound = File.Exists(path),
-            // Asked unconditionally. It was gated on nothing being configured, which reads as the
-            // state that needs it and is not: `services` here is the merged view across every
-            // configuration layer, so a single environment variable pinning one service hid the fact
-            // that a misspelled root key was costing the developer their whole file. What they got
-            // instead was the per-service error below, telling them to add an entry to a file
+            // Asked unconditionally, and not gated on nothing being configured — which reads as the
+            // state that needs it and is not. `services` here is the merged view across every
+            // configuration layer, so such a gate lets one environment variable pinning one service
+            // hide a misspelled root key that is costing the developer their whole file: what they
+            // get instead is the per-service error below, telling them to add an entry to a file
             // nothing reads.
             //
-            // The gate also used to pay for itself, since the lookup re-read the file. It no longer
-            // does: the root keys are captured while the file is parsed for its values.
+            // Costs nothing to ask, since the root keys are captured while the file is parsed for
+            // its values rather than by re-reading it.
             NearMissRootKey = DeveloperConfigFileSource.NearMissForServicesKey(builder),
         };
     }
