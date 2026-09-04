@@ -1486,7 +1486,8 @@ you wrote it, doubled ones included — so ODBC values keep their own doubling r
 (`PWD={pa}}ss}` is the password `pa}ss`, and stays that).
 
 The cost is one reserved shape. **A `{` begins a placeholder whenever the word after it — up to the
-first `:` or `}` — is *exactly* `port` or `secret`, in any casing** — so `{port}`, `{PORT}`, `{port:amqp}`,
+first `:` or `}`, or to the end — is *exactly* `port` or `secret`, in any casing** — so `{port}`,
+`{PORT}`, `{port:amqp}`,
 `{secret}`, `{secret:a}` and `{secret:a:b:c}` are all unavailable as literal text, not just the two
 well-formed spellings. A token of that shape which is *not* a placeholder this package can read
 fails at startup rather than passing through, which is what catches `PWD={secret}` — an ODBC-quoted

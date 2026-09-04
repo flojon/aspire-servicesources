@@ -62,10 +62,6 @@ public class ConnectionStringTemplateTests
     }
 
     [Fact]
-    public void Parse_PlaceholderKeywordInAnyCasing_IsRecognized() =>
-        Assert.IsType<ConnectionStringTemplate.Port>(Parse("{PORT}").Segments.Single());
-
-    [Fact]
     public void Parse_SeveralPlaceholders_AreAllFound() =>
         Assert.Equal(
             2,

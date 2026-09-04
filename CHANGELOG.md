@@ -167,7 +167,8 @@ nothing will fail to build to warn you.
   there is no escape: every brace reaches the app as written, doubled ones included, so ODBC's own
   doubling rule stays intact — `PWD={pa}}ss}` is the password `pa}ss` and remains it. The cost is
   one reserved shape: a `{` begins a placeholder whenever the word after it — up to the first `:` or
-  `}` — is *exactly* `port` or `secret`, in any casing, so `{PORT}`, `{port:amqp}`, `{secret}` and
+  `}`, or to the end — is *exactly* `port` or `secret`, in any casing, so `{PORT}`, `{port:amqp}`,
+  `{secret}` and
   `{secret:a}` are unavailable as literal text alongside the two well-formed spellings — which is
   what catches `PWD={secret}`, an ODBC-quoted password that happens to be the word. Equality rather
   than a prefix, so `{portal}`, `{secretariat}` and `{secrets:a}` are text like every other brace.
