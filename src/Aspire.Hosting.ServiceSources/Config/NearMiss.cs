@@ -41,9 +41,17 @@ internal static class NearMiss
     /// <remarks>
     /// A list rather than the single best answer, because near misses can tie where exact matches
     /// cannot: a typo can sit one edit from two different names. Every candidate at the smallest
-    /// qualifying distance is returned, in the order <paramref name="spelling"/> puts them, so a
-    /// caller that wants one answer takes the first and gets the same one on every run — and a
-    /// caller that would rather name them all can.
+    /// qualifying distance is returned, so a caller can name them all — and a caller that wants one
+    /// answer takes the first.
+    /// <para>
+    /// The order is <paramref name="spelling"/>'s, which is a total order only while the spellings
+    /// differ. Two candidates that <em>share</em> a spelling — the same field name declared by two
+    /// different blocks — are left in the order they were supplied, since nothing here can tell
+    /// them apart. A caller taking the first of those has to order by whatever separates them
+    /// first, or it is relying on its own enumeration order; see
+    /// <see cref="ServiceDeveloperConfigShape.NearMissFieldOf"/>, which orders by block as well for
+    /// exactly that reason.
+    /// </para>
     /// <para>
     /// Folded to lower case before measuring, because configuration keys are case-insensitive: a
     /// key written <c>Path</c> is not a misspelling of <c>path</c>, it is <c>path</c>, and would

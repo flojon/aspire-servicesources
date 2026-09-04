@@ -66,10 +66,17 @@ internal static class ServiceDeveloperConfigShape
     /// which cannot contain the word the developer was reaching for — the field is a level down. So
     /// the reader got five words, none of them the answer, and no hint the key existed at all.
     /// <para>
-    /// One answer rather than every tie, because no two blocks declare a field by the same name:
-    /// ties are possible in principle — a typo can sit one edit from fields in two blocks — and
-    /// <see cref="NearMiss.Nearest"/> resolves them the way <c>servicesources.local.json</c>'s root
-    /// key does, closest then ordinal, so the same one is named on every run.
+    /// One answer rather than every tie, because no two blocks declare a field by the same name
+    /// today. Ties are possible even so — a typo can sit one edit from fields in two blocks — so
+    /// the closest candidates are ordered here by field <em>and</em> block before one is taken.
+    /// <see cref="NearMiss.Nearest"/> orders by the spelling it was given, which separates two
+    /// differently-named fields but not one field name declared by two blocks; for that pair it
+    /// leaves the order it received, and what it received is
+    /// <see cref="System.Type.GetProperties()"/>'s, which the CLR does not promise to keep stable.
+    /// Ordering by the block as well makes the answer total, so the same one is named on every run
+    /// whichever kind of tie it is — and a section that does declare a field in two blocks, which
+    /// is the ordinary case for a backing service's <c>connectionString</c>, cannot reintroduce the
+    /// question.
     /// </para>
     /// </remarks>
     public static (string Field, string Block)? NearMissFieldOf(string writtenKey) =>
@@ -77,6 +84,8 @@ internal static class ServiceDeveloperConfigShape
                 writtenKey,
                 BlockFields.SelectMany(block => block.Value.Keys.Select(field => (Field: field, Block: block.Key))),
                 candidate => candidate.Field)
+            .OrderBy(candidate => candidate.Field, StringComparer.Ordinal)
+            .ThenBy(candidate => candidate.Block, StringComparer.Ordinal)
             .Select(candidate => ((string, string)?)candidate)
             .FirstOrDefault();
 }
