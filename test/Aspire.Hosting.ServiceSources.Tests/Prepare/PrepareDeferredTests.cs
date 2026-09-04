@@ -39,6 +39,23 @@ public class PrepareDeferredTests
 
             Directory.CreateDirectory(Path.Combine(destinationPath, ".git"));
             File.WriteAllText(Path.Combine(destinationPath, "prepare.sh"), "#!/bin/sh\n");
+
+            // The file the dotnet kind reads once its checkout has landed. Written here because it
+            // is committed: a repository that generates its .csproj still commits its launch
+            // profile, and reading it is what proves the restore got past the project file.
+            var properties = Directory.CreateDirectory(Path.Combine(destinationPath, "Properties")).FullName;
+            File.WriteAllText(
+                Path.Combine(properties, "launchSettings.json"),
+                """
+                {
+                  "profiles": {
+                    "http": {
+                      "commandName": "Project",
+                      "environmentVariables": { "DEMO_FROM_PROFILE": "yes" }
+                    }
+                  }
+                }
+                """);
         }
 
         public void Checkout(string repositoryPath, string reference)
@@ -197,6 +214,28 @@ public class PrepareDeferredTests
             {
                 State = new ResourceStateSnapshot(KnownResourceStates.NotStarted, null),
             });
+
+    /// <summary>
+    /// What the landed launch profile put on the resource, or <see langword="null"/> if the restore
+    /// never ran. The restore appends its callback after the clone, so it is the last one on the
+    /// resource; the rest belong to <c>WithProjectDefaults</c>, which is why counting them says
+    /// nothing.
+    /// </summary>
+    private static async Task<string?> RestoredProfileVariableAsync(IResource resource, string name)
+    {
+        var callbacks = resource.Annotations.OfType<EnvironmentCallbackAnnotation>().ToArray();
+        if (callbacks.Length == 0)
+        {
+            return null;
+        }
+
+        var context = new EnvironmentCallbackContext(
+            new DistributedApplicationExecutionContext(DistributedApplicationOperation.Run), resource);
+
+        await callbacks[^1].Callback(context);
+
+        return context.EnvironmentVariables.TryGetValue(name, out var value) ? value as string : null;
+    }
 
     private static async Task<string?> StateOfAsync(
         IServiceProvider services, IResource resource, TimeSpan timeout)
@@ -471,6 +510,109 @@ public class PrepareDeferredTests
         // alongside each other.
         Assert.Equal(1, slow.Runs);
         Assert.Equal(1, quick.Runs);
+    }
+
+    /// <remarks>
+    /// The <c>dotnet</c> kind takes the other deferred registration — <c>Register</c> rather than
+    /// <c>RegisterKind</c> — and its post-clone work is reading the landed launch profile, which
+    /// starts by requiring the project file. So a repository that generates its own <c>.csproj</c>
+    /// is a service both features aim at, and the step running first is what makes it resolvable.
+    /// </remarks>
+    [Fact]
+    public async Task ADotnetServiceWhoseProjectFileTheStepProduces_Starts()
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.yaml"),
+            "services:\n  orders:\n    repository: https://example.com/orders.git\n"
+            + "    project: Generated.csproj\n");
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.local.json"),
+            """{ "services": { "orders": { "source": "local" } } }""");
+
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.UseDeferredCheckout();
+
+        var journal = new Journal();
+        var runner = new FakeRunner(journal, produces: "Generated.csproj");
+
+        var orders = new LocalProjectSource(new FakeGitClient(), runner).Resolve(
+            builder,
+            "orders",
+            new ServiceMetadata
+            {
+                Repository = "https://example.com/orders.git",
+                Project = "Generated.csproj",
+                Prepare = Prepare(),
+            },
+            DevConfig());
+
+        // Nothing has been prepared yet, and the project file the resource was registered against
+        // does not exist.
+        Assert.Equal(0, runner.Runs);
+
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+        await PublishNotStartedAsync(services, orders.Resource);
+
+        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Equal(1, runner.Runs);
+        Assert.True(File.Exists(
+            Path.Combine(dir, ".servicesources", "checkouts", "orders", "Generated.csproj")));
+
+        // The landed launch profile was restored onto the resource, which is the dotnet kind's whole
+        // post-clone job and which starts by requiring the project file — so the step must have run
+        // first. The state it finally reaches is not the assertion: nothing here is DCP, so the
+        // start command has nothing to act on and fails whatever the checkout looks like.
+        Assert.Equal("yes", await RestoredProfileVariableAsync(orders.Resource, "DEMO_FROM_PROFILE"));
+    }
+
+    /// <remarks>
+    /// And without the step the same service cannot be started at all: the project file the resource
+    /// was registered against is not in the repository, which is exactly what the step exists to
+    /// produce.
+    /// </remarks>
+    [Fact]
+    public async Task ADotnetServiceWithNoStep_FailsOnTheProjectFileTheStepWouldHaveProduced()
+    {
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.yaml"),
+            "services:\n  orders:\n    repository: https://example.com/orders.git\n"
+            + "    project: Generated.csproj\n");
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.local.json"),
+            """{ "services": { "orders": { "source": "local" } } }""");
+
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.UseDeferredCheckout();
+
+        var orders = new LocalProjectSource(new FakeGitClient(), new FakeRunner(new Journal())).Resolve(
+            builder,
+            "orders",
+            new ServiceMetadata
+            {
+                Repository = "https://example.com/orders.git",
+                Project = "Generated.csproj",
+            },
+            DevConfig());
+
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+        await PublishNotStartedAsync(services, orders.Resource);
+
+        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Failed before the launch profile could be restored, so its variables never reached the
+        // resource — the project file the resource was registered against is not in the repository,
+        // which is exactly what the step exists to produce.
+        Assert.Null(await RestoredProfileVariableAsync(orders.Resource, "DEMO_FROM_PROFILE"));
+        Assert.Equal(
+            KnownResourceStates.FailedToStart,
+            await StateOfAsync(services, orders.Resource, TimeSpan.FromSeconds(30)));
     }
 
     /// <remarks>
