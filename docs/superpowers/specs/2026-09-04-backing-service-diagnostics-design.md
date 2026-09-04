@@ -36,10 +36,18 @@ Documenting it — the state before this change — is enough for a reader who f
 nothing at all for one who does not. Warning about it is worse than it looks: the remedy a warning
 would name has to be one the reader can act on, and in a guest language there is only one. C# can
 settle it from the consumer's side with `WithReference(source, connectionName)`; the generated
-TypeScript shim takes no such argument, because ATS erases overloads and
+TypeScript shim takes no such argument, because
 `ServiceConfigurationExports.WithServiceConnectionString` exports the one-argument shape (#209).
 Renaming the factory's resource is therefore not the *recommended* remedy for a guest-language
 AppHost, it is the only one — and a rule with exactly one remedy is a rule, not advice.
+
+Worth being precise about *why*, because the tempting explanation is wrong and would discourage
+fixing it. ATS does erase overloads, and that is why `WithReference(source, name)` has no projection.
+But Aspire's own answer to that erasure is an options bag, which projects perfectly well: a project's
+`withReference` already accepts `{ connectionName }` from TypeScript, verified against a running
+AppHost. So the missing argument is this package's shim, not the platform — which leaves the decision
+here unchanged (the rename is still the only remedy *today*) while making #209 a straightforward
+addition rather than a platform limitation to work around.
 
 Making the key stable ourselves, by surfacing the factory's resource under the backing service's
 name, was rejected: it needs a wrapper resource or a rename, which reintroduces the facade #62

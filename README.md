@@ -1465,9 +1465,11 @@ builder.AddService("orders")
 ```
 
 `WithReference`'s second argument overrides the source resource's name for the connection string.
-Reach for it when the app already reads a particular name — but note it is C#-only: Aspire's Type
-System drops overloads, so the generated shim takes the source alone
-([#209](https://github.com/flojon/aspire-servicesources/issues/209)). Naming the factory's resource
+Reach for it when the app already reads a particular name — but note it is C#-only today, because
+the generated shim takes the source alone
+([#209](https://github.com/flojon/aspire-servicesources/issues/209)). That is this package's gap
+rather than a limit of guest languages: a project's own `withReference` already accepts
+`{ connectionName }` from TypeScript. Until the shim offers the same, naming the factory's resource
 after the backing service is the one answer every AppHost can give, which is why it is the one
 enforced.
 

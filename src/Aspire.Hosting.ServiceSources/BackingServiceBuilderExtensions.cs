@@ -80,9 +80,12 @@ public static class BackingServiceBuilderExtensions
     /// A consumer can still choose a different key deliberately, by passing <c>WithReference</c> a
     /// <c>connectionName</c> — <c>WithReference(ordersDb, "OrdersDb")</c> gives
     /// <c>ConnectionStrings__OrdersDb</c> under every source. That is the answer when the app
-    /// already reads a particular name. It is not a way around the rule above: it is a C#-only
-    /// overload with no projection into a guest-language AppHost (#209), so the rule stays the one
-    /// thing every AppHost can satisfy.
+    /// already reads a particular name. It is not a way around the rule above, because the exported
+    /// shim takes the source alone and a guest-language AppHost has no way to pass the name through
+    /// it. That is this package's own gap rather than a platform limit — Aspire projects an options
+    /// bag perfectly well, and a project's <c>withReference</c> already accepts
+    /// <c>{ connectionName }</c> — but until the shim grows one (#209), renaming the factory's
+    /// resource is the one remedy every AppHost has.
     /// </para>
     /// </param>
     /// <returns>
@@ -202,10 +205,17 @@ public static class BackingServiceBuilderExtensions
     /// </summary>
     /// <remarks>
     /// One remedy, and it is the rename. C# has a second — <c>WithReference(db, "orders-db")</c>
-    /// names the connection from the consumer's side — but that overload has no projection into a
-    /// guest language, because Aspire's Type System erases overloads and the exported shim takes the
-    /// source alone (#209). A message offering a fix that half its readers cannot reach would send
-    /// them looking for an argument that is not there, so it offers the one that always works.
+    /// names the connection from the consumer's side — but the exported shim takes the source alone,
+    /// so a guest-language AppHost cannot reach it (#209). A message offering a fix that half its
+    /// readers cannot reach would send them looking for an argument that is not there, so it offers
+    /// the one that always works.
+    /// <para>
+    /// Worth stating precisely, because the obvious explanation is wrong in a way that would
+    /// discourage fixing it: Aspire's Type System does erase overloads, but that is not what closes
+    /// the door here. Aspire's own answer to that erasure is an options bag, which projects fine —
+    /// a project's <c>withReference</c> already takes <c>{ connectionName }</c> from TypeScript. The
+    /// missing argument is this package's, not the platform's.
+    /// </para>
     /// <para>
     /// <c>AddDatabase</c> is named in the message because it is where the constraint most often
     /// bites: the Aspire resource and the database itself frequently want different names, and the

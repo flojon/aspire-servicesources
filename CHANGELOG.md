@@ -155,9 +155,11 @@ nothing will fail to build to warn you.
 
   A consumer that needs a particular key can still pin it from its own side —
   `WithReference(ordersDb, "OrdersDb")` gives `ConnectionStrings__OrdersDb` under every source. That
-  is not a way around the rule: Aspire's Type System drops overloads, so the exported shim takes the
-  source alone and a guest-language AppHost has no such argument ([#209]). Renaming the factory's
-  resource is the one remedy every AppHost has, which is why it is the one enforced.
+  is not a way around the rule: the exported shim takes the source alone, so a guest-language AppHost
+  has no such argument ([#209]). That is this package's own gap and not a limit of guest languages —
+  a project's `withReference` already accepts `{ connectionName }` from TypeScript — but until the
+  shim offers the same, renaming the factory's resource is the one remedy every AppHost has, which
+  is why it is the one enforced.
 
   **Write `direct.connectionString` as an address reached from outside Aspire.** It is handed on as
   written; nothing about it is rewritten. The case that catches people out is pointing `"direct"` at
