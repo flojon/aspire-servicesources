@@ -702,13 +702,77 @@ internal static class DeveloperConfigValidator
         string value,
         NoSurroundingWhitespaceAttribute handedOn)
     {
-        var remedy = value.Trim();
+        var remedy = TrimUnseeable(value);
+        var opening = $"'{field.Key}' in the '{block}' block is set to {Escaped(value)}";
 
-        return $"'{field.Key}' in the '{block}' block is set to {Escaped(value)}, and "
-            + $"{handedOn.Receiver} is given it exactly as written — so {handedOn.Receiver} looks "
-            + $"for {Escaped(value)} and not {Escaped(remedy)}. Set it to {Escaped(remedy)}."
+        // Nothing but whitespace and characters with no glyph. Blank did not take it — a byte-order
+        // mark is not whitespace — but what Blank would have said is what this value needs: there is
+        // no spelling left to propose, and the empty value is the gesture for a field nobody meant
+        // to set.
+        if (remedy.Length == 0)
+        {
+            return $"{opening}, which is whitespace and characters with no glyph rather than a "
+                + "value. Set it to an empty value to leave the field unset."
+                + SetAt(field);
+        }
+
+        var mechanism = $", and {handedOn.Receiver} is given it exactly as written — so "
+            + $"{handedOn.Receiver} looks for {Escaped(value)} and not {Escaped(remedy)}. ";
+
+        // A remedy carrying an invisible character of its own cannot be typed out of this message,
+        // and must not be offered as though it could: an escape like \ufeff is also valid JSON, so
+        // a reader copying it back into the file writes the very value being complained about — and
+        // that one has no whitespace left for anything to catch.
+        var fix = Escaped(remedy) == $"'{remedy}'"
+            ? $"Set it to {Escaped(remedy)}."
+            : $"{Escaped(remedy)} still carries a character with no glyph of its own, so retype the "
+              + "value rather than copying it from here.";
+
+        return opening + mechanism + fix
             + (handedOn.IfDeliberate is { } deliberate ? $" {deliberate}" : "")
             + SetAt(field);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="c"/> is a character a reader cannot see: whitespace, a control
+    /// character, or one of Unicode's <see cref="UnicodeCategory.Format"/> characters.
+    /// </summary>
+    /// <remarks>
+    /// The same line <see cref="Escaped"/> draws, and for the same reason: these are the characters
+    /// a developer cannot tell apart from nothing at all. It stops short of a combining mark, which
+    /// is invisible too and is a real thing to write — a decomposed accented letter carries one.
+    /// </remarks>
+    private static bool IsUnseeable(char c) =>
+        char.IsWhiteSpace(c)
+        || char.IsControl(c)
+        || CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.Format;
+
+    /// <summary>
+    /// <paramref name="value"/> without the characters at either end that a reader cannot see.
+    /// </summary>
+    /// <remarks>
+    /// This computes the spelling a message <em>proposes</em>, and not the rule that fires it. The
+    /// rule stays about whitespace, which is what
+    /// <see href="https://github.com/flojon/aspire-servicesources/issues/236">#236</see> is about;
+    /// the remedy has to be a value the developer can actually type, and one still carrying a
+    /// byte-order mark is not.
+    /// </remarks>
+    private static string TrimUnseeable(string value)
+    {
+        var start = 0;
+        var end = value.Length;
+
+        while (start < end && IsUnseeable(value[start]))
+        {
+            start++;
+        }
+
+        while (end > start && IsUnseeable(value[end - 1]))
+        {
+            end--;
+        }
+
+        return value[start..end];
     }
 
     /// <summary>

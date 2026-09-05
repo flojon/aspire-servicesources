@@ -256,6 +256,87 @@ public class DeveloperConfigValidatorTests
         Assert.Equal("my dev ctx", resolved.DeveloperConfig.Kubernetes.Context);
     }
 
+    /// <remarks>
+    /// The trap this rule exists to close, re-created by the rule itself if the remedy is computed
+    /// by trimming whitespace alone. A byte-order mark is not whitespace, so it survives Trim() —
+    /// and ﻿ is a valid JSON escape, so a developer copying the proposed spelling back into
+    /// the file writes the same broken value, this time with no whitespace left to trigger any
+    /// message at all.
+    /// </remarks>
+    [Fact]
+    public void Validate_PaddingAroundAnInvisibleCharacter_ProposesASpellingThatWorks()
+    {
+        var ex = Load("""
+            { "services": { "orders": {
+                "source": "kubernetes",
+                "kubernetes": { "namespace": " ﻿orders" } } } }
+            """);
+
+        // What arrived is shown with the mark spelled out...
+        Assert.Contains(@"﻿", ex.Message);
+
+        // ...and what to write carries neither the space nor the mark.
+        Assert.Contains("Set it to 'orders'.", ex.Message);
+    }
+
+    /// <remarks>
+    /// Blank does not take this one: the mark is not whitespace, so the value is not
+    /// IsNullOrWhiteSpace. Trimming leaves nothing at all, and "Set it to" has no spelling to name —
+    /// so the message says what Blank would have said, because that is what the value is.
+    /// </remarks>
+    [Fact]
+    public void Validate_ValueOfNothingButWhitespaceAndInvisibles_NamesTheEmptySpelling()
+    {
+        var ex = Load("""
+            { "services": { "orders": {
+                "source": "kubernetes",
+                "kubernetes": { "namespace": " ﻿" } } } }
+            """);
+
+        // The distinguishing clause rather than "empty value" alone: Blank's message ends with that
+        // same sentence, so asserting on it by itself would pass even if this branch never ran.
+        Assert.Contains("characters with no glyph rather than a value", ex.Message);
+        Assert.DoesNotContain("Set it to ''", ex.Message);
+    }
+
+    /// <remarks>
+    /// An invisible in the middle survives the remedy, so the remedy cannot be typed out of the
+    /// message. Saying "Set it to" anyway would be the copy-paste trap again, one character further
+    /// in.
+    /// </remarks>
+    [Fact]
+    public void Validate_InvisibleInsideTheValue_AsksForItToBeRetypedRatherThanCopied()
+    {
+        var ex = Load("""
+            { "services": { "orders": {
+                "source": "kubernetes",
+                "kubernetes": { "namespace": " ord﻿ers" } } } }
+            """);
+
+        Assert.Contains("retype", ex.Message);
+        Assert.DoesNotContain(@"Set it to 'ord﻿ers'.", ex.Message);
+    }
+
+    /// <remarks>
+    /// The boundary this rule deliberately stops at: a value padded only with invisible characters
+    /// and no whitespace at all is not refused. TrimUnseeable is one edit away from becoming the
+    /// trigger rather than the remedy, which would widen the rule past what #236 asked for without
+    /// anyone noticing. Pinned so that widening it stays a decision.
+    /// </remarks>
+    [Fact]
+    public void Validate_InvisiblePaddingWithNoWhitespace_IsNotRefused()
+    {
+        var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory("""
+            { "services": { "orders": {
+                "source": "kubernetes",
+                "kubernetes": { "namespace": "﻿orders", "context": "dev", "port": 8080 } } } }
+            """));
+
+        var resolved = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+
+        Assert.Equal("﻿orders", resolved.DeveloperConfig.Kubernetes.Namespace);
+    }
+
     [Fact]
     public void Validate_FlatFieldAtEntryRoot_NamesTheBlockItBelongsUnder()
     {
