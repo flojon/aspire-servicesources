@@ -337,6 +337,126 @@ public class DeveloperConfigValidatorTests
         Assert.Equal("﻿orders", resolved.DeveloperConfig.Kubernetes.Namespace);
     }
 
+    /// <remarks>
+    /// The fields this rule deliberately does not reach. Whitespace may be real in a path or in a
+    /// command's argument; a connection string may carry it inside a quoted value; and a scheme is
+    /// already trimmed where it is read, into a closed set of two values where trimming cannot
+    /// resolve to the wrong one. Each is a decision #236 made rather than something the mechanism
+    /// guarantees, so each is pinned.
+    /// </remarks>
+    [Theory]
+    [InlineData("""{ "services": { "orders": { "source": "local", "local": { "path": "/src/orders " } } } }""", "path", "/src/orders ")]
+    [InlineData("""{ "services": { "orders": { "source": "local", "local": { "path": "/src/o", "prepare": { "command": ["mvn", " -Pprod"] } } } } }""", "command", " -Pprod")]
+    [InlineData("""{ "services": { "orders": { "source": "kubernetes", "kubernetes": { "context": "dev", "port": 8080, "scheme": " https" } } } }""", "scheme", " https")]
+    [InlineData("""{ "services": { "orders": { "source": "kubernetes", "kubernetes": { "context": "dev", "port": " 8080" } } } }""", "port", "8080")]
+    public void Validate_FieldThatDidNotOptIn_StillTakesASurroundedValue(
+        string json, string field, string expected)
+    {
+        var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory(json));
+
+        var resolved = ServiceSourcesConfigCache.ResolveService(builder, "orders").DeveloperConfig;
+
+        // Not merely "it did not throw": the value has to arrive with its whitespace intact.
+        // Someone "fixing" an exclusion by trimming it at the point of use would pass a no-throw
+        // test, and that is the change this pins against.
+        var arrived = field switch
+        {
+            "path" => resolved.Local.Path,
+            "command" => resolved.Local.Prepare.Command![1],
+            "scheme" => resolved.Kubernetes.Scheme,
+            _ => resolved.Kubernetes.Port?.ToString(CultureInfo.InvariantCulture),
+        };
+
+        Assert.Equal(expected, arrived);
+    }
+
+    [Fact]
+    public void Validate_DirectConnectionString_StillTakesATrailingSpace()
+    {
+        var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory("""
+            { "backingServices": { "orders-db": {
+                "source": "direct",
+                "direct": { "connectionString": "Host=db;Password=hunter2 " } } } }
+            """));
+
+        var configured = ServiceSourcesConfigCache.BackingServicesFor(builder);
+
+        Assert.Equal("Host=db;Password=hunter2 ", configured["orders-db"].Direct.ConnectionString);
+    }
+
+    /// <remarks>
+    /// The kubernetes block's own connectionString, which sits beside three fields that <em>did</em>
+    /// opt in and is therefore the one a later contributor is likeliest to add the attribute to. A
+    /// connection string may carry trailing whitespace inside a quoted value, which is why #236
+    /// rules it out by name.
+    /// </remarks>
+    [Fact]
+    public void Validate_KubernetesConnectionString_StillTakesATrailingSpace()
+    {
+        var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory("""
+            { "backingServices": { "orders-db": {
+                "source": "kubernetes",
+                "kubernetes": { "connectionString": "Host=localhost;Port=${port};Pwd=x " } } } }
+            """));
+
+        var configured = ServiceSourcesConfigCache.BackingServicesFor(builder);
+
+        Assert.Equal(
+            "Host=localhost;Port=${port};Pwd=x ",
+            configured["orders-db"].Kubernetes.ConnectionString);
+    }
+
+    /// <remarks>
+    /// Two failure modes, and one of them is invisible to a query over <c>BlockFields</c> alone.
+    /// That dictionary is built from the <em>entry type's</em> own block properties, so it is
+    /// exactly one level deep: <c>local.prepare</c>'s fields are not in it at all. An attribute on
+    /// <c>PrepareDeveloperConfig.Mode</c> would be live — <c>CollectBlock</c> recurses into a nested
+    /// block — and one on its <c>Command</c> would be inert, and neither would be visible here. So
+    /// this walk descends the way the validator does, and only then asserts each carrier is a
+    /// scalar the walk actually reaches.
+    /// <para>
+    /// This cannot guard against a property being moved between block types: attributes travel with
+    /// the property. What it guards is a carrier the walk never reaches, and a field quietly losing
+    /// the rule.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Shape_EveryFieldCarryingTheRuleIsAScalarTheWalkReaches()
+    {
+        static IEnumerable<PropertyInfo> Leaves(IReadOnlyDictionary<string, PropertyInfo> fields) =>
+            fields.Values.SelectMany(field =>
+                DeveloperConfigField.BlockFieldsOf(field.PropertyType) is { } nested
+                    ? Leaves(nested).Prepend(field)
+                    : [field]);
+
+        var carriers = (
+            from shape in new[] { DeveloperConfigShape.Service, DeveloperConfigShape.BackingService }
+            from block in shape.BlockFields
+            from field in Leaves(block.Value)
+            where field.GetCustomAttribute<NoSurroundingWhitespaceAttribute>() is not null
+            select field).Distinct().ToArray();
+
+        Assert.Equal(
+            new[]
+            {
+                "KubernetesBackingServiceDeveloperConfig.Context",
+                "KubernetesBackingServiceDeveloperConfig.Namespace",
+                "KubernetesBackingServiceDeveloperConfig.Service",
+                "KubernetesDeveloperConfig.Context",
+                "KubernetesDeveloperConfig.Namespace",
+            },
+            carriers.Select(c => $"{c.DeclaringType!.Name}.{c.Name}").Order(StringComparer.Ordinal));
+
+        foreach (var carrier in carriers)
+        {
+            Assert.False(
+                DeveloperConfigField.IsList(carrier.PropertyType),
+                $"{carrier.DeclaringType!.Name}.{carrier.Name} is a list, which CollectBlock hands "
+                + "to CollectList before the whitespace check is reached.");
+            Assert.Null(DeveloperConfigField.BlockFieldsOf(carrier.PropertyType));
+        }
+    }
+
     [Fact]
     public void Validate_FlatFieldAtEntryRoot_NamesTheBlockItBelongsUnder()
     {
