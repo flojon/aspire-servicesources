@@ -175,6 +175,71 @@ public class ConnectionStringRedactionTests
         => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
 
     /// <summary>
+    /// Text inside a recognised value that is not itself recognised does not ride out on it.
+    /// </summary>
+    /// <remarks>
+    /// The value of an allowlisted key is printed, and it runs to the next key the scan finds — so
+    /// anything the scan cannot see as a key travels inside it. A key does not begin with a digit,
+    /// or with punctuation, or in a script this does not read, and each of those printed a password
+    /// whole. Worse, silently: the result equalled the input, so the message appended no note and
+    /// said in effect that nothing had been hidden.
+    /// </remarks>
+    [Theory]
+    // A key the scan cannot see, because a key does not begin with a digit.
+    [InlineData("Host=db.internal;2fa=hunter2;Database=orders", "Host=db.internal;***;Database=orders")]
+    [InlineData("host=db.internal port=5432 2fa=hunter2", "host=db.internal port=5432 ***")]
+    // Nor in a script this does not read, nor behind punctuation outside a key's charset.
+    [InlineData("Host=db.internal;Lösenord=hunter2", "Host=db.internal;***")]
+    [InlineData("Host=db.internal;auth[token]=hunter2", "Host=db.internal;***")]
+    [InlineData("Host=db.internal;my$key=hunter2", "Host=db.internal;***")]
+    // Nor text that is not a pair at all.
+    [InlineData("Host=h;hunter2", "Host=h;***")]
+    [InlineData("Port=5432;hunter2", "Port=5432;***")]
+    [InlineData("Host=h hunter2", "Host=h ***")]
+    [InlineData("Host=h,hunter2", "Host=h,***")]
+    [InlineData("Host=db.internal;Port=;2fa=hunter2", "Host=db.internal;Port=;***")]
+    public void UnrecognisedTextInsideARecognisedValue_IsMaskedWithIt(string connectionString, string expected)
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
+
+    /// <summary>
+    /// A quoted value owns the separators inside it, and the tail of one is not a pair.
+    /// </summary>
+    /// <remarks>
+    /// Reading a quoted password as ending at its first <c>;</c> left the rest to be scanned, and
+    /// what followed was read as a key of its own — printing the second half of the password when
+    /// that key happened to be one the allowlist names.
+    /// </remarks>
+    [Theory]
+    [InlineData("Host=h;Password='a;Host=hunter2';Database=orders", "Host=h;Password=***;Database=orders")]
+    [InlineData("Host=h;Password=\"a;UID=hunter2\"", "Host=h;Password=***")]
+    public void AQuotedValueCarryingAKey_IsMaskedAsOneValue(string connectionString, string expected)
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
+
+    /// <summary>
+    /// A URI's fragment is vetted by no more than its query is.
+    /// </summary>
+    [Theory]
+    [InlineData("redis://h:6379/0#sig2=hunter2", "redis://h:6379/0#***")]
+    [InlineData("redis://h:6379/0#hunter2", "redis://h:6379/0#***")]
+    public void WhatFollowsAFragmentMarker_IsNotPrinted(string connectionString, string expected)
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
+
+    /// <summary>
+    /// A comma inside a value introduces a port, and a port is digits.
+    /// </summary>
+    /// <remarks>
+    /// SQL Server writes <c>Server=localhost,1433</c>, which is the one thing after a comma this can
+    /// vouch for — so the comma cannot simply end the value, and anything else after one is a field
+    /// nothing looked at.
+    /// </remarks>
+    [Theory]
+    [InlineData("Server=tcp:db.database.windows.net,1433", "Server=tcp:db.database.windows.net,1433")]
+    [InlineData("Server=localhost,1433;Database=orders", "Server=localhost,1433;Database=orders")]
+    [InlineData("Server=localhost,hunter2", "Server=localhost,***")]
+    public void ACommaInsideAValue_ShowsAPortAndNothingElse(string connectionString, string expected)
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
+
+    /// <summary>
     /// ADO.NET's <c>==</c> escape does not smuggle a value past the allowlist.
     /// </summary>
     /// <remarks>
@@ -208,6 +273,10 @@ public class ConnectionStringRedactionTests
     [InlineData("Host = localhost;Port = 5432;Database = orders")]
     [InlineData("Host=localhost ; Port = 5432")]
     [InlineData("Host = localhost;Port = ;Database = orders")]
+    // libpq writes 'user = dev', so the token after an empty value belongs to it. Read as a key of
+    // its own it swallowed the pair after it, and the database was hidden under 'dev database'.
+    [InlineData("host=db port=5432 user= dev database=orders")]
+    [InlineData("Host=h user= dev port=5432")]
     // Redis and Kafka address a tunnel with a bare host and port and no keys at all.
     [InlineData("localhost:6379")]
     [InlineData("[::1]:6379")]
@@ -281,6 +350,9 @@ public class ConnectionStringRedactionTests
     /// </remarks>
     [Theory]
     [InlineData("a://b/?host=")]
+    // A value of nothing but space-separated words asks "is a pair starting here?" at every one of
+    // them, so it is the shape that catches a scan re-reading what it has already read.
+    [InlineData("Host=a a a a a a a a ")]
     // A long run of whitespace is the shape that asks "may a pair begin here?" at every position in
     // it, so it is the one that catches a scan answering that question by walking backwards.
     [InlineData("Host=h; ")]

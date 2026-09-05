@@ -21,8 +21,18 @@ namespace Aspire.Hosting.ServiceSources.BackingServices;
 /// </para>
 /// <para>
 /// <b>The invariant, which any change here must be checked against:</b> nothing is printed unless it
-/// has been positively recognised as safe to print — a key name, a value under an allowlisted key,
-/// or a URI's scheme, its authority after the userinfo, and its path.
+/// has been positively recognised as safe to print — a key name; a value under an allowlisted key;
+/// a URI's scheme, its authority after the userinfo, and its path; a bare <c>host:port</c>; an empty
+/// value; and the separators and spacing between all of those.
+/// </para>
+/// <para>
+/// The boundary of "recognised" is a tokenizer, so the residue is a pair written behind punctuation
+/// no dialect separates pairs with: <c>Host=h|Custom=hunter2</c> is one value as far as this can
+/// tell, and is printed. Widening the separator set is not the answer — <c>:</c> and <c>/</c> carry
+/// <c>Data Source=tcp:host,1433</c> and every URL — and neither is masking any value containing an
+/// <c>=</c>, which would reduce an Oracle descriptor to nothing. <see cref="KnownCredentialKeywords"/>
+/// covers the conventional names in that position; an unconventional one behind unconventional
+/// punctuation is knowingly left.
 /// </para>
 /// <para>
 /// Redaction by key is only fail-closed if the scan that finds the keys is at least as permissive as
@@ -87,10 +97,16 @@ internal static class ConnectionStringRedaction
     /// Keywords only. A URI's <c>user:pass@host</c> is not matched here — <see cref="MaskUri"/> and
     /// <see cref="MaskAuthority"/> cover every shape of it, including a password carrying <c>/</c>,
     /// <c>?</c> or <c>#</c> raw, which no lookbehind anchored on <c>://</c> can bound.
+    /// <para>
+    /// A quoted value is taken whole, because it owns the <c>;</c> inside it. Stopping at that
+    /// <c>;</c> masked the first half of <c>Password='a;Host=hunter2'</c> and handed the second half
+    /// to a scan that then read it as a host.
+    /// </para>
     /// </para>
     /// </remarks>
     private static readonly Regex KnownCredentialKeywords = new(
-        @"(?<=(?:password|pwd|secret|token|accountkey|accesskey|apikey|signature)\s*=)[^;]*",
+        @"(?<=(?:password|pwd|secret|token|accountkey|accesskey|apikey|signature)\s*=)"
+        + @"(?:'[^']*'|""[^""]*""|[^;]+)",
         RegexOptions.IgnoreCase
         | RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(1));
@@ -156,18 +172,123 @@ internal static class ConnectionStringRedaction
     /// </para>
     /// </remarks>
     private static string RedactRecognisedValue(string value)
-        => Rebuild(value, FindPairs(value, whitespaceBeginsAPair: true), MaskAuthority, RedactNestedValue);
+        => Rebuild(value, FindPairs(value, whitespaceBeginsAPair: true), RecognisedText, RedactNestedValue);
 
     /// <summary>
     /// What is printed for a pair written inside a value that was already recognised.
     /// </summary>
     /// <remarks>
     /// The mirror of <see cref="RedactValue"/> one level down, and the last point at which anything
-    /// is printed: a recognised value here is masked for an authority and shown rather than scanned
-    /// again, so there is no third level and no recursion to bound.
+    /// is printed: a recognised value here goes to <see cref="RecognisedText"/> rather than being
+    /// scanned again, so there is no third level and no recursion to bound.
     /// </remarks>
     private static string RedactNestedValue(string key, string value)
-        => KeysThatHoldNoSecret.Contains(key) ? MaskAuthority(value) : Mask;
+        => KeysThatHoldNoSecret.Contains(key) ? RecognisedText(value) : Mask;
+
+    /// <summary>
+    /// The part of <paramref name="text"/> that belongs to the value it was found in, with anything
+    /// beyond it replaced.
+    /// </summary>
+    /// <remarks>
+    /// A value ends where a dialect could have ended it. Whatever follows the first separator was
+    /// not read as a pair — otherwise the scan would have taken it — so it was vetted by nothing and
+    /// is not printed. That is the difference between hiding a value and hiding a key nobody
+    /// anticipated: <c>Host=db.internal;2fa=hunter2</c> has no key the scan can see, because a key
+    /// does not begin with a digit, and printing the value whole printed the password with it.
+    /// <para>
+    /// A quoted value owns the separators inside it, so <c>Data Source="C:\a;b\x.mdb"</c> is one
+    /// value and comes back whole.
+    /// </para>
+    /// </remarks>
+    private static string RecognisedText(string text)
+    {
+        var end = 0;
+
+        if (text.Length > 0 && text[0] is '"' or '\'')
+        {
+            var close = text.IndexOf(text[0], 1);
+
+            end = close < 0 ? text.Length : close + 1;
+        }
+
+        while (end < text.Length && !char.IsWhiteSpace(text[end]) && text[end] is not (';' or '&' or '?' or '#'))
+        {
+            end++;
+        }
+
+        var printed = MaskAuthorityAndTrailingFields(text[..end]);
+
+        if (end == text.Length)
+        {
+            return printed;
+        }
+
+        var afterSeparators = end;
+
+        while (afterSeparators < text.Length
+               && (char.IsWhiteSpace(text[afterSeparators]) || IsSeparator(text[afterSeparators])))
+        {
+            afterSeparators++;
+        }
+
+        return afterSeparators == text.Length
+            ? printed + text[end..]
+            : printed + text[end..afterSeparators] + Mask;
+    }
+
+    /// <summary>
+    /// <paramref name="value"/> with its authority masked and any comma-separated field after the
+    /// first shown only where it is a port.
+    /// </summary>
+    /// <remarks>
+    /// A comma inside a value is how SQL Server writes a port — <c>Server=localhost,1433</c> — and
+    /// that is the only thing after one this can vouch for. Anything else there is a field the scan
+    /// never looked at, which is where <c>Host=h,hunter2</c> hid a password.
+    /// </remarks>
+    private static string MaskAuthorityAndTrailingFields(string value)
+    {
+        var comma = value.IndexOf(',');
+
+        if (comma < 0)
+        {
+            return MaskAuthority(value);
+        }
+
+        var built = new StringBuilder(MaskAuthority(value[..comma]));
+
+        foreach (var field in value[comma..].Split(','))
+        {
+            if (field.Length == 0)
+            {
+                continue;
+            }
+
+            built.Append(',').Append(IsPort(field) ? field : Mask);
+        }
+
+        return built.ToString();
+    }
+
+    /// <summary>
+    /// Whether <paramref name="field"/> is a port number and nothing else.
+    /// </summary>
+    private static bool IsPort(ReadOnlySpan<char> field)
+    {
+        if (field.Length is 0 or > 5)
+        {
+            return false;
+        }
+
+        foreach (var c in field)
+        {
+            if (!char.IsAsciiDigit(c))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     /// <summary>
     /// <paramref name="text"/> with each of <paramref name="pairs"/> put through
@@ -261,7 +382,9 @@ internal static class ConnectionStringRedaction
                 ? i > 0 && char.IsWhiteSpace(text[i - 1])
                 : lastMeaningful is '\0' or ';' or '&' or '?' or ',';
 
-            if (mayBegin && TryReadPair(text, i, out var pair))
+            var scannedTo = i;
+
+            if (mayBegin && TryReadPair(text, i, out var pair, out scannedTo))
             {
                 pairs.Add(pair);
 
@@ -269,7 +392,19 @@ internal static class ConnectionStringRedaction
                 // scanned as ordinary text, and that is what stops a pair beginning inside it.
                 lastMeaningful = '=';
 
-                i = pair.ValueStart - 1;
+                i = EndOfValue(text, pair.ValueStart) - 1;
+
+                continue;
+            }
+
+            if (scannedTo > i)
+            {
+                // Nothing can begin inside what that scan already read: a key starting later in the
+                // same run ends at the same place and fails the same way. Retrying at every position
+                // in it is what made a long run of words quadratic.
+                lastMeaningful = text[scannedTo - 1];
+                i = scannedTo - 1;
+
                 continue;
             }
 
@@ -283,11 +418,62 @@ internal static class ConnectionStringRedaction
     }
 
     /// <summary>
+    /// Where the value beginning at <paramref name="valueStart"/> ends for the purpose of scanning
+    /// on — past a quoted value, or past the token an empty value takes for its own.
+    /// </summary>
+    /// <remarks>
+    /// Two things a scan must not walk into. A quoted value owns the separators inside it, so
+    /// <c>Password='a;Host=hunter2'</c> is one value and not a password followed by a host — reading
+    /// it the other way printed the tail. And <c>user = dev</c> is how libpq writes a pair, so the
+    /// token after an empty value belongs to it; read as a key of its own it would swallow the
+    /// pair after it, and <c>user= dev database=orders</c> would hide the database under a key
+    /// called <c>dev database</c>.
+    /// </remarks>
+    private static int EndOfValue(string text, int valueStart)
+    {
+        var i = valueStart;
+
+        while (i < text.Length && char.IsWhiteSpace(text[i]))
+        {
+            i++;
+        }
+
+        if (i < text.Length && text[i] is '"' or '\'')
+        {
+            var close = text.IndexOf(text[i], i + 1);
+
+            return close < 0 ? text.Length : close + 1;
+        }
+
+        // Only where the '=' was followed by space: an empty value takes the next token, and that
+        // token is a value rather than a key only if it carries no '=' of its own.
+        if (i == valueStart || i >= text.Length)
+        {
+            return valueStart;
+        }
+
+        var token = i;
+
+        while (token < text.Length && !char.IsWhiteSpace(text[token]) && !IsSeparator(text[token]))
+        {
+            if (text[token] == '=')
+            {
+                return valueStart;
+            }
+
+            token++;
+        }
+
+        return token;
+    }
+
+    /// <summary>
     /// Whether a pair begins at <paramref name="start"/>, and where its parts are.
     /// </summary>
-    private static bool TryReadPair(string text, int start, out Pair pair)
+    private static bool TryReadPair(string text, int start, out Pair pair, out int scannedTo)
     {
         pair = default;
+        scannedTo = start;
 
         var keyEnd = KeyEndAt(text, start);
 
@@ -295,6 +481,8 @@ internal static class ConnectionStringRedaction
         {
             return false;
         }
+
+        scannedTo = keyEnd;
 
         // Whitespace is allowed on either side of the '=' — every keyword dialect trims it — but it
         // is not part of the key.
@@ -324,9 +512,11 @@ internal static class ConnectionStringRedaction
     /// Where the key starting at <paramref name="start"/> ends, or <c>-1</c> if none starts there.
     /// </summary>
     /// <remarks>
-    /// Single interior spaces are part of a key, because several dialects write one — <c>Data
-    /// Source</c>, <c>Initial Catalog</c>, <c>User ID</c>. A space is only taken when a key
-    /// character follows it, so a space in front of the <c>=</c> belongs to the layout instead.
+    /// Interior whitespace is part of a key, because several dialects write it — <c>Data Source</c>,
+    /// <c>Initial Catalog</c>, <c>User ID</c>. It is only taken when a key character follows it, so
+    /// space in front of the <c>=</c> belongs to the layout instead. A run of it counts the same as
+    /// one space: were it not to, <c>Custom  Port=x</c> would be read as the allowlisted <c>Port</c>
+    /// and print its value, while <c>Custom Port=x</c> did not.
     /// <para>
     /// The longest key wins, and that is the fail-closed reading rather than a tidiness preference.
     /// In <c>Host=x Custom Port=5432</c> the short read finds the allowlisted <c>Port</c> and prints
@@ -352,10 +542,21 @@ internal static class ConnectionStringRedaction
                 continue;
             }
 
-            if (c == ' ' && end + 1 < text.Length && (char.IsAsciiLetterOrDigit(text[end + 1]) || text[end + 1] == '_'))
+            if (char.IsWhiteSpace(c))
             {
-                end++;
-                continue;
+                var afterSpace = end;
+
+                while (afterSpace < text.Length && char.IsWhiteSpace(text[afterSpace]))
+                {
+                    afterSpace++;
+                }
+
+                if (afterSpace < text.Length
+                    && (char.IsAsciiLetterOrDigit(text[afterSpace]) || text[afterSpace] == '_'))
+                {
+                    end = afterSpace;
+                    continue;
+                }
             }
 
             break;
@@ -445,17 +646,18 @@ internal static class ConnectionStringRedaction
     /// <paramref name="uri"/> with its userinfo masked and any unrecognised query text dropped.
     /// </summary>
     /// <remarks>
-    /// Whatever sits after a <c>?</c> and was not recognised as a pair was vetted by nothing, so it
-    /// is replaced rather than printed.
+    /// Whatever sits after a <c>?</c> or a <c>#</c> and was not recognised as a pair was vetted by
+    /// nothing, so it is replaced rather than printed. A fragment is no more vetted than a query:
+    /// leaving it alone printed <c>redis://h:6379/0#sig2=hunter2</c> whole.
     /// </remarks>
     private static string MaskUri(string uri)
     {
         var masked = MaskAuthority(uri);
-        var query = masked.IndexOf('?');
+        var unvetted = masked.AsSpan().IndexOfAny('?', '#');
 
-        return query < 0 || query == masked.Length - 1
+        return unvetted < 0 || unvetted == masked.Length - 1
             ? masked
-            : string.Concat(masked.AsSpan(0, query + 1), Mask);
+            : string.Concat(masked.AsSpan(0, unvetted + 1), Mask);
     }
 
     /// <summary>

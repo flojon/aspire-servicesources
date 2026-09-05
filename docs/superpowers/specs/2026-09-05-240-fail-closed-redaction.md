@@ -257,11 +257,20 @@ Not closed, and said out loud rather than left to be discovered:
   told something was hidden when the honest answer is "nothing here was recognised".
 - A value under an allowlisted key that contains ` word=` is read as nested pairs, so
   `Data Source=a b=c` reads `Data Source=a b=***`. Fail-closed, mildly odd, and the price of libpq.
-- Space around a `=` is layout and is preserved, but a key is still only ASCII letters, digits and
-  `_ . -` with single interior spaces. A dialect writing a key outside that charset would not be
-  read as a pair, and its value would be swallowed by the pair before it — the shape that leaked
-  `RotationKey = hunter2` before the space rule landed. Nothing known writes such a key, and the
-  keyword backstop covers the conventional names regardless.
+- A pair written behind punctuation that no dialect separates pairs with is one value as far as the
+  scan can tell, and is printed: `Host=h|Custom=hunter2`, `Host=h:Custom=hunter2`,
+  `Host=h/Custom=hunter2`. Two ways to close it were considered and both cost more than they buy —
+  widening the separator set breaks `Data Source=tcp:host,1433` and every URL, and masking any value
+  that contains an `=` reduces an Oracle TNS descriptor to `***` on exactly the message that is
+  asking the developer which port they wrote. The keyword backstop covers the conventional names in
+  that position; an unconventional name behind unconventional punctuation is knowingly left.
+- `provider= Initial Catalog=orders` reads `Initial` as the empty value's own token — the rule libpq
+  needs for `user = dev` — and then masks `Catalog=orders` under a key it does not know. Fail-closed,
+  and the alternative is teaching the token rule about compound keys.
+- `IsHostAndPort` recognises a shape, not an address, so a token that happens to be `word:digits`
+  prints: `AKIAIOSFODNN7EXAMPLE:12345`. Requiring the digits is what keeps a bare secret out.
+- Redaction is not idempotent over arbitrary text. On a string that is not a connection string at
+  all, a second pass can mask more than the first — always more, never less.
 
 ## Tests
 
