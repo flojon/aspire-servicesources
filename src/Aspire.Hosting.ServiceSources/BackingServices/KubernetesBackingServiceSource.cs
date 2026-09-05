@@ -38,17 +38,14 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     {
         var kubernetes = config.Kubernetes;
 
-        // The fields in the order they are written in the block, which is the order a developer
-        // filling it in hits them — so an entry missing several is walked through them one run at a
-        // time in the order they would write them.
-        var service = Required(name, kubernetes.Service, "service", "the Kubernetes Service to forward to");
-        var remotePort = RequiredPort(name, kubernetes.Port);
-        var context = Required(name, kubernetes.Context, "context", "the kubectl context to forward through");
-        var connectionString = Required(
-            name, kubernetes.ConnectionString, "connectionString",
-            "the connection string consumers receive, with '${port}' standing for the local end of the tunnel");
+        RequireEveryField(name, kubernetes);
 
-        var template = ConnectionStringTemplate.Parse(connectionString, name, ConfigKey(name, "connectionString"));
+        var service = kubernetes.Service!;
+        var context = kubernetes.Context!;
+        var connectionString = kubernetes.ConnectionString!;
+        var remotePort = RequirePortInRange(name, kubernetes.Port!.Value);
+
+        var template = ConnectionStringTemplate.Parse(connectionString, name, ConfigKey(name, "ConnectionString"));
 
         // Judged whole before a port is taken, for the reason the service-side source gives: a
         // template this source cannot resolve is config validation like every check above it, and
@@ -69,7 +66,7 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
                 // Eager, and as a literal: the port is known here, so nothing about it has to be
                 // deferred to resolution time. What a consumer receives is an ordinary connection
                 // string with no late parts in it.
-                case ConnectionStringTemplate.Port:
+                case ConnectionStringTemplate.Port { Name: null }:
                     ConnectionStringTemplate.AppendLiteral(
                         expression, localPort.ToString(CultureInfo.InvariantCulture));
                     break;
@@ -89,7 +86,7 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
         // that serves it underneath, rather than two resources they have to work out the relation
         // between. Aspire keys nothing off this name — unlike the service-side source, where the
         // executable *is* the service and its name is what service discovery publishes.
-        var tunnel = builder
+        builder
             .AddExecutable(
                 $"{name}-tunnel",
                 "kubectl",
@@ -101,16 +98,30 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
 
         builder.Services
             .AddHealthChecks()
-            .AddCheck(healthCheckKey, new LocalPortHealthCheck(name, localPort));
+            .AddCheck(healthCheckKey, new LocalPortHealthCheck(name, localPort), timeout: ProbeTimeout);
 
-        // On the connection string rather than on the tunnel, because the connection string is what
-        // a consumer waits for — measured, and the reason this source has a health check at all.
-        // The tunnel carries it too, so that the dashboard reports the process as unhealthy while
-        // kubectl is still opening the socket rather than as running-and-fine.
-        tunnel.WithHealthCheck(healthCheckKey);
-
+        // On the connection string alone, and not also on the tunnel, though the tunnel is what the
+        // socket actually belongs to. The connection string is what a consumer waits for, which is
+        // the whole reason this source has a health check; the tunnel would gain only a badge in
+        // the dashboard. Aspire runs one monitor loop per resource, so a second resource carrying
+        // this key would run the probe twice per cycle — and every probe is a connection kubectl
+        // logs ("Handling connection for <port>") and the database behind it may log as an
+        // incomplete startup packet. The tunnel's log is where a bad context or an expired
+        // credential shows up, and it is worth keeping readable.
         return backingService.WithHealthCheck(healthCheckKey);
     }
+
+    /// <summary>
+    /// How long one probe may take before it counts as a failure.
+    /// </summary>
+    /// <remarks>
+    /// Set explicitly because <c>AddCheck</c>'s instance overload leaves the registration's timeout
+    /// infinite, and a connect that <em>hangs</em> rather than refuses would then stall that
+    /// resource's monitor loop for the life of the run — no result, and so no report to act on.
+    /// Loopback makes that nearly impossible, which is the reason to spend one argument on it
+    /// rather than a mechanism: the failure it forecloses is cheap to prevent and silent to hit.
+    /// </remarks>
+    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Refuses a template this source cannot resolve, and one that never mentions the tunnel.
@@ -142,7 +153,7 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
                     throw new ServiceSourcesConfigurationException(
                         $"Backing service '{name}': the connection string carries '{port.AsWritten}', which names one "
                         + "of several forwarded ports, and forwarding more than one port is not supported yet. This "
-                        + $"backing service forwards the single port '{ConfigKey(name, "port")}' names, so write "
+                        + $"backing service forwards the single port '{ConfigKey(name, "Port")}' names, so write "
                         + "'${port}'.");
 
                 case ConnectionStringTemplate.Secret secret:
@@ -150,7 +161,7 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
                         $"Backing service '{name}': the connection string carries '{secret.AsWritten}', and reading a "
                         + "value out of a Kubernetes secret is not supported yet. Put the value in the connection "
                         + "string, or set the whole connection string from a configuration layer that already holds "
-                        + $"it — user secrets, or {Environmentally(ConfigKey(name, "connectionString"))}.");
+                        + $"it — user secrets, or {Environmentally(ConfigKey(name, "ConnectionString"))}.");
 
                 default:
                     throw new InvalidOperationException($"Unhandled template segment '{segment.GetType().Name}'.");
@@ -175,60 +186,98 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
         configKey.Replace(":", "__", StringComparison.Ordinal);
 
     /// <summary>
-    /// The value of a field this source cannot work without, or the error naming it.
+    /// What each field this source cannot work without holds, in a phrase completing
+    /// "…requires 'kubernetes.<c>field</c>' —", in the order the block is written in.
     /// </summary>
-    /// <param name="whatItIs">
-    /// What the field holds, in a phrase that completes "…requires 'kubernetes.<c>field</c>' —". A
-    /// developer who has just switched a backing service to this source is reading these messages
-    /// as the block's documentation, one field per run, so each one says what to write and not only
-    /// that something is missing.
-    /// </param>
-    private static string Required(string name, string? value, string field, string whatItIs)
+    /// <remarks>
+    /// A developer who has just switched a backing service to this source reads these as the
+    /// block's documentation, so each says what to write rather than only that something is
+    /// missing. Ordered so a message listing several reads down the block rather than across a
+    /// dictionary.
+    /// </remarks>
+    /// <remarks>
+    /// <c>Field</c> is how the developer writes it in the file, <c>Property</c> how the same key is
+    /// spelled in a configuration path. Both, rather than one derived from the other, because a
+    /// message uses each in a different half of the same sentence and getting either wrong sends
+    /// the reader looking for a key nobody wrote.
+    /// </remarks>
+    private static readonly (string Field, string Property, string WhatItIs)[] RequiredFields =
+    [
+        ("service", "Service", "the Kubernetes Service to forward to"),
+        ("port", "Port",
+            "the port that Service listens on inside the cluster, which is what the tunnel forwards to"),
+        ("context", "Context", "the kubectl context to forward through"),
+        ("connectionString", "ConnectionString",
+            "the connection string consumers receive, with '${port}' standing for the local end of the tunnel"),
+    ];
+
+    /// <summary>
+    /// Refuses an entry missing any field this source cannot work without, naming <b>all</b> of
+    /// them.
+    /// </summary>
+    /// <remarks>
+    /// All of them, rather than the first, for the reason <see cref="DeveloperConfigValidator"/>
+    /// gives for collecting an entry's problems: reporting one per run costs a failed startup per
+    /// key. That was invisible while <c>"direct"</c> was the only configured source, since it has a
+    /// single field; this source has four, and a developer filling in a fresh block would otherwise
+    /// pay four startups to be told what the block contains.
+    /// <para>
+    /// The port is checked for presence here and for range at the call site. They are different
+    /// mistakes — one is a field nobody filled in, the other a field filled in wrongly — and only
+    /// the first belongs in a list of what the block is missing.
+    /// </para>
+    /// </remarks>
+    private static void RequireEveryField(string name, KubernetesBackingServiceDeveloperConfig kubernetes)
     {
-        if (!string.IsNullOrWhiteSpace(value))
+        var written = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
         {
-            return value;
+            ["service"] = !string.IsNullOrWhiteSpace(kubernetes.Service),
+            ["port"] = kubernetes.Port is not null,
+            ["context"] = !string.IsNullOrWhiteSpace(kubernetes.Context),
+            ["connectionString"] = !string.IsNullOrWhiteSpace(kubernetes.ConnectionString),
+        };
+
+        var missing = RequiredFields.Where(field => !written[field.Field]).ToArray();
+
+        if (missing.Length == 0)
+        {
+            return;
         }
 
-        var key = ConfigKey(name, field);
+        var each = string.Join(
+            " ", missing.Select(field => $"'kubernetes.{field.Field}' — {field.WhatItIs}."));
 
+        // The file's own root key, not DeveloperConfiguration.BackingServicesKey: this sentence
+        // sends the reader to the file, and the file spells the section "backingServices". The
+        // colon-separated path belongs only in the environment-variable half below, which is the
+        // one place it is what the reader types.
         throw new ServiceSourcesConfigurationException(
-            $"Backing service '{name}': source 'kubernetes' requires 'kubernetes.{field}' — {whatItIs}. Add it "
-            + $"under \"{name}\" in \"{DeveloperConfiguration.BackingServicesKey}\" in "
-            + $"'{DeveloperConfiguration.FileName}', or set {Environmentally(key)}.");
+            $"Backing service '{name}': source 'kubernetes' requires {each} Add "
+            + $"{(missing.Length == 1 ? "it" : "them")} under \"{name}\" in "
+            + $"\"{DeveloperConfigFileSource.FileBackingServicesKey}\" in "
+            + $"'{DeveloperConfiguration.FileName}', or set "
+            + $"{string.Join(", ", missing.Select(field => Environmentally(ConfigKey(name, field.Property))))}."
+            + (written["port"] ? "" : " The local end of the tunnel is allocated rather than configured, so a "
+                + "connection string names it as '${port}' and only the cluster's own port is written here."));
     }
 
     /// <summary>
-    /// The remote port, which is required and has to be a port.
+    /// The remote port, once it is known to be present.
     /// </summary>
     /// <remarks>
-    /// Kept apart from <see cref="Required"/> because the value is an <c>int?</c>: it is absent or
-    /// it is a number, and a number outside the port range is a different mistake from a missing
-    /// field. Unlike the service side there is no catalog value to fall back to — the catalog
-    /// carries no backing-service data at all, by decision — so absence is simply absence.
+    /// Unlike the service side there is no catalog value to fall back to — the catalog carries no
+    /// backing-service data at all, by decision — so the only question left here is the range.
     /// </remarks>
-    private static int RequiredPort(string name, int? port)
+    private static int RequirePortInRange(string name, int port)
     {
-        var key = ConfigKey(name, "port");
-
-        if (port is null)
-        {
-            throw new ServiceSourcesConfigurationException(
-                $"Backing service '{name}': source 'kubernetes' requires 'kubernetes.port' — the port the Service "
-                + "listens on inside the cluster, which is what the tunnel forwards to. Add it under "
-                + $"\"{name}\" in \"{DeveloperConfiguration.BackingServicesKey}\" in "
-                + $"'{DeveloperConfiguration.FileName}', or set {Environmentally(key)}. The local end of the tunnel "
-                + "is allocated rather than configured, so a connection string names it as '${port}'.");
-        }
-
         if (port is < 1 or > 65535)
         {
             throw new ServiceSourcesConfigurationException(
                 $"Backing service '{name}': 'kubernetes.port' is '{port}', which is not a port — a port is between "
-                + $"1 and 65535. The key is '{key}'.");
+                + $"1 and 65535. The key is '{ConfigKey(name, "Port")}'.");
         }
 
-        return port.Value;
+        return port;
     }
 
     /// <summary>
@@ -245,8 +294,15 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     /// The whole-string secret form is the one template that will legitimately carry no
     /// <c>${port}</c> — it arrives already addressed, and is answered by forwarding the same port
     /// number locally rather than by substitution. That form needs secrets, which this source does
-    /// not read yet, so today every template that reaches here without a <c>${port}</c> is the
-    /// mistake above.
+    /// not read yet, so today every template that reaches here without a <c>${port}</c> is a
+    /// mistake.
+    /// </para>
+    /// <para>
+    /// Two mistakes, which is why the message names both. The template may never have had a
+    /// <c>${port}</c>; or it had one and a shell ate it before the AppHost ran, which
+    /// <see cref="ConnectionStringTemplate"/> describes and which produces exactly this — a valid
+    /// template with no placeholder left in it. That second reader cannot be told anything by the
+    /// first half of this message, since the spelling they wrote was already right.
     /// </para>
     /// </remarks>
     private static ServiceSourcesConfigurationException NothingAddressesTheTunnel(
@@ -254,7 +310,10 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
         new($"Backing service '{name}': source 'kubernetes' opens a kubectl port-forward on a local port allocated "
             + $"at startup, but the connection string names no '${{port}}' placeholder to put it in — so nothing "
             + $"would address the tunnel: \"{connectionString}\". Replace the port in it with '${{port}}', as "
-            + "'Host=localhost;Port=${port};Database=orders'. A backing service reached at a fixed address the "
-            + $"developer already has — an ingress, or an instance they run themselves — is source 'direct' rather "
-            + $"than this one. The key is '{ConfigKey(name, "connectionString")}'.");
+            + "'Host=localhost;Port=${port};Database=orders'. If you did write '${port}', a shell expanded it "
+            + "away before the AppHost saw it — '${...}' is a shell variable too, and double quotes do not protect "
+            + "it. Single-quote the value, and use env 'NAME=value' for a key with a hyphen in it. A backing "
+            + $"service reached at a fixed address the developer already has — an ingress, or an instance they run "
+            + $"themselves — is source 'direct' rather "
+            + $"than this one. The key is '{ConfigKey(name, "ConnectionString")}'.");
 }

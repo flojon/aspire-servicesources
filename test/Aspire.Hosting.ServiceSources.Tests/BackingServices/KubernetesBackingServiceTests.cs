@@ -1,8 +1,10 @@
-using System.Globalization;
 using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.ServiceSources.BackingServices;
+using Aspire.Hosting.ServiceSources.Config;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
+using IPortAllocator = Aspire.Hosting.ServiceSources.PortAllocation.IPortAllocator;
 
 namespace Aspire.Hosting.ServiceSources.Tests.BackingServices;
 
@@ -12,73 +14,69 @@ namespace Aspire.Hosting.ServiceSources.Tests.BackingServices;
 /// <c>WaitFor</c> wait for the tunnel rather than for the string.
 /// </summary>
 /// <remarks>
+/// Resolved directly, with a fake <see cref="IPortAllocator"/>, exactly as
+/// <c>KubernetesSourceTests</c> does for the service-side source: no socket is bound, so the
+/// forwarded port is a number these tests can name. That the entry <em>binds</em> from
+/// <c>servicesources.local.json</c> and dispatches here is covered in <c>AddBackingServiceTests</c>,
+/// where the config layers are the subject.
+/// <para>
 /// Nothing here runs <c>kubectl</c>. What is asserted is the model the AppHost builds — the
 /// executable's command line, the connection string's text, the annotations — which is the whole of
 /// what this source decides; everything after that is Aspire's to run.
+/// </para>
 /// </remarks>
 public class KubernetesBackingServiceTests
 {
     private const string Name = "orders-db";
 
-    private static IDistributedApplicationBuilder CreateBuilder(string json)
-    {
-        var dir = Directory.CreateTempSubdirectory().FullName;
-        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), json);
+    /// <summary>The port the fake allocator hands out, so every expectation can name it.</summary>
+    private const int LocalPort = 54321;
 
-        return TestHelpers.CreateBuilder(dir);
+    private sealed class FakePortAllocator(int port) : IPortAllocator
+    {
+        public int AllocatePort() => port;
     }
 
+    private sealed class TrackingPortAllocator(Action onAllocate, int port) : IPortAllocator
+    {
+        public int AllocatePort()
+        {
+            onAllocate();
+            return port;
+        }
+    }
+
+    private static IDistributedApplicationBuilder CreateBuilder() =>
+        TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+
     /// <summary>
-    /// An entry with every field set, so that a test about one of them changes only that one.
+    /// An entry with every field set, so a test about one of them changes only that one.
     /// </summary>
-    private static string Entry(
+    private static BackingServiceDeveloperConfig Config(
         string? service = "orders-pg",
-        string? port = "5432",
+        int? port = 5432,
         string? context = "dev-west",
         string? @namespace = null,
-        string connectionString = "Host=localhost;Port=${port};Database=orders")
-    {
-        var fields = new List<string> { $"\"source\": \"kubernetes\"" };
-        var kubernetes = new List<string>();
-
-        if (service is not null)
+        string? connectionString = "Host=localhost;Port=${port};Database=orders") =>
+        new()
         {
-            kubernetes.Add($"\"service\": \"{service}\"");
-        }
-
-        if (port is not null)
-        {
-            kubernetes.Add($"\"port\": {port}");
-        }
-
-        if (context is not null)
-        {
-            kubernetes.Add($"\"context\": \"{context}\"");
-        }
-
-        if (@namespace is not null)
-        {
-            kubernetes.Add($"\"namespace\": \"{@namespace}\"");
-        }
-
-        kubernetes.Add($"\"connectionString\": {System.Text.Json.JsonSerializer.Serialize(connectionString)}");
-        fields.Add($"\"kubernetes\": {{ {string.Join(", ", kubernetes)} }}");
-
-        return $$"""{ "backingServices": { "{{Name}}": { {{string.Join(", ", fields)}} } } }""";
-    }
-
-    /// <summary>
-    /// A factory naming a resource the backing service is not called, so that asserting its absence
-    /// says something: this source never invokes it, and the name rule #200 added therefore never
-    /// applies to it.
-    /// </summary>
-    private static Func<IResourceBuilder<IResourceWithConnectionString>> UnusedFactory(
-        IDistributedApplicationBuilder builder, Action? onInvoke = null) =>
-        () =>
-        {
-            onInvoke?.Invoke();
-            return builder.AddConnectionString("not-the-backing-service");
+            Source = "kubernetes",
+            Kubernetes = new()
+            {
+                Service = service,
+                Port = port,
+                Context = context,
+                Namespace = @namespace,
+                ConnectionString = connectionString,
+            },
         };
+
+    private static IResourceBuilder<IResourceWithConnectionString> Resolve(
+        IDistributedApplicationBuilder builder,
+        BackingServiceDeveloperConfig config,
+        IPortAllocator? allocator = null) =>
+        new KubernetesBackingServiceSource(allocator ?? new FakePortAllocator(LocalPort))
+            .Resolve(builder, Name, config);
 
     private static ExecutableResource Tunnel(IDistributedApplicationBuilder builder) =>
         builder.Resources.OfType<ExecutableResource>().Single(resource => resource.Name == $"{Name}-tunnel");
@@ -86,10 +84,9 @@ public class KubernetesBackingServiceTests
     /// <summary>The command line the tunnel would run, as one array.</summary>
     private static async Task<string[]> TunnelArgsAsync(IDistributedApplicationBuilder builder)
     {
-        var tunnel = Tunnel(builder);
         var context = new CommandLineArgsCallbackContext([]);
 
-        foreach (var annotation in tunnel.Annotations.OfType<CommandLineArgsCallbackAnnotation>())
+        foreach (var annotation in Tunnel(builder).Annotations.OfType<CommandLineArgsCallbackAnnotation>())
         {
             await annotation.Callback(context);
         }
@@ -97,33 +94,17 @@ public class KubernetesBackingServiceTests
         return context.Args.Select(arg => arg.ToString()!).ToArray();
     }
 
-    /// <summary>The local port the tunnel forwards, read off its own arguments.</summary>
-    /// <remarks>
-    /// Read back rather than fixed, because the port is allocated by the OS: what these tests can
-    /// assert is that the connection string and the tunnel agree on it, which is the property that
-    /// matters and the one a fixed number would not check.
-    /// </remarks>
-    private static async Task<int> LocalPortAsync(IDistributedApplicationBuilder builder)
-    {
-        var args = await TunnelArgsAsync(builder);
-        var pair = args.Single(arg => arg.Contains(':', StringComparison.Ordinal));
-
-        return int.Parse(pair.Split(':')[0], CultureInfo.InvariantCulture);
-    }
-
     [Fact]
     public async Task AllFieldsSet_ForwardsTheConfiguredServiceAndPort()
     {
-        var builder = CreateBuilder(Entry(service: "orders-pg", port: "5432", context: "dev-west", @namespace: "orders"));
+        var builder = CreateBuilder();
 
-        builder.AddBackingService(Name, UnusedFactory(builder));
-
-        var localPort = await LocalPortAsync(builder);
+        Resolve(builder, Config(service: "orders-pg", port: 5432, context: "dev-west", @namespace: "orders"));
 
         Assert.Equal("kubectl", Tunnel(builder).Command);
         Assert.Equal(
             [
-                "port-forward", "svc/orders-pg", $"{localPort}:5432",
+                "port-forward", "svc/orders-pg", $"{LocalPort}:5432",
                 "--context", "dev-west", "--namespace", "orders",
             ],
             await TunnelArgsAsync(builder));
@@ -137,9 +118,9 @@ public class KubernetesBackingServiceTests
     [Fact]
     public async Task NamespaceOmitted_ForwardsInTheDefaultNamespace()
     {
-        var builder = CreateBuilder(Entry(@namespace: null));
+        var builder = CreateBuilder();
 
-        builder.AddBackingService(Name, UnusedFactory(builder));
+        Resolve(builder, Config(@namespace: null));
 
         var args = await TunnelArgsAsync(builder);
 
@@ -157,9 +138,9 @@ public class KubernetesBackingServiceTests
     [Fact]
     public void TheTunnel_IsNamedAfterTheBackingServiceAndParentedToIt()
     {
-        var builder = CreateBuilder(Entry());
+        var builder = CreateBuilder();
 
-        var db = builder.AddBackingService(Name, UnusedFactory(builder));
+        var db = Resolve(builder, Config());
 
         Assert.Equal(Name, db.Resource.Name);
         Assert.Equal($"{Name}-tunnel", Tunnel(builder).Name);
@@ -170,28 +151,14 @@ public class KubernetesBackingServiceTests
     }
 
     [Fact]
-    public void TheLocalFactory_IsNeverInvoked()
-    {
-        var builder = CreateBuilder(Entry());
-        var invocations = 0;
-
-        builder.AddBackingService(Name, UnusedFactory(builder, () => invocations++));
-
-        Assert.Equal(0, invocations);
-        Assert.DoesNotContain("not-the-backing-service", builder.Resources.Select(resource => resource.Name));
-    }
-
-    [Fact]
     public async Task PortPlaceholder_ResolvesToTheEndOfTheTunnelTheAppHostOpened()
     {
-        var builder = CreateBuilder(Entry(connectionString: "Host=localhost;Port=${port};Database=orders"));
+        var builder = CreateBuilder();
 
-        var db = builder.AddBackingService(Name, UnusedFactory(builder));
-
-        var localPort = await LocalPortAsync(builder);
+        var db = Resolve(builder, Config(connectionString: "Host=localhost;Port=${port};Database=orders"));
 
         Assert.Equal(
-            $"Host=localhost;Port={localPort};Database=orders",
+            $"Host=localhost;Port={LocalPort};Database=orders",
             await db.Resource.ConnectionStringExpression.GetValueAsync(default));
     }
 
@@ -202,14 +169,12 @@ public class KubernetesBackingServiceTests
     [Fact]
     public async Task PortPlaceholderWrittenTwice_IsSubstitutedBothTimes()
     {
-        var builder = CreateBuilder(Entry(connectionString: "Server=localhost,${port};Failover=localhost,${port}"));
+        var builder = CreateBuilder();
 
-        var db = builder.AddBackingService(Name, UnusedFactory(builder));
-
-        var localPort = await LocalPortAsync(builder);
+        var db = Resolve(builder, Config(connectionString: "Server=localhost,${port};Failover=localhost,${port}"));
 
         Assert.Equal(
-            $"Server=localhost,{localPort};Failover=localhost,{localPort}",
+            $"Server=localhost,{LocalPort};Failover=localhost,{LocalPort}",
             await db.Resource.ConnectionStringExpression.GetValueAsync(default));
     }
 
@@ -227,15 +192,12 @@ public class KubernetesBackingServiceTests
     [Fact]
     public async Task BracesInTheTemplate_ReachTheAppAsWritten()
     {
-        var builder = CreateBuilder(
-            Entry(connectionString: "Driver={PostgreSQL};Server=localhost;Port=${port}"));
+        var builder = CreateBuilder();
 
-        var db = builder.AddBackingService(Name, UnusedFactory(builder));
-
-        var localPort = await LocalPortAsync(builder);
+        var db = Resolve(builder, Config(connectionString: "Driver={PostgreSQL};Server=localhost;Port=${port}"));
 
         Assert.Equal(
-            $"Driver={{PostgreSQL}};Server=localhost;Port={localPort}",
+            $"Driver={{PostgreSQL}};Server=localhost;Port={LocalPort}",
             await db.Resource.ConnectionStringExpression.GetValueAsync(default));
     }
 
@@ -251,29 +213,34 @@ public class KubernetesBackingServiceTests
     [Fact]
     public void TheConnectionString_CarriesATcpHealthCheckOnTheForwardedPort()
     {
-        var builder = CreateBuilder(Entry());
+        var builder = CreateBuilder();
 
-        var db = builder.AddBackingService(Name, UnusedFactory(builder));
+        var db = Resolve(builder, Config());
 
         Assert.Equal(
             $"{Name}-tunnel-tcp",
             db.Resource.Annotations.OfType<HealthCheckAnnotation>().Single().Key);
     }
 
+    /// <summary>
+    /// The tunnel does <em>not</em> carry the same check, though the socket is its own.
+    /// </summary>
     /// <remarks>
-    /// The same check on the tunnel too, so the dashboard reports the process as unhealthy while
-    /// <c>kubectl</c> is still opening the socket rather than as running-and-fine.
+    /// Aspire runs one monitor loop per resource, each executing the registrations its resource
+    /// names, so a second resource carrying this key would run the probe twice per cycle. Every
+    /// probe is a connection <c>kubectl</c> logs and the database behind it may log as an
+    /// incomplete startup packet — into the log a developer reads to find out why the tunnel is
+    /// down. Nothing waits on the tunnel, so the second annotation would buy a dashboard badge and
+    /// pay for it in the diagnostic channel.
     /// </remarks>
     [Fact]
-    public void TheTunnel_CarriesTheSameHealthCheck()
+    public void TheTunnel_DoesNotCarryASecondCopyOfTheHealthCheck()
     {
-        var builder = CreateBuilder(Entry());
+        var builder = CreateBuilder();
 
-        builder.AddBackingService(Name, UnusedFactory(builder));
+        Resolve(builder, Config());
 
-        Assert.Equal(
-            $"{Name}-tunnel-tcp",
-            Tunnel(builder).Annotations.OfType<HealthCheckAnnotation>().Single().Key);
+        Assert.Empty(Tunnel(builder).Annotations.OfType<HealthCheckAnnotation>());
     }
 
     /// <summary>
@@ -286,16 +253,42 @@ public class KubernetesBackingServiceTests
     /// developer's machine.
     /// </remarks>
     [Fact]
-    public void TheHealthCheckKey_IsRegisteredWithTheHealthCheckService()
+    public void TheHealthCheckKey_IsRegisteredWithABoundedTimeout()
     {
-        var builder = CreateBuilder(Entry());
+        var builder = CreateBuilder();
 
-        builder.AddBackingService(Name, UnusedFactory(builder));
+        Resolve(builder, Config());
 
-        var registrations = builder.Services.BuildServiceProvider()
-            .GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations;
+        var registration = builder.Services.BuildServiceProvider()
+            .GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations
+            .Single(candidate => candidate.Name == $"{Name}-tunnel-tcp");
 
-        Assert.Contains(registrations, registration => registration.Name == $"{Name}-tunnel-tcp");
+        // Bounded, because AddCheck's instance overload leaves it infinite: a connect that hangs
+        // rather than refuses would stall that resource's monitor loop for the life of the run.
+        Assert.NotEqual(Timeout.InfiniteTimeSpan, registration.Timeout);
+    }
+
+    /// <summary>
+    /// An entry missing several required fields names all of them, in one run.
+    /// </summary>
+    /// <remarks>
+    /// The property the message exists for. Reporting one field per run costs a failed startup per
+    /// key — the trade <c>DeveloperConfigValidator</c> rejects for the same reason — and this block
+    /// has four fields, so a developer filling in a fresh one would otherwise pay four startups to
+    /// be told what it contains.
+    /// </remarks>
+    [Fact]
+    public void AnEmptyBlock_NamesEveryMissingFieldAtOnce()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, Config(service: null, port: null, context: null, connectionString: null)));
+
+        Assert.Contains("'kubernetes.service'", ex.Message);
+        Assert.Contains("'kubernetes.port'", ex.Message);
+        Assert.Contains("'kubernetes.context'", ex.Message);
+        Assert.Contains("'kubernetes.connectionString'", ex.Message);
     }
 
     [Theory]
@@ -304,20 +297,41 @@ public class KubernetesBackingServiceTests
     [InlineData("connectionString", "the connection string consumers receive")]
     public void AMissingField_IsNamedWithWhatItHolds(string field, string whatItIs)
     {
-        var builder = CreateBuilder(field switch
-        {
-            "service" => Entry(service: null),
-            "context" => Entry(context: null),
-            _ => WithoutConnectionString(),
-        });
+        var builder = CreateBuilder();
 
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => builder.AddBackingService(Name, UnusedFactory(builder)));
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => Resolve(builder, field switch
+        {
+            "service" => Config(service: null),
+            "context" => Config(context: null),
+            _ => Config(connectionString: null),
+        }));
 
         Assert.Contains($"Backing service '{Name}'", ex.Message);
         Assert.Contains($"requires 'kubernetes.{field}'", ex.Message);
         Assert.Contains(whatItIs, ex.Message);
-        Assert.Contains($"ServiceSources__BackingServices__{Name}__Kubernetes__{field}", ex.Message);
+    }
+
+    /// <summary>
+    /// The message points at the file by the name the file itself uses.
+    /// </summary>
+    /// <remarks>
+    /// <c>DeveloperConfiguration.BackingServicesKey</c> is the <c>IConfiguration</c> path
+    /// (<c>ServiceSources:BackingServices</c>) and belongs only in the environment-variable half of
+    /// the sentence. A developer sent to <c>servicesources.local.json</c> to add a key under
+    /// "ServiceSources:BackingServices" would find no such section — the file spells it
+    /// <c>backingServices</c>.
+    /// </remarks>
+    [Fact]
+    public void AMissingField_NamesTheFilesOwnSectionAndTheEnvironmentVariable()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, Config(service: null)));
+
+        Assert.Contains("\"backingServices\" in 'servicesources.local.json'", ex.Message);
+        Assert.DoesNotContain("\"ServiceSources:BackingServices\"", ex.Message);
+        Assert.Contains($"ServiceSources__BackingServices__{Name}__Kubernetes__Service", ex.Message);
     }
 
     /// <remarks>
@@ -328,29 +342,33 @@ public class KubernetesBackingServiceTests
     [Fact]
     public void AMissingPort_SaysWhichEndOfTheTunnelItIs()
     {
-        var builder = CreateBuilder(Entry(port: null));
+        var builder = CreateBuilder();
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => builder.AddBackingService(Name, UnusedFactory(builder)));
+            () => Resolve(builder, Config(port: null)));
 
         Assert.Contains("requires 'kubernetes.port'", ex.Message);
         Assert.Contains("inside the cluster", ex.Message);
         Assert.Contains("allocated rather than configured", ex.Message);
     }
 
+    /// <remarks>
+    /// A port that is present but not a port is a different mistake from a missing one, and is not
+    /// folded into the list of what the block lacks — the developer filled this field in.
+    /// </remarks>
     [Theory]
-    [InlineData("0")]
-    [InlineData("70000")]
-    [InlineData("-1")]
-    public void APortOutsideTheRange_IsRefused(string port)
+    [InlineData(0)]
+    [InlineData(70000)]
+    [InlineData(-1)]
+    public void APortOutsideTheRange_IsRefusedAsAValueRatherThanAsAnAbsence(int port)
     {
-        var builder = CreateBuilder(Entry(port: port));
+        var builder = CreateBuilder();
 
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => builder.AddBackingService(Name, UnusedFactory(builder)));
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => Resolve(builder, Config(port: port)));
 
         Assert.Contains($"'kubernetes.port' is '{port}'", ex.Message);
         Assert.Contains("between 1 and 65535", ex.Message);
+        Assert.DoesNotContain("requires", ex.Message);
     }
 
     /// <summary>
@@ -365,14 +383,35 @@ public class KubernetesBackingServiceTests
     [Fact]
     public void AConnectionStringThatNamesNoPort_IsRefusedRatherThanLeavingTheTunnelUndialled()
     {
-        var builder = CreateBuilder(Entry(connectionString: "Host=localhost;Port=5432;Database=orders"));
+        var builder = CreateBuilder();
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => builder.AddBackingService(Name, UnusedFactory(builder)));
+            () => Resolve(builder, Config(connectionString: "Host=localhost;Port=5432;Database=orders")));
 
         Assert.Contains("names no '${port}' placeholder", ex.Message);
         Assert.Contains("Host=localhost;Port=5432;Database=orders", ex.Message);
         Assert.Contains("source 'direct'", ex.Message);
+    }
+
+    /// <summary>
+    /// That same message names the shell, because a mangled template arrives looking identical.
+    /// </summary>
+    /// <remarks>
+    /// <c>${…}</c> is a shell variable too, so a template set through an environment variable can
+    /// reach the AppHost with its placeholder already expanded away — and what arrives is exactly
+    /// what someone who wrote a literal port produces. The first half of the message tells that
+    /// reader to write the spelling they already wrote, so the second half has to name the shell.
+    /// </remarks>
+    [Fact]
+    public void AConnectionStringThatNamesNoPort_AlsoNamesTheShellThatMayHaveEatenIt()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, Config(connectionString: "Host=localhost;Port=;Database=orders")));
+
+        Assert.Contains("a shell expanded it away", ex.Message);
+        Assert.Contains("Single-quote the value", ex.Message);
     }
 
     /// <remarks>
@@ -382,10 +421,10 @@ public class KubernetesBackingServiceTests
     [Fact]
     public void ANamedPort_IsRefusedUntilOneTunnelCanCarrySeveral()
     {
-        var builder = CreateBuilder(Entry(connectionString: "amqp://localhost:${port:amqp}/"));
+        var builder = CreateBuilder();
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => builder.AddBackingService(Name, UnusedFactory(builder)));
+            () => Resolve(builder, Config(connectionString: "amqp://localhost:${port:amqp}/")));
 
         Assert.Contains("'${port:amqp}'", ex.Message);
         Assert.Contains("not supported yet", ex.Message);
@@ -399,11 +438,11 @@ public class KubernetesBackingServiceTests
     [Fact]
     public void ASecretPlaceholder_IsRefusedWithSomewhereElseToPutTheValue()
     {
-        var builder = CreateBuilder(
-            Entry(connectionString: "Host=localhost;Port=${port};Password=${secret:orders-creds:password}"));
+        var builder = CreateBuilder();
 
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => builder.AddBackingService(Name, UnusedFactory(builder)));
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => Resolve(
+            builder,
+            Config(connectionString: "Host=localhost;Port=${port};Password=${secret:orders-creds:password}")));
 
         Assert.Contains("'${secret:orders-creds:password}'", ex.Message);
         Assert.Contains("not supported yet", ex.Message);
@@ -421,44 +460,45 @@ public class KubernetesBackingServiceTests
     [Fact]
     public void AMalformedPlaceholder_IsReportedAsMalformed()
     {
-        var builder = CreateBuilder(Entry(connectionString: "Host=localhost;Port=${port:}"));
+        var builder = CreateBuilder();
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => builder.AddBackingService(Name, UnusedFactory(builder)));
+            () => Resolve(builder, Config(connectionString: "Host=localhost;Port=${port:}")));
 
         Assert.Contains("the port name after 'port:' is empty", ex.Message);
         Assert.DoesNotContain("names no '${port}' placeholder", ex.Message);
     }
 
     /// <summary>
-    /// Nothing is added before the entry is known to be usable — a missing field and an
-    /// unresolvable template alike.
+    /// Nothing is allocated and nothing is added before the entry is known to be usable.
     /// </summary>
     /// <remarks>
-    /// A tunnel left behind by a call that then threw would be a resource the AppHost never asked
-    /// for, and — since AppHost construction fails anyway — one whose only effect is to make the
-    /// model harder to read in whatever reports it. The template case is the one worth pinning: the
-    /// whole template is judged in a pass of its own, ahead of the pass that needs a port, so that
-    /// every reason to refuse it is reached before anything is allocated or added.
+    /// The property the second commit exists for. A template this source cannot resolve is config
+    /// validation like the field checks above it, so it is judged in a pass of its own before a
+    /// port is taken — and a tunnel left behind by a call that then threw would be a resource the
+    /// AppHost never asked for.
     /// </remarks>
     [Theory]
     [InlineData("a missing field")]
-    [InlineData("an unresolvable placeholder")]
-    public void AFailedEntry_AddsNothing(string because)
+    [InlineData("a placeholder this source cannot resolve")]
+    [InlineData("a template that addresses no tunnel")]
+    public void AFailedEntry_AllocatesNoPortAndAddsNothing(string because)
     {
-        var builder = CreateBuilder(because == "a missing field"
-            ? Entry(context: null)
-            : Entry(connectionString: "Host=localhost;Port=${port};Password=${secret:creds:password}"));
+        var builder = CreateBuilder();
+        var allocations = 0;
+
+        var config = because switch
+        {
+            "a missing field" => Config(context: null),
+            "a placeholder this source cannot resolve" =>
+                Config(connectionString: "Host=localhost;Port=${port};Password=${secret:creds:password}"),
+            _ => Config(connectionString: "Host=localhost;Port=5432;Database=orders"),
+        };
 
         Assert.Throws<ServiceSourcesConfigurationException>(
-            () => builder.AddBackingService(Name, UnusedFactory(builder)));
+            () => Resolve(builder, config, new TrackingPortAllocator(() => allocations++, LocalPort)));
 
+        Assert.Equal(0, allocations);
         Assert.Empty(builder.Resources);
     }
-
-    private static string WithoutConnectionString() =>
-        $$"""
-        { "backingServices": { "{{Name}}": { "source": "kubernetes", "kubernetes": {
-            "service": "orders-pg", "port": 5432, "context": "dev-west" } } } }
-        """;
 }

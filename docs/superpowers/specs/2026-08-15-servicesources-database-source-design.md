@@ -22,13 +22,21 @@ that file is held to. So the map is split out as
 [#233](https://github.com/flojon/aspire-servicesources/issues/233) rather than shipped alongside the
 tunnel; a single `port` stays valid either way, so nothing about it is a breaking change.
 
-**A connection string with no `${port}` is refused, which this document does not say.** Its *Error
-Handling* section lists "a `${port}` placeholder present for a source where it isn't resolvable" —
-the `"direct"` case — and says nothing about the reverse. The reverse is worse: under
-`"kubernetes"`, a template carrying the cluster's own port addresses that port on the developer's
-machine, where their own database container may be listening, so the AppHost connects to the wrong
-database with every resource reporting healthy and the tunnel forwarding a port nothing dials. It is
-refused at `AddBackingService()` time.
+**A connection string with no `${port}` is refused — implementing *Templating*, which the *Error
+Handling* list omits.** Templating already says `${port}` is "Meaningful (and **required**) only for
+`"kubernetes"`". Error Handling then lists only the mirror case, "a `${port}` placeholder present for
+a source where it isn't resolvable", and says nothing about a `"kubernetes"` template that carries
+none — so the rule was stated once and not carried into the section an implementer works from. The
+omission matters because the unrefused case is the worse one: a template carrying the cluster's own
+port addresses that port on the developer's machine, where their own database container may be
+listening, so the AppHost connects to the wrong database with every resource reporting healthy and
+the tunnel forwarding a port nothing dials. Refused at `AddBackingService()` time.
+
+The message names two causes, not one. A template may never have had a `${port}`; or it had one and
+a shell ate it, which *Templating* describes and which produces exactly the same thing — a valid
+template with no placeholder left in it. `ConnectionStringTemplate`'s remarks said that case "nothing
+can report", and under `"direct"` that stands; under `"kubernetes"` it is now reported, so those
+remarks and the README paragraph repeating them have been corrected rather than left to rot.
 
 That refusal has to relax for the whole-string secret mode, which legitimately carries no `${port}`
 — it arrives already addressed, and is answered by forwarding the same port number locally. Stage 3

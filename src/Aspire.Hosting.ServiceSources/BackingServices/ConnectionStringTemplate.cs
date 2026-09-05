@@ -53,12 +53,18 @@ namespace Aspire.Hosting.ServiceSources.BackingServices;
 /// docker-compose and a GitHub Actions <c>run:</c> block use for their own variables, so a template
 /// set through an environment variable can be expanded before it reaches here — and double quotes
 /// do not help, since they protect the <c>;</c> and not the <c>${</c>. What arrives is a valid
-/// template with no placeholder in it, which nothing can report, because that is also what a
-/// developer who wanted a literal port writes. That is why the warning lives in the README and not
-/// in an error message: the reader who needs it sees no error, and the messages that <em>are</em>
-/// reachable are reached only by a token that survived the shell — so a note there would be read by
-/// exactly the people who did not need it. Single quotes are the answer, and hyphenated keys need
+/// template with no placeholder in it, which is also what a developer who wanted a literal port
+/// writes — so nothing here can tell the two apart, and the warning lives in the README rather than
+/// in a message this type could raise. Single quotes are the answer, and hyphenated keys need
 /// <c>env 'NAME=value'</c>, since <c>export</c> rejects the name.
+/// <para>
+/// A <em>source</em> can tell them apart where it knows a placeholder was mandatory, and one does:
+/// <see cref="KubernetesBackingServiceSource"/> requires a <c>${port}</c>, because the local end of
+/// its tunnel is allocated and nothing else can address it. A template that lost one to the shell
+/// arrives there as a template that never had one, so that message names the shell alongside the
+/// spelling. Under <c>"direct"</c> the gap remains, and has to: a literal port is exactly what that
+/// source expects.
+/// </para>
 /// Weighed against the alternatives and kept: the file is where a template normally lives and
 /// <c>$</c> is ordinary there, every other sigil trades this trap for another transport's — <c>%</c>
 /// is cmd's, <c>&lt;</c> is redirection — and an unquoted connection string is already mangled by

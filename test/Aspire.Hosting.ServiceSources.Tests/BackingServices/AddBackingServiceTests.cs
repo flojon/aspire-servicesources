@@ -319,7 +319,59 @@ public class AddBackingServiceTests
 
         Assert.Contains("unknown source 'clsuter'", ex.Message);
         Assert.Contains("'direct'", ex.Message);
+        Assert.Contains("'kubernetes'", ex.Message);
         Assert.Contains("'local'", ex.Message);
+    }
+
+    /// <summary>
+    /// A <c>kubernetes</c> block binds from the file and reaches the source that reads it.
+    /// </summary>
+    /// <remarks>
+    /// The half <c>KubernetesBackingServiceTests</c> deliberately does not cover: those resolve the
+    /// source directly with a fake port allocator, so nothing there would notice a field that
+    /// stopped binding or a <c>source</c> that dispatched elsewhere. This asserts the config path
+    /// and stops at the first thing that proves the block arrived — the tunnel's own arguments,
+    /// which carry three of the four fields.
+    /// <para>
+    /// The forwarded port is read back rather than named, because dispatching through
+    /// <c>AddBackingService</c> uses the real allocator, exactly as the service side's own
+    /// kubernetes coverage does.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task KubernetesEntry_BindsItsBlockAndReachesTheKubernetesSource()
+    {
+        var builder = CreateBuilder("""
+            { "backingServices": { "orders-db": {
+                "source": "kubernetes",
+                "kubernetes": {
+                  "service": "orders-pg",
+                  "port": 5432,
+                  "context": "dev-west",
+                  "namespace": "orders",
+                  "connectionString": "Host=localhost;Port=${port};Database=orders" } } } }
+            """);
+
+        var db = builder.AddBackingService("orders-db", LocalFactory(builder, resourceName: "not-the-one"));
+
+        var tunnel = Assert.Single(builder.Resources.OfType<ExecutableResource>());
+        var argsContext = new CommandLineArgsCallbackContext([]);
+
+        foreach (var annotation in tunnel.Annotations.OfType<CommandLineArgsCallbackAnnotation>())
+        {
+            await annotation.Callback(argsContext);
+        }
+
+        var args = argsContext.Args.Select(arg => arg.ToString()!).ToArray();
+        var localPort = args.Single(arg => arg.EndsWith(":5432", StringComparison.Ordinal)).Split(':')[0];
+
+        Assert.Equal("orders-db", db.Resource.Name);
+        Assert.Equal(
+            ["port-forward", "svc/orders-pg", $"{localPort}:5432", "--context", "dev-west", "--namespace", "orders"],
+            args);
+        Assert.Equal(
+            $"Host=localhost;Port={localPort};Database=orders",
+            await db.Resource.ConnectionStringExpression.GetValueAsync(default));
     }
 
     /// <remarks>

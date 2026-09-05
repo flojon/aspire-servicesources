@@ -1825,8 +1825,11 @@ That is a separate question from the value. `launchSettings.json` leaves a value
 docker-compose does its own `${…}` interpolation, so escape it there as `$${port}`; and a workflow's
 `run:` block is a shell, so it needs the single quotes above.
 
-Nothing reports the mangled case either way, because what arrives is a valid template that simply
-has no placeholder in it — which is also what someone writing a literal port produces.
+Under `"direct"` nothing reports the mangled case, because what arrives is a valid template that
+simply has no placeholder in it — which is also what someone writing a literal port produces, and
+that is a perfectly good `"direct"` connection string. **Under `"kubernetes"` it is reported**, since
+a `${port}` is required there: the error names the shell alongside the spelling, because a template
+that lost its placeholder and one that never had it arrive looking the same.
 
 This does not apply to `servicesources.local.json`, `appsettings.json` or user secrets, where `$` is
 an ordinary character — which is where a template normally lives.

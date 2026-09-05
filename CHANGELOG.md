@@ -151,7 +151,9 @@ nothing will fail to build to warn you.
   number anyone can write down — and the failure the refusal prevents is silent: `Port=5432` copied
   out of a manifest addresses that port on the developer's own machine, where their own database
   container may well be listening, and the AppHost would connect to the wrong database with every
-  resource reporting healthy.
+  resource reporting healthy. The message names the shell as well as the spelling, because a
+  template whose `${port}` was expanded away before the AppHost ran — `${…}` is a shell variable
+  too, and double quotes do not protect it — arrives looking exactly like one that never had it.
 
   Not in this pass: forwarding several ports through one tunnel (`"port": { "amqp": 5672 }`, reached
   as `${port:amqp}` — [#233]), and reading credentials out of a Kubernetes secret with
