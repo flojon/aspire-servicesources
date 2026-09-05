@@ -431,22 +431,29 @@ public class KubernetesBackingServiceTests
     }
 
     /// <summary>
-    /// Nothing is added before the entry is known to be usable.
+    /// Nothing is added before the entry is known to be usable — a missing field and an
+    /// unresolvable template alike.
     /// </summary>
     /// <remarks>
     /// A tunnel left behind by a call that then threw would be a resource the AppHost never asked
     /// for, and — since AppHost construction fails anyway — one whose only effect is to make the
-    /// model harder to read in whatever reports it.
+    /// model harder to read in whatever reports it. The template case is the one worth pinning: the
+    /// whole template is judged in a pass of its own, ahead of the pass that needs a port, so that
+    /// every reason to refuse it is reached before anything is allocated or added.
     /// </remarks>
-    [Fact]
-    public void AFailedEntry_AddsNothing()
+    [Theory]
+    [InlineData("a missing field")]
+    [InlineData("an unresolvable placeholder")]
+    public void AFailedEntry_AddsNothing(string because)
     {
-        var builder = CreateBuilder(Entry(context: null));
+        var builder = CreateBuilder(because == "a missing field"
+            ? Entry(context: null)
+            : Entry(connectionString: "Host=localhost;Port=${port};Password=${secret:creds:password}"));
 
         Assert.Throws<ServiceSourcesConfigurationException>(
             () => builder.AddBackingService(Name, UnusedFactory(builder)));
 
-        Assert.Empty(builder.Resources.OfType<ExecutableResource>());
+        Assert.Empty(builder.Resources);
     }
 
     private static string WithoutConnectionString() =>

@@ -38,10 +38,9 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     {
         var kubernetes = config.Kubernetes;
 
-        // Every field before anything is allocated or added, so that an entry missing two of them
-        // reports the first rather than a port allocation on the way to reporting it. The order is
-        // the order they are written in, which is the order a developer filling the block in would
-        // hit them.
+        // The fields in the order they are written in the block, which is the order a developer
+        // filling it in hits them — so an entry missing several is walked through them one run at a
+        // time in the order they would write them.
         var service = Required(name, kubernetes.Service, "service", "the Kubernetes Service to forward to");
         var remotePort = RequiredPort(name, kubernetes.Port);
         var context = Required(name, kubernetes.Context, "context", "the kubectl context to forward through");
@@ -51,9 +50,13 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
 
         var template = ConnectionStringTemplate.Parse(connectionString, name, ConfigKey(name, "connectionString"));
 
+        // Judged whole before a port is taken, for the reason the service-side source gives: a
+        // template this source cannot resolve is config validation like every check above it, and
+        // should not burn an allocation on its way to saying so.
+        RequireEveryPlaceholderIsResolvable(name, connectionString, template);
+
         var localPort = portAllocator.AllocatePort();
         var expression = new ReferenceExpressionBuilder();
-        var ports = 0;
 
         foreach (var segment in template.Segments)
         {
@@ -64,36 +67,19 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
                     break;
 
                 // Eager, and as a literal: the port is known here, so nothing about it has to be
-                // deferred to resolution time. A named one is the multi-port form, which arrives
-                // with the port map it would resolve against (#233).
-                case ConnectionStringTemplate.Port { Name: null }:
+                // deferred to resolution time. What a consumer receives is an ordinary connection
+                // string with no late parts in it.
+                case ConnectionStringTemplate.Port:
                     ConnectionStringTemplate.AppendLiteral(
                         expression, localPort.ToString(CultureInfo.InvariantCulture));
-                    ports++;
                     break;
 
-                case ConnectionStringTemplate.Port port:
-                    throw new ServiceSourcesConfigurationException(
-                        $"Backing service '{name}': the connection string carries '{port.AsWritten}', which names one "
-                        + "of several forwarded ports, and forwarding more than one port is not supported yet. This "
-                        + $"backing service forwards the single port '{ConfigKey(name, "port")}' names, so write "
-                        + "'${port}'.");
-
-                case ConnectionStringTemplate.Secret secret:
-                    throw new ServiceSourcesConfigurationException(
-                        $"Backing service '{name}': the connection string carries '{secret.AsWritten}', and reading a "
-                        + "value out of a Kubernetes secret is not supported yet. Put the value in the connection "
-                        + "string, or set the whole connection string from a configuration layer that already holds "
-                        + $"it — user secrets, or {Environmentally(ConfigKey(name, "connectionString"))}.");
-
+                // Unreachable: the walk above accepts only literals and the unnamed port. Kept so
+                // that a placeholder kind added later fails loudly here rather than vanishing from
+                // the connection string.
                 default:
                     throw new InvalidOperationException($"Unhandled template segment '{segment.GetType().Name}'.");
             }
-        }
-
-        if (ports == 0)
-        {
-            throw NothingAddressesTheTunnel(name, connectionString);
         }
 
         var backingService = builder.AddConnectionString(name, expression.Build());
@@ -124,6 +110,57 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
         tunnel.WithHealthCheck(healthCheckKey);
 
         return backingService.WithHealthCheck(healthCheckKey);
+    }
+
+    /// <summary>
+    /// Refuses a template this source cannot resolve, and one that never mentions the tunnel.
+    /// </summary>
+    /// <remarks>
+    /// A pass of its own, ahead of the one that builds the expression, so that every reason a
+    /// template is refused is reached before a port is allocated and before anything is added to
+    /// the model. It also puts the two "not supported yet" branches in one place, which is where
+    /// stage 3 and <see href="https://github.com/flojon/aspire-servicesources/issues/233">#233</see>
+    /// will remove them from.
+    /// </remarks>
+    private static void RequireEveryPlaceholderIsResolvable(
+        string name, string connectionString, ConnectionStringTemplate template)
+    {
+        var ports = 0;
+
+        foreach (var segment in template.Segments)
+        {
+            switch (segment)
+            {
+                case ConnectionStringTemplate.Literal:
+                    break;
+
+                case ConnectionStringTemplate.Port { Name: null }:
+                    ports++;
+                    break;
+
+                case ConnectionStringTemplate.Port port:
+                    throw new ServiceSourcesConfigurationException(
+                        $"Backing service '{name}': the connection string carries '{port.AsWritten}', which names one "
+                        + "of several forwarded ports, and forwarding more than one port is not supported yet. This "
+                        + $"backing service forwards the single port '{ConfigKey(name, "port")}' names, so write "
+                        + "'${port}'.");
+
+                case ConnectionStringTemplate.Secret secret:
+                    throw new ServiceSourcesConfigurationException(
+                        $"Backing service '{name}': the connection string carries '{secret.AsWritten}', and reading a "
+                        + "value out of a Kubernetes secret is not supported yet. Put the value in the connection "
+                        + "string, or set the whole connection string from a configuration layer that already holds "
+                        + $"it — user secrets, or {Environmentally(ConfigKey(name, "connectionString"))}.");
+
+                default:
+                    throw new InvalidOperationException($"Unhandled template segment '{segment.GetType().Name}'.");
+            }
+        }
+
+        if (ports == 0)
+        {
+            throw NothingAddressesTheTunnel(name, connectionString);
+        }
     }
 
     /// <summary>
