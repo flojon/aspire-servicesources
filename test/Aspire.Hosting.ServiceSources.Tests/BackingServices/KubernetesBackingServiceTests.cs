@@ -527,6 +527,11 @@ public class KubernetesBackingServiceTests
         Assert.IsType<ServiceSourcesConfigurationException>(ex);
         Assert.Contains($"Backing service '{longName}'", ex.Message);
         Assert.Contains($"{longName}-tunnel", ex.Message);
+
+        // Aspire's own rule, in its own words, without the parameter of a call the developer never
+        // made — which would otherwise land immediately before the sentence saying the name was
+        // derived rather than written.
+        Assert.DoesNotContain("(Parameter", ex.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -544,6 +549,14 @@ public class KubernetesBackingServiceTests
     [InlineData("Host=db.internal;Port=5432;Pwd=hunter2", "hunter2", "Host=db.internal")]
     [InlineData("postgresql://orders_app:hunter2@db.internal:5432/orders", "hunter2", "orders_app")]
     [InlineData("redis://:hunter2@db.internal:6379", "hunter2", "db.internal")]
+    // A ';' is legal and unencoded in userinfo (RFC 3986 puts it in sub-delims), so a password
+    // carrying one must still be found — forbidding ';' in the password class leaked these whole.
+    [InlineData("redis://user:pa;ss@db.internal:6379", "pa;ss", "user")]
+    [InlineData("mongodb://user:p;w@db.internal:27017", "p;w", "mongodb://")]
+    [InlineData(
+        "BlobEndpoint=https://acct.blob.core.windows.net/;SharedAccessSignature=sv=2021&sig=hunter2",
+        "hunter2",
+        "BlobEndpoint=https://acct.blob.core.windows.net/")]
     [InlineData(
         "Endpoint=sb://ns.servicebus.windows.net/;SharedAccessKeyName=root;SharedAccessKey=hunter2",
         "hunter2",
@@ -584,6 +597,9 @@ public class KubernetesBackingServiceTests
         Assert.DoesNotContain("***", ex.Message);
     }
 
+    /// <summary>
+    /// Text that only resembles a credential keyword is echoed as written.
+    /// </summary>
     /// <remarks>
     /// A keyword that merely starts with one of the reserved words is not a credential, and the
     /// lookbehind anchors on the <c>=</c> so it does not become one — <c>SharedAccessKeyName</c> is
@@ -593,6 +609,9 @@ public class KubernetesBackingServiceTests
     [InlineData("Host=db.internal;TokenExpiry=30;Database=orders", "TokenExpiry=30")]
     [InlineData("Host=db.internal;PasswordExpiry=30;Database=orders", "PasswordExpiry=30")]
     [InlineData("Host=db.internal;Integrated Security=SSPI;Database=orders", "Integrated Security=SSPI")]
+    // The other half of the ';' question: an '@' belonging to a later keyword must not drag the
+    // redaction across the fields between it and a '://' earlier in the string.
+    [InlineData("Data Source=tcp://db.internal:1433;UID=a@b.com;Database=orders", "1433;UID=a@b.com")]
     public void AKeywordThatOnlyLooksLikeACredential_IsNotRedacted(string connectionString, string survives)
     {
         var builder = CreateBuilder();

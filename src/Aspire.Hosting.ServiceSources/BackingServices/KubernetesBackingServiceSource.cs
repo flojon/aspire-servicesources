@@ -359,22 +359,6 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     }
 
     /// <summary>
-    /// The credential-bearing parts of a connection string, for the one message that echoes one
-    /// back.
-    /// </summary>
-    /// <remarks>
-    /// Two shapes cover what a connection string does with a secret: a keyword whose value runs to
-    /// the next <c>;</c>, and a URI authority's <c>user:pass@host</c>. Matched case-insensitively,
-    /// because keyword casing is a dialect's own business.
-    /// <para>
-    /// Deliberately not exhaustive, and the message says the value was redacted rather than
-    /// claiming it is safe. A backend naming its secret something this misses would still be
-    /// echoed, so this narrows the blast radius rather than closing it. That is the honest trade:
-    /// this message exists to show the developer what <em>arrived</em> — the shell-expansion case is
-    /// only diagnosable by seeing it — and a message that showed nothing would not do that.
-    /// </para>
-    /// </remarks>
-    /// <summary>
     /// What is shown in place of a connection string that could not be scanned.
     /// </summary>
     /// <remarks>
@@ -384,9 +368,36 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     private const string Unscannable =
         "<connection string omitted: it could not be scanned for credentials>";
 
+    /// <summary>
+    /// The credential-bearing parts of a connection string, for the one message that echoes one
+    /// back.
+    /// </summary>
+    /// <remarks>
+    /// Two shapes cover what a connection string does with a secret: a keyword whose value runs to
+    /// the next <c>;</c>, and a URI authority's <c>user:pass@host</c>. Matched case-insensitively,
+    /// because keyword casing is a dialect's own business.
+    /// <para>
+    /// The URI branch tries a <c>;</c>-free password first and falls back to an <c>=</c>-free one,
+    /// which looks fussy and is load-bearing in both directions. Allowing <c>;</c> unconditionally
+    /// let <c>Data Source=tcp://host:1433;UID=a@b.com</c> run to the <em>email's</em> <c>@</c> and
+    /// redact <c>1433;UID=a</c> — corrupting the string this message exists to display. Forbidding
+    /// it outright then leaked <c>redis://user:pa;ss@db</c> whole, because the password could no
+    /// longer reach its own <c>@</c> and nothing matched: RFC 3986 puts <c>;</c> in
+    /// <c>sub-delims</c>, which <c>userinfo</c> admits raw, so such a password is legal and
+    /// unencoded. Preferring the narrow read and falling back to the wide one separates them: the
+    /// corrupting case carries an <c>=</c> and the leaking case does not.
+    /// </para>
+    /// <para>
+    /// Deliberately not exhaustive, and the message says the value was redacted rather than
+    /// claiming it is safe. A backend naming its secret something this misses would still be
+    /// echoed, so this narrows the blast radius rather than closing it. That is the honest trade:
+    /// this message exists to show the developer what <em>arrived</em> — the shell-expansion case is
+    /// only diagnosable by seeing it — and a message that showed nothing would not do that.
+    /// </para>
+    /// </remarks>
     private static readonly Regex Credentials = new(
-        @"(?<=(?:password|pwd|secret|token|accountkey|accesskey|apikey)\s*=)[^;]*"
-        + @"|(?<=://[^:/@\s]{0,256}:)[^@/\s;]*(?=@)",
+        @"(?<=(?:password|pwd|secret|token|accountkey|accesskey|apikey|signature)\s*=)[^;]*"
+        + @"|(?<=://[^:/@\s]{0,256}:)(?:[^@/\s;]*|[^@/\s=]*)(?=@)",
         RegexOptions.IgnoreCase
         | RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(1));
