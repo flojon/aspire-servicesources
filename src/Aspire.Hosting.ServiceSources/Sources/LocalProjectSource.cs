@@ -29,6 +29,17 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         var handler = isDotnetKind ? null : ResolveKindHandler(builder, serviceName, metadata);
         handler?.Validate(serviceName, metadata.KindConfig);
 
+        // The dotnet kind's equivalent of the check above, and here for the same reason: confining
+        // 'project' to the checkout is lexical, so it needs no working tree and belongs in front of
+        // the clone rather than after it. Both paths below combine the value with a repo root — the
+        // eager one only once GetRepoRoot has materialized the checkout — and without this the
+        // commonest configuration, deferral being off by default, would pay for a cold clone before
+        // being told the value was wrong before any of it started.
+        if (isDotnetKind)
+        {
+            ValidateProject(serviceName, metadata.Project);
+        }
+
         // Starts the checkouts an AddService call would have to block on — every "local" service
         // whose first clone nothing else is going to run — at once, on background threads, and
         // returns without waiting for any of them. See LocalCheckoutPrefetch.
@@ -252,27 +263,45 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
     /// </remarks>
     internal static string ConfineProject(string serviceName, string repoRoot, string project)
     {
-        // The empty default of an unwritten 'project' is neither absolute nor climbing, and has a
-        // report of its own: the combine below leaves the checkout root, which is not a file, so
-        // ResolveProjectFile names the key as missing rather than as pointing somewhere it must not.
-        if (project.Length > 0)
-        {
-            if (CheckoutRelativePath.IsAbsolute(project))
-            {
-                throw new ServiceSourcesConfigurationException(
-                    $"Service '{serviceName}': project '{project}' is an absolute path. 'project' has to be a path "
-                    + "relative to the service's checkout — it names a project the repository commits, not one "
-                    + "sitting elsewhere on a developer's machine.");
-            }
+        ValidateProject(serviceName, project);
 
-            if (CheckoutRelativePath.EscapesRoot(project))
-            {
-                throw new ServiceSourcesConfigurationException(
-                    $"Service '{serviceName}': project '{project}' points outside the service's checkout. It must "
-                    + "stay within the repository.");
-            }
+        // Null for the reason ValidateProject tolerates it, and combined as empty: that resolves to
+        // the checkout root, which is not a file, so ResolveProjectFile reports the key as naming
+        // nothing — the report an unwritten 'project' has always had.
+        return Path.Combine(repoRoot, CheckoutRelativePath.NormalizeSeparators(project ?? ""));
+    }
+
+    /// <summary>
+    /// The confinement check on its own, for the callers that have a <c>project</c> to judge before
+    /// they have a checkout to combine it with. Lexical, so it is the same verdict
+    /// <see cref="ConfineProject"/> reaches later — running it twice costs nothing and keeps the
+    /// value judged in front of the clone as well as at the point it becomes a path.
+    /// </summary>
+    internal static void ValidateProject(string serviceName, string? project)
+    {
+        // An unwritten 'project' is neither absolute nor climbing, and has a report of its own —
+        // see ConfineProject. Null rather than empty when the key is written with nothing after it:
+        // YamlDotNet assigns null for an empty scalar and overrides the default, which is what
+        // ServiceCatalogLoader normalizes 'kind' for. Nothing normalizes this one, so it arrives
+        // here as it was parsed.
+        if (string.IsNullOrEmpty(project))
+        {
+            return;
         }
 
-        return Path.Combine(repoRoot, CheckoutRelativePath.NormalizeSeparators(project));
+        if (CheckoutRelativePath.IsAbsolute(project))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': project '{project}' is an absolute path. 'project' has to be a path "
+                + "relative to the service's checkout — it names a project the repository commits, not one "
+                + "sitting elsewhere on a developer's machine.");
+        }
+
+        if (CheckoutRelativePath.EscapesRoot(project))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': project '{project}' points outside the service's checkout. It must "
+                + "stay within the repository.");
+        }
     }
 }
