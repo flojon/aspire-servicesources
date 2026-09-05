@@ -172,6 +172,13 @@ rewrite argument above. If that argument is rejected, candidate (1) is the right
 whole design should be replaced by two `.Trim()` calls — which is a real option and is offered as
 one on the pull request rather than buried here.
 
+**The two candidates are not the same size in scope, either, and the comparison is not honest
+without saying so.** `Args` takes one `service` parameter, fed from the catalog on the service side
+and from developer config on the backing-service side. A `.Trim()` there would therefore also trim
+the *catalog's* Service name, which *Scope* below rules out on purpose. So candidate (1) can express
+the `context` and `namespace` half of this rule and not the `service` half: it is a 2-field answer
+to a 5-field scope. Anyone taking the cheap fallback should take it knowing that.
+
 ### Why the validator rather than a bespoke message in each source
 
 `DeveloperConfigValidator` already names the entry, its kind, the block, the key and the
@@ -185,9 +192,8 @@ validation.
 
 One sentence shape for every opted-in field, because what is true of all of them is the same thing:
 
-> `'namespace' in the 'kubernetes' block is set to ' orders', and the whitespace is part of the
-> value: it is passed to kubectl exactly as written, so what kubectl looks for is ' orders' and not
-> 'orders'. Set it to 'orders'.`
+> `'namespace' in the 'kubernetes' block is set to ' orders', which is passed to kubectl exactly as
+> written — so kubectl looks for ' orders' and not 'orders'. Set it to 'orders'.`
 
 plus the `SetAt` suffix every other complaint in this file carries, naming the configuration key the
 value came from — because it need not have come from the file.
@@ -200,17 +206,56 @@ space as itself, and the ticket's own example is a plain space, so the quoting r
 escaping is what does the work in the common case. The escaping earns its place on the second-
 commonest case: a tab, a non-breaking space, or a character with no glyph at all.
 
+**The tool's name is not hardcoded in the sentence; it is the attribute's required argument.** A
+rule named `NoSurroundingWhitespace` that always says "kubectl" would be a lie the moment a field
+outside this block opts in, and the attribute's own name invites exactly that reuse. So the
+attribute takes the name of whatever receives the value verbatim, and the sentence is built from it:
+
+```csharp
+[NoSurroundingWhitespace("kubectl")]
+public string? Namespace { get; set; }
+```
+
+That argument is also the question the next opt-in has to answer — *who receives this value as
+written?* — which is the fact that justifies the rule in the first place.
+
 **One field appends a sentence, and it is the field that can legitimately be padded.** A context is
 the only opted-in field where the developer receiving this message may have meant it, and a message
 that told *that* developer to write `'padded'` would be sending them to a context that may not
-exist. So `Context` — on both shapes — carries a second sentence naming the way out:
+exist. So `Context` — on both shapes — carries a second, optional payload naming the way out:
 
-> `A context name may legitimately carry surrounding whitespace, and this package cannot tell one
-> from a typo — rename it with 'kubectl config rename-context' if you meant it.`
+> `If this context really is named that, rename it with 'kubectl config rename-context'.`
 
-This is what the attribute's optional payload is *for*, which settles what it does: **the payload is
-message text, appended to the shared sentence.** A field with nothing extra to say carries the bare
-attribute.
+Written as a conditional rather than as an explanation of what this package can and cannot tell:
+every reader of a padded context sees this sentence and only a handful are its audience, so it has
+to be short, and it has to not argue with the `Set it to …` immediately before it.
+
+### When the remedy is not something the developer can type
+
+`Set it to 'X'` is only useful if `X` can be typed back into the file. Two cases where the value
+that survives trimming cannot be, both of which the rule must recognize rather than print anyway:
+
+- **The remedy still carries an invisible character.** ` \uFEFForders` trims to `\uFEFForders`,
+  which renders as `orders` and is not `orders`. Printing `Set it to '\uFEFForders'` is worse than
+  useless: `\uFEFF` is a *valid JSON escape*, so a developer who copies the remedy into
+  `servicesources.local.json` reproduces the identical broken value — and this time no whitespace
+  remains, so nothing fires and the AppHost starts. The fix would have handed the developer the bug
+  back.
+
+  So the remedy is computed by trimming boundary characters that are whitespace **or** invisible —
+  `char.IsControl`, or Unicode category `Format` — while the *trigger* stays `value != value.Trim()`.
+  ` \uFEFForders` is then refused with the remedy `orders`, which works. A value padded only with
+  invisibles and no whitespace at all is still not refused; that is the boundary, and it is recorded
+  below rather than silently widened.
+
+- **The remedy is empty.** ` \uFEFF` is not `IsNullOrWhiteSpace` — the BOM is not whitespace — so
+  `Blank` does not take it, and trimming leaves nothing. The message says the value has nothing in it
+  but whitespace and invisible characters and points at the empty spelling that unsets a field,
+  which is what `Blank` would have said had it been reached.
+
+If the remedy still contains an escaped character *inside* it rather than at its edges, the sentence
+degrades from `Set it to 'X'` to naming what is in there and asking the developer to retype the
+value rather than copy it — since copying is precisely what would round-trip the problem.
 
 ## Design
 
@@ -218,14 +263,19 @@ attribute.
 
 ```csharp
 /// <remarks>A namespace is a DNS-1123 label; a space is not legal anywhere in one.</remarks>
-[NoSurroundingWhitespace]
+[NoSurroundingWhitespace("kubectl")]
 public string? Namespace { get; set; }
 
 [NoSurroundingWhitespace(
-    "A context name may legitimately carry surrounding whitespace, and this package cannot tell "
-    + "one from a typo — rename it with 'kubectl config rename-context' if you meant it.")]
+    "kubectl",
+    IfDeliberate = "If this context really is named that, rename it with "
+        + "'kubectl config rename-context'.")]
 public string? Context { get; set; }
 ```
+
+The first argument is required and names whoever receives the value as written; the `IfDeliberate`
+payload is optional and is appended to the message, for the one field where the developer may have
+meant what they wrote.
 
 Declared on the property rather than in a table inside the validator, for the reason
 `DeveloperConfigShape` gives for deriving its own keys from the entry type: *"read off the entry
@@ -266,16 +316,26 @@ not remove them (verified on .NET 8). Two consequences:
 - `"\uFEFForders"` is **not** refused by this rule and reaches kubectl as written. That is a
   separate trap with the same shape, and it is left open here rather than answered badly: a rule
   about invisible characters is a different rule from a rule about whitespace, and it needs its own
-  decision about which code points and which fields. Recorded on the issue.
-- `" \uFEFForders"` **is** refused — and the remedy the message computes is `\uFEFForders`, which
-  renders as `orders` and is not `orders`. A developer following that advice writes a value that
-  fails again, with no whitespace left to trigger a message. **The fix would have re-created the
-  exact misdiagnosis it exists to close.**
+  decision about which code points and which fields. To be recorded on #236.
+- `" \uFEFForders"` **is** refused — and a remedy computed as `value.Trim()` would be
+  `\uFEFForders`, which renders as `orders` and is not `orders`. That is answered in *When the
+  remedy is not something the developer can type*, by trimming invisibles out of the remedy while
+  leaving the trigger alone.
 
-So `Escaped` gains one arm: a character in Unicode category `Format` — which covers all four above,
-and the soft hyphen — renders as its code point. It is the same rule `Escaped` already applies to
-whitespace that cannot be told from a space by looking, extended to characters that cannot be seen
-at all. Every message in this file benefits, and none changes for a value that does not contain one.
+So `Escaped` gains an arm: a character that is `char.IsControl` or in Unicode category `Format`
+renders as its code point. It is the same rule `Escaped` already applies to whitespace that cannot
+be told from a space by looking, extended to characters that cannot be seen at all. Every message in
+this file benefits, and none changes for a value that does not contain one. The two arms cannot
+collide: across the whole BMP no character is both `Format` and whitespace.
+
+**What that arm does *not* cover, stated so this section does not over-claim in the one place whose
+point is not over-claiming.** `Format` and `Control` are two slices of "invisible", not the whole of
+it. `U+FE0F` (a variation selector) is `NonSpacingMark` and `U+3164` (the Hangul filler) is
+`OtherLetter`; both are invisible, both survive `Trim`, and both reproduce the same unusable-remedy
+shape. Widening the predicate to reach them is the wrong trade — escaping `NonSpacingMark` would
+mangle any legitimately decomposed accented value, which is a real thing to write where these are
+not — so the line stays at `Format` and `Control`, and the residue belongs to the same deferred
+invisible-character question as the first bullet above.
 
 ### Nothing is trimmed anywhere
 
@@ -294,11 +354,18 @@ so a `context` of `--kubeconfig=/tmp/evil` is taken as a literal context name ra
 none of that; it refuses a narrower class of value than the argv already handles safely.
 
 The value is echoed back in the message, which is deliberate — seeing what arrived is the point.
-That is not a new disclosure surface: `NotBindable` already echoes any value that fails to bind, so
-a secret pasted into `kubernetes.port` is echoed verbatim today. The values this rule newly echoes
-are single tokens naming a cluster object, so `KubernetesBackingServiceSource`'s reason for
-redacting only the connection string — that it is the one echoed value which is a whole, valid
-connection string — is unaffected.
+
+It is worth being exact about whether that is a new disclosure surface, because the obvious argument
+that it is not turns out to be half wrong. `NotBindable` does echo any value that fails to bind, so
+a secret pasted into `kubernetes.port` is echoed verbatim today — but `BindsTo` returns `true`
+immediately for a `string`, so `NotBindable` can never fire for a string field. For the five fields
+this rule touches, it *is* a new echo path rather than a duplicate of an existing one.
+
+It is still the right call, on the narrower ground: these five values are single tokens naming a
+cluster object, the message exists to show a difference that is invisible without it, and
+`connectionString` — the one developer-config value that carries credentials by design — is out of
+scope. `KubernetesBackingServiceSource`'s reason for redacting only the connection string, that it
+is the one echoed value which is a whole valid connection string, is unaffected.
 
 ## Scope
 
@@ -321,17 +388,23 @@ process whose output they have to go and find in a dashboard log, after the tunn
 around a value that cannot work. The refusal is worth having for that; it is not worth overselling
 as the only thing standing between the developer and a mystery.
 
-**`service` on the backing-service block is in, and the ticket's "arguably the same case" is why.**
-The line this draws is *a developer-config key whose value is handed to kubectl as the name of a
-cluster object*. `service` is exactly that: `svc/{service}` in the argv, a DNS-1123 label that
-cannot contain a space. Excluding it while including `context` would draw the line by how legible
-the resulting failure is, and by that test `context` would be out too. One attribute and one test
-row.
+**`service` on the backing-service block is in, and this reverses an argument an earlier draft of
+this document made.** That draft excluded it, on the grounds that opting in the backing-service half
+alone "would produce exactly the one-sided fix the ticket refuses to ship". That was wrong, and it
+is retracted here rather than quietly replaced. The ticket's one-sidedness is *the same key, in the
+same file, behaving differently across the two sources*; a service's Service name is not a
+developer-config key at all, so there is no second side for this rule to be one of.
+
+The line the scope actually draws is *a developer-config key whose value is handed to kubectl as the
+name of a cluster object*. `service` is exactly that: `svc/{service}` in the argv, a DNS-1035 label
+that cannot contain a space. Excluding it while including `context` would instead draw the line by
+how legible the resulting failure is — and by that test `context` would be out too, since kubectl
+always names and quotes a bad context. One attribute and three test rows.
 
 **A service's own Service name is out, because it is not a developer-config key at all.** It comes
 from `servicesources.yaml` via `KubernetesMetadata`, a different file with a different author, which
 this validator does not walk. Whether the catalog should get whitespace diagnostics of its own is a
-real question about a different file, and is recorded on the issue rather than answered here.
+real question about a different file, and is to be recorded on #236 rather than answered here.
 
 **`connectionString` is out.** The ticket is explicit, and right: a connection string may carry
 trailing whitespace inside a quoted value.
@@ -356,16 +429,32 @@ headline claim is that both are covered:
 - **Backing-service side:** a seam this file does not have yet. `DeveloperConfigValidatorTests`
   contains no backing-service test at all, and `KubernetesBackingServiceTests` constructs its config
   in code and bypasses the validator entirely. A `LoadBackingService` helper is added alongside
-  `Load`, modelled on `AddBackingServiceTests.CreateAppHostDirectory` — no catalog file, JSON under
-  `backingServices`. **This helper is part of the work, not an existing asset.**
+  `Load`, reusing the existing `CreateAppHostDirectory` — the catalog it writes is inert here, since
+  `ReadBackingServicesFrom` never reads one, so a second directory helper would be duplication for
+  no behavioural difference. It resolves through `ServiceSourcesConfigCache.BackingServicesFor`, not
+  `ResolveBackingService`: the latter answers an unknown name with a default rather than failing, so
+  a test built on it could pass while asserting nothing. **This helper is part of the work, not an
+  existing asset.**
 
 Cases:
 
 - Each opted-in field refused with a leading space, with a trailing space, and with both — for the
   fields on both shapes. Driven from a `[Theory]` over `(shape, block, field)` rather than written
   out, so the symmetry claim is a table a reader can check against the *Scope* table above.
+
+  That theory table is itself the string-keyed second declaration this design rejected for
+  production code, so it has to be written to fail rather than to pass. A row naming a field that
+  does not exist trips `NotValidInBlock` instead, and `Load` is an `Assert.Throws` — so the row
+  would be green while proving nothing. Each row therefore asserts the message contains
+  `'<field>' in the '<block>' block is set to`, that it names the trimmed spelling, and that it
+  does **not** contain "is not a valid key" or the "N problems with the entry" wording — the latter
+  pinning that this rule and nothing else produced the message.
 - The message names the block, the key, the escaped value and the trimmed spelling, and ends with
   the `SetAt` key.
+- **The remedy the message proposes is a value the rule accepts.** Fed back through `Load`, the
+  spelling in `Set it to '…'` resolves rather than failing again. This is the behavioural form of
+  the zero-width fix; "the character is visible in the message" is an assertion about the
+  mitigation, and would still have passed with the unusable remedy.
 - `context` — and only `context` — carries the `rename-context` sentence, on both shapes.
 - A tab, a non-breaking space and a `U+FEFF` around a value are refused and are **visible** in the
   message, including in the spelling the remedy proposes. The `U+FEFF` case is the regression test
@@ -375,20 +464,29 @@ Cases:
 - Interior whitespace — `"my dev ctx"` — is accepted, which is the measured kubeconfig behaviour and
   would otherwise be a regression nobody noticed until someone had such a context.
 - Fields that did **not** opt in are unaffected: `local.path` with a trailing space, a
-  `prepare.command` element with surrounding space, and both `connectionString` fields with trailing
-  space all still bind. These pin the exclusions, which are decisions this document made rather than
-  properties of the mechanism.
-- **Guard test:** every property in either shape carrying the attribute is a block-field property
-  that the validator actually walks, and the set of carriers is exactly the *Scope* table. This
-  guards two real failure modes — an attribute placed somewhere the walk never reaches, and a field
-  quietly losing the rule — and not a third it cannot: moving a property between block types carries
-  its attributes with it, so relocation was never the hazard.
+  `prepare.command` element with surrounding space, both `connectionString` fields with trailing
+  space, and — the two *Scope* argues for at length, and the two that sit in the same block as three
+  opted-in fields — `kubernetes.scheme` as `" https"` still resolving to `https`, and
+  `kubernetes.port` as `" 8080"` still binding to `8080`. These pin the exclusions, which are
+  decisions this document made rather than properties of the mechanism.
+- **Guard test:** the set of properties carrying the attribute is exactly the *Scope* table, and
+  every one of them is a scalar leaf the walk actually reaches. Membership in `BlockFields` is not
+  enough to establish that second half, and getting it wrong would make the test useless for the
+  likeliest mistake: `BlockFieldsOf` keys *every* configurable property, including lists and nested
+  blocks, and `CollectBlock` short-circuits both before reaching this check. An attribute on
+  `PrepareDeveloperConfig.Command` — a `string[]` — would be completely inert and would still pass a
+  membership-only assertion. So each carrier is asserted to be neither a list nor a nested block.
+
+  This guards two real failure modes — an attribute placed where the walk never reaches it, and a
+  field quietly losing the rule — and not a third it cannot: moving a property between block types
+  carries its attributes with it, so relocation was never the hazard.
 
 ## Open questions
 
-None blocking. Two things are deliberately recorded on #236 rather than answered here: whether the
-catalog's `kubernetes.service` should get whitespace diagnostics of its own, and the zero-width
-character gap above.
+None blocking. Two things are deliberately left to a comment on #236 rather than answered here:
+whether the catalog's `kubernetes.service` should get whitespace diagnostics of its own, and the
+invisible-character gap above — a value padded only with characters that are not whitespace is not
+refused, and the `Format`/`Control` line the escaping draws leaves a residue of its own.
 
 ## Delivery
 
