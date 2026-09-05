@@ -38,7 +38,7 @@ Two feeds receive them:
 | Feed | What lands there | Published by |
 | --- | --- | --- |
 | [nuget.org] | stable versions only | `release.yml`, on a published GitHub release |
-| GitHub Packages | a prerelease per commit to `main` | `preview.yml`, on push |
+| GitHub Packages | a prerelease per commit to `main` | `preview.yml`, on push (`main` only — it runs on a release branch too, but publishes nothing there) |
 
 ## Steps
 
@@ -141,7 +141,7 @@ names:
 | Workflow | On a release branch |
 | --- | --- |
 | `ci.yml` | **Runs** on a PR into it, and two of its checks are **required** to merge (see [Protection](#protection)). `on: pull_request` is deliberately unfiltered by base branch (its header says why), so a backport PR gets the whole build, test, pack and smoke-test set. |
-| `preview.yml` | **Nothing.** It triggers on `push: branches: [main]`. That is the behaviour you want — a backport must not publish previews that outrank `main`'s — but it is why [step 3](#3-dry-run-the-release-shape) exists. |
+| `preview.yml` | **Builds, tests and packs the merge commit; publishes nothing.** Its `push` trigger covers `release/**` as well as `main`, so a backport gets the same post-merge run `main` gets — the squashed commit is not the one the PR's checks ran against, and on a branch heading for a tag that is the commit that matters. The publish steps are gated to `main`: a release branch off `v0.4.0` versions as `0.4.1-alpha.0.N`, the same shape `main` carries until its next tag, and the feed would order the two by version alone. So no preview of a backport exists, which is why [step 3](#3-dry-run-the-release-shape) still exists. |
 | `release.yml` | **Publishes normally.** It checks out `github.event.release.tag_name` rather than a branch, so it builds whatever the tag points at, wherever that commit lives. Releasing from a branch needs no workflow change. |
 | `prune-previews` | Runs, as on any release. The branch contributes no previews of its own, so there is nothing to configure — but note that publishing a patch does prune `main`'s previews for the minor still in development down to the five most recent. |
 | `aspire-matrix.yml`, `net11-preview.yml` | Their scheduled runs only ever fire on the default branch, as GitHub's cron does. The `pull_request` triggers still apply to a backport PR touching the paths they filter on. |
@@ -219,9 +219,9 @@ release, in [step 5](#5-record-the-release-on-main).
 
 ### 3. Dry-run the release shape
 
-Because `preview.yml` skips the branch, nothing has packed it — a release branch arrives at
-its tag with less exercise than an ordinary `main` commit gets, which is the situation
-[Gotchas](#gotchas) opens with. Pack the stable shape by hand first:
+`preview.yml` has built, tested and packed every merge into the branch, but only in the
+prerelease shape — that is the situation [Gotchas](#gotchas) opens with, and no amount of
+automated packing off an untagged commit escapes it. Pack the stable shape by hand first:
 
 ```bash
 dotnet build -c Release -warnaserror

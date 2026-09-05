@@ -396,6 +396,15 @@ nothing will fail to build to warn you.
   `UseDeferredCheckout()` nothing moves — those checks still run after the clone lands, as the
   service's resource state.
 
+- A commit merged into a release branch is built, tested and packed, as one merged into `main`
+  already was. `preview.yml` — renamed *Post-merge build*, since publishing is no longer all it
+  does — now triggers on `push` to `release/**` too. What a PR's checks run against is the
+  branch's tip merged with the base; what a squash merge lands is a different commit, and on a
+  branch heading for a tag that is the commit the release is cut from. Publishing stays
+  `main`-only: a release branch off `v0.4.0` versions as `0.4.1-alpha.0.N`, the same shape `main`
+  carries until its next tag, and the preview feed orders versions without regard for which
+  branch produced them. `RELEASING.md` records what each workflow does on such a branch.
+
 ### Fixed
 
 - **A service name is no longer able to place its checkout outside `.servicesources/checkouts/`**

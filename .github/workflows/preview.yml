@@ -1,14 +1,24 @@
-name: Publish preview package
+name: Post-merge build
 
+# Every commit that lands on a shipping branch is built and tested here, because the commit a
+# squash merge creates is not a commit anything has run against: the PR's checks tested the
+# branch's tip merged with the base, and the squashed result is a new commit nobody compiled.
+# `main` additionally publishes a prerelease of that commit to GitHub Packages; a release branch
+# runs the same build and test and stops short of publishing, for the reason the publish steps
+# below give.
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - 'release/**'
 
 jobs:
-  publish:
+  build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # Only the publish steps need this, and they only run on `main`. Job-level permissions
+      # cannot be made conditional, so a release-branch run holds a scope it never exercises.
       packages: write
 
     steps:
@@ -28,11 +38,26 @@ jobs:
 
       # Packed by project rather than solution-wide: the solution also holds the sample AppHost
       # and the test projects, which must never reach a feed.
+      #
+      # Runs on a release branch too, where nothing is pushed afterwards. Packing is the only
+      # step that exercises the nuspec at all, so a backport that breaks packaging is caught on
+      # merge rather than at the tag, where there is no second chance.
       - name: Pack
         run: dotnet pack src/Aspire.Hosting.ServiceSources/Aspire.Hosting.ServiceSources.csproj -c Release -o ./artifacts
 
+      # Publishing is `main`-only, and the two steps below carry the same condition because
+      # adding the source is pointless without the push that uses it.
+      #
+      # MinVer gives a release branch cut from `v0.4.0` the same `0.4.1-alpha.0.N` shape it
+      # gives `main` until `main` is tagged again, so both branches would be pushing prereleases
+      # into one version sequence. Nothing collides — the heights differ — but the feed orders
+      # them by version alone, and a backport merged after a `main` commit would present itself
+      # as the newer build of a line it is not on. A patch is verified by hand before its tag
+      # instead; RELEASING.md's "Dry-run the release shape" is that step.
       - name: Add GitHub Packages source
+        if: github.ref == 'refs/heads/main'
         run: dotnet nuget add source --username ${{ github.repository_owner }} --password ${{ secrets.GITHUB_TOKEN }} --store-password-in-clear-text --name github "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
 
       - name: Push
+        if: github.ref == 'refs/heads/main'
         run: dotnet nuget push "./artifacts/*.nupkg" --source github --skip-duplicate --api-key ${{ secrets.GITHUB_TOKEN }}
