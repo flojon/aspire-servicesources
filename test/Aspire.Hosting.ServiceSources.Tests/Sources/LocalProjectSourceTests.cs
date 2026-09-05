@@ -768,6 +768,38 @@ public class LocalProjectSourceTests
         Assert.Contains("outside", ex.Message);
     }
 
+    /// <summary>
+    /// A segment of nothing but dots and spaces used to be counted as an ordinary directory (#241),
+    /// matching neither <c>"."</c> nor <c>".."</c> exactly, and the value was then reported as a
+    /// project file missing from the checkout. It is refused instead, because the same written
+    /// value does not mean the same thing everywhere: an ordinary directory name here, and erased
+    /// as the last segment of a path on Windows.
+    /// </summary>
+    [Theory]
+    [InlineData(".../Api.csproj", "...")]
+    [InlineData("src/.. /Api.csproj", ".. ")]
+    [InlineData(".../../Api.csproj", "...")]
+    public void ResolveProjectPath_ProjectSegmentIsOnlyDotsAndSpaces_IsRefusedNamingTheSegment(
+        string project, string segment)
+    {
+        var repoDir = Directory.CreateTempSubdirectory().FullName;
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveProjectPath(
+                ServiceName, Metadata(project: project), DevConfig(path: repoDir), UnusedAppHostDirectory,
+                new FakeGitClient()));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains(project, ex.Message);
+
+        // Not the "points outside the checkout" message a climbing path gets: on the platform this
+        // test runs on, the value names a file that would be sitting inside the checkout. The
+        // segment is quoted back because for '.. ' the trailing space is invisible on screen.
+        Assert.Contains($"path segment '{segment}'", ex.Message);
+        Assert.Contains("dots and spaces", ex.Message);
+        Assert.DoesNotContain("points outside", ex.Message);
+    }
+
     [Fact]
     public void ResolveProjectPath_ProjectClimbsAndComesBack_StaysInsideAndIsAccepted()
     {
