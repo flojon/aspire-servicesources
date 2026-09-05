@@ -180,6 +180,76 @@ public class DeferredCheckoutTests
     }
 
     [Fact]
+    public void OptedIn_ColdCheckout_ProjectClimbsOutOfTheCheckout_IsRefusedBeforeAnythingIsRegistered()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.UseDeferredCheckout();
+
+        var client = new FakeGitClient();
+
+        // The deferred path builds the project path itself, against a checkout that does not exist
+        // yet, so it has to make the same confinement check the eager path makes — the two resolve
+        // the same value and must not disagree about it.
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(client).Resolve(
+                builder, "orders", Metadata("orders", project: "../../Evil.csproj"), DevConfig()));
+
+        Assert.Contains("orders", ex.Message);
+        Assert.Contains("outside", ex.Message);
+
+        // Refused at composition: no resource stands against a path outside the checkout, and the
+        // clone that would have filled it was never worth starting.
+        Assert.DoesNotContain(builder.Resources, r => string.Equals(r.Name, "orders", StringComparison.Ordinal));
+        Assert.Empty(client.Cloned);
+    }
+
+    [Fact]
+    public void OptedIn_ColdCheckout_ProjectWrittenWithWindowsSeparators_IsNormalizedIntoThePathDcpFreezes()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.UseDeferredCheckout();
+
+        var client = new FakeGitClient();
+        var gate = client.BlockFor("https://example.com/orders.git");
+
+        var service = new LocalProjectSource(client).Resolve(
+            builder, "orders", Metadata("orders", project: @"src\Service.csproj"), DevConfig());
+
+        // What this registration does with the value, rather than only whether it rejects one: the
+        // deferred path builds the project path itself, and this is the one DCP freezes into the
+        // executable spec. A bare combine would leave 'src\Service.csproj' as a single oddly-named
+        // segment on Linux and macOS, so it is also what tells the two call sites apart.
+        var metadata = Assert.Single(service.Resource.Annotations.OfType<IProjectMetadata>());
+        Assert.Equal(Path.Combine(ExpectedRepoRoot(dir, "orders"), "src", "Service.csproj"), metadata.ProjectPath);
+
+        gate.Set();
+    }
+
+    [Fact]
+    public void OptedIn_ColdCheckout_ProjectMissing_IsRefusedAtCompositionRatherThanAfterTheClone()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.UseDeferredCheckout();
+
+        var client = new FakeGitClient();
+
+        // A dotnet service that names no project file cannot run whichever path it takes. Reported
+        // at composition on this one too: registering it would stand a resource against the checkout
+        // directory itself, whose .csproj never appears, and report it only once the clone had been
+        // paid for and the landed checkout re-read.
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(client).Resolve(
+                builder, "orders", Metadata("orders", project: ""), DevConfig()));
+
+        Assert.Contains("'project' is required", ex.Message);
+        Assert.DoesNotContain(builder.Resources, r => string.Equals(r.Name, "orders", StringComparison.Ordinal));
+        Assert.Empty(client.Cloned);
+    }
+
+    [Fact]
     public void OptedIn_WarmCheckout_ResolvesEagerlyWithFullLaunchProfileFidelity()
     {
         var dir = CreateAppHostDirectory("orders");
