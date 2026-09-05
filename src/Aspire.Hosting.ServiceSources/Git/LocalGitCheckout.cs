@@ -44,9 +44,13 @@ internal static class LocalGitCheckout
         if (!IsContainedCheckoutDirectoryName(serviceName))
         {
             throw new ServiceSourcesConfigurationException(
+                // Kept word for word in step with the same refusal on main, which shares this
+                // clause with a second call site that does not exist at this version.
                 $"Service '{serviceName}' cannot be given a checkout: a service's name is the name of the "
                 + "directory its checkout is cloned into, so it has to be a single directory name — no '/' "
-                + "or '\\' separator, no ':', and not '.' or '..'. Rename the service in "
+                + "or '\\' separator, no ':', and not a name made only of dots and spaces — Windows strips "
+                + "trailing dots and spaces, leaving '.', '..' or nothing, none of which is a name of its "
+                + "own. Rename the service in "
                 + $"'servicesources.yaml' and '{Config.DeveloperConfiguration.FileName}'.");
         }
 
@@ -102,11 +106,19 @@ internal static class LocalGitCheckout
             return false;
         }
 
-        // Windows drops trailing dots and spaces from a path component before resolving it, so
-        // ".. ", "..." and ". " all arrive at the filesystem as ".." or ".". An exact test against
-        // "." and ".." would pass every one of them, and the escape would be invisible to a CI that
-        // only runs on Linux. Trim the same characters first: a name that is nothing but dots and
-        // spaces is one of those two however it was spelled, and nothing else can shed a segment.
+        // Windows strips trailing dots and spaces from a path component before resolving it, so a
+        // name made only of those characters is never a directory of its own there: ".. " arrives
+        // as ".." and escapes, while "..." and ". " are left with nothing and land on checkouts/
+        // itself. An exact test against "." and ".." passes all three, and the difference is
+        // invisible to a CI that only runs on Linux, where each is an ordinary directory name.
+        // Trim the same characters first: what is left is what Windows will actually look for, and
+        // only a name that is entirely dots and spaces has nothing left.
+        //
+        // Only what the trimming leaves is judged, so "orders." is accepted. That name is contained
+        // — it is a directory under checkouts/ either way — though on Windows it resolves to the
+        // same directory as "orders", so two entries spelled that way would share one checkout.
+        // Refusing it is a rule about naming rather than about containment, which belongs to
+        // whatever validates the name, not here.
         return serviceName.TrimEnd('.', ' ').Length > 0;
     }
 

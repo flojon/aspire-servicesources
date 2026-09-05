@@ -8,7 +8,12 @@ namespace Aspire.Hosting.ServiceSources.Tests.Git;
 /// </summary>
 public class LocalGitCheckoutTests
 {
-    private static string NewAppHostDirectory() => Directory.CreateTempSubdirectory().FullName;
+    /// <summary>
+    /// A directory to compose paths against, never created on disk.
+    /// <see cref="LocalGitCheckout.ManagedRepoRoot"/> does no I/O, so a real temp directory here
+    /// would be one more the suite leaves behind for nothing.
+    /// </summary>
+    private static readonly string UnusedAppHostDirectory = Path.Combine(Path.GetTempPath(), "apphost");
 
     /// <summary>
     /// The service name becomes a directory name under <c>.servicesources/checkouts/</c>, so one
@@ -33,10 +38,8 @@ public class LocalGitCheckoutTests
     [InlineData("  ..  ")]
     public void ManagedRepoRoot_ANameThatIsNotADirectoryNameOfItsOwn_IsRefused(string serviceName)
     {
-        var appHostDirectory = NewAppHostDirectory();
-
         var exception = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => LocalGitCheckout.ManagedRepoRoot(appHostDirectory, serviceName));
+            () => LocalGitCheckout.ManagedRepoRoot(UnusedAppHostDirectory, serviceName));
 
         Assert.Contains(serviceName, exception.Message, StringComparison.Ordinal);
     }
@@ -44,10 +47,8 @@ public class LocalGitCheckoutTests
     [Fact]
     public void ManagedRepoRoot_AnOrdinaryName_IsTheCheckoutDirectoryForIt()
     {
-        var appHostDirectory = NewAppHostDirectory();
-
         Assert.Equal(
-            Path.Combine(appHostDirectory, ".servicesources", "checkouts", "orders"),
-            LocalGitCheckout.ManagedRepoRoot(appHostDirectory, "orders"));
+            Path.Combine(UnusedAppHostDirectory, ".servicesources", "checkouts", "orders"),
+            LocalGitCheckout.ManagedRepoRoot(UnusedAppHostDirectory, "orders"));
     }
 }
