@@ -39,27 +39,49 @@ colon and is invisible. `KubectlPortForward.Args` always emits `--namespace`, de
 the kind of thing a later change might revisit. Recorded so that revisiting it is a decision rather
 than an accident.
 
-**A namespace with surrounding whitespace is not reported at all.** `kubectl` does not validate a
-namespace locally — it percent-encodes it and asks the API server for the object underneath it:
+**A namespace with surrounding whitespace is reported well or misdiagnosed, and which one depends
+on the developer's RBAC.** `kubectl` does not validate a namespace locally. It percent-encodes it
+and asks for the object underneath it; when that 404s it asks a *second* question, about the
+namespace itself:
 
 ```
 PATH: /api/v1/namespaces/%20orders/services/orders-pg
+PATH: /api/v1/namespaces/%20orders
 ```
 
-and the server answers with a message about the object, not about the namespace:
+If the developer may read that second object, its answer is what surfaces, and it is a good message —
+the right field, quoted, so the space is visible:
+
+```
+Error from server (NotFound): namespaces " orders" not found
+```
+
+If they may not — a `Role`/`RoleBinding` scoped to their own namespace, which is the ordinary
+posture in a shared dev cluster and grants nothing at cluster scope — the second question is
+answered `403 Forbidden`, `kubectl` discards it, and what surfaces is the first answer:
 
 ```
 Error from server (NotFound): services "orders-pg" not found
 ```
 
-So the developer is told their **Service** name is wrong, and it is not. They go and check the one
-field that is correct. This is the failure that makes #236 a trap rather than a polish item: not
-that the value reaches `kubectl` as written, but that the resulting diagnosis points at the wrong
-field.
+Now the developer is told their **Service** name is wrong, and it is not. They go and check the one
+field that is correct.
+
+**An earlier draft of this document claimed the misdiagnosis unconditionally, and that was a
+measurement error of mine.** The first stub API server answered every path with the same canned
+`services "orders-pg" not found`, including the namespace re-query — so it fabricated the fallback
+and hid the good message. A namespace-aware stub shows both branches. The conclusion survives in a
+narrower form: the misdiagnosis is real and reachable, but it is the RBAC-restricted case rather
+than the general one, and a developer with cluster-scoped read gets told exactly what is wrong.
+
+Two limits of this measurement, recorded rather than papered over: the stub returns `404` for a
+syntactically invalid namespace name because that is what an etcd key miss produces, and a real API
+server rejecting the name at admission with `400` was not tested; and the RBAC branch was produced
+by making the stub answer `403`, not by exercising a real `RoleBinding`.
 
 Both messages land in the tunnel resource's log in the dashboard rather than in the terminal, which
-raises the cost of a misdiagnosis further: a developer has to go looking for the message before they
-can be misled by it.
+raises the cost of either outcome: a developer has to go looking for the message before it can help
+or mislead them.
 
 ## The ticket's premise is half wrong, and it changes the wording
 
@@ -288,11 +310,16 @@ connection string — is unaffected.
 | `KubernetesBackingServiceDeveloperConfig` (a backing service) | `kubernetes` | `context`, `namespace`, `service` |
 
 `context` and `namespace` are the ticket's own list, and both sources carry them — that symmetry is
-why the ticket is one issue rather than two. Note that the measurement above does **not** put them
-on the same footing: only `namespace` misdiagnoses. `context` is in scope anyway, because its good
-message still requires the developer to notice a space inside a pair of quotes in a log they had to
-go looking for, and because a file where one of two adjacent keys is checked and the other is not is
-worse than either rule alone.
+why the ticket is one issue rather than two.
+
+The measurement does not make either of them urgent on the strength of the resulting message alone.
+`kubectl` names and quotes the offending value for a bad context always, and for a bad namespace
+whenever the developer may read namespaces; the misdiagnosis is the RBAC-restricted branch. What
+the rule buys in every branch is *when* and *where* the developer hears about it: at AppHost
+startup, from the file they wrote, naming the key and the spelling — rather than from a `kubectl`
+process whose output they have to go and find in a dashboard log, after the tunnel has been built
+around a value that cannot work. The refusal is worth having for that; it is not worth overselling
+as the only thing standing between the developer and a mystery.
 
 **`service` on the backing-service block is in, and the ticket's "arguably the same case" is why.**
 The line this draws is *a developer-config key whose value is handed to kubectl as the name of a
