@@ -860,4 +860,44 @@ public class CheckoutPreparationTests
         Assert.All(observed, seen => Assert.True(
             seen == recorded || seen == after, $"a reader saw neither record whole: '{seen}'"));
     }
+
+    /// <summary>
+    /// The second place a service name becomes a path. A <c>local.path</c> service has no checkout
+    /// this package owns, so its marker goes in the tool directory under the service's name — and
+    /// that route never passes <see cref="LocalGitCheckout.ManagedRepoRoot"/>, which is where the
+    /// name is otherwise refused. Without its own check, a traversal name writes the marker into the
+    /// AppHost directory itself: outside `.servicesources`, back inside the AppHost's source-control
+    /// status, which is the harm #224 is about.
+    /// </summary>
+    [Theory]
+    [InlineData("../../evil")]
+    [InlineData("..\\evil")]
+    [InlineData("..")]
+    [InlineData(".. ")]
+    public void LocationFor_APathServiceWhoseNameIsNotADirectoryName_IsRefused(string serviceName)
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var theirs = Directory.CreateTempSubdirectory().FullName;
+
+        var exception = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => PrepareMarker.LocationFor(serviceName, theirs, appHostDirectory, managedCheckout: false));
+
+        Assert.Contains(serviceName, exception.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A managed checkout's marker lives inside the checkout's own <c>.git</c>, so the name reaches
+    /// no path here — it was already refused when <see cref="LocalGitCheckout.ManagedRepoRoot"/>
+    /// produced <c>repoRoot</c>. Pinned so the guard above is not later applied to a branch that
+    /// does not need it and does not have a name to judge.
+    /// </summary>
+    [Fact]
+    public void LocationFor_AManagedCheckout_IsInsideTheCheckoutsOwnGitDirectory()
+    {
+        var repoRoot = Directory.CreateTempSubdirectory().FullName;
+
+        Assert.Equal(
+            Path.Combine(repoRoot, ".git", "servicesources-prepare.json"),
+            PrepareMarker.LocationFor(ServiceName, repoRoot, "/unused", managedCheckout: true));
+    }
 }

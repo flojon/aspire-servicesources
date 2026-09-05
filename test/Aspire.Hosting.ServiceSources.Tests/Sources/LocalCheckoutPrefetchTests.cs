@@ -402,6 +402,13 @@ public class LocalCheckoutPrefetchTests
         // Skipped, not fatal: the prefetch is speculative, and this AppHost never asked for the
         // malformed service. The one it did ask for still resolves.
         Assert.NotNull(service);
+
+        // The assertion that cannot pass by accident. Each prefetched checkout runs in its own
+        // Task.Run, so "escapee is absent from git.Cloned" is also true for the moment before its
+        // clone gets going — that alone would still pass with the filter deleted. This reads the
+        // prefetch's own candidate set under its lock, which is complete before Resolve returns.
+        Assert.Null(LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage);
+
         Assert.Equal(["https://example.com/orders.git"], git.Cloned);
         Assert.False(Directory.Exists(Path.Combine(dir, ".servicesources", "escapee")));
     }
@@ -434,6 +441,10 @@ public class LocalCheckoutPrefetchTests
         var git = new FakeGitClient();
 
         new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+
+        // The candidate set rather than the clone list, for the reason given above: absence from
+        // git.Cloned is also true of a clone that simply has not started yet.
+        Assert.Null(LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage);
 
         Assert.Equal(["https://example.com/orders.git"], git.Cloned);
     }

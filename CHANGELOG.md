@@ -342,18 +342,30 @@ nothing will fail to build to warn you.
   directory name of its own: no `/` or `\` separator, no `:`, and not `.` or `..`. A well-formed
   name is unaffected.
 
-  Two routes reached it, and neither was checked. The speculative prefetch enumerates the keys of
-  `servicesources.local.json` directly and never saw any validation at all; it now skips a key it
-  cannot use rather than reporting it, matching the filters either side of it — speculation about
-  a service the AppHost may never mention must never be what fails an `AddService()` call. The
-  ordinary `AddService(name)` route looked safe on the strength of Aspire's `[ResourceName]`
-  attribute, but that is an analyzer attribute, and the runtime validation behind it happens when
-  the resource is added to the application model — which is *after* the checkout it needs has been
-  cloned. Both now go through one refusal, in the function that builds the path, which names the
-  service and the two files to rename it in.
+  Two routes reached the checkout directory, and neither was checked. The speculative prefetch
+  enumerates the keys of `servicesources.local.json` directly and never saw any validation at all;
+  it now skips a key it cannot use rather than reporting it, matching the filters either side of
+  it — speculation about a service the AppHost may never mention must never be what fails an
+  `AddService()` call. The ordinary `AddService(name)` route looked safe on the strength of
+  Aspire's `[ResourceName]` attribute, but that is an analyzer attribute, and the runtime
+  validation behind it happens when the resource is added to the application model — which is
+  *after* the checkout it needs has been cloned. Both are refused in the function that builds that
+  path, which names the service and the two files to rename it in.
 
-  Reaching either needed write access to `servicesources.yaml` and `servicesources.local.json`, or
-  to the AppHost's own source — all files that are already trusted — so this is hardening rather
+  **A `"local"` service using `local.path` gets the same refusal from a second place.** It has no
+  checkout this package owns, so it never reaches that function at all — but a `prepare` step
+  still records its completion in a file named after the service, under the tool directory. A
+  traversal name put that marker outside `.servicesources/` and so back inside the AppHost's own
+  source-control status, which is the same harm by a different route.
+
+  The rule is deliberately lexical rather than a resolved path comparison, and rejects `".. "`,
+  `"..."` and `". "` as well as `"."` and `".."`: Windows strips trailing dots and spaces from a
+  path component before resolving it, so those spellings escape there while naming an ordinary
+  directory elsewhere. Judging them the same way on every platform keeps one verdict for a file a
+  whole team shares, and keeps the Windows-only cases testable on Linux.
+
+  Reaching any of this needed write access to `servicesources.yaml` and `servicesources.local.json`,
+  or to the AppHost's own source — all files that are already trusted — so this is hardening rather
   than a hole reachable from outside. Found during a security review.
 
 - **A field misspelled at a service entry's root now names the field it was reaching for**

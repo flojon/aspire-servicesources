@@ -77,15 +77,41 @@ internal static class LocalGitCheckout
     /// team, and a value that only escapes on Windows still escapes.
     /// </para>
     /// <para>
+    /// Lexical, and deliberately not a resolved <see cref="Path.GetFullPath(string)"/> prefix check.
+    /// Resolving asks the running platform what the name means, so the same shared file would be
+    /// accepted on Linux and refused on Windows — and the Windows-only half could never be exercised
+    /// by a Linux CI. Trimming the way Windows does and judging the result gives one verdict
+    /// everywhere, and one that is testable everywhere.
+    /// </para>
+    /// <para>
+    /// Asked at each place a name becomes a path rather than at one gate they all pass, because
+    /// there is no such gate: <see cref="ManagedRepoRoot"/> covers every route to a checkout
+    /// directory, and <see cref="Prepare.PrepareMarker.LocationFor"/> covers the one route that
+    /// bypasses it — a <c>local.path</c> service has no managed checkout, so its <c>prepare</c>
+    /// marker is named after the service without <c>ManagedRepoRoot</c> ever being called. A third
+    /// such place would need its own call to this, and that is the cost of the arrangement; the
+    /// alternative, validating names once on the way in, is a bigger change than a patch should be.
+    /// </para>
+    /// <para>
     /// Callers that ask on behalf of a service nobody has added filter on this rather than letting
     /// <see cref="ManagedRepoRoot"/> throw — see <see cref="Sources.LocalCheckoutPrefetch"/>, whose
     /// speculation must never be what fails an <c>AddService()</c> call.
     /// </para>
     /// </remarks>
-    public static bool IsContainedCheckoutDirectoryName(string serviceName) =>
-        !string.IsNullOrWhiteSpace(serviceName)
-        && serviceName is not ("." or "..")
-        && serviceName.IndexOfAny(['/', '\\', ':']) < 0;
+    public static bool IsContainedCheckoutDirectoryName(string serviceName)
+    {
+        if (string.IsNullOrWhiteSpace(serviceName) || serviceName.IndexOfAny(['/', '\\', ':']) >= 0)
+        {
+            return false;
+        }
+
+        // Windows drops trailing dots and spaces from a path component before resolving it, so
+        // ".. ", "..." and ". " all arrive at the filesystem as ".." or ".". An exact test against
+        // "." and ".." would pass every one of them, and the escape would be invisible to a CI that
+        // only runs on Linux. Trim the same characters first: a name that is nothing but dots and
+        // spaces is one of those two however it was spelled, and nothing else can shed a segment.
+        return serviceName.TrimEnd('.', ' ').Length > 0;
+    }
 
     /// <summary>
     /// Whether this package owns the checkout directory, and so has a

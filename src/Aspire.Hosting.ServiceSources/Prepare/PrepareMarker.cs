@@ -51,12 +51,37 @@ internal sealed record PrepareMarker(
     /// directory keep independent markers, which is correct when their commands differ.
     /// </para>
     /// </remarks>
+    /// <exception cref="ServiceSourcesConfigurationException">
+    /// The checkout is not managed and <paramref name="serviceName"/> is not a directory name of its
+    /// own — see <see cref="Git.LocalGitCheckout.IsContainedCheckoutDirectoryName"/>. This is the
+    /// second place a service name becomes a path, and the only one
+    /// <see cref="Git.LocalGitCheckout.ManagedRepoRoot"/> does not stand in front of: a
+    /// <c>local.path</c> service has no managed checkout, so nothing has judged its name by the time
+    /// the marker is written under it. A traversal name would otherwise put the marker outside the
+    /// tool directory — in the AppHost's own tree, and so back inside its source-control status,
+    /// which is the harm #224 is about. The managed branch needs no check: <paramref name="repoRoot"/>
+    /// came from <c>ManagedRepoRoot</c>, which has already refused it.
+    /// </exception>
     public static string LocationFor(
-        string serviceName, string repoRoot, string appHostDirectory, bool managedCheckout) =>
-        managedCheckout
-            ? System.IO.Path.Combine(repoRoot, ".git", FileNameInGitDirectory)
-            : System.IO.Path.Combine(
-                ToolDirectory.PathIn(appHostDirectory), "prepare", $"{serviceName}.json");
+        string serviceName, string repoRoot, string appHostDirectory, bool managedCheckout)
+    {
+        if (managedCheckout)
+        {
+            return System.IO.Path.Combine(repoRoot, ".git", FileNameInGitDirectory);
+        }
+
+        if (!Git.LocalGitCheckout.IsContainedCheckoutDirectoryName(serviceName))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}' cannot be prepared: a service's name is used as the name of the "
+                + "file recording that its 'prepare' step ran, so it has to be a single file name — no '/' "
+                + "or '\\' separator, no ':', and not '.' or '..'. Rename the service in "
+                + $"'servicesources.yaml' and '{Config.DeveloperConfiguration.FileName}'.");
+        }
+
+        return System.IO.Path.Combine(
+            ToolDirectory.PathIn(appHostDirectory), "prepare", $"{serviceName}.json");
+    }
 
     /// <summary>
     /// The recorded completion, or <see langword="null"/> when there is none to read — absent,
