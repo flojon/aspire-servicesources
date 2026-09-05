@@ -173,7 +173,10 @@ public IReadOnlyDictionary<string, IReadOnlyDictionary<string, PropertyInfo>> Bl
 and its `<remarks>` sentence "The type travels with the name because …" gains the reason it is now a
 property: a key can also be *declared* with a rule the walk has to see.
 
-`DeveloperConfigValidator.cs` — three signatures, all mechanical:
+`DeveloperConfigValidator.cs` — **first add `using System.Reflection;` to the top of the file.** It
+has only `Microsoft.Extensions.Configuration`, `System.ComponentModel` and `System.Text`, and
+`System.Reflection` is not among this project's global usings, so without it every signature below
+is a `CS0246` and Step 5's build fails. Then three signatures, all mechanical:
 - `CollectBlock`'s `fields` parameter (line ~176)
 - `NotValidInBlock`'s `fields` parameter (line ~510) — uses only `.Keys`
 - `BlockExpected`'s `fields` parameter (line ~572) — uses only `.Keys`
@@ -331,6 +334,61 @@ public void Validate_PaddedContext_NamesTheRenameThatKeepsIt()
     Assert.Contains("kubectl config rename-context", ex.Message);
 }
 
+/// <remarks>
+/// The backing-service half of the same payload. The attribute is applied by hand on each of the
+/// two unrelated config types, so nothing structural keeps them in step — which is the drift #236
+/// exists to prevent, and the reason this is asserted on both shapes rather than once.
+/// </remarks>
+[Fact]
+public void Validate_PaddedContextOnABackingService_AlsoNamesTheRename()
+{
+    var ex = LoadBackingService("""
+        { "backingServices": { "orders-db": {
+            "source": "kubernetes",
+            "kubernetes": { "context": " dev-west" } } } }
+        """);
+
+    Assert.Contains("kubectl config rename-context", ex.Message);
+}
+
+/// <remarks>
+/// A tab and a non-breaking space are the two paddings a developer cannot see, and the second is
+/// what a paste out of a browser or a document leaves behind. Both are whitespace, so both fire
+/// this rule — and the message has to spell them out, since echoed as themselves they would leave
+/// the reader looking at a value that appears to be exactly what they wrote.
+/// </remarks>
+[Theory]
+[InlineData("\t", "\\t")]
+[InlineData("\u00a0", "\\u00a0")]
+public void Validate_PaddingThatCannotBeSeen_IsSpelledOutInTheMessage(string padding, string spelled)
+{
+    var ex = Load($$"""
+        { "services": { "orders": {
+            "source": "kubernetes",
+            "kubernetes": { "namespace": "{{padding}}orders" } } } }
+        """);
+
+    Assert.Contains(spelled, ex.Message);
+    Assert.Contains("Set it to 'orders'.", ex.Message);
+}
+
+/// <remarks>
+/// The suffix every complaint in this file carries. It is what tells a developer the value need not
+/// have come from the file at all — an environment variable sets the same key — and dropping it
+/// from this one message would otherwise pass every other test here.
+/// </remarks>
+[Fact]
+public void Validate_PaddedNamespace_NamesTheConfigurationKeyItCameFrom()
+{
+    var ex = Load("""
+        { "services": { "orders": {
+            "source": "kubernetes",
+            "kubernetes": { "namespace": " orders" } } } }
+        """);
+
+    Assert.Contains("ServiceSources:Services:orders:kubernetes:namespace", ex.Message);
+}
+
 [Fact]
 public void Validate_PaddedNamespace_DoesNotOfferTheContextRename()
 {
@@ -384,7 +442,7 @@ public void Validate_ContextWithInteriorSpace_IsAccepted()
 
 ```bash
 dotnet test test/Aspire.Hosting.ServiceSources.Tests -f net8.0 \
-  --filter "FullyQualifiedName~KubectlName|FullyQualifiedName~PaddedContext|FullyQualifiedName~PaddedNamespace|FullyQualifiedName~InteriorSpace"
+  --filter "FullyQualifiedName~KubectlName|FullyQualifiedName~PaddedContext|FullyQualifiedName~PaddedNamespace|FullyQualifiedName~InteriorSpace|FullyQualifiedName~WhitespaceOnlyContext"
 ```
 
 Expected: the theory rows and both `Padded…` tests FAIL (no exception is thrown at all — the value
@@ -515,7 +573,7 @@ private static string SurroundedByWhitespace(
 }
 ```
 
-Add `using System.Reflection;` to the validator if it is not already there.
+`using System.Reflection;` is already in the validator from Task 2.
 
 - [ ] **Step 8: Run the tests**
 
@@ -589,8 +647,30 @@ public void Validate_ValueOfNothingButWhitespaceAndInvisibles_NamesTheEmptySpell
             "kubernetes": { "namespace": " \uFEFF" } } } }
         """);
 
-    Assert.Contains("empty value", ex.Message);
+    // The distinguishing clause, not just "empty value" — Blank's message ends with that same
+    // sentence, so asserting on it alone would pass even if this branch never ran.
+    Assert.Contains("characters with no glyph rather than a value", ex.Message);
     Assert.DoesNotContain("Set it to ''", ex.Message);
+}
+
+/// <remarks>
+/// The boundary this rule deliberately stops at: a value padded only with invisible characters and
+/// no whitespace at all is not refused. TrimUnseeable is one edit away from becoming the trigger
+/// rather than the remedy, which would widen the rule past what #236 asked for without anyone
+/// noticing. Pinned so that widening it is a decision.
+/// </remarks>
+[Fact]
+public void Validate_InvisiblePaddingWithNoWhitespace_IsNotRefused()
+{
+    var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory("""
+        { "services": { "orders": {
+            "source": "kubernetes",
+            "kubernetes": { "namespace": "\uFEFForders", "context": "dev", "port": 8080 } } } }
+        """));
+
+    var resolved = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+
+    Assert.Equal("\ufefforders", resolved.DeveloperConfig.Kubernetes.Namespace);
 }
 
 /// <remarks>
@@ -618,8 +698,10 @@ dotnet test test/Aspire.Hosting.ServiceSources.Tests -f net8.0 \
   --filter "FullyQualifiedName~PaddingAroundAnInvisible|FullyQualifiedName~NothingButWhitespaceAndInvisibles|FullyQualifiedName~InvisibleInsideTheValue"
 ```
 
-Expected: FAIL — the remedy is `U+FEFForders`, the empty case proposes `''`, and the interior case
-proposes an untypeable spelling.
+Expected: FAIL. Be precise about which assertion fails in each, so a wrong failure is not mistaken
+for the right one: the first fails on `Set it to 'orders'.` (Task 3's remedy is `value.Trim()`, which
+leaves the BOM, so the message proposes `'\ufefforders'`); the second fails on its first assertion,
+since trimming whitespace alone leaves `'\ufeff'` rather than nothing; the third fails on `retype`.
 
 - [ ] **Step 3: Add the trimming helper**
 
@@ -733,6 +815,13 @@ git add -A && git commit -m "Propose a spelling the developer can type (#236)"
 **Why:** the *Scope* section of the design is a set of decisions, not a property of the mechanism.
 Without these, the next contributor adds the attribute to `connectionString` and nothing objects.
 
+- [ ] **Step 0: Add the using**
+
+`System.Reflection` is not among the test project's implicit usings, and
+`PropertyInfo.GetCustomAttribute<T>()` is an extension on `System.Reflection.CustomAttributeExtensions`.
+Without it the guard test is a `CS1061`. Add `using System.Reflection;` and `using System.Globalization;`
+to the top of `DeveloperConfigValidatorTests.cs`.
+
 - [ ] **Step 1: Write the tests**
 
 ```csharp
@@ -744,17 +833,28 @@ Without these, the next contributor adds the attribute to `connectionString` and
 /// guarantees, so each is pinned.
 /// </remarks>
 [Theory]
-[InlineData("""{ "services": { "orders": { "source": "local", "local": { "path": "/src/orders " } } } }""")]
-[InlineData("""{ "services": { "orders": { "source": "local", "local": { "path": "/src/o", "prepare": { "command": ["mvn", " -Pprod"] } } } } }""")]
-[InlineData("""{ "services": { "orders": { "source": "kubernetes", "kubernetes": { "context": "dev", "port": 8080, "scheme": " https" } } } }""")]
-[InlineData("""{ "services": { "orders": { "source": "kubernetes", "kubernetes": { "context": "dev", "port": " 8080" } } } }""")]
-public void Validate_FieldThatDidNotOptIn_StillTakesASurroundedValue(string json)
+[InlineData("""{ "services": { "orders": { "source": "local", "local": { "path": "/src/orders " } } } }""", "path", "/src/orders ")]
+[InlineData("""{ "services": { "orders": { "source": "local", "local": { "path": "/src/o", "prepare": { "command": ["mvn", " -Pprod"] } } } } }""", "command", " -Pprod")]
+[InlineData("""{ "services": { "orders": { "source": "kubernetes", "kubernetes": { "context": "dev", "port": 8080, "scheme": " https" } } } }""", "scheme", " https")]
+[InlineData("""{ "services": { "orders": { "source": "kubernetes", "kubernetes": { "context": "dev", "port": " 8080" } } } }""", "port", "8080")]
+public void Validate_FieldThatDidNotOptIn_StillTakesASurroundedValue(string json, string field, string expected)
 {
     var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory(json));
 
-    // Resolving is the assertion: any of these throwing means the rule reached a field the design
-    // ruled out.
-    ServiceSourcesConfigCache.ResolveService(builder, "orders");
+    var resolved = ServiceSourcesConfigCache.ResolveService(builder, "orders").DeveloperConfig;
+
+    // Not merely "it did not throw": the value has to arrive with its whitespace intact. Somebody
+    // "fixing" an exclusion by trimming it at the point of use would pass a no-throw test, and that
+    // is the change this pins against.
+    var arrived = field switch
+    {
+        "path" => resolved.Local.Path,
+        "command" => resolved.Local.Prepare.Command![1],
+        "scheme" => resolved.Kubernetes.Scheme,
+        _ => resolved.Kubernetes.Port?.ToString(CultureInfo.InvariantCulture),
+    };
+
+    Assert.Equal(expected, arrived);
 }
 
 [Fact]
@@ -769,6 +869,26 @@ public void Validate_BackingServiceConnectionString_StillTakesATrailingSpace()
     var configured = ServiceSourcesConfigCache.BackingServicesFor(builder);
 
     Assert.Equal("Host=db;Password=hunter2 ", configured["orders-db"].Direct.ConnectionString);
+}
+
+/// <remarks>
+/// The kubernetes block's own connectionString, which sits beside three fields that *did* opt in
+/// and is the one a later contributor is likeliest to add the attribute to. A connection string may
+/// carry trailing whitespace inside a quoted value, which is why #236 rules it out by name.
+/// </remarks>
+[Fact]
+public void Validate_KubernetesConnectionString_StillTakesATrailingSpace()
+{
+    var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory("""
+        { "backingServices": { "orders-db": {
+            "source": "kubernetes",
+            "kubernetes": { "connectionString": "Host=localhost;Port=${port};Pwd=x " } } } }
+        """));
+
+    var configured = ServiceSourcesConfigCache.BackingServicesFor(builder);
+
+    Assert.Equal(
+        "Host=localhost;Port=${port};Pwd=x ", configured["orders-db"].Kubernetes.ConnectionString);
 }
 
 /// <remarks>
@@ -795,12 +915,22 @@ public void Shape_EveryFieldCarryingTheRuleIsAScalarTheWalkReaches()
         (typeof(KubernetesBackingServiceDeveloperConfig), "Service"),
     };
 
+    // Descends the way CollectBlock does. BlockFields is one level deep — it is built from the
+    // entry type's own block properties — so a query over it alone cannot see local.prepare at all:
+    // an attribute on prepare.mode would be live and unpinned, and one on prepare.command inert and
+    // unpinned. Neither is something this test may be blind to.
+    static IEnumerable<PropertyInfo> Leaves(IReadOnlyDictionary<string, PropertyInfo> fields) =>
+        fields.Values.SelectMany(field =>
+            DeveloperConfigField.BlockFieldsOf(field.PropertyType) is { } nested
+                ? Leaves(nested).Prepend(field)
+                : [field]);
+
     var carriers =
         from shape in new[] { DeveloperConfigShape.Service, DeveloperConfigShape.BackingService }
         from block in shape.BlockFields
-        from field in block.Value
-        where field.Value.GetCustomAttribute<NoSurroundingWhitespaceAttribute>() is not null
-        select (field.Value.DeclaringType!, field.Value.Name);
+        from field in Leaves(block.Value)
+        where field.GetCustomAttribute<NoSurroundingWhitespaceAttribute>() is not null
+        select (field.DeclaringType!, field.Name);
 
     Assert.Equal(expected.OrderBy(c => $"{c.Item1}.{c.Item2}"), carriers.Distinct().OrderBy(c => $"{c.Item1}.{c.Item2}"));
 
@@ -828,13 +958,27 @@ on a property the design did not name — fix the attribute, not the test.
 
 - [ ] **Step 3: Prove the guard bites**
 
-Temporarily add `[NoSurroundingWhitespace("mvn")]` to `PrepareDeveloperConfig.Command`, re-run, and
-confirm the guard test fails naming it. Then remove it. This is the mutation check that the test
-would have caught the inert-attribute case; do not commit the temporary attribute.
+In a **scratch copy of the repo**, not this working tree, add `[NoSurroundingWhitespace("mvn")]` to
+`PrepareDeveloperConfig.Command` and re-run the guard test. It must fail — on the set equality, and
+on `Assert.False(IsList(...))` once the row is expected. `Command` is a `string[]` two levels down,
+so this is precisely the case a `BlockFields`-only query cannot see; if the test passes, the `Leaves`
+recursion is wrong and everything the guard claims is worthless.
+
+```bash
+SCRATCH=$(mktemp -d) && git worktree add "$SCRATCH" HEAD
+# edit PrepareDeveloperConfig.Command there, run the filtered test, expect FAIL
+git worktree remove --force "$SCRATCH"
+```
+
+Done in a scratch copy because Step 4 commits with `git add -A`: a mutation left behind in `src/`
+would be committed silently, and a squash-merge lands it.
 
 - [ ] **Step 4: Commit**
 
+Confirm no production code crept in from Step 3 before committing a test-only task:
+
 ```bash
+git diff --stat -- src/   # must be empty
 git add -A && git commit -m "Pin the fields this rule deliberately does not reach (#236)"
 ```
 
@@ -911,6 +1055,26 @@ The container, config-layers and local-source smoke tests need Docker or the net
 `typecheck-typescript` and `verify-invariants` do not touch this change. Say so explicitly rather
 than letting silence imply they passed.
 
+- [ ] **Step 4: Shape the history for a squash merge**
+
+This repo squashes, and a squash takes the **commit message**, not the PR body. Six per-task commits
+would land under whichever message is last — the changelog one — which describes the smallest part
+of the work. Either squash the branch into one commit whose message is the thing that should land on
+`main`, or make the final commit message the one that describes the change as a whole.
+
+- [ ] **Step 5: Record what the design deferred**
+
+The spec defers two things to a comment on #236 and offers one alternative on the pull request.
+Neither is code, and both are promises this branch made:
+
+- comment on #236 with the two deferred questions — whether the catalog's `kubernetes.service`
+  should get whitespace diagnostics of its own, and the invisible-character gap (a value padded only
+  with characters that are not whitespace is not refused, and the `Format`/`Control` line the
+  escaping draws leaves a residue of its own);
+- state in the PR body that candidate (1) — trimming in `KubectlPortForward.Args` — remains
+  available, that it is roughly two lines, and that it covers the `context`/`namespace` half of this
+  rule but not `service`, whose value on the service side comes from the catalog.
+
 ---
 
 ## Self-Review
@@ -931,8 +1095,16 @@ with `IfDeliberate` is declared in Task 3 Step 4 and used with exactly those nam
 in Task 5. `SurroundedByWhitespace`'s four parameters are the same in Task 3 Step 7 and Task 4
 Step 4. `TrimUnseeable`/`IsUnseeable` are declared and used only in Task 4.
 
-**One deviation from the spec, deliberate:** the spec's *Testing* section asks that the remedy be
-fed back through `Load` and assert it resolves. Task 4 asserts the proposed spelling directly
-(`Set it to 'orders'.`) instead, because feeding it back requires a second load with a rewritten
-JSON document and asserts the same fact more indirectly. If a reviewer prefers the round-trip, it is
-a two-line addition to Task 4 Step 1.
+**Three deviations from the spec, all deliberate and all listed rather than left to be found:**
+
+1. The spec's *Testing* section asks that the remedy be fed back through `Load` and assert it
+   resolves. Task 4 asserts the proposed spelling directly (`Set it to 'orders'.`) instead: the
+   remedy is a BOM-free literal in the test source, so a remedy that kept the BOM renders
+   `Set it to '\ufefforders'.` and fails the assertion. `TrimUnseeable`'s output can never carry
+   whitespace at its boundaries, so the round-trip could not fail where this passes. The boundary
+   test added to Task 4 covers the case a future edit to `TrimUnseeable` would open.
+2. The spec's *Delivery* says one commit; the plan makes six, one per task, so each carries its own
+   test cycle and can be rejected on its own. Task 7 Step 4 reconciles that with the squash merge.
+3. The spec's guard-test paragraph said an inert attribute on `PrepareDeveloperConfig.Command` would
+   "still appear in the shape". It would not — `BlockFields` is one level deep — so the guard here
+   recurses through nested blocks, and the spec has been corrected rather than followed.

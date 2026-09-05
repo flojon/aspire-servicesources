@@ -470,12 +470,17 @@ Cases:
   `kubernetes.port` as `" 8080"` still binding to `8080`. These pin the exclusions, which are
   decisions this document made rather than properties of the mechanism.
 - **Guard test:** the set of properties carrying the attribute is exactly the *Scope* table, and
-  every one of them is a scalar leaf the walk actually reaches. Membership in `BlockFields` is not
-  enough to establish that second half, and getting it wrong would make the test useless for the
-  likeliest mistake: `BlockFieldsOf` keys *every* configurable property, including lists and nested
-  blocks, and `CollectBlock` short-circuits both before reaching this check. An attribute on
-  `PrepareDeveloperConfig.Command` — a `string[]` — would be completely inert and would still pass a
-  membership-only assertion. So each carrier is asserted to be neither a list nor a nested block.
+  every one of them is a scalar leaf the walk actually reaches.
+
+  **It has to search recursively, and an earlier draft of this document got that wrong.** That draft
+  said an attribute on `PrepareDeveloperConfig.Command` "would be completely inert and would still
+  pass a membership-only assertion", which is false in its second half: `DeveloperConfigShape.Blocks`
+  is built from the *entry type's* own block properties, so `BlockFields` is exactly one level deep —
+  `BlockFields["local"]` is `Path`, `Ref`, `Prepare`, and `Command` is a level below that and is not
+  in the shape at all. A guard reading only `BlockFields` would therefore not see such an attribute
+  to reject it, and — worse — would not see one on `local.prepare.mode` either, which *is* live,
+  since `CollectBlock` recurses into a nested block. So the guard descends through nested blocks the
+  way the validator does, and only then asserts each carrier is neither a list nor a nested block.
 
   This guards two real failure modes — an attribute placed where the walk never reaches it, and a
   field quietly losing the rule — and not a third it cannot: moving a property between block types
