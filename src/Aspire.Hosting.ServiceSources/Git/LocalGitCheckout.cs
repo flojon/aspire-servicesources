@@ -77,15 +77,38 @@ internal static class LocalGitCheckout
     /// file.
     /// </para>
     /// <para>
+    /// Lexical, and deliberately not a resolved <see cref="Path.GetFullPath(string)"/> prefix check.
+    /// Resolving asks the running platform what the name means, so the same shared file would be
+    /// accepted on Linux and refused on Windows — and the Windows-only half could never be exercised
+    /// by a Linux CI. Trimming the way Windows does and judging the result gives one verdict
+    /// everywhere, and one that is testable everywhere.
+    /// </para>
+    /// <para>
+    /// Asked here rather than at one gate every name passes, because at this version there is only
+    /// one place a name becomes a path: <see cref="ManagedRepoRoot"/>. The scratch directory
+    /// <c>CloneIntoPlace</c> names after the service sits downstream of it, on the managed route
+    /// alone. A later place that builds a path from a name needs its own call to this.
+    /// </para>
+    /// <para>
     /// Callers that ask on behalf of a service nobody has added filter on this rather than letting
     /// <see cref="ManagedRepoRoot"/> throw — see <see cref="Sources.LocalCheckoutPrefetch"/>, whose
     /// speculation must never be what fails an <c>AddService()</c> call.
     /// </para>
     /// </remarks>
-    public static bool IsContainedCheckoutDirectoryName(string serviceName) =>
-        !string.IsNullOrWhiteSpace(serviceName)
-        && serviceName is not ("." or "..")
-        && serviceName.IndexOfAny(['/', '\\', ':']) < 0;
+    public static bool IsContainedCheckoutDirectoryName(string serviceName)
+    {
+        if (string.IsNullOrWhiteSpace(serviceName) || serviceName.IndexOfAny(['/', '\\', ':']) >= 0)
+        {
+            return false;
+        }
+
+        // Windows drops trailing dots and spaces from a path component before resolving it, so
+        // ".. ", "..." and ". " all arrive at the filesystem as ".." or ".". An exact test against
+        // "." and ".." would pass every one of them, and the escape would be invisible to a CI that
+        // only runs on Linux. Trim the same characters first: a name that is nothing but dots and
+        // spaces is one of those two however it was spelled, and nothing else can shed a segment.
+        return serviceName.TrimEnd('.', ' ').Length > 0;
+    }
 
     /// <summary>
     /// The fully resolved checkout directory: prepared, then reconciled. For callers already

@@ -23,6 +23,14 @@ public class LocalGitCheckoutTests
     [InlineData("nested/escapee")]
     [InlineData("..")]
     [InlineData(".")]
+    // Windows strips trailing dots and spaces off a path component before resolving it, so each of
+    // these reaches the filesystem as ".." or "." there while naming an ordinary directory here.
+    // Refused on every platform: the verdict on shared configuration cannot depend on who reads it,
+    // and a Linux-only CI would never see the escape.
+    [InlineData(".. ")]
+    [InlineData("...")]
+    [InlineData(". ")]
+    [InlineData("  ..  ")]
     public void ManagedRepoRoot_ANameThatIsNotADirectoryNameOfItsOwn_IsRefused(string serviceName)
     {
         var appHostDirectory = NewAppHostDirectory();

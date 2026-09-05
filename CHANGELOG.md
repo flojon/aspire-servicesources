@@ -33,6 +33,12 @@ nothing will fail to build to warn you.
   cloned. Both now go through one refusal, in the function that builds the path, which names the
   service and the two files to rename it in.
 
+  The rule is deliberately lexical rather than a resolved path comparison, and rejects `".. "`,
+  `"..."` and `". "` as well as `"."` and `".."`: Windows strips trailing dots and spaces from a
+  path component before resolving it, so those spellings escape there while naming an ordinary
+  directory elsewhere. Judging them the same way on every platform keeps one verdict for a file a
+  whole team shares, and keeps the Windows-only cases testable on Linux.
+
   Reaching either needed write access to `servicesources.yaml` and `servicesources.local.json`, or
   to the AppHost's own source — all files that are already trusted — so this is hardening rather
   than a hole reachable from outside. Found during a security review.
