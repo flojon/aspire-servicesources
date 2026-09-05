@@ -35,6 +35,38 @@ public class DeveloperConfigurationTests
             project: src/EnvOverride/EnvOverride.csproj
         """;
 
+    /// <remarks>
+    /// Two names one edit apart, which is what makes an entry resembling one of them ambiguous
+    /// enough for the reverse check to matter.
+    /// </remarks>
+    private const string NeighbouringCartCatalog = """
+        services:
+          cart:
+            repository: https://github.com/company/cart
+            project: src/Cart.Api/Cart.Api.csproj
+          carts:
+            repository: https://github.com/company/carts
+            project: src/Carts.Api/Carts.Api.csproj
+        """;
+
+    private const string CartCatalog = """
+        services:
+          cart:
+            repository: https://github.com/company/cart
+            project: src/Cart.Api/Cart.Api.csproj
+        """;
+
+    /// <remarks>
+    /// Its own service and its own catalog, because the test that uses it sets a process-global
+    /// environment variable — see the remark on the first of those in this class.
+    /// </remarks>
+    private const string NearMissEnvCatalog = """
+        services:
+          nearmissenv:
+            repository: https://github.com/company/nearmissenv
+            project: src/NearMissEnv/NearMissEnv.csproj
+        """;
+
     private static string CreateAppHostDirectory(string yaml, string? json = null)
     {
         var dir = Directory.CreateTempSubdirectory().FullName;
@@ -836,5 +868,367 @@ public class DeveloperConfigurationTests
             () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
 
         Assert.Contains("'serivces'", ex.Message);
+    }
+
+    /// <summary>
+    /// A misspelled <em>service name</em> is the near miss one level down from the file's root key:
+    /// the entry is valid, correctly shaped and read, and nothing matches it to the service the
+    /// AppHost asked for.
+    /// </summary>
+    /// <remarks>
+    /// The advice the message already gives works — writing the entry a second time under the right
+    /// spelling does configure the service — so what is added is the sentence that says the fix is
+    /// one character in an entry the file already has.
+    /// </remarks>
+    [Fact]
+    public void ResolveService_ConfiguredNameIsOneEditFromTheService_NamesTheEntryAndAsksWhichWasMeant()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """{ "services": { "order": { "source": "local" } } }""");
+
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.Contains(
+            "Note that 'order' is configured and reaches no service in 'servicesources.yaml'. "
+            + "Did you mean 'orders'? If so, rename that entry rather than adding a second one.",
+            ex.Message);
+    }
+
+    /// <summary>
+    /// An entry naming a service the catalog declares is that service's entry, whatever else it
+    /// resembles.
+    /// </summary>
+    /// <remarks>
+    /// This is the reverse check the suggestion cannot do without. Resemblance alone would read a
+    /// working entry for a neighbouring service as a misspelling of this one and advise renaming it,
+    /// which breaks the service it belongs to. Only an entry the catalog cannot account for is a
+    /// candidate.
+    /// </remarks>
+    [Fact]
+    public void ResolveService_ResemblingEntryNamesAnotherCatalogService_IsNotOfferedAsAMisspelling()
+    {
+        var dir = CreateAppHostDirectory(
+            """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+              order:
+                repository: https://github.com/company/order
+                project: src/Order.Api/Order.Api.csproj
+            """,
+            """{ "services": { "order": { "source": "local" } } }""");
+
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.DoesNotContain("Did you mean", ex.Message);
+    }
+
+    /// <summary>
+    /// An entry for a service this AppHost does not add is not a typo, and is left alone.
+    /// </summary>
+    /// <remarks>
+    /// The legitimate shape the whole check has to stay silent about: a developer switching between
+    /// two AppHosts out of one file, or keeping an entry for a service they have stopped adding, has
+    /// done nothing wrong. Only resemblance separates that from a misspelling.
+    /// </remarks>
+    [Fact]
+    public void ResolveService_NoConfiguredNameResemblesTheService_SaysNothing()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """{ "services": { "billing": { "source": "local" } } }""");
+
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.DoesNotContain("Did you mean", ex.Message);
+    }
+
+    /// <summary>
+    /// The service's own entry, left without a source, is never offered as a misspelling of itself.
+    /// </summary>
+    /// <remarks>
+    /// The other way into this message: the entry is there and reaches the service, and what is
+    /// missing is the <c>source</c> key inside it. Its name is at distance zero, so a check drawing
+    /// candidates from every configured name would answer "did you mean 'orders'?" to a developer
+    /// who wrote exactly that. What keeps it quiet here is that the entry names a service the
+    /// catalog declares, so it is not a candidate at all — <see cref="NearMiss.MisspellingOf"/>
+    /// would also drop it, which is why this passes either way and why the restriction it is
+    /// really about is pinned by
+    /// <see cref="ResolveService_ResemblingEntryNamesAnotherCatalogService_IsNotOfferedAsAMisspelling"/>
+    /// rather than by this one. Kept because the shape is
+    /// the one a reader worries about, and a test that says so is cheaper than the worry.
+    /// </remarks>
+    [Fact]
+    public void ResolveService_ServicesOwnEntryHasNoSource_IsNotOfferedAsAMisspellingOfItself()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """{ "services": { "orders": { "local": { "path": "/tmp/orders" } } } }""");
+
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.DoesNotContain("Did you mean", ex.Message);
+    }
+
+    /// <summary>
+    /// Two entries the same distance away are separated by their own spelling, so the message names
+    /// the same one on every run rather than whichever the configuration provider enumerated first.
+    /// </summary>
+    /// <remarks>
+    /// <c>orderr</c> is a substitution away from <c>orders</c> and <c>ordrs</c> a dropped letter, so
+    /// the two tie at one edit. Ordinally <c>orderr</c> comes first: they agree on <c>ord</c> and
+    /// then it has <c>e</c> where the other has <c>r</c>.
+    /// <para>
+    /// The tie-break itself is pinned at the unit level, and has to be: configuration sorts a
+    /// section's children by its own key comparer, so these two arrive here already in the order
+    /// the answer wants and this would pass with the sort deleted. What it does pin is the answer a
+    /// developer with two candidates actually reads, which is worth having end to end.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ResolveService_TwoEquallyCloseConfiguredNames_NamesTheSameOneEveryRun()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """
+            {
+              "services": {
+                "ordrs": { "source": "url" },
+                "orderr": { "source": "local" }
+              }
+            }
+            """);
+
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.Contains("'orderr'", ex.Message);
+        Assert.DoesNotContain("'ordrs'", ex.Message);
+    }
+
+    /// <summary>
+    /// A short service name gets one edit of tolerance, and a transposition is one edit.
+    /// </summary>
+    [Fact]
+    public void ResolveService_ShortServiceNameWithATransposedEntry_IsNamed()
+    {
+        var dir = CreateAppHostDirectory(
+            CartCatalog,
+            """{ "services": { "crat": { "source": "local" } } }""");
+
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "cart"));
+
+        Assert.Contains("'crat'", ex.Message);
+        Assert.Contains("Did you mean 'cart'?", ex.Message);
+    }
+
+    /// <summary>
+    /// An entry contributed by a layer other than the file is named the same way, and the note does
+    /// not claim the file carries it.
+    /// </summary>
+    /// <remarks>
+    /// These are merged configuration keys, so the file is where a developer normally writes one
+    /// rather than where one must have come from — which is why the note is phrased against the
+    /// configuration and names no path of its own. A message asserting the file carried this entry
+    /// would be false here, and there is nothing in the value to tell the two apart by.
+    /// <para>
+    /// Environment variables are process-global and xunit runs test classes in parallel, so the
+    /// service this names must be one no other test uses — otherwise the variable is still set
+    /// while another class builds its own AppHost and silently configures its service.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ResolveService_MisspelledNameComesFromAnotherLayer_IsStillNamedAndTheFileIsNotBlamed()
+    {
+        var dir = CreateAppHostDirectory(NearMissEnvCatalog);
+
+        Environment.SetEnvironmentVariable("ServiceSources__Services__nearmisenv__Source", "local");
+        try
+        {
+            var builder = CreateBuilder(dir);
+
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+                () => ServiceSourcesConfigCache.ResolveService(builder, "nearmissenv"));
+
+            Assert.Contains(
+                "Note that 'nearmisenv' is configured and reaches no service in "
+                + "'servicesources.yaml'. Did you mean 'nearmissenv'? If so, rename that entry "
+                + "rather than adding a second one.",
+                ex.Message);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ServiceSources__Services__nearmisenv__Source", null);
+        }
+    }
+
+    /// <summary>
+    /// An entry closer to a different catalog service is left for that service to name, even when
+    /// it is inside the failing service's tolerance.
+    /// </summary>
+    /// <remarks>
+    /// The half of the check that stops the note costing a developer their configuration. Both
+    /// <c>cart</c> and <c>carts</c> are declared, and <c>crat</c> — a transposition of the first —
+    /// is one edit from it and two from the second, so a failing <c>carts</c> asked only "which
+    /// entry resembles me?" is told to rename the entry that configures <c>cart</c>. Following that
+    /// leaves <c>cart</c> unconfigured, and its own failure then carries no suggestion at all,
+    /// because <c>carts</c> is declared and the renamed entry is no longer a candidate.
+    /// </remarks>
+    [Fact]
+    public void ResolveService_EntryIsCloserToAnotherCatalogService_IsLeftForThatServiceToName()
+    {
+        var dir = CreateAppHostDirectory(
+            NeighbouringCartCatalog,
+            """{ "services": { "crat": { "source": "local" } } }""");
+
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "carts"));
+
+        Assert.DoesNotContain("Did you mean", ex.Message);
+    }
+
+    /// <summary>
+    /// The same entry, asked about by the service it is actually closest to, is named.
+    /// </summary>
+    /// <remarks>
+    /// The other side of the test above, and what makes it a redirection rather than a silence: the
+    /// suggestion is not withheld, it is made when the service it belongs to is the one asking.
+    /// </remarks>
+    [Fact]
+    public void ResolveService_EntryIsClosestToTheFailingService_IsNamedEvenWithANeighbourDeclared()
+    {
+        var dir = CreateAppHostDirectory(
+            NeighbouringCartCatalog,
+            """{ "services": { "crat": { "source": "local" } } }""");
+
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "cart"));
+
+        Assert.Contains("'crat'", ex.Message);
+        Assert.Contains("Did you mean 'cart'?", ex.Message);
+    }
+
+    /// <summary>
+    /// When the service already has an entry of its own, the note says where the source belongs
+    /// instead of telling the reader to rename onto a name the file already uses.
+    /// </summary>
+    /// <remarks>
+    /// The second route into this error: the entry is there and its <c>source</c> is missing, and a
+    /// stale near miss sits beside it carrying one. "Rename that entry" is a wrong instruction here
+    /// — it asks for a second <c>"orders"</c> key in the same object, which the JSON provider
+    /// refuses to load at all once the two collide on a leaf, leaving the AppHost failing to start
+    /// over an error that never mentions this package.
+    /// </remarks>
+    [Fact]
+    public void ResolveService_ServiceHasItsOwnSourcelessEntryBesideANearMiss_SaysWhereTheSourceBelongs()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """
+            {
+              "services": {
+                "orders": { "local": { "path": "/tmp/orders" } },
+                "order": { "source": "local", "local": { "path": "/tmp/order" } }
+              }
+            }
+            """);
+
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.Contains(
+            "Did you mean 'orders'? An entry for 'orders' is there already, so the source belongs "
+            + "on that one rather than on 'order'.",
+            ex.Message);
+        Assert.DoesNotContain("rename", ex.Message);
+    }
+
+    /// <summary>
+    /// A file whose root key is misspelled, beside a near miss contributed by another layer, gets
+    /// both notes — the root key first.
+    /// </summary>
+    /// <remarks>
+    /// The only case where the order of the two is observable, and it is the order that reads: the
+    /// root-key note ends by saying whatever is configured is coming from another layer, which is
+    /// the provenance the second note deliberately does not state. Reversed, the reader meets
+    /// "'ordrs' is configured" with nowhere to look and learns afterwards that the file they would
+    /// have looked in is dead.
+    /// <para>
+    /// The near miss has to come from a layer other than the file, and here does: a misspelled root
+    /// key is exactly the condition under which the file's own service entries never bind.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ResolveService_MisspelledRootKeyAndAMisspelledNameFromAnotherLayer_NamesTheRootKeyFirst()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """{ "serivces": { "orders": { "source": "local" } } }""");
+
+        var builder = CreateBuilder(dir);
+
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ServiceSources:Services:ordrs:Source"] = "url",
+        });
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.Contains("Did you mean 'services'?", ex.Message);
+        Assert.Contains("Did you mean 'orders'?", ex.Message);
+        Assert.True(
+            ex.Message.IndexOf("Did you mean 'services'?", StringComparison.Ordinal)
+            < ex.Message.IndexOf("Did you mean 'orders'?", StringComparison.Ordinal),
+            $"The root-key note should come first, but the message read: {ex.Message}");
+    }
+
+    /// <summary>
+    /// The tolerance is the service name's, not the entry's.
+    /// </summary>
+    /// <remarks>
+    /// <c>carted</c> is two edits from <c>cart</c> and six letters long, so scaling the tolerance by
+    /// the entry would admit it. The catalog is the fixed vocabulary here and <c>cart</c> is four
+    /// letters, which allows one edit — and two edits from a four-letter name reaches far enough
+    /// that the suggestion would be a guess.
+    /// </remarks>
+    [Fact]
+    public void ResolveService_LongerEntryTwoEditsFromAShortService_IsNotOfferedAsAMisspelling()
+    {
+        var dir = CreateAppHostDirectory(
+            CartCatalog,
+            """{ "services": { "carted": { "source": "local" } } }""");
+
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "cart"));
+
+        Assert.DoesNotContain("Did you mean", ex.Message);
     }
 }

@@ -33,6 +33,44 @@ internal sealed class DeveloperConfiguration
     public required string? NearMissRootKey { get; init; }
 
     /// <summary>
+    /// The configured service names that name no service <c>servicesources.yaml</c> declares, in
+    /// the spelling they were configured under.
+    /// </summary>
+    /// <remarks>
+    /// The candidates for the near miss in <see cref="NotConfiguredError"/>, and deliberately only
+    /// these. An entry naming a service the catalog declares is that service's entry whatever else
+    /// it resembles, and offering one as a correction of another is advice to rename a working
+    /// entry — which breaks the service it belongs to. What is left is the entries the catalog
+    /// cannot account for, which are kept rather than rejected because an AppHost need not add
+    /// every service the file mentions: a developer switching between two AppHosts out of one file
+    /// has done nothing wrong. So validity cannot tell a typo from an entry that is simply for
+    /// something else, and only resemblance to a service that is failing can.
+    /// <para>
+    /// It also settles the one way this could name a service after itself. An entry that reaches
+    /// its service but sets no <c>source</c> arrives at the same error, and its name is at distance
+    /// zero — but it names a service the catalog declares, so it is not in here to be offered.
+    /// </para>
+    /// </remarks>
+    public required IReadOnlyList<string> UndeclaredNames { get; init; }
+
+    /// <summary>
+    /// The service names <c>servicesources.yaml</c> declares.
+    /// </summary>
+    /// <remarks>
+    /// Kept for the second half of the near miss in <see cref="NotConfiguredError"/>: an entry that
+    /// resembles the service that failed has to resemble it more than it resembles anything else
+    /// the catalog declares, or the suggestion sends the developer to rename an entry that was
+    /// meant for a different service. Two neighbouring names are all it takes — with
+    /// <c>cart</c> and <c>carts</c> both declared, a <c>crat</c> entry is one edit from the first
+    /// and two from the second, and asked only about <c>carts</c> it qualifies.
+    /// <para>
+    /// Costs nothing to hold: <see cref="Sources.ServiceResources"/> reaches these through the
+    /// catalog itself, which is cached beside this object for the life of the builder.
+    /// </para>
+    /// </remarks>
+    public required IReadOnlyList<string> CatalogNames { get; init; }
+
+    /// <summary>
     /// Reads the developer's selection out of <paramref name="builder"/>'s configuration. Whichever
     /// entry point the AppHost called first has already put <c>servicesources.local.json</c> into
     /// that chain; the call below covers the internal paths that reach a read without one, and is a
@@ -46,6 +84,10 @@ internal sealed class DeveloperConfiguration
         IDistributedApplicationBuilder builder, IEnumerable<string> catalogNames)
     {
         DeveloperConfigFileSource.EnsureRegistered(builder);
+
+        // Walked more than once below, and held afterwards, so it is read out of the catalog here
+        // rather than re-enumerated per use.
+        var declaredNames = catalogNames.ToArray();
 
         var path = Path.Combine(builder.AppHostDirectory, FileName);
 
@@ -69,11 +111,13 @@ internal sealed class DeveloperConfiguration
             NormalizeBlankToAbsent(config, DeveloperConfigShape.Service);
         }
 
-        var services = CanonicalizeToCatalog(bound, catalogNames);
+        var (services, undeclaredNames) = CanonicalizeToCatalog(bound, declaredNames);
 
         return new DeveloperConfiguration
         {
             Services = services,
+            UndeclaredNames = undeclaredNames,
+            CatalogNames = declaredNames,
             FilePath = path,
             FileFound = File.Exists(path),
             // Asked unconditionally, and not gated on nothing being configured — which reads as the
@@ -213,8 +257,16 @@ internal sealed class DeveloperConfiguration
     /// spelled, so the entries move onto its spelling once, here, rather than every consumer having
     /// to know which comparer its keys arrived under.
     /// </remarks>
-    private static Dictionary<string, ServiceDeveloperConfig> CanonicalizeToCatalog(
-        Dictionary<string, ServiceDeveloperConfig> bound, IEnumerable<string> catalogNames)
+    /// <returns>
+    /// The re-keyed entries, and the names among them the catalog does not describe — see
+    /// <see cref="UndeclaredNames"/>. The second falls out of the walk below rather than being
+    /// found by a second pass, since deciding it is exactly what the walk already does for every
+    /// entry.
+    /// </returns>
+    private static (
+        Dictionary<string, ServiceDeveloperConfig> Services,
+        IReadOnlyList<string> UndeclaredNames) CanonicalizeToCatalog(
+        Dictionary<string, ServiceDeveloperConfig> bound, IReadOnlyList<string> catalogNames)
     {
         var catalogSpelling = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         foreach (var name in catalogNames)
@@ -232,11 +284,13 @@ internal sealed class DeveloperConfiguration
         // describe has no spelling to adopt, and looking one up has to keep working so that the
         // failure comes from the catalog lookup, which can say so, rather than from a miss here.
         var canonical = new Dictionary<string, ServiceDeveloperConfig>(StringComparer.OrdinalIgnoreCase);
+        var undeclared = new List<string>();
         foreach (var (name, config) in bound)
         {
             if (!catalogSpelling.TryGetValue(name, out var spelling))
             {
                 canonical[name] = config;
+                undeclared.Add(name);
                 continue;
             }
 
@@ -248,7 +302,7 @@ internal sealed class DeveloperConfiguration
             canonical[spelling] = config;
         }
 
-        return canonical;
+        return (canonical, undeclared);
     }
 
     /// <summary>
@@ -294,7 +348,99 @@ internal sealed class DeveloperConfiguration
                     ? $"add \"{serviceName}\": {{ \"source\": \"...\" }} under \"services\" in '{FilePath}', "
                     : $"create '{FilePath}' with {{ \"services\": {{ \"{serviceName}\": {{ \"source\": \"...\" }} }} }}, ")
                 + $"or set the environment variable {EnvironmentVariableFor(serviceName)}."
-                + MisspelledRootKeyNote());
+                // The root-key note first, because it is the causally prior fact: it says the
+                // file's service entries are going unread, which is what leaves the note below
+                // unable to say where the resembling entry was written.
+                + MisspelledRootKeyNote()
+                + MisspelledServiceNameNote(serviceName));
+
+    /// <summary>
+    /// The note that an entry the developer already has looks like a misspelling of the service
+    /// that is failing.
+    /// </summary>
+    /// <remarks>
+    /// The near miss #122 added for the file's root key, one level down. A misspelled service name
+    /// is the last shape that produces a fully valid file nothing reads: the entry sits there,
+    /// correctly shaped, and the error above is true in every word and never mentions that the fix
+    /// is one character in an entry the reader is looking at.
+    /// <para>
+    /// Asked only from here, so a file whose entries all resolve is never searched, and only of the
+    /// entries the catalog cannot account for — see <see cref="UndeclaredNames"/>.
+    /// </para>
+    /// <para>
+    /// Appended rather than replacing the advice, and phrased against the configuration rather than
+    /// against the file. The entry is a merged configuration key, so an environment variable can
+    /// have contributed it, and the file is only where a developer normally writes one: naming the
+    /// file as the thing that carries the misspelling would be a claim this cannot check. The
+    /// advice above names both places, which is where the reader goes.
+    /// </para>
+    /// <para>
+    /// The last clause is what makes the note worth appending to advice that says <em>add</em>.
+    /// Read in order, a developer told to add <c>"orders"</c> and then told <c>"order"</c> exists
+    /// does both and leaves two entries behind, one of them dead — and the dead one is the one they
+    /// were editing. So the note says which of the two actions to take, and says it last, where the
+    /// reader is when they stop reading.
+    /// </para>
+    /// <para>
+    /// It cannot say that when the service already has an entry of its own, which is the second
+    /// route into this error: the entry is there and its <c>source</c> is missing. Renaming the
+    /// resembling entry onto a name the file already uses is not a fix but a second key with the
+    /// same name, which the JSON provider refuses to load at all once the two collide on a leaf.
+    /// What is left to say there is where the source belongs, which is the entry that already
+    /// exists.
+    /// </para>
+    /// <para>
+    /// A near miss on demand rather than an audit of every entry once the AppHost is composed,
+    /// which is the shape <see cref="BackingServices.BackingServiceConfigAudit"/> uses for the
+    /// entries on its side of the same configuration. That audit is possible here too, and is not
+    /// ruled out by anything: what separates them is the register it can afford to speak in. It
+    /// warns, so it can absorb naming an entry that was deliberately left unused; this is a
+    /// sentence inside an exception, and the only entry it is certain about is one that a service
+    /// asking for its source has already failed over. #181 asked for that direction and left the
+    /// audit to be decided on its own.
+    /// </para>
+    /// </remarks>
+    private string MisspelledServiceNameNote(string serviceName) =>
+        NearMissForService(serviceName) is not { } configured
+            ? ""
+            : $" Note that '{configured}' is configured and reaches no service in "
+              + $"'servicesources.yaml'. Did you mean '{serviceName}'? "
+              + (Services.ContainsKey(serviceName)
+                  ? $"An entry for '{serviceName}' is there already, so the source belongs on that "
+                    + $"one rather than on '{configured}'."
+                  : "If so, rename that entry rather than adding a second one.");
+
+    /// <summary>
+    /// The configured entry that reads as a misspelling of <paramref name="serviceName"/>, or
+    /// <see langword="null"/> when none does.
+    /// </summary>
+    /// <remarks>
+    /// Two questions, and a suggestion needs both answered the same way. The first is the one the
+    /// message asks: of the entries the catalog cannot account for, which is closest to the service
+    /// that failed. The second is its reverse: of the services the catalog declares, which is that
+    /// entry closest to — and unless the answer is the service that failed, the entry was reaching
+    /// for something else and renaming it costs the developer the configuration it was carrying.
+    /// <para>
+    /// It takes two neighbouring catalog names to matter, and they are ordinary: with <c>cart</c>
+    /// and <c>carts</c> both declared, <c>crat</c> is one edit from the first and two from the
+    /// second, so a failing <c>carts</c> asked only the first question is told to rename the
+    /// <c>cart</c> entry onto <c>carts</c>. The second question answers <c>cart</c> and the note
+    /// stays quiet, leaving it to be made when <c>cart</c> itself fails — which it now will.
+    /// </para>
+    /// <para>
+    /// Each direction is asked with its own side as the vocabulary: the entries are the developer's
+    /// words and the catalog names are the fixed list, so the first goes through
+    /// <see cref="NearMiss.MisspellingOf"/> and the second through <see cref="NearMiss.Nearest{T}"/>.
+    /// Ties in the second are kept rather than broken — two catalog names equally close leave the
+    /// entry a misspelling of either, and the one that failed is as good an answer as the other.
+    /// </para>
+    /// </remarks>
+    private string? NearMissForService(string serviceName) =>
+        NearMiss.MisspellingOf(serviceName, UndeclaredNames) is { } configured
+        && NearMiss.Nearest(configured, CatalogNames, name => name)
+            .Contains(serviceName, StringComparer.OrdinalIgnoreCase)
+            ? configured
+            : null;
 
     /// <summary>
     /// The warning that the file the advice above points at is not being read, when its root key is

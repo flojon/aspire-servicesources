@@ -384,6 +384,54 @@ nothing will fail to build to warn you.
   `""`, which used to reach `Path.Combine` and come back as an `ArgumentNullException` naming
   neither.
 
+- **A misspelled service name in `servicesources.local.json` now names the entry it was reaching
+  for** ([#181]). A service name one letter off is the last near miss that produces a fully valid
+  entry nothing reads: it sits in the file correctly shaped, and the AppHost reports the service as
+  one nobody configured and tells you to add the entry you are looking at.
+
+  ```jsonc
+  // servicesources.yaml declares 'orders'
+  { "services": { "order": { "source": "local", "local": { "path": "/home/dev/code/orders" } } } }
+  ```
+
+  Every word of the old message was true and its advice worked — writing the entry a second time
+  under the right spelling does configure the service — it just never mentioned that the fix was
+  one character, and following it left the misspelled entry behind as a second, dead one. It now
+  adds: *Note that 'order' is configured and reaches no service in 'servicesources.yaml'. Did you
+  mean 'orders'? If so, rename that entry rather than adding a second one.*
+
+  The suggestion has to survive being followed, so it is made only when two questions agree. Of the
+  entries `servicesources.yaml` cannot account for, which is closest to the service that failed —
+  and of the services `servicesources.yaml` declares, which is that entry closest to. An entry
+  naming a service the catalog *does* declare is that service's entry whatever else it resembles,
+  so a file configuring both `order` and `orders` for two real services is never told one of them
+  is a typo. And an entry closer to some *other* declared service is left for that service to name:
+  with `cart` and `carts` both declared, a `crat` entry is one edit from the first and two from the
+  second, so a failing `carts` says nothing about it and a failing `cart` names it. Asking only the
+  first question there would have told you to rename the entry configuring `cart` onto `carts`,
+  which costs you the configuration and leaves the next failure with nothing to say.
+
+  Where the service already has an entry of its own and what is missing from it is the `source` key
+  rather than a letter, the note says so instead: *Did you mean 'orders'? An entry for 'orders' is
+  there already, so the source belongs on that one rather than on 'order'.* Telling you to rename
+  onto a name the file already uses would ask for a second `"orders"` key in one object, which the
+  JSON parser refuses to load at all once the two collide on a field.
+
+  Nothing is said about an unused entry on its own account. An AppHost need not add every service
+  the file mentions, so a developer switching between two AppHosts out of one file, or keeping an
+  entry for a service they have stopped adding, is doing nothing wrong and hears nothing — the file
+  is searched only from inside a failure, and a file whose entries all resolve is never searched at
+  all. What that leaves is one accepted false positive: an entry that is genuinely for something
+  else, but is nearer the failing service than any service this catalog declares, is offered as its
+  misspelling. The cost is two or three hedged sentences in an error already being thrown, which is
+  the trade the root-key near miss already makes.
+
+  The tolerance is the one [#182] settled, taken from the service name rather than the entry: one
+  edit for a name of four letters or fewer, two for anything longer, with a swapped pair counting
+  as one edit. So `crat` is answered with `cart`, while `carted` — two edits from `cart`, and long
+  enough to have allowed itself two — is left alone. Two entries the same distance away are
+  separated ordinally, so the message names the same one on every run.
+
 - **A field misspelled at a service entry's root now names the field it was reaching for**
   ([#182]). Spelled correctly, a field written flat at the entry root is walked through the move
   into its block: *'path' is not a valid key here. It belongs in the 'local' block: `"orders": {
@@ -1050,6 +1098,7 @@ Targets `net10.0`.
 [#170]: https://github.com/flojon/aspire-servicesources/issues/170
 [#171]: https://github.com/flojon/aspire-servicesources/issues/171
 [#180]: https://github.com/flojon/aspire-servicesources/pull/180
+[#181]: https://github.com/flojon/aspire-servicesources/issues/181
 [#182]: https://github.com/flojon/aspire-servicesources/issues/182
 [#187]: https://github.com/flojon/aspire-servicesources/issues/187
 [#200]: https://github.com/flojon/aspire-servicesources/issues/200
