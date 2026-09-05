@@ -59,6 +59,11 @@ internal static class ConnectionStringRedaction
     /// because under <c>tr-TR</c> a culture-sensitive fold maps the <c>I</c> of <c>Initial
     /// Catalog</c> to a dotless <c>ı</c> and the lookup misses.
     /// </para>
+    /// <para>
+    /// <c>user id</c> and <c>userid</c> are here because <c>uid</c>, <c>user</c> and <c>username</c>
+    /// are: they are SqlClient's spelling of the same concept, and without them <c>User ID=sa</c>
+    /// would read as <c>***</c> while <c>UID=sa</c> printed.
+    /// </para>
     /// </remarks>
     private static readonly HashSet<string> KeysThatHoldNoSecret = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -114,19 +119,24 @@ internal static class ConnectionStringRedaction
     /// <summary>
     /// Where one <c>key=value</c> pair sits in the string being scanned.
     /// </summary>
+    /// <param name="KeyStart">Where the key's first character is.</param>
+    /// <param name="KeyEnd">Where the key's text ends, before any space in front of the <c>=</c>.</param>
+    /// <param name="ValueStart">Where the value begins, just after the <c>=</c>.</param>
     private readonly record struct Pair(int KeyStart, int KeyEnd, int ValueStart);
 
     /// <summary>
     /// <paramref name="text"/> rebuilt with every unrecognised value replaced.
     /// </summary>
     /// <remarks>
-    /// Keys and the runs of separators between pairs are copied across verbatim, so a string with
-    /// nothing to hide comes back byte-identical. The caller decides whether to explain the masking
-    /// by comparing this with what it passed in, and any normalisation here would make that
-    /// comparison lie.
+    /// Keys, the spacing around each <c>=</c> and the runs of separators between pairs are copied
+    /// across verbatim, so a string with nothing to hide comes back byte-identical. The caller
+    /// decides whether to explain the masking by comparing this with what it passed in, and any
+    /// normalisation here would make that comparison lie.
     /// </remarks>
     private static string Scan(string text)
-        => text.Length == 0 ? text : Rebuild(text, FindPairs(text, IntroducesAPair), RedactPrefix, RedactValue);
+        => text.Length == 0
+            ? text
+            : Rebuild(text, FindPairs(text, whitespaceBeginsAPair: false), RedactPrefix, RedactValue);
 
     /// <summary>
     /// <paramref name="value"/> under a key the allowlist names, with anything written inside it
@@ -135,29 +145,32 @@ internal static class ConnectionStringRedaction
     /// <remarks>
     /// libpq's conninfo writes its pairs separated by spaces — <c>host=h port=5432
     /// password=hunter2</c> — so a value that is printed because its key is allowlisted can carry
-    /// several more pairs, one of which is the password. A space only introduces a pair
-    /// <em>here</em>, inside a value already recognised as safe to print. Doing it one level up
-    /// would let <c>Rotation Key=abc user=def</c> print <c>def</c>, which is not a username but the
-    /// tail of an unrecognised value.
+    /// several more pairs, one of which is the password. A space begins a pair <em>here</em>, inside
+    /// a value already recognised as safe to print. Letting it do so one level up would print the
+    /// <c>def</c> in <c>Rotation Key=abc user=def</c>, which is not a username but the tail of a
+    /// value nothing recognised.
     /// <para>
     /// One level deep, and no deeper: this is the last point at which anything is printed, so there
     /// is no recursion to bound.
     /// </para>
     /// </remarks>
     private static string RedactRecognisedValue(string value)
-    {
-        var pairs = FindPairs(value, IntroducesANestedPair);
-
-        return Rebuild(value, pairs, MaskAuthority, static (key, nested) =>
-            nested.Length == 0 || KeysThatHoldNoSecret.Contains(key.Trim())
-                ? MaskAuthority(nested)
-                : Mask);
-    }
+        => Rebuild(
+            value,
+            FindPairs(value, whitespaceBeginsAPair: true),
+            MaskAuthority,
+            static (key, nested) => KeysThatHoldNoSecret.Contains(key) ? MaskAuthority(nested) : Mask);
 
     /// <summary>
     /// <paramref name="text"/> with each of <paramref name="pairs"/> put through
-    /// <paramref name="redactValue"/> and everything between them copied verbatim.
+    /// <paramref name="redactValue"/>, the text before the first through
+    /// <paramref name="redactHead"/>, and everything else copied verbatim.
     /// </summary>
+    /// <remarks>
+    /// The head is what precedes the first key. At the top of the string that is an unvetted prefix
+    /// and is treated as one; inside a value it is the part of a value already recognised, such as
+    /// the <c>db.internal</c> in <c>host=db.internal port=5432</c>.
+    /// </remarks>
     private static string Rebuild(
         string text,
         List<Pair> pairs,
@@ -184,11 +197,21 @@ internal static class ConnectionStringRedaction
                 valueEnd--;
             }
 
-            var key = text[pair.KeyStart..pair.KeyEnd];
+            var valueStart = pair.ValueStart;
 
-            built.Append(key)
-                 .Append('=')
-                 .Append(redactValue(key, text[pair.ValueStart..valueEnd]))
+            // Space in front of a value belongs to the layout the developer wrote, not to the value:
+            // 'Port = 5432' must come back with its spacing whatever happens to the 5432.
+            while (valueStart < valueEnd && char.IsWhiteSpace(text[valueStart]))
+            {
+                valueStart++;
+            }
+
+            var value = text[valueStart..valueEnd];
+
+            // Key, any space around the '=', and the '=' itself, exactly as written.
+            built.Append(text, pair.KeyStart, valueStart - pair.KeyStart);
+
+            built.Append(value.Length == 0 ? value : redactValue(text[pair.KeyStart..pair.KeyEnd], value))
                  .Append(text, valueEnd, boundary - valueEnd);
         }
 
@@ -196,77 +219,100 @@ internal static class ConnectionStringRedaction
     }
 
     /// <summary>
-    /// Every <c>key=</c> in <paramref name="text"/> that <paramref name="introducesAPair"/> accepts,
-    /// in the order they appear.
+    /// Every <c>key=</c> in <paramref name="text"/> that something could have introduced, in the
+    /// order they appear.
     /// </summary>
     /// <remarks>
-    /// A key is recognised only where something could have introduced one, so the <c>host</c> in
-    /// <c>Password=myhost=x</c> is not mistaken for a key of its own. A doubled <c>=</c> is skipped
-    /// rather than accepted: <c>Host==x=hunter2</c> is ADO.NET's escape for the key <c>host=x</c>,
-    /// so reading <c>Host</c> as the key would find an allowlisted name and print the password
-    /// behind it. Skipped, it is recognised as nothing and shown as nothing.
+    /// A key is recognised only where a pair could begin, so the <c>host</c> in
+    /// <c>Password=myhost=x</c> is not mistaken for a key of its own. What may begin one differs by
+    /// level: at the top of the string one of <c>;</c> <c>&amp;</c> <c>?</c> <c>,</c> must have come
+    /// first, optionally followed by space, while inside a value already recognised as safe to print
+    /// space alone will do — see <see cref="RedactRecognisedValue"/>.
+    /// <para>
+    /// A doubled <c>=</c> is skipped rather than accepted: <c>Host==x=hunter2</c> is ADO.NET's
+    /// escape for the key <c>host=x</c>, so reading <c>Host</c> as the key would find an allowlisted
+    /// name and print the password behind it. Skipped, it is recognised as nothing and shown as
+    /// nothing.
+    /// </para>
     /// </remarks>
-    private static List<Pair> FindPairs(string text, Func<string, int, bool> introducesAPair)
+    private static List<Pair> FindPairs(string text, bool whitespaceBeginsAPair)
     {
         var pairs = new List<Pair>();
 
+        // The last character that was not whitespace, so that "a separator, then any amount of
+        // space" is answered in constant time however long that space runs.
+        var lastMeaningful = '\0';
+
         for (var i = 0; i < text.Length; i++)
         {
-            if (!introducesAPair(text, i))
+            var mayBegin = whitespaceBeginsAPair
+                ? i > 0 && char.IsWhiteSpace(text[i - 1])
+                : lastMeaningful is '\0' or ';' or '&' or '?' or ',';
+
+            if (mayBegin && TryReadPair(text, i, out var pair))
             {
+                pairs.Add(pair);
+
+                // Everything up to the '=' is accounted for; the value is scanned as ordinary text,
+                // which is what stops a pair beginning inside it.
+                for (var scanned = i; scanned < pair.ValueStart; scanned++)
+                {
+                    if (!char.IsWhiteSpace(text[scanned]))
+                    {
+                        lastMeaningful = text[scanned];
+                    }
+                }
+
+                i = pair.ValueStart - 1;
                 continue;
             }
 
-            var keyEnd = KeyEndAt(text, i);
-
-            if (keyEnd < 0 || keyEnd >= text.Length || text[keyEnd] != '=')
+            if (!char.IsWhiteSpace(text[i]))
             {
-                continue;
+                lastMeaningful = text[i];
             }
-
-            if (keyEnd + 1 < text.Length && text[keyEnd + 1] == '=')
-            {
-                continue;
-            }
-
-            pairs.Add(new Pair(i, keyEnd, keyEnd + 1));
-
-            i = keyEnd;
         }
 
         return pairs;
     }
 
     /// <summary>
-    /// Whether a pair may begin at <paramref name="index"/> in the connection string itself.
+    /// Whether a pair begins at <paramref name="start"/>, and where its parts are.
     /// </summary>
-    /// <remarks>
-    /// One of the marks a dialect writes between pairs, optionally followed by whitespace, so
-    /// <c>Host=h; Port=5432</c> reads as two pairs. Whitespace alone is not enough here — see
-    /// <see cref="RedactRecognisedValue"/>.
-    /// </remarks>
-    private static bool IntroducesAPair(string text, int index)
+    private static bool TryReadPair(string text, int start, out Pair pair)
     {
-        var before = index;
+        pair = default;
 
-        while (before > 0 && char.IsWhiteSpace(text[before - 1]))
+        var keyEnd = KeyEndAt(text, start);
+
+        if (keyEnd < 0)
         {
-            before--;
+            return false;
         }
 
-        return before == 0 || text[before - 1] is ';' or '&' or '?' or ',';
-    }
+        // Whitespace is allowed on either side of the '=' — every keyword dialect trims it — but it
+        // is not part of the key.
+        var equals = keyEnd;
 
-    /// <summary>
-    /// Whether a pair may begin at <paramref name="index"/> inside a value already being printed.
-    /// </summary>
-    /// <remarks>
-    /// Not at the start: the head of <c>host=db.internal port=5432</c> is the host, and reading it
-    /// as a key would run the key across the space into <c>db.internal port</c> and hide the port
-    /// behind a name nothing recognises.
-    /// </remarks>
-    private static bool IntroducesANestedPair(string text, int index)
-        => index > 0 && char.IsWhiteSpace(text[index - 1]);
+        while (equals < text.Length && char.IsWhiteSpace(text[equals]))
+        {
+            equals++;
+        }
+
+        if (equals >= text.Length || text[equals] != '=')
+        {
+            return false;
+        }
+
+        if (equals + 1 < text.Length && text[equals + 1] == '=')
+        {
+            return false;
+        }
+
+        pair = new Pair(start, keyEnd, equals + 1);
+
+        return true;
+    }
 
     /// <summary>
     /// Where the key starting at <paramref name="start"/> ends, or <c>-1</c> if none starts there.
@@ -274,7 +320,7 @@ internal static class ConnectionStringRedaction
     /// <remarks>
     /// Single interior spaces are part of a key, because several dialects write one — <c>Data
     /// Source</c>, <c>Initial Catalog</c>, <c>User ID</c>. A space is only taken when a key
-    /// character follows it, so a trailing space belongs to the separator instead.
+    /// character follows it, so a space in front of the <c>=</c> belongs to the layout instead.
     /// <para>
     /// The longest key wins, and that is the fail-closed reading rather than a tidiness preference.
     /// In <c>Host=x Custom Port=5432</c> the short read finds the allowlisted <c>Port</c> and prints
@@ -316,18 +362,14 @@ internal static class ConnectionStringRedaction
     /// What is printed for <paramref name="value"/> under <paramref name="key"/>.
     /// </summary>
     /// <remarks>
-    /// An empty value is left empty. It cannot be a secret, and it is the entire diagnosis in the
-    /// case this message exists for — a shell that ate a <c>${port}</c> leaves the key behind with
+    /// An empty value never reaches here: <see cref="Rebuild"/> leaves one exactly as it found it,
+    /// because an empty string cannot be a secret and because it is the entire diagnosis in the case
+    /// this message exists for — a shell that ate a <c>${port}</c> leaves the key behind with
     /// nothing in it, and masking that would assert something was hidden where nothing was.
     /// </remarks>
     private static string RedactValue(string key, string value)
     {
-        if (value.Length == 0)
-        {
-            return value;
-        }
-
-        return KeysThatHoldNoSecret.Contains(key.Trim()) ? RedactRecognisedValue(value) : Mask;
+        return KeysThatHoldNoSecret.Contains(key) ? RedactRecognisedValue(value) : Mask;
     }
 
     /// <summary>

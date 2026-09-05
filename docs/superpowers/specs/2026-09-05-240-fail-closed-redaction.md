@@ -53,7 +53,18 @@ at least as permissive as every tokenizer that could have written the string. Re
 separators; the real strings used a space, an end-of-string, a raw sub-delim inside a userinfo, and
 a doubled `=`.
 
-**Revision 2 tokenizes by keys rather than by delimiters.** It does not need to know which dialect
+Revision 2 tokenized by keys and was right about that, but got the levels wrong in two ways that
+review caught in the code rather than on paper. It read whitespace as a separator everywhere, so the
+tail of an unrecognised value was re-read as pairs and any of them under an allowlisted name was
+printed — `Rotation Key=abc user=def` printed `def`. And it read a key as ending at the `=` with no
+space allowed in between, so `RotationKey = hunter2` was not a pair at all: it was swallowed into the
+previous value, printed in full, and — because the result equalled the input — printed with no note
+saying anything had been hidden. Revision 3 confines nested pairs to values already recognised, lets
+space sit on either side of the `=`, halves the backstop, and answers "may a pair begin here?" in
+constant time rather than by walking backwards over the whitespace (which was quadratic: 2.1 s at
+80 KB of it).
+
+**The design that shipped tokenizes by keys rather than by delimiters.** It does not need to know which dialect
 wrote the string, and it never has to decide whether a `;` is a separator or part of a password.
 
 ## The design
@@ -206,7 +217,13 @@ So the real fork is echo-with-values or no echo, and the echo earns its place.
 must stop asserting one. Pinned wording, so the tests can assert it:
 
 - now: `" (a credential in it shown as ***)"`
-- becomes: `" (values not known to be safe to print are shown as ***)"`
+- becomes: `" (a value is shown only under a key known to hold no secret; the rest read as ***, which
+  does not mean they were secret)"`
+
+The second clause is not padding. Reading the real messages showed that a template of ordinary,
+unrecognised keys — `Host=localhost;Custom Port=5432;Encrypt=True` — gets `***` over a port number
+and a boolean, and a note saying values were "not known to be safe" reads as an accusation about
+them. Saying what the rule is, and that it is not a claim about the value, is the honest version.
 
 Its guard keeps the same two arms — `shown == connectionString || shown == Unscannable` — so an
 all-allowlisted template still quotes back exactly what the developer wrote, with no note. That
@@ -237,6 +254,11 @@ Not closed, and said out loud rather than left to be discovered:
   told something was hidden when the honest answer is "nothing here was recognised".
 - A value under an allowlisted key that contains ` word=` is read as nested pairs, so
   `Data Source=a b=c` reads `Data Source=a b=***`. Fail-closed, mildly odd, and the price of libpq.
+- Space around a `=` is layout and is preserved, but a key is still only ASCII letters, digits and
+  `_ . -` with single interior spaces. A dialect writing a key outside that charset would not be
+  read as a pair, and its value would be swallowed by the pair before it — the shape that leaked
+  `RotationKey = hunter2` before the space rule landed. Nothing known writes such a key, and the
+  keyword backstop covers the conventional names regardless.
 
 ## Tests
 
@@ -266,6 +288,9 @@ regression guard for the ordinary case.
 | `Host==x=hunter2` | `***` — the `==` escape fails closed, key included |
 | `Rotation Key=abc user=def` | `Rotation Key=***` — a nested pair does not escape an unrecognised value |
 | `Host=x Custom Port=5432` | `Host=x Custom Port=***` — longest key wins |
+| `Host=localhost;RotationKey = hunter2;Database=orders` | `RotationKey = ***` — space around `=` hides nothing |
+| `Host = localhost;Port = 5432;Database = orders` | untouched, spacing and all |
+| 30 000 copies of `Host=h; ` | returns in well under a second — the scan is linear in whitespace too |
 | `Data Source=file:pwd=hunter2` | `Data Source=file:pwd=***` — the row the backstop exists for |
 | `localhost:6379,ssl=false` | `localhost:6379,ssl=***` |
 | `localhost` | `***` |
