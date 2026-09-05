@@ -264,8 +264,17 @@ public class AddBackingServiceTests
         Assert.DoesNotContain("'${port}'", ex.Message);
     }
 
+    /// <summary>
+    /// A secret placeholder under <c>"direct"</c> is refused, and the message names the source that
+    /// does read one rather than calling the feature unbuilt.
+    /// </summary>
+    /// <remarks>
+    /// It is not "not supported yet" since stage 3 — <c>"kubernetes"</c> resolves these. What
+    /// <c>"direct"</c> lacks is a cluster to resolve one against: it carries a connection string and
+    /// nothing else, with no <c>context</c> or <c>namespace</c> beside it.
+    /// </remarks>
     [Fact]
-    public void DirectSource_WithSecretPlaceholder_FailsSayingItIsNotSupportedYet()
+    public void DirectSource_WithSecretPlaceholder_IsRefusedAndNamesTheSourceThatReadsOne()
     {
         var builder = CreateBuilder("""
             { "backingServices": { "orders-db": {
@@ -277,7 +286,8 @@ public class AddBackingServiceTests
             () => builder.AddBackingService("orders-db", LocalFactory(builder)));
 
         Assert.Contains("'${secret:orders-creds:password}'", ex.Message);
-        Assert.Contains("not supported yet", ex.Message);
+        Assert.Contains("'kubernetes' reads these", ex.Message);
+        Assert.DoesNotContain("not supported yet", ex.Message);
     }
 
     /// <summary>

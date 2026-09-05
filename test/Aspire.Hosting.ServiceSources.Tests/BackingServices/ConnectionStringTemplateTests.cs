@@ -358,4 +358,59 @@ public class ConnectionStringTemplateTests
         Assert.Equal(
             template,
             Assert.IsType<ConnectionStringTemplate.Literal>(Assert.Single(Parse(template).Segments)).Text);
+
+    /// <summary>
+    /// A secret name that could be read as a kubectl option is refused before it can become one.
+    /// </summary>
+    /// <remarks>
+    /// The name is passed to <c>kubectl</c> in a positional slot, and kubectl's parser takes options
+    /// wherever they appear — so <c>--kubeconfig=…</c> there points it at a file the writer of the
+    /// connection string chose, and a kubeconfig names an <c>exec:</c> credential plugin that kubectl
+    /// runs. The connection string arrives through configuration, so <c>appsettings.json</c> or an
+    /// environment variable is enough to carry it. A leading <c>-</c> is not a name any cluster could
+    /// hold either, so refusing it costs nothing real.
+    /// </remarks>
+    [Theory]
+    [InlineData("${secret:--kubeconfig=/tmp/evil.yaml:password}")]
+    [InlineData("${secret:-n:password}")]
+    [InlineData("${secret:--namespace:password}")]
+    public void Parse_SecretNameThatCouldBeReadAsAnOption_IsRefused(string template) =>
+        Assert.Contains("starting with a letter or a digit", Rejects(template).Message);
+
+    /// <summary>
+    /// A key carrying a quote is refused, because the quote would escape the jsonpath it is put in.
+    /// </summary>
+    /// <remarks>
+    /// <c>{.data['&lt;key&gt;']}</c> is the exact addressing the reader uses. A <c>'</c> closes it, and a
+    /// jsonpath that fails to <em>execute</em> makes kubectl print the whole object it was given —
+    /// every key of the secret — to standard error, which is reported. Kubernetes admits no quote in
+    /// a key, so this refuses nothing that exists.
+    /// </remarks>
+    [Theory]
+    [InlineData("${secret:orders-creds:password'][?(@=='x')]['x}")]
+    [InlineData("${secret:orders-creds:pass word}")]
+    [InlineData("${secret:orders creds:password}")]
+    public void Parse_SecretPartCarryingSomethingKubernetesCannotHold_IsRefused(string template) =>
+        Assert.Throws<ServiceSourcesConfigurationException>(() => Parse(template));
+
+    /// <summary>
+    /// The characters Kubernetes does allow are all accepted, including a key opening with a dot.
+    /// </summary>
+    /// <remarks>
+    /// <c>.dockerconfigjson</c> is the key the API itself gives a pull secret, and
+    /// <c>DB_PASSWORD</c> is what <c>--from-env-file</c> writes. Refusing either would leave the
+    /// placeholder unusable against most real secrets.
+    /// </remarks>
+    [Theory]
+    [InlineData("${secret:app-secrets:DB_PASSWORD}", "app-secrets", "DB_PASSWORD")]
+    [InlineData("${secret:pull:.dockerconfigjson}", "pull", ".dockerconfigjson")]
+    [InlineData("${secret:tls-1:tls.key}", "tls-1", "tls.key")]
+    [InlineData("${secret:a.b_c-1:x}", "a.b_c-1", "x")]
+    public void Parse_SecretPartsKubernetesAllows_AreAccepted(string template, string name, string key)
+    {
+        var secret = Assert.IsType<ConnectionStringTemplate.Secret>(Assert.Single(Parse(template).Segments));
+
+        Assert.Equal(name, secret.Name);
+        Assert.Equal(key, secret.Key);
+    }
 }

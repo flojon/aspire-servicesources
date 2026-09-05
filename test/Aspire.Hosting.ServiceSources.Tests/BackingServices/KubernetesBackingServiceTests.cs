@@ -35,11 +35,15 @@ public class KubernetesBackingServiceTests
 
     private sealed class FakePortAllocator(int port) : IPortAllocator
     {
+        public bool IsAvailable(int candidate) => true;
+
         public int AllocatePort() => port;
     }
 
     private sealed class TrackingPortAllocator(Action onAllocate, int port) : IPortAllocator
     {
+        public bool IsAvailable(int candidate) => true;
+
         public int AllocatePort()
         {
             onAllocate();
@@ -868,11 +872,179 @@ public class KubernetesBackingServiceTests
             builder,
             Config(service: "orders", port: 5432, connectionString: "${secret:orders-cs:connectionString}"),
             allocator: new OccupiedPortAllocator(occupied: -1),
-            secretReader: new FakeSecretReader("Host=orders;Database=orders-archive;User=orders_app"));
+            secretReader: new FakeSecretReader(
+                "Host=orders;Port=5432;Database=orders;User=orders;Password=orders"));
+
+        // Every 'orders' after the first is a value, not a host. A word boundary does not separate
+        // them — '=' and ';' bound a word — so this is the case a boundary-only rewrite gets wrong,
+        // and it is the ordinary Postgres shape: the service, the database and the role share a name.
+        Assert.Equal(
+            "Host=localhost;Port=5432;Database=orders;User=orders;Password=orders",
+            await db.Resource.ConnectionStringExpression.GetValueAsync(default));
+    }
+
+    /// <summary>
+    /// In a URI the text after <c>//</c> is the user when an <c>@</c> follows it, not the host.
+    /// </summary>
+    [Fact]
+    public async Task WholeStringSecret_DoesNotRewriteAUriUserNameMatchingTheService()
+    {
+        var builder = CreateBuilder();
+
+        var db = Resolve(
+            builder,
+            Config(service: "postgres", port: 5432, connectionString: "${secret:cs:connectionString}"),
+            allocator: new OccupiedPortAllocator(occupied: -1),
+            secretReader: new FakeSecretReader("postgresql://postgres:pw@postgres.default:5432/postgres"));
 
         Assert.Equal(
-            "Host=localhost;Database=orders-archive;User=orders_app",
+            "postgresql://postgres:pw@localhost:5432/postgres",
             await db.Resource.ConnectionStringExpression.GetValueAsync(default));
+    }
+
+    /// <remarks>
+    /// DNS folds case; the rewrite has to as well, or a secret naming <c>Orders-PG</c> keeps an
+    /// address that only resolves inside the cluster.
+    /// </remarks>
+    [Fact]
+    public async Task WholeStringSecret_RewritesRegardlessOfCase()
+    {
+        var builder = CreateBuilder();
+
+        var db = Resolve(
+            builder,
+            Config(service: "orders-pg", port: 5432, connectionString: "${secret:cs:connectionString}"),
+            allocator: new OccupiedPortAllocator(occupied: -1),
+            secretReader: new FakeSecretReader("Host=Orders-PG.Default;Port=5432"));
+
+        Assert.Equal(
+            "Host=localhost;Port=5432",
+            await db.Resource.ConnectionStringExpression.GetValueAsync(default));
+    }
+
+    /// <summary>
+    /// A secret that addresses the service by something this cannot rewrite is refused, rather than
+    /// handed over still pointing into the cluster.
+    /// </summary>
+    /// <remarks>
+    /// Whole-string mode exists because the fetched value is unusable as fetched. Zero substitutions
+    /// means that premise did not hold, and passing the value through would send the credentials in
+    /// it whichever way the developer's own DNS resolves a cluster name — which, behind a VPN or a
+    /// search domain, need not be nowhere.
+    /// </remarks>
+    [Fact]
+    public async Task WholeStringSecret_ThatNamesTheServiceInNoRecognisedForm_IsRefused()
+    {
+        var builder = CreateBuilder();
+
+        var db = Resolve(
+            builder,
+            Config(service: "orders-pg", port: 5432, connectionString: "${secret:cs:connectionString}"),
+            allocator: new OccupiedPortAllocator(occupied: -1),
+            secretReader: new FakeSecretReader("Host=10.42.3.5;Port=5432;Database=orders"));
+
+        var ex = await Assert.ThrowsAsync<KubernetesSecretException>(
+            () => db.Resource.ConnectionStringExpression.GetValueAsync(default).AsTask());
+
+        Assert.Contains("does not address 'orders-pg'", ex.Message);
+    }
+
+    /// <summary>
+    /// A secret whose port is not the port being forwarded is refused, not silently served.
+    /// </summary>
+    /// <remarks>
+    /// The tunnel's two ends both come from <c>kubernetes.port</c>. Unchecked, the app dials the
+    /// port the secret names, the health check watches the port the tunnel serves, and every
+    /// resource reports healthy while the connection reaches nothing — or reaches whatever else
+    /// holds that port locally.
+    /// </remarks>
+    [Fact]
+    public async Task WholeStringSecret_AddressingAnotherPortThanTheTunnelServes_IsRefused()
+    {
+        var builder = CreateBuilder();
+
+        var db = Resolve(
+            builder,
+            Config(service: "orders-pg", port: 5432, connectionString: "${secret:cs:connectionString}"),
+            allocator: new OccupiedPortAllocator(occupied: -1),
+            secretReader: new FakeSecretReader("Host=orders-pg;Port=6432;Database=orders"));
+
+        var ex = await Assert.ThrowsAsync<KubernetesSecretException>(
+            () => db.Resource.ConnectionStringExpression.GetValueAsync(default).AsTask());
+
+        Assert.Contains("addresses port 6432", ex.Message);
+        Assert.Contains("serves 5432", ex.Message);
+    }
+
+    /// <summary>
+    /// A key Aspire would refuse as a resource name is folded rather than rejected.
+    /// </summary>
+    /// <remarks>
+    /// <c>DB_PASSWORD</c> is what <c>kubectl create secret --from-env-file</c> writes and
+    /// <c>.dockerconfigjson</c> is the API's own key for a pull secret. Both are legal in a cluster
+    /// and illegal in an Aspire resource name, and the developer cannot rename a secret they do not
+    /// own — so refusing them would leave the placeholder unusable for the common case.
+    /// </remarks>
+    [Theory]
+    [InlineData("DB_PASSWORD")]
+    [InlineData(".dockerconfigjson")]
+    [InlineData("tls.key")]
+    public void SecretKeyAspireWouldRefuseAsAName_IsFoldedRatherThanRejected(string key)
+    {
+        var builder = CreateBuilder();
+
+        Resolve(builder, Config(connectionString: $"Port=${{port}};X=${{secret:app-secrets:{key}}}"));
+
+        var parameter = Assert.Single(builder.Resources.OfType<ParameterResource>());
+
+        Assert.True(parameter.Secret);
+        Assert.DoesNotContain(parameter.Name, ["_", "."], StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// Two keys that fold to the same characters still get separate parameters.
+    /// </summary>
+    [Fact]
+    public void TwoKeysFoldingAlike_DoNotBecomeOneParameter()
+    {
+        var builder = CreateBuilder();
+
+        Resolve(
+            builder,
+            Config(connectionString: "Port=${port};A=${secret:s:ca.crt};B=${secret:s:ca_crt}"));
+
+        var names = builder.Resources.OfType<ParameterResource>().Select(p => p.Name).ToArray();
+
+        Assert.Equal(2, names.Length);
+        Assert.Equal(2, names.Distinct(StringComparer.Ordinal).Count());
+    }
+
+    /// <summary>
+    /// The same placeholder written twice is one value, so it is one parameter.
+    /// </summary>
+    /// <remarks>
+    /// A connection string naming a host and a failover host carries the same credential twice.
+    /// Adding the parameter twice would throw on the duplicate name, naming a resource the AppHost
+    /// never wrote.
+    /// </remarks>
+    [Fact]
+    public async Task TheSamePlaceholderTwice_IsOneParameterAndOneValue()
+    {
+        var builder = CreateBuilder();
+        var reader = new TrackingSecretReader(SecretValue);
+
+        var db = Resolve(
+            builder,
+            Config(connectionString: "Port=${port};A=${secret:c:password};B=${secret:c:password}"),
+            secretReader: reader);
+
+        Assert.Single(builder.Resources.OfType<ParameterResource>());
+
+        Assert.Equal(
+            $"Port={LocalPort};A={SecretValue};B={SecretValue}",
+            await db.Resource.ConnectionStringExpression.GetValueAsync(default));
+
+        Assert.Single(reader.Reads);
     }
 
     /// <remarks>

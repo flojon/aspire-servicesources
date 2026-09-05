@@ -146,7 +146,9 @@ nothing will fail to build to warn you.
   before anything was there to connect to. It is part of the source rather than an option, since a
   wait that silently does nothing is worse than no wait.
 
-  **Write `${port}`, not a number**, and a connection string that names none is refused at startup.
+  **Write `${port}`, not a number**, and a connection string that names none is refused at startup —
+  with one exception, added below in the same release: a template that is exactly one `${secret:…}`
+  carries a port already.
   The local port is allocated so that two forwarded backing services cannot collide, so it is not a
   number anyone can write down — and the failure the refusal prevents is silent: `Port=5432` copied
   out of a manifest addresses that port on the developer's own machine, where their own database
@@ -192,15 +194,32 @@ nothing will fail to build to warn you.
   template as exactly one placeholder:
 
   ```jsonc
-  { "connectionString": "${secret:orders-cs:connectionString}" }
+  {
+    "backingServices": {
+      "orders-db": {
+        "source": "kubernetes",
+        "kubernetes": {
+          "service": "orders-pg-rw",
+          "port": 5432,
+          "context": "dev-west",
+          "namespace": "orders",
+          "connectionString": "${secret:orders-cs:connectionString}"
+        }
+      }
+    }
+  }
   ```
 
-  Then the port-forward listens on the *same* port the secret names rather than an allocated one,
+  Then the port-forward listens on the *same* port `port` names rather than an allocated one,
   because there is nothing in the template to substitute a local port into, and the in-cluster host
   the secret was written against — `orders-pg-rw`, `.orders`, `.svc`, or the fully qualified
   `.svc.cluster.local` — is rewritten to `localhost`. Giving up the allocated port is the real cost
   of the mode, so a local port already in use is refused by name up front rather than left to the
-  tunnel's log. Per-field placeholders stay preferred wherever the secret offers them.
+  tunnel's log. Two more things are refused rather than served quietly: a secret whose own port is
+  not the one being forwarded — the tunnel follows `port`, not the secret, and unchecked the app
+  would dial a port nothing serves while every resource reported healthy — and a secret that names
+  the service in no form this can rewrite, which would otherwise reach the app still addressed at
+  the cluster. Per-field placeholders stay preferred wherever the secret offers them.
 
 - **`prepare` — a `"local"` checkout can bootstrap itself before its kind judges it** ([#118]). A
   managed checkout is assumed to be runnable the moment it is cloned, which is not true of a

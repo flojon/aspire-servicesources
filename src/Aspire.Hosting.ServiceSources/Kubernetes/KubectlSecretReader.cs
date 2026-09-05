@@ -15,8 +15,17 @@ namespace Aspire.Hosting.ServiceSources.Kubernetes;
 /// <b>The key is addressed as <c>{.data['key']}</c>, not <c>{.data.key}</c>.</b> Kubernetes allows
 /// <c>.</c> in a secret key — <c>.dockerconfigjson</c> is the common one — and the dotted form
 /// silently descends into a field that is not there rather than failing, so it returns empty for a
-/// key that exists. The bracket form is exact. A key cannot contain <c>'</c>: the API restricts
-/// keys to <c>[-._a-zA-Z0-9]+</c>, which is also why this does not have to escape one.
+/// key that exists. The bracket form is exact.
+/// </para>
+/// <para>
+/// <b>Nothing here escapes the key, because nothing here can.</b> A <c>'</c> would close the
+/// quoting, and a jsonpath that fails to <em>execute</em> makes kubectl print the whole secret to
+/// standard error. What keeps that shut is
+/// <c>ConnectionStringTemplate</c>'s charset check at parse time, which refuses any key the
+/// Kubernetes API could not carry — so the string arriving here has already been constrained to
+/// <c>[-._a-zA-Z0-9]+</c>. That is a rule about what a developer may write, not merely about what a
+/// cluster happens to hold; the difference is the whole of the protection, and this file relies on
+/// it.
 /// </para>
 /// </remarks>
 internal sealed class KubectlSecretReader : IKubernetesSecretReader
@@ -37,6 +46,7 @@ internal sealed class KubectlSecretReader : IKubernetesSecretReader
     {
         var startInfo = new ProcessStartInfo("kubectl")
         {
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
@@ -49,6 +59,12 @@ internal sealed class KubectlSecretReader : IKubernetesSecretReader
         }
 
         using var process = Start(startInfo, secretName, key);
+
+        // Closed at once, the way every other process this package runs closes it: an exec
+        // credential plugin that decides to prompt — `kubelogin`, `aws eks get-token` — must see the
+        // end of stdin and fail rather than wait for a human who is not watching a parameter
+        // resolve.
+        process.StandardInput.Close();
 
         // Read both pipes before waiting. A secret's value is far smaller than a pipe buffer, but
         // kubectl's diagnostics on the error pipe need not be, and a process blocked writing to a
@@ -68,7 +84,7 @@ internal sealed class KubectlSecretReader : IKubernetesSecretReader
 
         if (process.ExitCode != 0)
         {
-            var diagnostic = standardError.GetAwaiter().GetResult().Trim();
+            var diagnostic = FirstLine(Drained(standardError));
 
             throw new KubernetesSecretException(
                 $"Reading key '{key}' from secret '{secretName}' in namespace '{@namespace}' failed"
@@ -76,7 +92,7 @@ internal sealed class KubectlSecretReader : IKubernetesSecretReader
                 + (diagnostic.Length == 0 ? "." : $": {diagnostic}"));
         }
 
-        var encoded = standardOutput.GetAwaiter().GetResult().Trim();
+        var encoded = Drained(standardOutput).Trim();
 
         // jsonpath prints nothing for a path that matches nothing, and exits 0 while doing it — so
         // an empty result is the shape "no such key" arrives in, not a secret holding an empty
@@ -86,7 +102,9 @@ internal sealed class KubectlSecretReader : IKubernetesSecretReader
         {
             throw new KubernetesSecretException(
                 $"Secret '{secretName}' in namespace '{@namespace}' has no key '{key}', or the key holds no "
-                + "value. `kubectl get secret " + secretName + " -o jsonpath='{.data}'` lists the keys it does have.");
+                + $"value. `kubectl get secret {secretName} --context {context} --namespace {@namespace} "
+                + "--output jsonpath='{.data}'` lists the keys it does have — with the context and the namespace "
+                + "this read used, which are not necessarily the ones kubectl is pointed at right now.");
         }
 
         try
@@ -107,12 +125,55 @@ internal sealed class KubectlSecretReader : IKubernetesSecretReader
     }
 
     /// <summary>
+    /// How long to keep waiting for kubectl's output once kubectl itself has exited.
+    /// </summary>
+    /// <remarks>
+    /// Bounded for the reason <c>ProcessPrepareCommandRunner.StreamDrainTimeout</c> gives, which was
+    /// measured rather than reasoned about: a redirected stream ends when the last handle to its
+    /// write end closes, not when the process handed it exits, so an exec credential plugin that
+    /// outlives kubectl holds this pipe open. <see cref="Process.WaitForExit(int)"/> bounds the
+    /// process and says nothing about the pipe, and an unbounded read after it would be the very
+    /// hang <see cref="FetchTimeout"/> exists to prevent, reintroduced one line later.
+    /// </remarks>
+    private static readonly TimeSpan StreamDrainTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>What a stream produced, for as long as that is worth waiting for.</summary>
+    private static string Drained(Task<string> stream) =>
+        stream.Wait(StreamDrainTimeout) ? stream.Result : "";
+
+    /// <summary>
+    /// The first line of kubectl's diagnostic, which is the line that says what went wrong.
+    /// </summary>
+    /// <remarks>
+    /// <b>Deliberately not the whole of it.</b> kubectl's jsonpath printer, when a template fails to
+    /// execute, appends the entire object it was given — for <c>get secret</c> that is every key of
+    /// the secret, base64-encoded, which is not redaction. This message reaches the dashboard and
+    /// <c>~/.aspire/logs</c>, which is a file people paste into issues. The first line carries the
+    /// error; the rest carries the secret.
+    /// <para>
+    /// The key charset checked at parse time already stops a template from failing that way, so this
+    /// is the second of two locks on the same door.
+    /// </para>
+    /// </remarks>
+    private static string FirstLine(string diagnostic)
+    {
+        var trimmed = diagnostic.AsSpan().Trim();
+        var end = trimmed.IndexOfAny('\r', '\n');
+
+        return (end < 0 ? trimmed : trimmed[..end]).ToString();
+    }
+
+    /// <summary>
     /// The command line one fetch runs, kept separate so a test can assert it without a cluster.
     /// </summary>
     internal static string[] Args(string context, string @namespace, string secretName, string key) =>
         [
             "get",
             "secret",
+            // Ends option parsing, so the name that follows is read as a name whatever it starts
+            // with. The parser already refuses a name beginning with '-'; this is the second lock,
+            // and it costs one argument.
+            "--",
             secretName,
             "--context",
             context,
