@@ -781,7 +781,10 @@ public class LocalProjectSourceTests
             ServiceName, Metadata(project: "src/../Orders.csproj"), DevConfig(path: repoDir), UnusedAppHostDirectory,
             new FakeGitClient());
 
-        Assert.Equal(Path.Combine(repoDir, "src", "..", "Orders.csproj"), projectPath);
+        // Compared resolved: the accepted value keeps the separators it was written with, and only
+        // '\' is rewritten — so on Windows the combine leaves 'src/../Orders.csproj' mixed, which
+        // names the same file and would fail a literal comparison.
+        Assert.Equal(Path.Combine(repoDir, "Orders.csproj"), Path.GetFullPath(projectPath));
     }
 
     [Fact]
@@ -812,6 +815,49 @@ public class LocalProjectSourceTests
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("was not found", ex.Message);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_ProjectKeyWrittenWithNoValue_IsReportedRatherThanCrashing()
+    {
+        var repoDir = Directory.CreateTempSubdirectory().FullName;
+
+        // A `project:` written with nothing after it is null, not "": YamlDotNet assigns null for an
+        // empty scalar and overrides the default, which is why ServiceCatalogLoader normalizes
+        // `kind:` for exactly this. Nothing normalizes 'project', so the confinement checks are the
+        // first thing to see it and must not dereference it.
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveProjectPath(
+                ServiceName, Metadata(project: null!), DevConfig(path: repoDir), UnusedAppHostDirectory,
+                new FakeGitClient()));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("was not found", ex.Message);
+    }
+
+    [Fact]
+    public void Resolve_EagerPath_ProjectClimbsOutOfTheCheckout_IsRefusedBeforeTheCloneRuns()
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            ProjectDirectory = appHostDir,
+            Args = [],
+        });
+        var gitClient = new FakeGitClient();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(gitClient).Resolve(
+                builder, ServiceName, Metadata(project: "../../Evil.csproj"), DevConfig()));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("outside", ex.Message);
+
+        // The check needs no working tree, so it belongs in front of the clone rather than after it
+        // — the same place the prepare command's identical check sits. Deferral is off by default,
+        // so without this the commonest configuration pays for a cold clone before being told the
+        // value was wrong before any of it started.
+        Assert.Empty(gitClient.ClonedRepos);
     }
 
     [Fact]

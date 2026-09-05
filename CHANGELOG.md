@@ -312,6 +312,16 @@ nothing will fail to build to warn you.
 
 ### Changed
 
+- **A `project` that points outside the service's checkout is now refused at composition** ([#222]).
+  The other side of the **Fixed** entry below, and the one nothing warns you about: a catalog whose
+  `project` is an absolute path (`/home/dev/shared/Api.csproj`, `C:\repos\Api.csproj`) or climbs out
+  of the checkout (`../../shared/Api.csproj`) **resolves and builds today** if that file exists.
+  Those AppHosts now throw a `ServiceSourcesConfigurationException` naming the service and the key,
+  at `AddService()`, before any clone. Nothing fails to build to warn you — the value is read at
+  composition — so if a catalog entry points `project` outside the checkout deliberately, the fix is
+  to give that project a service entry of its own, naming the repository that actually holds it. A
+  `project` resolving inside its checkout is unaffected, which is every catalog the README describes.
+
 - **A `"local"` service with a non-`dotnet` kind now waits for its checkout before its options block
   is checked** ([#63]). `AddService()` used to reject a typo'd `java:` or `javascript:` block
   without waiting for any clone to finish; `Validate` needs the checkout to judge the block's paths
@@ -350,15 +360,22 @@ nothing will fail to build to warn you.
   `project` can already set `prepare.command`, and `kind: dotnet` builds the checkout's own code
   regardless — nobody crosses a line here who was not already across it. What is fixed is that the
   rule the codebase states everywhere else no longer has a hole in it, and that the hole was on
-  `dotnet`, the kind most catalogs use. Nothing that works today changes: a `project` resolving
-  inside its checkout keeps resolving to the same file.
+  `dotnet`, the kind most catalogs use. A `project` resolving inside its checkout keeps resolving to
+  the same file; the catalogs that stop working are the ones this entry is about, and they are named
+  under **Changed** above.
 
-  Two smaller things fall out of using the shared check. A rejected path now says it was rejected
+  The check is lexical, so it needs no working tree and runs in front of the clone rather than after
+  it — beside the one `prepare` already makes there. A service whose `project` climbs out is refused
+  at composition on both paths, without the cold clone the eager path would otherwise pay for first.
+
+  Three smaller things fall out of using the shared check. A rejected path now says it was rejected
   for leaving the checkout, where the old message claimed the file *was not found under* the
-  checkout — untrue on precisely these inputs, since it was never looked for there. And `project`
+  checkout — untrue on precisely these inputs, since it was never looked for there. `project`
   accepts Windows separators on Linux and macOS the way every other confined path does, so
   `project: src\Orders.Api\Orders.Api.csproj` resolves instead of becoming one oddly-named path
-  reported as missing.
+  reported as missing. And a `project:` written with nothing after it is reported as a configuration
+  error naming the service: YamlDotNet parses an empty scalar as null rather than as `""`, which
+  used to reach `Path.Combine` and come back as an `ArgumentNullException` with no service in it.
 
 - **A field misspelled at a service entry's root now names the field it was reaching for**
   ([#182]). Spelled correctly, a field written flat at the entry root is walked through the move
