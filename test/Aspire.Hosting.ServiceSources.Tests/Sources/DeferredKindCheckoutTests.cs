@@ -530,11 +530,46 @@ public class DeferredKindCheckoutTests
         Assert.Equal(0, kind.ResolveDeferredCalls);
         Assert.True(kind.ResolvedEagerly);
 
-        // Twice, by the two callers that need the answer for different reasons: the checkout
-        // prefetch, deciding whether this service's clone is one it has to start ahead of demand
-        // (#76), and then the registration itself. Cheap and side-effect free is what makes asking
-        // twice — and asking about services that are never added at all — affordable.
-        Assert.Equal(2, kind.SupportsDeferredCheckoutCalls);
+        // Asked at all, so the eager path here is this kind declining deferral rather than deferral
+        // never having been on the table — which is what makes the assertion above mean something.
+        //
+        // How many times is deliberately not asserted (#189). For a kind that declines, the prefetch
+        // keeps the service in its set and starts the clone; that clone creates the checkout
+        // directory, and the registration's own ShouldDefer reads exactly that directory. So whether
+        // the registration gets as far as asking the kind depends on which of the two wins a race
+        // the package is entitled to leave open — both branches reach the same eager resolution. A
+        // total of 2 was pinning a scheduling accident, and reddened on whichever CI leg lost it.
+        Assert.True(
+            kind.SupportsDeferredCheckoutCalls > 0,
+            "the kind was never asked whether it supports a deferred checkout.");
+    }
+
+    /// <summary>
+    /// The property that makes the cheap question askable by more than one caller, and about
+    /// services nobody has added: asking it registers nothing. Exercised through the prefetch alone
+    /// — no <c>AddService</c> call, so the sweep over the developer configuration is the only caller
+    /// that can ask, and what it asked is attributable rather than inferred from a total.
+    /// </summary>
+    [Fact]
+    public void PrefetchAsksWhetherAKindSupportsDeferral_WithoutRegisteringAnything()
+    {
+        var dir = CreateAppHostDirectory("frontend");
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.UseDeferredCheckout();
+
+        var kind = new StandInKind();
+        builder.AddLocalKind(KindName, kind);
+
+        LocalCheckoutPrefetch.For(builder, new FakeGitClient());
+
+        // One caller, one answer — and the expensive form, the one that adds resources, is not how
+        // the prefetch found out.
+        Assert.Equal(1, kind.SupportsDeferredCheckoutCalls);
+        Assert.Equal(0, kind.ResolveDeferredCalls);
+        Assert.False(kind.ResolvedEagerly);
+
+        // Nothing reached the app model for a service the AppHost never mentioned.
+        Assert.DoesNotContain(builder.Resources, r => r.Name == "frontend");
     }
 
     [Fact]
