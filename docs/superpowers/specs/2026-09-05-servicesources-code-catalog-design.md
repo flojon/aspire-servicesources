@@ -61,7 +61,7 @@ Cited throughout, so stated once (#134):
 
 ## Findings that constrain the design
 
-Read out of the code on `main` (5996068), with file:line evidence. Each closes off a design that
+Read out of the code on `main` (48d2f8f), with file:line evidence. Each closes off a design that
 would otherwise look reasonable.
 
 ### 1. Exactly one call reads the catalog first: `AddService`
@@ -77,7 +77,7 @@ var catalog = ServiceCatalogLoader.Load(Path.Combine(builder.AppHostDirectory, "
 
 `LoadedFor` has **two** call sites: `ResolveService` (`ServiceSourcesConfigCache.cs:66`, reached only
 from `AddService`) and `LocalCheckoutPrefetch.Run` (`Sources/LocalCheckoutPrefetch.cs:507`) — and the
-prefetch is reached from `LocalProjectSource.Resolve` (`Sources/LocalProjectSource.cs:73`), i.e.
+prefetch is reached from `LocalProjectSource.Resolve` (`Sources/LocalProjectSource.cs:85`), i.e.
 *after* `ResolveService` already loaded on the same `AddService` call. `ServiceCatalogLoader.Load`
 has exactly one production caller.
 
@@ -133,6 +133,7 @@ Two things a code-authored entry needs that yaml must not see:
 
 1. `Origin` — which catalog declared it, so errors can name it (finding 5).
 2. `KindOptions` — already-typed options handed straight to the handler (finding 6).
+
 **Not** a typed `PrepareMode` on the definition, though the first draft of this design proposed one.
 `PrepareMetadata.Mode` stays `string?` (`Config/PrepareMetadata.cs:68`) and the parse stays where it
 is, in `PreparePlan` (`Prepare/PreparePlan.cs:95-96` into `PrepareModes.Parse`,
@@ -397,9 +398,9 @@ AddServiceCatalog(…) ──> ServiceDefinitionBuilder ────────
 | File | `ServiceMetadata` sites |
 | --- | --- |
 | `Git/LocalGitCheckout.cs` | 103, 127, 200, 218, 228, 286, 476 |
-| `Sources/LocalProjectSource.cs` | 20, 200, 224, 257, 300, 328 |
+| `Sources/LocalProjectSource.cs` | 21, 212, 236, 269, 312, 340 |
 | `Sources/LocalCheckoutPrefetch.cs` | 311, 420, 439, 592, 640 |
-| `Sources/DeferredCheckout.cs` | 116 (record field), 209, 260, 431 |
+| `Sources/DeferredCheckout.cs` | 116 (record field), 209, 265, 436 |
 | `Sources/KubernetesSource.cs` | 10, 41, 86 |
 | `Sources/UrlSource.cs` | 44, 278 |
 | `Sources/ContainerSource.cs` | 9, 33 |
