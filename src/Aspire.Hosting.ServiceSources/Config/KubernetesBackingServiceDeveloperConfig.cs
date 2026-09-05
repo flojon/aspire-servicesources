@@ -39,7 +39,7 @@ internal sealed class KubernetesBackingServiceDeveloperConfig
     /// services forwarded at once cannot collide — which is also why a connection string writes
     /// <c>${port}</c> rather than a number: the number is not known until the AppHost starts.
     /// </remarks>
-    public int? Port { get; set; }
+    public KubernetesPorts? Port { get; set; }
 
     /// <summary>The kubectl context the port-forward runs against. Required by this source.</summary>
     /// <remarks>

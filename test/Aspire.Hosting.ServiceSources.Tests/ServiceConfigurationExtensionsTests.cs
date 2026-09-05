@@ -29,6 +29,12 @@ public class ServiceConfigurationExtensionsTests
     private sealed class FixedPortAllocator : IPortAllocator
     {
         public int AllocatePort() => 51234;
+
+        /// <remarks>
+        /// The service-side source forwards exactly one port, so a call here would be a bug rather
+        /// than a case worth standing in for.
+        /// </remarks>
+        public IReadOnlyList<int> AllocatePorts(int count) => throw new NotSupportedException();
     }
 
     private static IDistributedApplicationBuilder Builder() =>

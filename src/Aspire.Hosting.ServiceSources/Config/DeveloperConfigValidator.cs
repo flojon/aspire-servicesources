@@ -182,6 +182,16 @@ internal static class DeveloperConfigValidator
                 continue;
             }
 
+            // Asked before the list question below, and it has to be: a block of named values
+            // arrives as children exactly as a list does, and a map is an IEnumerable, so a `port`
+            // written as a block of named ports would be walked as a list and answered with a
+            // sentence about list elements — about a field that has none.
+            if (DeveloperConfigField.IsValueOrMap(fieldType))
+            {
+                CollectValueOrMap(problems, field, blockPath, Declared(fields, field.Key), fieldType);
+                continue;
+            }
+
             // Asked before the block question below, and it has to be: a list arrives from
             // IConfiguration as indexed children, and its type is a class, so a list asked about as
             // a block is classified as one and answered with "takes a value, not a block of
@@ -233,6 +243,190 @@ internal static class DeveloperConfigValidator
             }
         }
     }
+
+    /// <summary>
+    /// The field's name as the shape declares it, whatever casing the developer wrote.
+    /// </summary>
+    /// <remarks>
+    /// Messages about a value-or-map field use its name twice over: quoted as the key, and as the
+    /// noun for what it holds — "takes a port number or a block of named ports". The quoted key
+    /// echoes what was written, as every message here does, but the noun has to be the declared
+    /// spelling: taken from the developer's casing it would read "a PORT number" for a file that
+    /// binds perfectly well.
+    /// </remarks>
+    private static string Declared(IReadOnlyDictionary<string, Type> fields, string writtenKey) =>
+        Spelled(fields.Keys.FirstOrDefault(
+            key => key.Equals(writtenKey, StringComparison.OrdinalIgnoreCase)) ?? writtenKey);
+
+    /// <summary>
+    /// Every problem with a field that takes either a value or a block of named values — a backing
+    /// service's <c>kubernetes.port</c>, written either as one port or as a name per port.
+    /// </summary>
+    /// <remarks>
+    /// The whole of this walk exists because the binder is silent about two of these. A named entry
+    /// it cannot convert is <em>dropped</em>, so the map binds one shorter than it was written and
+    /// the tunnel forwards a port fewer with nothing to say so — the same failure the list walk's
+    /// null-element check exists for. And a <em>value</em> it cannot convert throws from the binder
+    /// itself, naming a CLR type at a colon-separated key, from an exception no handler upstream
+    /// treats as a configuration problem. Both are caught here, before binding runs.
+    /// <para>
+    /// The two spellings are told apart the way <see cref="IConfiguration"/> tells them apart:
+    /// children mean a block, and a value means a value. Three spellings collapse on the way in and
+    /// the difference matters, so each is named below rather than left to be rediscovered — an empty
+    /// block and a JSON <c>null</c> are indistinguishable and share a message, while an empty
+    /// <em>array</em> arrives as an empty value and is the gesture that unsets the field.
+    /// </para>
+    /// </remarks>
+    private static void CollectValueOrMap(
+        List<string> problems,
+        IConfigurationSection field,
+        string blockPath,
+        string noun,
+        Type fieldType)
+    {
+        if (!HasChildren(field))
+        {
+            // An empty block of named values, or a JSON null: IConfiguration records both as a key
+            // with no value and no children, so there is no telling them apart and one message
+            // serves both. An *empty array* does not arrive here — it arrives as an empty value,
+            // below, which is the spelling that unsets a field.
+            if (field.Value is null)
+            {
+                problems.Add(EmptyMap(field, blockPath, noun));
+                return;
+            }
+
+            // Empty is the absent value: the one gesture a higher configuration layer has for
+            // dropping what a lower one set. Whitespace is not that gesture, and is refused with the
+            // same message every other field's whitespace gets.
+            if (field.Value.Length == 0)
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(field.Value))
+            {
+                problems.Add(Blank(field, blockPath));
+                return;
+            }
+
+            if (!KubernetesPorts.TryParsePort(field.Value, out _))
+            {
+                problems.Add(NotAValueOrMap(field, blockPath, noun));
+            }
+
+            return;
+        }
+
+        var entries = field.GetChildren().ToArray();
+
+        // Every key a position rather than a name: what a JSON array binds to. It would otherwise
+        // bind perfectly well as a block named "0", "1", …, reachable as ${port:0} — a spelling
+        // nobody meant to write and nobody should learn.
+        if (entries.All(entry => int.TryParse(entry.Key, out _)))
+        {
+            problems.Add(PositionalMap(field, blockPath, noun));
+            return;
+        }
+
+        foreach (var entry in entries)
+        {
+            if (string.IsNullOrWhiteSpace(entry.Key))
+            {
+                problems.Add(UnnamedMapEntry(field, entry, blockPath, noun));
+                continue;
+            }
+
+            if (HasChildren(entry))
+            {
+                problems.Add(MapEntryIsBlock(field, entry, blockPath, noun));
+                continue;
+            }
+
+            if (entry.Value is null)
+            {
+                problems.Add(MapEntryMissing(field, entry, blockPath, noun));
+                continue;
+            }
+
+            if (!KubernetesPorts.TryParsePort(entry.Value, out _))
+            {
+                problems.Add(MapEntryNotBindable(field, entry, blockPath, noun));
+            }
+        }
+    }
+
+    /// <summary>
+    /// The error for a value-or-map field written as a value that is neither a number nor a block.
+    /// </summary>
+    private static string NotAValueOrMap(IConfigurationSection field, string block, string noun) =>
+        $"'{field.Key}' in the '{block}' block takes a {noun} number or a block of named {noun}s, "
+        + $"but is set to {Escaped(field.Value)}."
+        + SetAt(field);
+
+    /// <summary>
+    /// The error for a block of named values that names none — an empty block, or a JSON
+    /// <c>null</c>, which arrive identically.
+    /// </summary>
+    private static string EmptyMap(IConfigurationSection field, string block, string noun) =>
+        $"'{field.Key}' in the '{block}' block is an empty block of named {noun}s, so nothing "
+        + $"would be forwarded. Write a {noun} number, or name at least one {noun}."
+        + SetAtBlock(field, $"<{noun}>");
+
+    /// <summary>
+    /// The error for a block of named values written as a list, whose entries are therefore keyed by
+    /// position.
+    /// </summary>
+    /// <remarks>
+    /// Worth its own message rather than being reported per entry as a name that is a number: what
+    /// is wrong is the shape, and a reader who wrote <c>[5672, 15672]</c> is not helped by being
+    /// told twice that a port is named '0' and '1'.
+    /// </remarks>
+    private static string PositionalMap(IConfigurationSection field, string block, string noun) =>
+        $"'{field.Key}' in the '{block}' block is written as a list, so its {noun}s are keyed by "
+        + $"position. A block of named {noun}s gives each one a name, because a connection string "
+        + $"reaches a {noun} by name and a position is not one."
+        + SetAtBlock(field, $"<{noun}>");
+
+    /// <summary>The error for a named entry the binder would drop for want of a usable value.</summary>
+    /// <remarks>
+    /// It has to be caught here, and the message says why it matters rather than only what is wrong:
+    /// the binder omits an entry it cannot convert, so the block binds one entry shorter than it was
+    /// written and nothing downstream ever receives the entry that would report it. That is the same
+    /// reasoning <see cref="ListElementMissing"/> carries for a null list element, and the same
+    /// consequence — something silently smaller than what was written.
+    /// </remarks>
+    private static string MapEntryNotBindable(
+        IConfigurationSection field, IConfigurationSection entry, string block, string noun) =>
+        $"'{field.Key}' in the '{block}' block names a {noun} {Escaped(entry.Key)}, but its value "
+        + $"{Escaped(entry.Value)} is not a whole number. A named {noun} whose value is not a number "
+        + $"is dropped rather than read, so one fewer would be forwarded than the block names."
+        + (entry.Value!.Length == 0
+            ? " An empty value unsets a whole field; it does not take one name out of a block."
+            : "")
+        + SetAt(entry);
+
+    /// <summary>The error for a named entry recorded with no value at all — a JSON <c>null</c>.</summary>
+    private static string MapEntryMissing(
+        IConfigurationSection field, IConfigurationSection entry, string block, string noun) =>
+        $"'{field.Key}' in the '{block}' block names a {noun} {Escaped(entry.Key)}, but it has no "
+        + $"value. A named {noun} with no value is dropped rather than read, so one fewer would be "
+        + "forwarded than the block names."
+        + SetAt(entry);
+
+    /// <summary>The error for a named entry that is itself a block of settings.</summary>
+    private static string MapEntryIsBlock(
+        IConfigurationSection field, IConfigurationSection entry, string block, string noun) =>
+        $"'{field.Key}' in the '{block}' block names a {noun} {Escaped(entry.Key)}, but its entry "
+        + $"is a block of settings rather than a number. Every named {noun} is a number."
+        + SetAt(entry);
+
+    /// <summary>The error for a named entry with no name.</summary>
+    private static string UnnamedMapEntry(
+        IConfigurationSection field, IConfigurationSection entry, string block, string noun) =>
+        $"'{field.Key}' in the '{block}' block names a {noun} with no name. Every {noun} in the "
+        + $"block needs a name, because a connection string reaches one by name."
+        + SetAt(entry);
 
     /// <summary>
     /// Every problem with a field whose value is a list of values.
@@ -697,31 +891,11 @@ internal static class DeveloperConfigValidator
         + SetAt(field);
 
     /// <summary>
-    /// A value as a quoted literal with its whitespace spelled out, so that a character which
-    /// looks like a space — a tab, a newline, U+00A0 — is distinguishable from one.
+    /// A value as a quoted literal with its whitespace spelled out. See
+    /// <see cref="ConfiguredValue.Escaped"/>, which now serves the two other files that echo a
+    /// developer-invented name.
     /// </summary>
-    /// <remarks>
-    /// The plain space is left as itself: it is the character a reader assumes, so escaping it
-    /// would add noise to the common case and nothing else. Everything else whitespace gets its
-    /// code point, which is what a developer needs in order to find it in the file.
-    ///
-    /// Every message that echoes a value back goes through this, rather than only the ones about
-    /// whitespace. A message is read by someone who cannot see what they typed, and which messages
-    /// a whitespace value can reach is not a thing to work out per message: it was reaching
-    /// <see cref="EntryExpected"/> unescaped for exactly as long as it took to notice.
-    /// </remarks>
-    private static string Escaped(string? value) =>
-        value is null
-            ? "''"
-            : $"'{string.Concat(value.Select(c => c switch
-            {
-                ' ' => " ",
-                '\t' => "\\t",
-                '\n' => "\\n",
-                '\r' => "\\r",
-                _ when char.IsWhiteSpace(c) => $"\\u{(int)c:x4}",
-                _ => c.ToString(),
-            }))}'";
+    private static string Escaped(string? value) => ConfiguredValue.Escaped(value);
 
     private static string Described(Type type)
     {

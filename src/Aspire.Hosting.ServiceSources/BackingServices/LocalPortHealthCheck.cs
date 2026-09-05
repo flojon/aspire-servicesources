@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using Aspire.Hosting.ServiceSources.Config;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Aspire.Hosting.ServiceSources.BackingServices;
@@ -30,7 +31,8 @@ namespace Aspire.Hosting.ServiceSources.BackingServices;
 /// that attempt to fail before falling back.
 /// </para>
 /// </remarks>
-internal sealed class LocalPortHealthCheck(string backingServiceName, int port) : IHealthCheck
+internal sealed class LocalPortHealthCheck(string backingServiceName, int port, string? portName = null)
+    : IHealthCheck
 {
     public async Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context, CancellationToken cancellationToken = default)
@@ -48,9 +50,16 @@ internal sealed class LocalPortHealthCheck(string backingServiceName, int port) 
             // The exception travels with the result rather than being swallowed: Aspire surfaces a
             // health check's description in the dashboard, and "connection refused" against a named
             // port is the difference between "the tunnel has not come up yet" and "kubectl exited".
+            // The port's name, when it has one, is what tells a reader which half of a multi-port
+            // tunnel is missing — the dashboard shows one badge per forwarded port and they are
+            // otherwise distinguishable only by a local port number nobody chose. Escaped, because
+            // the name is developer-invented free text and this description is relayed into
+            // ~/.aspire/logs. Nothing is added under the single-port form, which has no half to name.
+            var which = portName is null ? "" : $" port {ConfiguredValue.Escaped(portName)}'s";
+
             return HealthCheckResult.Unhealthy(
-                $"Backing service '{backingServiceName}': nothing is listening on 127.0.0.1:{port} yet, so the "
-                + "kubectl port-forward has not come up. Its own resource carries kubectl's output.",
+                $"Backing service '{backingServiceName}':{which} nothing is listening on 127.0.0.1:{port} yet, so "
+                + "the kubectl port-forward has not come up. Its own resource carries kubectl's output.",
                 ex);
         }
     }

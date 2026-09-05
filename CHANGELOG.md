@@ -155,9 +155,34 @@ nothing will fail to build to warn you.
   template whose `${port}` was expanded away before the AppHost ran — `${…}` is a shell variable
   too, and double quotes do not protect it — arrives looking exactly like one that never had it.
 
-  Not in this pass: forwarding several ports through one tunnel (`"port": { "amqp": 5672 }`, reached
-  as `${port:amqp}` — [#233]), and reading credentials out of a Kubernetes secret with
-  `${secret:<name>:<key>}`. Both are refused by name rather than misread.
+  **Several ports go through one tunnel** ([#233]). `port` takes either a number or a block that
+  names each port, and a connection string reaches a named one as `${port:<name>}`:
+
+  ```jsonc
+  "orders-events": {
+    "source": "kubernetes",
+    "kubernetes": {
+      "service": "rabbitmq",
+      "port": { "amqp": 5672, "management": 15672 },
+      "context": "dev-west",
+      "connectionString": "amqp://dev:hunter2@localhost:${port:amqp}/"
+    }
+  }
+  ```
+
+  One `kubectl` invocation carries every pair, because it can — measured against a two-port Service
+  in `kind`, where one process forwarded both and carried real traffic on each. Two entries would
+  mean two processes and two tunnels to the same Service. Each forwarded port gets its own health
+  check, and all of them hang off the backing service, so a `WaitFor` waits for the whole tunnel
+  rather than for whichever port happened to be registered.
+
+  A single `port` is unchanged, and `${port}` remains its spelling. The two do not mix: `${port}`
+  against a block that names its ports is refused naming the ports it forwards, and `${port:<name>}`
+  against a single port is refused saying so — each with the spelling that entry actually takes,
+  rather than advice that would earn a second startup failure contradicting the first.
+
+  Not in this pass: reading credentials out of a Kubernetes secret with `${secret:<name>:<key>}`,
+  which is refused by name rather than misread.
 
 - **`prepare` — a `"local"` checkout can bootstrap itself before its kind judges it** ([#118]). A
   managed checkout is assumed to be runnable the moment it is cloned, which is not true of a
