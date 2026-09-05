@@ -29,6 +29,12 @@ working, and it is the one the fix is about — see **Changed**.
   to give that project a service entry of its own, naming the repository that actually holds it. A
   `project` resolving inside its checkout is unaffected, which is every catalog the README describes.
 
+  A `kind: dotnet` entry with no `project` at all is now refused there too, rather than resolving to
+  the checkout directory and being reported later as a `.csproj` that is not there — as a missing
+  file on the eager path, and only after the clone had been paid for on the deferred one. Such a
+  service could never start, so nothing that ran before stops running; what changes is that it is
+  named as a required key at `AddService()`, on both paths, before any clone.
+
 ### Fixed
 
 - **A `project` that points outside the service's checkout is refused rather than built** ([#222]).
@@ -38,9 +44,10 @@ working, and it is the one the fix is about — see **Changed**.
   `project: ../../../Evil.csproj` resolved to a file outside the clone, which the AppHost then
   handed to `AddProject`, where MSBuild evaluates it: a `.targets` import or an inline task away
   from running code the catalog never described. Both the eager path and the deferred registration
-  did the same bare combine; both now go through the check `java.jarPath` and
-  `javascript.appDirectory` have always made, in one place they share, so the two cannot come to
-  different conclusions about the same value. An absolute path is reported as absolute and a
+  did the same bare combine; both now go through the lexical confinement `java.jarPath` has always
+  had, in one place they share, so the two cannot come to different conclusions about the same
+  value. (`javascript.appDirectory` is confined too, but by a resolved check of its own rather than
+  by this one.) An absolute path is reported as absolute and a
   climbing one as pointing outside the repository, and neither reaches MSBuild.
 
   Consistency and defence in depth rather than a boundary that moves: `kind: dotnet` builds the
@@ -59,9 +66,10 @@ working, and it is the one the fix is about — see **Changed**.
   checkout — untrue on precisely these inputs, since it was never looked for there. `project`
   accepts Windows separators on Linux and macOS the way every other confined path does, so
   `project: src\Orders.Api\Orders.Api.csproj` resolves instead of becoming one oddly-named path
-  reported as missing. And a `project:` written with nothing after it is reported as a configuration
-  error naming the service: YamlDotNet parses an empty scalar as null rather than as `""`, which in
-  `0.4.0` reached `Path.Combine` and came back as an `ArgumentNullException` with no service in it.
+  reported as missing. And a `project:` written with nothing after it is reported as the missing
+  required key it is, naming the service: YamlDotNet parses an empty scalar as null rather than as
+  `""`, which in `0.4.0` reached `Path.Combine` and came back as an `ArgumentNullException` naming
+  neither.
 
 ## [0.4.0] - 2026-09-03
 

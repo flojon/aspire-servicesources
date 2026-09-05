@@ -801,38 +801,25 @@ public class LocalProjectSourceTests
         Assert.Equal(Path.Combine(repoDir, "src", "Orders.csproj"), projectPath);
     }
 
-    [Fact]
-    public void ResolveProjectPath_ProjectUnset_IsStillReportedAsMissingRatherThanRefused()
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData(null)]
+    public void ResolveProjectPath_ProjectMissing_IsReportedAsTheRequiredKeyItIs(string? project)
     {
         var repoDir = Directory.CreateTempSubdirectory().FullName;
 
-        // 'project' has no required-key check, so the empty default reaches the confinement checks;
-        // it is not absolute and does not climb, and the missing-file message is what reports it.
+        // Three spellings of the same catalog mistake. Null is the one nothing else produces: a
+        // `project:` written with nothing after it parses as null rather than as "", overriding the
+        // default — the behaviour ServiceCatalogLoader normalizes `kind:` for, and does not normalize
+        // this. Whitespace survives quoting. All three are a service that names no project file.
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
-                ServiceName, Metadata(project: ""), DevConfig(path: repoDir), UnusedAppHostDirectory,
+                ServiceName, Metadata(project: project!), DevConfig(path: repoDir), UnusedAppHostDirectory,
                 new FakeGitClient()));
 
         Assert.Contains(ServiceName, ex.Message);
-        Assert.Contains("was not found", ex.Message);
-    }
-
-    [Fact]
-    public void ResolveProjectPath_ProjectKeyWrittenWithNoValue_IsReportedRatherThanCrashing()
-    {
-        var repoDir = Directory.CreateTempSubdirectory().FullName;
-
-        // A `project:` written with nothing after it is null, not "": YamlDotNet assigns null for an
-        // empty scalar and overrides the default, which is why ServiceCatalogLoader normalizes
-        // `kind:` for exactly this. Nothing normalizes 'project', so the confinement checks are the
-        // first thing to see it and must not dereference it.
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            ResolveProjectPath(
-                ServiceName, Metadata(project: null!), DevConfig(path: repoDir), UnusedAppHostDirectory,
-                new FakeGitClient()));
-
-        Assert.Contains(ServiceName, ex.Message);
-        Assert.Contains("was not found", ex.Message);
+        Assert.Contains("'project' is required", ex.Message);
     }
 
     [Fact]

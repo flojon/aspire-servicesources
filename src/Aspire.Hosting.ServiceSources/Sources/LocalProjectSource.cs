@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Git;
@@ -230,7 +231,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
     /// Resolves and validates the project file path for a "dotnet"-kind service whose repo root has
     /// already been resolved.
     /// </summary>
-    internal static string ResolveProjectFile(string serviceName, string repoRoot, string project)
+    internal static string ResolveProjectFile(string serviceName, string repoRoot, string? project)
     {
         var projectPath = ConfineProject(serviceName, repoRoot, project);
 
@@ -261,14 +262,11 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
     /// path it is rather than as a file missing from a checkout it was never looked for in.
     /// </para>
     /// </remarks>
-    internal static string ConfineProject(string serviceName, string repoRoot, string project)
+    internal static string ConfineProject(string serviceName, string repoRoot, string? project)
     {
         ValidateProject(serviceName, project);
 
-        // Null for the reason ValidateProject tolerates it, and combined as empty: that resolves to
-        // the checkout root, which is not a file, so ResolveProjectFile reports the key as naming
-        // nothing — the report an unwritten 'project' has always had.
-        return Path.Combine(repoRoot, CheckoutRelativePath.NormalizeSeparators(project ?? ""));
+        return Path.Combine(repoRoot, CheckoutRelativePath.NormalizeSeparators(project));
     }
 
     /// <summary>
@@ -277,16 +275,21 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
     /// <see cref="ConfineProject"/> reaches later — running it twice costs nothing and keeps the
     /// value judged in front of the clone as well as at the point it becomes a path.
     /// </summary>
-    internal static void ValidateProject(string serviceName, string? project)
+    internal static void ValidateProject(string serviceName, [NotNull] string? project)
     {
-        // An unwritten 'project' is neither absolute nor climbing, and has a report of its own —
-        // see ConfineProject. Null rather than empty when the key is written with nothing after it:
-        // YamlDotNet assigns null for an empty scalar and overrides the default, which is what
-        // ServiceCatalogLoader normalizes 'kind' for. Nothing normalizes this one, so it arrives
-        // here as it was parsed.
-        if (string.IsNullOrEmpty(project))
+        // Required, and reported as that rather than as a file that is not there: the "dotnet" kind
+        // resolves the whole service from this one value, so a service without it names nothing to
+        // run. Null and not "" when the key is written with nothing after it — YamlDotNet parses an
+        // empty scalar as null, overriding the default, which is what ServiceCatalogLoader
+        // normalizes 'kind' for and does not normalize this — and whitespace survives quoting, so
+        // all three spellings are caught here rather than one of them being combined with the
+        // checkout root and reported after a clone as a .csproj that never appeared.
+        if (string.IsNullOrWhiteSpace(project))
         {
-            return;
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': 'project' is required for a \"local\" service of kind 'dotnet'. It names "
+                + "the project file to run, relative to the service's checkout — for example "
+                + "'src/Orders.Api/Orders.Api.csproj'.");
         }
 
         if (CheckoutRelativePath.IsAbsolute(project))

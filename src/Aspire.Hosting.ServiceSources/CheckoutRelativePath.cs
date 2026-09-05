@@ -20,10 +20,16 @@ internal static class CheckoutRelativePath
     /// ('C:\repos\api', '\\server\share') sails past it on Linux/macOS and is then reported as a
     /// directory missing from the checkout instead of as the absolute path it is.
     /// </summary>
+    /// <remarks>
+    /// An empty path is not absolute, and says so rather than throwing: every caller happens to have
+    /// rejected empty before reaching here, but the indexing below is one call site away from being
+    /// an <see cref="IndexOutOfRangeException"/> for a caller that has not.
+    /// </remarks>
     public static bool IsAbsolute(string path) =>
-        Path.IsPathRooted(path)
-        || path[0] is '/' or '\\'
-        || (path.Length >= 2 && path[1] == ':' && char.IsAsciiLetter(path[0]));
+        path.Length > 0
+        && (Path.IsPathRooted(path)
+            || path[0] is '/' or '\\'
+            || (path.Length >= 2 && path[1] == ':' && char.IsAsciiLetter(path[0])));
 
     /// <summary>
     /// Whether <paramref name="relativePath"/> climbs above the directory it is relative to. Both
