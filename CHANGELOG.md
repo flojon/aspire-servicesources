@@ -360,6 +360,28 @@ nothing will fail to build to warn you.
 
 ### Changed
 
+- **A `kubernetes` `context`, `namespace` or `service` with surrounding whitespace is now refused**
+  ([#236]). These values are handed to `kubectl` exactly as written, so a leading or trailing space
+  is part of the name it looks for: `--context " dev-west"` matches no context, and a padded
+  namespace is looked up as a namespace that cannot exist. Both sources are covered — a service's
+  `kubernetes` block and a backing service's — because fixing one and not the other would be worse
+  than fixing neither.
+
+  **An AppHost whose file carries one of these now fails to start, where it used to start and fail
+  later** in `kubectl`'s own output in the dashboard. The message names the entry, the key, the value
+  with its whitespace spelled out, and the spelling to write instead.
+
+  **Nothing is trimmed for you, deliberately.** A kubectl context name is an arbitrary key in your
+  own kubeconfig, so `" padded "` can name a context that really exists — `kubectl config
+  set-context " padded "` succeeds. Silently trimming it would select a *different* context, and so
+  a different cluster, a different user entry, and whatever credential plugin that entry names,
+  without saying so. If yours really is named that, `kubectl config rename-context` is the way out,
+  and the message says so.
+
+  `connectionString`, `local.path` and a `prepare.command` argument are untouched, where whitespace
+  may be part of the value. Whitespace *inside* a value is untouched too: a context named
+  `my dev ctx` is legal and still works.
+
 - **A `"local"` service with a non-`dotnet` kind now waits for its checkout before its options block
   is checked** ([#63]). `AddService()` used to reject a typo'd `java:` or `javascript:` block
   without waiting for any clone to finish; `Validate` needs the checkout to judge the block's paths
@@ -1161,6 +1183,7 @@ Targets `net10.0`.
 [#222]: https://github.com/flojon/aspire-servicesources/issues/222
 [#224]: https://github.com/flojon/aspire-servicesources/issues/224
 [#233]: https://github.com/flojon/aspire-servicesources/issues/233
+[#236]: https://github.com/flojon/aspire-servicesources/issues/236
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
