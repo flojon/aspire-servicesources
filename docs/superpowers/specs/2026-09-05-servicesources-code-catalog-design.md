@@ -48,6 +48,17 @@ rebuilding the AppHost.
 
 ---
 
+## The acceptance criteria, quoted
+
+Cited throughout, so stated once (#134):
+
+1. An AppHost with no `servicesources.yaml` can declare and resolve every source kind.
+2. The same is true from a TypeScript AppHost.
+3. An existing yaml-based AppHost keeps working unchanged.
+4. A service declared twice fails with an error naming both sources.
+
+---
+
 ## Findings that constrain the design
 
 Read out of the code on `main` (5996068), with file:line evidence. Each closes off a design that
@@ -127,11 +138,15 @@ Two things a code-authored entry needs that yaml must not see:
 is, in `PreparePlan` (`Prepare/PreparePlan.cs:95-96` into `PrepareModes.Parse`,
 `Prepare/PrepareMode.cs:83-104`). Moving the catalog half to load time would make it run for **every**
 entry rather than only for a service the developer actually resolved through `"local"`, and it would
-run inside `ConfigLoader.Load`, which latches (`Config/ServiceSourcesConfigCache.cs:126-137`) — so a
+run inside `ConfigLoader.Load`, which latches (`Config/ServiceSourcesConfigCache.cs:126-144`) — so a
 typo in one entry's `prepare.mode` would newly fail every `AddService` in AppHosts that never select
 that service. That is a change to acceptance criterion 3 bought for nothing. `WithPrepare` instead
 takes the enum at the surface and stores `PrepareModes.Written(mode)`, the reverse mapping that
-already exists, leaving one representation downstream.
+already exists, leaving one representation downstream. `WithPrepare` guards with `Enum.IsDefined`
+first: `PrepareModes.Written` is a `Spellings.First(...)` lookup, total only over defined values, and
+an ATS caller can pass an undefined integer for an enum parameter (finding 7 lists enum-as-parameter
+among the unmeasured shapes). Undefined must be a `ServiceSourcesConfigurationException` naming the
+four spellings, not an `InvalidOperationException`.
 
 A fourth belongs on the conversion rather than on either type: `ServiceCatalogLoader.cs:87-92`
 normalizes a blank `kind:` back to `"dotnet"`, undoing YamlDotNet assigning null over the field
@@ -140,10 +155,34 @@ deserializer — and it is the kind of step that belongs in `ToDefinition()`. (I
 for the split: `ServiceMetadata.Kind` is non-nullable and initialized to `"dotnet"` at
 `Config/ServiceMetadata.cs:26`, so a bypassing path gets `"dotnet"`, not null.)
 
-Together these force the DTO/domain split. Note this is a *different* argument from #71's: the
+**How much of this forces a split, honestly.** Less than it first appears, and the codebase says so
+itself: `ServiceMetadata.KindConfig` is already `object?` carrying `[YamlIgnore]`
+(`Config/ServiceMetadata.cs:32-33`), assigned from the raw block at `ServiceCatalogLoader.cs:149` and
+skipped by `YamlProperties` at `:39`. That is the "add a field the yaml does not see" pattern,
+shipping in production, in exactly the `KindOptions` slot. So `KindOptions` needs no second type, the
+typed `PrepareMode?` is gone (above), and the `Kind` normalization is disclaimed as an argument. What
+is left needing a home is **`Origin` — one field.**
+
+The case for splitting anyway rests on two things that are true regardless of field count:
+
+- **The reflection trap.** Three schemas are derived from these types by reflection, and
+  `[YamlIgnore]` is opt-*out*. Every future field is a silent yaml-schema widening and a silent
+  removal from the kind registry's allowed names unless someone remembers the attribute. `KindConfig`
+  is not evidence the pattern is safe; it is one field that got it right.
+- **The container.** `ServiceCatalog.Services` cannot hold the merged map (`ServiceCatalogLoader.cs:60`
+  binds `ServiceCatalog` with YamlDotNet directly), so *some* new type is needed whatever happens to
+  `ServiceMetadata`.
+
+The case against is a measured 12 source files and 19 test files changed for no behaviour change.
+**This is a genuine cost/benefit call and it belongs to the reviewer, not to this document** — see
+open question 4. If the answer is "not now", the fallback is `[YamlIgnore] Origin` on
+`ServiceMetadata` plus the new container, which reaches every acceptance criterion, leaves #73 open,
+and cuts the largest single task out of stage 1.
+
+Note also that this is a *different* argument from #71's: the
 [ATS findings](2026-08-30-typed-catalog-ats-findings.md) are explicit (lines 139-141) that the split
 does **not** remove `IsReservedKindName`, which is a consequence of the document's layout and is
-#133's job. The split has to earn its place on the coupling above alone — and it does.
+#133's job.
 
 ### 4. One entry may carry every source at once, so the code API must be additive
 
@@ -156,23 +195,25 @@ where the package's central idea lives. Hence `With*` — see [The authoring API
 which also gives the method → `source`-value mapping, since the method names must not become a fifth
 vocabulary for a four-value set.
 
-### 5. Eight error messages name `servicesources.yaml` for a service that may have no yaml
+### 5. Eight files put `servicesources.yaml` into messages a code-declared service can reach
 
 Reachable for a code-declared service and each naming a file that need not exist —
 `ServiceSourcesConfigCache.cs:71` ("was not found in 'servicesources.yaml'"),
 `DeveloperConfiguration.cs:272,275` (`AmbiguousCatalogSpellingError`, which tells you to *rename them
 in 'servicesources.yaml'*), `ContainerSource.cs:38,42`, `KubernetesSource.cs:58,91`,
-`UrlSource.cs:286`, `Java/JavaKindOptions.cs:67-68`, `EndpointScheme.cs:58`,
+`UrlSource.cs:286`, `Java/JavaKindOptions.cs:67-69`, `EndpointScheme.cs:58`,
 `ServiceEndpointExtensions.cs:100`. (`Config/ServiceCatalogLoader.cs:56` is a ninth runtime message
 naming the file, but finding 2 replaces it, so it is not reachable for a code-declared service.
 Sixteen files mention the name in all; the other seven do so only in XML doc comments, and
 `ServiceSourcesConfigCache.cs:156` is the `Path.Combine`. Only the eight are what the guard test can
 hold honest.)
 
-`AmbiguousCatalogSpellingError` is the worst: two names differing only by case become trivially
-authorable in code, and the developer is sent to edit a yaml file they never created. This is why
-`Origin` exists on the domain type, and why the test suite gets a blanket guard (see
-[Testing](#testing)).
+`ServiceSourcesConfigCache.cs:71` — "was not found in `'servicesources.yaml'`" — is the one every
+developer will hit first, on the first typo'd name in a code catalog.
+(`AmbiguousCatalogSpellingError` is *not* in this set: finding 11 routes code-vs-code to the second
+`AddService` call and code-vs-yaml to the duplicate error, leaving that message reachable only
+yaml-vs-yaml, where the file does exist.) Carrying `Origin` on the entry is what lets these eight
+name the right thing, and the test suite gets a blanket guard (see [Testing](#testing)).
 
 ### 6. Kind options reach a handler as an untyped yaml dictionary, round-tripped through yaml
 
@@ -194,8 +235,9 @@ if (CameFromCode(rawConfig)) throw MismatchError();     // authored in code, wro
 ```
 
 `CameFromCode` must be narrow: YamlDotNet produces `string`, boxed primitives, `IList` and
-`IDictionary`, and `LocalKindConfig.cs:43-54` already has good messages for the first three ("a
-list", "the scalar '…'. Check the indentation under the kind's key."). Only an object that is none
+`IDictionary`, and `LocalKindConfig.cs:43-54` already has good messages for them — it branches on
+`IEnumerable and not string` for "a list" and falls back to "the scalar '…'. Check the indentation
+under the kind's key.", so the predicate must mirror that test rather than checking `IList`. Only an object that is none
 of those can have come from a `WithKind` call, and only that one gets the new error.
 
 The middle branch matters: without it, a third-party kind's options object handed to the wrong
@@ -345,8 +387,9 @@ AddServiceCatalog(…) ──> ServiceDefinitionBuilder ────────
 ```
 
 `ServiceDefinition` carries everything `ServiceMetadata` carries, with `Kind` already normalized to
-`"dotnet"`, plus `Origin` (`Yaml` with the path, or `Code`), `KindOptions`, and a typed
-`PrepareMode?`.
+`"dotnet"`, plus `Origin` (`Yaml` with the path, or `Code`) and `KindOptions`. **No typed
+`PrepareMode`** — `Prepare.Mode` stays the string it is today, parsed where it is parsed today
+(finding 3); adding the enum here is what would move the parse to load time and latch it.
 
 **Blast radius, measured.** All internal — no public signature mentions `ServiceMetadata`
 (`Config/ServiceMetadata.cs:5`, `IServiceSource.cs:6`) — but wider than a first pass suggests:
@@ -360,7 +403,7 @@ AddServiceCatalog(…) ──> ServiceDefinitionBuilder ────────
 | `Sources/KubernetesSource.cs` | 10, 41, 86 |
 | `Sources/UrlSource.cs` | 44, 278 |
 | `Sources/ContainerSource.cs` | 9, 33 |
-| `Config/ServiceCatalogLoader.cs` | 17, 30, 49 (the reflection roots, which must keep pointing at the DTO); `:51-60` and `:77-92` are where `ToDefinition()` gets wired |
+| `Config/ServiceCatalogLoader.cs` | 17, 30, 49 (the reflection roots, which must keep pointing at the DTO); `:51-60`, `:77-92` and `:147-153` are where `ToDefinition()` gets wired |
 | `Config/ServiceCatalog.cs` | 5, 14 |
 | `Config/ServiceMetadata.cs` | 5 (the declaration itself, plus the new `ToDefinition()`) |
 | `IServiceSource.cs` | 16 |
@@ -368,18 +411,19 @@ AddServiceCatalog(…) ──> ServiceDefinitionBuilder ────────
 
 Twelve source files, of which `Git/LocalGitCheckout.cs` is the surprise — it is not in the `Sources/`
 folder and takes `ServiceMetadata` at seven sites. `Config/RawServiceCatalog.cs:6` and
-`Config/PrepareMetadata.cs:9` mention the type only in XML doc comments and need no code change.
+`Config/PrepareMetadata.cs:9` and `LocalKindConfig.cs:8` mention the type only in XML doc comments
+and need no code change — fifteen files name it in all.
 Nothing in `Prepare/` moves, now that the mode stays a string (finding 3).
 
 plus **19 test files** that construct or pass `ServiceMetadata` directly, across all three test
 projects. It is a mechanical change, but it is not a small one, and it is why the split is a task of
 its own rather than a side effect.
 
-> **Alternative, recorded and not recommended:** add the three fields to `ServiceMetadata` with
-> `[YamlIgnore]`. It works — `YamlProperties` skips them, so the schema does not widen — and costs a
-> permanent trap: the next person adding a field without the attribute widens the yaml schema and
-> shrinks the kind registry's allowed names, silently. It also cannot express finding 3's `Kind`
-> normalization or the typed `PrepareMode?`, both of which need a second type regardless.
+> **Alternative, genuinely open:** put `Origin` on `ServiceMetadata` with `[YamlIgnore]` and keep the
+> new container only for the merged map. It works — `KindConfig` already does exactly this — and it
+> removes the largest task in stage 1. What it keeps is the opt-out trap in finding 3: the next
+> field added without the attribute widens the yaml schema and shrinks the kind registry's allowed
+> names, with nothing to catch it. Finding 3 tallies both sides; open question 4 asks for the call.
 
 ### The authoring API
 
@@ -417,7 +461,7 @@ rather than standing beside it; the plan should try folding them into it
 (`WithRepository(url, project:, defaultRef:)`) if finding 7's probe clears optional parameters, since
 that also removes a chain.
 
-Public types, all `sealed`:
+Public types (all `sealed`, except the enum):
 
 | Type | Role |
 | --- | --- |
@@ -589,7 +633,7 @@ shipped stage 1 as `AddBackingService` with the rest still open):
 | --- | --- | --- |
 | **0** | Throwaway ATS probe of finding 7's five unmeasured shapes. No shipped code. | — (de-risks stage 1) |
 | **1** | `ServiceDefinition`/`CodeServiceCatalog` split; `AddServiceCatalog` with all four sources **and** `[AspireExport]` on the builders from the start; `WithKind` **with** the `LocalKindConfig.Parse<T>` branches it depends on; yaml optional; duplicate/ordering/name/collision errors; `Origin` threaded into the error strings; C# **and** TypeScript samples with no yaml | Criteria 3 and 4 in full; criteria 1 and 2 for `dotnet` and for any kind configured through `WithKind` |
-| **2** | `WithPrepare`; `AsJava`/`AsJavaScript` handles (the shipped kinds' options classes are `internal`, so they are unreachable from code until these land) | Criteria 1 and 2 in full — parity with the yaml loader, closing the gap #134's second comment raises |
+| **2** | `WithPrepare`; `AsJava`/`AsJavaScript` handles (the shipped kinds' options classes are `internal`, so they are unreachable *typed* until these land — a dictionary passed to `WithKind` round-trips in stage 1) | Criteria 1 and 2 in full — parity with the yaml loader, closing the gap #134's second comment raises |
 
 The exports move into stage 1 deliberately: they cost nothing at runtime, the whole argument of this
 design rests on the shape crossing ATS, and shipping the public builders in one release and
@@ -662,8 +706,10 @@ Mirroring the repo's layout, `Method_Condition_ExpectedOutcome`:
 2. **Staging.** Three stages as above, or one PR?
 3. **`With*` versus the issue's `From*`**, and whether `WithProject`/`defaultRef` fold into
    `WithRepository`.
-4. **#73.** Closed here as a consequence, for finding 3's reasons. Confirm that is wanted here
-   rather than as its own change.
+4. **Is the DTO/domain split worth it now?** Finding 3 tallies it: the honest forcing case is one
+   field (`Origin`) plus a reflection trap, against 12 source and 19 test files changed for no
+   behaviour change — and `KindConfig` proves the cheap `[YamlIgnore]` route works. Split (closing
+   #73), or take the cheap route and leave #73 open? This is the largest single cost in the plan.
 5. **Is yaml targeted for removal at 1.0?** This design assumes kept indefinitely as one provider.
 6. **Serialization.** `ServiceDefinition` is left plainly serializable for #11 but nothing serializes
    it. Is that the right amount of anticipation?
