@@ -35,8 +35,110 @@ internal static class LocalGitCheckout
     /// to a <c>path</c> override, which is the developer's own directory rather than one this
     /// package places.
     /// </remarks>
-    public static string ManagedRepoRoot(string appHostDirectory, string serviceName) =>
-        Path.Combine(ToolDirectory.PathIn(appHostDirectory), "checkouts", serviceName);
+    /// <exception cref="ServiceSourcesConfigurationException">
+    /// <paramref name="serviceName"/> is not a directory name of its own, and so names a location
+    /// this package does not own. See <see cref="IsContainedCheckoutDirectoryName"/>.
+    /// </exception>
+    public static string ManagedRepoRoot(string appHostDirectory, string serviceName)
+    {
+        if (!IsContainedCheckoutDirectoryName(serviceName))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}' cannot be given a checkout: a service's name is the name of the "
+                + "directory its checkout is cloned into, so it has to be a single directory name — "
+                + ContainedNameRuleAndRemedy);
+        }
+
+        return Path.Combine(ToolDirectory.PathIn(appHostDirectory), "checkouts", serviceName);
+    }
+
+    /// <summary>
+    /// The half of a refusal that is the same wherever a name is turned away for not being a path
+    /// segment of its own: what the rule is, and where to change the name.
+    /// </summary>
+    /// <remarks>
+    /// Shared by the two places that refuse so they cannot drift into describing different rules,
+    /// which has happened once already — the rule grew to cover Windows normalization and both
+    /// messages went on naming only <c>.</c> and <c>..</c>, so a developer refused for <c>'.. '</c>
+    /// was handed a list of two forbidden values, neither of them theirs.
+    /// </remarks>
+    public static string ContainedNameRuleAndRemedy =>
+        "no '/' or '\\' separator, no ':', and not a name made only of dots and spaces — Windows "
+        + "strips those from the end of a path component, so such a name is not a directory of its "
+        + "own there. Rename the service in 'servicesources.yaml' and "
+        + $"'{Config.DeveloperConfiguration.FileName}'.";
+
+    /// <summary>
+    /// Whether <paramref name="serviceName"/> can be the single directory name a managed checkout is
+    /// placed under, rather than a value that puts the checkout somewhere else entirely.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A service name reaches this package two ways, and only one of them has been checked. From
+    /// <c>AddService(string)</c> it carries Aspire's <c>[ResourceName]</c> — but that is an analyzer
+    /// attribute, and the runtime validation behind it happens when the resource is added to the
+    /// application model, which is <em>after</em> the checkout it needs has been cloned. From the
+    /// developer configuration it is a raw key that nothing has looked at. Either way the value is
+    /// combined into <c>.servicesources/checkouts/</c> first, so a name containing <c>..</c> clones
+    /// outside the directory that the ignore file and the <see cref="CheckoutBuildBarrier"/> files
+    /// <c>EnsureToolDirectory</c> writes exist to cover — which puts the checkout back into the
+    /// AppHost's source-control status and inside its build settings (#224).
+    /// </para>
+    /// <para>
+    /// Containment rather than a copy of Aspire's name rules, which are not public to call and would
+    /// reject spellings that say nothing about where the clone lands. Both separators and the volume
+    /// separator count on every platform, for the reason
+    /// <see cref="CheckoutRelativePath.IsAbsolute"/> gives: this configuration is shared across a
+    /// team, and a value that only escapes on Windows still escapes.
+    /// </para>
+    /// <para>
+    /// Lexical, and deliberately not a resolved <see cref="Path.GetFullPath(string)"/> prefix check.
+    /// Resolving asks the running platform what the name means, so the same shared file would be
+    /// accepted on Linux and refused on Windows — and the Windows-only half could never be exercised
+    /// by a Linux CI. Trimming the way Windows does and judging the result gives one verdict
+    /// everywhere, and one that is testable everywhere.
+    /// </para>
+    /// <para>
+    /// Asked at each place a name becomes a path rather than at one gate they all pass, because
+    /// there is no such gate: <see cref="ManagedRepoRoot"/> covers every route to a checkout
+    /// directory, and <see cref="Prepare.PrepareMarker.LocationFor"/> covers the one route that
+    /// bypasses it — a <c>local.path</c> service has no managed checkout, so its <c>prepare</c>
+    /// marker is named after the service without <c>ManagedRepoRoot</c> ever being called. A third
+    /// such place would need its own call to this, and that is the cost of the arrangement; the
+    /// alternative, validating names once on the way in, is a bigger change than a patch should be.
+    /// </para>
+    /// <para>
+    /// Callers that ask on behalf of a service nobody has added filter on this rather than letting
+    /// <see cref="ManagedRepoRoot"/> throw — see <see cref="Sources.LocalCheckoutPrefetch"/>, whose
+    /// speculation must never be what fails an <c>AddService()</c> call.
+    /// </para>
+    /// </remarks>
+    public static bool IsContainedCheckoutDirectoryName(string serviceName)
+    {
+        if (string.IsNullOrWhiteSpace(serviceName) || serviceName.IndexOfAny(['/', '\\', ':']) >= 0)
+        {
+            return false;
+        }
+
+        // Windows strips trailing dots and spaces from a path component, so a name made only of
+        // those characters is not a directory of its own there — whether it is erased outright or
+        // read as a relative segment, what it resolves to is never a checkout of that name. An
+        // exact test against "." and ".." passes every such spelling, and the difference is
+        // invisible to a CI that only runs on Linux, where each is an ordinary directory name.
+        // Trim the same characters first: what is left is what Windows will actually look for, and
+        // only a name that is entirely dots and spaces has nothing left.
+        //
+        // Which of the two it does per spelling is deliberately not claimed here. It decides
+        // nothing — every one of them is refused — and it cannot be checked from this repository,
+        // whose CI has no Windows leg.
+        //
+        // Only what the trimming leaves is judged, so "orders." is accepted. That name is contained
+        // — it is a directory under checkouts/ either way — though on Windows it resolves to the
+        // same directory as "orders", so two entries spelled that way would share one checkout.
+        // Refusing it is a rule about naming rather than about containment, which belongs to
+        // whatever validates the name, not here.
+        return serviceName.TrimEnd('.', ' ').Length > 0;
+    }
 
     /// <summary>
     /// Whether this package owns the checkout directory, and so has a

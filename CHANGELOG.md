@@ -398,6 +398,43 @@ nothing will fail to build to warn you.
 
 ### Fixed
 
+- **A service name is no longer able to place its checkout outside `.servicesources/checkouts/`**
+  ([#224]). The name is used verbatim as the directory the clone goes into, so one containing `..`
+  put the checkout somewhere else — outside the ignore file and the build-barrier files this
+  package writes into that directory precisely to keep a checkout out of the AppHost's
+  source-control status and out of its build settings. The name is now required to be a single
+  directory name of its own: no `/` or `\` separator, no `:`, and not a name made only of dots and
+  spaces. A well-formed name is unaffected.
+
+  Two routes reached the checkout directory, and neither was checked. The speculative prefetch
+  enumerates the keys of `servicesources.local.json` directly and never saw any validation at all;
+  it now skips a key it cannot use rather than reporting it, matching the filters either side of
+  it — speculation about a service the AppHost may never mention must never be what fails an
+  `AddService()` call. The ordinary `AddService(name)` route looked safe on the strength of
+  Aspire's `[ResourceName]` attribute, but that is an analyzer attribute, and the runtime
+  validation behind it happens when the resource is added to the application model — which is
+  *after* the checkout it needs has been cloned. Both are refused in the function that builds that
+  path, which names the service and the two files to rename it in.
+
+  **A `"local"` service using `local.path` gets the same refusal from a second place.** It has no
+  checkout this package owns, so it never reaches that function at all — but a `prepare` step
+  still records its completion in a file named after the service, under the tool directory. A
+  traversal name put that marker outside `.servicesources/` and so back inside the AppHost's own
+  source-control status, which is the same harm by a different route.
+
+  The rule is deliberately lexical rather than a resolved path comparison, and rejects `".. "`,
+  `"..."` and `". "` as well as `"."` and `".."`. Windows strips trailing dots and spaces from a
+  path component, so none of those is a directory of its own there — what such a name resolves to
+  is never a checkout by that name. On Linux and macOS each is an ordinary directory name. Judging
+  them the same way everywhere keeps one verdict for a file a whole team shares, and keeps the
+  Windows-only cases testable on Linux.
+
+  Reaching any of this needed write access to `servicesources.yaml` — which is committed, shared,
+  and as trusted as the AppHost's own source — together with a matching entry in the developer
+  configuration, which can equally arrive from `appsettings`, user secrets, an environment variable
+  or the command line. So this is hardening rather than a hole reachable from outside. Found during
+  a security review.
+
 - **A `project` that points outside the service's checkout is refused rather than built** ([#222]).
   `project` was the one path a catalog names that was never confined to the checkout it is read
   against. `Path.Combine` gives no confinement of its own — it discards the checkout root outright
@@ -1106,6 +1143,7 @@ Targets `net10.0`.
 [#209]: https://github.com/flojon/aspire-servicesources/issues/209
 [#220]: https://github.com/flojon/aspire-servicesources/issues/220
 [#222]: https://github.com/flojon/aspire-servicesources/issues/222
+[#224]: https://github.com/flojon/aspire-servicesources/issues/224
 [#233]: https://github.com/flojon/aspire-servicesources/issues/233
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
