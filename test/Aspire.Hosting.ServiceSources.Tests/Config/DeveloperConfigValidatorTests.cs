@@ -362,7 +362,7 @@ public class DeveloperConfigValidatorTests
         var arrived = field switch
         {
             "path" => resolved.Local.Path,
-            "command" => resolved.Local.Prepare.Command![1],
+            "command" => resolved.Local.Prepare!.Command![1],
             "scheme" => resolved.Kubernetes.Scheme,
             _ => resolved.Kubernetes.Port?.ToString(CultureInfo.InvariantCulture),
         };
