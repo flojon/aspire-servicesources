@@ -15,7 +15,9 @@ nothing will fail to build to warn you.
 
 A patch on top of `0.4.0`, cut from the `release/0.4.x` branch off the `v0.4.0` tag rather than
 from `main`: `main` has moved on to changes a patch must not carry. One configuration stops
-working, and it is the one the fix is about — see **Changed**.
+working, and it is the `project` fix that stops it — see **Changed**. The service-name fix below
+turns away no catalog that ever started: those names were already refused, one clone later, by
+Aspire's own resource-name validation.
 
 ### Changed
 
@@ -47,8 +49,8 @@ working, and it is the one the fix is about — see **Changed**.
   did the same bare combine; both now go through the lexical confinement `java.jarPath` has always
   had, in one place they share, so the two cannot come to different conclusions about the same
   value. (`javascript.appDirectory` is confined too, but by a resolved check of its own rather than
-  by this one.) An absolute path is reported as absolute and a
-  climbing one as pointing outside the repository, and neither reaches MSBuild.
+  by this one.) An absolute path is reported as absolute and a climbing one as pointing outside the
+  repository, and neither reaches MSBuild.
 
   Consistency and defence in depth rather than a boundary that moves: `kind: dotnet` builds the
   checkout's own code regardless — nobody crosses a line here who was not already across it. What

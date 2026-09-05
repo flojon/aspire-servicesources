@@ -49,8 +49,8 @@ internal static class LocalGitCheckout
                 $"Service '{serviceName}' cannot be given a checkout: a service's name is the name of the "
                 + "directory its checkout is cloned into, so it has to be a single directory name — no '/' "
                 + "or '\\' separator, no ':', and not a name made only of dots and spaces — Windows strips "
-                + "trailing dots and spaces, leaving '.', '..' or nothing, none of which is a name of its "
-                + "own. Rename the service in "
+                + "those from the end of a path component, so such a name is not a directory of its own "
+                + "there. Rename the service in "
                 + $"'servicesources.yaml' and '{Config.DeveloperConfiguration.FileName}'.");
         }
 
