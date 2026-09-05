@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using System.ComponentModel;
+using System.Globalization;
+using System.Reflection;
 using System.Text;
 
 namespace Aspire.Hosting.ServiceSources.Config;
@@ -172,11 +174,11 @@ internal static class DeveloperConfigValidator
         string serviceName,
         IConfigurationSection block,
         string blockPath,
-        IReadOnlyDictionary<string, Type> fields)
+        IReadOnlyDictionary<string, PropertyInfo> fields)
     {
         foreach (var field in block.GetChildren())
         {
-            if (!fields.TryGetValue(field.Key, out var fieldType))
+            if (!fields.TryGetValue(field.Key, out var declared))
             {
                 problems.Add(NotValidInBlock(field, blockPath, fields));
                 continue;
@@ -186,13 +188,13 @@ internal static class DeveloperConfigValidator
             // IConfiguration as indexed children, and its type is a class, so a list asked about as
             // a block is classified as one and answered with "takes a value, not a block of
             // settings" — about a field whose value is neither.
-            if (DeveloperConfigField.IsList(fieldType))
+            if (DeveloperConfigField.IsList(declared.PropertyType))
             {
                 CollectList(problems, field, blockPath);
                 continue;
             }
 
-            if (DeveloperConfigField.BlockFieldsOf(fieldType) is { } nested)
+            if (DeveloperConfigField.BlockFieldsOf(declared.PropertyType) is { } nested)
             {
                 // The same mistake one level down as a block name carrying a value: it binds to
                 // nothing, and the binder giving up takes the surrounding block with it.
@@ -227,9 +229,21 @@ internal static class DeveloperConfigValidator
                 continue;
             }
 
-            if (field.Value is { } value && !BindsTo(fieldType, value))
+            // After Blank, which takes a value that is *entirely* whitespace: such a value satisfies
+            // this rule too, and the complaint naming the empty spelling is the one its author was
+            // reaching for. Before BindsTo, so the field's own type stays out of the sentence — the
+            // same reason Blank is kept apart from NotBindable.
+            if (field.Value is { } verbatim
+                && declared.GetCustomAttribute<NoSurroundingWhitespaceAttribute>() is { } handedOn
+                && verbatim != verbatim.Trim())
             {
-                problems.Add(NotBindable(field, blockPath, fieldType, value));
+                problems.Add(SurroundedByWhitespace(field, blockPath, verbatim, handedOn));
+                continue;
+            }
+
+            if (field.Value is { } value && !BindsTo(declared.PropertyType, value))
+            {
+                problems.Add(NotBindable(field, blockPath, declared.PropertyType, value));
             }
         }
     }
@@ -507,7 +521,7 @@ internal static class DeveloperConfigValidator
 
     /// <summary>The error for a key that no block of this name declares.</summary>
     private static string NotValidInBlock(
-        IConfigurationSection field, string block, IReadOnlyDictionary<string, Type> fields) =>
+        IConfigurationSection field, string block, IReadOnlyDictionary<string, PropertyInfo> fields) =>
         $"'{field.Key}' is not a valid key in the "
         + $"'{block.ToLowerInvariant()}' block. Valid keys there are {Quoted(fields.Keys)}."
         + SetAt(field);
@@ -569,7 +583,7 @@ internal static class DeveloperConfigValidator
     /// and the enclosing block's path for one nested inside it.
     /// </param>
     private static string BlockExpected(
-        string container, IConfigurationSection key, IReadOnlyDictionary<string, Type> fields)
+        string container, IConfigurationSection key, IReadOnlyDictionary<string, PropertyInfo> fields)
     {
         var block = key.Key.ToLowerInvariant();
 
@@ -671,6 +685,97 @@ internal static class DeveloperConfigValidator
         + SetAt(field);
 
     /// <summary>
+    /// The error for a value whose surrounding whitespace is part of a name something outside this
+    /// process will look up.
+    /// </summary>
+    /// <remarks>
+    /// It says nothing about what such a name may or may not contain, because that varies by field
+    /// and getting it wrong prints a false claim at the one developer it is wrong for: a kubeconfig
+    /// context name really can carry a space at either end. What is true of every field carrying
+    /// <see cref="NoSurroundingWhitespaceAttribute"/> is that the value travels as written, so that
+    /// is what the sentence says — with the two spellings side by side, which is what makes a plain
+    /// space visible, since <see cref="Escaped"/> leaves one as itself.
+    /// </remarks>
+    private static string SurroundedByWhitespace(
+        IConfigurationSection field,
+        string block,
+        string value,
+        NoSurroundingWhitespaceAttribute handedOn)
+    {
+        var remedy = TrimUnseeable(value);
+        var opening = $"'{field.Key}' in the '{block}' block is set to {Escaped(value)}";
+
+        // Nothing but whitespace and characters with no glyph. Blank did not take it — a byte-order
+        // mark is not whitespace — but what Blank would have said is what this value needs: there is
+        // no spelling left to propose, and the empty value is the gesture for a field nobody meant
+        // to set.
+        if (remedy.Length == 0)
+        {
+            return $"{opening}, which is whitespace and characters with no glyph rather than a "
+                + "value. Set it to an empty value to leave the field unset."
+                + SetAt(field);
+        }
+
+        var mechanism = $", and {handedOn.Receiver} is given it exactly as written — so "
+            + $"{handedOn.Receiver} looks for {Escaped(value)} and not {Escaped(remedy)}. ";
+
+        // A remedy carrying an invisible character of its own cannot be typed out of this message,
+        // and must not be offered as though it could: an escape like \ufeff is also valid JSON, so
+        // a reader copying it back into the file writes the very value being complained about — and
+        // that one has no whitespace left for anything to catch.
+        var fix = Escaped(remedy) == $"'{remedy}'"
+            ? $"Set it to {Escaped(remedy)}."
+            : $"{Escaped(remedy)} still carries a character with no glyph of its own, so retype the "
+              + "value rather than copying it from here.";
+
+        return opening + mechanism + fix
+            + (handedOn.IfDeliberate is { } deliberate ? $" {deliberate}" : "")
+            + SetAt(field);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="c"/> is a character a reader cannot see: whitespace, a control
+    /// character, or one of Unicode's <see cref="UnicodeCategory.Format"/> characters.
+    /// </summary>
+    /// <remarks>
+    /// The same line <see cref="Escaped"/> draws, and for the same reason: these are the characters
+    /// a developer cannot tell apart from nothing at all. It stops short of a combining mark, which
+    /// is invisible too and is a real thing to write — a decomposed accented letter carries one.
+    /// </remarks>
+    private static bool IsUnseeable(char c) =>
+        char.IsWhiteSpace(c)
+        || char.IsControl(c)
+        || CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.Format;
+
+    /// <summary>
+    /// <paramref name="value"/> without the characters at either end that a reader cannot see.
+    /// </summary>
+    /// <remarks>
+    /// This computes the spelling a message <em>proposes</em>, and not the rule that fires it. The
+    /// rule stays about whitespace, which is what
+    /// <see href="https://github.com/flojon/aspire-servicesources/issues/236">#236</see> is about;
+    /// the remedy has to be a value the developer can actually type, and one still carrying a
+    /// byte-order mark is not.
+    /// </remarks>
+    private static string TrimUnseeable(string value)
+    {
+        var start = 0;
+        var end = value.Length;
+
+        while (start < end && IsUnseeable(value[start]))
+        {
+            start++;
+        }
+
+        while (end > start && IsUnseeable(value[end - 1]))
+        {
+            end--;
+        }
+
+        return value[start..end];
+    }
+
+    /// <summary>
     /// The error for a value of one or more spaces, whatever type the field takes.
     /// </summary>
     /// <remarks>
@@ -720,6 +825,16 @@ internal static class DeveloperConfigValidator
                 '\n' => "\\n",
                 '\r' => "\\r",
                 _ when char.IsWhiteSpace(c) => $"\\u{(int)c:x4}",
+
+                // A character with no glyph of its own is worse than one that merely looks like a
+                // space: echoed as itself it is not there at all, so the value reads back as
+                // exactly what the developer typed and the message appears to be complaining about
+                // nothing. Control characters and Unicode's Format category are the two slices of
+                // that this can name without reaching a character somebody meant — a combining mark
+                // is invisible too, and a decomposed accented letter carries one.
+                _ when char.IsControl(c) || CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.Format
+                    => $"\\u{(int)c:x4}",
+
                 _ => c.ToString(),
             }))}'";
 

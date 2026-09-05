@@ -2,6 +2,8 @@ using Aspire.Hosting;
 using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
 using Microsoft.Extensions.Configuration;
+using System.Globalization;
+using System.Reflection;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Config;
 
@@ -32,6 +34,427 @@ public class DeveloperConfigValidatorTests
         var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory(json));
         return Assert.Throws<ServiceSourcesConfigurationException>(
             () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+    }
+
+    /// <summary>
+    /// The backing-service half of the same walk, which this file had no way to reach before.
+    /// </summary>
+    /// <remarks>
+    /// The catalog <see cref="CreateAppHostDirectory"/> writes is inert here — a backing service is
+    /// declared by the <c>AddBackingService</c> call rather than by a catalog, and
+    /// <c>ReadBackingServicesFrom</c> never looks for one — so this reuses that helper rather than
+    /// adding a second one that differs only in a file nothing reads.
+    /// <para>
+    /// Resolved through <c>BackingServicesFor</c> and not <c>ResolveBackingService</c>: the latter
+    /// answers a name it does not know with a default instead of failing, so a test built on it
+    /// could pass while asserting nothing at all.
+    /// </para>
+    /// </remarks>
+    private static ServiceSourcesConfigurationException LoadBackingService(string json)
+    {
+        var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory(json));
+        return Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.BackingServicesFor(builder));
+    }
+
+    /// <remarks>
+    /// A byte-order mark is what a copy-paste out of a Windows-authored file leaves behind, and it
+    /// has no glyph at all: echoed as itself it is indistinguishable from the value being correct,
+    /// so the reader is shown what looks exactly like what they wrote and told it is wrong. It is
+    /// not whitespace, so the arm that spells out a tab does not reach it.
+    /// </remarks>
+    [Fact]
+    public void Validate_ValueCarryingAnInvisibleCharacter_SpellsItOutRatherThanEchoingIt()
+    {
+        var ex = Load("""
+            { "services": { "orders": {
+                "source": "kubernetes",
+                "kubernetes": { "port": "\uFEFF8080" } } } }
+            """);
+
+        Assert.Contains("\\ufeff", ex.Message);
+        Assert.DoesNotContain("'\ufeff8080'", ex.Message);
+    }
+
+    /// <remarks>
+    /// The five fields this rule covers, each padded three ways. A theory rather than fifteen tests
+    /// because the symmetry is the point of #236: a service and a backing service carry the same
+    /// two keys, and a rule that reached one and not the other would be the defect rather than the
+    /// fix. The attribute is applied by hand on two unrelated types, so nothing structural keeps
+    /// them in step.
+    /// <para>
+    /// Every row asserts the refusal is <em>this</em> rule's rather than another complaint that
+    /// happens to throw: a row naming a field that does not exist would be answered by
+    /// <c>NotValidInBlock</c> and would otherwise pass while proving nothing.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("services", "orders", "context", " dev-west", "dev-west")]
+    [InlineData("services", "orders", "context", "dev-west ", "dev-west")]
+    [InlineData("services", "orders", "context", "  dev-west  ", "dev-west")]
+    [InlineData("services", "orders", "namespace", " orders", "orders")]
+    [InlineData("services", "orders", "namespace", "orders ", "orders")]
+    [InlineData("services", "orders", "namespace", " orders ", "orders")]
+    [InlineData("backingServices", "orders-db", "context", " dev-west", "dev-west")]
+    [InlineData("backingServices", "orders-db", "context", "dev-west ", "dev-west")]
+    [InlineData("backingServices", "orders-db", "context", " dev-west ", "dev-west")]
+    [InlineData("backingServices", "orders-db", "namespace", " orders", "orders")]
+    [InlineData("backingServices", "orders-db", "namespace", "orders ", "orders")]
+    [InlineData("backingServices", "orders-db", "namespace", " orders ", "orders")]
+    [InlineData("backingServices", "orders-db", "service", " orders-pg", "orders-pg")]
+    [InlineData("backingServices", "orders-db", "service", "orders-pg ", "orders-pg")]
+    [InlineData("backingServices", "orders-db", "service", " orders-pg ", "orders-pg")]
+    public void Validate_KubectlNameWithSurroundingWhitespace_IsRefusedWithTheSpellingThatWorks(
+        string section, string entry, string field, string written, string expected)
+    {
+        var json = $$"""
+            { "{{section}}": { "{{entry}}": {
+                "source": "kubernetes",
+                "kubernetes": { "{{field}}": "{{written}}" } } } }
+            """;
+
+        var ex = section == "services" ? Load(json) : LoadBackingService(json);
+
+        Assert.Contains($"'{field}' in the 'kubernetes' block is set to '{written}'", ex.Message);
+        Assert.Contains("kubectl", ex.Message);
+        Assert.Contains($"Set it to '{expected}'.", ex.Message);
+
+        // This rule's complaint and no other: a row naming a field that does not exist would be
+        // answered by NotValidInBlock, and a second problem would switch Failure to its list wording.
+        Assert.DoesNotContain("is not a valid key", ex.Message);
+        Assert.DoesNotContain("problems with the entry", ex.Message);
+    }
+
+    /// <remarks>
+    /// A context is the one opted-in field whose padding may have been meant: a kubeconfig context
+    /// name is an arbitrary key, and `kubectl config set-context " padded "` succeeds. Telling that
+    /// developer to write the trimmed spelling would send them to a context that need not exist, so
+    /// the message carries the way out.
+    /// </remarks>
+    [Fact]
+    public void Validate_PaddedContext_NamesTheRenameThatKeepsIt()
+    {
+        var ex = Load("""
+            { "services": { "orders": {
+                "source": "kubernetes",
+                "kubernetes": { "context": " dev-west" } } } }
+            """);
+
+        Assert.Contains("kubectl config rename-context", ex.Message);
+    }
+
+    /// <remarks>
+    /// The backing-service half of the same payload, asserted separately because it is a second
+    /// application of the attribute written by hand on an unrelated type — which is exactly the
+    /// drift #236 exists to prevent.
+    /// </remarks>
+    [Fact]
+    public void Validate_PaddedContextOnABackingService_AlsoNamesTheRename()
+    {
+        var ex = LoadBackingService("""
+            { "backingServices": { "orders-db": {
+                "source": "kubernetes",
+                "kubernetes": { "context": " dev-west" } } } }
+            """);
+
+        Assert.Contains("kubectl config rename-context", ex.Message);
+    }
+
+    /// <remarks>
+    /// No other field can be in the context's position, so no other field pays for the sentence.
+    /// </remarks>
+    [Fact]
+    public void Validate_PaddedNamespace_DoesNotOfferTheContextRename()
+    {
+        var ex = Load("""
+            { "services": { "orders": {
+                "source": "kubernetes",
+                "kubernetes": { "namespace": " orders" } } } }
+            """);
+
+        Assert.DoesNotContain("rename-context", ex.Message);
+    }
+
+    /// <remarks>
+    /// A tab and a non-breaking space are the two paddings a developer cannot see, and the second is
+    /// what a paste out of a browser or a document leaves behind. Both are whitespace, so both fire
+    /// this rule — and the message has to spell them out, since echoed as themselves they leave the
+    /// reader looking at a value that appears to be precisely what they typed.
+    /// <para>
+    /// The padding is written as a JSON escape rather than as itself: a literal tab inside a JSON
+    /// string is not valid JSON, so the document would fail to parse before the validator saw it.
+    /// The two arguments are the same text by coincidence — one is what the file carries, the other
+    /// what the message must render — and they are kept apart because that coincidence is not a
+    /// rule.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData(@"\t", @"\t")]
+    [InlineData(@"\u00a0", @"\u00a0")]
+    public void Validate_PaddingThatCannotBeSeen_IsSpelledOutInTheMessage(string padding, string spelled)
+    {
+        var ex = Load($$"""
+            { "services": { "orders": {
+                "source": "kubernetes",
+                "kubernetes": { "namespace": "{{padding}}orders" } } } }
+            """);
+
+        Assert.Contains(spelled, ex.Message);
+        Assert.Contains("Set it to 'orders'.", ex.Message);
+    }
+
+    /// <remarks>
+    /// The suffix every complaint in this file carries. It is what tells a developer the value need
+    /// not have come from the file at all — an environment variable sets the same key — and dropping
+    /// it from this one message would pass every other test here.
+    /// </remarks>
+    [Fact]
+    public void Validate_PaddedNamespace_NamesTheConfigurationKeyItCameFrom()
+    {
+        var ex = Load("""
+            { "services": { "orders": {
+                "source": "kubernetes",
+                "kubernetes": { "namespace": " orders" } } } }
+            """);
+
+        Assert.Contains("ServiceSources:Services:orders:kubernetes:namespace", ex.Message);
+    }
+
+    /// <remarks>
+    /// Blank runs first and has to: a value of nothing but spaces satisfies both rules, and the one
+    /// naming the empty spelling is what the developer reaching for it needs.
+    /// </remarks>
+    [Fact]
+    public void Validate_WhitespaceOnlyContext_KeepsTheBlankComplaint()
+    {
+        var ex = Load("""
+            { "services": { "orders": {
+                "source": "kubernetes",
+                "kubernetes": { "context": "  " } } } }
+            """);
+
+        Assert.Contains("whitespace rather than a value", ex.Message);
+        Assert.DoesNotContain("Set it to ''", ex.Message);
+    }
+
+    /// <remarks>
+    /// A context name may contain a space — `kubectl config set-context "my dev ctx"` succeeds — so
+    /// a rule about whitespace anywhere in the value would refuse a working configuration. Only the
+    /// ends of the value are this package's business.
+    /// </remarks>
+    [Fact]
+    public void Validate_ContextWithInteriorSpace_IsAccepted()
+    {
+        var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory("""
+            { "services": { "orders": {
+                "source": "kubernetes",
+                "kubernetes": { "context": "my dev ctx", "port": 8080 } } } }
+            """));
+
+        var resolved = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+
+        Assert.Equal("my dev ctx", resolved.DeveloperConfig.Kubernetes.Context);
+    }
+
+    /// <remarks>
+    /// The trap this rule exists to close, re-created by the rule itself if the remedy is computed
+    /// by trimming whitespace alone. A byte-order mark is not whitespace, so it survives Trim() —
+    /// and ﻿ is a valid JSON escape, so a developer copying the proposed spelling back into
+    /// the file writes the same broken value, this time with no whitespace left to trigger any
+    /// message at all.
+    /// </remarks>
+    [Fact]
+    public void Validate_PaddingAroundAnInvisibleCharacter_ProposesASpellingThatWorks()
+    {
+        var ex = Load("""
+            { "services": { "orders": {
+                "source": "kubernetes",
+                "kubernetes": { "namespace": " ﻿orders" } } } }
+            """);
+
+        // What arrived is shown with the mark spelled out...
+        Assert.Contains(@"﻿", ex.Message);
+
+        // ...and what to write carries neither the space nor the mark.
+        Assert.Contains("Set it to 'orders'.", ex.Message);
+    }
+
+    /// <remarks>
+    /// Blank does not take this one: the mark is not whitespace, so the value is not
+    /// IsNullOrWhiteSpace. Trimming leaves nothing at all, and "Set it to" has no spelling to name —
+    /// so the message says what Blank would have said, because that is what the value is.
+    /// </remarks>
+    [Fact]
+    public void Validate_ValueOfNothingButWhitespaceAndInvisibles_NamesTheEmptySpelling()
+    {
+        var ex = Load("""
+            { "services": { "orders": {
+                "source": "kubernetes",
+                "kubernetes": { "namespace": " ﻿" } } } }
+            """);
+
+        // The distinguishing clause rather than "empty value" alone: Blank's message ends with that
+        // same sentence, so asserting on it by itself would pass even if this branch never ran.
+        Assert.Contains("characters with no glyph rather than a value", ex.Message);
+        Assert.DoesNotContain("Set it to ''", ex.Message);
+    }
+
+    /// <remarks>
+    /// An invisible in the middle survives the remedy, so the remedy cannot be typed out of the
+    /// message. Saying "Set it to" anyway would be the copy-paste trap again, one character further
+    /// in.
+    /// </remarks>
+    [Fact]
+    public void Validate_InvisibleInsideTheValue_AsksForItToBeRetypedRatherThanCopied()
+    {
+        var ex = Load("""
+            { "services": { "orders": {
+                "source": "kubernetes",
+                "kubernetes": { "namespace": " ord﻿ers" } } } }
+            """);
+
+        Assert.Contains("retype", ex.Message);
+        Assert.DoesNotContain(@"Set it to 'ord﻿ers'.", ex.Message);
+    }
+
+    /// <remarks>
+    /// The boundary this rule deliberately stops at: a value padded only with invisible characters
+    /// and no whitespace at all is not refused. TrimUnseeable is one edit away from becoming the
+    /// trigger rather than the remedy, which would widen the rule past what #236 asked for without
+    /// anyone noticing. Pinned so that widening it stays a decision.
+    /// </remarks>
+    [Fact]
+    public void Validate_InvisiblePaddingWithNoWhitespace_IsNotRefused()
+    {
+        var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory("""
+            { "services": { "orders": {
+                "source": "kubernetes",
+                "kubernetes": { "namespace": "﻿orders", "context": "dev", "port": 8080 } } } }
+            """));
+
+        var resolved = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+
+        Assert.Equal("﻿orders", resolved.DeveloperConfig.Kubernetes.Namespace);
+    }
+
+    /// <remarks>
+    /// The fields this rule deliberately does not reach. Whitespace may be real in a path or in a
+    /// command's argument; a connection string may carry it inside a quoted value; and a scheme is
+    /// already trimmed where it is read, into a closed set of two values where trimming cannot
+    /// resolve to the wrong one. Each is a decision #236 made rather than something the mechanism
+    /// guarantees, so each is pinned.
+    /// </remarks>
+    [Theory]
+    [InlineData("""{ "services": { "orders": { "source": "local", "local": { "path": "/src/orders " } } } }""", "path", "/src/orders ")]
+    [InlineData("""{ "services": { "orders": { "source": "local", "local": { "path": "/src/o", "prepare": { "command": ["mvn", " -Pprod"] } } } } }""", "command", " -Pprod")]
+    [InlineData("""{ "services": { "orders": { "source": "kubernetes", "kubernetes": { "context": "dev", "port": 8080, "scheme": " https" } } } }""", "scheme", " https")]
+    [InlineData("""{ "services": { "orders": { "source": "kubernetes", "kubernetes": { "context": "dev", "port": " 8080" } } } }""", "port", "8080")]
+    public void Validate_FieldThatDidNotOptIn_StillTakesASurroundedValue(
+        string json, string field, string expected)
+    {
+        var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory(json));
+
+        var resolved = ServiceSourcesConfigCache.ResolveService(builder, "orders").DeveloperConfig;
+
+        // Not merely "it did not throw": the value has to arrive with its whitespace intact.
+        // Someone "fixing" an exclusion by trimming it at the point of use would pass a no-throw
+        // test, and that is the change this pins against.
+        var arrived = field switch
+        {
+            "path" => resolved.Local.Path,
+            "command" => resolved.Local.Prepare!.Command![1],
+            "scheme" => resolved.Kubernetes.Scheme,
+            _ => resolved.Kubernetes.Port?.ToString(CultureInfo.InvariantCulture),
+        };
+
+        Assert.Equal(expected, arrived);
+    }
+
+    [Fact]
+    public void Validate_DirectConnectionString_StillTakesATrailingSpace()
+    {
+        var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory("""
+            { "backingServices": { "orders-db": {
+                "source": "direct",
+                "direct": { "connectionString": "Host=db;Password=hunter2 " } } } }
+            """));
+
+        var configured = ServiceSourcesConfigCache.BackingServicesFor(builder);
+
+        Assert.Equal("Host=db;Password=hunter2 ", configured["orders-db"].Direct.ConnectionString);
+    }
+
+    /// <remarks>
+    /// The kubernetes block's own connectionString, which sits beside three fields that <em>did</em>
+    /// opt in and is therefore the one a later contributor is likeliest to add the attribute to. A
+    /// connection string may carry trailing whitespace inside a quoted value, which is why #236
+    /// rules it out by name.
+    /// </remarks>
+    [Fact]
+    public void Validate_KubernetesConnectionString_StillTakesATrailingSpace()
+    {
+        var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory("""
+            { "backingServices": { "orders-db": {
+                "source": "kubernetes",
+                "kubernetes": { "connectionString": "Host=localhost;Port=${port};Pwd=x " } } } }
+            """));
+
+        var configured = ServiceSourcesConfigCache.BackingServicesFor(builder);
+
+        Assert.Equal(
+            "Host=localhost;Port=${port};Pwd=x ",
+            configured["orders-db"].Kubernetes.ConnectionString);
+    }
+
+    /// <remarks>
+    /// Two failure modes, and one of them is invisible to a query over <c>BlockFields</c> alone.
+    /// That dictionary is built from the <em>entry type's</em> own block properties, so it is
+    /// exactly one level deep: <c>local.prepare</c>'s fields are not in it at all. An attribute on
+    /// <c>PrepareDeveloperConfig.Mode</c> would be live — <c>CollectBlock</c> recurses into a nested
+    /// block — and one on its <c>Command</c> would be inert, and neither would be visible here. So
+    /// this walk descends the way the validator does, and only then asserts each carrier is a
+    /// scalar the walk actually reaches.
+    /// <para>
+    /// This cannot guard against a property being moved between block types: attributes travel with
+    /// the property. What it guards is a carrier the walk never reaches, and a field quietly losing
+    /// the rule.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Shape_EveryFieldCarryingTheRuleIsAScalarTheWalkReaches()
+    {
+        static IEnumerable<PropertyInfo> Leaves(IReadOnlyDictionary<string, PropertyInfo> fields) =>
+            fields.Values.SelectMany(field =>
+                DeveloperConfigField.BlockFieldsOf(field.PropertyType) is { } nested
+                    ? Leaves(nested).Prepend(field)
+                    : [field]);
+
+        var carriers = (
+            from shape in new[] { DeveloperConfigShape.Service, DeveloperConfigShape.BackingService }
+            from block in shape.BlockFields
+            from field in Leaves(block.Value)
+            where field.GetCustomAttribute<NoSurroundingWhitespaceAttribute>() is not null
+            select field).Distinct().ToArray();
+
+        Assert.Equal(
+            new[]
+            {
+                "KubernetesBackingServiceDeveloperConfig.Context",
+                "KubernetesBackingServiceDeveloperConfig.Namespace",
+                "KubernetesBackingServiceDeveloperConfig.Service",
+                "KubernetesDeveloperConfig.Context",
+                "KubernetesDeveloperConfig.Namespace",
+            },
+            carriers.Select(c => $"{c.DeclaringType!.Name}.{c.Name}").Order(StringComparer.Ordinal));
+
+        foreach (var carrier in carriers)
+        {
+            Assert.False(
+                DeveloperConfigField.IsList(carrier.PropertyType),
+                $"{carrier.DeclaringType!.Name}.{carrier.Name} is a list, which CollectBlock hands "
+                + "to CollectList before the whitespace check is reached.");
+            Assert.Null(DeveloperConfigField.BlockFieldsOf(carrier.PropertyType));
+        }
     }
 
     [Fact]
