@@ -1,6 +1,6 @@
 # Backing services: several ports through one tunnel
 
-**Status: Reviewed.** Design for [#233], split out of stage 2 of [#144] ([#234]) — `port` as a named
+**Status: Implemented.** Design for [#233], split out of stage 2 of [#144] ([#234]) — `port` as a named
 map, and `${port:<name>}` resolved against it.
 
 The decision itself is not open. The database-source design already settled it, under *Multi-port
@@ -217,6 +217,23 @@ file's deliberate `SetAt(element)`-versus-`SetAtList(field)` split. Each goes th
 read as a list rather than as one startup per mistake — and, per *the placeholder pass collects*
 below, that habit is now followed on the source side too.
 
+**Correction, found in implementation: the file cannot express three of these.**
+`DeveloperConfigFileSource` re-roots `servicesources.local.json` into configuration and drops every
+null-valued key on the way, because that is also what an intermediate node looks like. The JSON
+parser records `{}` and `null` as exactly that, so from the file:
+
+- `"port": {}` and `"port": null` do not survive to be walked at all — `port` is simply absent, and
+  the source reports it as the missing field it now is. Which is the better message anyway: a block
+  nobody put a port in and a field nobody wrote are the same mistake, with the same fix.
+- `"port": { "amqp": null }` likewise loses its only entry, so the field goes missing.
+- `"port": { "amqp": 5672, "management": null }` loses one entry and keeps the other, and **nothing
+  can report it**: unlike a list, whose indices leave a visible gap, a name that is not there is
+  indistinguishable from a name nobody wrote. This is a known limit of the file, recorded rather
+  than papered over, and pinned by a test.
+
+The empty-block and null-entry messages are still reached from the layers that *are* read directly
+rather than re-rooted — appsettings and user secrets — and are tested through one.
+
 Two of these rows are decisions rather than mechanics, and are called out as such:
 
 - **An array at `port` is refused, not accepted as positional names.** `[5672, 15672]` binds
@@ -257,12 +274,11 @@ Refusing `${port:<name>}` against a single `port` is a **decision, not an open q
 listed as one in the draft and is promoted here, because the acceptance criteria already test it. It
 reads as a developer who edited half of a change, and the message says which half.
 
-For a name the map does not carry, the message follows the shape `NotValidHere` already uses for a
-misspelled key: **the near miss when there is one, and otherwise every forwarded port.**
-`NearMiss.Nearest` returns empty when nothing is close, so a near-miss-only message would say
-nothing at all for `${port:mgmt}` against `{ amqp, management }` — while the acceptance criterion
-requires naming the ports that *are* forwarded. Both halves are needed; the draft asserted each of
-them separately and contradicted itself.
+For a name the map does not carry, the message names **every forwarded port, always, plus a "did you
+mean" when there is a near miss.** `NearMiss.Nearest` returns empty when nothing is close, so a
+near-miss-only message would say nothing at all for a name resembling none of them — while the
+acceptance criterion requires naming the ports that *are* forwarded. The draft asserted each half
+separately and contradicted itself; carrying both is strictly more use to each of the two readers.
 
 A template still has to carry at least one port placeholder — the rule stage 2 shipped, for the
 reason it shipped it. But **`NothingAddressesTheTunnel` now branches on the configured shape.** Its

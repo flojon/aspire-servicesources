@@ -1,4 +1,5 @@
 using System.Collections;
+using System.ComponentModel;
 using System.Reflection;
 
 namespace Aspire.Hosting.ServiceSources.Config;
@@ -9,10 +10,16 @@ namespace Aspire.Hosting.ServiceSources.Config;
 /// </summary>
 /// <remarks>
 /// Every field in this file was a scalar until <c>local.prepare</c>, so the question had one answer
-/// and nobody had to ask it. It now has three, and the order they are asked in is load-bearing:
+/// and nobody had to ask it. It now has four, and the order they are asked in is load-bearing:
 /// <see cref="string"/><c>[]</c> is a class, so a list asked about as a block is classified as one
 /// and reported with precisely the message this type exists to stop producing — "takes a value, not
 /// a block of settings", about a field whose value is a list.
+/// <para>
+/// The fourth, <see cref="IsValueOrMap"/>, has to be asked <em>before</em>
+/// <see cref="IsList"/> for the same reason: a map is a <see cref="IEnumerable"/> too, so a
+/// <c>port</c> written as a block of named ports would otherwise be walked as a list and answered
+/// with a sentence about list elements — about a field that has none.
+/// </para>
 /// </remarks>
 internal static class DeveloperConfigField
 {
@@ -28,6 +35,50 @@ internal static class DeveloperConfigField
         type != typeof(string) && typeof(IEnumerable).IsAssignableFrom(type);
 
     /// <summary>
+    /// Whether the field takes <em>either</em> a value <em>or</em> a block of named values — the
+    /// shape a backing service's <c>kubernetes.port</c> has, where one port is written as a number
+    /// and several are written with a name each.
+    /// </summary>
+    /// <remarks>
+    /// Recognized by the two things that make such a field bindable at all, rather than by naming
+    /// the type: it binds children as a map, and it carries a <see cref="TypeConverterAttribute"/>
+    /// for the value spelling. That pairing is not a convention, it is what the standard binder
+    /// requires — value-first conversion for the scalar, the dictionary walk for the block — so a
+    /// second such field cannot be added without both halves and cannot be added <em>with</em> them
+    /// and go unclassified.
+    /// <para>
+    /// Asked ahead of <see cref="IsList"/>, which would otherwise claim it: see the remarks on this
+    /// type.
+    /// </para>
+    /// </remarks>
+    public static bool IsValueOrMap(Type type) =>
+        MapValueTypeOf(type) is not null
+        && type.IsDefined(typeof(TypeConverterAttribute), inherit: true);
+
+    /// <summary>
+    /// The type each named value in a value-or-map field has to bind to, or <see langword="null"/>
+    /// when <paramref name="type"/> is not keyed by name at all.
+    /// </summary>
+    /// <remarks>
+    /// The value type travels out of here because the walk over such a block has to check each entry
+    /// itself: the binder <em>drops</em> an entry it cannot convert rather than failing, so the map
+    /// binds one shorter than it was written and nothing downstream receives the entry that would
+    /// have reported it.
+    /// <para>
+    /// Only a <see cref="string"/> key counts. Configuration has no other kind — every key arrives as
+    /// text — so a dictionary keyed by anything else is not a shape configuration can produce, and
+    /// claiming it here would classify a field the binder cannot fill.
+    /// </para>
+    /// </remarks>
+    public static Type? MapValueTypeOf(Type type) =>
+        type.GetInterfaces()
+            .Where(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IDictionary<,>))
+            .Select(i => i.GetGenericArguments())
+            .Where(arguments => arguments[0] == typeof(string))
+            .Select(arguments => arguments[1])
+            .FirstOrDefault();
+
+    /// <summary>
     /// The keys valid inside <paramref name="type"/> when the field is a block of settings of its
     /// own, or <see langword="null"/> when it is a value or a list.
     /// </summary>
@@ -37,7 +88,7 @@ internal static class DeveloperConfigField
     /// </remarks>
     public static IReadOnlyDictionary<string, Type>? BlockFieldsOf(Type type)
     {
-        if (!type.IsClass || type == typeof(string) || IsList(type))
+        if (!type.IsClass || type == typeof(string) || IsList(type) || IsValueOrMap(type))
         {
             return null;
         }
