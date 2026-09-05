@@ -1,6 +1,8 @@
 # Fail-closed credential redaction in the echoed connection string (#240)
 
-Status: **Draft** (revision 2 — revision 1's algorithm was withdrawn; see "What changed and why")
+Status: **Implemented** (revision 3 — this describes what shipped; revisions 1 and 2 were
+withdrawn under review, and "What changed and why" keeps the reasons, because they are the reasons
+the final shape looks the way it does)
 
 ## The problem
 
@@ -22,8 +24,9 @@ Everything below exists to hold one property, and any change to it must be check
 property rather than against the procedure:
 
 > **Nothing is printed unless it has been positively recognised as safe to print.** The recognised
-> things are: a key name, a value under a key on the allowlist, a URI's scheme, its authority after
-> the userinfo, and its path.
+> things are: a key name; a value under a key on the allowlist; a URI's scheme, its authority after
+> the userinfo, and its path; a bare `host:port`; an empty value; and the runs of separators
+> between pairs.
 
 Revision 1 failed because it stated a procedure and not a property. Six shapes were found where the
 procedure printed a password in full — each one a string that used a separator the procedure did not
@@ -55,77 +58,98 @@ wrote the string, and it never has to decide whether a `;` is a separator or par
 
 ## The design
 
-### 1. The blocklist stays, demoted to a backstop
+### 1. The keyword list stays, halved, and demoted to a backstop
 
-The existing `Credentials` regex runs **first**, unchanged, on the original string. It can only
-replace text with `***`, so it can only ever redact more.
+```
+(?<=(?:password|pwd|secret|token|accountkey|accesskey|apikey|signature)\s*=)[^;]*
+```
 
-This is not extending the blocklist — nothing is added to it, and it stops being the defence. It is
-kept because it makes one guarantee that the new scanner cannot make on its own: **no shape that is
-redacted today can be printed after this change.** A tokenizer can always be surprised by a dialect
-nobody modelled; an unconditional `(?<=password\s*=)[^;]*` cannot.
+It runs **first**, on the original string, and can only replace text with `***`, so it can only ever
+redact more. That is what makes it impossible for this change to print something the previous
+version hid.
 
-Because the regex stays, so do its `TimeSpan.FromSeconds(1)` timeout, the
-`RegexMatchTimeoutException` catch and the `Unscannable` sentinel. Revision 1 proposed deleting all
-three on the grounds that removing the regex removed the last ReDoS surface. It did not: revision 1's
-own mutual recursion measured **O(n²)** (1.6 s at 48 KB, 5.8 s at 96 KB) and died with an uncatchable
-`Stack overflow.` at 300 KB, which would take the AppHost down instead of reporting the
-configuration error it was building. Revision 2's scanner is a single non-recursive linear pass, and
-the timeout still bounds the backstop.
+It is not extending the blocklist — nothing is added to it, and it stops being the defence. It is
+also **half the size it was**: the alternative that matched a URI's `user:pass@host`, and with it the
+`(?:[^@/\s;]*|[^@/\s=]*)` alternation that three separate corrections went into, is deleted. The
+scanner covers every shape that alternation caught and several it did not, so keeping it would have
+pinned its non-obvious justification in the file forever for no coverage.
+
+What the keyword half still earns: a conventional keyword sitting inside an **allowlisted** value
+with nothing to mark it off. `Data Source=file:pwd=hunter2` has no separator before `pwd`, so the
+scanner has no reason to read it as a pair and would print it. An unconditional `pwd=` finds it.
+
+A timeout on the regex still returns `Unscannable`, and that path **short-circuits** — the sentinel
+is returned without being scanned, since the scanner would recognise nothing in it and reduce it to
+`***`.
 
 ### 2. The scanner
 
 Over the string the backstop returned:
 
 ```
-A key-start is:  a delimiter, then a key, then '=' not followed by '='
-  delimiter  = start-of-string | ';' | '&' | '?' | ',' | ASCII whitespace
-  key        = [A-Za-z_] [A-Za-z0-9_.-]* with single interior spaces allowed
-A pair's value runs from after its '=' to the delimiter that introduces the next key-start,
-or to end-of-string.
-Text before the first key-start is the prefix.
+Level 1 — a pair may begin at the start of the string, or after one of  ;  &  ?  ,
+          optionally followed by whitespace ("Host=h; Port=5432" is two pairs).
+Level 2 — inside a value whose key is allowlisted, a pair may also begin after whitespace.
+A key is  [A-Za-z_] then [A-Za-z0-9_.-], with single interior spaces where a key character
+          follows, and then '=' not followed by '='.
+A value runs from after its '=' to the start of the next key, less the separators between them.
+Text before the first key is the prefix.
 ```
 
-Output is `RedactPrefix(prefix)` followed by, for each pair, its separator text verbatim, its key
-verbatim, `=`, and:
+Keys and separator runs are copied verbatim, so a string with nothing hidden comes back
+byte-identical and the caller can tell the two cases apart by comparing.
+
+**The longest key wins.** In `Host=x Custom Port=5432` the short read finds the allowlisted `Port`
+and prints `5432`; the long read finds `Custom Port`, which is recognised as nothing. Leftmost-longest
+is the fail-closed reading, not a tidiness preference.
+
+**Whitespace introduces a pair only at level 2**, and that is load-bearing. Reading a space as a
+separator everywhere lets `Rotation Key=abc user=def` print `def` — not a username, but the tail of
+a value nothing recognised. Confining it to values already recognised as safe is what makes libpq's
+`host=h port=5432 password=hunter2` work without opening that hole. Level 2 does not treat the
+value's own head as a key, or the key would run across the space in `host=db.internal port=5432`.
+
+Level 2 is the last point at which anything is printed, so there is no recursion to bound. The whole
+scan is one linear pass — which also answers the measurement that killed revision 1, whose mutual
+recursion ran at O(n²) and died with an uncatchable `Stack overflow.` at 300 KB.
 
 ```
 RedactValue(key, value):
     if value is empty            -> value        # an empty string cannot be a secret, and an
                                                  # emptied ${port} is the diagnosis this message
                                                  # exists to deliver
-    if value starts with '='     -> "***"        # ADO.NET's '==' escape: the key was not the key
     if key is not allowlisted    -> "***"
-    return MaskAuthority(value)                  # an allowlisted key may still hold a URL
-```
+    return the level-2 scan of value, with MaskAuthority over its head and each nested value
 
-```
-MaskAuthority(v):                                # linear, non-recursive
-    find the last '@' in v
-    if none                      -> v
-    if no ':' occurs before it   -> v            # 'UID=a@b.com' is an address, not an authority
-    return "***" + v[from that '@']              # 'Data Source=user:pw@h:1433' -> '***@h:1433'
-```
+MaskAuthority(v):                                # an allowlisted key may still hold a URL
+    at = the LAST '@' in v;  if none            -> v
+    if no ':' occurs before it                  -> v   # 'UID=a@b.com' is an address, not an authority
+    keep a leading "scheme://" if there is one, replace the rest up to that '@' with "***"
 
-```
 RedactPrefix(p):
-    if p is empty or only delimiters  -> p
-    if p contains "://"
-        mask the userinfo: the LAST '@' in p, everything before it back to the "://" becomes "***"
-        of what remains, everything up to the first '?' is scheme + authority + path -> printed
-        anything after that '?' other than delimiters is unvetted query text          -> "***"
-    if p matches  host ':' 1-5 digits  (or '[' IPv6 ']' ':' digits)  -> p
+    trim a trailing run of separators off p and put it back at the end
+    if the core contains "://"                  -> return MaskUri(core)
+    if the core is host ':' 1-5 digits, or '[' IPv6 ']' ':' digits  -> return p
     return "***"
+
+MaskUri(u):
+    replace everything from after "://" up to the LAST '@' with "***", if there is one
+    if a '?' remains with anything after it     -> replace what follows it with "***"
 ```
 
-The prefix is where a whole-string URI lands, because a URI has no `key=` in it. Taking the **last**
-`@` rather than the first, and not stopping the authority at `/`, `?` or `#`, is what covers a
-password containing any of those — the three shapes revision 1 leaked.
+ADO.NET's `==` escape is handled in exactly one place: the key rule declines `Host==x=hunter2`
+because the `=` is doubled, so nothing in it is recognised and it reads as `***`. (Note this is the
+one case where a *key* is hidden too — the real key there is `host=x`. Worth knowing, since keys are
+otherwise always shown.)
+
+Taking the **last** `@` and not stopping the authority at `/`, `?` or `#` is what covers a password
+containing any of those. All three are legal unencoded in passwords people actually write, and a
+rule that stopped at them printed the password whole in revision 1.
 
 ### 3. The allowlist
 
 Compared with `OrdinalIgnoreCase` against the trimmed key — not `ToLower()`, which under `tr-TR`
-maps the `I` of `Initial Catalog` to `ı` and breaks the lookup:
+maps the `I` of `Initial Catalog` to a dotless `ı` and breaks the lookup:
 
 `host`, `server`, `data source`, `port`, `database`, `initial catalog`, `user`, `user id`, `userid`,
 `username`, `uid`, `driver`, `provider`
@@ -144,10 +168,10 @@ Deliberately left off:
   `***`.
 
 Two honest caveats. `uid`/`user`/`username` print an identifier that is PII and, for some managed
-providers, is itself a generated account key — the AC4 fixture prints `UID=a@b.com` into
+providers, is itself a generated account key — the no-corruption fixture prints `UID=a@b.com` into
 `~/.aspire/logs` by design. And `data source`/`server` are safe as *values* in every dialect
 checked (Oracle TNS descriptors, `tcp:host,1433`, named pipes, SQLite `file:` URIs); their danger
-was always structural, which `MaskAuthority` and the key scanner now cover.
+was always structural, which `MaskAuthority` and the key scan now cover.
 
 ## The open question the ticket raises, answered
 
@@ -202,12 +226,17 @@ Not closed, and said out loud rather than left to be discovered:
 
 - A path or fragment containing `@` over-redacts: `redis://db.internal:6379/@notauser` becomes
   `redis://***@notauser`. Fail-closed, and the alternative reopens the password-with-`/` leak.
-- A comma-delimited option list whose first token is not a pair — `localhost:6379,ssl=false` — has an
-  unvettable prefix, so it reads `***,ssl=***`.
+- A bare hostname with no port — `localhost`, `orders-pg` — is not distinguishable from a token that
+  merely looks like a word, so it reads `***`. The port is what makes `localhost:6379` recognisable,
+  and requiring it is what stops an API key being printed on the grounds that it is shaped like a
+  host.
 - A key that is itself secret text (`hunter2=x`) prints the key. Keys are printed by construction;
   that is the ticket's own prescription and what makes the message diagnostic.
-- A value containing ` word=` is re-tokenized, so `Password=my token=x` reads `Password=***;token=***`
-  rather than one masked value. Fail-closed, mildly odd.
+- The note now fires for pure over-redaction. A template of nothing but unrecognised keys gets
+  `***` and the sentence explaining it, even though it held no credential at all — the developer is
+  told something was hidden when the honest answer is "nothing here was recognised".
+- A value under an allowlisted key that contains ` word=` is read as nested pairs, so
+  `Data Source=a b=c` reads `Data Source=a b=***`. Fail-closed, mildly odd, and the price of libpq.
 
 ## Tests
 
@@ -226,7 +255,7 @@ regression guard for the ordinary case.
 | `redis://user:pa;ss@db.internal:6379` | `redis://***@db.internal:6379` |
 | `mongodb://user:p;w@db.internal:27017` | `mongodb://***@db.internal:27017` |
 | `Endpoint=sb://ns…/;SharedAccessKeyName=root;SharedAccessKey=hunter2` | all three values `***`, all three keys shown |
-| `BlobEndpoint=https://acct…/;SharedAccessSignature=sv=2021&sig=hunter2` | both values `***` |
+| `BlobEndpoint=https://acct…/;SharedAccessSignature=sv=2021&sig=hunter2` | both values `***` (the keyword backstop takes the whole signature before `&sig=` is ever read as a pair) |
 | `Host=h;Rotation Key=hunter2` | `Rotation Key=***` — the fail-closed case no blocklist would name |
 | `host=db.internal port=5432 user=dev password=hunter2` | `password=***`, the rest intact |
 | `mongodb://db.internal:27017;Password=hunter2` | host printed, `Password=***` |
@@ -234,7 +263,13 @@ regression guard for the ordinary case.
 | `jdbc:postgresql://user:pw@h:5432/db?ssl=true` | `jdbc:postgresql://***@h:5432/db?ssl=***` |
 | `redis://user:pa#ss@db.internal:6379` | `redis://***@db.internal:6379` |
 | `postgresql://app:8Kx/2Qz+w7A=@db.internal:5432/orders` | `postgresql://***@db.internal:5432/orders` |
-| `Host==x=hunter2` | `***` — the `==` escape fails closed |
+| `Host==x=hunter2` | `***` — the `==` escape fails closed, key included |
+| `Rotation Key=abc user=def` | `Rotation Key=***` — a nested pair does not escape an unrecognised value |
+| `Host=x Custom Port=5432` | `Host=x Custom Port=***` — longest key wins |
+| `Data Source=file:pwd=hunter2` | `Data Source=file:pwd=***` — the row the backstop exists for |
+| `localhost:6379,ssl=false` | `localhost:6379,ssl=***` |
+| `localhost` | `***` |
+| `Host=db.internal;Integrated Security=SSPI;Database=orders` | `Integrated Security=***` — the knowing cost of the inversion |
 | `Data Source=user:hunter2@h:1433` | `Data Source=***@h:1433` |
 | `redis://h:6379/0?password=hunter2` | `?password=***` — regression guard, the blocklist catches this today |
 | `Data Source=tcp://db.internal:1433;UID=a@b.com;Database=orders` | intact — no corruption |
@@ -244,7 +279,7 @@ regression guard for the ordinary case.
 | `Host=h;Custom Port=` | untouched — an empty value is never masked |
 | `localhost:6379` | untouched — Redis/Kafka's own shape must not collapse to `***` |
 | `hunter2` | `***` |
-| a 300 KB pathological string | returns, does not overflow the stack |
+| a 300 KB pathological string | returns; a regression here would take the test host down rather than redden one test, so this row guards the suite |
 | the note wording when only an unknown key was masked | does not call it a credential |
 
 ## Decided, not open

@@ -71,6 +71,67 @@ public class ConnectionStringRedactionTests
         => Assert.Equal(expected, ConnectionStringRedaction.Apply(connectionString));
 
     /// <summary>
+    /// A pair written inside an unrecognised value does not escape from it.
+    /// </summary>
+    /// <remarks>
+    /// libpq separates its pairs with spaces, so a value under an allowlisted key can carry several
+    /// more pairs and one of them can be the password. Reading a space as a separator everywhere
+    /// would undo that: the tail of an unrecognised value would be re-read as pairs of its own, and
+    /// any of them whose key happened to be allowlisted would be printed. Here <c>def</c> is not a
+    /// username — it is the second half of a value nothing recognised.
+    /// </remarks>
+    [Theory]
+    [InlineData("Rotation Key=abc user=def", "Rotation Key=***")]
+    [InlineData("Rotation Key=abc host=db.internal port=5432", "Rotation Key=***")]
+    public void APairInsideAnUnrecognisedValue_IsMaskedWithIt(string connectionString, string expected)
+        => Assert.Equal(expected, ConnectionStringRedaction.Apply(connectionString));
+
+    /// <summary>
+    /// The longest key wins, because the shortest one is the one that prints a secret.
+    /// </summary>
+    /// <remarks>
+    /// Reading <c>Custom Port</c> as the allowlisted <c>Port</c> preceded by some other text would
+    /// print the value behind it.
+    /// </remarks>
+    [Fact]
+    public void AKeyEndingInAnAllowlistedWord_IsNotReadAsThatWord()
+        => Assert.Equal(
+            "Host=x Custom Port=***",
+            ConnectionStringRedaction.Apply("Host=x Custom Port=5432"));
+
+    /// <summary>
+    /// A conventional keyword is masked even where nothing marks it off as a pair.
+    /// </summary>
+    /// <remarks>
+    /// What the retained keyword list is for. Here the password sits inside the value of an
+    /// allowlisted key, behind a <c>:</c> that introduces nothing, so the scan has no reason to
+    /// treat it as a pair and would print it. Naming the keyword outright is the backstop that
+    /// makes it impossible for this rewrite to print something the previous one hid.
+    /// </remarks>
+    [Fact]
+    public void AKeywordBehindNoSeparatorAtAll_IsStillMasked()
+        => Assert.Equal(
+            "Data Source=file:pwd=***",
+            ConnectionStringRedaction.Apply("Data Source=file:pwd=hunter2"));
+
+    /// <summary>
+    /// A keyword that merely resembles a credential is masked too, and that is the trade.
+    /// </summary>
+    /// <remarks>
+    /// Under the previous list these were the near misses worth being careful about, since a
+    /// blocklist that caught them would have redacted an expiry. An allowlist has the opposite
+    /// problem and takes it knowingly: a value nothing recognises is hidden whether or not it was
+    /// ever secret. Mildly annoying, never dangerous.
+    /// </remarks>
+    [Theory]
+    [InlineData("Host=db.internal;TokenExpiry=30;Database=orders", "Host=db.internal;TokenExpiry=***;Database=orders")]
+    [InlineData("Host=db.internal;PasswordExpiry=30;Database=orders", "Host=db.internal;PasswordExpiry=***;Database=orders")]
+    [InlineData("Host=db.internal;Integrated Security=SSPI;Database=orders",
+                "Host=db.internal;Integrated Security=***;Database=orders")]
+    public void AKeywordThatOnlyLooksLikeACredential_IsMaskedAnyway(string connectionString, string expected)
+        => Assert.Equal(expected, ConnectionStringRedaction.Apply(connectionString));
+
+    /// <summary>
     /// ADO.NET's <c>==</c> escape does not smuggle a value past the allowlist.
     /// </summary>
     /// <remarks>
@@ -139,6 +200,9 @@ public class ConnectionStringRedactionTests
     [Theory]
     [InlineData("hunter2", "***")]
     [InlineData("=hunter2", "***")]
+    // A host with no port is not distinguishable from a token that looks like a word, so it goes
+    // the same way. The port is what makes 'localhost:6379' recognisable.
+    [InlineData("localhost", "***")]
     public void UnrecognisableText_IsMaskedWhole(string connectionString, string expected)
         => Assert.Equal(expected, ConnectionStringRedaction.Apply(connectionString));
 
