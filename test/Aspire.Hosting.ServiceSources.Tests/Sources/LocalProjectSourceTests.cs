@@ -718,6 +718,136 @@ public class LocalProjectSourceTests
     }
 
     [Fact]
+    public void ResolveProjectPath_ProjectIsAbsolute_IsRefusedRatherThanResolvedOutsideTheCheckout()
+    {
+        var repoDir = Directory.CreateTempSubdirectory().FullName;
+        var elsewhere = Path.Combine(Directory.CreateTempSubdirectory().FullName, "Evil.csproj");
+        File.WriteAllText(elsewhere, "<Project />");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveProjectPath(
+                ServiceName, Metadata(project: elsewhere), DevConfig(path: repoDir), UnusedAppHostDirectory,
+                new FakeGitClient()));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains(elsewhere, ex.Message);
+        Assert.Contains("absolute", ex.Message);
+    }
+
+    [Theory]
+    [InlineData(@"C:\repos\Evil.csproj")]
+    [InlineData(@"\\server\share\Evil.csproj")]
+    public void ResolveProjectPath_ProjectAbsoluteOnAnotherPlatform_IsStillRefusedAsAbsolute(string project)
+    {
+        var repoDir = Directory.CreateTempSubdirectory().FullName;
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveProjectPath(
+                ServiceName, Metadata(project: project), DevConfig(path: repoDir), UnusedAppHostDirectory,
+                new FakeGitClient()));
+
+        // Reported as the absolute path it is on whichever platform the AppHost runs, rather than as
+        // a file missing from the checkout — the distinction CheckoutRelativePath exists to keep.
+        Assert.Contains("absolute", ex.Message);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_ProjectClimbsOutOfTheCheckout_IsRefusedRatherThanResolvedOutsideIt()
+    {
+        var parent = Directory.CreateTempSubdirectory().FullName;
+        var repoDir = Directory.CreateDirectory(Path.Combine(parent, "orders")).FullName;
+        File.WriteAllText(Path.Combine(parent, "Evil.csproj"), "<Project />");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveProjectPath(
+                ServiceName, Metadata(project: "../Evil.csproj"), DevConfig(path: repoDir), UnusedAppHostDirectory,
+                new FakeGitClient()));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("../Evil.csproj", ex.Message);
+        Assert.Contains("outside", ex.Message);
+    }
+
+    [Fact]
+    public void ResolveProjectPath_ProjectClimbsAndComesBack_StaysInsideAndIsAccepted()
+    {
+        var repoDir = Directory.CreateTempSubdirectory().FullName;
+        Directory.CreateDirectory(Path.Combine(repoDir, "src"));
+        File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
+
+        // Counted rather than pattern-matched: a '..' that a preceding segment pays for never leaves
+        // the checkout, so it is not the thing being refused.
+        var projectPath = ResolveProjectPath(
+            ServiceName, Metadata(project: "src/../Orders.csproj"), DevConfig(path: repoDir), UnusedAppHostDirectory,
+            new FakeGitClient());
+
+        // Compared resolved: the accepted value keeps the separators it was written with, and only
+        // '\' is rewritten — so on Windows the combine leaves 'src/../Orders.csproj' mixed, which
+        // names the same file and would fail a literal comparison.
+        Assert.Equal(Path.Combine(repoDir, "Orders.csproj"), Path.GetFullPath(projectPath));
+    }
+
+    [Fact]
+    public void ResolveProjectPath_ProjectWrittenWithWindowsSeparators_ResolvesOnEveryPlatform()
+    {
+        var repoDir = Directory.CreateTempSubdirectory().FullName;
+        Directory.CreateDirectory(Path.Combine(repoDir, "src"));
+        File.WriteAllText(Path.Combine(repoDir, "src", "Orders.csproj"), "<Project />");
+
+        var projectPath = ResolveProjectPath(
+            ServiceName, Metadata(project: @"src\Orders.csproj"), DevConfig(path: repoDir), UnusedAppHostDirectory,
+            new FakeGitClient());
+
+        Assert.Equal(Path.Combine(repoDir, "src", "Orders.csproj"), projectPath);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData(null)]
+    public void ResolveProjectPath_ProjectMissing_IsReportedAsTheRequiredKeyItIs(string? project)
+    {
+        var repoDir = Directory.CreateTempSubdirectory().FullName;
+
+        // Three spellings of the same catalog mistake. Null is the one nothing else produces: a
+        // `project:` written with nothing after it parses as null rather than as "", overriding the
+        // default — the behaviour ServiceCatalogLoader normalizes `kind:` for, and does not normalize
+        // this. Whitespace survives quoting. All three are a service that names no project file.
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveProjectPath(
+                ServiceName, Metadata(project: project!), DevConfig(path: repoDir), UnusedAppHostDirectory,
+                new FakeGitClient()));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("'project' is required", ex.Message);
+    }
+
+    [Fact]
+    public void Resolve_EagerPath_ProjectClimbsOutOfTheCheckout_IsRefusedBeforeTheCloneRuns()
+    {
+        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            ProjectDirectory = appHostDir,
+            Args = [],
+        });
+        var gitClient = new FakeGitClient();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(gitClient).Resolve(
+                builder, ServiceName, Metadata(project: "../../Evil.csproj"), DevConfig()));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("outside", ex.Message);
+
+        // The check needs no working tree, so it belongs in front of the clone rather than after it
+        // — the same place the prepare command's identical check sits. Deferral is off by default,
+        // so without this the commonest configuration pays for a cold clone before being told the
+        // value was wrong before any of it started.
+        Assert.Empty(gitClient.ClonedRepos);
+    }
+
+    [Fact]
     public void ResolveProjectPath_CloneFails_WrapsAsConfigurationExceptionNamingServiceAndRepository()
     {
         var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
