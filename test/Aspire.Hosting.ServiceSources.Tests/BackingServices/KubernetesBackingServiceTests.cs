@@ -1,6 +1,7 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.BackingServices;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Kubernetes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
@@ -74,9 +75,44 @@ public class KubernetesBackingServiceTests
     private static IResourceBuilder<IResourceWithConnectionString> Resolve(
         IDistributedApplicationBuilder builder,
         BackingServiceDeveloperConfig config,
-        IPortAllocator? allocator = null) =>
-        new KubernetesBackingServiceSource(allocator ?? new FakePortAllocator(LocalPort))
+        IPortAllocator? allocator = null,
+        IKubernetesSecretReader? secretReader = null) =>
+        new KubernetesBackingServiceSource(
+                allocator ?? new FakePortAllocator(LocalPort),
+                secretReader ?? new FakeSecretReader(SecretValue))
             .Resolve(builder, Name, config);
+
+    /// <summary>The value the fake reader returns, so every expectation can name it.</summary>
+    private const string SecretValue = "s3cr3t";
+
+    private sealed class FakeSecretReader(string value) : IKubernetesSecretReader
+    {
+        public string Read(string context, string @namespace, string secretName, string key) => value;
+    }
+
+    /// <summary>
+    /// Counts fetches and records what each was asked for, which is how the deferral is asserted:
+    /// nothing during <c>Resolve</c>, one on the first resolution, and still one on the second.
+    /// </summary>
+    private sealed class TrackingSecretReader(string value) : IKubernetesSecretReader
+    {
+        public List<string> Reads { get; } = [];
+
+        public string Read(string context, string @namespace, string secretName, string key)
+        {
+            Reads.Add($"{context}/{@namespace}/{secretName}/{key}");
+            return value;
+        }
+    }
+
+    /// <summary>An allocator that reports a port as taken, for whole-string mode's fail-fast.</summary>
+    private sealed class OccupiedPortAllocator(int occupied) : IPortAllocator
+    {
+        public int AllocatePort() => throw new InvalidOperationException(
+            "Whole-string mode must not allocate: it forwards the remote port to the same local port.");
+
+        public bool IsAvailable(int port) => port != occupied;
+    }
 
     private static ExecutableResource Tunnel(IDistributedApplicationBuilder builder) =>
         builder.Resources.OfType<ExecutableResource>().Single(resource => resource.Name == $"{Name}-tunnel");
@@ -431,24 +467,6 @@ public class KubernetesBackingServiceTests
         Assert.Contains("write '${port}'", ex.Message);
     }
 
-    /// <remarks>
-    /// Secrets arrive with stage 3. Until then the message says what to do instead, rather than
-    /// only that the placeholder is unsupported — the value has to come from somewhere today.
-    /// </remarks>
-    [Fact]
-    public void ASecretPlaceholder_IsRefusedWithSomewhereElseToPutTheValue()
-    {
-        var builder = CreateBuilder();
-
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => Resolve(
-            builder,
-            Config(connectionString: "Host=localhost;Port=${port};Password=${secret:orders-creds:password}")));
-
-        Assert.Contains("'${secret:orders-creds:password}'", ex.Message);
-        Assert.Contains("not supported yet", ex.Message);
-        Assert.Contains("user secrets", ex.Message);
-    }
-
     /// <summary>
     /// A malformed placeholder is reported as malformed, ahead of anything this source checks.
     /// </summary>
@@ -490,8 +508,10 @@ public class KubernetesBackingServiceTests
         var config = because switch
         {
             "a missing field" => Config(context: null),
+            // A named port, which is the placeholder this source still cannot resolve now that
+            // stage 3 has taught it secrets. #233 is where that one goes.
             "a placeholder this source cannot resolve" =>
-                Config(connectionString: "Host=localhost;Port=${port};Password=${secret:creds:password}"),
+                Config(connectionString: "amqp://localhost:${port:amqp}/"),
             _ => Config(connectionString: "Host=localhost;Port=5432;Database=orders"),
         };
 
@@ -520,7 +540,8 @@ public class KubernetesBackingServiceTests
         var longName = new string('a', 64);
 
         var ex = Record.Exception(
-            () => new KubernetesBackingServiceSource(new FakePortAllocator(LocalPort))
+            () => new KubernetesBackingServiceSource(
+                    new FakePortAllocator(LocalPort), new FakeSecretReader(SecretValue))
                 .Resolve(builder, longName, Config()));
 
         Assert.NotNull(ex);
@@ -665,5 +686,248 @@ public class KubernetesBackingServiceTests
         Assert.Contains("requires 'kubernetes.context'", ex.Message);
         Assert.DoesNotContain("  - ", ex.Message);
         Assert.DoesNotContain("A whole entry reads:", ex.Message);
+    }
+
+    [Fact]
+    public async Task SecretPlaceholder_ResolvesToTheValueTheClusterHolds()
+    {
+        var builder = CreateBuilder();
+
+        var db = Resolve(
+            builder,
+            Config(connectionString: "Host=localhost;Port=${port};Password=${secret:orders-creds:password}"));
+
+        Assert.Equal(
+            $"Host=localhost;Port={LocalPort};Password={SecretValue}",
+            await db.Resource.ConnectionStringExpression.GetValueAsync(default));
+    }
+
+    /// <summary>
+    /// The fetch is asked for with the context and namespace the entry configures, not with
+    /// kubectl's own current ones.
+    /// </summary>
+    [Fact]
+    public async Task SecretPlaceholder_FetchesFromTheConfiguredContextAndNamespace()
+    {
+        var builder = CreateBuilder();
+        var reader = new TrackingSecretReader(SecretValue);
+
+        var db = Resolve(
+            builder,
+            Config(
+                context: "dev-west",
+                @namespace: "orders",
+                connectionString: "Port=${port};Password=${secret:orders-creds:password}"),
+            secretReader: reader);
+
+        await db.Resource.ConnectionStringExpression.GetValueAsync(default);
+
+        Assert.Equal(["dev-west/orders/orders-creds/password"], reader.Reads);
+    }
+
+    /// <remarks>
+    /// The namespace defaults the same way the port-forward's does, so a secret and the tunnel
+    /// beside it are never read out of two different namespaces.
+    /// </remarks>
+    [Fact]
+    public async Task SecretPlaceholderWithNoNamespace_FetchesFromTheDefaultNamespace()
+    {
+        var builder = CreateBuilder();
+        var reader = new TrackingSecretReader(SecretValue);
+
+        var db = Resolve(
+            builder,
+            Config(
+                context: "dev-west",
+                @namespace: null,
+                connectionString: "Port=${port};Password=${secret:c:password}"),
+            secretReader: reader);
+
+        await db.Resource.ConnectionStringExpression.GetValueAsync(default);
+
+        Assert.Equal(["dev-west/default/c/password"], reader.Reads);
+    }
+
+    /// <summary>
+    /// The fetch is deferred: nothing runs during <c>AddBackingService</c>, one fetch happens when
+    /// something first asks for the value, and asking again does not fetch again.
+    /// </summary>
+    /// <remarks>
+    /// The whole reason the value travels as a parameter rather than as text. Resolving eagerly
+    /// would run kubectl while the AppHost is being composed — the path local project resolution
+    /// deliberately moved off — and would fail the whole AppHost for a developer who has simply not
+    /// logged in to the cluster yet.
+    /// </remarks>
+    [Fact]
+    public async Task SecretFetch_IsDeferredUntilTheValueIsAskedForAndHappensOnce()
+    {
+        var builder = CreateBuilder();
+        var reader = new TrackingSecretReader(SecretValue);
+
+        var db = Resolve(
+            builder,
+            Config(connectionString: "Password=${secret:orders-creds:password};Port=${port}"),
+            secretReader: reader);
+
+        Assert.Empty(reader.Reads);
+
+        await db.Resource.ConnectionStringExpression.GetValueAsync(default);
+
+        Assert.Single(reader.Reads);
+
+        await db.Resource.ConnectionStringExpression.GetValueAsync(default);
+
+        Assert.Single(reader.Reads);
+    }
+
+    /// <remarks>
+    /// <c>secret: true</c> is what masks the value in the dashboard, and is most of the reason to
+    /// carry it as a parameter at all.
+    /// </remarks>
+    [Fact]
+    public void SecretPlaceholder_BecomesAParameterMarkedSecret()
+    {
+        var builder = CreateBuilder();
+
+        Resolve(builder, Config(connectionString: "Password=${secret:orders-creds:password};Port=${port}"));
+
+        var parameter = Assert.Single(builder.Resources.OfType<ParameterResource>());
+
+        Assert.True(parameter.Secret);
+        Assert.Equal($"{Name}-orders-creds-password", parameter.Name);
+    }
+
+    /// <summary>
+    /// A connection string that is exactly one secret placeholder forwards the remote port to the
+    /// same local port, and rewrites the in-cluster host the secret was written against.
+    /// </summary>
+    /// <remarks>
+    /// The mode exists for hand-authored secrets — a Sealed Secret holding one whole connection
+    /// string — where there are no per-field keys to fall back on and re-shaping means re-sealing
+    /// against the cluster's key. Nothing in the template can be substituted into, so the only
+    /// rewrite available is the host, and the port has to match what the string already names.
+    /// </remarks>
+    [Fact]
+    public async Task WholeStringSecret_ForwardsTheSamePortAndRewritesTheHost()
+    {
+        var builder = CreateBuilder();
+        var reader = new FakeSecretReader("Host=orders-pg;Port=5432;Database=orders");
+
+        var db = Resolve(
+            builder,
+            Config(service: "orders-pg", port: 5432, connectionString: "${secret:orders-cs:connectionString}"),
+            allocator: new OccupiedPortAllocator(occupied: -1),
+            secretReader: reader);
+
+        Assert.Equal(
+            "Host=localhost;Port=5432;Database=orders",
+            await db.Resource.ConnectionStringExpression.GetValueAsync(default));
+
+        Assert.Equal(
+            ["port-forward", "svc/orders-pg", "5432:5432", "--context", "dev-west", "--namespace", "default"],
+            await TunnelArgsAsync(builder));
+    }
+
+    /// <remarks>
+    /// All four forms a pod can resolve, since a secret written in the cluster may use any of them.
+    /// </remarks>
+    [Theory]
+    [InlineData("Host=orders-pg;Port=5432")]
+    [InlineData("Host=orders-pg.orders;Port=5432")]
+    [InlineData("Host=orders-pg.orders.svc;Port=5432")]
+    [InlineData("Host=orders-pg.orders.svc.cluster.local;Port=5432")]
+    public async Task WholeStringSecret_RewritesEveryInClusterHostForm(string fetched)
+    {
+        var builder = CreateBuilder();
+
+        var db = Resolve(
+            builder,
+            Config(
+                service: "orders-pg",
+                port: 5432,
+                @namespace: "orders",
+                connectionString: "${secret:orders-cs:connectionString}"),
+            allocator: new OccupiedPortAllocator(occupied: -1),
+            secretReader: new FakeSecretReader(fetched));
+
+        Assert.Equal(
+            "Host=localhost;Port=5432",
+            await db.Resource.ConnectionStringExpression.GetValueAsync(default));
+    }
+
+    /// <summary>
+    /// The host rewrite is bounded, so a service name that also appears as an ordinary value —
+    /// a database named after the service is the common case — is left alone.
+    /// </summary>
+    [Fact]
+    public async Task WholeStringSecret_DoesNotRewriteTheServiceNameUsedAsAValue()
+    {
+        var builder = CreateBuilder();
+
+        var db = Resolve(
+            builder,
+            Config(service: "orders", port: 5432, connectionString: "${secret:orders-cs:connectionString}"),
+            allocator: new OccupiedPortAllocator(occupied: -1),
+            secretReader: new FakeSecretReader("Host=orders;Database=orders-archive;User=orders_app"));
+
+        Assert.Equal(
+            "Host=localhost;Database=orders-archive;User=orders_app",
+            await db.Resource.ConnectionStringExpression.GetValueAsync(default));
+    }
+
+    /// <remarks>
+    /// A template with anything else in it gives somewhere to substitute a local port into, so the
+    /// allocator's collision avoidance is kept rather than given up.
+    /// </remarks>
+    [Fact]
+    public async Task SecretMixedWithOtherText_DoesNotSelectWholeStringMode()
+    {
+        var builder = CreateBuilder();
+
+        var db = Resolve(
+            builder,
+            Config(
+                service: "orders-pg",
+                port: 5432,
+                connectionString: "Host=orders-pg;Port=${port};Password=${secret:c:password}"));
+
+        Assert.Equal(
+            $"Host=orders-pg;Port={LocalPort};Password={SecretValue}",
+            await db.Resource.ConnectionStringExpression.GetValueAsync(default));
+    }
+
+    /// <summary>
+    /// Whole-string mode cannot pick another port, so a port already taken locally is refused
+    /// before anything is added to the model, naming the backing service and the port.
+    /// </summary>
+    [Fact]
+    public void WholeStringSecret_WithTheLocalPortTaken_FailsFast()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(
+                builder,
+                Config(port: 5432, connectionString: "${secret:orders-cs:connectionString}"),
+                allocator: new OccupiedPortAllocator(occupied: 5432)));
+
+        Assert.Contains(Name, ex.Message);
+        Assert.Contains("5432", ex.Message);
+        Assert.Empty(builder.Resources.OfType<ExecutableResource>());
+    }
+
+    /// <summary>
+    /// A template that never addresses the tunnel is still refused — whole-string mode is the one
+    /// exception, and only because the secret it resolves to carries the port itself.
+    /// </summary>
+    [Fact]
+    public void SecretWithoutAPortPlaceholder_IsStillRefusedWhenItIsNotTheWholeString()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, Config(connectionString: "Password=${secret:orders-creds:password}")));
+
+        Assert.Contains("${port}", ex.Message);
     }
 }
