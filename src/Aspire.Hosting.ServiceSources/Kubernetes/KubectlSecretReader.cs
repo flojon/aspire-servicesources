@@ -157,11 +157,40 @@ internal sealed class KubectlSecretReader : IKubernetesSecretReader
     /// </remarks>
     private static string FirstLine(string diagnostic)
     {
-        var trimmed = diagnostic.AsSpan().Trim();
-        var end = trimmed.IndexOfAny('\r', '\n');
+        string? first = null;
 
-        return (end < 0 ? trimmed : trimmed[..end]).ToString();
+        foreach (var line in diagnostic.Split('\n'))
+        {
+            var text = line.Trim();
+
+            if (text.Length == 0 || IsNoise(text))
+            {
+                continue;
+            }
+
+            // The first line that says something is the answer; the first line at all need not be.
+            first ??= text;
+
+            if (text.StartsWith("error", StringComparison.OrdinalIgnoreCase))
+            {
+                return text;
+            }
+        }
+
+        return first ?? "";
     }
+
+    /// <summary>
+    /// Whether a line of kubectl's standard error is a warning rather than the diagnostic.
+    /// </summary>
+    /// <remarks>
+    /// klog writes <c>W0905 12:00:00.000000 1 loader.go:221] Config not found: …</c> before the
+    /// error, and an API server can prepend <c>Warning:</c> headers of its own. Taking line one
+    /// blindly replaces the diagnostic with noise on any cluster that emits either.
+    /// </remarks>
+    private static bool IsNoise(string line) =>
+        line.StartsWith("Warning:", StringComparison.OrdinalIgnoreCase)
+        || (line.Length > 5 && line[0] is 'W' or 'I' && char.IsAsciiDigit(line[1]) && char.IsAsciiDigit(line[4]));
 
     /// <summary>
     /// The command line one fetch runs, kept separate so a test can assert it without a cluster.
@@ -170,17 +199,22 @@ internal sealed class KubectlSecretReader : IKubernetesSecretReader
         [
             "get",
             "secret",
-            // Ends option parsing, so the name that follows is read as a name whatever it starts
-            // with. The parser already refuses a name beginning with '-'; this is the second lock,
-            // and it costs one argument.
-            "--",
-            secretName,
             "--context",
             context,
             "--namespace",
             @namespace,
             "--output",
             $"jsonpath={{.data['{key}']}}",
+            // Last, immediately before the name. A bare '--' ends option parsing for everything
+            // after it — kubectl uses pflag, where it is not a one-argument escape — so putting it
+            // ahead of the flags would hand '--context' and its value to kubectl as secret names
+            // and quietly drop the context, the namespace and the output format, leaving the fetch
+            // to run against whatever cluster the developer's kubeconfig currently points at.
+            // Here it does the one job it is for: the name that follows is a name whatever it
+            // starts with. The parser already refuses a name beginning with '-'; this is the
+            // second lock.
+            "--",
+            secretName,
         ];
 
     private static Process Start(ProcessStartInfo startInfo, string secretName, string key)

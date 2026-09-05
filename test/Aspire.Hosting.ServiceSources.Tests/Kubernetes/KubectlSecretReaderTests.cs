@@ -28,23 +28,36 @@ public class KubectlSecretReaderTests
     [InlineData("password", "jsonpath={.data['password']}")]
     [InlineData("ca.crt", "jsonpath={.data['ca.crt']}")]
     [InlineData(".dockerconfigjson", "jsonpath={.data['.dockerconfigjson']}")]
-    public void Args_AddressTheKeyWithBrackets(string key, string expected) =>
-        Assert.Equal(expected, KubectlSecretReader.Args("dev-west", "orders", "orders-creds", key)[^1]);
+    public void Args_AddressTheKeyWithBrackets(string key, string expected)
+    {
+        var args = KubectlSecretReader.Args("dev-west", "orders", "orders-creds", key);
+
+        Assert.Equal(expected, args[Array.IndexOf(args, "--output") + 1]);
+    }
 
     /// <summary>
-    /// The secret's name is separated from the options by <c>--</c>.
+    /// <c>--</c> comes after every option, and nothing follows it but the secret's name.
     /// </summary>
     /// <remarks>
-    /// kubectl takes options wherever they appear, so a name that looked like one would be read as
-    /// one. <c>ConnectionStringTemplate</c> already refuses such a name; this is the second lock, and
-    /// it is what makes the reader safe to read in isolation.
+    /// <b>The position is the whole of it.</b> kubectl uses pflag, where a bare <c>--</c> ends
+    /// option parsing for <em>everything</em> after it rather than escaping one argument. Put ahead
+    /// of the flags it hands <c>--context</c> and its value to kubectl as secret names and silently
+    /// drops the context, the namespace and the output format — so the fetch runs against whatever
+    /// cluster the developer's kubeconfig happens to point at, which is the opposite of what naming
+    /// a context is for. Asserted as "last two, in this order" rather than "somewhere before the
+    /// name", because the weaker shape held while the behaviour was wrong.
     /// </remarks>
     [Fact]
-    public void Args_EndOptionParsingBeforeTheSecretName()
+    public void Args_EndOptionParsingOnlyAfterEveryOption()
     {
         var args = KubectlSecretReader.Args("dev-west", "orders", "orders-creds", "password");
 
-        Assert.Equal("--", args[Array.IndexOf(args, "orders-creds") - 1]);
+        Assert.Equal(["--", "orders-creds"], args[^2..]);
+        Assert.All(
+            new[] { "--context", "--namespace", "--output" },
+            option => Assert.True(
+                Array.IndexOf(args, option) < Array.IndexOf(args, "--"),
+                $"'{option}' must be parsed, so it has to come before '--'."));
     }
 
     /// <summary>
