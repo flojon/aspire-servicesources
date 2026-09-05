@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Git;
@@ -28,6 +29,17 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         // are already in flight and this check no longer runs ahead of them.
         var handler = isDotnetKind ? null : ResolveKindHandler(builder, serviceName, metadata);
         handler?.Validate(serviceName, metadata.KindConfig);
+
+        // The dotnet kind's equivalent of the check above, and here for the same reason: confining
+        // 'project' to the checkout is lexical, so it needs no working tree and belongs in front of
+        // the clone rather than after it. Both paths below combine the value with a repo root — the
+        // eager one only once GetRepoRoot has materialized the checkout — and without this the
+        // commonest configuration, deferral being off by default, would pay for a cold clone before
+        // being told the value was wrong before any of it started.
+        if (isDotnetKind)
+        {
+            ValidateProject(serviceName, metadata.Project);
+        }
 
         // Starts the checkouts an AddService call would have to block on — every "local" service
         // whose first clone nothing else is going to run — at once, on background threads, and
@@ -219,9 +231,9 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
     /// Resolves and validates the project file path for a "dotnet"-kind service whose repo root has
     /// already been resolved.
     /// </summary>
-    internal static string ResolveProjectFile(string serviceName, string repoRoot, string project)
+    internal static string ResolveProjectFile(string serviceName, string repoRoot, string? project)
     {
-        var projectPath = Path.Combine(repoRoot, project);
+        var projectPath = ConfineProject(serviceName, repoRoot, project);
 
         if (!File.Exists(projectPath))
         {
@@ -230,5 +242,69 @@ internal sealed class LocalProjectSource(IGitClient gitClient) : IServiceSource
         }
 
         return projectPath;
+    }
+
+    /// <summary>
+    /// Combines a service's <c>project</c> with its checkout, having confined it to that checkout.
+    /// The one place the value is turned into a path, because the eager path and
+    /// <see cref="DeferredCheckout"/> both resolve it and must not disagree about what it means.
+    /// </summary>
+    /// <remarks>
+    /// Confined for the reason <c>java.jarPath</c> and <c>javascript.appDirectory</c> are:
+    /// <c>servicesources.yaml</c> is shared team configuration a developer clones rather than writes,
+    /// so an absolute or climbing <c>project</c> would have the AppHost build — and MSBuild evaluate,
+    /// imports and inline tasks included — something from outside the checkout the catalog describes.
+    /// <see cref="Path.Combine(string, string)"/> gives no confinement of its own: it discards
+    /// <paramref name="repoRoot"/> outright for a rooted value and does nothing about <c>..</c>.
+    /// <para>
+    /// Lexical, so the verdict is the same on both paths — the deferred one judges the value in front
+    /// of a checkout that has not landed yet — and so an absolute path is reported as the absolute
+    /// path it is rather than as a file missing from a checkout it was never looked for in.
+    /// </para>
+    /// </remarks>
+    internal static string ConfineProject(string serviceName, string repoRoot, string? project)
+    {
+        ValidateProject(serviceName, project);
+
+        return Path.Combine(repoRoot, CheckoutRelativePath.NormalizeSeparators(project));
+    }
+
+    /// <summary>
+    /// The confinement check on its own, for the callers that have a <c>project</c> to judge before
+    /// they have a checkout to combine it with. Lexical, so it is the same verdict
+    /// <see cref="ConfineProject"/> reaches later — running it twice costs nothing and keeps the
+    /// value judged in front of the clone as well as at the point it becomes a path.
+    /// </summary>
+    internal static void ValidateProject(string serviceName, [NotNull] string? project)
+    {
+        // Required, and reported as that rather than as a file that is not there: the "dotnet" kind
+        // resolves the whole service from this one value, so a service without it names nothing to
+        // run. Null and not "" when the key is written with nothing after it — YamlDotNet parses an
+        // empty scalar as null, overriding the default, which is what ServiceCatalogLoader
+        // normalizes 'kind' for and does not normalize this — and whitespace survives quoting, so
+        // all three spellings are caught here rather than one of them being combined with the
+        // checkout root and reported after a clone as a .csproj that never appeared.
+        if (string.IsNullOrWhiteSpace(project))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': 'project' is required for a 'local' service of kind 'dotnet'. It names "
+                + "the project file to run, relative to the service's checkout — for example "
+                + "'src/Orders.Api/Orders.Api.csproj'.");
+        }
+
+        if (CheckoutRelativePath.IsAbsolute(project))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': project '{project}' is an absolute path. 'project' has to be a path "
+                + "relative to the service's checkout — it names a project the repository commits, not one "
+                + "sitting elsewhere on a developer's machine.");
+        }
+
+        if (CheckoutRelativePath.EscapesRoot(project))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': project '{project}' points outside the service's checkout. It must "
+                + "stay within the repository.");
+        }
     }
 }

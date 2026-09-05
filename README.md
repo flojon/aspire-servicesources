@@ -489,6 +489,14 @@ services:
 ```
 
 `kind: dotnet` (the default) uses the entry's `project` property and needs no options block.
+`project` is required for that kind, and is a path relative to the service's checkout that must
+stay inside it — the rule `java.jarPath` and `java.workingDirectory` follow below, and for the same
+reason: the catalog is shared configuration you clone rather than write, so it does not get to name
+a project elsewhere on a developer's machine. An absolute path (`/srv/Api.csproj`,
+`C:\repos\Api.csproj`) or one that climbs out (`../../shared/Api.csproj`) is refused at that
+service's `AddService()` call, before its checkout is used. A project in another repository gets an
+entry of its own, naming that repository. The `javascript` keys are confined to the checkout too,
+by a check of their own that judges the resolved path rather than the written one.
 Any other kind is resolved by a handler that a satellite package registers, and its options
 live in a block named after the kind. Kind names are matched case-sensitively, and a kind with
 no registered handler fails at that service's `AddService()` call, before its checkout is used.

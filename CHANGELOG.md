@@ -11,9 +11,65 @@ nothing will fail to build to warn you.
 
 ## [Unreleased]
 
-## [0.4.1] - 2026-09-05
+## [0.4.1] - 2026-09-04
+
+A patch on top of `0.4.0`, cut from the `release/0.4.x` branch off the `v0.4.0` tag rather than
+from `main`: `main` has moved on to changes a patch must not carry. One configuration stops
+working, and it is the one the fix is about — see **Changed**.
+
+### Changed
+
+- **A `project` that points outside the service's checkout is now refused at composition** ([#222]).
+  The other side of the **Fixed** entry below, and the one nothing warns you about: a catalog whose
+  `project` is an absolute path (`/home/dev/shared/Api.csproj`, `C:\repos\Api.csproj`) or climbs out
+  of the checkout (`../../shared/Api.csproj`) **resolves and builds in `0.4.0`** if that file exists.
+  Those AppHosts now throw a `ServiceSourcesConfigurationException` naming the service and the key,
+  at `AddService()`, before any clone. Nothing fails to build to warn you — the value is read at
+  composition — so if a catalog entry points `project` outside the checkout deliberately, the fix is
+  to give that project a service entry of its own, naming the repository that actually holds it. A
+  `project` resolving inside its checkout is unaffected, which is every catalog the README describes.
+
+  A `kind: dotnet` entry with no `project` at all is now refused there too, rather than resolving to
+  the checkout directory and being reported later as a `.csproj` that is not there — as a missing
+  file on the eager path, and only after the clone had been paid for on the deferred one. Such a
+  service could never start, so nothing that ran before stops running; what changes is that it is
+  named as a required key at `AddService()`, on both paths, before any clone.
 
 ### Fixed
+
+- **A `project` that points outside the service's checkout is refused rather than built** ([#222]).
+  `project` was the one path a catalog names that was never confined to the checkout it is read
+  against. `Path.Combine` gives no confinement of its own — it discards the checkout root outright
+  for a rooted value, and does nothing about `..` — so `project: /home/dev/other/Evil.csproj` or
+  `project: ../../../Evil.csproj` resolved to a file outside the clone, which the AppHost then
+  handed to `AddProject`, where MSBuild evaluates it: a `.targets` import or an inline task away
+  from running code the catalog never described. Both the eager path and the deferred registration
+  did the same bare combine; both now go through the lexical confinement `java.jarPath` has always
+  had, in one place they share, so the two cannot come to different conclusions about the same
+  value. (`javascript.appDirectory` is confined too, but by a resolved check of its own rather than
+  by this one.) An absolute path is reported as absolute and a
+  climbing one as pointing outside the repository, and neither reaches MSBuild.
+
+  Consistency and defence in depth rather than a boundary that moves: `kind: dotnet` builds the
+  checkout's own code regardless — nobody crosses a line here who was not already across it. What
+  is fixed is that the rule the codebase states for every other path a catalog names no longer has
+  a hole in it, and that the hole was on `dotnet`, the kind most catalogs use. A `project` resolving
+  inside its checkout keeps resolving to the same file; the catalogs that stop working are named
+  under **Changed** above.
+
+  The check is lexical, so it needs no working tree and runs in front of the clone rather than after
+  it. A service whose `project` climbs out is refused at composition on both paths, without the cold
+  clone the eager path — the default, deferral being opt-in — would otherwise pay for first.
+
+  Three smaller things fall out of using the shared check. A rejected path now says it was rejected
+  for leaving the checkout, where the old message claimed the file *was not found under* the
+  checkout — untrue on precisely these inputs, since it was never looked for there. `project`
+  accepts Windows separators on Linux and macOS the way every other confined path does, so
+  `project: src\Orders.Api\Orders.Api.csproj` resolves instead of becoming one oddly-named path
+  reported as missing. And a `project:` written with nothing after it is reported as the missing
+  required key it is, naming the service: YamlDotNet parses an empty scalar as null rather than as
+  `""`, which in `0.4.0` reached `Path.Combine` and came back as an `ArgumentNullException` naming
+  neither.
 
 - **A service name is no longer able to place its checkout outside `.servicesources/checkouts/`**
   ([#224]). The name is used verbatim as the directory the clone goes into, so one containing `..`
@@ -675,6 +731,7 @@ Targets `net10.0`.
 [#170]: https://github.com/flojon/aspire-servicesources/issues/170
 [#171]: https://github.com/flojon/aspire-servicesources/issues/171
 [#180]: https://github.com/flojon/aspire-servicesources/pull/180
+[#222]: https://github.com/flojon/aspire-servicesources/issues/222
 [#224]: https://github.com/flojon/aspire-servicesources/issues/224
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
