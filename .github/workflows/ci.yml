@@ -402,15 +402,38 @@ jobs:
           key: nuget-typescript-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props', 'Directory.Build.props') }}
           restore-keys: nuget-typescript-${{ runner.os }}-
 
+      # $ASPIRE_CLI_VERSION is pinned above, so a hit is exact-version-or-nothing - no
+      # restore-keys fallback that could resurrect a stale CLI under a version bump.
+      - name: Cache the Aspire CLI tool install
+        id: cache-aspire-cli
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/aspire-cli
+          key: aspire-cli-${{ runner.os }}-${{ env.ASPIRE_CLI_VERSION }}
+
       # As a dotnet tool rather than through aspire.dev's install script: the version resolves
       # from nuget.org like every other dependency here, and a tool path keeps it out of the
       # runner's global state.
       - name: Install the Aspire CLI
-        run: |
-          dotnet tool install --tool-path "$RUNNER_TEMP/aspire-cli" aspire.cli --version "$ASPIRE_CLI_VERSION"
-          echo "$RUNNER_TEMP/aspire-cli" >> "$GITHUB_PATH"
+        if: steps.cache-aspire-cli.outputs.cache-hit != 'true'
+        run: dotnet tool install --tool-path "$RUNNER_TEMP/aspire-cli" aspire.cli --version "$ASPIRE_CLI_VERSION"
+
+      - name: Add the Aspire CLI to PATH
+        run: echo "$RUNNER_TEMP/aspire-cli" >> "$GITHUB_PATH"
+
+      # Keyed on the lockfile hash so a hit skips `npm ci` outright. setup-node's cache above
+      # only warms ~/.npm - npm ci still deletes and reinstalls node_modules from that cache
+      # on every run, and still pays for a slow registry on anything the cache doesn't serve.
+      # This sample's dependencies change rarely, so most runs should hit and skip entirely.
+      - name: Cache the sample's node_modules
+        id: cache-node-modules
+        uses: actions/cache@v6
+        with:
+          path: samples/DemoAppHostTypeScript/node_modules
+          key: typescript-node-modules-${{ runner.os }}-${{ hashFiles('samples/DemoAppHostTypeScript/package-lock.json') }}
 
       - name: Install the sample's npm dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
         working-directory: samples/DemoAppHostTypeScript
         run: npm ci
 
