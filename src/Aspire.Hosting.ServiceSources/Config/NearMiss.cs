@@ -1,8 +1,12 @@
 namespace Aspire.Hosting.ServiceSources.Config;
 
 /// <summary>
-/// "Did you mean …?" over a fixed vocabulary: which of a known set of names a developer's misspelled
-/// one is close enough to be a typo of.
+/// "Did you mean …?" over a fixed vocabulary, asked in either direction: which of a known set of
+/// names a developer's misspelled one is close enough to be a typo of — <see cref="Nearest{T}"/> —
+/// and which of the words a developer wrote is close enough to be a typo of one known name —
+/// <see cref="MisspellingOf"/>. The vocabulary is the fixed side in both, and it is the side the
+/// tolerance is scaled by — which side that is is what a caller picks between. The two differ in
+/// what they answer with as well, and each says so where it is defined.
 /// </summary>
 /// <remarks>
 /// Used only to improve a failure that is already being thrown, never to accept a key. A false
@@ -29,6 +33,16 @@ internal static class NearMiss
     /// which plain Levenshtein does — left the commonest typo of the commonest fields unanswered
     /// while <c>pth</c>, a dropped letter, was answered, and the difference is invisible to whoever
     /// hit it.
+    /// </para>
+    /// <para>
+    /// The vocabulary is no longer only this package's own names. It still is for every caller that
+    /// matches against a fixed list — the entry fields above, and the file's root keys, where
+    /// <see cref="MisspellingOf"/> is asked about <c>services</c> and <c>backingServices</c> and the
+    /// developer's own keys are the candidates. The one that widened it is the service-name caller,
+    /// where the vocabulary is a name from <c>servicesources.yaml</c> and so is as long as whoever
+    /// wrote the catalog made it. The boundary holds there by being the stingier of the two tiers
+    /// where it applies at all: a four-letter service name gets the single edit <c>path</c> gets,
+    /// for the same reason, and a longer one gets the two <c>namespace</c> gets.
     /// </para>
     /// </remarks>
     private const int ShortName = 4;
@@ -103,6 +117,58 @@ internal static class NearMiss
             .OrderBy(entry => entry.Spelling, StringComparer.Ordinal)
             .Select(entry => entry.Candidate)
             .ToArray();
+    }
+
+    /// <summary>
+    /// The one of <paramref name="written"/> that reads as a misspelling of
+    /// <paramref name="known"/>, or <see langword="null"/> when none of them does.
+    /// </summary>
+    /// <remarks>
+    /// The mirror of <see cref="Nearest{T}"/>, and what differs is which side is the fixed
+    /// vocabulary. There a caller holds the known list and asks which of it one word the developer
+    /// wrote resembles, so each candidate's own length sets the tolerance. Here it is the other way
+    /// round — the candidates are the developer's words, the root keys of their file or the service
+    /// names they configured, and <paramref name="known"/> is the single word from the vocabulary —
+    /// so <paramref name="known"/> is what <see cref="MaxEdits"/> is asked about. Scaling by the
+    /// written word instead lets a long typo buy itself room the word it is supposed to be does not
+    /// have: with <c>cart</c> looked for, <c>carted</c> is two edits away and would qualify on its
+    /// own six letters, while nothing suggests it is a misspelling rather than a second name.
+    /// <para>
+    /// A candidate that folds to <paramref name="known"/> is not a misspelling of it but the word
+    /// itself, so it is dropped rather than offered as a correction of itself. Not because the
+    /// caller must already have matched it — the root-key caller reaches here with the key it is
+    /// looking for present but configuring nothing, which is precisely why it is still searching —
+    /// but because configuration keys are case-insensitive, so the two spellings are one name and
+    /// answering "did you mean X?" with X is not an answer.
+    /// </para>
+    /// <para>
+    /// Closest first, then ordinal, so a caller with two candidates the same distance away names
+    /// the same one on every run rather than whichever its provider happened to enumerate first.
+    /// One answer rather than the list <see cref="Nearest{T}"/> returns, because the messages this
+    /// feeds ask a question — <em>did you mean …?</em> — and a question with two answers in it is
+    /// one the reader has to resolve themselves.
+    /// </para>
+    /// </remarks>
+    public static string? MisspellingOf(string known, IEnumerable<string> written)
+    {
+        var folded = known.ToLowerInvariant();
+        var tolerance = MaxEdits(known);
+
+        return written
+            .Select(name => (Written: name, Folded: name.ToLowerInvariant()))
+            // Judged on the folded spellings, the same ones the distance below is measured over,
+            // rather than by comparing the written ones case-insensitively. The two are the same
+            // question asked twice, and letting them disagree — as they do for the handful of
+            // characters whose invariant lower case and whose case-insensitive comparison part
+            // company — would let a name through at distance zero to be offered as a correction of
+            // itself.
+            .Where(name => string.Equals(name.Folded, folded, StringComparison.Ordinal) is false)
+            .Select(name => (name.Written, Distance: EditDistance(name.Folded, folded)))
+            .Where(name => name.Distance <= tolerance)
+            .OrderBy(name => name.Distance)
+            .ThenBy(name => name.Written, StringComparer.Ordinal)
+            .Select(name => name.Written)
+            .FirstOrDefault();
     }
 
     /// <summary>

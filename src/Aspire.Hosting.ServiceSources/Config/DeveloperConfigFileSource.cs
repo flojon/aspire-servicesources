@@ -279,31 +279,17 @@ internal static class DeveloperConfigFileSource
         }
 
         // Candidates come from every key the file mentions, which is the other question — a
-        // misspelling is worth naming before its entries have any values in them. The key being
-        // looked for is excluded explicitly: it is at distance zero from itself, so an empty
-        // `services` beside a populated `service` would otherwise be offered as a correction of
-        // itself.
-        var rootKeys = registration.RootKeys
-            .Where(key => !key.Equals(fileKey, StringComparison.OrdinalIgnoreCase));
-
-        // Both sides folded, since the vocabulary itself is not all lower case — `backingServices`
-        // compared against a lower-cased candidate would never match its own spelling.
-        var folded = fileKey.ToLowerInvariant();
-
-        // Closest first, then ordinal, so a file with two candidates names the same one every run
-        // rather than whichever the provider happened to enumerate first.
+        // misspelling is worth naming before its entries have any values in them. That list can
+        // include the key being looked for, since a file reaches here with an empty `services`
+        // beside a populated `service`; when it does, it drops out inside the search, which
+        // excludes a candidate folding to the word it would be correcting rather than offering
+        // `services` as a correction of itself.
         //
-        // The tolerance is taken from the key being looked for rather than from the one the
-        // developer wrote, which is the direction NearMiss.MaxEdits is meant to be asked in: the
-        // file's own root keys are the fixed vocabulary here. It is what keeps the two apart, too —
-        // `services` and `backingServices` are seven edits from each other, far outside any
-        // tolerance, so neither is ever offered as a correction of the other.
-        return rootKeys
-            .Select(key => (Key: key, Distance: NearMiss.EditDistance(key.ToLowerInvariant(), folded)))
-            .Where(candidate => candidate.Distance <= NearMiss.MaxEdits(fileKey))
-            .OrderBy(candidate => candidate.Distance)
-            .ThenBy(candidate => candidate.Key, StringComparer.Ordinal)
-            .Select(candidate => candidate.Key)
-            .FirstOrDefault();
+        // The tolerance comes from the key being looked for rather than from the one the developer
+        // wrote, which is what NearMiss.MisspellingOf is for: the file's own root keys are the
+        // written words here and `fileKey` is the vocabulary. It is what keeps the two root keys
+        // apart, too — `services` and `backingServices` are seven edits from each other, far
+        // outside any tolerance, so neither is ever offered as a correction of the other.
+        return NearMiss.MisspellingOf(fileKey, registration.RootKeys);
     }
 }

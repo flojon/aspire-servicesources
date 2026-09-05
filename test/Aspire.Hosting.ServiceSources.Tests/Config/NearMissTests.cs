@@ -116,6 +116,72 @@ public class NearMissTests
     public void Nearest_DiffersOnlyByCase_IsAnExactMatch() =>
         Assert.Equal(["path"], NearMiss.Nearest("PATH", ["path", "port"], name => name));
 
+    /// <summary>
+    /// <see cref="NearMiss.MisspellingOf"/> asks the question the other way round: one known name,
+    /// and a list of words the developer wrote.
+    /// </summary>
+    [Fact]
+    public void MisspellingOf_OneWrittenNameResembles_IsReturned() =>
+        Assert.Equal("order", NearMiss.MisspellingOf("orders", ["billing", "order"]));
+
+    [Fact]
+    public void MisspellingOf_NothingResembles_ReturnsNull() =>
+        Assert.Null(NearMiss.MisspellingOf("orders", ["billing", "shipping"]));
+
+    [Fact]
+    public void MisspellingOf_NoCandidatesAtAll_ReturnsNull() =>
+        Assert.Null(NearMiss.MisspellingOf("orders", []));
+
+    /// <remarks>
+    /// The tolerance is the known name's, not each candidate's, which is what separates this from
+    /// <see cref="NearMiss.Nearest{T}"/>. <c>carted</c> is two edits from <c>cart</c> and long
+    /// enough to allow two of its own, so scaling by the written word would offer it; <c>cart</c>
+    /// is four letters and allows one, and two edits from four letters reaches far enough that the
+    /// answer would be a guess.
+    /// <para>
+    /// The same candidate at the same distance, against a known name one letter longer, so the
+    /// only thing that moved between the two lines is the length the tolerance is taken from.
+    /// Pairing it with a candidate one edit away would prove nothing — one edit is inside every
+    /// tolerance there is.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void MisspellingOf_ToleranceComesFromTheKnownNameNotTheCandidate()
+    {
+        Assert.Null(NearMiss.MisspellingOf("cart", ["carted"]));
+        Assert.Equal("carted", NearMiss.MisspellingOf("carts", ["carted"]));
+    }
+
+    /// <remarks>
+    /// Ordinally <c>orderr</c> comes first: the two agree on <c>ord</c> and then it has <c>e</c>
+    /// where the other has <c>r</c>. Enumeration order is the reverse, so a search that returned
+    /// whichever it met first would answer differently.
+    /// </remarks>
+    [Fact]
+    public void MisspellingOf_TwoEquallyCloseCandidates_TakesTheOrdinallyFirst() =>
+        Assert.Equal("orderr", NearMiss.MisspellingOf("orders", ["ordrs", "orderr"]));
+
+    /// <remarks>
+    /// <c>aorder</c> is two edits from <c>orders</c> and ordinally first; <c>orderz</c> is one and
+    /// ordinally second. Distance decides, and the spelling only breaks a tie.
+    /// </remarks>
+    [Fact]
+    public void MisspellingOf_CloserCandidateWinsOverTheOrdinallyFirst() =>
+        Assert.Equal("orderz", NearMiss.MisspellingOf("orders", ["aorder", "orderz"]));
+
+    /// <remarks>
+    /// A candidate differing from the known name only by case is that name — configuration keys are
+    /// case-insensitive — so it is dropped rather than offered as a correction of itself. The
+    /// root-key caller is the one that needs it: a file carrying an empty <c>services</c> beside a
+    /// populated <c>service</c> is still searching, with <c>services</c> among the candidates.
+    /// (The service-name caller cannot reach it, since its candidates are the names the catalog
+    /// does <em>not</em> declare and the name being looked for always is one it does — but that is
+    /// its own restriction rather than something this may drop.)
+    /// </remarks>
+    [Fact]
+    public void MisspellingOf_CandidateDiffersOnlyByCase_IsNotAMisspelling() =>
+        Assert.Null(NearMiss.MisspellingOf("orders", ["ORDERS"]));
+
     [Theory]
     [InlineData("", "", 0)]
     [InlineData("path", "path", 0)]
