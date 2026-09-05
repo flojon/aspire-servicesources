@@ -108,7 +108,7 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
             // where the name came from.
             throw new ServiceSourcesConfigurationException(
                 $"Backing service '{name}': its port-forward runs as a resource named '{tunnelName}', after the "
-                + $"backing service, and Aspire rejected that name — \"{ex.Message}\" Aspire's limit is on the "
+                + $"backing service, and Aspire rejected that name — \"{WithoutParameterSuffix(ex.Message)}\" Aspire's limit is on the "
                 + $"derived name rather than on '{name}', so a shorter backing-service name is what fixes it.",
                 ex);
         }
@@ -203,6 +203,23 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     /// <summary>The same key spelled as the environment variable that sets it.</summary>
     private static string Environmentally(string configKey) =>
         configKey.Replace(":", "__", StringComparison.Ordinal);
+
+    /// <summary>
+    /// An <see cref="ArgumentException"/>'s message without the <c>(Parameter 'name')</c> that
+    /// <see cref="ArgumentException.Message"/> appends.
+    /// </summary>
+    /// <remarks>
+    /// Quoted into a message of ours, so the parameter is plumbing from a call the developer did
+    /// not make — and it lands immediately before the sentence explaining that the name was derived
+    /// rather than written, which is the opposite of what naming a parameter suggests. The rule
+    /// itself stays in Aspire's own words.
+    /// </remarks>
+    private static string WithoutParameterSuffix(string message)
+    {
+        var suffix = message.IndexOf(" (Parameter ", StringComparison.Ordinal);
+
+        return suffix < 0 ? message : message[..suffix];
+    }
 
     /// <summary>
     /// What each field this source cannot work without holds, in a phrase completing
@@ -342,6 +359,62 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     }
 
     /// <summary>
+    /// The credential-bearing parts of a connection string, for the one message that echoes one
+    /// back.
+    /// </summary>
+    /// <remarks>
+    /// Two shapes cover what a connection string does with a secret: a keyword whose value runs to
+    /// the next <c>;</c>, and a URI authority's <c>user:pass@host</c>. Matched case-insensitively,
+    /// because keyword casing is a dialect's own business.
+    /// <para>
+    /// Deliberately not exhaustive, and the message says the value was redacted rather than
+    /// claiming it is safe. A backend naming its secret something this misses would still be
+    /// echoed, so this narrows the blast radius rather than closing it. That is the honest trade:
+    /// this message exists to show the developer what <em>arrived</em> — the shell-expansion case is
+    /// only diagnosable by seeing it — and a message that showed nothing would not do that.
+    /// </para>
+    /// </remarks>
+    /// <summary>
+    /// What is shown in place of a connection string that could not be scanned.
+    /// </summary>
+    /// <remarks>
+    /// Named so the caller can tell it from a redacted value and drop the sentence explaining
+    /// how passwords are shown — nothing here was shown, redacted or otherwise.
+    /// </remarks>
+    private const string Unscannable =
+        "<connection string omitted: it could not be scanned for credentials>";
+
+    private static readonly Regex Credentials = new(
+        @"(?<=(?:password|pwd|secret|token|accountkey|accesskey|apikey)\s*=)[^;]*"
+        + @"|(?<=://[^:/@\s]{0,256}:)[^@/\s;]*(?=@)",
+        RegexOptions.IgnoreCase
+        | RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(1));
+
+    /// <summary>
+    /// <paramref name="connectionString"/> with the credentials this recognizes replaced.
+    /// </summary>
+    /// <remarks>
+    /// Because this message is echoed where messages go: an AppHost's startup failure is relayed
+    /// into <c>~/.aspire/logs</c> and routinely pasted into an issue. Every other value this package
+    /// echoes is malformed, blank or a single token — this is the only one that is a whole, valid
+    /// connection string, so it is the only one that can carry a password.
+    /// </remarks>
+    private static string Redacted(string connectionString)
+    {
+        try
+        {
+            return Credentials.Replace(connectionString, "***");
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            // A pathological value is not a reason to fail differently than the developer expects,
+            // and it is emphatically not a reason to print the thing this method exists to hide.
+            return Unscannable;
+        }
+    }
+
+    /// <summary>
     /// The error for a connection string that never mentions the tunnel this source opens.
     /// </summary>
     /// <remarks>
@@ -366,57 +439,23 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     /// first half of this message, since the spelling they wrote was already right.
     /// </para>
     /// </remarks>
-    /// <summary>
-    /// The credential-bearing parts of a connection string, for the one message that echoes one
-    /// back.
-    /// </summary>
-    /// <remarks>
-    /// Two shapes cover what a connection string does with a secret: a keyword whose value runs to
-    /// the next <c>;</c>, and a URI authority's <c>user:pass@host</c>. Matched case-insensitively,
-    /// because keyword casing is a dialect's own business.
-    /// <para>
-    /// Deliberately not exhaustive, and the message says the value was redacted rather than
-    /// claiming it is safe. A backend naming its secret something this misses would still be
-    /// echoed, so this narrows the blast radius rather than closing it. That is the honest trade:
-    /// this message exists to show the developer what <em>arrived</em> — the shell-expansion case is
-    /// only diagnosable by seeing it — and a message that showed nothing would not do that.
-    /// </para>
-    /// </remarks>
-    private static readonly Regex Credentials = new(
-        @"(?<=(?:password|pwd|secret|token|accountkey)\s*=)[^;]*"
-        + @"|(?<=://[^:/@\s]{1,256}:)[^@/\s]*(?=@)",
-        RegexOptions.IgnoreCase
-        | RegexOptions.CultureInvariant,
-        TimeSpan.FromSeconds(1));
-
-    /// <summary>
-    /// <paramref name="connectionString"/> with the credentials this recognizes replaced.
-    /// </summary>
-    /// <remarks>
-    /// Because this message is echoed where messages go: an AppHost's startup failure is relayed
-    /// into <c>~/.aspire/logs</c> and routinely pasted into an issue. Every other value this package
-    /// echoes is malformed, blank or a single token — this is the only one that is a whole, valid
-    /// connection string, so it is the only one that can carry a password.
-    /// </remarks>
-    private static string Redacted(string connectionString)
-    {
-        try
-        {
-            return Credentials.Replace(connectionString, "***");
-        }
-        catch (RegexMatchTimeoutException)
-        {
-            // A pathological value is not a reason to fail differently than the developer expects,
-            // and it is emphatically not a reason to print the thing this method exists to hide.
-            return "<connection string omitted: it could not be scanned for credentials>";
-        }
-    }
-
     private static ServiceSourcesConfigurationException NothingAddressesTheTunnel(
-        string name, string connectionString) =>
-        new($"Backing service '{name}': source 'kubernetes' opens a kubectl port-forward on a local port allocated "
+        string name, string connectionString)
+    {
+        var shown = Redacted(connectionString);
+
+        // Only when something was actually replaced. Said unconditionally it would put "***" into
+        // every one of these messages, including the ordinary case where the template carries no
+        // credential at all and what is quoted is exactly what the developer wrote — leaving them
+        // to wonder which part of it the package had hidden.
+        var note = shown == connectionString || shown == Unscannable
+            ? ""
+            : " (a credential in it shown as ***)";
+
+        return new(
+            $"Backing service '{name}': source 'kubernetes' opens a kubectl port-forward on a local port allocated "
             + $"at startup, but the connection string names no '${{port}}' placeholder to put it in — so nothing "
-            + $"would address the tunnel: \"{Redacted(connectionString)}\" (any password in it shown as ***). "
+            + $"would address the tunnel: \"{shown}\"{note}. "
             + "Replace the port in it with '${port}', as "
             + "'Host=localhost;Port=${port};Database=orders'. If you did write '${port}', a shell expanded it "
             + "away before the AppHost saw it — '${...}' is a shell variable too, and double quotes do not protect "
@@ -424,4 +463,5 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
             + $"service reached at a fixed address the developer already has — an ingress, or an instance they run "
             + $"themselves — is source 'direct' rather "
             + $"than this one. The key is '{ConfigKey(name, "ConnectionString")}'.");
+    }
 }

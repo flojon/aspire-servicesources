@@ -540,10 +540,16 @@ public class KubernetesBackingServiceTests
     /// value is redacted rather than withheld.
     /// </remarks>
     [Theory]
-    [InlineData("Host=localhost;Port=5432;Username=dev;Password=hunter2", "hunter2")]
-    [InlineData("Host=localhost;Port=5432;Pwd=hunter2", "hunter2")]
-    [InlineData("postgresql://orders_app:hunter2@localhost:5432/orders", "hunter2")]
-    public void TheEchoedConnectionString_HasItsCredentialsRedacted(string connectionString, string secret)
+    [InlineData("Host=db.internal;Port=5432;Username=dev;Password=hunter2", "hunter2", "Username=dev")]
+    [InlineData("Host=db.internal;Port=5432;Pwd=hunter2", "hunter2", "Host=db.internal")]
+    [InlineData("postgresql://orders_app:hunter2@db.internal:5432/orders", "hunter2", "orders_app")]
+    [InlineData("redis://:hunter2@db.internal:6379", "hunter2", "db.internal")]
+    [InlineData(
+        "Endpoint=sb://ns.servicebus.windows.net/;SharedAccessKeyName=root;SharedAccessKey=hunter2",
+        "hunter2",
+        "SharedAccessKeyName=root")]
+    public void TheEchoedConnectionString_HasItsCredentialsRedacted(
+        string connectionString, string secret, string survives)
     {
         var builder = CreateBuilder();
 
@@ -552,7 +558,50 @@ public class KubernetesBackingServiceTests
 
         Assert.DoesNotContain(secret, ex.Message, StringComparison.Ordinal);
         Assert.Contains("***", ex.Message);
-        Assert.Contains("localhost", ex.Message);
+
+        // Something unique to this input, so the assertion distinguishes the echoed value from the
+        // worked example the message hard-codes — "localhost" would pass with the echo suppressed.
+        Assert.Contains(survives, ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A connection string with nothing secret in it is echoed whole.
+    /// </summary>
+    /// <remarks>
+    /// The redaction narrows what the echo can leak; it must not narrow what the echo is
+    /// <em>for</em>. Showing the developer what arrived is how the shell-expansion case is
+    /// diagnosed, and most templates carry no credential at all.
+    /// </remarks>
+    [Fact]
+    public void AConnectionStringWithNoCredential_IsEchoedUntouched()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, Config(connectionString: "Host=db.internal;Port=5432;Database=orders")));
+
+        Assert.Contains("\"Host=db.internal;Port=5432;Database=orders\"", ex.Message);
+        Assert.DoesNotContain("***", ex.Message);
+    }
+
+    /// <remarks>
+    /// A keyword that merely starts with one of the reserved words is not a credential, and the
+    /// lookbehind anchors on the <c>=</c> so it does not become one — <c>SharedAccessKeyName</c> is
+    /// the case that matters, since it sits beside a key that genuinely is one.
+    /// </remarks>
+    [Theory]
+    [InlineData("Host=db.internal;TokenExpiry=30;Database=orders", "TokenExpiry=30")]
+    [InlineData("Host=db.internal;PasswordExpiry=30;Database=orders", "PasswordExpiry=30")]
+    [InlineData("Host=db.internal;Integrated Security=SSPI;Database=orders", "Integrated Security=SSPI")]
+    public void AKeywordThatOnlyLooksLikeACredential_IsNotRedacted(string connectionString, string survives)
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, Config(connectionString: connectionString)));
+
+        Assert.Contains(survives, ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("***", ex.Message);
     }
 
     /// <summary>
