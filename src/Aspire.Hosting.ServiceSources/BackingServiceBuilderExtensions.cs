@@ -1,6 +1,7 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.BackingServices;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Kubernetes;
 using Aspire.Hosting.ServiceSources.PortAllocation;
 
 namespace Aspire.Hosting.ServiceSources;
@@ -30,7 +31,8 @@ public static class BackingServiceBuilderExtensions
         new(StringComparer.OrdinalIgnoreCase)
         {
             ["direct"] = new DirectBackingServiceSource(),
-            ["kubernetes"] = new KubernetesBackingServiceSource(new SocketPortAllocator()),
+            ["kubernetes"] = new KubernetesBackingServiceSource(
+                new SocketPortAllocator(), new KubectlSecretReader()),
         };
 
     /// <summary>
