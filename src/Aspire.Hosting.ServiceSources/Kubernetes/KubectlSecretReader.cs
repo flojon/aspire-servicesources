@@ -12,10 +12,22 @@ namespace Aspire.Hosting.ServiceSources.Kubernetes;
 /// about — and the values are credentials, which is a poor thing to hold longer than the call that
 /// needs them.
 /// <para>
-/// <b>The key is addressed as <c>{.data['key']}</c>, not <c>{.data.key}</c>.</b> Kubernetes allows
-/// <c>.</c> in a secret key — <c>.dockerconfigjson</c> is the common one — and the dotted form
-/// silently descends into a field that is not there rather than failing, so it returns empty for a
-/// key that exists. The bracket form is exact.
+/// <b>The key is addressed as <c>{.data.the\.key}</c>, with each <c>.</c> in the key escaped — not
+/// as <c>{.data['the.key']}</c>.</b> The bracket form reads as the exact one and is not: kubectl's
+/// jsonpath returns <em>empty</em> for it whenever the key contains a literal dot, while exiting 0,
+/// which this reader can only report as "no such key". Measured against kubectl v1.24.3 rather than
+/// reasoned about, because the two forms are easy to argue about and the failure is silent:
+/// </para>
+/// <code>
+/// kubectl create secret generic p --from-literal=ca.crt=CERT --dry-run=client \
+///     -o "jsonpath={.data['ca.crt']}"   # prints nothing, exit 0
+///     -o 'jsonpath={.data.ca\.crt}'     # prints Q0VSVA==
+/// </code>
+/// <para>
+/// The keys this matters for are the ones worth having: <c>.dockerconfigjson</c> is the key the API
+/// itself gives a pull secret, and <c>ca.crt</c> and <c>tls.key</c> are TLS material. Every other
+/// character a key may hold — letters, digits, <c>-</c> and <c>_</c> — needs no escape, verified the
+/// same way.
 /// </para>
 /// <para>
 /// <b>Nothing here escapes the key, because nothing here can.</b> A <c>'</c> would close the
@@ -204,7 +216,10 @@ internal sealed class KubectlSecretReader : IKubernetesSecretReader
             "--namespace",
             @namespace,
             "--output",
-            $"jsonpath={{.data['{key}']}}",
+            // Each '.' in the key escaped, so it selects a field whose name contains a dot rather
+            // than descending through one. Nothing else in a key needs escaping — the parser admits
+            // only letters, digits, '-', '.' and '_'.
+            $"jsonpath={{.data.{key.Replace(".", "\\.", StringComparison.Ordinal)}}}",
             // Last, immediately before the name. A bare '--' ends option parsing for everything
             // after it — kubectl uses pflag, where it is not a one-argument escape — so putting it
             // ahead of the flags would hand '--context' and its value to kubectl as secret names

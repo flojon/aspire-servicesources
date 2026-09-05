@@ -339,8 +339,10 @@ internal sealed partial class KubernetesBackingServiceSource(
             throw new ServiceSourcesConfigurationException(
                 $"Backing service '{name}': the placeholder '{secret.AsWritten}' becomes a parameter named "
                 + $"'{parameterName}', after the backing service, the secret and the key, and Aspire rejected that "
-                + $"name — \"{WithoutParameterSuffix(ex.Message)}\" The limit is on the derived name rather than on "
-                + "any one part, so a shorter backing-service name is what fixes it.",
+                + $"name — \"{WithoutParameterSuffix(ex.Message)}\" The name is {parameterName.Length} characters: "
+                + $"{name.Length} for the backing service, {secret.Name.Length} for the secret and "
+                + $"{secret.Key.Length} for the key. Shorten whichever of those you own — the backing service's "
+                + "name is the one this AppHost decides.",
                 ex);
         }
     }
@@ -407,6 +409,15 @@ internal sealed partial class KubernetesBackingServiceSource(
 
         var foldedName = folded.ToString();
 
+        // Aspire wants a letter first, and a backing service may legitimately begin with a digit —
+        // '3proxy' names a real thing. Prefixed rather than refused, for the same reason the
+        // characters are folded: this identifier is derived, nobody writes it, and a name the
+        // developer cannot spell differently is not a mistake to report back to them.
+        if (foldedName.Length > 0 && !char.IsAsciiLetter(foldedName[0]))
+        {
+            return $"s-{foldedName}-{Fingerprint(written)}";
+        }
+
         return foldedName == written ? written : $"{foldedName}-{Fingerprint(written)}";
     }
 
@@ -460,7 +471,7 @@ internal sealed partial class KubernetesBackingServiceSource(
             return value;
         }
 
-        var localised = ToLocalhost(value, service, @namespace, out var rewrites);
+        var localised = ToLocalhost(value, service, @namespace, out var rewrites, out var ports);
 
         // Whole-string mode exists because the fetched string is written for use inside the cluster
         // and is unusable as fetched. If nothing was rewritten, that premise did not hold — the
@@ -479,7 +490,7 @@ internal sealed partial class KubernetesBackingServiceSource(
                 + $"Check that '{ConfigKey(name, "Service")}' names the service the secret was written against.");
         }
 
-        RequireSecretPortMatches(name, localised, secret, remotePort);
+        RequireSecretPortMatches(name, ports, secret, remotePort);
 
         return localised;
     }
@@ -496,12 +507,12 @@ internal sealed partial class KubernetesBackingServiceSource(
     /// prevent, arriving through the one door that rule no longer guards.
     /// </remarks>
     private static void RequireSecretPortMatches(
-        string name, string localised, ConnectionStringTemplate.Secret secret, int remotePort)
+        string name, int[] ports, ConnectionStringTemplate.Secret secret, int remotePort)
     {
-        var written = SecretPort().Match(localised);
-
-        if (!written.Success || !int.TryParse(
-                written.Groups["port"].ValueSpan, CultureInfo.InvariantCulture, out var port) || port == remotePort)
+        // Every port a rewritten host is addressed on, not the first number in the string. A host
+        // list can name several, and the tunnel serves one — so any of them differing is the
+        // mismatch, and the first is only the one to name.
+        if (ports.FirstOrDefault(p => p != remotePort) is not (var port and not 0))
         {
             return;
         }
@@ -509,14 +520,12 @@ internal sealed partial class KubernetesBackingServiceSource(
         throw new KubernetesSecretException(
             $"Backing service '{name}': the connection string in key '{secret.Key}' of secret '{secret.Name}' "
             + $"addresses port {port}, and the port-forward serves {remotePort} — the port "
-            + $"'{ConfigKey(name, "Port")}' names. Nothing listens on {port} locally, and the tunnel's health check "
-            + $"watches {remotePort}, so every resource would report healthy while the app reached nothing. Set "
-            + $"'{ConfigKey(name, "Port")}' to {port}, or point it at a secret written for port {remotePort}.");
+            + $"'{ConfigKey(name, "Port")}' names. The tunnel's health check watches {remotePort}, so every "
+            + $"resource would report healthy while the app dialled {port}: nothing there, or whatever else on "
+            + $"this machine happens to hold it. Set '{ConfigKey(name, "Port")}' to {port}, or point it at a "
+            + $"secret written for port {remotePort}.");
     }
 
-    /// <summary>The port a localised connection string addresses, in either shape it is written.</summary>
-    [GeneratedRegex(@"(?:localhost[:,]|\bPort\s*=\s*)(?<port>\d{1,5})(?!\d)", RegexOptions.IgnoreCase)]
-    private static partial Regex SecretPort();
 
     /// <summary>
     /// Whether a match the credential scan found is really a <c>${secret:...}</c> placeholder.
@@ -556,16 +565,14 @@ internal sealed partial class KubernetesBackingServiceSource(
     /// </para>
     /// </remarks>
     private static string ToLocalhost(
-        string connectionString, string service, string @namespace, out int rewrites)
+        string connectionString, string service, string @namespace, out int rewrites, out int[] ports)
     {
-        var host = $@"(?:{Regex.Escape(service)}(?:\.{Regex.Escape(@namespace)}(?:\.svc(?:\.cluster\.local)?)?)?)"
-            + @"(?![\w.-])";
-
         try
         {
-            var (localised, count) = Rewrite(connectionString, host);
+            var (localised, count, found) = Rewrite(connectionString, service, @namespace);
 
             rewrites = count;
+            ports = found;
 
             return localised;
         }
@@ -582,60 +589,118 @@ internal sealed partial class KubernetesBackingServiceSource(
         }
     }
 
-    /// <summary>One pass of the host rewrite, and how many hosts it replaced.</summary>
-    private static (string Localised, int Rewrites) Rewrite(string connectionString, string host)
+    /// <summary>
+    /// Rewrites every in-cluster host, and reports the ports the rewritten hosts are addressed on.
+    /// </summary>
+    /// <remarks>
+    /// <b>Region by region, not prefix by prefix.</b> A prefix-anchored rewrite finds the host a
+    /// keyword or a <c>//</c> introduces and stops there — but a host list carries the rest after a
+    /// comma with nothing in front of them, so <c>Server=orders,orders</c> and a three-node
+    /// <c>mongodb://…orders:27017,orders:27018,orders:27019/…</c> left every host but the first
+    /// addressed at the cluster, while the "something was rewritten" check counted one and passed.
+    /// So the prefix now selects a <em>region</em> — everything up to the <c>;</c> that ends a
+    /// keyword's value, or to the <c>/</c> that ends a URI's authority — and every host in it is
+    /// rewritten.
+    /// <para>
+    /// The ports come from the same pass, read off what follows each host that was actually
+    /// rewritten. Scanning the whole string for a port instead finds whichever number appears first,
+    /// which is a decoy in <c>Password=Port=9999!;Server=orders,1433</c> and a false pass in
+    /// <c>Options=Port=1433;Server=orders,9999</c>.
+    /// </para>
+    /// </remarks>
+    private static (string Localised, int Rewrites, int[] Ports) Rewrite(
+        string connectionString, string service, string @namespace)
     {
         var replaced = 0;
+        var ports = new List<int>();
+
+        var host = $@"(?<![\w.-])(?:{Regex.Escape(service)}"
+            + $@"(?:\.{Regex.Escape(@namespace)}(?:\.svc(?:\.cluster\.local)?)?)?)"
+            // Either a trailing dot that ends the name — the absolute form, which resolves the same
+            // — or no host character at all after it. Written as two alternatives because the dot
+            // has to be consumed in the first case and refused in the second, where it would mean
+            // the name continues into a namespace this is not looking for.
+            + @"(?:\.(?![\w-])|(?![\w.-]))";
 
         var localised = Regex.Replace(
             connectionString,
-            // Three ways a host is introduced, each with the tail it needs. Written out rather than
-            // shared because the '//' branch is the only one that has to look ahead for an '@', and
-            // applying that lookahead to the others made a password containing '@' suppress every
-            // rewrite in the string.
-            $"(?<prefix>{Keyword})(?:{host})"
-                + $"|(?<prefix>{UriAuthority})(?:{host})"
-                + $"|(?<prefix>//)(?:{host})(?![^/@\\s;]*@)",
-            match =>
+            $"(?<lead>{Keyword})(?<region>[^;]*)"
+                + $"|(?<lead>//(?:[^/@;\\s]*@)?)(?<region>[^/?;\\s]*)",
+            region =>
             {
-                replaced++;
-                return match.Groups["prefix"].Value + "localhost";
+                var rewritten = Regex.Replace(
+                    region.Groups["region"].Value,
+                    host,
+                    _ =>
+                    {
+                        replaced++;
+                        return "localhost";
+                    },
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                    TimeSpan.FromSeconds(1));
+
+                foreach (Match addressed in AddressedPort().Matches(rewritten))
+                {
+                    if (int.TryParse(addressed.Groups["port"].ValueSpan, CultureInfo.InvariantCulture, out var port))
+                    {
+                        ports.Add(port);
+                    }
+                }
+
+                return region.Groups["lead"].Value + rewritten;
             },
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
             TimeSpan.FromSeconds(1));
 
-        return (localised, replaced);
+        // A port written as its own field rather than beside the host, which is how Npgsql and most
+        // keyword dialects spell it: 'Host=orders;Port=5432'. Anchored to the start of a field, so
+        // that a 'Port=' appearing inside some other field's *value* — a password of 'Port=9999!' —
+        // is not read as one. Only asked once the hosts are known, so a string this does not
+        // address at all contributes nothing.
+        if (replaced > 0)
+        {
+            foreach (Match field in PortField().Matches(localised))
+            {
+                if (int.TryParse(field.Groups["port"].ValueSpan, CultureInfo.InvariantCulture, out var port))
+                {
+                    ports.Add(port);
+                }
+            }
+        }
+
+        return (localised, replaced, [.. ports]);
     }
 
+    /// <summary>A port written as its own field, anchored so a value containing one is not read.</summary>
+    [GeneratedRegex(@"(?:\A|;)\s*Port\s*=\s*(?<port>\d{1,5})(?!\d)", RegexOptions.IgnoreCase)]
+    private static partial Regex PortField();
+
+    /// <summary>The port a rewritten host is addressed on, in either shape a host list writes it.</summary>
+    /// <remarks>
+    /// <c>:</c> in a URI and most keyword dialects, <c>,</c> in SQL Server's
+    /// <c>Server=tcp:host,1433</c>. Read only inside a host region, so a <c>Port=</c> elsewhere in
+    /// the string cannot be mistaken for one.
+    /// </remarks>
+    [GeneratedRegex(@"localhost[:,](?<port>\d{1,5})(?!\d)", RegexOptions.IgnoreCase)]
+    private static partial Regex AddressedPort();
+
     /// <summary>
-    /// The places a connection string can introduce a host, captured so the rewrite can put it back.
+    /// The places a connection string introduces a host, and how far that host's region reaches.
     /// </summary>
     /// <remarks>
     /// Case-insensitively, because DNS is: a secret naming <c>Orders-PG</c> reaches the same service
     /// as one naming <c>orders-pg</c>, and leaving the first unrewritten would send credentials into
     /// the cluster's address space.
     /// <para>
-    /// The trailing <c>(?![^/@]*@)</c> on the match keeps a URI's user name out of it. In
-    /// <c>postgresql://orders:pw@orders:5432/db</c> the text after <c>//</c> is the user, not the
-    /// host — an <c>@</c> before the next <c>/</c> is what says so — and a service whose name is
-    /// also the database's user name is the ordinary Postgres shape.
+    /// A URI's region starts after the optional user information, which is what keeps a user name
+    /// equal to the service name out of the rewrite: in
+    /// <c>postgresql://orders:pw@orders:5432/db</c> the first <c>orders</c> is the user and the
+    /// second is the host. A keyword's region ends at the <c>;</c> that ends its value, so nothing
+    /// in another field can be rewritten or read as a port.
     /// </para>
     /// </remarks>
     private const string Keyword =
-        @"(?:\A|[;,\s])\s*(?:Host|Hostname|Server|Data\s?Source|Addr|Address)\s*=\s*(?:tcp:)?";
-
-    /// <summary>
-    /// The <c>@</c> that separates a URI's user information from its host, and only that one.
-    /// </summary>
-    /// <remarks>
-    /// A bare <c>@</c> is not enough: a keyword connection string writes
-    /// <c>User ID=sa@contoso.com</c>, and treating that <c>@</c> as a host introducer rewrites the
-    /// user's domain while leaving the real host alone — a corrupting rewrite that also passes the
-    /// "something was rewritten" check. What makes an <c>@</c> a URI authority is a preceding
-    /// <c>//</c> with no <c>;</c> or space between, which is what this looks behind for. The bound
-    /// keeps the lookbehind from scanning an arbitrarily long string.
-    /// </remarks>
-    private const string UriAuthority = @"(?<=//[^;\s/]{0,512})@";
+        @"(?:\A|[;,\s])\s*(?:Host|Hostname|Server|Data\s?Source|Addr|Address)\s*=\s*";
 
     /// <summary>
     /// The configuration key one of this block's fields is read from, for a message that has to

@@ -950,6 +950,100 @@ public class KubernetesBackingServiceTests
     }
 
     /// <summary>
+    /// Every host in a list is rewritten, not only the one a keyword or a <c>//</c> introduces.
+    /// </summary>
+    /// <remarks>
+    /// A host list carries its later entries after a comma with nothing in front of them, so a
+    /// rewrite anchored to the introducer left them addressed at the cluster while the
+    /// "something was rewritten" count reached one and the value was handed over. A replica set and
+    /// a failover partner are the ordinary shapes this arrives in.
+    /// </remarks>
+    [Theory]
+    [InlineData("Server=orders,orders;Database=db", "Server=localhost,localhost;Database=db")]
+    [InlineData(
+        "mongodb://user:pw@orders:5432,orders:5432,orders:5432/db",
+        "mongodb://user:pw@localhost:5432,localhost:5432,localhost:5432/db")]
+    [InlineData("Host=orders.default.svc,orders;Port=5432", "Host=localhost,localhost;Port=5432")]
+    public async Task WholeStringSecret_RewritesEveryHostInAList(string fetched, string expected)
+    {
+        var builder = CreateBuilder();
+
+        var db = Resolve(
+            builder,
+            Config(service: "orders", port: 5432, connectionString: "${secret:cs:connectionString}"),
+            allocator: new OccupiedPortAllocator(occupied: -1),
+            secretReader: new FakeSecretReader(fetched));
+
+        Assert.Equal(expected, await db.Resource.ConnectionStringExpression.GetValueAsync(default));
+    }
+
+    /// <remarks>
+    /// The absolute form, with the trailing dot DNS allows. It resolves to the same service, so
+    /// refusing it as "no form this can rewrite" would refuse a value that plainly names the host.
+    /// </remarks>
+    [Fact]
+    public async Task WholeStringSecret_RewritesTheAbsoluteFormWithATrailingDot()
+    {
+        var builder = CreateBuilder();
+
+        var db = Resolve(
+            builder,
+            Config(service: "orders", port: 5432, connectionString: "${secret:cs:connectionString}"),
+            allocator: new OccupiedPortAllocator(occupied: -1),
+            secretReader: new FakeSecretReader("Host=orders.default.svc.cluster.local.;Port=5432"));
+
+        Assert.Equal(
+            "Host=localhost;Port=5432",
+            await db.Resource.ConnectionStringExpression.GetValueAsync(default));
+    }
+
+    /// <summary>
+    /// A port written somewhere that is not a host is neither read as one nor mistaken for a
+    /// mismatch.
+    /// </summary>
+    /// <remarks>
+    /// Scanning the whole string for the first number found a decoy in a password and, worse,
+    /// matched it against the forwarded port and passed while the real address named another. The
+    /// ports are read only from inside a host's own region now.
+    /// </remarks>
+    [Theory]
+    [InlineData("Password=Port=9999!;Host=orders,5432")]
+    [InlineData("Options=Port=5432;Host=orders:5432")]
+    public async Task WholeStringSecret_ReadsThePortFromTheHostRatherThanTheFirstNumber(string fetched)
+    {
+        var builder = CreateBuilder();
+
+        var db = Resolve(
+            builder,
+            Config(service: "orders", port: 5432, connectionString: "${secret:cs:connectionString}"),
+            allocator: new OccupiedPortAllocator(occupied: -1),
+            secretReader: new FakeSecretReader(fetched));
+
+        Assert.Contains("localhost", await db.Resource.ConnectionStringExpression.GetValueAsync(default));
+    }
+
+    /// <remarks>
+    /// The mirror of the test above: a decoy that matches the forwarded port must not hide a real
+    /// mismatch at the host.
+    /// </remarks>
+    [Fact]
+    public async Task WholeStringSecret_WithADecoyPortMatchingTheTunnel_StillRefusesTheRealMismatch()
+    {
+        var builder = CreateBuilder();
+
+        var db = Resolve(
+            builder,
+            Config(service: "orders", port: 5432, connectionString: "${secret:cs:connectionString}"),
+            allocator: new OccupiedPortAllocator(occupied: -1),
+            secretReader: new FakeSecretReader("Options=Port=5432;Host=orders,9999"));
+
+        var ex = await Assert.ThrowsAsync<KubernetesSecretException>(
+            () => db.Resource.ConnectionStringExpression.GetValueAsync(default).AsTask());
+
+        Assert.Contains("addresses port 9999", ex.Message);
+    }
+
+    /// <summary>
     /// A secret whose port is not the port being forwarded is refused, not silently served.
     /// </summary>
     /// <remarks>
@@ -1039,6 +1133,32 @@ public class KubernetesBackingServiceTests
             secretReader: new FakeSecretReader(fetched));
 
         Assert.Equal(expected, await db.Resource.ConnectionStringExpression.GetValueAsync(default));
+    }
+
+    /// <summary>
+    /// A backing service whose own name Aspire refuses is reported against that name, not against
+    /// the parameter a placeholder derived from it.
+    /// </summary>
+    /// <remarks>
+    /// Aspire wants a resource name to start with a letter, and the parameter is added before the
+    /// connection string is — so a backing service called <c>3proxy</c> used to fail first on the
+    /// derived <c>3proxy-creds-password</c>, with a message about a name the developer never wrote
+    /// and advice to shorten it, which fixes nothing. The derived name now carries a prefix, so what
+    /// fails is the name the developer did write, and Aspire says why.
+    /// </remarks>
+    [Fact]
+    public void ABackingServiceNameAspireRefuses_IsReportedAgainstThatNameNotTheParameter()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Record.Exception(
+            () => new KubernetesBackingServiceSource(
+                    new FakePortAllocator(LocalPort), new FakeSecretReader(SecretValue))
+                .Resolve(builder, "3proxy", Config(connectionString: "Port=${port};P=${secret:creds:password}")));
+
+        Assert.NotNull(ex);
+        Assert.Contains("'3proxy'", ex.Message);
+        Assert.DoesNotContain("creds-password", ex.Message);
     }
 
     /// <summary>
