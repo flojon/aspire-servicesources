@@ -81,10 +81,12 @@ internal sealed class DirectBackingServiceSource : IBackingServiceSource
 
                 case ConnectionStringTemplate.Secret secret:
                     throw new ServiceSourcesConfigurationException(
-                        $"Backing service '{name}': the connection string carries '{secret.AsWritten}', and reading "
-                        + "a value out of a Kubernetes secret is not supported yet. Put the value in the connection "
-                        + "string, or set the whole connection string from a configuration layer that already holds "
-                        + $"it — user secrets, or {configKey.Replace(":", "__", StringComparison.Ordinal)}.");
+                        $"Backing service '{name}': the connection string carries '{secret.AsWritten}', and source "
+                        + "'direct' has no cluster to read a secret from — it carries a connection string and "
+                        + "nothing else, with no 'context' or 'namespace' to resolve one against. Source "
+                        + "'kubernetes' reads these. Under 'direct', put the value in the connection string, or set "
+                        + "the whole connection string from a configuration layer that already holds it — user "
+                        + $"secrets, or {configKey.Replace(":", "__", StringComparison.Ordinal)}.");
 
                 default:
                     throw new InvalidOperationException($"Unhandled template segment '{segment.GetType().Name}'.");

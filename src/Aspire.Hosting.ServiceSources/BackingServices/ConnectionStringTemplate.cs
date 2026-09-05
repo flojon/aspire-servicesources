@@ -262,10 +262,21 @@ internal sealed class ConnectionStringTemplate
 
         placeholder = parts.Length switch
         {
-            3 when IsNamed(parts[1]) && IsNamed(parts[2]) => new Secret(parts[1], parts[2]) { Token = token },
-            3 => throw Malformed(
+            3 when IsSecretName(parts[1]) && IsSecretKey(parts[2]) =>
+                new Secret(parts[1], parts[2]) { Token = token },
+            3 when !IsNamed(parts[1]) || !IsNamed(parts[2]) => throw Malformed(
                 backingServiceName, configKey, token,
                 "the secret name and key must both be given: '${secret:<name>:<key>}'."),
+            3 when !IsSecretName(parts[1]) => throw Malformed(
+                backingServiceName, configKey, token,
+                "a Kubernetes secret's name is lower-case letters, digits, '-' and '.', beginning and ending "
+                + "with a letter or a digit — narrower than its keys, which also take upper case and '_'. "
+                + "Nothing in a cluster can carry this name as written, so it is refused here rather than left "
+                + "to arrive as an indistinguishable \"not found\" at start time."),
+            3 => throw Malformed(
+                backingServiceName, configKey, token,
+                "a key inside a Kubernetes secret is letters, digits, '-', '.' and '_', and this key is not. "
+                + "Nothing in a cluster can carry the key as written."),
             < 3 => throw Malformed(
                 backingServiceName, configKey, token,
                 "a secret placeholder names a secret and a key inside it: '${secret:<name>:<key>}'."),
@@ -280,6 +291,68 @@ internal sealed class ConnectionStringTemplate
 
     /// <summary>Whether a placeholder's name part is a name rather than nothing.</summary>
     private static bool IsNamed(string part) => !string.IsNullOrWhiteSpace(part);
+
+    /// <summary>
+    /// Whether a secret's name is one a Kubernetes cluster could carry.
+    /// </summary>
+    /// <remarks>
+    /// <b>A security check, not only a spelling one.</b> The name is passed to <c>kubectl</c> in the
+    /// positional slot that says which secret to get, and kubectl's flag parser accepts options
+    /// interspersed with positionals — so a name beginning with <c>-</c> is read as an option rather
+    /// than as a name. <c>--kubeconfig=…</c> in that slot points kubectl at a file the writer of the
+    /// connection string chose, and a kubeconfig can name an <c>exec:</c> credential plugin, which
+    /// kubectl runs. That is arbitrary code, from a string that arrives through
+    /// <see cref="Microsoft.Extensions.Configuration.IConfiguration"/> — so from
+    /// <c>appsettings.json</c>, an environment variable, or the command line, none of which is read
+    /// as carefully as code.
+    /// <para>
+    /// Requiring the first character to be a letter or a digit is what closes that, and it is also
+    /// the cluster's own rule: a secret's name is an RFC 1123 name and cannot begin with <c>-</c>.
+    /// The check refuses nothing a real cluster could hold.
+    /// </para>
+    /// </remarks>
+    /// <remarks>
+    /// A secret's name is an RFC 1123 subdomain, which is narrower than its keys: lower case only,
+    /// no <c>_</c>, and it must begin and end with a letter or a digit. Measured against a cluster
+    /// rather than taken from the same charset as a key — <c>My_Secret</c> and <c>ABCsecret</c> are
+    /// both refused by the API server, and a name the cluster cannot hold is worth saying so about
+    /// here, where the message can name the rule, rather than at start time as an indistinguishable
+    /// "not found".
+    /// </remarks>
+    private static bool IsSecretName(string part) =>
+        part.Length > 0
+        && IsSecretNameEdge(part[0])
+        && IsSecretNameEdge(part[^1])
+        && part.All(c => IsSecretNameEdge(c) || c is '-' or '.');
+
+    /// <summary>A character a secret's name may begin and end with.</summary>
+    private static bool IsSecretNameEdge(char c) => char.IsAsciiDigit(c) || char.IsAsciiLetterLower(c);
+
+    /// <summary>
+    /// Whether a key inside a secret is one a Kubernetes cluster could carry.
+    /// </summary>
+    /// <remarks>
+    /// Also a security check. The key is interpolated into a jsonpath expression, and a jsonpath
+    /// that fails to <em>execute</em> makes kubectl print the whole object it was given — every key
+    /// of the secret — to standard error, which this package reports. The charset admits none of
+    /// the characters that could end the expression or start another: no quote, no bracket, no
+    /// space, no wildcard. Only <c>.</c> has meaning inside it, and the reader escapes each one.
+    /// <para>
+    /// Leading <c>.</c> is allowed, unlike a name: <c>.dockerconfigjson</c> is the key the API itself
+    /// gives a <c>kubernetes.io/dockerconfigjson</c> secret, and the key never reaches a positional
+    /// argument where a leading character could be read as an option.
+    /// </para>
+    /// </remarks>
+    private static bool IsSecretKey(string part) => part.Length > 0 && part.All(IsSecretNameChar);
+
+    /// <summary>The characters Kubernetes allows in a key inside a secret.</summary>
+    /// <remarks>
+    /// Wider than what a secret's <em>name</em> may hold — see <see cref="IsSecretName"/>. Upper
+    /// case and <c>_</c> are both legal here, which is what makes <c>DB_PASSWORD</c> a key an
+    /// AppHost can name.
+    /// </remarks>
+    private static bool IsSecretNameChar(char c) =>
+        char.IsAsciiLetterOrDigit(c) || c is '-' or '.' or '_';
 
     /// <summary>
     /// Appends literal text to a connection-string expression, escaped so that a brace in it stays

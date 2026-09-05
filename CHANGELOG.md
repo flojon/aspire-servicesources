@@ -146,7 +146,9 @@ nothing will fail to build to warn you.
   before anything was there to connect to. It is part of the source rather than an option, since a
   wait that silently does nothing is worse than no wait.
 
-  **Write `${port}`, not a number**, and a connection string that names none is refused at startup.
+  **Write `${port}`, not a number**, and a connection string that names none is refused at startup —
+  with one exception, added below in the same release: a template that is exactly one `${secret:…}`
+  carries a port already.
   The local port is allocated so that two forwarded backing services cannot collide, so it is not a
   number anyone can write down — and the failure the refusal prevents is silent: `Port=5432` copied
   out of a manifest addresses that port on the developer's own machine, where their own database
@@ -156,8 +158,68 @@ nothing will fail to build to warn you.
   too, and double quotes do not protect it — arrives looking exactly like one that never had it.
 
   Not in this pass: forwarding several ports through one tunnel (`"port": { "amqp": 5672 }`, reached
-  as `${port:amqp}` — [#233]), and reading credentials out of a Kubernetes secret with
-  `${secret:<name>:<key>}`. Both are refused by name rather than misread.
+  as `${port:amqp}` — [#233]). It is refused by name rather than misread.
+
+- **A connection string can read its credentials out of a Kubernetes secret: `${secret:<name>:<key>}`**
+  ([#144]). The password a backing service needs no longer has to be written into
+  `servicesources.local.json` beside the host and the port:
+
+  ```jsonc
+  {
+    "backingServices": {
+      "orders-db": {
+        "source": "kubernetes",
+        "kubernetes": {
+          "service": "orders-pg-rw",
+          "port": 5432,
+          "context": "dev-west",
+          "namespace": "orders",
+          "connectionString": "Host=localhost;Port=${port};Database=orders;Username=dev;Password=${secret:orders-pg-app:password}"
+        }
+      }
+    }
+  }
+  ```
+
+  **The fetch is deferred, not synchronous.** Each placeholder becomes a parameter whose value is
+  read when something first asks for it, rather than while the AppHost is being composed — so a
+  developer who has not logged in to the cluster yet gets one failed parameter in the dashboard
+  instead of an AppHost that will not start, and nothing runs `kubectl` on the path that local
+  project resolution was deliberately moved off. The value is marked secret, so the dashboard masks
+  it. Reading the same placeholder twice fetches once.
+
+  **A secret holding the whole connection string works too**, which is the shape a hand-authored
+  Sealed Secret usually has — there are no per-field keys to fall back on, and re-shaping one means
+  re-sealing against the cluster's key and a commit to a repo a platform team often owns. Write the
+  template as exactly one placeholder:
+
+  ```jsonc
+  {
+    "backingServices": {
+      "orders-db": {
+        "source": "kubernetes",
+        "kubernetes": {
+          "service": "orders-pg-rw",
+          "port": 5432,
+          "context": "dev-west",
+          "namespace": "orders",
+          "connectionString": "${secret:orders-cs:connectionString}"
+        }
+      }
+    }
+  }
+  ```
+
+  Then the port-forward listens on the *same* port `port` names rather than an allocated one,
+  because there is nothing in the template to substitute a local port into, and the in-cluster host
+  the secret was written against — `orders-pg-rw`, `.orders`, `.svc`, or the fully qualified
+  `.svc.cluster.local` — is rewritten to `localhost`. Giving up the allocated port is the real cost
+  of the mode, so a local port already in use is refused by name up front rather than left to the
+  tunnel's log. Two more things are refused rather than served quietly: a secret whose own port is
+  not the one being forwarded — the tunnel follows `port`, not the secret, and unchecked the app
+  would dial a port nothing serves while every resource reported healthy — and a secret that names
+  the service in no form this can rewrite, which would otherwise reach the app still addressed at
+  the cluster. Per-field placeholders stay preferred wherever the secret offers them.
 
 - **`prepare` — a `"local"` checkout can bootstrap itself before its kind judges it** ([#118]). A
   managed checkout is assumed to be runnable the moment it is cloned, which is not true of a

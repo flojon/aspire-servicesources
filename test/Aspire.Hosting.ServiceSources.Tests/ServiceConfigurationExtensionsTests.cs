@@ -28,6 +28,8 @@ public class ServiceConfigurationExtensionsTests
 
     private sealed class FixedPortAllocator : IPortAllocator
     {
+        public bool IsAvailable(int port) => true;
+
         public int AllocatePort() => 51234;
     }
 

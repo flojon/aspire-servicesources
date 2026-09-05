@@ -1,7 +1,9 @@
 using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Kubernetes;
 using Aspire.Hosting.ServiceSources.Sources;
 using Microsoft.Extensions.DependencyInjection;
 using IPortAllocator = Aspire.Hosting.ServiceSources.PortAllocation.IPortAllocator;
@@ -30,7 +32,8 @@ namespace Aspire.Hosting.ServiceSources.BackingServices;
 /// consumer receives is an ordinary connection string with no deferred parts in it.
 /// </para>
 /// </remarks>
-internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocator) : IBackingServiceSource
+internal sealed partial class KubernetesBackingServiceSource(
+    IPortAllocator portAllocator, IKubernetesSecretReader secretReader) : IBackingServiceSource
 {
     public IResourceBuilder<IResourceWithConnectionString> Resolve(
         IDistributedApplicationBuilder builder,
@@ -45,15 +48,29 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
         var context = kubernetes.Context!;
         var connectionString = kubernetes.ConnectionString!;
         var remotePort = RequirePortInRange(name, kubernetes.Port!.Value);
+        var @namespace = kubernetes.Namespace ?? KubectlPortForward.DefaultNamespace;
 
         var template = ConnectionStringTemplate.Parse(connectionString, name, ConfigKey(name, "ConnectionString"));
+
+        // Decided from the template's shape, which is local configuration and therefore known now,
+        // even though the value it stands for is not fetched until start time. See
+        // <see cref="IsWholeSecret"/> for why the shape is enough.
+        var wholeSecret = IsWholeSecret(template);
 
         // Judged whole before a port is taken, for the reason the service-side source gives: a
         // template this source cannot resolve is config validation like every check above it, and
         // should not burn an allocation on its way to saying so.
-        RequireEveryPlaceholderIsResolvable(name, connectionString, template);
+        RequireEveryPlaceholderIsResolvable(name, connectionString, template, wholeSecret);
 
-        var localPort = portAllocator.AllocatePort();
+        // Whole-string mode cannot choose its port. The connection string is one opaque secret
+        // written against the cluster, so there is no placeholder to substitute a local port into
+        // and the only rewrite available is the host — which means the port has to match the one
+        // the string already names. Giving up the allocator's collision avoidance is the cost of
+        // the mode, so the collision is reported here rather than left to the tunnel's log.
+        var localPort = wholeSecret
+            ? RequireLocalPortFree(builder, name, remotePort)
+            : portAllocator.AllocatePort();
+
         var expression = new ReferenceExpressionBuilder();
 
         foreach (var segment in template.Segments)
@@ -72,9 +89,19 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
                         expression, localPort.ToString(CultureInfo.InvariantCulture));
                     break;
 
-                // Unreachable: the walk above accepts only literals and the unnamed port. Kept so
-                // that a placeholder kind added later fails loudly here rather than vanishing from
-                // the connection string.
+                // Late, and as a parameter rather than text: the value is in the cluster, and
+                // fetching it here would run kubectl while the AppHost is still being composed —
+                // the path main deliberately moved off when local project resolution became
+                // deferred — and would fail the whole AppHost for a developer who is merely not
+                // logged in yet. Aspire resolves a parameter when something asks for its value.
+                case ConnectionStringTemplate.Secret secret:
+                    expression.Append(
+                        $"{SecretParameter(builder, name, service, context, @namespace, secret, wholeSecret, remotePort).Resource}");
+                    break;
+
+                // Unreachable: the walk above accepts only literals, the unnamed port and secrets.
+                // Kept so that a placeholder kind added later fails loudly here rather than
+                // vanishing from the connection string.
                 default:
                     throw new InvalidOperationException($"Unhandled template segment '{segment.GetType().Name}'.");
             }
@@ -148,12 +175,12 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     /// <remarks>
     /// A pass of its own, ahead of the one that builds the expression, so that every reason a
     /// template is refused is reached before a port is allocated and before anything is added to
-    /// the model. It also puts the two "not supported yet" branches in one place, which is where
-    /// stage 3 and <see href="https://github.com/flojon/aspire-servicesources/issues/233">#233</see>
-    /// will remove them from.
+    /// the model. Stage 3 took the secret branch out of it; what is left is the named port, which
+    /// <see href="https://github.com/flojon/aspire-servicesources/issues/233">#233</see> will
+    /// remove from here in the same way.
     /// </remarks>
     private static void RequireEveryPlaceholderIsResolvable(
-        string name, string connectionString, ConnectionStringTemplate template)
+        string name, string connectionString, ConnectionStringTemplate template, bool wholeSecret)
     {
         var ports = 0;
 
@@ -175,23 +202,505 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
                         + $"backing service forwards the single port '{ConfigKey(name, "Port")}' names, so write "
                         + "'${port}'.");
 
-                case ConnectionStringTemplate.Secret secret:
-                    throw new ServiceSourcesConfigurationException(
-                        $"Backing service '{name}': the connection string carries '{secret.AsWritten}', and reading a "
-                        + "value out of a Kubernetes secret is not supported yet. Put the value in the connection "
-                        + "string, or set the whole connection string from a configuration layer that already holds "
-                        + $"it — user secrets, or {Environmentally(ConfigKey(name, "ConnectionString"))}.");
+                // The only placeholder here whose value this source does not know: it is fetched
+                // from the cluster when Aspire resolves the parameter it becomes, so nothing is
+                // checked about it beyond its spelling, which the parser already did.
+                case ConnectionStringTemplate.Secret:
+                    break;
 
                 default:
                     throw new InvalidOperationException($"Unhandled template segment '{segment.GetType().Name}'.");
             }
         }
 
-        if (ports == 0)
+        // Whole-string mode is the one shape that addresses the tunnel without naming a port: the
+        // secret it resolves to carries the port already, written against the cluster, and the mode
+        // exists precisely because there is nothing in the template to substitute into. Requiring
+        // '${port}' of it would refuse the only template it can be written as.
+        if (ports == 0 && !wholeSecret)
         {
             throw NothingAddressesTheTunnel(name, connectionString);
         }
     }
+
+    /// <summary>
+    /// Whether the whole connection string is one <c>${secret:...}</c> placeholder and nothing else.
+    /// </summary>
+    /// <remarks>
+    /// The shape is enough to decide by, and it is knowable now: the template comes from
+    /// <c>servicesources.local.json</c>, which is read while the AppHost is composed, even though
+    /// the value it stands for is not fetched until start time. A template with anything else in it
+    /// — a literal, a <c>${port}</c>, a second secret — is not this mode, because the developer has
+    /// given somewhere to substitute a local port into and the allocator's collision avoidance can
+    /// be kept.
+    /// <para>
+    /// Both shapes occur in practice. Operator-generated secrets (CloudNativePG's <c>&lt;cluster&gt;-app</c>)
+    /// carry per-field keys, and per-field is preferred where it exists. Hand-authored secrets —
+    /// a Sealed Secret holding one <c>connectionString</c> — often carry only the whole string, and
+    /// re-shaping one means re-sealing against the cluster's key and a commit to a GitOps repo that
+    /// a platform team frequently owns rather than the developer.
+    /// </para>
+    /// </remarks>
+    private static bool IsWholeSecret(ConnectionStringTemplate template) =>
+        template.Segments is [ConnectionStringTemplate.Secret];
+
+    /// <summary>
+    /// The remote port, once it is known that nothing local holds it.
+    /// </summary>
+    /// <remarks>
+    /// Asked only when the AppHost is being run. Publishing writes a manifest: there is no
+    /// port-forward, nothing binds a local port, and whatever happens to be listening on the
+    /// machine doing the publishing has no bearing on the file it produces. Checking there would
+    /// fail a CI publish for a developer's running database.
+    /// </remarks>
+    private int RequireLocalPortFree(IDistributedApplicationBuilder builder, string name, int remotePort)
+    {
+        if (!builder.ExecutionContext.IsRunMode || portAllocator.IsAvailable(remotePort))
+        {
+            return remotePort;
+        }
+
+        throw new ServiceSourcesConfigurationException(
+            $"Backing service '{name}': its connection string is a single '${{secret:...}}' placeholder, so the "
+            + $"port-forward has to listen locally on {remotePort} — the port "
+            + $"'{ConfigKey(name, "Port")}' names — and something is already listening on {remotePort} here. "
+            + $"Free that port, or write the connection string yourself with per-field '${{secret:...}}' "
+            + $"placeholders and a '${{port}}' in it, which lets this source pick a local port that is free. "
+            + $"Adding '${{port}}' to the whole-string placeholder does not work: it stops being a whole-string "
+            + "secret, and the in-cluster host inside the fetched value is then left as written.");
+    }
+
+    /// <summary>
+    /// The parameter one <c>${secret:...}</c> placeholder becomes.
+    /// </summary>
+    /// <remarks>
+    /// <c>secret: true</c> so the dashboard masks it, which is free and is the whole reason the
+    /// value should travel as a parameter rather than as text spliced into a connection string.
+    /// </remarks>
+    private IResourceBuilder<ParameterResource> SecretParameter(
+        IDistributedApplicationBuilder builder,
+        string name,
+        string service,
+        string context,
+        string @namespace,
+        ConnectionStringTemplate.Secret secret,
+        bool wholeSecret,
+        int remotePort)
+    {
+        var parameterName = ParameterName(name, secret);
+
+        var origin = new SecretParameterOrigin(name, secret.Name, secret.Key);
+
+        // The same placeholder written twice is one value, so it is one parameter. Adding it twice
+        // would throw on the duplicate name — naming a resource the developer never wrote — for a
+        // template that is perfectly ordinary: a connection string that names the host and a
+        // failover host carries the same credential twice.
+        //
+        // Matched on what the parameter was made FOR, not on the name it derived. The name joins
+        // three parts with hyphens and the join is ambiguous — backing service 'db' with key 'b-c'
+        // and backing service 'db-a' with key 'c' both read as 'db-a-b-c' — so trusting the name
+        // would hand one backing service another's credential, silently, where before there was at
+        // least a duplicate-name failure. Aspire folds case in a resource name, so the lookup does
+        // too.
+        if (builder.Resources.OfType<ParameterResource>()
+                .FirstOrDefault(p => string.Equals(p.Name, parameterName, StringComparison.OrdinalIgnoreCase))
+            is { } existing)
+        {
+            if (!existing.Annotations.OfType<SecretParameterOrigin>().Contains(origin))
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Backing service '{name}': the placeholder '{secret.AsWritten}' derives the parameter name "
+                    + $"'{parameterName}', which another resource in this AppHost already uses for something else. "
+                    + "The name is the backing service, the secret and the key joined by hyphens, so two different "
+                    + "placeholders can spell it the same way. Rename the backing service, or use a secret or key "
+                    + "that does not collide.");
+            }
+
+            return builder.CreateResourceBuilder(existing);
+        }
+
+        try
+        {
+            return builder
+                .AddParameter(
+                    parameterName,
+                    () => Fetch(name, service, context, @namespace, secret, wholeSecret, remotePort),
+                    secret: true)
+                .WithAnnotation(origin);
+        }
+        catch (ArgumentException ex)
+        {
+            // Derived from three names the developer wrote separately, none of which Aspire saw, so
+            // its complaint names a resource that appears nowhere in the AppHost or the config file.
+            // The same shape the tunnel's name uses, and for the same reason: Aspire stays the
+            // authority on the rule, this adds where the name came from. Only length can reach here
+            // now that the characters are folded — which is why the remedy named is a shorter name
+            // and nothing about spelling.
+            throw new ServiceSourcesConfigurationException(
+                $"Backing service '{name}': the placeholder '{secret.AsWritten}' becomes a parameter named "
+                + $"'{parameterName}', after the backing service, the secret and the key, and Aspire rejected that "
+                + $"name — \"{WithoutParameterSuffix(ex.Message)}\" The name is {parameterName.Length} characters: "
+                + $"{name.Length} for the backing service, {secret.Name.Length} for the secret and "
+                + $"{secret.Key.Length} for the key. Shorten whichever of those you own — the backing service's "
+                + "name is the one this AppHost decides.",
+                ex);
+        }
+    }
+
+    /// <summary>
+    /// What a secret parameter was created for, so that reusing one can be sure it is the same.
+    /// </summary>
+    /// <remarks>
+    /// The derived name cannot answer that question: it joins three parts with hyphens, and the
+    /// join is ambiguous. Carried on the resource rather than in a table here because this source is
+    /// one instance shared by every AppHost in the process, and the answer belongs to one model.
+    /// </remarks>
+    private sealed record SecretParameterOrigin(string BackingService, string SecretName, string Key)
+        : IResourceAnnotation;
+
+    /// <summary>
+    /// The parameter name one placeholder derives, in the characters Aspire allows.
+    /// </summary>
+    /// <remarks>
+    /// Aspire admits ASCII letters, digits and hyphens in a resource name. Kubernetes admits
+    /// <c>-</c>, <c>.</c>, <c>_</c> and alphanumerics in a secret's name and its keys, and the ones
+    /// that differ are not exotic: <c>DB_PASSWORD</c> is what <c>--from-env-file</c> produces,
+    /// <c>ca.crt</c> and <c>tls.key</c> are TLS material, and <c>.dockerconfigjson</c> is the key the
+    /// API itself gives a pull secret. Refusing those would leave the placeholder unusable against
+    /// most real secrets, and the developer could not fix it: the key is in a cluster they may not
+    /// own.
+    /// <para>
+    /// So the name is folded rather than refused. It is an identifier nobody writes — it appears in
+    /// the dashboard and in a failure message, never in configuration — so folding costs nothing a
+    /// developer relies on.
+    /// </para>
+    /// <para>
+    /// A folded name carries four hex digits of the original, because folding is lossy:
+    /// <c>ca.crt</c> and <c>ca_crt</c> both read as <c>ca-crt</c>, and two parameters sharing a
+    /// name would be one value serving two keys. The suffix is derived from the text, so it is the
+    /// same on every run — a name that changed between runs would move what the dashboard shows.
+    /// </para>
+    /// </remarks>
+    private static string ParameterName(string name, ConnectionStringTemplate.Secret secret)
+    {
+        var written = $"{name}-{secret.Name}-{secret.Key}";
+        var folded = new StringBuilder(written.Length);
+
+        foreach (var c in written)
+        {
+            if (char.IsAsciiLetterOrDigit(c))
+            {
+                folded.Append(c);
+            }
+            // Runs collapse rather than each becoming its own hyphen: Aspire refuses consecutive
+            // hyphens as well as the characters that produced them, and '.dockerconfigjson' after
+            // the separator is exactly that pair.
+            else if (folded.Length > 0 && folded[^1] != '-')
+            {
+                folded.Append('-');
+            }
+        }
+
+        // A trailing hyphen is refused too, and a key ending in '.' or '_' leaves one.
+        while (folded.Length > 0 && folded[^1] == '-')
+        {
+            folded.Length--;
+        }
+
+        var foldedName = folded.ToString();
+
+        // Aspire wants a letter first, and a backing service may legitimately begin with a digit —
+        // '3proxy' names a real thing. Prefixed rather than refused, for the same reason the
+        // characters are folded: this identifier is derived, nobody writes it, and a name the
+        // developer cannot spell differently is not a mistake to report back to them.
+        if (foldedName.Length > 0 && !char.IsAsciiLetter(foldedName[0]))
+        {
+            return $"s-{foldedName}-{Fingerprint(written)}";
+        }
+
+        return foldedName == written ? written : $"{foldedName}-{Fingerprint(written)}";
+    }
+
+    /// <summary>
+    /// Four hex digits standing for a string, stable across runs.
+    /// </summary>
+    /// <remarks>
+    /// FNV-1a rather than <see cref="string.GetHashCode()"/>, which .NET randomises per process:
+    /// a parameter that changed its name between runs would change what the dashboard shows and
+    /// what a failure message names.
+    /// </remarks>
+    private static string Fingerprint(string text)
+    {
+        var hash = 2166136261u;
+
+        foreach (var c in text)
+        {
+            hash = (hash ^ c) * 16777619u;
+        }
+
+        return (hash & 0xFFFF).ToString("x4", CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// One deferred fetch, with the backing service's name added to whatever went wrong.
+    /// </summary>
+    private string Fetch(
+        string name,
+        string service,
+        string context,
+        string @namespace,
+        ConnectionStringTemplate.Secret secret,
+        bool wholeSecret,
+        int remotePort)
+    {
+        string value;
+
+        try
+        {
+            value = secretReader.Read(context, @namespace, secret.Name, secret.Key);
+        }
+        catch (KubernetesSecretException ex)
+        {
+            // The reader knows the secret and the key; only this knows which backing service asked,
+            // and a parameter's name is the only other thing the dashboard shows beside the failure.
+            throw new KubernetesSecretException($"Backing service '{name}': {ex.Message}", ex);
+        }
+
+        if (!wholeSecret)
+        {
+            return value;
+        }
+
+        var localised = ToLocalhost(value, service, @namespace, out var rewrites, out var ports);
+
+        // Whole-string mode exists because the fetched string is written for use inside the cluster
+        // and is unusable as fetched. If nothing was rewritten, that premise did not hold — the
+        // secret addresses the service by a name this does not recognise (a ClusterIP, a pod's
+        // StatefulSet name, a namespace other than the configured one), and handing the value over
+        // unchanged would send the credentials in it to whatever that name resolves to here, which
+        // on a machine with a VPN or a search domain need not be nothing. Refusing is the only safe
+        // answer, and the developer can see both halves in the message.
+        if (rewrites == 0)
+        {
+            throw new KubernetesSecretException(
+                $"Backing service '{name}': the connection string in key '{secret.Key}' of secret '{secret.Name}' "
+                + $"does not address '{service}' in any form this can rewrite — '{service}', '{service}.{@namespace}', "
+                + $"'.svc' or '.svc.cluster.local', after a host keyword or a URI's '@' or '//'. Nothing was "
+                + $"substituted, so the value still points into the cluster and would not reach the port-forward. "
+                + $"Check that '{ConfigKey(name, "Service")}' names the service the secret was written against.");
+        }
+
+        RequireSecretPortMatches(name, ports, secret, remotePort);
+
+        return localised;
+    }
+
+    /// <summary>
+    /// Refuses a whole-string secret whose port is not the one being forwarded.
+    /// </summary>
+    /// <remarks>
+    /// The tunnel's two ends both come from <c>kubernetes.port</c>; the port in the connection
+    /// string comes from the secret, and nothing made them agree. Unchecked, the app dials a port
+    /// the tunnel does not serve while the health check probes the port it does — so every resource
+    /// reports healthy and the connection goes nowhere, or worse, to whatever else on the developer's
+    /// machine happens to hold that port. That is the failure the <c>${port}</c> rule exists to
+    /// prevent, arriving through the one door that rule no longer guards.
+    /// </remarks>
+    private static void RequireSecretPortMatches(
+        string name, int[] ports, ConnectionStringTemplate.Secret secret, int remotePort)
+    {
+        // Every port a rewritten host is addressed on, not the first number in the string. A host
+        // list can name several, and the tunnel serves one — so any of them differing is the
+        // mismatch, and the first is only the one to name.
+        if (ports.FirstOrDefault(p => p != remotePort) is not (var port and not 0))
+        {
+            return;
+        }
+
+        throw new KubernetesSecretException(
+            $"Backing service '{name}': the connection string in key '{secret.Key}' of secret '{secret.Name}' "
+            + $"addresses port {port}, and the port-forward serves {remotePort} — the port "
+            + $"'{ConfigKey(name, "Port")}' names. The tunnel's health check watches {remotePort}, so every "
+            + $"resource would report healthy while the app dialled {port}: nothing there, or whatever else on "
+            + $"this machine happens to hold it. Set '{ConfigKey(name, "Port")}' to {port}, or point it at a "
+            + $"secret written for port {remotePort}.");
+    }
+
+
+    /// <summary>
+    /// Whether a match the credential scan found is really a <c>${secret:...}</c> placeholder.
+    /// </summary>
+    /// <remarks>
+    /// The scan looks for keywords a credential is usually written under, and <c>Password=</c> is
+    /// one of them whatever follows it. What follows it here is a placeholder, which is safe to
+    /// show and is the whole of what the reader needs.
+    /// </remarks>
+    private static bool IsSecretPlaceholder(string matched) =>
+        matched.Contains("${secret:", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Rewrites the in-cluster host in a whole-string secret to the local end of the tunnel.
+    /// </summary>
+    /// <remarks>
+    /// A secret written for use inside the cluster addresses the service by its Kubernetes name, in
+    /// any of the four forms a pod can resolve: <c>&lt;service&gt;</c>, <c>&lt;service&gt;.&lt;namespace&gt;</c>,
+    /// with <c>.svc</c>, and fully qualified with <c>.svc.cluster.local</c>. None of them resolve
+    /// on the developer's machine, so the string is useless as fetched, and the port-forward is the
+    /// thing that makes it usable — which is why this mode forwards the same port and rewrites only
+    /// the host.
+    /// <para>
+    /// <b>Anchored to where a host can appear, not merely bounded.</b> A word boundary is not
+    /// enough: a service named <c>orders</c> reaches a database usually also named <c>orders</c>,
+    /// and <c>Host=orders;Database=orders</c> would have both rewritten — leaving a string that
+    /// connects to the right server and then asks for a database called <c>localhost</c>, which
+    /// fails far from its cause. So the name is rewritten only where a connection string can put a
+    /// host: after one of the keywords that introduces one, after <c>@</c> in a URI's authority, or
+    /// after <c>//</c> in a scheme.
+    /// </para>
+    /// <para>
+    /// The keyword list is the cost of that: a dialect spelling its host key some other way is
+    /// left alone, and the developer sees an unrewritten in-cluster name rather than a silently
+    /// wrong value. That is the right direction to fail in — one is visible immediately, the other
+    /// is a wrong database.
+    /// </para>
+    /// </remarks>
+    private static string ToLocalhost(
+        string connectionString, string service, string @namespace, out int rewrites, out int[] ports)
+    {
+        try
+        {
+            var (localised, count, found) = Rewrite(connectionString, service, @namespace);
+
+            rewrites = count;
+            ports = found;
+
+            return localised;
+        }
+        catch (RegexMatchTimeoutException ex)
+        {
+            // A named failure rather than a stack trace out of the callback Aspire is resolving.
+            // Reachable only for a value shaped to be pathological, whose author already owns the
+            // credential in it — but what the dashboard shows is the message, so there should be one.
+            throw new KubernetesSecretException(
+                "Rewriting the in-cluster host in the fetched connection string took too long and was abandoned. "
+                + "The value is shaped in a way this cannot scan quickly; a per-field '${secret:...}' template "
+                + "avoids the rewrite entirely.",
+                ex);
+        }
+    }
+
+    /// <summary>
+    /// Rewrites every in-cluster host, and reports the ports the rewritten hosts are addressed on.
+    /// </summary>
+    /// <remarks>
+    /// <b>Region by region, not prefix by prefix.</b> A prefix-anchored rewrite finds the host a
+    /// keyword or a <c>//</c> introduces and stops there — but a host list carries the rest after a
+    /// comma with nothing in front of them, so <c>Server=orders,orders</c> and a three-node
+    /// <c>mongodb://…orders:27017,orders:27018,orders:27019/…</c> left every host but the first
+    /// addressed at the cluster, while the "something was rewritten" check counted one and passed.
+    /// So the prefix now selects a <em>region</em> — everything up to the <c>;</c> that ends a
+    /// keyword's value, or to the <c>/</c> that ends a URI's authority — and every host in it is
+    /// rewritten.
+    /// <para>
+    /// The ports come from the same pass, read off what follows each host that was actually
+    /// rewritten. Scanning the whole string for a port instead finds whichever number appears first,
+    /// which is a decoy in <c>Password=Port=9999!;Server=orders,1433</c> and a false pass in
+    /// <c>Options=Port=1433;Server=orders,9999</c>.
+    /// </para>
+    /// </remarks>
+    private static (string Localised, int Rewrites, int[] Ports) Rewrite(
+        string connectionString, string service, string @namespace)
+    {
+        var replaced = 0;
+        var ports = new List<int>();
+
+        var host = $@"(?<![\w.-])(?:{Regex.Escape(service)}"
+            + $@"(?:\.{Regex.Escape(@namespace)}(?:\.svc(?:\.cluster\.local)?)?)?)"
+            // Either a trailing dot that ends the name — the absolute form, which resolves the same
+            // — or no host character at all after it. Written as two alternatives because the dot
+            // has to be consumed in the first case and refused in the second, where it would mean
+            // the name continues into a namespace this is not looking for.
+            + @"(?:\.(?![\w-])|(?![\w.-]))";
+
+        var localised = Regex.Replace(
+            connectionString,
+            $"(?<lead>{Keyword})(?<region>[^;]*)"
+                + $"|(?<lead>//(?:[^/@;\\s]*@)?)(?<region>[^/?;\\s]*)",
+            region =>
+            {
+                var rewritten = Regex.Replace(
+                    region.Groups["region"].Value,
+                    host,
+                    _ =>
+                    {
+                        replaced++;
+                        return "localhost";
+                    },
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                    TimeSpan.FromSeconds(1));
+
+                foreach (Match addressed in AddressedPort().Matches(rewritten))
+                {
+                    if (int.TryParse(addressed.Groups["port"].ValueSpan, CultureInfo.InvariantCulture, out var port))
+                    {
+                        ports.Add(port);
+                    }
+                }
+
+                return region.Groups["lead"].Value + rewritten;
+            },
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+            TimeSpan.FromSeconds(1));
+
+        // A port written as its own field rather than beside the host, which is how Npgsql and most
+        // keyword dialects spell it: 'Host=orders;Port=5432'. Anchored to the start of a field, so
+        // that a 'Port=' appearing inside some other field's *value* — a password of 'Port=9999!' —
+        // is not read as one. Only asked once the hosts are known, so a string this does not
+        // address at all contributes nothing.
+        if (replaced > 0)
+        {
+            foreach (Match field in PortField().Matches(localised))
+            {
+                if (int.TryParse(field.Groups["port"].ValueSpan, CultureInfo.InvariantCulture, out var port))
+                {
+                    ports.Add(port);
+                }
+            }
+        }
+
+        return (localised, replaced, [.. ports]);
+    }
+
+    /// <summary>A port written as its own field, anchored so a value containing one is not read.</summary>
+    [GeneratedRegex(@"(?:\A|;)\s*Port\s*=\s*(?<port>\d{1,5})(?!\d)", RegexOptions.IgnoreCase)]
+    private static partial Regex PortField();
+
+    /// <summary>The port a rewritten host is addressed on, in either shape a host list writes it.</summary>
+    /// <remarks>
+    /// <c>:</c> in a URI and most keyword dialects, <c>,</c> in SQL Server's
+    /// <c>Server=tcp:host,1433</c>. Read only inside a host region, so a <c>Port=</c> elsewhere in
+    /// the string cannot be mistaken for one.
+    /// </remarks>
+    [GeneratedRegex(@"localhost[:,](?<port>\d{1,5})(?!\d)", RegexOptions.IgnoreCase)]
+    private static partial Regex AddressedPort();
+
+    /// <summary>
+    /// The places a connection string introduces a host, and how far that host's region reaches.
+    /// </summary>
+    /// <remarks>
+    /// Case-insensitively, because DNS is: a secret naming <c>Orders-PG</c> reaches the same service
+    /// as one naming <c>orders-pg</c>, and leaving the first unrewritten would send credentials into
+    /// the cluster's address space.
+    /// <para>
+    /// A URI's region starts after the optional user information, which is what keeps a user name
+    /// equal to the service name out of the rewrite: in
+    /// <c>postgresql://orders:pw@orders:5432/db</c> the first <c>orders</c> is the user and the
+    /// second is the host. A keyword's region ends at the <c>;</c> that ends its value, so nothing
+    /// in another field can be rewritten or read as a port.
+    /// </para>
+    /// </remarks>
+    private const string Keyword =
+        @"(?:\A|[;,\s])\s*(?:Host|Hostname|Server|Data\s?Source|Addr|Address)\s*=\s*";
 
     /// <summary>
     /// The configuration key one of this block's fields is read from, for a message that has to
@@ -415,7 +924,12 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     {
         try
         {
-            return Credentials.Replace(connectionString, "***");
+            // A '${secret:...}' is not a credential — it is the developer's own placeholder, naming
+            // a value that lives in the cluster and is not in this string at all. Hiding it would
+            // hide the one part of the template the reader needs to see to understand why the
+            // message fired, and would call their syntax a leak.
+            return Credentials.Replace(
+                connectionString, match => IsSecretPlaceholder(match.Value) ? match.Value : "***");
         }
         catch (RegexMatchTimeoutException)
         {
@@ -436,11 +950,12 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     /// database while reporting every resource healthy. The tunnel would sit alongside, forwarding a
     /// port nothing dials.
     /// <para>
-    /// The whole-string secret form is the one template that will legitimately carry no
+    /// The whole-string secret form is the one template that legitimately carries no
     /// <c>${port}</c> — it arrives already addressed, and is answered by forwarding the same port
-    /// number locally rather than by substitution. That form needs secrets, which this source does
-    /// not read yet, so today every template that reaches here without a <c>${port}</c> is a
-    /// mistake.
+    /// number locally rather than by substitution. Stage 3 made that reachable, so this refusal is
+    /// no longer asked of every template without a <c>${port}</c>: the caller exempts whole-string
+    /// mode before getting here, and what still reaches this is a template that names no port and
+    /// has no secret to have carried one.
     /// </para>
     /// <para>
     /// Two mistakes, which is why the message names both. The template may never have had a
