@@ -27,4 +27,6 @@ internal sealed class BackingServiceDeveloperConfig
     public string Source { get; set; } = "";
 
     public DirectDeveloperConfig Direct { get; set; } = new();
+
+    public KubernetesBackingServiceDeveloperConfig Kubernetes { get; set; } = new();
 }

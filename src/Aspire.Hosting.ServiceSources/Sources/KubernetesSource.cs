@@ -63,20 +63,10 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
                 $"Service '{serviceName}': port value '{remotePort}' is not a valid port (must be between 1 and 65535).");
         }
 
-        var @namespace = config.Kubernetes.Namespace ?? "default";
-
         localPort = portAllocator.AllocatePort();
 
-        return
-        [
-            "port-forward",
-            $"svc/{kubernetes.Service}",
-            $"{localPort}:{remotePort}",
-            "--context",
-            config.Kubernetes.Context,
-            "--namespace",
-            @namespace,
-        ];
+        return KubectlPortForward.Args(
+            kubernetes.Service!, localPort, remotePort, config.Kubernetes.Context, config.Kubernetes.Namespace);
     }
 
     /// <summary>
