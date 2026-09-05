@@ -15,7 +15,9 @@ nothing will fail to build to warn you.
 
 A patch on top of `0.4.0`, cut from the `release/0.4.x` branch off the `v0.4.0` tag rather than
 from `main`: `main` has moved on to changes a patch must not carry. One configuration stops
-working, and it is the one the fix is about — see **Changed**.
+working, and it is the `project` fix that stops it — see **Changed**. The service-name fix below
+turns away no catalog that ever started: those names were already refused, one clone later, by
+Aspire's own resource-name validation.
 
 ### Changed
 
@@ -47,8 +49,8 @@ working, and it is the one the fix is about — see **Changed**.
   did the same bare combine; both now go through the lexical confinement `java.jarPath` has always
   had, in one place they share, so the two cannot come to different conclusions about the same
   value. (`javascript.appDirectory` is confined too, but by a resolved check of its own rather than
-  by this one.) An absolute path is reported as absolute and a
-  climbing one as pointing outside the repository, and neither reaches MSBuild.
+  by this one.) An absolute path is reported as absolute and a climbing one as pointing outside the
+  repository, and neither reaches MSBuild.
 
   Consistency and defence in depth rather than a boundary that moves: `kind: dotnet` builds the
   checkout's own code regardless — nobody crosses a line here who was not already across it. What
@@ -70,6 +72,37 @@ working, and it is the one the fix is about — see **Changed**.
   required key it is, naming the service: YamlDotNet parses an empty scalar as null rather than as
   `""`, which in `0.4.0` reached `Path.Combine` and came back as an `ArgumentNullException` naming
   neither.
+
+- **A service name is no longer able to place its checkout outside `.servicesources/checkouts/`**
+  ([#224]). The name is used verbatim as the directory the clone goes into, so one containing `..`
+  put the checkout somewhere else — outside the ignore file and the build-barrier files this
+  package writes into that directory precisely to keep a checkout out of the AppHost's
+  source-control status and out of its build settings. The name is now required to be a single
+  directory name of its own: no `/` or `\` separator, no `:`, and not a name made only of dots and
+  spaces. A well-formed name is unaffected.
+
+  Two routes reached it, and neither was checked. The speculative prefetch enumerates the keys of
+  `servicesources.local.json` directly and never saw any validation at all; it now skips a key it
+  cannot use rather than reporting it, matching the filters either side of it — speculation about
+  a service the AppHost may never mention must never be what fails an `AddService()` call. The
+  ordinary `AddService(name)` route looked safe on the strength of Aspire's `[ResourceName]`
+  attribute, but that is an analyzer attribute, and the runtime validation behind it happens when
+  the resource is added to the application model — which is *after* the checkout it needs has been
+  cloned. Both now go through one refusal, in the function that builds the path, which names the
+  service and the two files to rename it in.
+
+  The rule is deliberately lexical rather than a resolved path comparison, and rejects `".. "`,
+  `"..."` and `". "` as well as `"."` and `".."`. Windows strips trailing dots and spaces from a
+  path component, so none of those is a directory of its own there — what such a name resolves to
+  is never a checkout by that name. On Linux and macOS each is an ordinary directory name. Judging
+  them the same way everywhere keeps one verdict for a file a whole team shares, and keeps the
+  Windows-only cases testable on Linux.
+
+  Reaching either needed write access to `servicesources.yaml` — which is committed, shared, and
+  as trusted as the AppHost's own source — together with a matching entry in the developer
+  configuration, which can equally arrive from `appsettings`, user secrets, an environment variable
+  or the command line. So this is hardening rather than a hole reachable from outside. Found during
+  a security review.
 
 ## [0.4.0] - 2026-09-03
 
@@ -701,6 +734,7 @@ Targets `net10.0`.
 [#171]: https://github.com/flojon/aspire-servicesources/issues/171
 [#180]: https://github.com/flojon/aspire-servicesources/pull/180
 [#222]: https://github.com/flojon/aspire-servicesources/issues/222
+[#224]: https://github.com/flojon/aspire-servicesources/issues/224
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
