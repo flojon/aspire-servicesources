@@ -423,7 +423,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         if (string.IsNullOrWhiteSpace(project))
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': 'project' is required for a \"local\" service of kind 'dotnet'. It names "
+                $"Service '{serviceName}': 'project' is required for a 'local' service of kind 'dotnet'. It names "
                 + "the project file to run, relative to the service's checkout — for example "
                 + "'src/Orders.Api/Orders.Api.csproj'.");
         }
