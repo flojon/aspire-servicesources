@@ -289,22 +289,44 @@ internal sealed partial class KubernetesBackingServiceSource(
     {
         var parameterName = ParameterName(name, secret);
 
+        var origin = new SecretParameterOrigin(name, secret.Name, secret.Key);
+
         // The same placeholder written twice is one value, so it is one parameter. Adding it twice
         // would throw on the duplicate name — naming a resource the developer never wrote — for a
         // template that is perfectly ordinary: a connection string that names the host and a
         // failover host carries the same credential twice.
-        if (builder.Resources.OfType<ParameterResource>().FirstOrDefault(p => p.Name == parameterName)
+        //
+        // Matched on what the parameter was made FOR, not on the name it derived. The name joins
+        // three parts with hyphens and the join is ambiguous — backing service 'db' with key 'b-c'
+        // and backing service 'db-a' with key 'c' both read as 'db-a-b-c' — so trusting the name
+        // would hand one backing service another's credential, silently, where before there was at
+        // least a duplicate-name failure. Aspire folds case in a resource name, so the lookup does
+        // too.
+        if (builder.Resources.OfType<ParameterResource>()
+                .FirstOrDefault(p => string.Equals(p.Name, parameterName, StringComparison.OrdinalIgnoreCase))
             is { } existing)
         {
+            if (!existing.Annotations.OfType<SecretParameterOrigin>().Contains(origin))
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Backing service '{name}': the placeholder '{secret.AsWritten}' derives the parameter name "
+                    + $"'{parameterName}', which another resource in this AppHost already uses for something else. "
+                    + "The name is the backing service, the secret and the key joined by hyphens, so two different "
+                    + "placeholders can spell it the same way. Rename the backing service, or use a secret or key "
+                    + "that does not collide.");
+            }
+
             return builder.CreateResourceBuilder(existing);
         }
 
         try
         {
-            return builder.AddParameter(
-                parameterName,
-                () => Fetch(name, service, context, @namespace, secret, wholeSecret, remotePort),
-                secret: true);
+            return builder
+                .AddParameter(
+                    parameterName,
+                    () => Fetch(name, service, context, @namespace, secret, wholeSecret, remotePort),
+                    secret: true)
+                .WithAnnotation(origin);
         }
         catch (ArgumentException ex)
         {
@@ -322,6 +344,17 @@ internal sealed partial class KubernetesBackingServiceSource(
                 ex);
         }
     }
+
+    /// <summary>
+    /// What a secret parameter was created for, so that reusing one can be sure it is the same.
+    /// </summary>
+    /// <remarks>
+    /// The derived name cannot answer that question: it joins three parts with hyphens, and the
+    /// join is ambiguous. Carried on the resource rather than in a table here because this source is
+    /// one instance shared by every AppHost in the process, and the answer belongs to one model.
+    /// </remarks>
+    private sealed record SecretParameterOrigin(string BackingService, string SecretName, string Key)
+        : IResourceAnnotation;
 
     /// <summary>
     /// The parameter name one placeholder derives, in the characters Aspire allows.
@@ -482,7 +515,7 @@ internal sealed partial class KubernetesBackingServiceSource(
     }
 
     /// <summary>The port a localised connection string addresses, in either shape it is written.</summary>
-    [GeneratedRegex(@"(?:localhost:|\bPort\s*=\s*)(?<port>\d{1,5})", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?:localhost[:,]|\bPort\s*=\s*)(?<port>\d{1,5})(?!\d)", RegexOptions.IgnoreCase)]
     private static partial Regex SecretPort();
 
     /// <summary>
@@ -525,24 +558,53 @@ internal sealed partial class KubernetesBackingServiceSource(
     private static string ToLocalhost(
         string connectionString, string service, string @namespace, out int rewrites)
     {
-        var count = 0;
+        var host = $@"(?:{Regex.Escape(service)}(?:\.{Regex.Escape(@namespace)}(?:\.svc(?:\.cluster\.local)?)?)?)"
+            + @"(?![\w.-])";
+
+        try
+        {
+            var (localised, count) = Rewrite(connectionString, host);
+
+            rewrites = count;
+
+            return localised;
+        }
+        catch (RegexMatchTimeoutException ex)
+        {
+            // A named failure rather than a stack trace out of the callback Aspire is resolving.
+            // Reachable only for a value shaped to be pathological, whose author already owns the
+            // credential in it — but what the dashboard shows is the message, so there should be one.
+            throw new KubernetesSecretException(
+                "Rewriting the in-cluster host in the fetched connection string took too long and was abandoned. "
+                + "The value is shaped in a way this cannot scan quickly; a per-field '${secret:...}' template "
+                + "avoids the rewrite entirely.",
+                ex);
+        }
+    }
+
+    /// <summary>One pass of the host rewrite, and how many hosts it replaced.</summary>
+    private static (string Localised, int Rewrites) Rewrite(string connectionString, string host)
+    {
+        var replaced = 0;
 
         var localised = Regex.Replace(
             connectionString,
-            HostPrefix
-                + $@"(?:{Regex.Escape(service)}(?:\.{Regex.Escape(@namespace)}(?:\.svc(?:\.cluster\.local)?)?)?)"
-                + @"(?![\w.-])(?![^/@]*@)",
+            // Three ways a host is introduced, each with the tail it needs. Written out rather than
+            // shared because the '//' branch is the only one that has to look ahead for an '@', and
+            // applying that lookahead to the others made a password containing '@' suppress every
+            // rewrite in the string.
+            $"(?<prefix>{Keyword})(?:{host})"
+                + $"|(?<prefix>{UriAuthority})(?:{host})"
+                + $"|(?<prefix>//)(?:{host})(?![^/@\\s;]*@)",
             match =>
             {
-                count++;
+                replaced++;
                 return match.Groups["prefix"].Value + "localhost";
             },
-            RegexOptions.IgnoreCase,
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
             TimeSpan.FromSeconds(1));
 
-        rewrites = count;
-
-        return localised;
+        return (localised, replaced);
     }
 
     /// <summary>
@@ -559,8 +621,21 @@ internal sealed partial class KubernetesBackingServiceSource(
     /// also the database's user name is the ordinary Postgres shape.
     /// </para>
     /// </remarks>
-    private const string HostPrefix =
-        @"(?<prefix>(?:\A|[;,\s])\s*(?:Host|Hostname|Server|Data\s?Source|Addr|Address)\s*=\s*|@|//)";
+    private const string Keyword =
+        @"(?:\A|[;,\s])\s*(?:Host|Hostname|Server|Data\s?Source|Addr|Address)\s*=\s*(?:tcp:)?";
+
+    /// <summary>
+    /// The <c>@</c> that separates a URI's user information from its host, and only that one.
+    /// </summary>
+    /// <remarks>
+    /// A bare <c>@</c> is not enough: a keyword connection string writes
+    /// <c>User ID=sa@contoso.com</c>, and treating that <c>@</c> as a host introducer rewrites the
+    /// user's domain while leaving the real host alone — a corrupting rewrite that also passes the
+    /// "something was rewritten" check. What makes an <c>@</c> a URI authority is a preceding
+    /// <c>//</c> with no <c>;</c> or space between, which is what this looks behind for. The bound
+    /// keeps the lookbehind from scanning an arbitrarily long string.
+    /// </remarks>
+    private const string UriAuthority = @"(?<=//[^;\s/]{0,512})@";
 
     /// <summary>
     /// The configuration key one of this block's fields is read from, for a message that has to

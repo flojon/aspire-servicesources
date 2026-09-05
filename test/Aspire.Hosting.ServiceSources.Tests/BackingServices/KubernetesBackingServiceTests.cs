@@ -998,7 +998,47 @@ public class KubernetesBackingServiceTests
         var parameter = Assert.Single(builder.Resources.OfType<ParameterResource>());
 
         Assert.True(parameter.Secret);
-        Assert.DoesNotContain(parameter.Name, ["_", "."], StringComparer.Ordinal);
+
+        // Character by character, because the collection overload of DoesNotContain would bind
+        // instead and assert that a two-element set does not contain the name, which is true
+        // whatever the name is.
+        Assert.DoesNotContain('_', parameter.Name);
+        Assert.DoesNotContain('.', parameter.Name);
+        Assert.DoesNotContain("--", parameter.Name, StringComparison.Ordinal);
+        Assert.False(parameter.Name.EndsWith('-'));
+    }
+
+    /// <summary>
+    /// An <c>@</c> elsewhere in the value does not suppress the rewrite, and is not itself rewritten.
+    /// </summary>
+    /// <remarks>
+    /// The guard that keeps a URI's user name out of the rewrite has to apply to the URI form only.
+    /// Applied to a keyword connection string it reads any later <c>@</c> — a generated password
+    /// containing one, or <c>User Id=admin@contoso.com</c> — as a reason to rewrite nothing, which
+    /// then trips the "nothing was rewritten" refusal and blames the one setting that is right.
+    /// </remarks>
+    [Theory]
+    [InlineData("Host=orders;Port=5432;Password=p@ssword", "Host=localhost;Port=5432;Password=p@ssword")]
+    [InlineData(
+        "Host=orders;Port=5432;User Id=admin@contoso.com",
+        "Host=localhost;Port=5432;User Id=admin@contoso.com")]
+    [InlineData(
+        "Server=tcp:orders,5432;User ID=sa@orders;Password=x",
+        "Server=tcp:localhost,5432;User ID=sa@orders;Password=x")]
+    [InlineData(
+        "Data Source=orders;Port=5432;Uid=x@y;Server=orders",
+        "Data Source=localhost;Port=5432;Uid=x@y;Server=localhost")]
+    public async Task WholeStringSecret_RewritesTheHostAndOnlyTheHost(string fetched, string expected)
+    {
+        var builder = CreateBuilder();
+
+        var db = Resolve(
+            builder,
+            Config(service: "orders", port: 5432, connectionString: "${secret:cs:connectionString}"),
+            allocator: new OccupiedPortAllocator(occupied: -1),
+            secretReader: new FakeSecretReader(fetched));
+
+        Assert.Equal(expected, await db.Resource.ConnectionStringExpression.GetValueAsync(default));
     }
 
     /// <summary>
