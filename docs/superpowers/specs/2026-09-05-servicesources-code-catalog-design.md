@@ -3,8 +3,10 @@
 **Date:** 2026-09-05
 **Status:** Draft — for review before an implementation plan is written. Nothing here has shipped.
 Revised 2026-09-05 after two reviews: the ordering rule was built on a miscounted set of catalog
-readers, the `servicesources.local.json` requirement was left unsaid, and four ATS shapes this API
+readers, the `servicesources.local.json` requirement was left unsaid, and five ATS shapes this API
 depends on turn out never to have been measured. All three are corrected below.
+Revised again the same day after a second round, which found that an `OrdinalIgnoreCase` catalog
+changes lookup for existing yaml AppHosts — see finding 11.
 **Resolves:** GitHub issue #134 (the service catalog should be authorable in the AppHost's own
 language, so `servicesources.yaml` becomes optional rather than required).
 **Would also resolve:** #73 (split the yaml DTO from the catalog domain model) — see
@@ -111,8 +113,9 @@ developer has no catalog at all and deserves to be told both ways of getting one
 
 **Adding a property to `ServiceMetadata` silently widens the accepted yaml schema and silently
 removes a name from the kind registry's allowed set. Adding one to `ServiceCatalog` widens the
-accepted root keys.** The second is the one that constrains composition: the merged dictionary
-cannot simply be `ServiceCatalog.Services` retyped, because `ServiceCatalog` *is* the root schema.
+accepted root keys.** Separately, `ServiceCatalog.Services` cannot simply be retyped to hold the
+domain type: `ServiceCatalogLoader.cs:60` binds `ServiceCatalog` with YamlDotNet directly, so its
+value type must stay the yaml DTO. The merged map therefore needs a container of its own.
 
 Three things a code-authored entry needs that yaml must not see:
 
@@ -120,11 +123,19 @@ Three things a code-authored entry needs that yaml must not see:
 2. `KindOptions` — already-typed options handed straight to the handler (finding 6).
 3. A **typed** `PrepareMode?`. `PrepareMetadata.Mode` is `string?` (`Config/PrepareMetadata.cs:68`)
    because yaml has to reject a bad spelling by name; a code API takes the enum and has nothing to
-   parse.
+   parse. The enum↔string boundary moves to `ToDefinition()`, which calls
+   `PrepareModes.Parse(serviceName, mode, "prepare.mode")` — keeping the `writtenAt` argument that
+   lets the message distinguish the catalog's `prepare.mode` from the developer file's
+   `local.prepare.mode` (`Prepare/PrepareMode.cs:83-104`). The developer half stays where it is, in
+   `PreparePlan` (`:252`); only the catalog half moves earlier, so a bad spelling in yaml is now
+   rejected at catalog load rather than at plan time.
 
-And one the loader does today that a code path would otherwise skip silently: `ServiceCatalogLoader.Load`
-normalizes a blank `kind:` back to `"dotnet"`. A path that bypasses the loader has no such step and
-would produce `Kind == null`.
+A fourth belongs on the conversion rather than on either type: `ServiceCatalogLoader.cs:87-92`
+normalizes a blank `kind:` back to `"dotnet"`, undoing YamlDotNet assigning null over the field
+initializer. That is yaml-specific cleanup — a code path never sees it, because it never runs the
+deserializer — and it is the kind of step that belongs in `ToDefinition()`. (It is *not* an argument
+for the split: `ServiceMetadata.Kind` is non-nullable and initialized to `"dotnet"` at
+`Config/ServiceMetadata.cs:26`, so a bypassing path gets `"dotnet"`, not null.)
 
 Together these force the DTO/domain split. Note this is a *different* argument from #71's: the
 [ATS findings](2026-08-30-typed-catalog-ats-findings.md) are explicit (lines 139-141) that the split
@@ -142,14 +153,16 @@ where the package's central idea lives. Hence `With*` — see [The authoring API
 which also gives the method → `source`-value mapping, since the method names must not become a fifth
 vocabulary for a four-value set.
 
-### 5. Sixteen source files hardcode `"servicesources.yaml"` in error text
+### 5. Nine source files put `"servicesources.yaml"` into error text
 
 Reachable for a code-declared service and each naming a file that need not exist —
 `ServiceSourcesConfigCache.cs:71` ("was not found in 'servicesources.yaml'"),
 `DeveloperConfiguration.cs:272,275` (`AmbiguousCatalogSpellingError`, which tells you to *rename them
 in 'servicesources.yaml'*), `ContainerSource.cs:38,42`, `KubernetesSource.cs:58,91`,
 `UrlSource.cs:286`, `Java/JavaKindOptions.cs:67-68`, `EndpointScheme.cs:58`,
-`ServiceEndpointExtensions.cs:100`, among others.
+`ServiceEndpointExtensions.cs:100`. (Sixteen files mention the name; the other seven do so only in
+XML doc comments, and `ServiceSourcesConfigCache.cs:156` is the `Path.Combine`. Only the nine are
+what the guard test can hold honest.)
 
 `AmbiguousCatalogSpellingError` is the worst: two names differing only by case become trivially
 authorable in code, and the developer is sent to edit a yaml file they never created. This is why
@@ -177,22 +190,23 @@ if (rawConfig is not null and not IDictionary) throw MismatchError(); // authore
 
 The middle branch matters: without it a `JavaScriptKindOptions` reaching `Parse<JavaKindOptions>`
 falls into the existing "must be a block of key/value pairs, but found the scalar
-`Aspire.Hosting.ServiceSources.Java.JavaKindOptions`" message — advice about yaml indentation for a
+`Aspire.Hosting.ServiceSources.JavaScript.JavaScriptKindOptions`" message — advice about yaml indentation for a
 service with no yaml. The new error names both types instead.
 
 Two consequences to record rather than discover:
 
 - **`LocalKindConfig` is public** (`LocalKindConfig.cs:13`), so this is a public *behavioural*
   change even though no signature moves. It belongs in the CHANGELOG under `### Changed`.
-- The round-trip hands `Validate`, `Resolve` and `ResolveDeferred` a **fresh** instance each time
-  (`JavaKindOptions.cs:47-53` relies on the parse being "cheap and side-effect free"). The
-  pass-through shares one instance across all three. Kind handlers must not mutate their options —
-  none do today; the XML doc must say so.
+- The round-trip hands `Validate`, `Resolve` and `ResolveDeferred` a **fresh** instance each time;
+  the pass-through shares one. This does not reach the `java` kind, which re-wraps into a new
+  `ValidatedJavaKindOptions` on every call (`Java/JavaKindOptions.cs:80`), but it does reach
+  `JavaScript/JavaScriptLocalKind.cs:325`, which uses the `Parse<T>` result directly. Kind handlers
+  must not mutate their options — none do today; the XML doc must say so.
 
 `ILocalResourceKind`'s signature stays untouched, so there is no repeat of #63's silent-`Validate`
 migration.
 
-### 7. ATS: the shipped surface is the precedent, and four shapes this API needs were never measured
+### 7. ATS: the shipped surface is the precedent, and five shapes this API needs were never measured
 
 The repo already exports a lambda-taking method with the exact flag this design needs
 (`BackingServiceBuilderExtensions.cs:149`), and the generated SDK in the sample proves the projection:
@@ -210,7 +224,7 @@ here — the catalog builders return *handles*, not resource builders — and in
 same document shows the bare-interface return type-checks clean once any export declares such a
 receiver, which is why the shipped `AddService` is green in CI today.
 
-**But four shapes this design depends on are in neither findings document:**
+**But five shapes this design depends on are in neither findings document:**
 
 | Shape | Where this design uses it |
 | --- | --- |
@@ -228,7 +242,7 @@ extension methods, and a different method name (`Define`).
 All attributes and properties this needs exist in the repo's floor, **Aspire.Hosting 13.5.2**:
 `AspireExportAttribute`, `AspireDtoAttribute`, `ExposeMethods`, `ExposeProperties`,
 `RunSyncOnBackgroundThread`, `MethodName` (verified in the packaged
-`Aspire.Hosting.xml`, lines 12005-12214). Nothing needs a version bump.
+`Aspire.Hosting.xml`, lines 11982-12235). Nothing needs a version bump.
 
 ### 8. Verifying the TypeScript half needs a CLI at or above the floor — and it works
 
@@ -242,7 +256,7 @@ for this. With `aspire.cli` 13.5.3 installed to a tool path, `aspire restore --n
 --nologo` followed by `npx tsc --noEmit -p tsconfig.apphost.json` on `samples/DemoAppHostTypeScript`
 is **clean**. So the stage-gate harness is confirmed working locally before anything depends on it.
 The whole `.aspire/` directory must be deleted between runs, not just `modules/`
-(`ci.yml:421-427`, microsoft/aspire#19603).
+(`ci.yml:420-424`, microsoft/aspire#19603).
 
 ### 9. Every service still needs a `source`, and there is no default
 
@@ -274,6 +288,25 @@ in [Testing](#testing) — the same shape as
 `test/…/ServiceConfigurationExportsTests.cs`, whose `ExportedMethods()` reflects only over
 `ServiceConfigurationExports` and therefore covers neither `AddService` nor `AddBackingService`
 today.
+
+### 11. Case-insensitive name comparison cannot be delegated to the dictionary
+
+`ServiceCatalog.Services` is `Ordinal`, so a *yaml* catalog can legally declare both `orders:` and
+`Orders:`; both survive the load, and `DeveloperConfiguration.CanonicalizeToCatalog`
+(`Config/DeveloperConfiguration.cs:234-249`) reports it at `:245` as
+`AmbiguousCatalogSpellingError`. There is a live test for exactly that
+(`test/…/Config/DeveloperConfigurationTests.cs:305-325`).
+
+So building the merged map as `new Dictionary<string, ServiceDefinition>(OrdinalIgnoreCase)` breaks
+two things at once. That yaml throws a raw `ArgumentException` on the second key before `ReadFrom` is
+ever reached, replacing a good error with a bad one; and `ResolveService`'s lookup
+(`ServiceSourcesConfigCache.cs:68`) becomes case-insensitive, so `AddService("Orders")` against a
+yaml `orders:` goes from "not found" to resolving — a silent behaviour change for existing yaml
+AppHosts, which is acceptance criterion 3.
+
+**The merge therefore compares `OrdinalIgnoreCase` explicitly and keeps an `Ordinal` map.** Each
+collision gets the error that already fits it: code-vs-yaml is the duplicate error, yaml-vs-yaml
+stays `AmbiguousCatalogSpellingError`, code-vs-code is caught at the second `AddService` call.
 
 ---
 
@@ -313,8 +346,15 @@ AddServiceCatalog(…) ──> ServiceDefinitionBuilder ────────
 | `Sources/KubernetesSource.cs` | 10, 41, 86 |
 | `Sources/UrlSource.cs` | 44, 278 |
 | `Sources/ContainerSource.cs` | 9, 33 |
+| `Config/ServiceCatalogLoader.cs` | 15, 17, 22, 30, 46, 49, 103 (the reflection roots, which must keep pointing at the DTO, and where `ToDefinition()` gets wired) |
 | `Config/ServiceCatalog.cs` | 5, 14 |
-| `IServiceSource.cs` | 16 · `Config/ServiceSourcesConfigCache.cs` | 63 |
+| `Config/ServiceMetadata.cs` | 5 · `Config/RawServiceCatalog.cs` | 6 |
+| `Config/PrepareMetadata.cs` | 9 |
+| `IServiceSource.cs` | 16 |
+| `Config/ServiceSourcesConfigCache.cs` | 63 |
+
+The typed `PrepareMode?` additionally reaches `Prepare/PreparePlan.cs` (`For(…, PrepareMetadata?
+catalog, …)` at `:84-86`, mode parsed at `:252`) and `Prepare/PrepareStep.cs`.
 
 plus **19 test files** that construct or pass `ServiceMetadata` directly, across all three test
 projects. It is a mechanical change, but it is not a small one, and it is why the split is a task of
@@ -389,12 +429,14 @@ entry point does (`ServiceSourcesBuilderExtensions.cs:90,186,213`,
 `BackingServiceBuilderExtensions.cs:162`). Called twice it **appends**, so a helper method can
 contribute entries; a name declared twice across calls is the same duplicate error as any other.
 
-**Names.** `AddService(name)` rejects null, empty and whitespace at the call. The catalog is keyed
-`OrdinalIgnoreCase`, not the `Ordinal` that `ServiceCatalog.Services` uses today, because
-`DeveloperConfiguration` is `OrdinalIgnoreCase` and an ordinal duplicate check would let code
-`Orders` and yaml `orders` both through, only to poison `CanonicalizeToCatalog` and surface much
-later as `AmbiguousCatalogSpellingError` against a yaml file (finding 5). Two code-declared names
-differing only by case are rejected at the second `AddService` call, naming both. `[ResourceName]`
+**Names.** `AddService(name)` rejects null, empty and whitespace at the call. Two code-declared
+names differing only by case are rejected at the second `AddService` call, naming both.
+
+Name comparison across the two catalogs is `OrdinalIgnoreCase`, because `DeveloperConfiguration` is,
+and an ordinal check would let code `Orders` and yaml `orders` both through only to surface much
+later as `AmbiguousCatalogSpellingError` against a yaml file (finding 5). **But the merge must do
+that comparison itself rather than delegating it to an `OrdinalIgnoreCase` dictionary** — see
+finding 11. `[ResourceName]`
 is deliberately **not** used: it is analyzer-only, so it buys nothing at runtime and nothing at all
 through ATS.
 
@@ -409,6 +451,8 @@ public ServiceDefinitionBuilder WithKind(string kind, object? options = null);
 `AddLocalKind` is public, so third parties register kinds; today their options arrive from the yaml
 `<kind>:` block. Without `WithKind` an out-of-tree kind would be unconfigurable from code and
 acceptance criterion 1 ("every source kind") would hold only for the two kinds this package ships.
+`WithKind`'s `options` argument only works once `LocalKindConfig.Parse<T>` has the branches of
+finding 6, which is why both land together in stage 1.
 `AsJava`/`AsJavaScript` are sugar over it, and the README shows the three lines a third-party
 package writes to add its own.
 
@@ -448,7 +492,11 @@ always was.
    what makes that a stated rule instead of a silent loss.
 2. Load `servicesources.yaml` **if it exists**. Absent *and* no code catalog → finding 2's message,
    extended to name both remedies.
-3. Merge into one `OrdinalIgnoreCase` `Dictionary<string, ServiceDefinition>`.
+3. Merge into one map, comparing names `OrdinalIgnoreCase` **explicitly** and routing each kind of
+   collision to its own error (finding 11): code-vs-yaml to the duplicate error below, yaml-vs-yaml
+   to the existing `AmbiguousCatalogSpellingError`, code-vs-code to the `AddService` error above.
+   The map itself stays `Ordinal`, so lookup for an existing yaml AppHost is byte-for-byte what it
+   is today.
 4. Hand the merged key set to `DeveloperConfiguration.ReadFrom` exactly as today, so
    canonical-spelling reconciliation covers code-declared names too.
 
@@ -482,8 +530,7 @@ stated rather than fixed.
 
 **Memory model.** The "already read" flag lives on `ConfigLoader<T>` beside `_loaded`, which is only
 ever touched under `_gate`; the probe takes the same lock. This matters because
-`RunSyncOnBackgroundThread = true` means `AddServiceCatalog` can run on a background thread, and
-`LocalCheckoutPrefetch` is already the one component reading `LoadedFor` off the calling thread.
+`RunSyncOnBackgroundThread = true` means `AddServiceCatalog` can itself run on a background thread.
 
 ---
 
@@ -508,8 +555,11 @@ ever touched under `_gate`; the probe takes the same lock. This matters because
 - `LocalKindConfig.Parse<T>` changes observable behaviour for a public method (finding 6), and kind
   handlers now share one options instance across `Validate`/`Resolve`/`ResolveDeferred` instead of
   getting a fresh parse each time.
-- The domain split touches ten source files and nineteen test files for no behaviour change. That
+- The domain split touches fifteen source files and nineteen test files for no behaviour change. That
   cost is real and is the reason for the staging below.
+- Catalog **name comparison** becomes case-insensitive across the two catalogs while the map itself
+  stays `Ordinal` (finding 11). Nothing about an existing yaml AppHost's lookup changes; the cost is
+  that the merge carries collision handling by hand instead of getting it from a comparer.
 - Two ways to author one catalog is two things to document and two paths to keep tested. The README
   grows; `smoketest-config-layers.sh` grows.
 
@@ -523,8 +573,8 @@ shipped stage 1 as `AddBackingService` with the rest still open):
 | Stage | Contents | Acceptance reached |
 | --- | --- | --- |
 | **0** | Throwaway ATS probe of finding 7's five unmeasured shapes. No shipped code. | — (de-risks stage 1) |
-| **1** | `ServiceDefinition`/`CodeServiceCatalog` split; `AddServiceCatalog` with all four sources **and** `[AspireExport]` on the builders from the start; `WithKind`; yaml optional; duplicate/ordering/name errors; `Origin` threaded into the error strings; C# **and** TypeScript samples with no yaml | Criteria 1, 2, 3 and 4 |
-| **2** | `WithPrepare`; `AsJava`/`AsJavaScript` handles; `LocalKindConfig.Parse<T>` branches | Parity with the yaml loader, closing the gap #134's second comment raises |
+| **1** | `ServiceDefinition`/`CodeServiceCatalog` split; `AddServiceCatalog` with all four sources **and** `[AspireExport]` on the builders from the start; `WithKind` **with** the `LocalKindConfig.Parse<T>` branches it depends on; yaml optional; duplicate/ordering/name/collision errors; `Origin` threaded into the error strings; C# **and** TypeScript samples with no yaml | Criteria 3 and 4 in full; criteria 1 and 2 for the `dotnet` kind |
+| **2** | `WithPrepare`; `AsJava`/`AsJavaScript` handles | Criteria 1 and 2 in full — parity with the yaml loader, closing the gap #134's second comment raises |
 
 The exports move into stage 1 deliberately: they cost nothing at runtime, the whole argument of this
 design rests on the shape crossing ATS, and shipping the public builders in one release and
@@ -545,7 +595,10 @@ Mirroring the repo's layout, `Method_Condition_ExpectedOutcome`:
   `WithKind` carries an arbitrary options object.
 - `test/…/Catalog/CatalogCompositionTests.cs` — code-only, yaml-only, both-disjoint,
   both-overlapping (the duplicate error, asserting **both** sources appear), neither (finding 2's
-  extended message); a code name and a yaml name differing only by case is the duplicate error, not
+  extended message); a yaml catalog declaring `orders:` and `Orders:` still produces
+  `AmbiguousCatalogSpellingError`, not an `ArgumentException` (finding 11); `AddService("Orders")`
+  against a yaml `orders:` still reports not-found; a code name and a yaml name differing only by
+  case is the duplicate error, not
   `AmbiguousCatalogSpellingError`.
 - `test/…/AddServiceCatalogTests.cs` — the ordering error after `AddService`; **no** ordering error
   after `AddBackingService` (finding 1, asserted so the wrong rule cannot creep back); two calls
@@ -553,7 +606,7 @@ Mirroring the repo's layout, `Method_Condition_ExpectedOutcome`:
   registered by the call.
 - `test/…/Catalog/CatalogErrorMessageTests.cs` — the finding-5 guard: for a code-only catalog, **no**
   `ServiceSourcesConfigurationException` message contains the string `servicesources.yaml`. Cheap,
-  and it is the only thing that will keep the sixteen call sites honest as they change.
+  and it is the only thing that will keep the nine call sites honest as they change.
 - `test/…/Config/ServiceCatalogLoaderTests.cs` — extended: a missing file is no longer unconditional
   failure. `Load_EveryKnownPropertyOnOneService_LoadsWithoutError`
   (`Config/ServiceCatalogLoaderTests.cs:386`) stays the schema-completeness guard and gains a sibling
