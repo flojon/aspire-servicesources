@@ -1,11 +1,16 @@
-name: Publish preview package
+name: Post-merge build
 
+# Builds and tests every commit merged into a shipping branch. `main` additionally publishes a
+# prerelease to GitHub Packages; a release branch does not, since it would version-collide with
+# `main`'s prereleases on the feed (see the Publish steps below).
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - 'release/**'
 
 jobs:
-  publish:
+  build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -32,7 +37,9 @@ jobs:
         run: dotnet pack src/Aspire.Hosting.ServiceSources/Aspire.Hosting.ServiceSources.csproj -c Release -o ./artifacts
 
       - name: Add GitHub Packages source
+        if: github.ref == 'refs/heads/main'
         run: dotnet nuget add source --username ${{ github.repository_owner }} --password ${{ secrets.GITHUB_TOKEN }} --store-password-in-clear-text --name github "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
 
       - name: Push
+        if: github.ref == 'refs/heads/main'
         run: dotnet nuget push "./artifacts/*.nupkg" --source github --skip-duplicate --api-key ${{ secrets.GITHUB_TOKEN }}
