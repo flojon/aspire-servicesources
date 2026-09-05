@@ -45,13 +45,28 @@ internal static class LocalGitCheckout
         {
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}' cannot be given a checkout: a service's name is the name of the "
-                + "directory its checkout is cloned into, so it has to be a single directory name — no '/' "
-                + "or '\\' separator, no ':', and not '.' or '..'. Rename the service in "
-                + $"'servicesources.yaml' and '{Config.DeveloperConfiguration.FileName}'.");
+                + "directory its checkout is cloned into, so it has to be a single directory name — "
+                + ContainedNameRuleAndRemedy);
         }
 
         return Path.Combine(ToolDirectory.PathIn(appHostDirectory), "checkouts", serviceName);
     }
+
+    /// <summary>
+    /// The half of a refusal that is the same wherever a name is turned away for not being a path
+    /// segment of its own: what the rule is, and where to change the name.
+    /// </summary>
+    /// <remarks>
+    /// Shared by the two places that refuse so they cannot drift into describing different rules,
+    /// which has happened once already — the rule grew to cover Windows normalization and both
+    /// messages went on naming only <c>.</c> and <c>..</c>, so a developer refused for <c>'.. '</c>
+    /// was handed a list of two forbidden values, neither of them theirs.
+    /// </remarks>
+    public static string ContainedNameRuleAndRemedy =>
+        "no '/' or '\\' separator, no ':', and not a name made only of dots and spaces — Windows "
+        + "strips trailing dots and spaces, leaving '.', '..' or nothing, none of which is a name of "
+        + "its own. Rename the service in 'servicesources.yaml' and "
+        + $"'{Config.DeveloperConfiguration.FileName}'.";
 
     /// <summary>
     /// Whether <paramref name="serviceName"/> can be the single directory name a managed checkout is
@@ -105,11 +120,19 @@ internal static class LocalGitCheckout
             return false;
         }
 
-        // Windows drops trailing dots and spaces from a path component before resolving it, so
-        // ".. ", "..." and ". " all arrive at the filesystem as ".." or ".". An exact test against
-        // "." and ".." would pass every one of them, and the escape would be invisible to a CI that
-        // only runs on Linux. Trim the same characters first: a name that is nothing but dots and
-        // spaces is one of those two however it was spelled, and nothing else can shed a segment.
+        // Windows strips trailing dots and spaces from a path component before resolving it, so a
+        // name made only of those characters is never a directory of its own there: ".. " arrives
+        // as ".." and escapes, while "..." and ". " are left with nothing and land on checkouts/
+        // itself. An exact test against "." and ".." passes all three, and the difference is
+        // invisible to a CI that only runs on Linux, where each is an ordinary directory name.
+        // Trim the same characters first: what is left is what Windows will actually look for, and
+        // only a name that is entirely dots and spaces has nothing left.
+        //
+        // Only what the trimming leaves is judged, so "orders." is accepted. That name is contained
+        // — it is a directory under checkouts/ either way — though on Windows it resolves to the
+        // same directory as "orders", so two entries spelled that way would share one checkout.
+        // Refusing it is a rule about naming rather than about containment, which belongs to
+        // whatever validates the name, not here.
         return serviceName.TrimEnd('.', ' ').Length > 0;
     }
 

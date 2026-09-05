@@ -20,6 +20,13 @@ public class LocalGitCheckoutTests
 
     private static string NewAppHostDirectory() => Directory.CreateTempSubdirectory().FullName;
 
+    /// <summary>
+    /// A directory to compose paths against, never created on disk — for the tests that only ask
+    /// <see cref="LocalGitCheckout.ManagedRepoRoot"/> to build a path. It does no I/O, so a real
+    /// temp directory there would be one more the suite leaves behind for nothing.
+    /// </summary>
+    private static readonly string UnusedAppHostDirectory = Path.Combine(Path.GetTempPath(), "apphost");
+
     [Fact]
     public void IsManagedCheckout_NoPathOverride_IsTrue() =>
         Assert.True(LocalGitCheckout.IsManagedCheckout(Managed()));
@@ -105,10 +112,8 @@ public class LocalGitCheckoutTests
     [InlineData("  ..  ")]
     public void ManagedRepoRoot_ANameThatIsNotADirectoryNameOfItsOwn_IsRefused(string serviceName)
     {
-        var appHostDirectory = NewAppHostDirectory();
-
         var exception = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => LocalGitCheckout.ManagedRepoRoot(appHostDirectory, serviceName));
+            () => LocalGitCheckout.ManagedRepoRoot(UnusedAppHostDirectory, serviceName));
 
         Assert.Contains(serviceName, exception.Message, StringComparison.Ordinal);
     }
@@ -116,10 +121,8 @@ public class LocalGitCheckoutTests
     [Fact]
     public void ManagedRepoRoot_AnOrdinaryName_IsTheCheckoutDirectoryForIt()
     {
-        var appHostDirectory = NewAppHostDirectory();
-
         Assert.Equal(
-            Path.Combine(appHostDirectory, ".servicesources", "checkouts", "orders"),
-            LocalGitCheckout.ManagedRepoRoot(appHostDirectory, "orders"));
+            Path.Combine(UnusedAppHostDirectory, ".servicesources", "checkouts", "orders"),
+            LocalGitCheckout.ManagedRepoRoot(UnusedAppHostDirectory, "orders"));
     }
 }

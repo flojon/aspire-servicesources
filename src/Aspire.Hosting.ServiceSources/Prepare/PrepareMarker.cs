@@ -74,9 +74,8 @@ internal sealed record PrepareMarker(
         {
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}' cannot be prepared: a service's name is used as the name of the "
-                + "file recording that its 'prepare' step ran, so it has to be a single file name — no '/' "
-                + "or '\\' separator, no ':', and not '.' or '..'. Rename the service in "
-                + $"'servicesources.yaml' and '{Config.DeveloperConfiguration.FileName}'.");
+                + "file recording that its 'prepare' step ran, so it has to be a single file name — "
+                + Git.LocalGitCheckout.ContainedNameRuleAndRemedy);
         }
 
         return System.IO.Path.Combine(

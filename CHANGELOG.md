@@ -339,8 +339,8 @@ nothing will fail to build to warn you.
   put the checkout somewhere else — outside the ignore file and the build-barrier files this
   package writes into that directory precisely to keep a checkout out of the AppHost's
   source-control status and out of its build settings. The name is now required to be a single
-  directory name of its own: no `/` or `\` separator, no `:`, and not `.` or `..`. A well-formed
-  name is unaffected.
+  directory name of its own: no `/` or `\` separator, no `:`, and not a name made only of dots and
+  spaces. A well-formed name is unaffected.
 
   Two routes reached the checkout directory, and neither was checked. The speculative prefetch
   enumerates the keys of `servicesources.local.json` directly and never saw any validation at all;
@@ -359,14 +359,18 @@ nothing will fail to build to warn you.
   source-control status, which is the same harm by a different route.
 
   The rule is deliberately lexical rather than a resolved path comparison, and rejects `".. "`,
-  `"..."` and `". "` as well as `"."` and `".."`: Windows strips trailing dots and spaces from a
-  path component before resolving it, so those spellings escape there while naming an ordinary
-  directory elsewhere. Judging them the same way on every platform keeps one verdict for a file a
-  whole team shares, and keeps the Windows-only cases testable on Linux.
+  `"..."` and `". "` as well as `"."` and `".."`. Windows strips trailing dots and spaces from a
+  path component before resolving it, so none of those is a directory of its own there: `".. "`
+  becomes `".."` and escapes, while `"..."` and `". "` are left with nothing and land on the
+  checkouts directory itself. On Linux and macOS each is an ordinary directory name. Judging them
+  the same way everywhere keeps one verdict for a file a whole team shares, and keeps the
+  Windows-only cases testable on Linux.
 
-  Reaching any of this needed write access to `servicesources.yaml` and `servicesources.local.json`,
-  or to the AppHost's own source — all files that are already trusted — so this is hardening rather
-  than a hole reachable from outside. Found during a security review.
+  Reaching any of this needed write access to `servicesources.yaml` — which is committed, shared,
+  and as trusted as the AppHost's own source — together with a matching entry in the developer
+  configuration, which can equally arrive from `appsettings`, user secrets, an environment variable
+  or the command line. So this is hardening rather than a hole reachable from outside. Found during
+  a security review.
 
 - **A field misspelled at a service entry's root now names the field it was reaching for**
   ([#182]). Spelled correctly, a field written flat at the entry root is walked through the move

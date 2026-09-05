@@ -862,12 +862,34 @@ public class CheckoutPreparationTests
     }
 
     /// <summary>
-    /// The second place a service name becomes a path. A <c>local.path</c> service has no checkout
-    /// this package owns, so its marker goes in the tool directory under the service's name — and
-    /// that route never passes <see cref="LocalGitCheckout.ManagedRepoRoot"/>, which is where the
-    /// name is otherwise refused. Without its own check, a traversal name writes the marker into the
-    /// AppHost directory itself: outside `.servicesources`, back inside the AppHost's source-control
-    /// status, which is the harm #224 is about.
+    /// The whole route, not just the function that builds the path. A name that would put the
+    /// marker outside the tool directory is refused before the step runs, and nothing lands in the
+    /// AppHost's own tree — which is the property, and the one a test against
+    /// <see cref="PrepareMarker.LocationFor"/> alone would keep asserting after a refactor stopped
+    /// routing through it. That is the shape of the gap this guard exists to close (#224).
+    /// </summary>
+    [Fact]
+    public void APathCheckout_WhoseNameWouldEscapeTheToolDirectory_IsRefusedBeforeTheStepRuns()
+    {
+        var fixture = NewFixture();
+
+        var exception = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            CheckoutPreparation.Run(
+                "../../evil", Step(), fixture.RepoRoot, fixture.AppHostDirectory,
+                managedCheckout: false, fixture.Git, fixture.Runner, fixture.Sink));
+
+        Assert.Contains("../../evil", exception.Message, StringComparison.Ordinal);
+        Assert.Empty(fixture.Runner.Runs);
+        Assert.False(File.Exists(Path.Combine(fixture.AppHostDirectory, "evil.json")));
+        Assert.False(File.Exists(
+            Path.Combine(Directory.GetParent(fixture.AppHostDirectory)!.FullName, "evil.json")));
+    }
+
+    /// <summary>
+    /// The same refusal at the function that builds the path, over the spellings the route test
+    /// does not enumerate. <c>"..\evil"</c> only escapes on Windows and <c>".. "</c> only after that
+    /// platform's trailing-space trimming, but both are refused everywhere: a name in shared
+    /// configuration cannot mean one thing to one reader and something else to the next.
     /// </summary>
     [Theory]
     [InlineData("../../evil")]
@@ -876,11 +898,10 @@ public class CheckoutPreparationTests
     [InlineData(".. ")]
     public void LocationFor_APathServiceWhoseNameIsNotADirectoryName_IsRefused(string serviceName)
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
-        var theirs = Directory.CreateTempSubdirectory().FullName;
-
+        // Neither directory is created: LocationFor throws before it combines anything, and this
+        // suite already leaves more temp directories behind than it cleans up.
         var exception = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => PrepareMarker.LocationFor(serviceName, theirs, appHostDirectory, managedCheckout: false));
+            () => PrepareMarker.LocationFor(serviceName, "/unused", "/unused", managedCheckout: false));
 
         Assert.Contains(serviceName, exception.Message, StringComparison.Ordinal);
     }
@@ -894,10 +915,8 @@ public class CheckoutPreparationTests
     [Fact]
     public void LocationFor_AManagedCheckout_IsInsideTheCheckoutsOwnGitDirectory()
     {
-        var repoRoot = Directory.CreateTempSubdirectory().FullName;
-
         Assert.Equal(
-            Path.Combine(repoRoot, ".git", "servicesources-prepare.json"),
-            PrepareMarker.LocationFor(ServiceName, repoRoot, "/unused", managedCheckout: true));
+            Path.Combine("/repo", ".git", "servicesources-prepare.json"),
+            PrepareMarker.LocationFor(ServiceName, "/repo", "/unused", managedCheckout: true));
     }
 }
