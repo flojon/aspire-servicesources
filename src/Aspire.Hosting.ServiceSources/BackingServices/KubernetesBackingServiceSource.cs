@@ -393,7 +393,7 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
         // wonder which part of it the package had hidden.
         var note = shown == connectionString || shown == ConnectionStringRedaction.Unscannable
             ? ""
-            : " (values not known to be safe to print are shown as ***)";
+            : " (a value is shown only under a key known to hold no secret; the rest read as ***, which does not mean they were secret)";
 
         return new(
             $"Backing service '{name}': source 'kubernetes' opens a kubectl port-forward on a local port allocated "

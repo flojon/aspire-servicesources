@@ -67,6 +67,11 @@ public class ConnectionStringRedactionTests
     [InlineData("Data Source=user:hunter2@h:1433", "Data Source=***@h:1433")]
     // A query parameter, which the previous blocklist did catch — this must not regress.
     [InlineData("redis://h:6379/0?password=hunter2", "redis://h:6379/0?password=***")]
+    // An option list whose head is an address, which is recognised by shape and kept.
+    [InlineData("localhost:6379,ssl=false,password=hunter2", "localhost:6379,ssl=***,password=***")]
+    // The no-corruption shape without the leading keyword, so the URI branch handles it alone.
+    [InlineData("tcp://db.internal:1433;UID=a@b.com;Password=hunter2",
+                "tcp://db.internal:1433;UID=a@b.com;Password=***")]
     public void ASecretBehindAnUnfamiliarSeparator_IsStillMasked(string connectionString, string expected)
         => Assert.Equal(expected, ConnectionStringRedaction.Apply(connectionString));
 
@@ -84,6 +89,23 @@ public class ConnectionStringRedactionTests
     [InlineData("Rotation Key=abc user=def", "Rotation Key=***")]
     [InlineData("Rotation Key=abc host=db.internal port=5432", "Rotation Key=***")]
     public void APairInsideAnUnrecognisedValue_IsMaskedWithIt(string connectionString, string expected)
+        => Assert.Equal(expected, ConnectionStringRedaction.Apply(connectionString));
+
+    /// <summary>
+    /// Space around the <c>=</c> is layout, and does not hide a pair from the scan.
+    /// </summary>
+    /// <remarks>
+    /// Every keyword dialect trims it, and <c>DbConnectionStringBuilder</c> parses it, so a key that
+    /// is not read as one because a space sits in front of its <c>=</c> takes its value with it —
+    /// into the value of whatever pair came before, where nothing looks at it again. That printed
+    /// the password, and printed it with no note attached, since the result matched the input.
+    /// </remarks>
+    [Theory]
+    [InlineData("Host=localhost;RotationKey = hunter2;Database=orders",
+                "Host=localhost;RotationKey = ***;Database=orders")]
+    [InlineData("Host=h;Rotation Key =hunter2", "Host=h;Rotation Key =***")]
+    [InlineData("Host=localhost ; Rotation Key = hunter2", "Host=localhost ; Rotation Key = ***")]
+    public void SpaceAroundTheEqualsSign_DoesNotHideAPairFromTheScan(string connectionString, string expected)
         => Assert.Equal(expected, ConnectionStringRedaction.Apply(connectionString));
 
     /// <summary>
@@ -161,6 +183,10 @@ public class ConnectionStringRedactionTests
     [InlineData("Data Source=\"C:\\a;b\\x.mdb\";Database=orders")]
     [InlineData("Host=h;Port=5432;")]
     [InlineData("Server=tcp:db.database.windows.net,1433;Initial Catalog=orders;User ID=dev")]
+    // Spacing is the developer's own layout, and comes back exactly as they wrote it.
+    [InlineData("Host = localhost;Port = 5432;Database = orders")]
+    [InlineData("Host=localhost ; Port = 5432")]
+    [InlineData("Host = localhost;Port = ;Database = orders")]
     // Redis and Kafka address a tunnel with a bare host and port and no keys at all.
     [InlineData("localhost:6379")]
     [InlineData("[::1]:6379")]
@@ -232,13 +258,22 @@ public class ConnectionStringRedactionTests
     /// configuration mistake must produce the configuration error, not a stack dump from inside the
     /// code that was building it. Recursion is what makes that a live risk, so this scan has none.
     /// </remarks>
-    [Fact]
-    public void AVeryLargeConnectionString_IsScannedWithoutExhaustingTheStack()
+    [Theory]
+    [InlineData("a://b/?host=")]
+    // A long run of whitespace is the shape that asks "may a pair begin here?" at every position in
+    // it, so it is the one that catches a scan answering that question by walking backwards.
+    [InlineData("Host=h; ")]
+    public void AVeryLargeConnectionString_IsScannedInTimeAndWithoutExhaustingTheStack(string unit)
     {
-        var pathological = string.Concat(Enumerable.Repeat("a://b/?host=", 30_000)) + ";Password=hunter2";
+        var pathological = string.Concat(Enumerable.Repeat(unit, 30_000)) + ";Password=hunter2";
+        var watch = System.Diagnostics.Stopwatch.StartNew();
 
         var redacted = ConnectionStringRedaction.Apply(pathological);
 
+        // Generous by two orders of magnitude against a linear scan, and still far under what
+        // quadratic behaviour costs at this length — the point is the shape of the curve, not the
+        // machine this runs on.
+        Assert.True(watch.ElapsedMilliseconds < 2_000, $"took {watch.ElapsedMilliseconds} ms");
         Assert.DoesNotContain("hunter2", redacted, StringComparison.Ordinal);
     }
 

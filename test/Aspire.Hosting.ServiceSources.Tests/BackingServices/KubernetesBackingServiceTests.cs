@@ -587,7 +587,7 @@ public class KubernetesBackingServiceTests
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => Resolve(builder, Config(connectionString: "Host=db.internal;Rotation Key=30")));
 
-        Assert.Contains("values not known to be safe to print are shown as ***", ex.Message);
+        Assert.Contains("the rest read as ***, which does not mean they were secret", ex.Message);
         Assert.DoesNotContain("credential", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -632,7 +632,6 @@ public class KubernetesBackingServiceTests
         Assert.Contains("1433;UID=a@b.com", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("***", ex.Message);
     }
-
 
     /// <summary>
     /// A whole entry nobody has filled in is answered with a whole entry.
