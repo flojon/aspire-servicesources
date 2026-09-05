@@ -16,23 +16,39 @@ namespace Aspire.Hosting.ServiceSources.Tests.Kubernetes;
 public class KubectlSecretReaderTests
 {
     /// <summary>
-    /// The key is addressed with brackets, not with a dot.
+    /// Every <c>.</c> in the key is escaped, and the key is not wrapped in brackets.
     /// </summary>
     /// <remarks>
-    /// <c>{.data.ca.crt}</c> descends into a field <c>ca</c> that does not exist and prints nothing,
-    /// while exiting 0 — so a key containing a dot would read as a key that is not there. Kubernetes
-    /// allows the dot, and <c>.dockerconfigjson</c> is the API's own key for a pull secret, so the
-    /// dotted form would be wrong for exactly the keys the bracket form exists to serve.
+    /// <b>The bracket form reads as the exact one and is not.</b> kubectl's jsonpath returns empty
+    /// for <c>{.data['ca.crt']}</c> while exiting 0, so a key containing a dot reads as a key that
+    /// is not there — and dotted keys are the ones this has to serve, since
+    /// <c>.dockerconfigjson</c> is the API's own key for a pull secret. Measured against kubectl
+    /// v1.24.3:
+    /// <code>
+    /// -o "jsonpath={.data['ca.crt']}"   # prints nothing, exit 0
+    /// -o 'jsonpath={.data.ca\.crt}'     # prints Q0VSVA==
+    /// </code>
+    /// <para>
+    /// These expectations are the exact strings that were run against that binary, so the assertion
+    /// is a record of a measurement rather than a restatement of the code. Nothing in a unit test
+    /// can run kubectl — that is what let the bracket form ship — so the measurement is written
+    /// down here instead.
+    /// </para>
     /// </remarks>
     [Theory]
-    [InlineData("password", "jsonpath={.data['password']}")]
-    [InlineData("ca.crt", "jsonpath={.data['ca.crt']}")]
-    [InlineData(".dockerconfigjson", "jsonpath={.data['.dockerconfigjson']}")]
-    public void Args_AddressTheKeyWithBrackets(string key, string expected)
+    [InlineData("password", @"jsonpath={.data.password}")]
+    [InlineData("DB_PASSWORD", @"jsonpath={.data.DB_PASSWORD}")]
+    [InlineData("redis-password", @"jsonpath={.data.redis-password}")]
+    [InlineData("ca.crt", @"jsonpath={.data.ca\.crt}")]
+    [InlineData("tls.key", @"jsonpath={.data.tls\.key}")]
+    [InlineData(".dockerconfigjson", @"jsonpath={.data.\.dockerconfigjson}")]
+    public void Args_EscapeEveryDotInTheKeyAndUseNoBrackets(string key, string expected)
     {
         var args = KubectlSecretReader.Args("dev-west", "orders", "orders-creds", key);
+        var written = args[Array.IndexOf(args, "--output") + 1];
 
-        Assert.Equal(expected, args[Array.IndexOf(args, "--output") + 1]);
+        Assert.Equal(expected, written);
+        Assert.DoesNotContain('[', written);
     }
 
     /// <summary>

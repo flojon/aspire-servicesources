@@ -375,16 +375,36 @@ public class ConnectionStringTemplateTests
     [InlineData("${secret:-n:password}")]
     [InlineData("${secret:--namespace:password}")]
     public void Parse_SecretNameThatCouldBeReadAsAnOption_IsRefused(string template) =>
-        Assert.Contains("starting with a letter or a digit", Rejects(template).Message);
+        Assert.Contains("beginning and ending with a letter or a digit", Rejects(template).Message);
+
+    /// <summary>
+    /// A secret's name is narrower than its keys: no upper case and no <c>_</c>.
+    /// </summary>
+    /// <remarks>
+    /// A name is an RFC 1123 subdomain and a key is not, so the two cannot share one check. Verified
+    /// against a cluster: <c>kubectl create secret generic My_Secret</c> and <c>ABCsecret</c> are
+    /// both refused by the API server with "a lowercase RFC 1123 subdomain must consist of …".
+    /// Caught here, the message can name the rule; left to run, it arrives as a "not found" that
+    /// looks exactly like a secret nobody created.
+    /// </remarks>
+    [Theory]
+    [InlineData("${secret:My_Secret:password}")]
+    [InlineData("${secret:ABCsecret:password}")]
+    [InlineData("${secret:app_secrets:password}")]
+    [InlineData("${secret:-leading:password}")]
+    [InlineData("${secret:trailing-:password}")]
+    [InlineData("${secret:trailing.:password}")]
+    public void Parse_SecretNameNoClusterCouldHold_IsRefused(string template) =>
+        Assert.Contains("lower-case letters", Rejects(template).Message);
 
     /// <summary>
     /// A key carrying a quote is refused, because the quote would escape the jsonpath it is put in.
     /// </summary>
     /// <remarks>
-    /// <c>{.data['&lt;key&gt;']}</c> is the exact addressing the reader uses. A <c>'</c> closes it, and a
-    /// jsonpath that fails to <em>execute</em> makes kubectl print the whole object it was given —
-    /// every key of the secret — to standard error, which is reported. Kubernetes admits no quote in
-    /// a key, so this refuses nothing that exists.
+    /// The key is interpolated into the jsonpath the reader runs, and a jsonpath that fails to
+    /// <em>execute</em> makes kubectl print the whole object it was given — every key of the secret
+    /// — to standard error, which is reported. Kubernetes admits no quote, bracket or space in a
+    /// key, so refusing them here costs nothing that exists.
     /// </remarks>
     [Theory]
     [InlineData("${secret:orders-creds:password'][?(@=='x')]['x}")]
@@ -405,7 +425,8 @@ public class ConnectionStringTemplateTests
     [InlineData("${secret:app-secrets:DB_PASSWORD}", "app-secrets", "DB_PASSWORD")]
     [InlineData("${secret:pull:.dockerconfigjson}", "pull", ".dockerconfigjson")]
     [InlineData("${secret:tls-1:tls.key}", "tls-1", "tls.key")]
-    [InlineData("${secret:a.b_c-1:x}", "a.b_c-1", "x")]
+    [InlineData("${secret:a.b-c-1:x}", "a.b-c-1", "x")]
+    [InlineData("${secret:orders-pg-app:Mixed_Case.Key-1}", "orders-pg-app", "Mixed_Case.Key-1")]
     public void Parse_SecretPartsKubernetesAllows_AreAccepted(string template, string name, string key)
     {
         var secret = Assert.IsType<ConnectionStringTemplate.Secret>(Assert.Single(Parse(template).Segments));
