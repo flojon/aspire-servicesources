@@ -880,15 +880,16 @@ public class CheckoutPreparationTests
 
         Assert.Contains("../../evil", exception.Message, StringComparison.Ordinal);
         Assert.Empty(fixture.Runner.Runs);
+
+        // Where this name lands when nothing stops it: the marker path is rooted at
+        // .servicesources/prepare/, so "../../evil" climbs exactly back to the AppHost directory.
         Assert.False(File.Exists(Path.Combine(fixture.AppHostDirectory, "evil.json")));
-        Assert.False(File.Exists(
-            Path.Combine(Directory.GetParent(fixture.AppHostDirectory)!.FullName, "evil.json")));
     }
 
     /// <summary>
     /// The same refusal at the function that builds the path, over the spellings the route test
-    /// does not enumerate. <c>"..\evil"</c> only escapes on Windows and <c>".. "</c> only after that
-    /// platform's trailing-space trimming, but both are refused everywhere: a name in shared
+    /// does not enumerate. <c>"..\evil"</c> is a traversal only on Windows, and <c>".. "</c> is not
+    /// a directory of its own only on Windows, but both are refused everywhere: a name in shared
     /// configuration cannot mean one thing to one reader and something else to the next.
     /// </summary>
     [Theory]

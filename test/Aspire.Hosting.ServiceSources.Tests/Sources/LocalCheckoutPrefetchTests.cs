@@ -412,12 +412,6 @@ public class LocalCheckoutPrefetchTests
         Assert.Null(LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage);
 
         Assert.Equal(["https://example.com/orders.git"], git.Cloned);
-
-        // Names the directory the escape would land in, so the test says what it is about. Not
-        // load-bearing, and cannot be: like git.Cloned above it is read while a clone this call
-        // never waits for may still be starting, so it can only ever pass spuriously. The
-        // assertion above is the one that holds.
-        Assert.False(Directory.Exists(Path.Combine(dir, ".servicesources", "escapee")));
     }
 
     /// <summary>
