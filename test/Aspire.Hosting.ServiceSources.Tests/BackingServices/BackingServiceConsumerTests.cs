@@ -130,6 +130,65 @@ public class BackingServiceConsumerTests
     }
 
     /// <summary>
+    /// The same again for <c>"kubernetes"</c>, where the value the service receives is not written
+    /// anywhere: the port in it is the local end of a tunnel this AppHost opened.
+    /// </summary>
+    /// <remarks>
+    /// The port is read back off the tunnel's own command line rather than fixed, because it is
+    /// allocated at startup. What is asserted is that the service and the tunnel agree on it —
+    /// which a fixed number could not check, and which is the whole of what could go wrong here.
+    /// </remarks>
+    [Fact]
+    public async Task SwitchingTheBackingServiceToKubernetes_KeepsTheKeyAndTunnelsTheValue()
+    {
+        var builder = CreateBuilder("""
+            {
+              "services": { "orders": { "source": "local" } },
+              "backingServices": { "orders-db": {
+                "source": "kubernetes",
+                "kubernetes": {
+                  "service": "orders-pg",
+                  "port": 5432,
+                  "context": "dev-west",
+                  "connectionString": "Host=localhost;Port=${port};Database=orders" } } }
+            }
+            """);
+
+        // Identical to the AppHost code in the two tests above, down to the factory.
+        var db = builder.AddBackingService(
+            "orders-db",
+            () => builder.AddConnectionString("orders-db", ReferenceExpression.Create($"Host=localhost;Database=orders")));
+
+        var orders = builder.AddService("orders");
+        var beforeTheReference = EnvironmentCallbackCount(orders.Resource);
+
+        orders.Configure<IResourceWithEnvironment>(service => service.WithReference(db));
+
+        var environment = await MaterializeEnvironmentAsync(orders.Resource, beforeTheReference);
+        var tunnel = builder.Resources.OfType<ExecutableResource>().Single(r => r.Name == "orders-db-tunnel");
+        var localPort = await LocalPortOfAsync(tunnel);
+
+        Assert.Equal(
+            $"Host=localhost;Port={localPort};Database=orders", environment["ConnectionStrings__orders-db"]);
+    }
+
+    /// <summary>The local port a port-forward executable forwards, read off its own arguments.</summary>
+    private static async Task<int> LocalPortOfAsync(ExecutableResource tunnel)
+    {
+        var context = new CommandLineArgsCallbackContext([]);
+
+        foreach (var annotation in tunnel.Annotations.OfType<CommandLineArgsCallbackAnnotation>())
+        {
+            await annotation.Callback(context);
+        }
+
+        var pair = context.Args.Select(arg => arg.ToString()!)
+            .Single(arg => arg.Contains(':', StringComparison.Ordinal));
+
+        return int.Parse(pair.Split(':')[0], System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
     /// A factory naming its resource something other than the backing service is refused, because
     /// that is what would move the key the app reads.
     /// </summary>

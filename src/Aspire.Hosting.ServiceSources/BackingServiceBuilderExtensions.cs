@@ -1,6 +1,7 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.BackingServices;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.PortAllocation;
 
 namespace Aspire.Hosting.ServiceSources;
 
@@ -29,6 +30,7 @@ public static class BackingServiceBuilderExtensions
         new(StringComparer.OrdinalIgnoreCase)
         {
             ["direct"] = new DirectBackingServiceSource(),
+            ["kubernetes"] = new KubernetesBackingServiceSource(new SocketPortAllocator()),
         };
 
     /// <summary>
@@ -47,8 +49,10 @@ public static class BackingServiceBuilderExtensions
     /// <summary>
     /// Adds the backing service <paramref name="name"/> to <paramref name="builder"/> from
     /// whichever source this developer configured for it: the local instance
-    /// <paramref name="local"/> provisions (the <c>"local"</c> source, and the default), or a
-    /// connection string pointing at one they already run (the <c>"direct"</c> source).
+    /// <paramref name="local"/> provisions (the <c>"local"</c> source, and the default), a
+    /// connection string pointing at one they already run (the <c>"direct"</c> source), or one
+    /// running in a dev cluster, reached through a <c>kubectl port-forward</c> this AppHost opens
+    /// (the <c>"kubernetes"</c> source).
     /// </summary>
     /// <param name="builder">The AppHost's builder.</param>
     /// <param name="name">
@@ -112,10 +116,12 @@ public static class BackingServiceBuilderExtensions
     /// <para>
     /// <b>The <c>WaitFor</c> in the example above stops meaning anything under <c>"direct"</c>
     /// (#220).</b> It waits properly under <c>"local"</c>, where a real database resource sits
-    /// behind it. Under <c>"direct"</c> the resource is a connection string, the orchestrator marks
-    /// it running as soon as that string is available, and the wait is satisfied at once — so the
-    /// consumer starts without the remote instance having been checked at all. It does not hang, and
-    /// nothing goes wrong loudly; the ordering simply stops being enforced.
+    /// behind it, and under <c>"kubernetes"</c>, where a health check on the forwarded port holds
+    /// the consumer back until the tunnel is listening. Under <c>"direct"</c> the resource is a
+    /// connection string, the orchestrator marks it running as soon as that string is available,
+    /// and the wait is satisfied at once — so the consumer starts without the remote instance
+    /// having been checked at all. It does not hang, and nothing goes wrong loudly; the ordering
+    /// simply stops being enforced.
     /// </para>
     /// <para>
     /// Which of a consumer's configuration actually reaches it still depends on that consumer's own

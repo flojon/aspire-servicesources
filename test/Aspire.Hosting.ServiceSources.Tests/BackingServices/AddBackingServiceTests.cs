@@ -319,7 +319,66 @@ public class AddBackingServiceTests
 
         Assert.Contains("unknown source 'clsuter'", ex.Message);
         Assert.Contains("'direct'", ex.Message);
+        Assert.Contains("'kubernetes'", ex.Message);
         Assert.Contains("'local'", ex.Message);
+    }
+
+    /// <summary>
+    /// A <c>kubernetes</c> block binds from the file and reaches the source that reads it.
+    /// </summary>
+    /// <remarks>
+    /// The half <c>KubernetesBackingServiceTests</c> deliberately does not cover: those resolve the
+    /// source directly with a fake port allocator, so nothing there would notice a field that
+    /// stopped binding or a <c>source</c> that dispatched elsewhere. This asserts the config path
+    /// and stops at the first thing that proves the block arrived — the tunnel's own arguments,
+    /// which carry three of the four fields.
+    /// <para>
+    /// The forwarded port is read back rather than named, because dispatching through
+    /// <c>AddBackingService</c> uses the real allocator, exactly as the service side's own
+    /// kubernetes coverage does.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task KubernetesEntry_BindsItsBlockAndReachesTheKubernetesSource()
+    {
+        var builder = CreateBuilder("""
+            { "backingServices": { "orders-db": {
+                "source": "kubernetes",
+                "kubernetes": {
+                  "service": "orders-pg",
+                  "port": 5432,
+                  "context": "dev-west",
+                  "namespace": "orders",
+                  "connectionString": "Host=localhost;Port=${port};Database=orders" } } } }
+            """);
+
+        var invocations = 0;
+
+        var db = builder.AddBackingService(
+            "orders-db", LocalFactory(builder, () => invocations++, resourceName: "not-the-one"));
+
+        // Stated rather than left to the name check: a factory this source invoked would throw on
+        // the mismatched name, so the property is enforced either way — but only visibly here.
+        Assert.Equal(0, invocations);
+
+        var tunnel = Assert.Single(builder.Resources.OfType<ExecutableResource>());
+        var argsContext = new CommandLineArgsCallbackContext([]);
+
+        foreach (var annotation in tunnel.Annotations.OfType<CommandLineArgsCallbackAnnotation>())
+        {
+            await annotation.Callback(argsContext);
+        }
+
+        var args = argsContext.Args.Select(arg => arg.ToString()!).ToArray();
+        var localPort = args.Single(arg => arg.EndsWith(":5432", StringComparison.Ordinal)).Split(':')[0];
+
+        Assert.Equal("orders-db", db.Resource.Name);
+        Assert.Equal(
+            ["port-forward", "svc/orders-pg", $"{localPort}:5432", "--context", "dev-west", "--namespace", "orders"],
+            args);
+        Assert.Equal(
+            $"Host=localhost;Port={localPort};Database=orders",
+            await db.Resource.ConnectionStringExpression.GetValueAsync(default));
     }
 
     /// <remarks>
@@ -385,6 +444,12 @@ public class AddBackingServiceTests
     /// <remarks>
     /// Reported as a backing service, not as a service: the two sections are edited in the same
     /// file, and "Service 'orders-db'" would send the reader to the wrong half of it.
+    /// <para>
+    /// <c>connectionString</c> is declared by two source blocks, so this is also where the
+    /// several-homes branch is exercised: the message names both rather than picking one, because
+    /// the entry's own <c>source</c> is not what decides where the key goes — a developer switching
+    /// source keeps whichever block they wrote.
+    /// </para>
     /// </remarks>
     [Fact]
     public void MalformedEntry_IsReportedAgainstTheBackingServiceShape()
@@ -399,15 +464,21 @@ public class AddBackingServiceTests
         Assert.Contains("Backing service 'orders-db'", ex.Message);
         Assert.DoesNotContain("Service 'orders-db'", ex.Message);
         Assert.Contains("'connectionString' is not a valid key here", ex.Message);
-        Assert.Contains("'direct' block", ex.Message);
+        Assert.Contains("It belongs inside the block of the source it configures", ex.Message);
+        Assert.Contains("'direct', 'kubernetes'", ex.Message);
     }
 
     /// <summary>
     /// A misspelled field in a backing-service entry gets the near-miss message the service section
     /// gained in #182, because both sections are validated through the same shape-driven walk.
     /// </summary>
+    /// <remarks>
+    /// The suggestion names one field in two blocks rather than the same word twice, which is what
+    /// the grouping in <c>DescribeNearMisses</c> is for. Both blocks are named in a fixed order, so
+    /// the sentence reads the same on every run — <c>Type.GetProperties()</c> does not promise one.
+    /// </remarks>
     [Fact]
-    public void MisspelledFieldAtEntryRoot_NamesTheFieldAndItsBlock()
+    public void MisspelledFieldAtEntryRoot_NamesTheFieldAndEveryBlockItLivesIn()
     {
         var builder = CreateBuilder("""
             { "backingServices": { "orders-db": { "source": "direct", "conectionString": "Host=x" } } }
@@ -416,8 +487,7 @@ public class AddBackingServiceTests
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => builder.AddBackingService("orders-db", LocalFactory(builder)));
 
-        Assert.Contains("Did you mean 'connectionString'", ex.Message);
-        Assert.Contains("'direct' block", ex.Message);
+        Assert.Contains("Did you mean 'connectionString', in the 'direct' or 'kubernetes' block?", ex.Message);
     }
 
     /// <remarks>

@@ -28,7 +28,8 @@ internal sealed class DeveloperConfigShape
     /// A backing-service entry, keyed under <see cref="DeveloperConfiguration.BackingServicesKey"/>.
     /// </summary>
     public static DeveloperConfigShape BackingService { get; } =
-        Of<BackingServiceDeveloperConfig>("Backing service", "backing service", ["local", "direct"]);
+        Of<BackingServiceDeveloperConfig>(
+            "Backing service", "backing service", ["local", "direct", "kubernetes"]);
 
     private DeveloperConfigShape(
         Type entry,
@@ -107,16 +108,11 @@ internal sealed class DeveloperConfigShape
     /// none does. Used to turn "that key does not go there" into "here is where it goes".
     /// </summary>
     /// <remarks>
-    /// A list rather than the single answer both shapes can give today, because a field name shared
-    /// by two blocks is coming and naming just the first would send the developer to a block they
-    /// are not using. Each source that takes a <c>connectionString</c> will declare its own, since
-    /// each wants its own template — the <c>kubernetes</c> one carries a <c>${port}</c> placeholder
-    /// that would be dead text under <c>direct</c> — and that source is the next one to be added.
-    /// <para>
-    /// So no shape has such a field yet, and every caller's several-homes branch is unreachable as
-    /// this ships. The list is still what the signature should be: the alternative is a lookup that
-    /// answers correctly only while the coincidence holds, and it holds for one more release.
-    /// </para>
+    /// A list rather than a single answer, because a field name can be declared by more than one
+    /// block: a backing service's <c>connectionString</c> lives in both <c>direct</c> and
+    /// <c>kubernetes</c>, since each source wants its own template — the <c>kubernetes</c> one
+    /// carries a <c>${port}</c> placeholder that <c>direct</c> has nothing to resolve. Naming only
+    /// the first would send a developer to the block they are not using.
     /// </remarks>
     public IReadOnlyList<string> HomeBlocksOf(string field) =>
         BlockFields
@@ -138,11 +134,13 @@ internal sealed class DeveloperConfigShape
     /// all.
     /// <para>
     /// Every tie is returned, not the closest one, for the two reasons ties happen: a typo can sit
-    /// the same distance from two differently-named fields, which happens now, and a field name can
-    /// be declared by more than one block, which no shape does yet — see
+    /// the same distance from two differently-named fields, and a field name can be declared by
+    /// more than one block — a backing service's <c>connectionString</c> is, see
     /// <see cref="HomeBlocksOf"/>. <see cref="NearMiss.Nearest"/> orders the first kind by the
     /// spelling it was given; the second it cannot order at all, since the spellings are equal, so
-    /// the block is ordered on here too. The result is the same on every run either way.
+    /// the block is ordered on here too — which is what keeps a near miss of
+    /// <c>connectionString</c>, declared by both <c>direct</c> and <c>kubernetes</c>, naming those
+    /// two blocks in the same order on every run.
     /// </para>
     /// </remarks>
     public IReadOnlyList<(string Field, string Block)> NearMissFieldsOf(string writtenKey) =>
@@ -152,10 +150,9 @@ internal sealed class DeveloperConfigShape
                 candidate => candidate.Field)
             // Ordered by block as well as field, because Nearest can only order by what it was
             // given: two candidates sharing a field name would keep the order they arrived in,
-            // which is Type.GetProperties()'s and not one the CLR promises to keep stable. No shape
-            // declares such a field today, so this changes no message now — it is here because the
-            // one that will, a source block's connectionString, is the next thing added, and a
-            // reordering nothing guarantees is not a thing to notice from a message.
+            // which is Type.GetProperties()'s and not one the CLR promises to keep stable. A
+            // backing service's connectionString is declared by two blocks, so without this a
+            // message naming both could reorder them between runs for no reason a reader could see.
             .OrderBy(candidate => candidate.Field, StringComparer.Ordinal)
             .ThenBy(candidate => candidate.Block, StringComparer.Ordinal)
             .ToArray();
