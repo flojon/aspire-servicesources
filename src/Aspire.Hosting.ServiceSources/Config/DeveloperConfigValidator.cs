@@ -229,6 +229,18 @@ internal static class DeveloperConfigValidator
                 continue;
             }
 
+            // After Blank, which takes a value that is *entirely* whitespace: such a value satisfies
+            // this rule too, and the complaint naming the empty spelling is the one its author was
+            // reaching for. Before BindsTo, so the field's own type stays out of the sentence — the
+            // same reason Blank is kept apart from NotBindable.
+            if (field.Value is { } verbatim
+                && declared.GetCustomAttribute<NoSurroundingWhitespaceAttribute>() is { } handedOn
+                && verbatim != verbatim.Trim())
+            {
+                problems.Add(SurroundedByWhitespace(field, blockPath, verbatim, handedOn));
+                continue;
+            }
+
             if (field.Value is { } value && !BindsTo(declared.PropertyType, value))
             {
                 problems.Add(NotBindable(field, blockPath, declared.PropertyType, value));
@@ -671,6 +683,33 @@ internal static class DeveloperConfigValidator
               + "so it needs a value."
             : "")
         + SetAt(field);
+
+    /// <summary>
+    /// The error for a value whose surrounding whitespace is part of a name something outside this
+    /// process will look up.
+    /// </summary>
+    /// <remarks>
+    /// It says nothing about what such a name may or may not contain, because that varies by field
+    /// and getting it wrong prints a false claim at the one developer it is wrong for: a kubeconfig
+    /// context name really can carry a space at either end. What is true of every field carrying
+    /// <see cref="NoSurroundingWhitespaceAttribute"/> is that the value travels as written, so that
+    /// is what the sentence says — with the two spellings side by side, which is what makes a plain
+    /// space visible, since <see cref="Escaped"/> leaves one as itself.
+    /// </remarks>
+    private static string SurroundedByWhitespace(
+        IConfigurationSection field,
+        string block,
+        string value,
+        NoSurroundingWhitespaceAttribute handedOn)
+    {
+        var remedy = value.Trim();
+
+        return $"'{field.Key}' in the '{block}' block is set to {Escaped(value)}, and "
+            + $"{handedOn.Receiver} is given it exactly as written — so {handedOn.Receiver} looks "
+            + $"for {Escaped(value)} and not {Escaped(remedy)}. Set it to {Escaped(remedy)}."
+            + (handedOn.IfDeliberate is { } deliberate ? $" {deliberate}" : "")
+            + SetAt(field);
+    }
 
     /// <summary>
     /// The error for a value of one or more spaces, whatever type the field takes.
