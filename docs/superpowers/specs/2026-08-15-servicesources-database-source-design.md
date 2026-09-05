@@ -23,7 +23,7 @@ that file is held to. So the map is split out as
 tunnel; a single `port` stays valid either way, so nothing about it is a breaking change.
 
 **A connection string with no `${port}` is refused — implementing *Templating*, which the *Error
-Handling* list omits.** Templating already says `${port}` is "Meaningful (and **required**) only for
+Handling* list omits.** Templating already says `${port}` is "Meaningful (and required) only for
 `"kubernetes"`". Error Handling then lists only the mirror case, "a `${port}` placeholder present for
 a source where it isn't resolvable", and says nothing about a `"kubernetes"` template that carries
 none — so the rule was stated once and not carried into the section an implementer works from. The

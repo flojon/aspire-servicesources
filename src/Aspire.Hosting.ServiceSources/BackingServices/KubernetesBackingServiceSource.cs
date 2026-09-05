@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Sources;
@@ -86,13 +87,31 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
         // that serves it underneath, rather than two resources they have to work out the relation
         // between. Aspire keys nothing off this name — unlike the service-side source, where the
         // executable *is* the service and its name is what service discovery publishes.
-        builder
-            .AddExecutable(
-                $"{name}-tunnel",
-                "kubectl",
-                builder.AppHostDirectory,
-                KubectlPortForward.Args(service, localPort, remotePort, context, kubernetes.Namespace))
-            .WithParentRelationship(backingService);
+        var tunnelName = $"{name}-tunnel";
+
+        try
+        {
+            builder
+                .AddExecutable(
+                    tunnelName,
+                    "kubectl",
+                    builder.AppHostDirectory,
+                    KubectlPortForward.Args(service, localPort, remotePort, context, kubernetes.Namespace))
+                .WithParentRelationship(backingService);
+        }
+        catch (ArgumentException ex)
+        {
+            // The tunnel's name is derived, so Aspire's complaint about it names a resource the
+            // AppHost never wrote — and the only rule this can break by deriving is length, since
+            // a backing service whose own name Aspire rejected would not have reached this line.
+            // Aspire stays the authority on what the rule is: this adds the missing half, which is
+            // where the name came from.
+            throw new ServiceSourcesConfigurationException(
+                $"Backing service '{name}': its port-forward runs as a resource named '{tunnelName}', after the "
+                + $"backing service, and Aspire rejected that name — \"{ex.Message}\" Aspire's limit is on the "
+                + $"derived name rather than on '{name}', so a shorter backing-service name is what fixes it.",
+                ex);
+        }
 
         var healthCheckKey = $"{name}-tunnel-tcp";
 
@@ -200,15 +219,28 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     /// spelled in a configuration path. Both, rather than one derived from the other, because a
     /// message uses each in a different half of the same sentence and getting either wrong sends
     /// the reader looking for a key nobody wrote.
+    /// <para>
+    /// <c>IsWritten</c> travels in the row rather than in a lookup beside it, so that a fifth field
+    /// is one row and cannot be half-added: a table entry with no predicate beside it would throw
+    /// on lookup, and a predicate with no table entry would silently never be required.
+    /// </para>
     /// </remarks>
-    private static readonly (string Field, string Property, string WhatItIs)[] RequiredFields =
+    private static readonly (
+        string Field,
+        string Property,
+        string WhatItIs,
+        Func<KubernetesBackingServiceDeveloperConfig, bool> IsWritten)[] RequiredFields =
     [
-        ("service", "Service", "the Kubernetes Service to forward to"),
+        ("service", "Service", "the Kubernetes Service to forward to",
+            k => !string.IsNullOrWhiteSpace(k.Service)),
         ("port", "Port",
-            "the port that Service listens on inside the cluster, which is what the tunnel forwards to"),
-        ("context", "Context", "the kubectl context to forward through"),
+            "the port that Service listens on inside the cluster, which is what the tunnel forwards to",
+            k => k.Port is not null),
+        ("context", "Context", "the kubectl context to forward through",
+            k => !string.IsNullOrWhiteSpace(k.Context)),
         ("connectionString", "ConnectionString",
-            "the connection string consumers receive, with '${port}' standing for the local end of the tunnel"),
+            "the connection string consumers receive, with '${port}' standing for the local end of the tunnel",
+            k => !string.IsNullOrWhiteSpace(k.ConnectionString)),
     ];
 
     /// <summary>
@@ -229,37 +261,66 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     /// </remarks>
     private static void RequireEveryField(string name, KubernetesBackingServiceDeveloperConfig kubernetes)
     {
-        var written = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["service"] = !string.IsNullOrWhiteSpace(kubernetes.Service),
-            ["port"] = kubernetes.Port is not null,
-            ["context"] = !string.IsNullOrWhiteSpace(kubernetes.Context),
-            ["connectionString"] = !string.IsNullOrWhiteSpace(kubernetes.ConnectionString),
-        };
-
-        var missing = RequiredFields.Where(field => !written[field.Field]).ToArray();
+        var missing = RequiredFields.Where(field => !field.IsWritten(kubernetes)).ToArray();
 
         if (missing.Length == 0)
         {
             return;
         }
 
-        var each = string.Join(
-            " ", missing.Select(field => $"'kubernetes.{field.Field}' — {field.WhatItIs}."));
-
         // The file's own root key, not DeveloperConfiguration.BackingServicesKey: this sentence
         // sends the reader to the file, and the file spells the section "backingServices". The
-        // colon-separated path belongs only in the environment-variable half below, which is the
-        // one place it is what the reader types.
+        // colon-separated path belongs only in the environment-variable half, which is the one
+        // place it is what the reader types.
+        var where = $"under \"{name}\" in \"{DeveloperConfigFileSource.FileBackingServicesKey}\" in "
+            + $"'{DeveloperConfiguration.FileName}'";
+
+        // The shape DeveloperConfigValidator.Failure uses, and for its reason: one problem reads as
+        // a sentence, several read as a list, and each keeps its own remedy beside it rather than
+        // in a second list the reader has to pair up across a paragraph.
+        if (missing.Length == 1)
+        {
+            var only = missing[0];
+
+            throw new ServiceSourcesConfigurationException(
+                $"Backing service '{name}': source 'kubernetes' requires 'kubernetes.{only.Field}' — "
+                + $"{only.WhatItIs}. Add it {where}, or set {Environmentally(ConfigKey(name, only.Property))}."
+                + PortIsWhichEnd(kubernetes));
+        }
+
+        var lines = missing.Select(field =>
+            $"{Environment.NewLine}  - 'kubernetes.{field.Field}' — {field.WhatItIs}. Set it in the file, or as "
+            + $"{Environmentally(ConfigKey(name, field.Property))}.");
+
+        // Every field missing at once is a block nobody has filled in, which is the case a literal
+        // example answers better than a list does — the same thing DirectBackingServiceSource
+        // offers for its one field.
+        var blank = missing.Length == RequiredFields.Length
+            ? $"{Environment.NewLine}{Environment.NewLine}A whole entry reads: \"{name}\": {{ \"source\": "
+              + "\"kubernetes\", \"kubernetes\": { \"service\": \"orders-pg\", \"port\": 5432, \"context\": "
+              + "\"dev-west\", \"connectionString\": \"Host=localhost;Port=${port};Database=orders\" } }."
+            : "";
+
         throw new ServiceSourcesConfigurationException(
-            $"Backing service '{name}': source 'kubernetes' requires {each} Add "
-            + $"{(missing.Length == 1 ? "it" : "them")} under \"{name}\" in "
-            + $"\"{DeveloperConfigFileSource.FileBackingServicesKey}\" in "
-            + $"'{DeveloperConfiguration.FileName}', or set "
-            + $"{string.Join(", ", missing.Select(field => Environmentally(ConfigKey(name, field.Property))))}."
-            + (written["port"] ? "" : " The local end of the tunnel is allocated rather than configured, so a "
-                + "connection string names it as '${port}' and only the cluster's own port is written here."));
+            $"Backing service '{name}': source 'kubernetes' needs {missing.Length} fields the entry does not "
+            + $"have, {where}:{string.Concat(lines)}{blank}{PortIsWhichEnd(kubernetes)}");
     }
+
+    /// <summary>
+    /// The sentence that answers "which of my two ports goes here", when the port is what is
+    /// missing.
+    /// </summary>
+    /// <remarks>
+    /// A developer filling this field in has the cluster's port and the one they would connect to
+    /// in front of them, and only one of them goes in the file — so the message that asks for it
+    /// says which. Nothing to say when the port is already written.
+    /// </remarks>
+    private static string PortIsWhichEnd(KubernetesBackingServiceDeveloperConfig kubernetes) =>
+        kubernetes.Port is not null
+            ? ""
+            : $"{Environment.NewLine}{Environment.NewLine}The local end of the tunnel is allocated rather than "
+              + "configured, so a connection string names it as '${port}' and only the cluster's own port is "
+              + "written here.";
 
     /// <summary>
     /// The remote port, once it is known to be present.
@@ -305,11 +366,58 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     /// first half of this message, since the spelling they wrote was already right.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// The credential-bearing parts of a connection string, for the one message that echoes one
+    /// back.
+    /// </summary>
+    /// <remarks>
+    /// Two shapes cover what a connection string does with a secret: a keyword whose value runs to
+    /// the next <c>;</c>, and a URI authority's <c>user:pass@host</c>. Matched case-insensitively,
+    /// because keyword casing is a dialect's own business.
+    /// <para>
+    /// Deliberately not exhaustive, and the message says the value was redacted rather than
+    /// claiming it is safe. A backend naming its secret something this misses would still be
+    /// echoed, so this narrows the blast radius rather than closing it. That is the honest trade:
+    /// this message exists to show the developer what <em>arrived</em> — the shell-expansion case is
+    /// only diagnosable by seeing it — and a message that showed nothing would not do that.
+    /// </para>
+    /// </remarks>
+    private static readonly Regex Credentials = new(
+        @"(?<=(?:password|pwd|secret|token|accountkey)\s*=)[^;]*"
+        + @"|(?<=://[^:/@\s]{1,256}:)[^@/\s]*(?=@)",
+        RegexOptions.IgnoreCase
+        | RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(1));
+
+    /// <summary>
+    /// <paramref name="connectionString"/> with the credentials this recognizes replaced.
+    /// </summary>
+    /// <remarks>
+    /// Because this message is echoed where messages go: an AppHost's startup failure is relayed
+    /// into <c>~/.aspire/logs</c> and routinely pasted into an issue. Every other value this package
+    /// echoes is malformed, blank or a single token — this is the only one that is a whole, valid
+    /// connection string, so it is the only one that can carry a password.
+    /// </remarks>
+    private static string Redacted(string connectionString)
+    {
+        try
+        {
+            return Credentials.Replace(connectionString, "***");
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            // A pathological value is not a reason to fail differently than the developer expects,
+            // and it is emphatically not a reason to print the thing this method exists to hide.
+            return "<connection string omitted: it could not be scanned for credentials>";
+        }
+    }
+
     private static ServiceSourcesConfigurationException NothingAddressesTheTunnel(
         string name, string connectionString) =>
         new($"Backing service '{name}': source 'kubernetes' opens a kubectl port-forward on a local port allocated "
             + $"at startup, but the connection string names no '${{port}}' placeholder to put it in — so nothing "
-            + $"would address the tunnel: \"{connectionString}\". Replace the port in it with '${{port}}', as "
+            + $"would address the tunnel: \"{Redacted(connectionString)}\" (any password in it shown as ***). "
+            + "Replace the port in it with '${port}', as "
             + "'Host=localhost;Port=${port};Database=orders'. If you did write '${port}', a shell expanded it "
             + "away before the AppHost saw it — '${...}' is a shell variable too, and double quotes do not protect "
             + "it. Single-quote the value, and use env 'NAME=value' for a key with a hyphen in it. A backing "

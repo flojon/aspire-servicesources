@@ -33,21 +33,26 @@ public class LocalPortHealthCheckTests
     }
 
     /// <summary>
-    /// A port nobody is listening on — a listener's port, taken and then released.
+    /// A port nobody is listening on: a socket bound to it and never told to listen. Held open by
+    /// the caller, whose disposal releases it.
     /// </summary>
     /// <remarks>
-    /// Borrowed from the OS rather than hard-coded, because a hard-coded "surely nothing is on
-    /// 59999" is exactly the assumption that fails on one developer's machine and nowhere else.
-    /// Something else may still claim it between the release and the check, which would make this
-    /// report healthy — a false pass, not a false failure, so the test cannot start failing
-    /// spuriously.
+    /// Bound rather than hard-coded, because "surely nothing is on 59999" is the assumption that
+    /// fails on one machine and nowhere else. Bound-and-not-listening rather than bound-and-released,
+    /// which is the same idea and is wrong: a released port can be claimed by anything else in the
+    /// process — <c>SocketPortAllocator</c> draws from the same ephemeral range, and this suite runs
+    /// collections in parallel — and something listening on it would make the check report
+    /// <em>healthy</em>, which is what these tests assert against. That is a spurious failure, not a
+    /// spurious pass. Holding the socket removes the race rather than reasoning about it, and the
+    /// kernel answers a connection to a bound port with no listener behind it by refusing it, which
+    /// is exactly the condition under test.
     /// </remarks>
-    private static int Closed()
+    private static (Socket Held, int Port) Closed()
     {
-        var (listener, port) = Listening();
-        listener.Stop();
+        var held = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        held.Bind(new IPEndPoint(IPAddress.Loopback, 0));
 
-        return port;
+        return (held, ((IPEndPoint)held.LocalEndPoint!).Port);
     }
 
     [Fact]
@@ -70,9 +75,14 @@ public class LocalPortHealthCheckTests
     [Fact]
     public async Task NothingListening_IsUnhealthy()
     {
-        var result = await new LocalPortHealthCheck("orders-db", Closed()).CheckHealthAsync(Context);
+        var (held, port) = Closed();
 
-        Assert.Equal(HealthStatus.Unhealthy, result.Status);
+        using (held)
+        {
+            var result = await new LocalPortHealthCheck("orders-db", port).CheckHealthAsync(Context);
+
+            Assert.Equal(HealthStatus.Unhealthy, result.Status);
+        }
     }
 
     /// <summary>
@@ -86,14 +96,17 @@ public class LocalPortHealthCheckTests
     [Fact]
     public async Task TheUnhealthyResult_SaysWhichBackingServiceAndWhereItsOutputIs()
     {
-        var port = Closed();
+        var (held, port) = Closed();
 
-        var result = await new LocalPortHealthCheck("orders-db", port).CheckHealthAsync(Context);
+        using (held)
+        {
+            var result = await new LocalPortHealthCheck("orders-db", port).CheckHealthAsync(Context);
 
-        Assert.Contains("orders-db", result.Description);
-        Assert.Contains($"127.0.0.1:{port}", result.Description);
-        Assert.Contains("kubectl", result.Description);
-        Assert.IsType<SocketException>(result.Exception);
+            Assert.Contains("orders-db", result.Description);
+            Assert.Contains($"127.0.0.1:{port}", result.Description);
+            Assert.Contains("kubectl", result.Description);
+            Assert.IsType<SocketException>(result.Exception);
+        }
     }
 
     /// <summary>

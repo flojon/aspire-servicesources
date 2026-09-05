@@ -352,7 +352,14 @@ public class AddBackingServiceTests
                   "connectionString": "Host=localhost;Port=${port};Database=orders" } } } }
             """);
 
-        var db = builder.AddBackingService("orders-db", LocalFactory(builder, resourceName: "not-the-one"));
+        var invocations = 0;
+
+        var db = builder.AddBackingService(
+            "orders-db", LocalFactory(builder, () => invocations++, resourceName: "not-the-one"));
+
+        // Stated rather than left to the name check: a factory this source invoked would throw on
+        // the mismatched name, so the property is enforced either way — but only visibly here.
+        Assert.Equal(0, invocations);
 
         var tunnel = Assert.Single(builder.Resources.OfType<ExecutableResource>());
         var argsContext = new CommandLineArgsCallbackContext([]);

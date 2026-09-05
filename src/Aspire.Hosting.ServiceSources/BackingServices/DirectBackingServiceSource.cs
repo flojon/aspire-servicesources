@@ -46,7 +46,7 @@ internal sealed class DirectBackingServiceSource : IBackingServiceSource
             throw new ServiceSourcesConfigurationException(
                 $"Backing service '{name}': source 'direct' requires 'direct.connectionString' — it is the whole "
                 + $"of what this source supplies. Add \"{name}\": {{ \"source\": \"direct\", \"direct\": "
-                + "{ \"connectionString\": \"...\" } } under \"backingServices\" in "
+                + $"{{ \"connectionString\": \"...\" }} }} under \"{DeveloperConfigFileSource.FileBackingServicesKey}\" in "
                 + $"'{DeveloperConfiguration.FileName}', or set "
                 + $"{configKey.Replace(":", "__", StringComparison.Ordinal)}.");
         }

@@ -1675,6 +1675,13 @@ Two resources appear in the dashboard: the backing service itself, and the `kube
 underneath it as `orders-db-tunnel`. `kubectl`'s own output — a bad context, a Service that does not
 exist, an expired credential — lands in that resource's logs.
 
+**The health badge is on the backing service, not on the tunnel.** For the few seconds before the
+forward is up, the tunnel shows as running while the backing service above it shows as unhealthy;
+that is the right way round, because the backing service is what consumers wait for. The check is
+deliberately not duplicated onto the tunnel: Aspire probes once per resource carrying it, and every
+probe is a connection `kubectl` logs — which would bury the output you go there to read. A `kubectl`
+that exits outright shows up as a failed resource regardless.
+
 - **A Service, not a pod.** A pod name carries a replica-set suffix that changes on every rollout;
   `kubectl port-forward` against a Service picks a backing pod itself.
 - **`context` is required**, and deliberately not defaulted to whatever `kubectl` is currently

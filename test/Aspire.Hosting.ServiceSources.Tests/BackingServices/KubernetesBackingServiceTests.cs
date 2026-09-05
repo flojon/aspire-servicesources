@@ -501,4 +501,101 @@ public class KubernetesBackingServiceTests
         Assert.Equal(0, allocations);
         Assert.Empty(builder.Resources);
     }
+
+    /// <summary>
+    /// A backing-service name Aspire accepts, whose derived tunnel name it does not, is reported
+    /// against the backing service.
+    /// </summary>
+    /// <remarks>
+    /// Aspire caps a resource name's length, and the tunnel's name is seven characters longer than
+    /// the one the AppHost wrote — so there is a band of names where the backing service is legal
+    /// and its tunnel is not, and Aspire's own complaint would name a resource nobody wrote. The
+    /// limit itself stays Aspire's to define: this asserts only that the failure says where the
+    /// rejected name came from.
+    /// </remarks>
+    [Fact]
+    public void ABackingServiceNameTooLongOnceSuffixed_IsReportedAgainstTheBackingService()
+    {
+        var builder = CreateBuilder();
+        var longName = new string('a', 64);
+
+        var ex = Record.Exception(
+            () => new KubernetesBackingServiceSource(new FakePortAllocator(LocalPort))
+                .Resolve(builder, longName, Config()));
+
+        Assert.NotNull(ex);
+        Assert.IsType<ServiceSourcesConfigurationException>(ex);
+        Assert.Contains($"Backing service '{longName}'", ex.Message);
+        Assert.Contains($"{longName}-tunnel", ex.Message);
+    }
+
+    /// <summary>
+    /// The echoed connection string has its credentials replaced.
+    /// </summary>
+    /// <remarks>
+    /// This is the only message in the package that echoes a whole, valid connection string — every
+    /// other echo is a malformed value or a single token — and an AppHost's startup failure is
+    /// relayed into <c>~/.aspire/logs</c> and routinely pasted into an issue. The echo earns its
+    /// place, since the shell-expansion case is only diagnosable by seeing what arrived, so the
+    /// value is redacted rather than withheld.
+    /// </remarks>
+    [Theory]
+    [InlineData("Host=localhost;Port=5432;Username=dev;Password=hunter2", "hunter2")]
+    [InlineData("Host=localhost;Port=5432;Pwd=hunter2", "hunter2")]
+    [InlineData("postgresql://orders_app:hunter2@localhost:5432/orders", "hunter2")]
+    public void TheEchoedConnectionString_HasItsCredentialsRedacted(string connectionString, string secret)
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, Config(connectionString: connectionString)));
+
+        Assert.DoesNotContain(secret, ex.Message, StringComparison.Ordinal);
+        Assert.Contains("***", ex.Message);
+        Assert.Contains("localhost", ex.Message);
+    }
+
+    /// <summary>
+    /// A whole entry nobody has filled in is answered with a whole entry.
+    /// </summary>
+    /// <remarks>
+    /// The all-four case is the fresh-block case, where a literal example is the most useful
+    /// sentence available — the same thing the <c>"direct"</c> source offers for its one field. The
+    /// message also pairs each field with its own environment variable on its own line rather than
+    /// listing the fields and then the variables, which is the shape
+    /// <c>DeveloperConfigValidator.Failure</c> uses for the same reason.
+    /// </remarks>
+    [Fact]
+    public void AnEmptyBlock_ShowsAWholeEntryAndPairsEachFieldWithItsVariable()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, Config(service: null, port: null, context: null, connectionString: null)));
+
+        Assert.Contains("A whole entry reads:", ex.Message);
+        Assert.Contains("\"source\": \"kubernetes\"", ex.Message);
+        Assert.Contains(
+            "  - 'kubernetes.service' — the Kubernetes Service to forward to. Set it in the file, or as "
+            + $"ServiceSources__BackingServices__{Name}__Kubernetes__Service.",
+            ex.Message);
+    }
+
+    /// <remarks>
+    /// One missing field reads as a sentence rather than as a list of one, which is what
+    /// <c>DeveloperConfigValidator.Failure</c> does and why: the ordinary case pays nothing for the
+    /// collecting.
+    /// </remarks>
+    [Fact]
+    public void OneMissingField_ReadsAsASentenceRatherThanAListOfOne()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, Config(context: null)));
+
+        Assert.Contains("requires 'kubernetes.context'", ex.Message);
+        Assert.DoesNotContain("  - ", ex.Message);
+        Assert.DoesNotContain("A whole entry reads:", ex.Message);
+    }
 }

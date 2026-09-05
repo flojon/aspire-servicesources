@@ -57,18 +57,18 @@ namespace Aspire.Hosting.ServiceSources.BackingServices;
 /// writes — so nothing here can tell the two apart, and the warning lives in the README rather than
 /// in a message this type could raise. Single quotes are the answer, and hyphenated keys need
 /// <c>env 'NAME=value'</c>, since <c>export</c> rejects the name.
-/// <para>
-/// A <em>source</em> can tell them apart where it knows a placeholder was mandatory, and one does:
-/// <see cref="KubernetesBackingServiceSource"/> requires a <c>${port}</c>, because the local end of
-/// its tunnel is allocated and nothing else can address it. A template that lost one to the shell
-/// arrives there as a template that never had one, so that message names the shell alongside the
-/// spelling. Under <c>"direct"</c> the gap remains, and has to: a literal port is exactly what that
-/// source expects.
-/// </para>
 /// Weighed against the alternatives and kept: the file is where a template normally lives and
 /// <c>$</c> is ordinary there, every other sigil trades this trap for another transport's — <c>%</c>
 /// is cmd's, <c>&lt;</c> is redirection — and an unquoted connection string is already mangled by
 /// its own <c>;</c> and by any <c>$</c> in a password.
+/// </para>
+/// <para>
+/// A <em>source</em> can tell the two apart where it knows a placeholder was mandatory, and one
+/// does: <see cref="KubernetesBackingServiceSource"/> requires a <c>${port}</c>, because the local
+/// end of its tunnel is allocated and nothing else can address it. A template that lost one to the
+/// shell arrives there as a template that never had one, so that message names the shell alongside
+/// the spelling. Under <c>"direct"</c> the gap remains, and has to: a literal port is exactly what
+/// that source expects.
 /// </para>
 /// </remarks>
 internal sealed class ConnectionStringTemplate
