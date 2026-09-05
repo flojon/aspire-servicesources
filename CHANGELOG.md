@@ -111,6 +111,52 @@ nothing will fail to build to warn you.
 
 ### Added
 
+- **A backing service can be reached in a dev cluster: `source: "kubernetes"`** ([#144]). The
+  database, broker or cache a service connects to now has the third source the service side has had
+  all along — a `kubectl port-forward` this AppHost opens and Aspire manages, with the connection
+  string addressing its local end:
+
+  ```jsonc
+  {
+    "backingServices": {
+      "orders-db": {
+        "source": "kubernetes",
+        "kubernetes": {
+          "service": "orders-pg-rw",
+          "port": 5432,
+          "context": "dev-west",
+          "namespace": "orders",
+          "connectionString": "Host=localhost;Port=${port};Database=orders;Username=dev;Password=hunter2"
+        }
+      }
+    }
+  }
+  ```
+
+  The AppHost's own code is unchanged — the same `AddBackingService("orders-db", local: …)` call,
+  the same handle, and the same `ConnectionStrings__orders-db` the app reads. The `kubectl` process
+  appears in the dashboard as `orders-db-tunnel`, beneath the backing service it serves, and carries
+  kubectl's output.
+
+  **`WaitFor` on a backing service means something again under this source.** The local end of the
+  tunnel carries a TCP health check, and `WaitFor` waits for running *and* healthy — so a consumer
+  holds back until something is actually listening. Without it the connection-string resource
+  reports running as soon as its template resolves, which is immediately: measured against a tunnel
+  that took 8 seconds to come up, the consumer started at 3.4s rather than 11.5s, about five seconds
+  before anything was there to connect to. It is part of the source rather than an option, since a
+  wait that silently does nothing is worse than no wait.
+
+  **Write `${port}`, not a number**, and a connection string that names none is refused at startup.
+  The local port is allocated so that two forwarded backing services cannot collide, so it is not a
+  number anyone can write down — and the failure the refusal prevents is silent: `Port=5432` copied
+  out of a manifest addresses that port on the developer's own machine, where their own database
+  container may well be listening, and the AppHost would connect to the wrong database with every
+  resource reporting healthy.
+
+  Not in this pass: forwarding several ports through one tunnel (`"port": { "amqp": 5672 }`, reached
+  as `${port:amqp}` — [#233]), and reading credentials out of a Kubernetes secret with
+  `${secret:<name>:<key>}`. Both are refused by name rather than misread.
+
 - **`prepare` — a `"local"` checkout can bootstrap itself before its kind judges it** ([#118]). A
   managed checkout is assumed to be runnable the moment it is cloned, which is not true of a
   repository whose runnable artifact or data asset is produced by a script it commits and then
@@ -1007,6 +1053,7 @@ Targets `net10.0`.
 [#207]: https://github.com/flojon/aspire-servicesources/issues/207
 [#209]: https://github.com/flojon/aspire-servicesources/issues/209
 [#220]: https://github.com/flojon/aspire-servicesources/issues/220
+[#233]: https://github.com/flojon/aspire-servicesources/issues/233
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

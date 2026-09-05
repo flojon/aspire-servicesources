@@ -1,10 +1,45 @@
 # Aspire.Hosting.ServiceSources — Backing Service Source Design
 
-**Status:** Stage 1 implemented (2026-09-03) — `"local"` and `"direct"`, the `backingServices:` config section and the ATS export; stages 2 (`"kubernetes"`) and 3 (secrets) remain. Accepted. Revised 2026-08-22 against `main` at #62, which removed the `ServiceResource` facade and shipped `Configure<T>`/`As<T>`; the proposed `AddService(configure:)` parameter and `WaitFor` shim are withdrawn as a result, and `AddBackingService` is now the design's only new public surface. Revised again 2026-08-30, when the supposed guest-language gap turned out not to exist. Earlier questions were settled by prototype and against a `kind` cluster, and the three team decisions that remained were all made on 2026-08-30. See Revision Notes.
-**Date:** 2026-08-15 (revised 2026-08-21, 2026-08-22, 2026-08-30, 2026-09-03)
+**Status:** Stages 1 and 2a implemented (2026-09-05) — `"local"`, `"direct"` and `"kubernetes"`, the `backingServices:` config section, the required TCP health check and the ATS export; the named port map ([#233](https://github.com/flojon/aspire-servicesources/issues/233)) and stage 3 (secrets) remain. Accepted. Revised 2026-08-22 against `main` at #62, which removed the `ServiceResource` facade and shipped `Configure<T>`/`As<T>`; the proposed `AddService(configure:)` parameter and `WaitFor` shim are withdrawn as a result, and `AddBackingService` is now the design's only new public surface. Revised again 2026-08-30, when the supposed guest-language gap turned out not to exist. Earlier questions were settled by prototype and against a `kind` cluster, and the three team decisions that remained were all made on 2026-08-30. See Revision Notes.
+**Date:** 2026-08-15 (revised 2026-08-21, 2026-08-22, 2026-08-30, 2026-09-03, 2026-09-05)
 **Scope:** Extends the local-vs-kubernetes source-switching model from services to the backing resources a service connects to: databases (Postgres, SQL Server) and, on exactly the same mechanism, message brokers and caches (RabbitMQ, Redis, …). The mechanism is connection-string-based and backend-agnostic — see [Generalization](#generalization-beyond-databases), where this is verified rather than assumed. Closes out the "Database/queue source switching" item from the [phase 2 reference doc](2026-08-09-servicesources-phase2-future-work.md) and [issue #10](https://github.com/flojon/aspire-servicesources/issues/10).
 
 ## Revision Notes
+
+### 2026-09-05 — the `"kubernetes"` source, minus the port map
+
+The tunnel, the eager `${port}` substitution and the health check are implemented, and the health
+check behaves as the prototype said it would. Two things this document assumes turned out to want
+saying differently.
+
+**The named port map is a fourth config shape, not a field.** This document decides that `port`
+accepts "either a single port or a named map", as though that were a binding detail. It is not: the
+developer config has three field shapes — a value, a list and a block — and a value-*or*-block is a
+fourth, checked ahead of `IsList` because a `Dictionary<,>` is an `IEnumerable` and would otherwise
+be walked as a list and answered with a message about list elements. It also needs diagnostics of
+its own ("takes a port number or a block of named ports") to reach the standard every other key in
+that file is held to. So the map is split out as
+[#233](https://github.com/flojon/aspire-servicesources/issues/233) rather than shipped alongside the
+tunnel; a single `port` stays valid either way, so nothing about it is a breaking change.
+
+**A connection string with no `${port}` is refused, which this document does not say.** Its *Error
+Handling* section lists "a `${port}` placeholder present for a source where it isn't resolvable" —
+the `"direct"` case — and says nothing about the reverse. The reverse is worse: under
+`"kubernetes"`, a template carrying the cluster's own port addresses that port on the developer's
+machine, where their own database container may be listening, so the AppHost connects to the wrong
+database with every resource reporting healthy and the tunnel forwarding a port nothing dials. It is
+refused at `AddBackingService()` time.
+
+That refusal has to relax for the whole-string secret mode, which legitimately carries no `${port}`
+— it arrives already addressed, and is answered by forwarding the same port number locally. Stage 3
+relaxes it to "unless the whole template is a single `${secret:…}`", which is the shape that mode is
+already selected by.
+
+**The port-forward argument builder is now shared.** `KubernetesSource.BuildPortForwardArgs` was the
+only place that knew kubectl's argument order, and this document says to reuse "the
+`BuildPortForwardArgs` shape". Shape is not enough — two arrays asserted separately drift, and no
+test runs `kubectl`, so a string array is all either source's coverage of this can be. Extracted to
+`KubectlPortForward.Args`, which both sources call.
 
 ### 2026-09-03 — stage 1 implemented; three claims corrected by measurement
 

@@ -1573,12 +1573,13 @@ builder.AddService("orders")
     .Configure<IResourceWithWaitSupport>(r => r.WaitFor(ordersDb));
 ```
 
-> **`WaitFor` stops meaning anything when the source changes.** The `WaitFor` above waits properly
-> under `"local"`, where a real database resource sits behind it. Switch that backing service to
-> `"direct"` and it is satisfied immediately instead: the resource is a connection string, and Aspire
-> marks it running as soon as that string is available — which is at once, without the instance you
-> pointed at having been checked. Nothing fails and nothing hangs; the consumer simply starts
-> earlier than you asked it to. Tracked as
+> **`WaitFor` stops meaning anything under `"direct"`.** The `WaitFor` above waits properly under
+> `"local"`, where a real database resource sits behind it, and under `"kubernetes"`, where a health
+> check on the forwarded port holds the consumer back until the tunnel is actually listening. Switch
+> that backing service to `"direct"` and it is satisfied immediately instead: the resource is a
+> connection string, and Aspire marks it running as soon as that string is available — which is at
+> once, without the instance you pointed at having been checked. Nothing fails and nothing hangs;
+> the consumer simply starts earlier than you asked it to. Tracked as
 > [#220](https://github.com/flojon/aspire-servicesources/issues/220).
 
 Two things are different from `AddService()`:
@@ -1617,6 +1618,7 @@ Configured under a new `backingServices:` section of `servicesources.local.json`
 | --- | --- |
 | `"local"` | Run the `local` factory. **The default** — a backing service with no entry resolves here, so an AppHost nobody has configured runs as it reads. |
 | `"direct"` | Connect to `direct.connectionString`. Covers a database the developer started by hand *and* a cluster database published through an ingress: from the AppHost's side both are an address to connect to, with no process to manage. |
+| `"kubernetes"` | Open a `kubectl port-forward` to a Service in a dev cluster, and connect to the local end of it. See [Reaching a backing service in a cluster](#reaching-a-backing-service-in-a-cluster). |
 
 `"direct"` is named for the one thing that distinguishes it — nothing in the way — rather than for
 where the database runs. It is not `"remote"`, because the common case is a `localhost` the
@@ -1638,6 +1640,58 @@ being read alongside it.
 > soon as either changes. Take the real published port from your container runtime
 > (`docker port` / `podman port`) — or keep `"local"`, which is what "a database this AppHost runs"
 > already means.
+
+### Reaching a backing service in a cluster
+
+`"kubernetes"` connects to a database, broker or cache running in a dev cluster, through a
+`kubectl port-forward` this AppHost opens and Aspire manages for the life of the run:
+
+```jsonc
+{
+  "backingServices": {
+    "orders-db": {
+      "source": "kubernetes",
+      "kubernetes": {
+        "service": "orders-pg-rw",         // the Kubernetes Service to forward to
+        "port": 5432,                       // the port it listens on inside the cluster
+        "context": "dev-west",              // the kubectl context to forward through
+        "namespace": "orders",              // optional; "default" when omitted
+        "connectionString": "Host=localhost;Port=${port};Database=orders;Username=dev;Password=hunter2"
+      }
+    }
+  }
+}
+```
+
+**Write `${port}`, not a number.** The local end of the tunnel is allocated when the AppHost starts,
+so that two backing services forwarded at once cannot collide — which means it is not a number you
+can write down. `${port}` is replaced with it before any consumer sees the string. A connection
+string that names no `${port}` is refused at startup rather than run, because the alternative fails
+silently: `Port=5432` copied out of a manifest addresses port 5432 on *your* machine, where your own
+database container may well be listening, and the AppHost would connect to the wrong database with
+every resource reporting healthy.
+
+Two resources appear in the dashboard: the backing service itself, and the `kubectl` process
+underneath it as `orders-db-tunnel`. `kubectl`'s own output — a bad context, a Service that does not
+exist, an expired credential — lands in that resource's logs.
+
+- **A Service, not a pod.** A pod name carries a replica-set suffix that changes on every rollout;
+  `kubectl port-forward` against a Service picks a backing pod itself.
+- **`context` is required**, and deliberately not defaulted to whatever `kubectl` is currently
+  pointed at. Defaulting would make the AppHost's behaviour depend on a shell you may not have
+  opened today, and the failure would be a connection to the wrong cluster rather than an error.
+- **`namespace` defaults to `default`**, which is *not* `kubectl`'s own default — `kubectl` uses the
+  namespace configured on the context. Same reasoning: what the AppHost does should not depend on a
+  `kubectl config set-context --current --namespace=…` nobody recorded.
+- **`kubectl` must be on `PATH`.** Nothing is bundled, and this source runs the same binary you do.
+
+Forwarding **several ports through one tunnel** — a broker's AMQP and management ports, written as
+`"port": { "amqp": 5672, "management": 15672 }` and reached as `${port:amqp}` — is
+[#233](https://github.com/flojon/aspire-servicesources/issues/233). Until it lands, `port` takes a
+single number and a named `${port:…}` is refused by name. Reading credentials out of a Kubernetes
+secret with `${secret:<name>:<key>}` is not supported yet either; put the value in the connection
+string, or set the whole string from a configuration layer that already holds it — user secrets, or
+`ServiceSources__BackingServices__orders-db__Kubernetes__ConnectionString`.
 
 ### The local factory's resource must be named after the backing service
 
@@ -1712,16 +1766,18 @@ what replaces it.
 
 ### Connection-string placeholders
 
-`direct.connectionString` is normally a literal. **Braces reserve nothing** — `Driver={PostgreSQL}`,
+A `connectionString` is normally a literal. **Braces reserve nothing** — `Driver={PostgreSQL}`,
 `Server={host}\instance` and `PWD={secret}` all pass through exactly as written, doubled braces
 included, so ODBC values keep their own doubling rule intact (`PWD={pa}}ss}` is the password
 `pa}ss`, and stays that).
 
 Placeholders open on `${`, which no connection-string dialect uses. Two are recognised and reserved
-for the sources that can resolve them, and are rejected under `"direct"` with a message saying why:
+for the sources that can resolve them; a source that cannot rejects one with a message saying why:
 
-- `${port}`, or `${port:<name>}` — a local port the AppHost forwards. `"direct"` forwards nothing,
-  so write the port the backing service already listens on.
+- `${port}` — the local end of the tunnel, under `"kubernetes"`, where it is **required**.
+  `"direct"` forwards nothing, so there write the port the backing service already listens on.
+  `${port:<name>}` names one of several forwarded ports and is refused until
+  [#233](https://github.com/flojon/aspire-servicesources/issues/233).
 - `${secret:<name>:<key>}` — a value read from a Kubernetes secret. Not supported yet.
 
 A malformed placeholder — `${secret:orders-creds}`, with no key — fails when the AppHost starts,

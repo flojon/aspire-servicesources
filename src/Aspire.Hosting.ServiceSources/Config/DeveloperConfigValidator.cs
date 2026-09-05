@@ -486,9 +486,9 @@ internal static class DeveloperConfigValidator
     /// </summary>
     /// <remarks>
     /// Grouped by field name so that a field two blocks each declare their own copy of reads as one
-    /// suggestion in more than one place rather than as the same word twice — which no shape
-    /// produces yet, so today every group holds one candidate and the grouping is what keeps the
-    /// sentence right when one does. Candidates arrive already ordered by
+    /// suggestion in more than one place rather than as the same word twice — which a backing
+    /// service's <c>connectionString</c>, declared by both <c>direct</c> and <c>kubernetes</c>,
+    /// does. Candidates arrive already ordered by
     /// <see cref="NearMiss.Nearest"/>, so what is added here is only the block ordering within a
     /// group.
     /// </remarks>

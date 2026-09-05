@@ -385,6 +385,12 @@ public class AddBackingServiceTests
     /// <remarks>
     /// Reported as a backing service, not as a service: the two sections are edited in the same
     /// file, and "Service 'orders-db'" would send the reader to the wrong half of it.
+    /// <para>
+    /// <c>connectionString</c> is declared by two source blocks, so this is also where the
+    /// several-homes branch is exercised: the message names both rather than picking one, because
+    /// the entry's own <c>source</c> is not what decides where the key goes — a developer switching
+    /// source keeps whichever block they wrote.
+    /// </para>
     /// </remarks>
     [Fact]
     public void MalformedEntry_IsReportedAgainstTheBackingServiceShape()
@@ -399,15 +405,21 @@ public class AddBackingServiceTests
         Assert.Contains("Backing service 'orders-db'", ex.Message);
         Assert.DoesNotContain("Service 'orders-db'", ex.Message);
         Assert.Contains("'connectionString' is not a valid key here", ex.Message);
-        Assert.Contains("'direct' block", ex.Message);
+        Assert.Contains("It belongs inside the block of the source it configures", ex.Message);
+        Assert.Contains("'direct', 'kubernetes'", ex.Message);
     }
 
     /// <summary>
     /// A misspelled field in a backing-service entry gets the near-miss message the service section
     /// gained in #182, because both sections are validated through the same shape-driven walk.
     /// </summary>
+    /// <remarks>
+    /// The suggestion names one field in two blocks rather than the same word twice, which is what
+    /// the grouping in <c>DescribeNearMisses</c> is for. Both blocks are named in a fixed order, so
+    /// the sentence reads the same on every run — <c>Type.GetProperties()</c> does not promise one.
+    /// </remarks>
     [Fact]
-    public void MisspelledFieldAtEntryRoot_NamesTheFieldAndItsBlock()
+    public void MisspelledFieldAtEntryRoot_NamesTheFieldAndEveryBlockItLivesIn()
     {
         var builder = CreateBuilder("""
             { "backingServices": { "orders-db": { "source": "direct", "conectionString": "Host=x" } } }
@@ -416,8 +428,7 @@ public class AddBackingServiceTests
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => builder.AddBackingService("orders-db", LocalFactory(builder)));
 
-        Assert.Contains("Did you mean 'connectionString'", ex.Message);
-        Assert.Contains("'direct' block", ex.Message);
+        Assert.Contains("Did you mean 'connectionString', in the 'direct' or 'kubernetes' block?", ex.Message);
     }
 
     /// <remarks>
