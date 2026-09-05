@@ -535,7 +535,7 @@ public class KubernetesBackingServiceTests
     }
 
     /// <summary>
-    /// The echoed connection string has its credentials replaced.
+    /// The echoed connection string reaches the message with its credentials replaced.
     /// </summary>
     /// <remarks>
     /// This is the only message in the package that echoes a whole, valid connection string — every
@@ -543,24 +543,18 @@ public class KubernetesBackingServiceTests
     /// relayed into <c>~/.aspire/logs</c> and routinely pasted into an issue. The echo earns its
     /// place, since the shell-expansion case is only diagnosable by seeing what arrived, so the
     /// value is redacted rather than withheld.
+    /// <para>
+    /// One row per syntax, because what is covered here is that the redaction is applied at all and
+    /// that its result is what the message quotes. The dialects it has to survive are a matrix of
+    /// connection strings rather than of AppHost configurations, and live in
+    /// <see cref="ConnectionStringRedactionTests"/>.
+    /// </para>
     /// </remarks>
     [Theory]
     [InlineData("Host=db.internal;Port=5432;Username=dev;Password=hunter2", "hunter2", "Username=dev")]
-    [InlineData("Host=db.internal;Port=5432;Pwd=hunter2", "hunter2", "Host=db.internal")]
-    [InlineData("postgresql://orders_app:hunter2@db.internal:5432/orders", "hunter2", "orders_app")]
-    [InlineData("redis://:hunter2@db.internal:6379", "hunter2", "db.internal")]
-    // A ';' is legal and unencoded in userinfo (RFC 3986 puts it in sub-delims), so a password
-    // carrying one must still be found — forbidding ';' in the password class leaked these whole.
-    [InlineData("redis://user:pa;ss@db.internal:6379", "pa;ss", "user")]
-    [InlineData("mongodb://user:p;w@db.internal:27017", "p;w", "mongodb://")]
-    [InlineData(
-        "BlobEndpoint=https://acct.blob.core.windows.net/;SharedAccessSignature=sv=2021&sig=hunter2",
-        "hunter2",
-        "BlobEndpoint=https://acct.blob.core.windows.net/")]
-    [InlineData(
-        "Endpoint=sb://ns.servicebus.windows.net/;SharedAccessKeyName=root;SharedAccessKey=hunter2",
-        "hunter2",
-        "SharedAccessKeyName=root")]
+    [InlineData("postgresql://orders_app:hunter2@db.internal:5432/orders", "hunter2", "db.internal:5432/orders")]
+    // The case an allowlist exists for: a key no blocklist would have thought to name.
+    [InlineData("Host=db.internal;Rotation Key=hunter2", "hunter2", "Rotation Key=")]
     public void TheEchoedConnectionString_HasItsCredentialsRedacted(
         string connectionString, string secret, string survives)
     {
@@ -578,7 +572,27 @@ public class KubernetesBackingServiceTests
     }
 
     /// <summary>
-    /// A connection string with nothing secret in it is echoed whole.
+    /// The note explaining the masking does not call what it hid a credential.
+    /// </summary>
+    /// <remarks>
+    /// Under an allowlist a <c>***</c> means "not recognised", which is not the same as "secret" —
+    /// the <c>Rotation Key</c> here holds a timeout. A note asserting a credential was found would
+    /// tell the developer something the package does not know.
+    /// </remarks>
+    [Fact]
+    public void TheNoteAboutMaskedValues_DoesNotClaimACredentialWasFound()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, Config(connectionString: "Host=db.internal;Rotation Key=30")));
+
+        Assert.Contains("the rest read as ***, which does not mean they were secret", ex.Message);
+        Assert.DoesNotContain("credential", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// A connection string with nothing to hide is echoed whole.
     /// </summary>
     /// <remarks>
     /// The redaction narrows what the echo can leak; it must not narrow what the echo is
@@ -598,28 +612,27 @@ public class KubernetesBackingServiceTests
     }
 
     /// <summary>
-    /// Text that only resembles a credential keyword is echoed as written.
+    /// An address that merely contains an <c>@</c> is not swept into the redaction.
     /// </summary>
     /// <remarks>
-    /// A keyword that merely starts with one of the reserved words is not a credential, and the
-    /// lookbehind anchors on the <c>=</c> so it does not become one — <c>SharedAccessKeyName</c> is
-    /// the case that matters, since it sits beside a key that genuinely is one.
+    /// The one shape that has to survive intact whatever else changes: a <c>://</c> early in the
+    /// string and an <c>@</c> late in it, with everything between them the very thing the message
+    /// exists to display. Guarded here as well as in
+    /// <see cref="ConnectionStringRedactionTests"/> because three separate corrections went into
+    /// getting it right, and what it protects is the message — that the developer can read their own
+    /// address back out of it — rather than the redaction in isolation.
     /// </remarks>
-    [Theory]
-    [InlineData("Host=db.internal;TokenExpiry=30;Database=orders", "TokenExpiry=30")]
-    [InlineData("Host=db.internal;PasswordExpiry=30;Database=orders", "PasswordExpiry=30")]
-    [InlineData("Host=db.internal;Integrated Security=SSPI;Database=orders", "Integrated Security=SSPI")]
-    // The other half of the ';' question: an '@' belonging to a later keyword must not drag the
-    // redaction across the fields between it and a '://' earlier in the string.
-    [InlineData("Data Source=tcp://db.internal:1433;UID=a@b.com;Database=orders", "1433;UID=a@b.com")]
-    public void AKeywordThatOnlyLooksLikeACredential_IsNotRedacted(string connectionString, string survives)
+    [Fact]
+    public void AnAddressBetweenTheSchemeAndAnEmail_IsNotSweptIntoTheRedaction()
     {
         var builder = CreateBuilder();
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => Resolve(builder, Config(connectionString: connectionString)));
+            () => Resolve(
+                builder,
+                Config(connectionString: "Data Source=tcp://db.internal:1433;UID=a@b.com;Database=orders")));
 
-        Assert.Contains(survives, ex.Message, StringComparison.Ordinal);
+        Assert.Contains("1433;UID=a@b.com", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("***", ex.Message);
     }
 
