@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using System.ComponentModel;
+using System.Globalization;
 using System.Text;
 
 namespace Aspire.Hosting.ServiceSources.Config;
@@ -720,6 +721,16 @@ internal static class DeveloperConfigValidator
                 '\n' => "\\n",
                 '\r' => "\\r",
                 _ when char.IsWhiteSpace(c) => $"\\u{(int)c:x4}",
+
+                // A character with no glyph of its own is worse than one that merely looks like a
+                // space: echoed as itself it is not there at all, so the value reads back as
+                // exactly what the developer typed and the message appears to be complaining about
+                // nothing. Control characters and Unicode's Format category are the two slices of
+                // that this can name without reaching a character somebody meant — a combining mark
+                // is invisible too, and a decomposed accented letter carries one.
+                _ when char.IsControl(c) || CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.Format
+                    => $"\\u{(int)c:x4}",
+
                 _ => c.ToString(),
             }))}'";
 

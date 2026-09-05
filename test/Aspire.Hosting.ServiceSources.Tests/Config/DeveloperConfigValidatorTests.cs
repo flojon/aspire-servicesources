@@ -34,6 +34,25 @@ public class DeveloperConfigValidatorTests
             () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
     }
 
+    /// <remarks>
+    /// A byte-order mark is what a copy-paste out of a Windows-authored file leaves behind, and it
+    /// has no glyph at all: echoed as itself it is indistinguishable from the value being correct,
+    /// so the reader is shown what looks exactly like what they wrote and told it is wrong. It is
+    /// not whitespace, so the arm that spells out a tab does not reach it.
+    /// </remarks>
+    [Fact]
+    public void Validate_ValueCarryingAnInvisibleCharacter_SpellsItOutRatherThanEchoingIt()
+    {
+        var ex = Load("""
+            { "services": { "orders": {
+                "source": "kubernetes",
+                "kubernetes": { "port": "\uFEFF8080" } } } }
+            """);
+
+        Assert.Contains("\\ufeff", ex.Message);
+        Assert.DoesNotContain("'\ufeff8080'", ex.Message);
+    }
+
     [Fact]
     public void Validate_FlatFieldAtEntryRoot_NamesTheBlockItBelongsUnder()
     {
