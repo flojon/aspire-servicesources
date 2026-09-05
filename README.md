@@ -1703,10 +1703,7 @@ that exits outright shows up as a failed resource regardless.
 Forwarding **several ports through one tunnel** — a broker's AMQP and management ports, written as
 `"port": { "amqp": 5672, "management": 15672 }` and reached as `${port:amqp}` — is
 [#233](https://github.com/flojon/aspire-servicesources/issues/233). Until it lands, `port` takes a
-single number and a named `${port:…}` is refused by name. Reading credentials out of a Kubernetes
-secret with `${secret:<name>:<key>}` is not supported yet either; put the value in the connection
-string, or set the whole string from a configuration layer that already holds it — user secrets, or
-`ServiceSources__BackingServices__orders-db__Kubernetes__ConnectionString`.
+single number and a named `${port:…}` is refused by name.
 
 ### The local factory's resource must be named after the backing service
 
@@ -1789,11 +1786,49 @@ included, so ODBC values keep their own doubling rule intact (`PWD={pa}}ss}` is 
 Placeholders open on `${`, which no connection-string dialect uses. Two are recognised and reserved
 for the sources that can resolve them; a source that cannot rejects one with a message saying why:
 
-- `${port}` — the local end of the tunnel, under `"kubernetes"`, where it is **required**.
+- `${port}` — the local end of the tunnel, under `"kubernetes"`, where it is **required** unless the
+  whole connection string is one `${secret:…}` (below), which carries a port already.
   `"direct"` forwards nothing, so there write the port the backing service already listens on.
   `${port:<name>}` names one of several forwarded ports and is refused until
   [#233](https://github.com/flojon/aspire-servicesources/issues/233).
-- `${secret:<name>:<key>}` — a value read from a Kubernetes secret. Not supported yet.
+- `${secret:<name>:<key>}` — a value read from a Kubernetes secret, under `"kubernetes"`. The fetch
+  is deferred: the placeholder becomes a parameter Aspire resolves when something first asks for the
+  value, so an unreachable cluster costs one failed parameter rather than an AppHost that will not
+  start. The value is marked secret, so the dashboard masks it, and reading the same placeholder
+  twice fetches once. `"direct"` has no cluster to resolve one against and refuses it, naming
+  `"kubernetes"` as the source that does.
+
+  A secret's name and its keys are letters, digits, `-`, `.` and `_`, with the name starting with a
+  letter or a digit — the cluster's own rule, checked here so that nothing else can be smuggled into
+  the `kubectl` command that reads it.
+
+  **A secret holding the whole connection string** works too, which is the shape a hand-authored
+  Sealed Secret usually has. Write the template as exactly one placeholder:
+
+  ```jsonc
+  {
+    "backingServices": {
+      "orders-db": {
+        "source": "kubernetes",
+        "kubernetes": {
+          "service": "orders-pg-rw",
+          "port": 5432,
+          "context": "dev-west",
+          "namespace": "orders",
+          "connectionString": "${secret:orders-cs:connectionString}"
+        }
+      }
+    }
+  }
+  ```
+
+  Then the port-forward listens on the same port `port` names rather than an allocated one — there
+  is nothing in the template to substitute a local port into — and the in-cluster host the secret
+  was written against is rewritten to `localhost`, in any of the four forms a pod resolves
+  (`orders-pg-rw`, `.orders`, `.svc`, `.svc.cluster.local`), wherever a connection string can put a
+  host. Because the allocated port is given up, a local port already in use is refused up front; so
+  is a secret whose own port is not the one being forwarded, and one that names the service in no
+  form this can rewrite. Per-field placeholders stay preferred wherever the secret offers them.
 
 A malformed placeholder — `${secret:orders-creds}`, with no key — fails when the AppHost starts,
 naming the backing service and the configuration key, rather than reaching the app as text.

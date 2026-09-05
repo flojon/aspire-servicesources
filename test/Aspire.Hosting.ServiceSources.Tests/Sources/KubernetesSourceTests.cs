@@ -10,6 +10,8 @@ public class KubernetesSourceTests
 {
     private sealed class FakePortAllocator(int port) : IPortAllocator
     {
+        public bool IsAvailable(int candidate) => true;
+
         public int AllocatePort() => port;
     }
 
@@ -280,6 +282,8 @@ public class KubernetesSourceTests
 
     private sealed class TrackingPortAllocator(Action onAllocate, int port) : IPortAllocator
     {
+        public bool IsAvailable(int candidate) => true;
+
         public int AllocatePort()
         {
             onAllocate();

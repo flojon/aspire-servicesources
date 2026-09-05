@@ -21,11 +21,16 @@ internal interface IPortAllocator
     /// cost of the mode, so the collision is worth reporting before it happens rather than leaving
     /// a developer to read a port-forward's log.
     /// <para>
-    /// Defaults to <see langword="true"/> — "nothing known against it" — which is what a test fake
-    /// standing in for the OS wants when the port is not what it is testing. The implementation
-    /// that actually talks to the OS overrides it; the same TOCTOU caveat as
-    /// <see cref="AllocatePort"/> applies, and for the same reason it is accepted.
+    /// <b>Deliberately not defaulted.</b> A default would have to be <see langword="true"/> — there
+    /// is no safe guess — and an implementation that never answered the question would then assert
+    /// that every port is free, which is fail-open in the one place this method exists to close.
+    /// <c>IGitClient.GetHeadCommitSha</c> defaults precisely because its default is the fail-safe
+    /// answer; this one has no such answer, so every implementer says what it means.
+    /// </para>
+    /// <para>
+    /// The same TOCTOU caveat as <see cref="AllocatePort"/> applies, and for the same reason it is
+    /// accepted.
     /// </para>
     /// </remarks>
-    bool IsAvailable(int port) => true;
+    bool IsAvailable(int port);
 }

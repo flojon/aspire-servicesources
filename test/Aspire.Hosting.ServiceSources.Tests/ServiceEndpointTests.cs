@@ -19,6 +19,8 @@ public class ServiceEndpointTests
 
     private sealed class FakePortAllocator : IPortAllocator
     {
+        public bool IsAvailable(int port) => true;
+
         public int AllocatePort() => 54321;
     }
 
