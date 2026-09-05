@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using System.ComponentModel;
 using System.Globalization;
+using System.Reflection;
 using System.Text;
 
 namespace Aspire.Hosting.ServiceSources.Config;
@@ -173,11 +174,11 @@ internal static class DeveloperConfigValidator
         string serviceName,
         IConfigurationSection block,
         string blockPath,
-        IReadOnlyDictionary<string, Type> fields)
+        IReadOnlyDictionary<string, PropertyInfo> fields)
     {
         foreach (var field in block.GetChildren())
         {
-            if (!fields.TryGetValue(field.Key, out var fieldType))
+            if (!fields.TryGetValue(field.Key, out var declared))
             {
                 problems.Add(NotValidInBlock(field, blockPath, fields));
                 continue;
@@ -187,13 +188,13 @@ internal static class DeveloperConfigValidator
             // IConfiguration as indexed children, and its type is a class, so a list asked about as
             // a block is classified as one and answered with "takes a value, not a block of
             // settings" — about a field whose value is neither.
-            if (DeveloperConfigField.IsList(fieldType))
+            if (DeveloperConfigField.IsList(declared.PropertyType))
             {
                 CollectList(problems, field, blockPath);
                 continue;
             }
 
-            if (DeveloperConfigField.BlockFieldsOf(fieldType) is { } nested)
+            if (DeveloperConfigField.BlockFieldsOf(declared.PropertyType) is { } nested)
             {
                 // The same mistake one level down as a block name carrying a value: it binds to
                 // nothing, and the binder giving up takes the surrounding block with it.
@@ -228,9 +229,9 @@ internal static class DeveloperConfigValidator
                 continue;
             }
 
-            if (field.Value is { } value && !BindsTo(fieldType, value))
+            if (field.Value is { } value && !BindsTo(declared.PropertyType, value))
             {
-                problems.Add(NotBindable(field, blockPath, fieldType, value));
+                problems.Add(NotBindable(field, blockPath, declared.PropertyType, value));
             }
         }
     }
@@ -508,7 +509,7 @@ internal static class DeveloperConfigValidator
 
     /// <summary>The error for a key that no block of this name declares.</summary>
     private static string NotValidInBlock(
-        IConfigurationSection field, string block, IReadOnlyDictionary<string, Type> fields) =>
+        IConfigurationSection field, string block, IReadOnlyDictionary<string, PropertyInfo> fields) =>
         $"'{field.Key}' is not a valid key in the "
         + $"'{block.ToLowerInvariant()}' block. Valid keys there are {Quoted(fields.Keys)}."
         + SetAt(field);
@@ -570,7 +571,7 @@ internal static class DeveloperConfigValidator
     /// and the enclosing block's path for one nested inside it.
     /// </param>
     private static string BlockExpected(
-        string container, IConfigurationSection key, IReadOnlyDictionary<string, Type> fields)
+        string container, IConfigurationSection key, IReadOnlyDictionary<string, PropertyInfo> fields)
     {
         var block = key.Key.ToLowerInvariant();
 
