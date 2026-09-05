@@ -35,10 +35,9 @@ nothing will fail to build to warn you.
 
   The rule is deliberately lexical rather than a resolved path comparison, and rejects `".. "`,
   `"..."` and `". "` as well as `"."` and `".."`. Windows strips trailing dots and spaces from a
-  path component before resolving it, so none of those is a directory of its own there: `".. "`
-  becomes `".."` and escapes, while `"..."` and `". "` are left with nothing and land on the
-  checkouts directory itself. On Linux and macOS each is an ordinary directory name. Judging them
-  the same way everywhere keeps one verdict for a file a whole team shares, and keeps the
+  path component, so none of those is a directory of its own there — what such a name resolves to
+  is never a checkout by that name. On Linux and macOS each is an ordinary directory name. Judging
+  them the same way everywhere keeps one verdict for a file a whole team shares, and keeps the
   Windows-only cases testable on Linux.
 
   Reaching either needed write access to `servicesources.yaml` — which is committed, shared, and

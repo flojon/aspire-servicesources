@@ -106,13 +106,17 @@ internal static class LocalGitCheckout
             return false;
         }
 
-        // Windows strips trailing dots and spaces from a path component before resolving it, so a
-        // name made only of those characters is never a directory of its own there: ".. " arrives
-        // as ".." and escapes, while "..." and ". " are left with nothing and land on checkouts/
-        // itself. An exact test against "." and ".." passes all three, and the difference is
+        // Windows strips trailing dots and spaces from a path component, so a name made only of
+        // those characters is not a directory of its own there — whether it is erased outright or
+        // read as a relative segment, what it resolves to is never a checkout of that name. An
+        // exact test against "." and ".." passes every such spelling, and the difference is
         // invisible to a CI that only runs on Linux, where each is an ordinary directory name.
         // Trim the same characters first: what is left is what Windows will actually look for, and
         // only a name that is entirely dots and spaces has nothing left.
+        //
+        // Which of the two it does per spelling is deliberately not claimed here. It decides
+        // nothing — every one of them is refused — and it cannot be checked from this repository,
+        // whose CI has no Windows leg.
         //
         // Only what the trimming leaves is judged, so "orders." is accepted. That name is contained
         // — it is a directory under checkouts/ either way — though on Windows it resolves to the
