@@ -617,7 +617,10 @@ public class KubernetesBackingServiceTests
     /// <remarks>
     /// The one shape that has to survive intact whatever else changes: a <c>://</c> early in the
     /// string and an <c>@</c> late in it, with everything between them the very thing the message
-    /// exists to display.
+    /// exists to display. Guarded here as well as in
+    /// <see cref="ConnectionStringRedactionTests"/> because three separate corrections went into
+    /// getting it right, and what it protects is the message — that the developer can read their own
+    /// address back out of it — rather than the redaction in isolation.
     /// </remarks>
     [Fact]
     public void AnAddressBetweenTheSchemeAndAnEmail_IsNotSweptIntoTheRedaction()

@@ -27,9 +27,11 @@ namespace Aspire.Hosting.ServiceSources.BackingServices;
 /// <para>
 /// Redaction by key is only fail-closed if the scan that finds the keys is at least as permissive as
 /// every syntax that could have written the string, so the scan looks for keys rather than for
-/// separators. A pair may be introduced by <c>;</c>, <c>&amp;</c>, <c>?</c>, <c>,</c> or whitespace,
-/// and its value runs to the next key rather than to the next separator — which is also why a
-/// quoted value carrying a separator, <c>Password='a;b'</c>, costs nothing to handle.
+/// separators. A pair may be introduced by <c>;</c>, <c>&amp;</c>, <c>?</c> or <c>,</c> — and, inside
+/// a value whose key is allowlisted, by whitespace alone (see <see cref="RedactRecognisedValue"/>).
+/// Space may sit on either side of the <c>=</c>, and a value runs to the next key rather than to the
+/// next separator — which is also why a quoted value carrying a separator, <c>Password='a;b'</c>,
+/// costs nothing to handle.
 /// </para>
 /// </remarks>
 internal static class ConnectionStringRedaction
@@ -82,10 +84,9 @@ internal static class ConnectionStringRedaction
     /// introduces nothing: <c>Data Source=file:pwd=hunter2</c> hides its password inside an
     /// allowlisted value, where no separator marks it off. An unconditional <c>pwd=</c> finds it.
     /// <para>
-    /// This is the keyword half of the list that used to do the whole job. The half that matched a
-    /// URI's <c>user:pass@host</c> is gone, along with the alternation three separate corrections
-    /// went into: <see cref="MaskUri"/> and <see cref="MaskAuthority"/> cover every shape it did,
-    /// and cover the ones it did not.
+    /// Keywords only. A URI's <c>user:pass@host</c> is not matched here — <see cref="MaskUri"/> and
+    /// <see cref="MaskAuthority"/> cover every shape of it, including a password carrying <c>/</c>,
+    /// <c>?</c> or <c>#</c> raw, which no lookbehind anchored on <c>://</c> can bound.
     /// </para>
     /// </remarks>
     private static readonly Regex KnownCredentialKeywords = new(
@@ -96,9 +97,9 @@ internal static class ConnectionStringRedaction
 
     /// <summary>
     /// <paramref name="connectionString"/> with everything not recognised as safe to print replaced
-    /// by <c>***</c>, or <see cref="Unscannable"/> if it could not be scanned at all.
+    /// by <c>***</c>, or <see cref="Unscannable"/> if the search for credentials did not finish.
     /// </summary>
-    public static string Apply(string connectionString)
+    public static string Redact(string connectionString)
     {
         string backstopped;
 
@@ -155,11 +156,18 @@ internal static class ConnectionStringRedaction
     /// </para>
     /// </remarks>
     private static string RedactRecognisedValue(string value)
-        => Rebuild(
-            value,
-            FindPairs(value, whitespaceBeginsAPair: true),
-            MaskAuthority,
-            static (key, nested) => KeysThatHoldNoSecret.Contains(key) ? MaskAuthority(nested) : Mask);
+        => Rebuild(value, FindPairs(value, whitespaceBeginsAPair: true), MaskAuthority, RedactNestedValue);
+
+    /// <summary>
+    /// What is printed for a pair written inside a value that was already recognised.
+    /// </summary>
+    /// <remarks>
+    /// The mirror of <see cref="RedactValue"/> one level down, and the last point at which anything
+    /// is printed: a recognised value here is masked for an authority and shown rather than scanned
+    /// again, so there is no third level and no recursion to bound.
+    /// </remarks>
+    private static string RedactNestedValue(string key, string value)
+        => KeysThatHoldNoSecret.Contains(key) ? MaskAuthority(value) : Mask;
 
     /// <summary>
     /// <paramref name="text"/> with each of <paramref name="pairs"/> put through
@@ -211,8 +219,12 @@ internal static class ConnectionStringRedaction
             // Key, any space around the '=', and the '=' itself, exactly as written.
             built.Append(text, pair.KeyStart, valueStart - pair.KeyStart);
 
-            built.Append(value.Length == 0 ? value : redactValue(text[pair.KeyStart..pair.KeyEnd], value))
-                 .Append(text, valueEnd, boundary - valueEnd);
+            if (value.Length > 0)
+            {
+                built.Append(redactValue(text[pair.KeyStart..pair.KeyEnd], value));
+            }
+
+            built.Append(text, valueEnd, boundary - valueEnd);
         }
 
         return built.ToString();
@@ -253,15 +265,9 @@ internal static class ConnectionStringRedaction
             {
                 pairs.Add(pair);
 
-                // Everything up to the '=' is accounted for; the value is scanned as ordinary text,
-                // which is what stops a pair beginning inside it.
-                for (var scanned = i; scanned < pair.ValueStart; scanned++)
-                {
-                    if (!char.IsWhiteSpace(text[scanned]))
-                    {
-                        lastMeaningful = text[scanned];
-                    }
-                }
+                // A pair's head always ends at its '=', which introduces nothing — the value is then
+                // scanned as ordinary text, and that is what stops a pair beginning inside it.
+                lastMeaningful = '=';
 
                 i = pair.ValueStart - 1;
                 continue;
@@ -444,13 +450,7 @@ internal static class ConnectionStringRedaction
     /// </remarks>
     private static string MaskUri(string uri)
     {
-        var schemeEnd = uri.IndexOf("://", StringComparison.Ordinal) + 3;
-        var at = uri.LastIndexOf('@');
-
-        var masked = at >= schemeEnd
-            ? string.Concat(uri.AsSpan(0, schemeEnd), Mask, uri.AsSpan(at))
-            : uri;
-
+        var masked = MaskAuthority(uri);
         var query = masked.IndexOf('?');
 
         return query < 0 || query == masked.Length - 1

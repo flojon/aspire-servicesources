@@ -100,7 +100,9 @@ Over the string the backstop returned:
 ```
 Level 1 — a pair may begin at the start of the string, or after one of  ;  &  ?  ,
           optionally followed by whitespace ("Host=h; Port=5432" is two pairs).
-Level 2 — inside a value whose key is allowlisted, a pair may also begin after whitespace.
+Level 2 — inside a value whose key is allowlisted, a pair begins after whitespace, and only
+          there. Not a union with level 1: those separators have already split the string before
+          any value was formed.
 A key is  [A-Za-z_] then [A-Za-z0-9_.-], with single interior spaces where a key character
           follows, and then '=' not followed by '='.
 A value runs from after its '=' to the start of the next key, less the separators between them.
@@ -133,9 +135,10 @@ RedactValue(key, value):
     return the level-2 scan of value, with MaskAuthority over its head and each nested value
 
 MaskAuthority(v):                                # an allowlisted key may still hold a URL
-    at = the LAST '@' in v;  if none            -> v
-    if no ':' occurs before it                  -> v   # 'UID=a@b.com' is an address, not an authority
-    keep a leading "scheme://" if there is one, replace the rest up to that '@' with "***"
+    at = the LAST '@' in v;  if none, or at index 0     -> v
+    if no ':' occurs before it                          -> v   # 'UID=a@b.com' is an address
+    keep a leading "scheme://" if one begins at or before that '@', else keep nothing,
+    and replace everything up to the '@' with "***"
 
 RedactPrefix(p):
     trim a trailing run of separators off p and put it back at the end
@@ -144,8 +147,8 @@ RedactPrefix(p):
     return "***"
 
 MaskUri(u):
-    replace everything from after "://" up to the LAST '@' with "***", if there is one
-    if a '?' remains with anything after it     -> replace what follows it with "***"
+    masked = MaskAuthority(u)                    # the same rule; a "://" guarantees its ':'
+    if a '?' remains in masked with anything after it  -> replace what follows it with "***"
 ```
 
 ADO.NET's `==` escape is handled in exactly one place: the key rule declines `Host==x=hunter2`
@@ -262,9 +265,11 @@ Not closed, and said out loud rather than left to be discovered:
 
 ## Tests
 
-`AKeywordThatOnlyLooksLikeACredential_IsNotRedacted` is **deleted**, not rewritten: it asserts a
+`AKeywordThatOnlyLooksLikeACredential_IsNotRedacted` does not survive as it was: it asserts a
 blocklist property (the lookbehind anchors on `=`, so `SharedAccessKeyName` is not caught) that
-ceases to exist. Three of its four rows now redact. Its fourth row is rehomed as the no-corruption
+ceases to exist. Three of its four rows now redact, so it is rehomed to the unit tests as
+`AKeywordThatOnlyLooksLikeACredential_IsMaskedAnyway` with those three rows and their expectations
+inverted — the knowing cost of the inversion, stated as a test. Its fourth row is rehomed as the no-corruption
 test. `AConnectionStringWithNoCredential_IsEchoedUntouched` is left **untouched** — it is the best
 regression guard for the ordinary case.
 
@@ -273,6 +278,7 @@ regression guard for the ordinary case.
 | `Host=db.internal;Port=5432;Username=dev;Password=hunter2` | `Password=***`, rest intact |
 | `Host=db.internal;Port=5432;Pwd=hunter2` | `Pwd=***` |
 | `postgresql://orders_app:hunter2@db.internal:5432/orders` | `postgresql://***@db.internal:5432/orders` |
+| `x:y@a://b` | `***@a://b` — an `@` before the scheme resolves no authority, so none of it prints |
 | `redis://:hunter2@db.internal:6379` | `redis://***@db.internal:6379` |
 | `redis://user:pa;ss@db.internal:6379` | `redis://***@db.internal:6379` |
 | `mongodb://user:p;w@db.internal:27017` | `mongodb://***@db.internal:27017` |
