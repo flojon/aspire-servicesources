@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Globalization;
 using Aspire.Hosting.ServiceSources.BackingServices;
 
 namespace Aspire.Hosting.ServiceSources.Tests.BackingServices;
@@ -26,18 +28,44 @@ public class ConnectionStringRedactionTests
     [InlineData("Host=db.internal;Port=5432;Username=dev;Password=hunter2",
                 "Host=db.internal;Port=5432;Username=dev;Password=***")]
     [InlineData("Host=db.internal;Port=5432;Pwd=hunter2", "Host=db.internal;Port=5432;Pwd=***")]
-    [InlineData("redis://:hunter2@db.internal:6379", "redis://***@db.internal:6379")]
     [InlineData("Endpoint=sb://ns.servicebus.windows.net/;SharedAccessKeyName=root;SharedAccessKey=hunter2",
                 "Endpoint=***;SharedAccessKeyName=***;SharedAccessKey=***")]
     [InlineData("BlobEndpoint=https://acct.blob.core.windows.net/;SharedAccessSignature=sv=2021&sig=hunter2",
                 "BlobEndpoint=***;SharedAccessSignature=***")]
-    // RFC 3986 puts ';' in sub-delims, which userinfo admits raw, so a password may carry one.
-    [InlineData("redis://user:pa;ss@db.internal:6379", "redis://***@db.internal:6379")]
-    [InlineData("mongodb://user:p;w@db.internal:27017", "mongodb://***@db.internal:27017")]
     // The case no blocklist names, and the reason this is an allowlist.
     [InlineData("Host=h;Rotation Key=hunter2", "Host=h;Rotation Key=***")]
     public void AValueUnderAnUnrecognisedKey_IsMasked(string connectionString, string expected)
-        => Assert.Equal(expected, ConnectionStringRedaction.Apply(connectionString));
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
+
+    /// <summary>
+    /// A URI authority is reduced to its host, whatever the password inside it contains.
+    /// </summary>
+    /// <remarks>
+    /// The authority is not ended by <c>/</c>, <c>?</c> or <c>#</c>: all three are legal unencoded
+    /// in a password people actually write, and a rule that stopped at them printed the password
+    /// whole. The last <c>@</c> is what bounds it, and the whole userinfo goes — inside one there is
+    /// no telling a username from a password, since <c>redis://:pass@h</c> has only the latter.
+    /// </remarks>
+    [Theory]
+    [InlineData("postgresql://orders_app:hunter2@db.internal:5432/orders",
+                "postgresql://***@db.internal:5432/orders")]
+    // No username at all, the canonical Redis URL before ACLs.
+    [InlineData("redis://:hunter2@db.internal:6379", "redis://***@db.internal:6379")]
+    // RFC 3986 puts ';' in sub-delims, which userinfo admits raw, so a password may carry one.
+    [InlineData("redis://user:pa;ss@db.internal:6379", "redis://***@db.internal:6379")]
+    [InlineData("mongodb://user:p;w@db.internal:27017", "mongodb://***@db.internal:27017")]
+    // The other sub-delims, each of which would end an authority under RFC 3986's own rule.
+    [InlineData("redis://user:pa#ss@db.internal:6379", "redis://***@db.internal:6379")]
+    [InlineData("redis://user:pa?ss@db.internal:6379", "redis://***@db.internal:6379")]
+    [InlineData("postgresql://app:8Kx/2Qz+w7A=@db.internal:5432/orders",
+                "postgresql://***@db.internal:5432/orders")]
+    // No scheme: a bare authority says the same thing, and an allowlisted key may hold one.
+    [InlineData("Data Source=user:hunter2@h:1433", "Data Source=***@h:1433")]
+    // An '@' that precedes the scheme belongs to no authority this could resolve, so none of it
+    // is printed.
+    [InlineData("x:y@a://b", "***@a://b")]
+    public void AUriAuthority_IsMaskedToItsHost(string connectionString, string expected)
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
 
     /// <summary>
     /// A secret is masked whatever separates the pair it sits in from its neighbours.
@@ -58,13 +86,6 @@ public class ConnectionStringRedactionTests
                 "sb://ns.servicebus.windows.net;SharedAccessKey=***")]
     // A scheme that is not a bare 'scheme://' at position 0.
     [InlineData("jdbc:postgresql://user:pw@h:5432/db?ssl=true", "jdbc:postgresql://***@h:5432/db?ssl=***")]
-    // Sub-delims a URI password may carry raw, each of which ends an authority.
-    [InlineData("redis://user:pa#ss@db.internal:6379", "redis://***@db.internal:6379")]
-    [InlineData("redis://user:pa?ss@db.internal:6379", "redis://***@db.internal:6379")]
-    [InlineData("postgresql://app:8Kx/2Qz+w7A=@db.internal:5432/orders",
-                "postgresql://***@db.internal:5432/orders")]
-    // An authority with no scheme at all, behind a key the allowlist passes.
-    [InlineData("Data Source=user:hunter2@h:1433", "Data Source=***@h:1433")]
     // A query parameter, which the previous blocklist did catch — this must not regress.
     [InlineData("redis://h:6379/0?password=hunter2", "redis://h:6379/0?password=***")]
     // An option list whose head is an address, which is recognised by shape and kept.
@@ -73,7 +94,7 @@ public class ConnectionStringRedactionTests
     [InlineData("tcp://db.internal:1433;UID=a@b.com;Password=hunter2",
                 "tcp://db.internal:1433;UID=a@b.com;Password=***")]
     public void ASecretBehindAnUnfamiliarSeparator_IsStillMasked(string connectionString, string expected)
-        => Assert.Equal(expected, ConnectionStringRedaction.Apply(connectionString));
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
 
     /// <summary>
     /// A pair written inside an unrecognised value does not escape from it.
@@ -89,7 +110,7 @@ public class ConnectionStringRedactionTests
     [InlineData("Rotation Key=abc user=def", "Rotation Key=***")]
     [InlineData("Rotation Key=abc host=db.internal port=5432", "Rotation Key=***")]
     public void APairInsideAnUnrecognisedValue_IsMaskedWithIt(string connectionString, string expected)
-        => Assert.Equal(expected, ConnectionStringRedaction.Apply(connectionString));
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
 
     /// <summary>
     /// Space around the <c>=</c> is layout, and does not hide a pair from the scan.
@@ -106,7 +127,7 @@ public class ConnectionStringRedactionTests
     [InlineData("Host=h;Rotation Key =hunter2", "Host=h;Rotation Key =***")]
     [InlineData("Host=localhost ; Rotation Key = hunter2", "Host=localhost ; Rotation Key = ***")]
     public void SpaceAroundTheEqualsSign_DoesNotHideAPairFromTheScan(string connectionString, string expected)
-        => Assert.Equal(expected, ConnectionStringRedaction.Apply(connectionString));
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
 
     /// <summary>
     /// The longest key wins, because the shortest one is the one that prints a secret.
@@ -119,7 +140,7 @@ public class ConnectionStringRedactionTests
     public void AKeyEndingInAnAllowlistedWord_IsNotReadAsThatWord()
         => Assert.Equal(
             "Host=x Custom Port=***",
-            ConnectionStringRedaction.Apply("Host=x Custom Port=5432"));
+            ConnectionStringRedaction.Redact("Host=x Custom Port=5432"));
 
     /// <summary>
     /// A conventional keyword is masked even where nothing marks it off as a pair.
@@ -134,7 +155,7 @@ public class ConnectionStringRedactionTests
     public void AKeywordBehindNoSeparatorAtAll_IsStillMasked()
         => Assert.Equal(
             "Data Source=file:pwd=***",
-            ConnectionStringRedaction.Apply("Data Source=file:pwd=hunter2"));
+            ConnectionStringRedaction.Redact("Data Source=file:pwd=hunter2"));
 
     /// <summary>
     /// A keyword that merely resembles a credential is masked too, and that is the trade.
@@ -151,7 +172,7 @@ public class ConnectionStringRedactionTests
     [InlineData("Host=db.internal;Integrated Security=SSPI;Database=orders",
                 "Host=db.internal;Integrated Security=***;Database=orders")]
     public void AKeywordThatOnlyLooksLikeACredential_IsMaskedAnyway(string connectionString, string expected)
-        => Assert.Equal(expected, ConnectionStringRedaction.Apply(connectionString));
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
 
     /// <summary>
     /// ADO.NET's <c>==</c> escape does not smuggle a value past the allowlist.
@@ -164,7 +185,7 @@ public class ConnectionStringRedactionTests
     /// </remarks>
     [Fact]
     public void ADoubledEqualsSign_DoesNotMakeAnAllowlistedKey()
-        => Assert.Equal("***", ConnectionStringRedaction.Apply("Host==x=hunter2"));
+        => Assert.Equal("***", ConnectionStringRedaction.Redact("Host==x=hunter2"));
 
     /// <summary>
     /// A connection string of nothing but recognised keys comes back byte-identical.
@@ -191,7 +212,7 @@ public class ConnectionStringRedactionTests
     [InlineData("localhost:6379")]
     [InlineData("[::1]:6379")]
     public void AConnectionStringWithNothingToHide_IsReturnedUnchanged(string connectionString)
-        => Assert.Equal(connectionString, ConnectionStringRedaction.Apply(connectionString));
+        => Assert.Equal(connectionString, ConnectionStringRedaction.Redact(connectionString));
 
     /// <summary>
     /// An empty value is never replaced.
@@ -202,10 +223,10 @@ public class ConnectionStringRedactionTests
     /// it. Masking it would assert that something was hidden where nothing was.
     /// </remarks>
     [Theory]
-    [InlineData("Host=localhost;Port=;Database=orders")]
     [InlineData("Host=localhost;Port Number=;Database=orders")]
+    [InlineData("Host=localhost;Rotation Key=;Database=orders")]
     public void AnEmptyValue_IsLeftEmptyRatherThanMasked(string connectionString)
-        => Assert.DoesNotContain("***", ConnectionStringRedaction.Apply(connectionString));
+        => Assert.Equal(connectionString, ConnectionStringRedaction.Redact(connectionString));
 
     /// <summary>
     /// A quoted value carrying the separator is masked without inventing a second pair.
@@ -218,7 +239,7 @@ public class ConnectionStringRedactionTests
     public void AQuotedValueContainingASeparator_IsMaskedAsOneValue()
         => Assert.Equal(
             "Host=h;Password=***;Database=orders",
-            ConnectionStringRedaction.Apply("Host=h;Password='a;b';Database=orders"));
+            ConnectionStringRedaction.Redact("Host=h;Password='a;b';Database=orders"));
 
     /// <summary>
     /// Text that is recognised as nothing at all is shown as nothing at all.
@@ -230,7 +251,7 @@ public class ConnectionStringRedactionTests
     // the same way. The port is what makes 'localhost:6379' recognisable.
     [InlineData("localhost", "***")]
     public void UnrecognisableText_IsMaskedWhole(string connectionString, string expected)
-        => Assert.Equal(expected, ConnectionStringRedaction.Apply(connectionString));
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
 
     /// <summary>
     /// Redacting an already-redacted string changes nothing further.
@@ -245,9 +266,9 @@ public class ConnectionStringRedactionTests
     [InlineData("host=db.internal port=5432 user=dev password=hunter2")]
     public void RedactionIsIdempotent(string connectionString)
     {
-        var once = ConnectionStringRedaction.Apply(connectionString);
+        var once = ConnectionStringRedaction.Redact(connectionString);
 
-        Assert.Equal(once, ConnectionStringRedaction.Apply(once));
+        Assert.Equal(once, ConnectionStringRedaction.Redact(once));
     }
 
     /// <summary>
@@ -266,9 +287,9 @@ public class ConnectionStringRedactionTests
     public void AVeryLargeConnectionString_IsScannedInTimeAndWithoutExhaustingTheStack(string unit)
     {
         var pathological = string.Concat(Enumerable.Repeat(unit, 30_000)) + ";Password=hunter2";
-        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var watch = Stopwatch.StartNew();
 
-        var redacted = ConnectionStringRedaction.Apply(pathological);
+        var redacted = ConnectionStringRedaction.Redact(pathological);
 
         // Generous by two orders of magnitude against a linear scan, and still far under what
         // quadratic behaviour costs at this length — the point is the shape of the curve, not the
@@ -288,18 +309,18 @@ public class ConnectionStringRedactionTests
     [Fact]
     public void TheAllowlist_IsMatchedIndependentlyOfTheCurrentCulture()
     {
-        var original = System.Globalization.CultureInfo.CurrentCulture;
-        System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("tr-TR");
+        // On a thread of its own: test classes run in parallel here, and a culture set on a shared
+        // one would be visible to whatever else happened to be running.
+        var redacted = "";
+        var worker = new Thread(() =>
+        {
+            CultureInfo.CurrentCulture = new CultureInfo("tr-TR");
+            redacted = ConnectionStringRedaction.Redact("Initial Catalog=orders;UID=dev");
+        });
 
-        try
-        {
-            Assert.Equal(
-                "Initial Catalog=orders;UID=dev",
-                ConnectionStringRedaction.Apply("Initial Catalog=orders;UID=dev"));
-        }
-        finally
-        {
-            System.Globalization.CultureInfo.CurrentCulture = original;
-        }
+        worker.Start();
+        worker.Join();
+
+        Assert.Equal("Initial Catalog=orders;UID=dev", redacted);
     }
 }

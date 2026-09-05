@@ -385,7 +385,7 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     private static ServiceSourcesConfigurationException NothingAddressesTheTunnel(
         string name, string connectionString)
     {
-        var shown = ConnectionStringRedaction.Apply(connectionString);
+        var shown = ConnectionStringRedaction.Redact(connectionString);
 
         // Only when something was actually replaced. Said unconditionally it would put "***" into
         // every one of these messages, including the ordinary case where nothing in the template
