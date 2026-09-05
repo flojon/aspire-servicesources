@@ -322,6 +322,12 @@ nothing will fail to build to warn you.
   to give that project a service entry of its own, naming the repository that actually holds it. A
   `project` resolving inside its checkout is unaffected, which is every catalog the README describes.
 
+  A `kind: dotnet` entry with no `project` at all is now refused there too, rather than resolving to
+  the checkout directory and being reported later as a `.csproj` that is not there — as a missing
+  file on the eager path, and only after the clone had been paid for on the deferred one. Such a
+  service could never start, so nothing that ran before stops running; what changes is that it is
+  named as a required key at `AddService()`, on both paths, before any clone.
+
 - **A `"local"` service with a non-`dotnet` kind now waits for its checkout before its options block
   is checked** ([#63]). `AddService()` used to reject a typo'd `java:` or `javascript:` block
   without waiting for any clone to finish; `Validate` needs the checkout to judge the block's paths
@@ -373,9 +379,10 @@ nothing will fail to build to warn you.
   checkout — untrue on precisely these inputs, since it was never looked for there. `project`
   accepts Windows separators on Linux and macOS the way every other confined path does, so
   `project: src\Orders.Api\Orders.Api.csproj` resolves instead of becoming one oddly-named path
-  reported as missing. And a `project:` written with nothing after it is reported as a configuration
-  error naming the service: YamlDotNet parses an empty scalar as null rather than as `""`, which
-  used to reach `Path.Combine` and come back as an `ArgumentNullException` with no service in it.
+  reported as missing. And a `project:` written with nothing after it is reported as the missing
+  required key it is, naming the service: YamlDotNet parses an empty scalar as null rather than as
+  `""`, which used to reach `Path.Combine` and come back as an `ArgumentNullException` naming
+  neither.
 
 - **A field misspelled at a service entry's root now names the field it was reaching for**
   ([#182]). Spelled correctly, a field written flat at the entry root is walked through the move
