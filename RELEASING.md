@@ -140,17 +140,44 @@ names:
 
 | Workflow | On a release branch |
 | --- | --- |
-| `ci.yml` | **Runs** on a PR into it. `on: pull_request` is deliberately unfiltered by base branch (its header says why), so a backport PR gets the whole build, test, pack and smoke-test set. |
+| `ci.yml` | **Runs** on a PR into it, and two of its checks are **required** to merge (see [Protection](#protection)). `on: pull_request` is deliberately unfiltered by base branch (its header says why), so a backport PR gets the whole build, test, pack and smoke-test set. |
 | `preview.yml` | **Nothing.** It triggers on `push: branches: [main]`. That is the behaviour you want — a backport must not publish previews that outrank `main`'s — but it is why [step 3](#3-dry-run-the-release-shape) exists. |
 | `release.yml` | **Publishes normally.** It checks out `github.event.release.tag_name` rather than a branch, so it builds whatever the tag points at, wherever that commit lives. Releasing from a branch needs no workflow change. |
 | `prune-previews` | Runs, as on any release. The branch contributes no previews of its own, so there is nothing to configure — but note that publishing a patch does prune `main`'s previews for the minor still in development down to the five most recent. |
 | `aspire-matrix.yml`, `net11-preview.yml` | Their scheduled runs only ever fire on the default branch, as GitHub's cron does. The `pull_request` triggers still apply to a backport PR touching the paths they filter on. |
 
-One gap to know about: the repository's branch ruleset includes `~DEFAULT_BRANCH` and nothing
-else, so a release branch has no required status checks, no required review, and no protection
-against a force push or a deletion. CI *runs* on a PR into it; nothing *requires* it to be
-green. Either work through PRs on the honour system, or extend the ruleset to cover
-`release/*` before relying on it.
+### Protection
+
+A release branch is protected on the same terms as `main`, by a second ruleset — *release
+branch protection* — matching `refs/heads/release/**`. It requires a pull request, requires the
+two checks `main` requires (`🔨 build, test & pack` and `🐳 container source smoke test`), and
+refuses a force push or a deletion. It has no bypass actors, so it binds the maintainer too: a
+backport goes in through a PR, which is why [step 1](#1-fix-on-main-first) opens one rather
+than pushing the cherry-pick.
+
+Requiring those two checks on a branch cut from an old tag is only safe because both survive
+the trip. Both contexts exist under the same names in `ci.yml` at `v0.4.0`, that file's
+`pull_request` trigger is unfiltered there too, and neither job is skippable by an `if:` or a
+path filter — so they report on a backport PR instead of sitting forever as a required check
+that never arrives, which is the failure `ci.yml`'s own header warns about.
+
+One parameter is load-bearing, and worth knowing if the ruleset is ever rebuilt from scratch:
+`required_status_checks` carries **`do_not_enforce_on_create: true`**. Without it the ruleset
+rejects the push that *creates* the release branch, since that push is asked to satisfy checks
+which by definition have never run for the ref:
+
+```
+remote: - 2 of 2 required status checks are expected.
+ ! [remote rejected] v0.4.0 -> release/0.4.x (push declined due to repository rule violations)
+```
+
+`main`'s ruleset leaves the same parameter `false` and never notices, because `main` is not a
+branch anyone creates.
+
+Blocking deletion is deliberate, and it is what makes "keep it" above more than advice. A tag
+keeps its own commit reachable, but backports sitting on the branch above the last tag are
+reachable from nothing else, so deleting the branch would orphan them. Retiring a release line
+is a deliberate edit to the ruleset rather than one `git push --delete`.
 
 ### 1. Fix on `main` first
 
@@ -160,12 +187,20 @@ is no way to end up with a fix that ships in `0.4.1` and regresses in `0.5.0`. F
 branch first inverts all three.
 
 ```bash
-git switch release/0.4.x && git pull --ff-only
+git fetch origin
+git switch -c backport/0.4.1-<issue> origin/release/0.4.x
 git cherry-pick -x <sha-on-main>
+git push -u origin backport/0.4.1-<issue>
+gh pr create --base release/0.4.x
 ```
 
-`-x` records the source commit in the message, which is what later answers whether a given
-`main` commit was backported.
+The PR is not a formality. The ruleset refuses a direct push to the release branch with
+`Changes must be made through a pull request`, and the PR is what runs CI on the backported
+commit in the shape it will actually ship in — the cherry-pick can conflict, or compile against
+`main` and not against `0.4.x`. Squash is the only merge method allowed, as on `main`.
+
+`-x` records the source commit in the cherry-pick's message, which is what later answers
+whether a given `main` commit was backported.
 
 Take only the fix. A patch carrying a refactor "while we are here" is a minor wearing a patch's
 version number.
