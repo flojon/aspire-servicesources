@@ -9,6 +9,15 @@ name: CI
 on:
   pull_request:
   workflow_dispatch:
+  # Merging into these ran only preview.yml's thinner build (no -warnaserror, no release-shape
+  # or polyglot-tag checks) - a PR could pass every check here and still land something those
+  # checks would have caught, since nothing exercised them against the merged tree itself.
+  # Unlike pull_request above, a branch filter here is safe: push has no "stacked branch" case
+  # to miss - the ref pushed to is the ref that ran.
+  push:
+    branches:
+      - main
+      - 'release/**'
 
 # A PR that gets a second push doesn't need the first run's result any more.
 concurrency:
@@ -23,6 +32,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # Only the Push step below writes, and only on a push to main - granted here anyway
+      # because permissions are per-job, not per-step.
+      packages: write
 
     steps:
       - uses: actions/checkout@v7
@@ -72,8 +84,8 @@ jobs:
 
       # Packing on every PR catches packaging-only breakage (missing README/LICENSE, bad
       # metadata) here rather than at release time, where release.yml deliberately has no
-      # --skip-duplicate safety net. Packed project by project like preview.yml/release.yml:
-      # the solution also holds the sample AppHost and the test projects.
+      # --skip-duplicate safety net. Packed project by project like release.yml: the solution
+      # also holds the sample AppHost and the test projects.
       - name: Pack
         run: |
           dotnet pack src/Aspire.Hosting.ServiceSources/Aspire.Hosting.ServiceSources.csproj -c Release --no-build -o ./artifacts/package
@@ -182,6 +194,22 @@ jobs:
         with:
           name: nuget-packages
           path: ./artifacts/package/*.nupkg
+
+      # main publishes a preview per commit; a release branch does not, since it would
+      # version-collide with main's prereleases on the feed. Also excludes workflow_dispatch:
+      # main matches its ref same as a real push would, and a manual rerun republishing whatever
+      # commit happens to be checked out is not what that trigger is for.
+      #
+      # ./artifacts/package, never ./artifacts/stable - the release-shape pack above is a
+      # synthetic 9.9.9 built only to be scanned for a prerelease bound, not a package that
+      # should ever reach a feed.
+      - name: Add GitHub Packages source
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: dotnet nuget add source --username ${{ github.repository_owner }} --password ${{ secrets.GITHUB_TOKEN }} --store-password-in-clear-text --name github "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
+
+      - name: Push
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: dotnet nuget push "./artifacts/package/*.nupkg" --source github --skip-duplicate --api-key ${{ secrets.GITHUB_TOKEN }}
 
   smoketest-container:
     # Runs alongside `build` rather than after it: this is a different kind of workload
