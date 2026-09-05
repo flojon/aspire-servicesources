@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text.RegularExpressions;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Sources;
@@ -359,73 +358,6 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     }
 
     /// <summary>
-    /// What is shown in place of a connection string that could not be scanned.
-    /// </summary>
-    /// <remarks>
-    /// Named so the caller can tell it from a redacted value and drop the sentence explaining
-    /// how passwords are shown — nothing here was shown, redacted or otherwise.
-    /// </remarks>
-    private const string Unscannable =
-        "<connection string omitted: it could not be scanned for credentials>";
-
-    /// <summary>
-    /// The credential-bearing parts of a connection string, for the one message that echoes one
-    /// back.
-    /// </summary>
-    /// <remarks>
-    /// Two shapes cover what a connection string does with a secret: a keyword whose value runs to
-    /// the next <c>;</c>, and a URI authority's <c>user:pass@host</c>. Matched case-insensitively,
-    /// because keyword casing is a dialect's own business.
-    /// <para>
-    /// The URI branch tries a <c>;</c>-free password first and falls back to an <c>=</c>-free one,
-    /// which looks fussy and is load-bearing in both directions. Allowing <c>;</c> unconditionally
-    /// let <c>Data Source=tcp://host:1433;UID=a@b.com</c> run to the <em>email's</em> <c>@</c> and
-    /// redact <c>1433;UID=a</c> — corrupting the string this message exists to display. Forbidding
-    /// it outright then leaked <c>redis://user:pa;ss@db</c> whole, because the password could no
-    /// longer reach its own <c>@</c> and nothing matched: RFC 3986 puts <c>;</c> in
-    /// <c>sub-delims</c>, which <c>userinfo</c> admits raw, so such a password is legal and
-    /// unencoded. Preferring the narrow read and falling back to the wide one separates them: the
-    /// corrupting case carries an <c>=</c> and the leaking case does not.
-    /// </para>
-    /// <para>
-    /// Deliberately not exhaustive, and the message says the value was redacted rather than
-    /// claiming it is safe. A backend naming its secret something this misses would still be
-    /// echoed, so this narrows the blast radius rather than closing it. That is the honest trade:
-    /// this message exists to show the developer what <em>arrived</em> — the shell-expansion case is
-    /// only diagnosable by seeing it — and a message that showed nothing would not do that.
-    /// </para>
-    /// </remarks>
-    private static readonly Regex Credentials = new(
-        @"(?<=(?:password|pwd|secret|token|accountkey|accesskey|apikey|signature)\s*=)[^;]*"
-        + @"|(?<=://[^:/@\s]{0,256}:)(?:[^@/\s;]*|[^@/\s=]*)(?=@)",
-        RegexOptions.IgnoreCase
-        | RegexOptions.CultureInvariant,
-        TimeSpan.FromSeconds(1));
-
-    /// <summary>
-    /// <paramref name="connectionString"/> with the credentials this recognizes replaced.
-    /// </summary>
-    /// <remarks>
-    /// Because this message is echoed where messages go: an AppHost's startup failure is relayed
-    /// into <c>~/.aspire/logs</c> and routinely pasted into an issue. Every other value this package
-    /// echoes is malformed, blank or a single token — this is the only one that is a whole, valid
-    /// connection string, so it is the only one that can carry a password.
-    /// </remarks>
-    private static string Redacted(string connectionString)
-    {
-        try
-        {
-            return Credentials.Replace(connectionString, "***");
-        }
-        catch (RegexMatchTimeoutException)
-        {
-            // A pathological value is not a reason to fail differently than the developer expects,
-            // and it is emphatically not a reason to print the thing this method exists to hide.
-            return Unscannable;
-        }
-    }
-
-    /// <summary>
     /// The error for a connection string that never mentions the tunnel this source opens.
     /// </summary>
     /// <remarks>
@@ -453,15 +385,15 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     private static ServiceSourcesConfigurationException NothingAddressesTheTunnel(
         string name, string connectionString)
     {
-        var shown = Redacted(connectionString);
+        var shown = ConnectionStringRedaction.Apply(connectionString);
 
         // Only when something was actually replaced. Said unconditionally it would put "***" into
-        // every one of these messages, including the ordinary case where the template carries no
-        // credential at all and what is quoted is exactly what the developer wrote — leaving them
-        // to wonder which part of it the package had hidden.
-        var note = shown == connectionString || shown == Unscannable
+        // every one of these messages, including the ordinary case where nothing in the template
+        // needed hiding and what is quoted is exactly what the developer wrote — leaving them to
+        // wonder which part of it the package had hidden.
+        var note = shown == connectionString || shown == ConnectionStringRedaction.Unscannable
             ? ""
-            : " (a credential in it shown as ***)";
+            : " (values not known to be safe to print are shown as ***)";
 
         return new(
             $"Backing service '{name}': source 'kubernetes' opens a kubectl port-forward on a local port allocated "
