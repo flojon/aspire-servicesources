@@ -67,24 +67,24 @@ internal static class ConnectionStringRedaction
     };
 
     /// <summary>
-    /// The keywords a secret is conventionally written under, and a URI's <c>user:pass@host</c>.
+    /// The keywords a secret is conventionally written under, wherever one appears.
     /// </summary>
     /// <remarks>
     /// A backstop, not the defence. It runs first and can only replace text with <c>***</c>, so it
     /// can only ever hide more — which is what makes it impossible for the allowlist to print
-    /// something the previous blocklist caught. A scan can always be surprised by a dialect nobody
-    /// modelled; an unconditional <c>password=</c> cannot.
+    /// something the keyword list caught. <see cref="Scan"/> can be surprised by a dialect nobody
+    /// modelled, and one shape it is known to miss is a keyword behind a punctuation mark that
+    /// introduces nothing: <c>Data Source=file:pwd=hunter2</c> hides its password inside an
+    /// allowlisted value, where no separator marks it off. An unconditional <c>pwd=</c> finds it.
     /// <para>
-    /// The URI branch prefers a <c>;</c>-free password and falls back to an <c>=</c>-free one, which
-    /// separates two cases that pull in opposite directions: allowing <c>;</c> unconditionally lets
-    /// <c>Data Source=tcp://host:1433;UID=a@b.com</c> run to the <em>email's</em> <c>@</c>, while
-    /// forbidding it hides nothing in <c>redis://user:pa;ss@db</c>, since RFC 3986 puts <c>;</c> in
-    /// <c>sub-delims</c>, which <c>userinfo</c> admits raw.
+    /// This is the keyword half of the list that used to do the whole job. The half that matched a
+    /// URI's <c>user:pass@host</c> is gone, along with the alternation three separate corrections
+    /// went into: <see cref="MaskUri"/> and <see cref="MaskAuthority"/> cover every shape it did,
+    /// and cover the ones it did not.
     /// </para>
     /// </remarks>
     private static readonly Regex KnownCredentialKeywords = new(
-        @"(?<=(?:password|pwd|secret|token|accountkey|accesskey|apikey|signature)\s*=)[^;]*"
-        + @"|(?<=://[^:/@\s]{0,256}:)(?:[^@/\s;]*|[^@/\s=]*)(?=@)",
+        @"(?<=(?:password|pwd|secret|token|accountkey|accesskey|apikey|signature)\s*=)[^;]*",
         RegexOptions.IgnoreCase
         | RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(1));
@@ -126,22 +126,52 @@ internal static class ConnectionStringRedaction
     /// comparison lie.
     /// </remarks>
     private static string Scan(string text)
+        => text.Length == 0 ? text : Rebuild(text, FindPairs(text, IntroducesAPair), RedactPrefix, RedactValue);
+
+    /// <summary>
+    /// <paramref name="value"/> under a key the allowlist names, with anything written inside it
+    /// that is a pair of its own held to the same rule.
+    /// </summary>
+    /// <remarks>
+    /// libpq's conninfo writes its pairs separated by spaces — <c>host=h port=5432
+    /// password=hunter2</c> — so a value that is printed because its key is allowlisted can carry
+    /// several more pairs, one of which is the password. A space only introduces a pair
+    /// <em>here</em>, inside a value already recognised as safe to print. Doing it one level up
+    /// would let <c>Rotation Key=abc user=def</c> print <c>def</c>, which is not a username but the
+    /// tail of an unrecognised value.
+    /// <para>
+    /// One level deep, and no deeper: this is the last point at which anything is printed, so there
+    /// is no recursion to bound.
+    /// </para>
+    /// </remarks>
+    private static string RedactRecognisedValue(string value)
     {
-        if (text.Length == 0)
-        {
-            return text;
-        }
+        var pairs = FindPairs(value, IntroducesANestedPair);
 
-        var pairs = FindPairs(text);
+        return Rebuild(value, pairs, MaskAuthority, static (key, nested) =>
+            nested.Length == 0 || KeysThatHoldNoSecret.Contains(key.Trim())
+                ? MaskAuthority(nested)
+                : Mask);
+    }
 
+    /// <summary>
+    /// <paramref name="text"/> with each of <paramref name="pairs"/> put through
+    /// <paramref name="redactValue"/> and everything between them copied verbatim.
+    /// </summary>
+    private static string Rebuild(
+        string text,
+        List<Pair> pairs,
+        Func<string, string> redactHead,
+        Func<string, string, string> redactValue)
+    {
         if (pairs.Count == 0)
         {
-            return RedactPrefix(text);
+            return redactHead(text);
         }
 
         var built = new StringBuilder(text.Length);
 
-        built.Append(RedactPrefix(text[..pairs[0].KeyStart]));
+        built.Append(redactHead(text[..pairs[0].KeyStart]));
 
         for (var i = 0; i < pairs.Count; i++)
         {
@@ -158,7 +188,7 @@ internal static class ConnectionStringRedaction
 
             built.Append(key)
                  .Append('=')
-                 .Append(RedactValue(key, text[pair.ValueStart..valueEnd]))
+                 .Append(redactValue(key, text[pair.ValueStart..valueEnd]))
                  .Append(text, valueEnd, boundary - valueEnd);
         }
 
@@ -166,22 +196,23 @@ internal static class ConnectionStringRedaction
     }
 
     /// <summary>
-    /// Every <c>key=</c> in <paramref name="text"/>, in the order they appear.
+    /// Every <c>key=</c> in <paramref name="text"/> that <paramref name="introducesAPair"/> accepts,
+    /// in the order they appear.
     /// </summary>
     /// <remarks>
-    /// A key is recognised only where a separator could have introduced one, so the <c>host</c> in
+    /// A key is recognised only where something could have introduced one, so the <c>host</c> in
     /// <c>Password=myhost=x</c> is not mistaken for a key of its own. A doubled <c>=</c> is skipped
     /// rather than accepted: <c>Host==x=hunter2</c> is ADO.NET's escape for the key <c>host=x</c>,
-    /// so treating <c>Host</c> as the key would find an allowlisted name and print the password
-    /// behind it.
+    /// so reading <c>Host</c> as the key would find an allowlisted name and print the password
+    /// behind it. Skipped, it is recognised as nothing and shown as nothing.
     /// </remarks>
-    private static List<Pair> FindPairs(string text)
+    private static List<Pair> FindPairs(string text, Func<string, int, bool> introducesAPair)
     {
         var pairs = new List<Pair>();
 
         for (var i = 0; i < text.Length; i++)
         {
-            if (i > 0 && !IsSeparator(text[i - 1]))
+            if (!introducesAPair(text, i))
             {
                 continue;
             }
@@ -207,12 +238,48 @@ internal static class ConnectionStringRedaction
     }
 
     /// <summary>
+    /// Whether a pair may begin at <paramref name="index"/> in the connection string itself.
+    /// </summary>
+    /// <remarks>
+    /// One of the marks a dialect writes between pairs, optionally followed by whitespace, so
+    /// <c>Host=h; Port=5432</c> reads as two pairs. Whitespace alone is not enough here — see
+    /// <see cref="RedactRecognisedValue"/>.
+    /// </remarks>
+    private static bool IntroducesAPair(string text, int index)
+    {
+        var before = index;
+
+        while (before > 0 && char.IsWhiteSpace(text[before - 1]))
+        {
+            before--;
+        }
+
+        return before == 0 || text[before - 1] is ';' or '&' or '?' or ',';
+    }
+
+    /// <summary>
+    /// Whether a pair may begin at <paramref name="index"/> inside a value already being printed.
+    /// </summary>
+    /// <remarks>
+    /// Not at the start: the head of <c>host=db.internal port=5432</c> is the host, and reading it
+    /// as a key would run the key across the space into <c>db.internal port</c> and hide the port
+    /// behind a name nothing recognises.
+    /// </remarks>
+    private static bool IntroducesANestedPair(string text, int index)
+        => index > 0 && char.IsWhiteSpace(text[index - 1]);
+
+    /// <summary>
     /// Where the key starting at <paramref name="start"/> ends, or <c>-1</c> if none starts there.
     /// </summary>
     /// <remarks>
     /// Single interior spaces are part of a key, because several dialects write one — <c>Data
     /// Source</c>, <c>Initial Catalog</c>, <c>User ID</c>. A space is only taken when a key
     /// character follows it, so a trailing space belongs to the separator instead.
+    /// <para>
+    /// The longest key wins, and that is the fail-closed reading rather than a tidiness preference.
+    /// In <c>Host=x Custom Port=5432</c> the short read finds the allowlisted <c>Port</c> and prints
+    /// <c>5432</c>; the long one finds <c>Custom Port</c>, which is nothing this recognises.
+    /// </para>
     /// </remarks>
     private static int KeyEndAt(string text, int start)
     {
@@ -260,13 +327,7 @@ internal static class ConnectionStringRedaction
             return value;
         }
 
-        // The key was not the key: this is the tail of an escaped '=' that FindPairs declined.
-        if (value[0] == '=')
-        {
-            return Mask;
-        }
-
-        return KeysThatHoldNoSecret.Contains(key.Trim()) ? MaskAuthority(value) : Mask;
+        return KeysThatHoldNoSecret.Contains(key.Trim()) ? RedactRecognisedValue(value) : Mask;
     }
 
     /// <summary>
