@@ -183,7 +183,7 @@ internal static class ConnectionStringRedaction
     /// scanned again, so there is no third level and no recursion to bound.
     /// </remarks>
     private static string RedactNestedValue(string key, string value)
-        => KeysThatHoldNoSecret.Contains(key) ? RecognisedText(value) : Mask;
+        => KeysThatHoldNoSecret.Contains(key) ? RecognisedText(value) : RedactValue(key, value);
 
     /// <summary>
     /// The part of <paramref name="text"/> that belongs to the value it was found in, with anything
@@ -202,6 +202,32 @@ internal static class ConnectionStringRedaction
     /// </remarks>
     private static string RecognisedText(string text)
     {
+        var start = 0;
+
+        while (start < text.Length && char.IsWhiteSpace(text[start]))
+        {
+            start++;
+        }
+
+        if (start > 0)
+        {
+            // Something written after a space is the value itself only when it carries no '=' of its
+            // own — 'Host = localhost' — which is the same rule EndOfValue applies from the other
+            // side. Carrying one makes it a pair the scan declined to read, and 'port= 2fa=hunter2'
+            // printed a password on the strength of being written after a space.
+            for (var i = start; i < text.Length && !char.IsWhiteSpace(text[i]) && !IsSeparator(text[i]); i++)
+            {
+                if (text[i] == '=')
+                {
+                    return text[..start] + Mask;
+                }
+            }
+        }
+
+        var leading = text[..start];
+
+        text = text[start..];
+
         var end = 0;
 
         if (text.Length > 0 && text[0] is '"' or '\'')
@@ -211,7 +237,7 @@ internal static class ConnectionStringRedaction
             if (close < 0)
             {
                 // Nothing closes it, so nothing in it was ever delimited, so none of it is known.
-                return Mask;
+                return leading + Mask;
             }
 
             // A quote spans the separators inside it, which is the whole reason to look for one —
@@ -220,7 +246,7 @@ internal static class ConnectionStringRedaction
             // prevented it.
             if (text.AsSpan(1, close - 1).Contains('='))
             {
-                return Mask;
+                return leading + Mask;
             }
 
             end = close + 1;
@@ -231,7 +257,7 @@ internal static class ConnectionStringRedaction
             end++;
         }
 
-        var printed = MaskAuthorityAndTrailingFields(text[..end]);
+        var printed = leading + MaskAuthorityAndTrailingFields(text[..end]);
 
         if (end == text.Length)
         {
@@ -355,24 +381,17 @@ internal static class ConnectionStringRedaction
                 valueEnd--;
             }
 
-            var valueStart = pair.ValueStart;
+            // Space in front of a value goes on with it rather than being trimmed off here. It is
+            // the only thing that would introduce a pair one level down, and stripping it hid
+            // 'port= 2fa=hunter2' from the scan that was supposed to read it.
+            var value = text[pair.ValueStart..valueEnd];
 
-            // Space in front of a value belongs to the layout the developer wrote, not to the value:
-            // 'Port = 5432' must come back with its spacing whatever happens to the 5432.
-            while (valueStart < valueEnd && char.IsWhiteSpace(text[valueStart]))
-            {
-                valueStart++;
-            }
+            // Key, any space before the '=', and the '=' itself, exactly as written.
+            built.Append(text, pair.KeyStart, pair.ValueStart - pair.KeyStart);
 
-            var value = text[valueStart..valueEnd];
-
-            // Key, any space around the '=', and the '=' itself, exactly as written.
-            built.Append(text, pair.KeyStart, valueStart - pair.KeyStart);
-
-            if (value.Length > 0)
-            {
-                built.Append(redactValue(text[pair.KeyStart..pair.KeyEnd], value));
-            }
+            built.Append(value.AsSpan().Trim().Length == 0
+                ? value
+                : redactValue(text[pair.KeyStart..pair.KeyEnd], value));
 
             built.Append(text, valueEnd, boundary - valueEnd);
         }
@@ -608,7 +627,21 @@ internal static class ConnectionStringRedaction
     /// </remarks>
     private static string RedactValue(string key, string value)
     {
-        return KeysThatHoldNoSecret.Contains(key) ? RedactRecognisedValue(value) : Mask;
+        if (KeysThatHoldNoSecret.Contains(key))
+        {
+            return RedactRecognisedValue(value);
+        }
+
+        // Space in front of the value is layout the developer wrote, and survives the masking of
+        // what follows it: 'Rotation Key = hunter2' reads back as 'Rotation Key = ***'.
+        var leading = 0;
+
+        while (leading < value.Length && char.IsWhiteSpace(value[leading]))
+        {
+            leading++;
+        }
+
+        return value[..leading] + Mask;
     }
 
     /// <summary>

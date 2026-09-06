@@ -234,6 +234,24 @@ public class ConnectionStringRedactionTests
         => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
 
     /// <summary>
+    /// A pair written after an empty value is read, rather than riding out on the space.
+    /// </summary>
+    /// <remarks>
+    /// The space after an empty value is the only thing that would introduce a pair inside it, so
+    /// trimming that space off as layout before looking hid the pair completely — at the top,
+    /// because whitespace introduces nothing there, and inside, because the space was gone. The
+    /// second row is the sharpest: it is a passing row of this file with the port emptied, which is
+    /// exactly the shell-expansion case this message exists to diagnose.
+    /// </remarks>
+    [Theory]
+    [InlineData("Host= Custom=hunter2", "Host= Custom=***")]
+    [InlineData("host=db.internal port= 2fa=hunter2", "host=db.internal port= ***")]
+    [InlineData("Host=localhost;Port= RotationKey=hunter2", "Host=localhost;Port= RotationKey=***")]
+    [InlineData("Data Source= Custom=hunter2", "Data Source= Custom=***")]
+    public void APairWrittenAfterAnEmptyValue_IsRead(string connectionString, string expected)
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
+
+    /// <summary>
     /// An unterminated quote claims nothing beyond itself.
     /// </summary>
     /// <remarks>
@@ -331,6 +349,15 @@ public class ConnectionStringRedactionTests
     // its own it swallowed the pair after it, and the database was hidden under 'dev database'.
     [InlineData("host=db port=5432 user= dev database=orders")]
     [InlineData("Host=h user= dev port=5432")]
+    // Space around the '=' after an empty value is layout too, and the value that follows it is a
+    // value rather than a pair exactly when it carries no '=' of its own.
+    [InlineData("Host= Port = 5432")]
+    [InlineData("Host=\tPort = 5432")]
+    [InlineData("Host= Port = ")]
+    [InlineData("Host= hunter2")]
+    // An Oracle descriptor is full of '=' and none of it was written after a space, so all of it is
+    // this value.
+    [InlineData("Data Source=(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=h)(PORT=1521)))")]
     // Redis and Kafka address a tunnel with a bare host and port and no keys at all.
     [InlineData("localhost:6379")]
     [InlineData("[::1]:6379")]

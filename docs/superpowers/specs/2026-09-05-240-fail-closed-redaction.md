@@ -267,6 +267,10 @@ Not closed, and said out loud rather than left to be discovered:
 - `provider= Initial Catalog=orders` reads `Initial` as the empty value's own token — the rule libpq
   needs for `user = dev` — and then masks `Catalog=orders` under a key it does not know. Fail-closed,
   and the alternative is teaching the token rule about compound keys.
+- A key absorbs the whitespace inside it, so where two words could be one key or a value followed by
+  a key, they are one key: `host = db port = user = dev` masks from `port` on, reading `db port` as
+  the key. That string is not one any dialect writes, and the reading that would print it is the one
+  that let `Custom  Port=hunter2` pass as the allowlisted `Port`.
 - `IsHostAndPort` recognises a shape, not an address, so a token that happens to be `word:digits`
   prints: `AKIAIOSFODNN7EXAMPLE:12345`. Requiring the digits is what keeps a bare secret out.
 - Redaction is not idempotent over arbitrary text. On a string that is not a connection string at
