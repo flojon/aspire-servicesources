@@ -414,14 +414,15 @@ internal static class DeveloperConfigValidator
     /// </remarks>
     private static bool IsPosition(string key) =>
         key.Length > 0
-        // Short enough to be an index. A key of twenty digits is a name someone chose, for the same
-        // reason a padded one is: no list this walk will ever see is that long.
-        && key.Length <= 9
         && key.All(char.IsAsciiDigit)
         // A padded index is not one configuration ever writes: an array renders its keys as 0, 1, 2
         // with no leading zeros, so "007" is a name someone chose and refusing it as "written as a
         // list" would misdescribe a shape that was never a list.
-        && (key == "0" || key[0] != '0');
+        && (key == "0" || key[0] != '0')
+        // And an index is a number a list could actually have reached, which is what bounds the
+        // length rather than a digit count chosen for looking about right: a key too large for
+        // int is one no array ever produced, so it is a name too.
+        && int.TryParse(key, out _);
 
     /// <summary>
     /// How a connection string reaches one of several named values, for the messages that send a
@@ -501,8 +502,7 @@ internal static class DeveloperConfigValidator
     /// </summary>
     private static string PositionalMap(IConfigurationSection field, string block, string noun) =>
         $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block is written as a list, so its {noun}s are keyed by "
-        + $"position. A block of named {noun}s gives each one a name, because a connection string "
-        + $"reaches a {noun} by name and a position is not one."
+        + $"position. A block of named {noun}s gives each one a name, and a position is not one."
         + ReachEachByName(noun)
         + SetAtBlock(field, "<name>");
 
@@ -563,7 +563,7 @@ internal static class DeveloperConfigValidator
     /// </remarks>
     private static string UnnamedMapEntry(IConfigurationSection field, string block, string noun) =>
         $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block names a {noun} with no name. Every {noun} in the "
-        + $"block needs a name, because a connection string reaches one by name."
+        + $"block needs one."
         + ReachEachByName(noun)
         + SetAtBlock(field, "<name>");
 
@@ -1075,9 +1075,7 @@ internal static class DeveloperConfigValidator
     /// </para>
     /// </remarks>
     private static bool IsInvisible(string value, int index) =>
-        char.IsWhiteSpace(value[index])
-        || char.IsControl(value[index])
-        || CharUnicodeInfo.GetUnicodeCategory(value, index) == UnicodeCategory.Format;
+        ConfiguredValue.IsInvisible(value, index);
 
     /// <summary>
     /// The span of <paramref name="value"/> left once the characters at either end that a reader
@@ -1179,23 +1177,7 @@ internal static class DeveloperConfigValidator
     /// format today, so a later decision to quote the plain space would silently turn every context
     /// with a space in it into one this cannot propose.
     /// </remarks>
-    private static bool PrintsAsItself(string value)
-    {
-        for (var i = 0; i < value.Length; i++)
-        {
-            if (value[i] != ' ' && IsInvisible(value, i))
-            {
-                return false;
-            }
-
-            if (char.IsSurrogatePair(value, i))
-            {
-                i++;
-            }
-        }
-
-        return true;
-    }
+    private static bool PrintsAsItself(string value) => ConfiguredValue.PrintsAsItself(value);
 
     /// <summary>
     /// The error for a value of one or more spaces, whatever type the field takes.

@@ -139,7 +139,7 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
             // Aspire stays the authority on what the rule is: this adds the missing half, which is
             // where the name came from.
             throw new ServiceSourcesConfigurationException(
-                $"Backing service '{name}': its port-forward runs as a resource named '{tunnelName}', after the "
+                $"Backing service '{Named(name)}': its port-forward runs as a resource named '{tunnelName}', after the "
                 + $"backing service, and Aspire rejected that name — \"{WithoutParameterSuffix(ex.Message)}\" Aspire's limit is on the "
                 + $"derived name rather than on '{name}', so a shorter backing-service name is what fixes it.",
                 ex);
@@ -299,8 +299,8 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     /// </remarks>
     private static ServiceSourcesConfigurationException Failure(string name, IReadOnlyList<string> problems) =>
         new(problems.Count == 1
-            ? $"Backing service '{name}': {problems[0]}"
-            : $"Backing service '{name}': {problems.Count} problems with the connection string:"
+            ? $"Backing service '{Named(name)}': {problems[0]}"
+            : $"Backing service '{Named(name)}': {problems.Count} problems with the connection string:"
               + string.Concat(problems.Select(problem => $"{Environment.NewLine}  - {problem}")));
 
     /// <summary>
@@ -346,8 +346,22 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
         // 'amqp', apostrophes and all, was suggested as amqp, a port that does not exist.
         var suggestion = near.Count == 1 ? $" Did you mean {ConfiguredValue.Escaped(near[0])}?" : "";
 
+        // Escaping is not injective — a real tab and a written backslash-t both print as '\t' — so a
+        // message quoting two names can render them identically and read as "you wrote X, which does
+        // not exist; did you mean X?". Saying that the difference is one you cannot see is the only
+        // thing that makes such a message actionable, and it is the caveat the developer-config
+        // validator already attaches for the same reason.
+        var indistinguishable =
+            !ConfiguredValue.PrintsAsItself(port.Name!)
+            || names.Any(candidate => !ConfiguredValue.PrintsAsItself(candidate));
+
+        var caveat = indistinguishable
+            ? " One of these spellings carries characters you cannot pick out by looking, so two of them "
+              + "can print the same — retype the name rather than copying it back."
+            : "";
+
         return $"the connection string carries {ConfiguredValue.Escaped(port.AsWritten)}, which names a port this "
-            + $"backing service does not forward.{suggestion} It forwards {Quoted(names)}.";
+            + $"backing service does not forward.{suggestion} It forwards {Quoted(names)}.{caveat}";
     }
 
     /// <summary>
@@ -374,7 +388,20 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     /// name the layer that set it rather than only the file a developer usually writes it in.
     /// </summary>
     private static string ConfigKey(string name, string field) =>
-        $"{DeveloperConfiguration.BackingServicesKey}:{name}:Kubernetes:{field}";
+        $"{DeveloperConfiguration.BackingServicesKey}:{Named(name)}:Kubernetes:{field}";
+
+    /// <summary>
+    /// The backing service's name as a message shows it.
+    /// </summary>
+    /// <remarks>
+    /// Escaped like every other echo. It is the AppHost author's own C# literal rather than
+    /// configuration, and Aspire refuses anything but a plain resource name — but it refuses it at
+    /// <c>AddConnectionString</c>, which is *after* every message in this file can be thrown, so an
+    /// unusable name reaches these sentences before anything has rejected it. That matters most for
+    /// the collecting report, where a newline forges a bullet and an entry header, which is the same
+    /// defect the developer-config validator's own multi-entry report was fixed for.
+    /// </remarks>
+    private static string Named(string name) => ConfiguredValue.Bare(name);
 
     /// <summary>The same key spelled as the environment variable that sets it.</summary>
     private static string Environmentally(string configKey) =>
@@ -478,7 +505,7 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
             var only = missing[0];
 
             throw new ServiceSourcesConfigurationException(
-                $"Backing service '{name}': source 'kubernetes' requires 'kubernetes.{only.Field}' — "
+                $"Backing service '{Named(name)}': source 'kubernetes' requires 'kubernetes.{only.Field}' — "
                 + $"{only.WhatItIs}. Add it {where}, or set {Environmentally(ConfigKey(name, only.Property))}."
                 + PortIsWhichEnd(name, kubernetes));
         }
@@ -497,7 +524,7 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
             : "";
 
         throw new ServiceSourcesConfigurationException(
-            $"Backing service '{name}': source 'kubernetes' needs {missing.Length} fields the entry does not "
+            $"Backing service '{Named(name)}': source 'kubernetes' needs {missing.Length} fields the entry does not "
             + $"have, {where}:{string.Concat(lines)}{blank}{PortIsWhichEnd(name, kubernetes)}");
     }
 
@@ -555,13 +582,25 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     {
         if (ports.SinglePort is { } single)
         {
+            // Unreachable through configuration: a section carrying both a value and named children
+            // is refused by DeveloperConfigValidator before binding, and the binder itself takes one
+            // path or the other. Kept because KubernetesPorts is a Dictionary and cannot refuse a
+            // mutation — so a later caller adding an entry to a single-port instance fails here,
+            // loudly, instead of having every name silently dropped by the return below.
+            if (ports.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"Backing service '{Named(name)}': 'kubernetes.port' bound to both a single port and "
+                    + $"{ports.Count} named ports, which is not a shape configuration can produce.");
+            }
+
             return [(null, RequirePortInRange(name, portName: null, single))];
         }
 
         if (ports.Count > MaxForwardedPorts)
         {
             throw new ServiceSourcesConfigurationException(
-                $"Backing service '{name}': 'kubernetes.port' names {ports.Count} ports, and one tunnel forwards "
+                $"Backing service '{Named(name)}': 'kubernetes.port' names {ports.Count} ports, and one tunnel forwards "
                 + $"at most {MaxForwardedPorts}. Every forwarded port holds a local socket open and adds a pair to "
                 + $"one kubectl command line. The key is '{ConfigKey(name, "Port")}'.");
         }
@@ -597,7 +636,7 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
                 : $"{ConfigKey(name, "Port")}:{ConfiguredValue.Bare(portName)}";
 
             throw new ServiceSourcesConfigurationException(
-                $"Backing service '{name}': {which}, which is not a port — a port is between "
+                $"Backing service '{Named(name)}': {which}, which is not a port — a port is between "
                 + $"1 and 65535. The key is '{key}'.");
         }
 

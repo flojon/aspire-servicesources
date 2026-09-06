@@ -30,15 +30,47 @@ internal static class ConfiguredValue
     /// decomposed accented letter carries one.
     /// </para>
     /// <para>
-    /// It lives here rather than beside the trimming that also asks it, so that what a message
-    /// escapes and what a remedy drops stay the same set — two spellings of one predicate are two
-    /// things to keep in step.
+    /// It lives here, and <see cref="DeveloperConfigValidator"/>'s trimming asks it here too, so that
+    /// what a message escapes and what a remedy drops stay the same set — two spellings of one
+    /// predicate are two things to keep in step.
     /// </para>
     /// </remarks>
     public static bool IsInvisible(string value, int index) =>
         char.IsWhiteSpace(value[index])
         || char.IsControl(value[index])
         || CharUnicodeInfo.GetUnicodeCategory(value, index) == UnicodeCategory.Format;
+
+    /// <summary>
+    /// Whether <paramref name="value"/> reaches a reader as the characters it is made of — nothing
+    /// in it that escaping would have to spell out.
+    /// </summary>
+    /// <remarks>
+    /// A message that quotes two values back has to ask this, because the escaping is <b>not</b>
+    /// injective: a real tab and a written backslash-<c>t</c> both print as <c>\t</c>. Without it a
+    /// message can read "you wrote X, which does not exist — did you mean X?", which tells the reader
+    /// nothing and looks like a bug in this package rather than in their file.
+    /// <para>
+    /// A plain space is allowed, for the reason <see cref="Bare"/> leaves it alone: it is the
+    /// character a reader assumes.
+    /// </para>
+    /// </remarks>
+    public static bool PrintsAsItself(string value)
+    {
+        for (var i = 0; i < value.Length; i++)
+        {
+            if (value[i] != ' ' && IsInvisible(value, i))
+            {
+                return false;
+            }
+
+            if (char.IsSurrogatePair(value, i))
+            {
+                i++;
+            }
+        }
+
+        return true;
+    }
 
     /// <summary>
     /// A value as a quoted literal with its whitespace spelled out, so that a character which

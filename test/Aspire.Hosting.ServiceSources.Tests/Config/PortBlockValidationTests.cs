@@ -182,7 +182,8 @@ public class PortBlockValidationTests
             + "position.",
             ex.Message,
             StringComparison.Ordinal);
-        Assert.Contains("a connection string reaches a port by name", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            "A connection string reaches each one as '${port:<name>}'.", ex.Message, StringComparison.Ordinal);
     }
 
     /// <remarks>
@@ -579,4 +580,34 @@ public class PortBlockValidationTests
         Assert.Contains("orders\\n-db", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("orders\n-db", ex.Message, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// A JSON file cannot name one port two ways, and the README says so — this is what makes that
+    /// claim checkable rather than folklore.
+    /// </summary>
+    /// <remarks>
+    /// Configuration keys are case-insensitive, so <c>amqp</c> and <c>AMQP</c> in one file are one
+    /// key written twice. The JSON provider refuses the <em>whole file</em> for that, which is why
+    /// this package says nothing about it itself; across two layers they merge instead, and the last
+    /// writer's casing wins. Pinned because the README documents the asymmetry.
+    /// </remarks>
+    [Fact]
+    public void TwoCasingsOfOnePortNameInOneFile_AreRefusedByTheJsonProvider()
+    {
+        var builder = TestHelpers.CreateBuilder(AppHostDirectory(Entry("""{ "amqp": 5672, "AMQP": 15672 }""")));
+
+        var ex = Assert.Throws<InvalidDataException>(
+            () => builder.AddBackingService("orders-db", () => builder.AddConnectionString("orders-db")));
+
+        Assert.Contains("duplicate key", ex.InnerException?.Message ?? "", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <remarks>
+    /// A key too large for an index is a name, like a padded one: no list ever produced it. The
+    /// boundary is what a list could have reached rather than a digit count that merely looks right.
+    /// </remarks>
+    [Fact]
+    public void APortNamedWithANumberTooLargeForAnIndex_IsAName() =>
+        Accepted("""{ "12345678901234567890": 5672 }""", "amqp://localhost:${port:12345678901234567890}/");
+
 }

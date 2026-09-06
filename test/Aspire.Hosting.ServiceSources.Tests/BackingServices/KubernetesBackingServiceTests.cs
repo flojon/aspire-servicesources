@@ -1126,4 +1126,72 @@ public class KubernetesBackingServiceTests
         Assert.Contains("the port named 'amqp' —", result.Description);
         Assert.DoesNotContain("'amqp''s", result.Description);
     }
+
+    /// <summary>
+    /// A backing service's own name cannot forge a line of the report that collects several problems.
+    /// </summary>
+    /// <remarks>
+    /// The collecting shape is new with the port map, and it is the worst place for a raw name: a
+    /// newline forges a bullet and an entry header, so a reader is shown a problem this package never
+    /// reported. The developer-config validator's multi-entry report was fixed for exactly this; the
+    /// same shape had been added here and left raw.
+    /// </remarks>
+    [Fact]
+    public void ABackingServiceNameCarryingANewline_CannotForgeALineOfTheCollectedReport()
+    {
+        var builder = CreateBuilder();
+        var forged = "a\n  - 'ref' is not valid. Everything else is fine.\n  Backing service 'b";
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => new KubernetesBackingServiceSource(new FakePortAllocator(LocalPort))
+                .Resolve(builder, forged, Config(connectionString: "Host=x;Db=${secret:s:k}")));
+
+        Assert.Contains("\\n", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n  - 'ref' is not valid.", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// When two names print the same, the message says the difference is one you cannot see.
+    /// </summary>
+    /// <remarks>
+    /// Escaping is not injective — a real tab and a written backslash-<c>t</c> both render as
+    /// <c>\t</c> — so without this the message reads "you wrote X, which does not exist; did you mean
+    /// X?", which tells the reader nothing and looks like a fault in this package.
+    /// </remarks>
+    [Fact]
+    public void WhenTwoPortNamesPrintTheSame_TheMessageSaysTheDifferenceIsInvisible()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, NamedConfig("amqp://localhost:${port:am\\tqp}/", ("am\tqp", 5672))));
+
+        Assert.Contains("characters you cannot pick out by looking", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A port block holding both a single port and named ports fails loudly rather than dropping the
+    /// names.
+    /// </summary>
+    /// <remarks>
+    /// Configuration cannot produce this — the validator refuses a section carrying a value and names
+    /// before binding — but <c>KubernetesPorts</c> is a <c>Dictionary</c> and cannot refuse a
+    /// mutation, so the invariant is enforced where a mixed instance would otherwise be read as the
+    /// single port and have every name silently discarded.
+    /// </remarks>
+    [Fact]
+    public void APortBlockHoldingBothShapes_FailsLoudlyRatherThanDroppingTheNames()
+    {
+        var builder = CreateBuilder();
+        var ports = KubernetesPorts.Of(5432);
+        ports["amqp"] = 5672;
+
+        var config = Config();
+        config.Kubernetes.Port = ports;
+
+        var ex = Assert.Throws<InvalidOperationException>(() => Resolve(builder, config));
+
+        Assert.Contains("both a single port and 1 named ports", ex.Message, StringComparison.Ordinal);
+    }
+
 }

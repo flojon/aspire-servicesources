@@ -11,7 +11,14 @@ namespace Aspire.Hosting.ServiceSources.Config;
 /// <remarks>
 /// A dictionary that may instead hold a single port, rather than the two separate fields the shape
 /// reads like, because the developer writes <em>one</em> key and a key binds to one property.
-/// Exactly one of <see cref="SinglePort"/> and the entries is ever populated.
+/// Exactly one of <see cref="SinglePort"/> and the entries is ever populated — an invariant of how
+/// this type is built and read, <b>not</b> one it can enforce. <see cref="Dictionary{TKey,TValue}"/>
+/// declares neither its indexer nor <c>Add</c> virtual, so a subclass cannot refuse a mutation;
+/// enforcing it would mean composing over a private dictionary and re-declaring the whole
+/// <see cref="IDictionary{TKey,TValue}"/> surface the binder walks. Instead the one reader that
+/// could be misled by a mixed instance refuses it outright — see
+/// <c>KubernetesBackingServiceSource.RequireForwardablePorts</c> — so a later caller that adds an
+/// entry to a single-port instance fails loudly rather than having its names silently dropped.
 /// <para>
 /// <b>The single port is not stored as a one-entry map</b>, which would be tidier and is wrong:
 /// <c>${port}</c> is accepted against a port written as a number and refused against a block of one
