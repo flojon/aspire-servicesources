@@ -1,5 +1,5 @@
+using System.ComponentModel;
 using System.Diagnostics;
-using System.Runtime.CompilerServices;
 
 namespace Aspire.Hosting.ServiceSources.Tests;
 
@@ -8,6 +8,10 @@ namespace Aspire.Hosting.ServiceSources.Tests;
 /// of it when the process exits — including a run that got killed, via an opportunistic sweep of
 /// any sibling left behind by a process that is no longer running.
 /// </summary>
+/// <remarks>
+/// Linked into the Java and JavaScript test projects rather than duplicated — see their
+/// <c>.csproj</c> files.
+/// </remarks>
 internal static class TempDirectories
 {
     public static readonly string CommonRoot = Path.Combine(Path.GetTempPath(), "aspire-servicesources-tests");
@@ -15,16 +19,15 @@ internal static class TempDirectories
     public static readonly string ProcessRoot =
         Path.Combine(CommonRoot, $"{Environment.ProcessId}-{Path.GetRandomFileName()}");
 
-    [ModuleInitializer]
-    internal static void Initialize()
+    static TempDirectories()
     {
         SweepOrphanedProcessRoots();
-        Directory.CreateDirectory(ProcessRoot);
+        CreateDirectory(ProcessRoot);
         AppDomain.CurrentDomain.ProcessExit += (_, _) => Remove(ProcessRoot);
     }
 
     public static DirectoryInfo CreateSubdirectory(string prefix = "") =>
-        Directory.CreateDirectory(Path.Combine(ProcessRoot, $"{prefix}{Path.GetRandomFileName()}"));
+        CreateDirectory(Path.Combine(ProcessRoot, $"{prefix}{Path.GetRandomFileName()}"));
 
     /// <summary>
     /// Removes a sibling per-process subfolder left under <see cref="CommonRoot"/> by a process
@@ -39,21 +42,33 @@ internal static class TempDirectories
 
         foreach (var directory in Directory.EnumerateDirectories(CommonRoot))
         {
-            if (string.Equals(directory, ProcessRoot, StringComparison.Ordinal))
+            try
             {
-                continue;
+                SweepOne(directory);
             }
-
-            var name = Path.GetFileName(directory);
-            var dash = name.IndexOf('-');
-
-            if (dash <= 0 || !int.TryParse(name[..dash], out var processId) || IsRunning(processId))
+            catch
             {
-                continue;
+                // Best-effort: one sibling's oddity must never abort the whole run over cleanup.
             }
-
-            Remove(directory);
         }
+    }
+
+    private static void SweepOne(string directory)
+    {
+        if (string.Equals(directory, ProcessRoot, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var name = Path.GetFileName(directory);
+        var dash = name.IndexOf('-');
+
+        if (dash <= 0 || !int.TryParse(name[..dash], out var processId) || IsRunning(processId))
+        {
+            return;
+        }
+
+        Remove(directory);
     }
 
     private static bool IsRunning(int processId)
@@ -71,6 +86,14 @@ internal static class TempDirectories
         {
             return false;
         }
+        catch (Win32Exception)
+        {
+            // Access to the process is restricted rather than the process being gone — a dead
+            // process's /proc entry doesn't stick around to be access-denied, so this means it's
+            // alive and owned by someone else. Treat it as running: the safe default is to leave
+            // the directory rather than risk deleting one a live process still uses.
+            return true;
+        }
     }
 
     private static void Remove(string path)
@@ -87,4 +110,15 @@ internal static class TempDirectories
         {
         }
     }
+
+    /// <summary>
+    /// Restricts the directory to this user on Unix, matching what
+    /// <see cref="Directory.CreateTempSubdirectory(string)"/> itself does — this lives under a
+    /// fixed, predictable, shared path, so it doesn't get to rely on an unguessable name for that
+    /// protection the way the BCL method does.
+    /// </summary>
+    private static DirectoryInfo CreateDirectory(string path) =>
+        OperatingSystem.IsWindows()
+            ? Directory.CreateDirectory(path)
+            : Directory.CreateDirectory(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
 }
