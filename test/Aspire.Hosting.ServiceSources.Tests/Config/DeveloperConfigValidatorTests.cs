@@ -321,8 +321,11 @@ public class DeveloperConfigValidatorTests
             """);
 
         Assert.Contains(@"Set it to 'ord\ufeffers'.", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("characters you cannot see", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("retype", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("cannot pick out by looking", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Retype the value", ex.Message, StringComparison.Ordinal);
+
+        // The message may not narrate its own scope: no other complaint in this file does.
+        Assert.DoesNotContain("this rule", ex.Message, StringComparison.Ordinal);
     }
 
     /// <remarks>
@@ -359,13 +362,15 @@ public class DeveloperConfigValidatorTests
                 "kubernetes": { "namespace": " \uD834\uDD73orders" } } } }
             """);
 
-        Assert.Contains(@"\U0001d173", ex.Message, StringComparison.Ordinal);
+        // Spelled as the surrogate pair, which is what a developer can paste back into the file:
+        // \uD834\uDD73 is a JSON escape and \U0001d173 is not.
+        Assert.Contains(@"\ud834\udd73", ex.Message, StringComparison.Ordinal);
         Assert.Contains("Set it to 'orders'.", ex.Message, StringComparison.Ordinal);
     }
 
     /// <remarks>
     /// The boundary this rule deliberately stops at: a value padded only with invisible characters
-    /// and no whitespace at all is not refused. TrimUnseeable is one edit away from becoming the
+    /// and no whitespace at all is not refused. TrimInvisible is one edit away from becoming the
     /// trigger rather than the remedy, which would widen the rule past what #236 asked for without
     /// anyone noticing. Pinned so that widening it stays a decision.
     /// </remarks>
@@ -508,6 +513,47 @@ public class DeveloperConfigValidatorTests
                 + "to CollectList before the whitespace check is reached.");
             Assert.Null(DeveloperConfigField.BlockFieldsOf(carrier.PropertyType));
         }
+    }
+
+    /// <remarks>
+    /// The spelling a message proposes has to be one the developer can put back. That is not a
+    /// property of the trimming — it is a property of how the value is *written*, and the two came
+    /// apart once already: an astral code point spelled as U+0001d173 names the right character and
+    /// is not a JSON escape, so following the advice literally made the whole file fail to parse.
+    /// Spelled as its surrogate pair it is valid JSON, and this asserts the round trip rather than
+    /// the spelling, so the next way of getting it wrong fails here too.
+    /// </remarks>
+    [Theory]
+    // Every value here is written as an escape rather than as the character itself: the JSON parser
+    // decodes it on the way in, and a reader of this file can see what the case is about. `proposed`
+    // is the text the message prints, which is also what a developer would paste back.
+    [InlineData(@" \uFEFForders", "orders")]
+    [InlineData(@" ord\uFEFFers", @"ord\ufeffers")]
+    [InlineData(@" \uD834\uDD73orders", "orders")]
+    [InlineData(@" ord\uD834\uDD73ers", @"ord\ud834\udd73ers")]
+    [InlineData(@" my dev ctx ", "my dev ctx")]
+    public void Validate_TheSpellingTheMessageProposes_IsAcceptedWhenWrittenBack(
+        string written, string proposed)
+    {
+        var refused = Load($$"""
+            { "services": { "orders": {
+                "source": "kubernetes",
+                "kubernetes": { "namespace": "{{written}}", "context": "dev", "port": 8080 } } } }
+            """);
+
+        Assert.Contains($"Set it to '{proposed}'.", refused.Message, StringComparison.Ordinal);
+
+        // The proposed spelling, typed back into the file exactly as the message wrote it.
+        var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory($$"""
+            { "services": { "orders": {
+                "source": "kubernetes",
+                "kubernetes": { "namespace": "{{proposed}}", "context": "dev", "port": 8080 } } } }
+            """));
+
+        // Resolving at all is the assertion: a spelling that breaks the file throws
+        // InvalidDataException from the JSON provider, and one this rule still refuses throws
+        // ServiceSourcesConfigurationException.
+        ServiceSourcesConfigCache.ResolveService(builder, "orders");
     }
 
     [Fact]

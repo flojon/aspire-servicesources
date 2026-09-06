@@ -61,8 +61,10 @@ internal sealed class DeveloperConfigShape
 
     /// <summary>The type an entry of this kind binds to.</summary>
     /// <remarks>
-    /// Kept so that a check can ask about the entry's own properties and not only about what is
-    /// inside its blocks — <c>source</c> lives here, and is handled outside the block walk.
+    /// Exposed so that a check can ask about the entry's own properties and not only about what is
+    /// inside its blocks — <c>source</c> lives here and is handled outside the block walk, so a
+    /// field-level rule placed on it would be inert. Nothing in the walk needs this; the test that
+    /// pins where <see cref="NoSurroundingWhitespaceAttribute"/> may be declared does.
     /// </remarks>
     public Type Entry { get; }
 

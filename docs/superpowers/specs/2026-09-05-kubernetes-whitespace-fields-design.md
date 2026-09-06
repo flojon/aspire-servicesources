@@ -243,7 +243,7 @@ that survives trimming cannot be, both of which the rule must recognize rather t
   back.
 
   So the remedy is computed by trimming boundary characters that are whitespace **or** invisible —
-  `char.IsControl`, or Unicode category `Format` — while the *trigger* stays `value != value.Trim()`.
+  `char.IsControl`, or Unicode category `Format` — which reaches wider than what the rule fires on.
   ` \uFEFForders` is then refused with the remedy `orders`, which works. A value padded only with
   invisibles and no whitespace at all is still not refused; that is the boundary, and it is recorded
   below rather than silently widened.
@@ -336,8 +336,8 @@ not remove them (verified on .NET 8). Two consequences:
   decision about which code points and which fields. Recorded on #236.
 - `" \uFEFForders"` **is** refused — and a remedy computed as `value.Trim()` would be
   `\uFEFForders`, which renders as `orders` and is not `orders`. That is answered in *When the
-  remedy is not something the developer can type*, by trimming invisibles out of the remedy while
-  leaving the trigger alone.
+  remedy is not something the developer can type*, by trimming invisibles out of the remedy, which
+  reaches wider than the rule that fires.
 
 So `Escaped` gains an arm: a character that is `char.IsControl` or in Unicode category `Format`
 renders as its code point. It asks that of the *string and an index* rather than of a `char`,
@@ -346,8 +346,14 @@ invisible characters above the BMP are exactly the ones worth catching, since pl
 block that exists to be unseeable. Asking per `char` would have caught the accidental cases and
 missed the deliberate ones. It is the same rule `Escaped` already applies to whitespace that cannot
 be told from a space by looking, extended to characters that cannot be seen at all. Every message in
-this file benefits, and none changes for a value that does not contain one. The two arms cannot
-collide: across the whole BMP no character is both `Format` and whitespace.
+this file benefits, and none changes for a value that does not contain one. It is one arm calling
+the same predicate the trimming uses, rather than a second spelling of it: what a message escapes
+and what a remedy drops have to be the same set.
+
+**A code point above the BMP is spelled as its surrogate pair, not as the code point it makes.** The
+escapes in these messages are advice a developer pastes back, and `\uD834\uDD73` is a JSON escape
+where `\U0001d173` is not — so the eight-digit form names a spelling that breaks the file it is typed
+into. Found by a reviewer following the advice literally, which is the only way it would have been.
 
 **What that arm does *not* cover, stated so this section does not over-claim in the one place whose
 point is not over-claiming.** `Format` and `Control` are two slices of "invisible", not the whole of
@@ -481,8 +487,20 @@ Cases:
   mitigation, and would still have passed with the unusable remedy.
 - `context` — and only `context` — carries the `rename-context` sentence, on both shapes.
 - A tab, a non-breaking space and a `U+FEFF` around a value are refused and are **visible** in the
-  message, including in the spelling the remedy proposes. The `U+FEFF` case is the regression test
-  for the trap the fix would otherwise have re-created.
+  echo of what arrived. The `U+FEFF` case is the regression test for the trap the fix would
+  otherwise have re-created — and note the remedy is where the mark is *not*: the whole point is
+  that the proposed spelling has dropped it.
+- **The spelling the message proposes is accepted when written back**, for a padded invisible, an
+  invisible left inside the value, an astral invisible in both positions, and a value whose interior
+  space is legitimate. A round trip rather than an assertion about the text, because the two came
+  apart once: an astral code point spelled as `\U0001d173` names the right character and is not a
+  JSON escape, so following the advice literally made the file fail to parse.
+- A value whose invisible padding carries no whitespace is not refused, and one where the whitespace
+  sits *behind* an invisible — `"\u200b dev-west"` — is. The second is the case a
+  `value != value.Trim()` trigger answers with silence.
+- An invisible **above the BMP** padding a value is spelled out and dropped from the remedy. Asked
+  of the string and an index rather than of a `char`, since either half of a surrogate pair answers
+  `Surrogate` whatever the pair spells.
 - A value that is entirely whitespace still gets `Blank`'s message and not this one.
 - An empty value is still the unset gesture and is not refused.
 - Interior whitespace — `"my dev ctx"` — is accepted, which is the measured kubeconfig behaviour and
@@ -506,9 +524,14 @@ Cases:
   since `CollectBlock` recurses into a nested block. So the guard descends through nested blocks the
   way the validator does, and only then asserts each carrier is neither a list nor a nested block.
 
-  This guards two real failure modes — an attribute placed where the walk never reaches it, and a
-  field quietly losing the rule — and not a third it cannot: moving a property between block types
-  carries its attributes with it, so relocation was never the hazard.
+  The scan covers the entry's own properties as well as its blocks and everything nested in them.
+  `source` lives at the entry root and is handled outside the block walk, so a rule declared there
+  would be inert — and a scan reading only `BlockFields` would be blind to that end too. Mutation
+  checked in all three positions: `PrepareDeveloperConfig.Command` (a list, two levels down),
+  `ServiceDeveloperConfig.Source` (the entry root), and by deletion.
+
+  What it cannot guard is a property moved between block types: attributes travel with the property,
+  so relocation was never the hazard.
 
 ## Open questions
 

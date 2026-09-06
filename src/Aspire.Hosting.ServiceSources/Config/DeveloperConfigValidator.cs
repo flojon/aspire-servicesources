@@ -719,11 +719,16 @@ internal static class DeveloperConfigValidator
         // The spelling is always named, even when it still carries something invisible of its own.
         // Withholding it leaves the reader with "retype" and no target, and the escapes are honest
         // about what is in there — what they cannot convey is *where*, which the sentence does.
+        // States the fact and what it costs the developer, rather than narrating this check's own
+        // scope: no other message in this file talks about itself. "Cannot pick out by looking"
+        // rather than "cannot see", because a tab and a non-breaking space both reach here and both
+        // are perfectly visible — what they are not is distinguishable from an ordinary space.
         var caveat = PrintsAsItself(remedy)
             ? ""
-            : " The escapes in that spelling are characters you cannot see. They sit inside the "
-              + "value rather than around it, which is outside what this rule judges, so retype it "
-              + "if they were not deliberate.";
+            : " That spelling still carries characters you cannot pick out by looking, inside the "
+              + $"name rather than at its ends, so {rule.Receiver} gets those too. Retype the value "
+              + "if you did not mean them — outside the file an escape stays as its literal "
+              + "characters.";
 
         return opening
             + $", and {rule.Receiver} is given it exactly as written — so {rule.Receiver} looks "
@@ -871,7 +876,6 @@ internal static class DeveloperConfigValidator
         return true;
     }
 
-
     /// <summary>
     /// The error for a value of one or more spaces, whatever type the field takes.
     /// </summary>
@@ -938,9 +942,13 @@ internal static class DeveloperConfigValidator
                 // The one predicate the trimming uses, rather than a second spelling of it: what a
                 // message escapes and what a remedy drops have to be the same set, and two switch
                 // arms saying so in different words are two things to keep in step.
+                // Spelled as the surrogate pair rather than as the code point it makes, because
+                // this text is advice a developer pastes back: `\uD834\uDD73` is a JSON escape and
+                // `\U0001d173` is not, so the eight-digit form would name a spelling that breaks the
+                // file it is typed into.
                 _ when IsInvisible(value, i) => width == 1
                     ? $"\\u{(int)value[i]:x4}"
-                    : $"\\U{char.ConvertToUtf32(value, i):x8}",
+                    : $"\\u{(int)value[i]:x4}\\u{(int)value[i + 1]:x4}",
 
                 _ => value.Substring(i, width),
             });
