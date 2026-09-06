@@ -28,7 +28,11 @@ internal sealed class KubernetesBackingServiceDeveloperConfig
     /// makes: a pod name carries a replica-set suffix that changes on every rollout, so a
     /// forwarded pod is a value that goes stale between one <c>kubectl get</c> and the next.
     /// <c>kubectl port-forward</c> against a Service picks a backing pod itself.
+    /// <para>
+    /// A Service name is a DNS-1035 label, so a space is not legal anywhere in one.
+    /// </para>
     /// </remarks>
+    [NoSurroundingWhitespace("kubectl")]
     public string? Service { get; set; }
 
     /// <summary>
@@ -48,9 +52,15 @@ internal sealed class KubernetesBackingServiceDeveloperConfig
     /// it would make an AppHost's behaviour depend on a shell they may not have opened today — and
     /// the failure would be a connection to the wrong cluster rather than an error.
     /// </remarks>
+    [NoSurroundingWhitespace(
+        "kubectl",
+        IfDeliberate = "If this context really is named that, rename it with "
+            + "'kubectl config rename-context'.")]
     public string? Context { get; set; }
 
     /// <summary>The namespace the Service lives in. Defaults to <c>default</c>.</summary>
+    /// <remarks>A namespace is a DNS-1123 label, so a space is not legal anywhere in one.</remarks>
+    [NoSurroundingWhitespace("kubectl")]
     public string? Namespace { get; set; }
 
     /// <summary>

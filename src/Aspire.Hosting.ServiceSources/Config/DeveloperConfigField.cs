@@ -32,10 +32,13 @@ internal static class DeveloperConfigField
     /// own, or <see langword="null"/> when it is a value or a list.
     /// </summary>
     /// <remarks>
-    /// Keyed the way <see cref="DeveloperConfigShape.BlockFields"/> is — name to the type the value
-    /// has to bind to — so a nested block is walked by the same code as a top-level one.
+    /// Keyed the way <see cref="DeveloperConfigShape.BlockFields"/> is — name to the property the
+    /// value binds to — so a nested block is walked by the same code as a top-level one. The
+    /// property rather than its type, because a key can be valid, be of the right type, and still
+    /// carry a rule of its own: <see cref="NoSurroundingWhitespaceAttribute"/> is declared on the
+    /// property, and a dictionary of types would have discarded it before the walk could look.
     /// </remarks>
-    public static IReadOnlyDictionary<string, Type>? BlockFieldsOf(Type type)
+    public static IReadOnlyDictionary<string, PropertyInfo>? BlockFieldsOf(Type type)
     {
         if (!type.IsClass || type == typeof(string) || IsList(type))
         {
@@ -44,7 +47,7 @@ internal static class DeveloperConfigField
 
         return type.GetProperties()
             .Where(IsConfigurable)
-            .ToDictionary(field => field.Name, field => field.PropertyType, StringComparer.OrdinalIgnoreCase);
+            .ToDictionary(field => field.Name, field => field, StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>
