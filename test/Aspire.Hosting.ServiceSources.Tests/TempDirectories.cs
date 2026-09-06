@@ -35,20 +35,37 @@ internal static class TempDirectories
     /// </summary>
     internal static void SweepOrphanedProcessRoots()
     {
-        if (!Directory.Exists(CommonRoot))
+        string[] siblings;
+
+        try
+        {
+            // A snapshot, not EnumerateDirectories: a concurrently-sweeping sibling process can
+            // delete an entry out from under a lazy enumerator's own MoveNext(), which would
+            // throw from outside the per-sibling try/catch below and, since this whole method
+            // runs from the static constructor, take the entire test run down with it.
+            siblings = Directory.Exists(CommonRoot) ? Directory.GetDirectories(CommonRoot) : [];
+        }
+        catch (IOException)
+        {
+            return;
+        }
+        catch (UnauthorizedAccessException)
         {
             return;
         }
 
-        foreach (var directory in Directory.EnumerateDirectories(CommonRoot))
+        foreach (var directory in siblings)
         {
             try
             {
                 SweepOne(directory);
             }
-            catch
+            catch (IOException)
             {
-                // Best-effort: one sibling's oddity must never abort the whole run over cleanup.
+                // A sibling process finished sweeping (or exited) the same folder concurrently.
+            }
+            catch (UnauthorizedAccessException)
+            {
             }
         }
     }
@@ -112,10 +129,13 @@ internal static class TempDirectories
     }
 
     /// <summary>
-    /// Restricts the directory to this user on Unix, matching what
-    /// <see cref="Directory.CreateTempSubdirectory(string)"/> itself does — this lives under a
-    /// fixed, predictable, shared path, so it doesn't get to rely on an unguessable name for that
-    /// protection the way the BCL method does.
+    /// Restricts the directory itself to this user on Unix, matching what
+    /// <see cref="Directory.CreateTempSubdirectory(string)"/> does for the leaf it creates — this
+    /// lives under a fixed, predictable, shared path, so it doesn't get to rely on an unguessable
+    /// name the way the BCL method does. Only the leaf: <see cref="CommonRoot"/> itself, created
+    /// implicitly as a parent directory the first time any process needs it, keeps the OS default
+    /// mode, so its child names (process ids, nothing else) are listable by other local users even
+    /// though no process's own contents are.
     /// </summary>
     private static DirectoryInfo CreateDirectory(string path) =>
         OperatingSystem.IsWindows()
