@@ -399,6 +399,9 @@ internal static class DeveloperConfigValidator
     /// </remarks>
     private static bool IsPosition(string key) =>
         key.Length > 0
+        // Short enough to be an index. A key of twenty digits is a name someone chose, for the same
+        // reason a padded one is: no list this walk will ever see is that long.
+        && key.Length <= 9
         && key.All(char.IsAsciiDigit)
         // A padded index is not one configuration ever writes: an array renders its keys as 0, 1, 2
         // with no leading zeros, so "007" is a name someone chose and refusing it as "written as a
@@ -683,7 +686,8 @@ internal static class DeveloperConfigValidator
 
         foreach (var (service, problems) in faulted)
         {
-            message.Append(Environment.NewLine).Append($"  {shape.Kind} '{service}':");
+            message.Append(Environment.NewLine)
+                .Append($"  {shape.Kind} '{ConfiguredValue.Bare(service)}':");
 
             foreach (var problem in problems)
             {
@@ -889,7 +893,7 @@ internal static class DeveloperConfigValidator
         var block = key.Key.ToLowerInvariant();
 
         return $"'{ConfiguredValue.Bare(key.Key)}' takes a block of settings, not a value: "
-            + $"\"{container}\": {{ ..., \"{block}\": {{ ... }} }}. "
+            + $"\"{ConfiguredValue.Bare(container)}\": {{ ..., \"{block}\": {{ ... }} }}. "
             + $"Valid keys there are {Quoted(fields.Keys)}."
             // FirstOrDefault rather than First: every block declares at least one field, but a
             // message builder that can throw would replace the configuration error being reported
@@ -912,7 +916,8 @@ internal static class DeveloperConfigValidator
     /// </remarks>
     private static string ValueExpected(string serviceName, IConfigurationSection key, string? block) =>
         $"'{ConfiguredValue.Bare(key.Key)}'{(block is null ? "" : $" in the '{block}' block")} "
-        + $"takes a value, not a block of settings: \"{block ?? serviceName}\": {{ \"{ConfiguredValue.Bare(key.Key)}\": ... }}."
+        + $"takes a value, not a block of settings: "
+        + $"\"{ConfiguredValue.Bare(block ?? serviceName)}\": {{ \"{ConfiguredValue.Bare(key.Key)}\": ... }}."
         + SetAt(key);
 
     /// <summary>
@@ -1069,7 +1074,7 @@ internal static class DeveloperConfigValidator
         $" The key is '{Path(section)}', which any configuration layer can set: "
         + $"{DeveloperConfiguration.FileName}, appsettings, user secrets, the environment or the "
         + "command line — the flat layers an element at a time, as "
-        + $"{ConfiguredValue.Bare($"{section.Path}:0".Replace(":", "__", StringComparison.Ordinal))}.";
+        + $"{Environmentally(section)}__0.";
 
     /// <summary>
     /// The same, for a key that has to hold a block of settings rather than a value.
@@ -1087,7 +1092,7 @@ internal static class DeveloperConfigValidator
         $" The key is '{Path(section)}', which any configuration layer can set: "
         + $"{DeveloperConfiguration.FileName}, appsettings, user secrets, the environment or the "
         + "command line — the flat layers a field at a time, as "
-        + $"{ConfiguredValue.Bare($"{section.Path}:{exampleField}".Replace(":", "__", StringComparison.Ordinal))}.";
+        + $"{Environmentally(section)}__{ConfiguredValue.Bare(exampleField)}.";
 
     /// <summary>
     /// The same as <see cref="SetAt"/>, for one named entry of a block of named values.

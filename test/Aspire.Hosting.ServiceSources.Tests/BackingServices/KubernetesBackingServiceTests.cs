@@ -1113,5 +1113,4 @@ public class KubernetesBackingServiceTests
         Assert.Contains("the port named 'amqp' —", result.Description);
         Assert.DoesNotContain("'amqp''s", result.Description);
     }
-
 }

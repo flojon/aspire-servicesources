@@ -579,5 +579,4 @@ public class PortBlockValidationTests
         Assert.Contains("orders\\n-db", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("orders\n-db", ex.Message, StringComparison.Ordinal);
     }
-
 }

@@ -813,4 +813,46 @@ public class DeveloperConfigValidatorTests
         Assert.Contains("'prepare' is not a valid key here", ex.Message);
         Assert.Contains("'local' block", ex.Message);
     }
+
+    /// <summary>
+    /// A service name cannot forge a line of the report that lists several faulted entries.
+    /// </summary>
+    /// <remarks>
+    /// The multi-entry report is the worst place for a raw name, and the last one to be noticed: it
+    /// is indented and bulleted, so a name carrying a newline forges both a bullet and an entry
+    /// header of its own — a reader sees a problem this package never reported, against an entry that
+    /// does not exist. The single-entry report was escaped a commit earlier; this one is reached only
+    /// when two entries are wrong at once, which no test had done.
+    /// </remarks>
+    [Fact]
+    public void Validate_ServiceNameCarryingANewline_CannotForgeALineOfTheCombinedReport()
+    {
+        var ex = Load("""
+            { "services": {
+                "a\n    - 'ref' is not a valid key. Everything else is fine.\n  Service 'a": { "zzz": 1 },
+                "other": { "yyy": 1 } } }
+            """);
+
+        Assert.Contains("problems across 2 service entries", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("\\n", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "\n    - 'ref' is not a valid key. Everything else is fine.", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <remarks>
+    /// The shape a message shows is built around the service's own name, so the name has to be
+    /// escaped there as well as in the sentence that quotes it — these two messages wrapped the key
+    /// beside it and left the name raw.
+    /// </remarks>
+    [Theory]
+    [InlineData("""{ "services": { "ord\ners": { "source": "local", "local": "x" } } }""")]
+    [InlineData("""{ "services": { "ord\ners": { "source": { "a": "b" } } } }""")]
+    public void Validate_ServiceNameCarryingANewline_IsEscapedInTheShapeAMessageShows(string json)
+    {
+        var ex = Load(json);
+
+        Assert.Contains("ord\\ners", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("ord\ners", ex.Message, StringComparison.Ordinal);
+    }
+
 }
