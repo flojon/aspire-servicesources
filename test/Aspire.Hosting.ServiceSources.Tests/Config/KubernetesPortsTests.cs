@@ -104,4 +104,17 @@ public class KubernetesPortsTests
 
         Assert.Contains("abc", thrown.Message, StringComparison.Ordinal);
     }
+
+    /// <remarks>
+    /// #264: a named port already bound through the BCL's own <c>Int32Converter</c>, which reads
+    /// <c>0x1628</c> as 5672 — the single port now asks the same converter, so the two can no
+    /// longer disagree about what a number is.
+    /// </remarks>
+    [Fact]
+    public void A_port_written_in_hexadecimal_binds_the_same_as_a_named_one_does()
+    {
+        var config = Bind(("kubernetes:port", "0x1628"));
+
+        Assert.Equal(5672, config.Port!.SinglePort);
+    }
 }

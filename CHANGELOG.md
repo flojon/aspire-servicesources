@@ -585,6 +585,12 @@ nothing will fail to build to warn you.
   `service` has two equally close candidates instead of a clear winner. The message names the
   ordinally first, as it already did for any exact tie, so it stays the same on every run.
 
+- **A port written in hexadecimal as a single value is now accepted, the same as a named one**
+  ([#264]). `"port": "0x1628"` was refused — *takes a port number or a block of named ports* —
+  while the identical spelling as a named entry, `"port": { "amqp": "0x1628" }`, bound as `5672`.
+  The single value now asks the same converter a named entry always has, so the two can no longer
+  disagree about what a number is; `#1628` and `&H1628` are accepted too, for the same reason.
+
 ## [0.4.1] - 2026-09-05
 
 A patch on top of `0.4.0`, cut from the `release/0.4.x` branch off the `v0.4.0` tag rather than
@@ -1311,6 +1317,7 @@ Targets `net10.0`.
 [#170]: https://github.com/flojon/aspire-servicesources/issues/170
 [#171]: https://github.com/flojon/aspire-servicesources/issues/171
 [#180]: https://github.com/flojon/aspire-servicesources/pull/180
+[#264]: https://github.com/flojon/aspire-servicesources/issues/264
 [#182]: https://github.com/flojon/aspire-servicesources/issues/182
 [#187]: https://github.com/flojon/aspire-servicesources/issues/187
 [#200]: https://github.com/flojon/aspire-servicesources/issues/200

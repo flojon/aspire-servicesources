@@ -81,22 +81,30 @@ internal sealed class KubernetesPorts : Dictionary<string, int>
     /// agree exactly: a value the validator accepts and the converter rejects reaches the binder,
     /// which answers it by naming a CLR type at a colon-separated key.
     /// <para>
-    /// <see cref="NumberStyles.Integer"/> against <see cref="CultureInfo.InvariantCulture"/> — the
-    /// plain spelling of a number, and deliberately narrower than <c>Int32Converter</c>, which also
-    /// accepts <c>0x1628</c>, <c>#1628</c> and <c>&amp;H1628</c>. Nothing is lost by refusing those:
-    /// the validator asks this same converter whether the value binds, so the two halves of the
-    /// scalar spelling cannot disagree, and a port written in hexadecimal is a mistake worth
-    /// reporting rather than a spelling worth supporting. A <em>named</em> entry is a different
-    /// matter — it is converted by the binder rather than here, so the validator asks the binder's
-    /// own converter about it instead of asking this.
+    /// Asks the BCL's own <c>Int32Converter</c> — the same converter a <em>named</em> entry is
+    /// read by, since that one is converted by the binder rather than here. #264: these used to
+    /// disagree about hexadecimal (<c>0x1628</c>, <c>#1628</c>, <c>&amp;H1628</c>) — accepted for a
+    /// named entry, refused for the single value — with nothing telling a developer why the same
+    /// spelling worked in one shape and not the other. Asking the same converter both places
+    /// removes the asymmetry entirely, rather than explaining it.
+    /// </para>
     /// <para>
     /// A negative number parses and is refused later, by the range check, which is where a port that
     /// is a number but not a port has always been answered.
     /// </para>
-    /// </para>
     /// </remarks>
-    internal static bool TryParsePort(string value, out int port) =>
-        int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out port);
+    internal static bool TryParsePort(string value, out int port)
+    {
+        var converter = TypeDescriptor.GetConverter(typeof(int));
+        if (converter.IsValid(value))
+        {
+            port = (int)converter.ConvertFromInvariantString(value)!;
+            return true;
+        }
+
+        port = 0;
+        return false;
+    }
 }
 
 /// <summary>

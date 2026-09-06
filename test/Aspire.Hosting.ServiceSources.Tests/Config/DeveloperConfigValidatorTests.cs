@@ -422,6 +422,26 @@ public class DeveloperConfigValidatorTests
         Assert.Equal(expected, arrived);
     }
 
+    /// <remarks>
+    /// #264: confirms this is still the intended behaviour rather than an oversight.
+    /// <c>Port</c> is nullable, so <c>NotBindable</c>'s "this one cannot be unset" branch cannot
+    /// reach it — an empty value means "unset" for every field that can hold one, the same
+    /// gesture a higher configuration layer uses to drop a value a lower layer set.
+    /// </remarks>
+    [Fact]
+    public void Validate_EmptyKubernetesPort_LeavesTheFieldUnset()
+    {
+        var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory("""
+            { "services": { "orders": {
+                "source": "kubernetes",
+                "kubernetes": { "context": "dev", "port": "" } } } }
+            """));
+
+        var resolved = ServiceSourcesConfigCache.ResolveService(builder, "orders").DeveloperConfig;
+
+        Assert.Null(resolved.Kubernetes.Port);
+    }
+
     [Fact]
     public void Validate_DirectConnectionString_StillTakesATrailingSpace()
     {

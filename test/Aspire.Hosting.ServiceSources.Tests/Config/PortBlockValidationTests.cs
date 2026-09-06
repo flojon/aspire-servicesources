@@ -451,6 +451,12 @@ public class PortBlockValidationTests
     public void ANamedPortInHexadecimal_IsAcceptedBecauseTheBinderAcceptsIt() =>
         Accepted("""{ "amqp": "0x1628" }""", "amqp://localhost:${port:amqp}/");
 
+    /// <remarks>
+    /// #264: the single-port spelling used to have its own narrower parser, so this was refused
+    /// while the named-entry case above was accepted. Both now ask the same converter.
+    /// </remarks>
+    [Fact]
+    public void AScalarPortInHexadecimal_IsAcceptedForTheSameReason() => Accepted("\"0x1628\"");
 
     /// <summary>
     /// The names echoed by the value-and-names message are escaped, and keep their own casing.
