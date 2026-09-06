@@ -1804,6 +1804,39 @@ public class KubernetesBackingServiceTests
         Assert.Contains("'amqp', 'management'", ex.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A whole-string secret against a block naming exactly one port is not "several ports" and is
+    /// allowed — the name carries through to the command line and the health check exactly as it
+    /// does for a per-field secret or an ordinary <c>${port:amqp}</c> template.
+    /// </summary>
+    [Fact]
+    public async Task WholeStringSecret_AgainstASingleNamedPort_Forwards()
+    {
+        var builder = CreateBuilder();
+        var reader = new FakeSecretReader("Host=orders-pg;Port=5672;Database=orders");
+
+        var db = Resolve(
+            builder,
+            NamedConfig("${secret:orders-cs:connectionString}", ("amqp", 5672)),
+            allocator: new OccupiedPortAllocator(occupied: -1),
+            secretReader: reader);
+
+        Assert.Equal(
+            "Host=localhost;Port=5672;Database=orders",
+            await db.Resource.ConnectionStringExpression.GetValueAsync(default));
+
+        Assert.Contains("5672:5672", await TunnelArgsAsync(builder));
+
+        var registration = builder.Services.BuildServiceProvider()
+            .GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations
+            .Single(candidate => candidate.Name == $"{Name}-tunnel-tcp-amqp");
+
+        var result = await registration.Factory(null!)
+            .CheckHealthAsync(new HealthCheckContext { Registration = registration }, default);
+
+        Assert.Contains($"127.0.0.1:5672", result.Description);
+    }
+
 
     /// <summary>
     /// The connection string this message quotes back has its whitespace spelled out too.

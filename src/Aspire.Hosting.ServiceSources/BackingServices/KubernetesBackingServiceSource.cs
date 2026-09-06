@@ -133,6 +133,10 @@ internal sealed partial class KubernetesBackingServiceSource(
                 // the path main deliberately moved off when local project resolution became
                 // deferred — and would fail the whole AppHost for a developer who is merely not
                 // logged in yet. Aspire resolves a parameter when something asks for its value.
+                // forwarded[0] regardless of how many ports this backing service declares: the
+                // remote port only matters to a whole-string secret, and RequireEveryPlaceholderIsResolvable
+                // already refused a whole-string secret against more than one declared port, so
+                // whenever it is read there is exactly one entry to read it from.
                 case ConnectionStringTemplate.Secret secret:
                     expression.Append(
                         $"{SecretParameter(builder, name, service, context, @namespace, secret, wholeSecret, forwarded[0].RemotePort).Resource}");
@@ -498,6 +502,8 @@ internal sealed partial class KubernetesBackingServiceSource(
     /// <remarks>
     /// <c>secret: true</c> so the dashboard masks it, which is free and is the whole reason the
     /// value should travel as a parameter rather than as text spliced into a connection string.
+    /// <paramref name="remotePort"/> is only read by <see cref="Fetch"/> when
+    /// <paramref name="wholeSecret"/> is <see langword="true"/> — a per-field secret ignores it.
     /// </remarks>
     private IResourceBuilder<ParameterResource> SecretParameter(
         IDistributedApplicationBuilder builder,
