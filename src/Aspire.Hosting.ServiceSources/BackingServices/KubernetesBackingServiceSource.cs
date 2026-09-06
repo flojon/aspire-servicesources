@@ -43,16 +43,37 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
         var service = kubernetes.Service!;
         var context = kubernetes.Context!;
         var connectionString = kubernetes.ConnectionString!;
-        var remotePort = RequirePortInRange(name, kubernetes.Port!.Value);
-
-        var template = ConnectionStringTemplate.Parse(connectionString, name, ConfigKey(name, "ConnectionString"));
 
         // Judged whole before a port is taken, for the reason the service-side source gives: a
         // template this source cannot resolve is config validation like every check above it, and
         // should not burn an allocation on its way to saying so.
-        RequireEveryPlaceholderIsResolvable(name, connectionString, template);
+        var requested = RequireForwardablePorts(name, kubernetes.Port!);
 
-        var localPort = portAllocator.AllocatePort();
+        var template = ConnectionStringTemplate.Parse(connectionString, name, ConfigKey(name, "ConnectionString"));
+
+        RequireEveryPlaceholderIsResolvable(name, connectionString, template, requested);
+
+        // THE binding of a name to a local port, made once and read by everything below: the
+        // connection string, the kubectl command line, and the health checks. Nothing downstream
+        // re-derives an order of its own, and nothing pairs by position.
+        //
+        // That is not tidiness. With one port there was one number and nothing could be mispaired;
+        // with several there are three sequences in play — the block's own order, the ordinal-by-name
+        // order the command line is written in, and the order the allocator returned — and pairing
+        // any two of them by index gives ${port:amqp} the port kubectl forwarded to the management
+        // port. Both health checks pass, every resource reports healthy, and the application talks
+        // to the wrong listener. It is the failure NothingAddressesTheTunnel exists to prevent, one
+        // level down.
+        var localPorts = portAllocator.AllocatePorts(requested.Count);
+
+        var forwarded = requested
+            .Select((port, index) => new ForwardedPort(port.Name, port.RemotePort, localPorts[index]))
+            .ToArray();
+
+        var byName = forwarded
+            .Where(port => port.Name is not null)
+            .ToDictionary(port => port.Name!, StringComparer.OrdinalIgnoreCase);
+
         var expression = new ReferenceExpressionBuilder();
 
         foreach (var segment in template.Segments)
@@ -68,10 +89,18 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
                 // string with no late parts in it.
                 case ConnectionStringTemplate.Port { Name: null }:
                     ConnectionStringTemplate.AppendLiteral(
-                        expression, localPort.ToString(CultureInfo.InvariantCulture));
+                        expression, forwarded[0].LocalPort.ToString(CultureInfo.InvariantCulture));
                     break;
 
-                // Unreachable: the walk above accepts only literals and the unnamed port. Kept so
+                // Looked up by name, never by position. A name repeated in the template resolves to
+                // the same forwarded port both times, because the binding is per forwarded port and
+                // not per placeholder.
+                case ConnectionStringTemplate.Port port:
+                    ConnectionStringTemplate.AppendLiteral(
+                        expression, byName[port.Name!].LocalPort.ToString(CultureInfo.InvariantCulture));
+                    break;
+
+                // Unreachable: the pass above accepts only literals and resolvable ports. Kept so
                 // that a placeholder kind added later fails loudly here rather than vanishing from
                 // the connection string.
                 default:
@@ -95,7 +124,11 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
                     tunnelName,
                     "kubectl",
                     builder.AppHostDirectory,
-                    KubectlPortForward.Args(service, localPort, remotePort, context, kubernetes.Namespace))
+                    KubectlPortForward.Args(
+                        service,
+                        forwarded.Select(port => (port.LocalPort, port.RemotePort)).ToArray(),
+                        context,
+                        kubernetes.Namespace))
                 .WithParentRelationship(backingService);
         }
         catch (ArgumentException ex)
@@ -106,28 +139,56 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
             // Aspire stays the authority on what the rule is: this adds the missing half, which is
             // where the name came from.
             throw new ServiceSourcesConfigurationException(
-                $"Backing service '{name}': its port-forward runs as a resource named '{tunnelName}', after the "
+                $"Backing service '{Named(name)}': its port-forward runs as a resource named '{tunnelName}', after the "
                 + $"backing service, and Aspire rejected that name — \"{WithoutParameterSuffix(ex.Message)}\" Aspire's limit is on the "
                 + $"derived name rather than on '{name}', so a shorter backing-service name is what fixes it.",
                 ex);
         }
 
-        var healthCheckKey = $"{name}-tunnel-tcp";
-
-        builder.Services
-            .AddHealthChecks()
-            .AddCheck(healthCheckKey, new LocalPortHealthCheck(name, localPort), timeout: ProbeTimeout);
-
+        // One per forwarded port, all of them on the connection string, so that a consumer's
+        // WaitFor waits for the whole tunnel rather than for whichever port happened to be
+        // registered.
+        //
         // On the connection string alone, and not also on the tunnel, though the tunnel is what the
-        // socket actually belongs to. The connection string is what a consumer waits for, which is
+        // sockets actually belong to. The connection string is what a consumer waits for, which is
         // the whole reason this source has a health check; the tunnel would gain only a badge in
         // the dashboard. Aspire runs one monitor loop per resource, so a second resource carrying
-        // this key would run the probe twice per cycle — and every probe is a connection kubectl
+        // these keys would run every probe twice per cycle — and every probe is a connection kubectl
         // logs ("Handling connection for <port>") and the database behind it may log as an
         // incomplete startup packet. The tunnel's log is where a bad context or an expired
         // credential shows up, and it is worth keeping readable.
-        return backingService.WithHealthCheck(healthCheckKey);
+        foreach (var port in forwarded)
+        {
+            var healthCheckKey = HealthCheckKey(name, port.Name);
+
+            builder.Services
+                .AddHealthChecks()
+                .AddCheck(
+                    healthCheckKey,
+                    new LocalPortHealthCheck(name, port.LocalPort, port.Name),
+                    timeout: ProbeTimeout);
+
+            backingService = backingService.WithHealthCheck(healthCheckKey);
+        }
+
+        return backingService;
     }
+
+    /// <summary>One port this source forwards: its name, the cluster's port, and the local one.</summary>
+    /// <remarks>
+    /// <see cref="Name"/> is <see langword="null"/> for a <c>port</c> written as a number, which is
+    /// what <c>${port}</c> resolves against — and the reason the single form is not carried as a
+    /// one-entry map: <c>${port}</c> is accepted against a port written as a number and refused
+    /// against a block of one named port.
+    /// </remarks>
+    private sealed record ForwardedPort(string? Name, int RemotePort, int LocalPort);
+
+    /// <summary>
+    /// The health check watching one forwarded port. The single-port form keeps the key it has
+    /// always had; a named port adds its name.
+    /// </summary>
+    private static string HealthCheckKey(string name, string? portName) =>
+        portName is null ? $"{name}-tunnel-tcp" : $"{name}-tunnel-tcp-{portName}";
 
     /// <summary>
     /// How long one probe may take before it counts as a failure.
@@ -147,13 +208,24 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     /// <remarks>
     /// A pass of its own, ahead of the one that builds the expression, so that every reason a
     /// template is refused is reached before a port is allocated and before anything is added to
-    /// the model. It also puts the two "not supported yet" branches in one place, which is where
-    /// stage 3 and <see href="https://github.com/flojon/aspire-servicesources/issues/233">#233</see>
-    /// will remove them from.
+    /// the model.
+    /// <para>
+    /// Every problem is collected rather than thrown at the first, which is the habit
+    /// <see cref="RequireEveryField"/> already keeps in this file and for its reason: reporting one
+    /// per run costs a failed startup per mistake, and a developer who has just written a port block
+    /// and a connection string to go with it can easily have got two names wrong at once.
+    /// </para>
     /// </remarks>
     private static void RequireEveryPlaceholderIsResolvable(
-        string name, string connectionString, ConnectionStringTemplate template)
+        string name,
+        string connectionString,
+        ConnectionStringTemplate template,
+        IReadOnlyList<(string? Name, int RemotePort)> requested)
     {
+        var forwardsOneUnnamedPort = requested is [{ Name: null }];
+        var names = requested.Where(port => port.Name is not null).Select(port => port.Name!).ToArray();
+
+        var problems = new List<string>();
         var ports = 0;
 
         foreach (var segment in template.Segments)
@@ -163,41 +235,173 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
                 case ConnectionStringTemplate.Literal:
                     break;
 
-                case ConnectionStringTemplate.Port { Name: null }:
+                case ConnectionStringTemplate.Port { Name: null } unnamed:
                     ports++;
+
+                    if (!forwardsOneUnnamedPort)
+                    {
+                        problems.Add(UnnamedPortAgainstABlock(unnamed, names));
+                    }
+
                     break;
 
                 case ConnectionStringTemplate.Port port:
-                    throw new ServiceSourcesConfigurationException(
-                        $"Backing service '{name}': the connection string carries '{port.AsWritten}', which names one "
-                        + "of several forwarded ports, and forwarding more than one port is not supported yet. This "
-                        + $"backing service forwards the single port '{ConfigKey(name, "Port")}' names, so write "
-                        + "'${port}'.");
+                    ports++;
+
+                    if (forwardsOneUnnamedPort)
+                    {
+                        problems.Add(NamedPortAgainstASinglePort(name, port));
+                    }
+                    else if (!names.Contains(port.Name!, StringComparer.OrdinalIgnoreCase))
+                    {
+                        problems.Add(NoSuchForwardedPort(port, names));
+                    }
+
+                    break;
 
                 case ConnectionStringTemplate.Secret secret:
-                    throw new ServiceSourcesConfigurationException(
-                        $"Backing service '{name}': the connection string carries '{secret.AsWritten}', and reading a "
-                        + "value out of a Kubernetes secret is not supported yet. Put the value in the connection "
-                        + "string, or set the whole connection string from a configuration layer that already holds "
-                        + $"it — user secrets, or {Environmentally(ConfigKey(name, "ConnectionString"))}.");
+                    problems.Add(
+                        $"the connection string carries {ConfiguredValue.Escaped(secret.AsWritten)}, and reading a "
+                        + "value out of a "
+                        + "Kubernetes secret is not supported yet. Put the value in the connection string, or set "
+                        + "the whole connection string from a configuration layer that already holds it — user "
+                        + $"secrets, or {Environmentally(ConfigKey(name, "ConnectionString"))}.");
+
+                    break;
 
                 default:
                     throw new InvalidOperationException($"Unhandled template segment '{segment.GetType().Name}'.");
             }
         }
 
+        // Collected alongside the rest rather than thrown after them, so a template that carries a
+        // secret and no port does not cost two startups to be told both.
         if (ports == 0)
         {
-            throw NothingAddressesTheTunnel(name, connectionString);
+            problems.Add(NothingAddressesTheTunnel(connectionString, requested));
+        }
+
+        if (problems.Count > 0)
+        {
+            throw Failure(name, problems);
         }
     }
+
+    /// <summary>
+    /// One exception for however many problems one connection string turned out to have, naming the
+    /// backing service once rather than once per problem.
+    /// </summary>
+    /// <remarks>
+    /// The shape <c>DeveloperConfigValidator.Failure</c> uses, and for its reason: a lone problem
+    /// reads exactly as it did when it was thrown where it was found, so the ordinary case pays
+    /// nothing for the collecting, and several read as a list with each remedy beside its own
+    /// problem.
+    /// </remarks>
+    private static ServiceSourcesConfigurationException Failure(string name, IReadOnlyList<string> problems) =>
+        new(problems.Count == 1
+            ? $"Backing service '{Named(name)}': {problems[0]}"
+            : $"Backing service '{Named(name)}': {problems.Count} problems with the connection string:"
+              + string.Concat(problems.Select(problem => $"{Environment.NewLine}  - {problem}")));
+
+    /// <summary>
+    /// The error for <c>${port}</c> where the block names its ports, so there is no "the" port.
+    /// </summary>
+    private static string UnnamedPortAgainstABlock(
+        ConnectionStringTemplate.Port port, IReadOnlyList<string> names) =>
+        $"the connection string carries {ConfiguredValue.Escaped(port.AsWritten)}, which stands for the one "
+        + $"forwarded port, but this backing service forwards {(names.Count == 1 ? "its port" : "several ports")} "
+        + $"by name: {Quoted(names)}. Name the one this addresses, as {Spelled(names[0])}.";
+
+    /// <summary>
+    /// The error for <c>${port:&lt;name&gt;}</c> where a single unnamed port is forwarded.
+    /// </summary>
+    private static string NamedPortAgainstASinglePort(string name, ConnectionStringTemplate.Port port) =>
+        $"the connection string carries {ConfiguredValue.Escaped(port.AsWritten)}, which names one of several "
+        + "forwarded ports, but this backing service forwards a single unnamed port — the one written at "
+        + $"'{ConfigKey(name, "Port")}'. Write '${{port}}' for it. To forward several instead, give each a name: "
+        + "\"port\": { \"amqp\": 5672, \"management\": 15672 }.";
+
+    /// <summary>
+    /// The error for <c>${port:&lt;name&gt;}</c> naming a port the block does not carry.
+    /// </summary>
+    /// <remarks>
+    /// Names the forwarded ports unconditionally, and adds a near miss when there is one. Either
+    /// half alone is not enough: a near miss is what answers a typo, but
+    /// <see cref="NearMiss.Nearest"/> returns nothing when the written name resembles none of them —
+    /// and a developer looking at a name this backing service does not forward needs to be told
+    /// which ones it does.
+    /// </remarks>
+    private static string NoSuchForwardedPort(
+        ConnectionStringTemplate.Port port, IReadOnlyList<string> names)
+    {
+        // Only worth asking of a name short enough to be a typo. The edit distance is O(n·m) with
+        // both operands developer-written and neither length-capped, and every other caller in this
+        // package compares against short declared field names rather than against free text.
+        var near = port.Name!.Length <= LongestNameWorthComparing
+            ? NearMiss.Nearest(port.Name!, names, candidate => candidate)
+            : [];
+
+        // Escaped, not trimmed of its quotes: Escaped wraps its value in apostrophes, and stripping
+        // them back off also strips any the name itself begins or ends with — so a port named
+        // 'amqp', apostrophes and all, was suggested as amqp, a port that does not exist.
+        var suggestion = near.Count == 1 ? $" Did you mean {ConfiguredValue.Escaped(near[0])}?" : "";
+
+        // Escaping is not injective — a real tab and a written backslash-t both print as '\t' — so a
+        // message quoting two names can render them identically and read as "you wrote X, which does
+        // not exist; did you mean X?". Saying that the difference is one you cannot see is the only
+        // thing that makes such a message actionable, and it is the caveat the developer-config
+        // validator already attaches for the same reason.
+        var indistinguishable =
+            !ConfiguredValue.PrintsAsItself(port.Name!)
+            || names.Any(candidate => !ConfiguredValue.PrintsAsItself(candidate));
+
+        var caveat = indistinguishable
+            ? " One of these spellings carries characters you cannot pick out by looking, so two of them "
+              + "can print the same — retype the name rather than copying it back."
+            : "";
+
+        return $"the connection string carries {ConfiguredValue.Escaped(port.AsWritten)}, which names a port this "
+            + $"backing service does not forward.{suggestion} It forwards {Quoted(names)}.{caveat}";
+    }
+
+    /// <summary>
+    /// How long a written port name may be before a near-miss suggestion stops being worth its cost.
+    /// </summary>
+    private const int LongestNameWorthComparing = 128;
+
+    /// <summary>
+    /// A port name as it is written in a connection string placeholder, ready to paste.
+    /// </summary>
+    /// <remarks>
+    /// Escaped like every other echo of a name — the list of forwarded ports beside this one always
+    /// was, so a name carrying a newline was rendered safely in one half of a sentence and forged a
+    /// line in the other. Escaped <em>bare</em>, since this builds its own quoting around the name.
+    /// </remarks>
+    private static string Spelled(string portName) => $"'${{port:{ConfiguredValue.Bare(portName)}}}'";
+
+    /// <summary>Developer-invented names, escaped, quoted and in the order they are forwarded.</summary>
+    private static string Quoted(IEnumerable<string> names) =>
+        string.Join(", ", names.Select(ConfiguredValue.Escaped));
 
     /// <summary>
     /// The configuration key one of this block's fields is read from, for a message that has to
     /// name the layer that set it rather than only the file a developer usually writes it in.
     /// </summary>
     private static string ConfigKey(string name, string field) =>
-        $"{DeveloperConfiguration.BackingServicesKey}:{name}:Kubernetes:{field}";
+        $"{DeveloperConfiguration.BackingServicesKey}:{Named(name)}:Kubernetes:{field}";
+
+    /// <summary>
+    /// The backing service's name as a message shows it.
+    /// </summary>
+    /// <remarks>
+    /// Escaped like every other echo. It is the AppHost author's own C# literal rather than
+    /// configuration, and Aspire refuses anything but a plain resource name — but it refuses it at
+    /// <c>AddConnectionString</c>, which is *after* every message in this file can be thrown, so an
+    /// unusable name reaches these sentences before anything has rejected it. That matters most for
+    /// the collecting report, where a newline forges a bullet and an entry header, which is the same
+    /// defect the developer-config validator's own multi-entry report was fixed for.
+    /// </remarks>
+    private static string Named(string name) => ConfiguredValue.Bare(name);
 
     /// <summary>The same key spelled as the environment variable that sets it.</summary>
     private static string Environmentally(string configKey) =>
@@ -250,12 +454,14 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
         ("service", "Service", "the Kubernetes Service to forward to",
             k => !string.IsNullOrWhiteSpace(k.Service)),
         ("port", "Port",
-            "the port that Service listens on inside the cluster, which is what the tunnel forwards to",
-            k => k.Port is not null),
+            "the port that Service listens on inside the cluster, which is what the tunnel forwards to — one "
+            + "number, or a name per port to forward several through the one tunnel",
+            k => k.Port is { } ports && (ports.SinglePort is not null || ports.Count > 0)),
         ("context", "Context", "the kubectl context to forward through",
             k => !string.IsNullOrWhiteSpace(k.Context)),
         ("connectionString", "ConnectionString",
-            "the connection string consumers receive, with '${port}' standing for the local end of the tunnel",
+            "the connection string consumers receive, with '${port}' standing for the local end of the tunnel — "
+            + "or '${port:<name>}' where the block names its ports",
             k => !string.IsNullOrWhiteSpace(k.ConnectionString)),
     ];
 
@@ -299,9 +505,9 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
             var only = missing[0];
 
             throw new ServiceSourcesConfigurationException(
-                $"Backing service '{name}': source 'kubernetes' requires 'kubernetes.{only.Field}' — "
+                $"Backing service '{Named(name)}': source 'kubernetes' requires 'kubernetes.{only.Field}' — "
                 + $"{only.WhatItIs}. Add it {where}, or set {Environmentally(ConfigKey(name, only.Property))}."
-                + PortIsWhichEnd(kubernetes));
+                + PortIsWhichEnd(name, kubernetes));
         }
 
         var lines = missing.Select(field =>
@@ -318,8 +524,8 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
             : "";
 
         throw new ServiceSourcesConfigurationException(
-            $"Backing service '{name}': source 'kubernetes' needs {missing.Length} fields the entry does not "
-            + $"have, {where}:{string.Concat(lines)}{blank}{PortIsWhichEnd(kubernetes)}");
+            $"Backing service '{Named(name)}': source 'kubernetes' needs {missing.Length} fields the entry does not "
+            + $"have, {where}:{string.Concat(lines)}{blank}{PortIsWhichEnd(name, kubernetes)}");
     }
 
     /// <summary>
@@ -331,27 +537,107 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     /// in front of them, and only one of them goes in the file — so the message that asks for it
     /// says which. Nothing to say when the port is already written.
     /// </remarks>
-    private static string PortIsWhichEnd(KubernetesBackingServiceDeveloperConfig kubernetes) =>
-        kubernetes.Port is not null
+    private static string PortIsWhichEnd(string name, KubernetesBackingServiceDeveloperConfig kubernetes) =>
+        kubernetes.Port is { } written && (written.SinglePort is not null || written.Count > 0)
             ? ""
             : $"{Environment.NewLine}{Environment.NewLine}The local end of the tunnel is allocated rather than "
-              + "configured, so a connection string names it as '${port}' and only the cluster's own port is "
-              + "written here.";
+              + "configured, so only the cluster's own port is written here and a connection string names the "
+              + "local end as '${port}' — or, where the block names its ports, as '${port:<name>}'. A block is "
+              + "written a name at a time from a flat layer, as "
+              + $"{Environmentally(ConfigKey(name, "Port"))}__<name>.";
 
     /// <summary>
-    /// The remote port, once it is known to be present.
+    /// How many ports one backing service may forward through its tunnel.
     /// </summary>
     /// <remarks>
-    /// Unlike the service side there is no catalog value to fall back to — the catalog carries no
-    /// backing-service data at all, by decision — so the only question left here is the range.
+    /// A limit at all because the count comes from a developer-config block with no cardinality of
+    /// its own, and every forwarded port costs a socket bound at once inside <c>Resolve</c> plus an
+    /// argument on a command line. A block with thousands of entries would exhaust the process's
+    /// file-descriptor limit and surface as a bare <c>SocketException</c> naming no backing service
+    /// and no key — the one shape every message in this package is written to avoid.
+    /// <para>
+    /// The number is arbitrary and deliberately generous: the case this feature exists for is a
+    /// broker with two ports.
+    /// </para>
     /// </remarks>
-    private static int RequirePortInRange(string name, int port)
+    private const int MaxForwardedPorts = 32;
+
+    /// <summary>
+    /// The ports this source will forward, in the order the command line writes them, once each is
+    /// known to be a port and there are not absurdly many.
+    /// </summary>
+    /// <remarks>
+    /// Ordered by name, ordinally, so that the command line, the dashboard and every message listing
+    /// them read the same on every run — a developer checks a connection string against a `kubectl`
+    /// line by eye, and an order that moved between runs would make that impossible. The single-port
+    /// form is one entry whose name is <see langword="null"/>.
+    /// <para>
+    /// Unlike the service side there is no catalog value to fall back to — the catalog carries no
+    /// backing-service data at all, by decision — so the only questions left here are the range and
+    /// the count.
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<(string? Name, int RemotePort)> RequireForwardablePorts(
+        string name, KubernetesPorts ports)
+    {
+        if (ports.SinglePort is { } single)
+        {
+            // Unreachable through configuration: a section carrying both a value and named children
+            // is refused by DeveloperConfigValidator before binding, and the binder itself takes one
+            // path or the other. Kept because KubernetesPorts is a Dictionary and cannot refuse a
+            // mutation — so a later caller adding an entry to a single-port instance fails here,
+            // loudly, instead of having every name silently dropped by the return below.
+            if (ports.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"Backing service '{Named(name)}': 'kubernetes.port' bound to both a single port and "
+                    + $"{ports.Count} named ports, which is not a shape configuration can produce.");
+            }
+
+            return [(null, RequirePortInRange(name, portName: null, single))];
+        }
+
+        if (ports.Count > MaxForwardedPorts)
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Backing service '{Named(name)}': 'kubernetes.port' names {ports.Count} ports, and one tunnel forwards "
+                + $"at most {MaxForwardedPorts}. Every forwarded port holds a local socket open and adds a pair to "
+                + $"one kubectl command line. The key is '{ConfigKey(name, "Port")}'.");
+        }
+
+        return ports
+            .OrderBy(port => port.Key, StringComparer.Ordinal)
+            .Select(port => ((string?)port.Key, RequirePortInRange(name, port.Key, port.Value)))
+            .ToArray();
+    }
+
+    /// <summary>
+    /// One port, once it is known to be present.
+    /// </summary>
+    /// <remarks>
+    /// Applied to every named port and not only to a single one, and it is not a restatement of the
+    /// validator's "is this a whole number". A port <em>name</em> carrying a colon flattens into the
+    /// configuration key path, so the binder sees a section with children and no value and
+    /// manufactures <c>default(int)</c> for it — measured. This is what stops a port number nobody
+    /// wrote reaching a kubectl command line, and it must not be relaxed as redundant.
+    /// </remarks>
+    private static int RequirePortInRange(string name, string? portName, int port)
     {
         if (port is < 1 or > 65535)
         {
+            var which = portName is null
+                ? $"'kubernetes.port' is '{port}'"
+                : $"'kubernetes.port' gives the port named {ConfiguredValue.Escaped(portName)} the value '{port}'";
+
+            // The named form points at the entry rather than at the block, so the key named is the
+            // one that is wrong — as the validator's own per-entry messages do.
+            var key = portName is null
+                ? ConfigKey(name, "Port")
+                : $"{ConfigKey(name, "Port")}:{ConfiguredValue.Bare(portName)}";
+
             throw new ServiceSourcesConfigurationException(
-                $"Backing service '{name}': 'kubernetes.port' is '{port}', which is not a port — a port is between "
-                + $"1 and 65535. The key is '{ConfigKey(name, "Port")}'.");
+                $"Backing service '{Named(name)}': {which}, which is not a port — a port is between "
+                + $"1 and 65535. The key is '{key}'.");
         }
 
         return port;
@@ -382,8 +668,8 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     /// first half of this message, since the spelling they wrote was already right.
     /// </para>
     /// </remarks>
-    private static ServiceSourcesConfigurationException NothingAddressesTheTunnel(
-        string name, string connectionString)
+    private static string NothingAddressesTheTunnel(
+        string connectionString, IReadOnlyList<(string? Name, int RemotePort)> requested)
     {
         var shown = ConnectionStringRedaction.Redact(connectionString);
 
@@ -395,16 +681,34 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
             ? ""
             : " (a value is shown only under a key known to hold no secret; the rest read as ***, which does not mean they were secret)";
 
-        return new(
-            $"Backing service '{name}': source 'kubernetes' opens a kubectl port-forward on a local port allocated "
-            + $"at startup, but the connection string names no '${{port}}' placeholder to put it in — so nothing "
-            + $"would address the tunnel: \"{shown}\"{note}. "
-            + "Replace the port in it with '${port}', as "
-            + "'Host=localhost;Port=${port};Database=orders'. If you did write '${port}', a shell expanded it "
-            + "away before the AppHost saw it — '${...}' is a shell variable too, and double quotes do not protect "
-            + "it. Single-quote the value, and use env 'NAME=value' for a key with a hyphen in it. A backing "
-            + $"service reached at a fixed address the developer already has — an ingress, or an instance they run "
-            + $"themselves — is source 'direct' rather "
-            + $"than this one. The key is '{ConfigKey(name, "ConnectionString")}'.");
+        // The advice has to follow the block that was written. Telling someone whose block names
+        // its ports to "write '${port}'" earns them a second startup failure that contradicts this
+        // one — ${port} is refused against a named block — so the two halves of that pair are the
+        // one thing this message must not get wrong.
+        var names = requested.Where(port => port.Name is not null).Select(port => port.Name!).ToArray();
+
+        // Every clause that names a spelling names the one this entry actually takes. Telling a
+        // developer whose block names its ports to write '${port}' would earn them a second startup
+        // failure saying the opposite — which is the one thing this message must not do.
+        // What is missing, said no more precisely than it is known: under a block of names, any one
+        // of them would have done, and naming the first would tell a developer who meant the second
+        // that they wrote the wrong one. The remedy below is where a single spelling belongs, because
+        // there it is offered rather than asserted.
+        var missing = names.Length == 0 ? "'${port}'" : "'${port:<name>}'";
+
+        var remedy = names.Length == 0
+            ? "Replace the port in it with '${port}', as 'Host=localhost;Port=${port};Database=orders'."
+            : $"This backing service forwards its ports by name — {Quoted(names)} — so name the one this "
+              + $"addresses: replace the port in it with {Spelled(names[0])}.";
+
+        return "source 'kubernetes' opens a kubectl port-forward on a local port allocated at startup, but the "
+            + $"connection string names no {missing} placeholder to put it in — so nothing would address the "
+            + $"tunnel: \"{ConfiguredValue.Bare(shown)}\"{note}."
+            + $"{Environment.NewLine}    {remedy}"
+            + $"{Environment.NewLine}    If you did write {missing}, a shell expanded it away before the AppHost "
+            + "saw it — '${...}' is a shell variable too, and double quotes do not protect it. Single-quote the "
+            + "value, and use env 'NAME=value' for a key with a hyphen in it."
+            + $"{Environment.NewLine}    A backing service reached at a fixed address you already have — an "
+            + "ingress, or an instance you run yourself — is source 'direct' rather than this one.";
     }
 }

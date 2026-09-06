@@ -20,6 +20,12 @@ public class ServiceEndpointTests
     private sealed class FakePortAllocator : IPortAllocator
     {
         public int AllocatePort() => 54321;
+
+        /// <remarks>
+        /// The service-side source forwards exactly one port, so a call here would be a bug rather
+        /// than a case worth standing in for.
+        /// </remarks>
+        public IReadOnlyList<int> AllocatePorts(int count) => throw new NotSupportedException();
     }
 
     private static IResourceBuilder<IResourceWithServiceDiscovery> ContainerService(

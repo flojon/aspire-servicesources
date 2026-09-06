@@ -184,6 +184,17 @@ internal static class DeveloperConfigValidator
                 continue;
             }
 
+            // Asked before the list question below, and it has to be: a block of named values
+            // arrives as children exactly as a list does, and a map is an IEnumerable, so a `port`
+            // written as a block of named ports would be walked as a list and answered with a
+            // sentence about list elements — about a field that has none.
+            if (DeveloperConfigField.IsValueOrMap(declared.PropertyType))
+            {
+                CollectValueOrMap(
+                    problems, field, blockPath, Declared(fields, field.Key), declared.PropertyType);
+                continue;
+            }
+
             // Asked before the block question below, and it has to be: a list arrives from
             // IConfiguration as indexed children, and its type is a class, so a list asked about as
             // a block is classified as one and answered with "takes a value, not a block of
@@ -247,6 +258,314 @@ internal static class DeveloperConfigValidator
             }
         }
     }
+
+    /// <summary>
+    /// The field's name as the shape declares it, whatever casing the developer wrote.
+    /// </summary>
+    /// <remarks>
+    /// Messages about a value-or-map field use its name twice over: quoted as the key, and as the
+    /// noun for what it holds — "takes a port number or a block of named ports". The quoted key
+    /// echoes what was written, as every message here does, but the noun has to be the declared
+    /// spelling: taken from the developer's casing it would read "a PORT number" for a file that
+    /// binds perfectly well.
+    /// </remarks>
+    private static string Declared(IReadOnlyDictionary<string, PropertyInfo> fields, string writtenKey) =>
+        Spelled(fields.Keys.FirstOrDefault(
+            key => key.Equals(writtenKey, StringComparison.OrdinalIgnoreCase)) ?? writtenKey);
+
+    /// <summary>
+    /// Every problem with a field that takes either a value or a block of named values — a backing
+    /// service's <c>kubernetes.port</c>, written either as one port or as a name per port.
+    /// </summary>
+    /// <remarks>
+    /// The whole of this walk exists because the binder is silent about three of these. A named entry
+    /// it cannot convert is <em>dropped</em>, so the map binds one shorter than it was written and
+    /// the tunnel forwards a port fewer with nothing to say so — the same failure the list walk's
+    /// null-element check exists for. A <em>value</em> it cannot convert throws from the binder
+    /// itself, naming a CLR type at a colon-separated key, from an exception no handler upstream
+    /// treats as a configuration problem. And a section carrying a value <em>and</em> names loses the
+    /// names entirely, for the reason given on <see cref="ValueAndNamedEntries"/>.
+    /// <para>
+    /// The two spellings are told apart the way <see cref="IConfiguration"/> tells them apart:
+    /// children mean a block, and a value means a value. Three spellings collapse on the way in and
+    /// the difference matters, so each is named below rather than left to be rediscovered — an empty
+    /// block and a JSON <c>null</c> are indistinguishable and share a message, while an empty
+    /// <em>array</em> arrives as an empty value and is the gesture that unsets the field. That
+    /// mapping is the JSON provider's rather than a rule of configuration, and it is the one this
+    /// repo resolves through Aspire; an older provider spells the same two shapes the other way
+    /// round.
+    /// </para>
+    /// <para>
+    /// Whether a value binds is asked of the field's own type rather than of anything this file
+    /// knows about ports: <see cref="BindsTo"/> puts it through the very converter the binder will
+    /// use, so the two cannot disagree about the same text. The same goes for each named entry,
+    /// through the value type <see cref="DeveloperConfigField.MapValueTypeOf"/> reports.
+    /// </para>
+    /// </remarks>
+    private static void CollectValueOrMap(
+        List<string> problems,
+        IConfigurationSection field,
+        string blockPath,
+        string noun,
+        Type fieldType)
+    {
+        var hasChildren = HasChildren(field);
+
+        // A value *and* names. The binder is value-first, so the value wins and every name is
+        // dropped — and when the value is one it cannot convert, it abandons the whole entry, which
+        // then reads downstream as a backing service nobody configured. Checked before either
+        // spelling's own walk, because neither describes what is wrong here.
+        if (hasChildren && field.Value is not null)
+        {
+            problems.Add(ValueAndNamedEntries(field, blockPath, noun));
+            return;
+        }
+
+        if (!hasChildren)
+        {
+            // An empty block of named values, or a JSON null: IConfiguration records both as a key
+            // with no value and no children, so there is no telling them apart and one message
+            // serves both. An *empty array* does not arrive here — it arrives as an empty value,
+            // below, which is the spelling that unsets a field.
+            if (field.Value is null)
+            {
+                problems.Add(EmptyMap(field, blockPath, noun));
+                return;
+            }
+
+            // Empty is the absent value: the one gesture a higher configuration layer has for
+            // dropping what a lower one set. Whitespace is not that gesture, and is refused with the
+            // same message every other field's whitespace gets.
+            if (field.Value.Length == 0)
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(field.Value))
+            {
+                problems.Add(Blank(field, blockPath));
+                return;
+            }
+
+            if (!BindsTo(fieldType, field.Value))
+            {
+                problems.Add(NotAValueOrMap(field, blockPath, noun));
+            }
+
+            return;
+        }
+
+        var entries = field.GetChildren().ToArray();
+
+        // Every key a position rather than a name: what a JSON array binds to. It would otherwise
+        // bind perfectly well as a block named "0", "1", …, reachable as ${port:0} — a spelling
+        // nobody meant to write and nobody should learn. Reported once for the whole field, because
+        // someone who wrote [5672, 15672] made one mistake and not one per element.
+        if (entries.All(entry => IsPosition(entry.Key)))
+        {
+            problems.Add(PositionalMap(field, blockPath, noun));
+            return;
+        }
+
+        var valueType = DeveloperConfigField.MapValueTypeOf(fieldType)!;
+
+        foreach (var entry in entries)
+        {
+            if (string.IsNullOrWhiteSpace(entry.Key))
+            {
+                problems.Add(UnnamedMapEntry(field, blockPath, noun));
+                continue;
+            }
+
+            // A name that is a number, among names that are not: the mixed spelling the whole-field
+            // check above cannot claim. Refused for the same reason, since ${port:0} is no more a
+            // name here than it is there.
+            if (IsPosition(entry.Key))
+            {
+                problems.Add(PositionalMapEntry(field, entry, blockPath, noun));
+                continue;
+            }
+
+            if (HasChildren(entry))
+            {
+                problems.Add(MapEntryIsBlock(field, entry, blockPath, noun));
+                continue;
+            }
+
+            if (entry.Value is null)
+            {
+                problems.Add(MapEntryMissing(field, entry, blockPath, noun));
+                continue;
+            }
+
+            if (!BindsTo(valueType, entry.Value))
+            {
+                problems.Add(MapEntryNotBindable(field, entry, blockPath, noun, valueType));
+            }
+        }
+    }
+
+    /// <summary>Whether a key is a position rather than a name.</summary>
+    /// <remarks>
+    /// Digits and nothing else, because that is what <see cref="IConfiguration"/> keys an array by.
+    /// <see cref="int.TryParse(string, out int)"/> would also claim <c>+1</c>, <c>-1</c> and a
+    /// number padded with spaces, none of which any array produces — so a developer who wrote one of
+    /// those as a name would be told it was a position, which is not what is wrong with it.
+    /// </remarks>
+    private static bool IsPosition(string key) =>
+        key.Length > 0
+        && key.All(char.IsAsciiDigit)
+        // A padded index is not one configuration ever writes: an array renders its keys as 0, 1, 2
+        // with no leading zeros, so "007" is a name someone chose and refusing it as "written as a
+        // list" would misdescribe a shape that was never a list.
+        && (key == "0" || key[0] != '0')
+        // And an index is a number a list could actually have reached, which is what bounds the
+        // length rather than a digit count chosen for looking about right: a key too large for
+        // int is one no array ever produced, so it is a name too.
+        && int.TryParse(key, out _);
+
+    /// <summary>
+    /// How a connection string reaches one of several named values, for the messages that send a
+    /// developer to write a block and would otherwise not mention that the template changes too.
+    /// </summary>
+    private static string ReachEachByName(string noun) =>
+        $" A connection string reaches each one as '${{{noun}:<name>}}'.";
+
+    /// <summary>
+    /// The error for a section carrying both a value and named entries.
+    /// </summary>
+    /// <remarks>
+    /// Its own message, and checked ahead of both walks, because it is the one shape whose failure is
+    /// total: the binder takes the value and drops every name, and if the value is one it cannot
+    /// convert it abandons the surrounding entry too — so the backing service reads downstream as one
+    /// nobody configured, which is precisely what this whole file exists to stop.
+    /// <para>
+    /// Nearly always two layers rather than one file: configuration merges per key, so a file writing
+    /// a block of names and an environment variable writing a number both land on this field, and
+    /// neither author can see the other's.
+    /// </para>
+    /// </remarks>
+    private static string ValueAndNamedEntries(IConfigurationSection field, string block, string noun)
+    {
+        var names = QuotedNames(field.GetChildren().Select(entry => entry.Key));
+
+        // The empty value is the gesture that unsets a field, honoured a few lines above for a field
+        // written as a value alone. Here it still unsets — taking the names with it — so it is
+        // refused, and the sentence has to say that rather than talk about a number nobody wrote.
+        var cause = field.Value!.Length == 0
+            ? $"An empty value unsets a field, so a higher layer blanking this key would drop the whole block of "
+              + $"named {noun}s rather than any one of them."
+            : $"Configuration merges layers per key, so this is usually one layer writing a {noun} number over "
+              + "another layer's block of names.";
+
+        return $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block carries both the value {Escaped(field.Value)} and named "
+            + $"{noun}s ({names}). It takes one or the other, and a value is read first — so the names would be "
+            + $"dropped, and a value that is not a {noun} would take the whole entry with it. {cause}"
+            + ReachEachByName(noun)
+            + SetAt(field);
+    }
+
+    /// <summary>
+    /// Developer-invented names, escaped and quoted, in the order configuration holds them.
+    /// </summary>
+    /// <remarks>
+    /// Not <see cref="Quoted"/>, which exists for keys the <em>shape</em> declares: that one runs
+    /// them through <see cref="Spelled"/>, which lowercases the first character — right for a
+    /// PascalCase property name and wrong for a name a developer chose, since it renders
+    /// <c>AMQP</c> as <c>aMQP</c> — and it does not escape, because a declared key cannot contain a
+    /// newline. A name out of a block of named values can contain anything at all.
+    /// </remarks>
+    private static string QuotedNames(IEnumerable<string> names) =>
+        string.Join(", ", names.Select(Escaped));
+
+    /// <summary>
+    /// The error for a value-or-map field written as a value that is neither a number nor a block.
+    /// </summary>
+    private static string NotAValueOrMap(IConfigurationSection field, string block, string noun) =>
+        $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block takes a {noun} number or a block of named {noun}s, "
+        + $"but is set to {Escaped(field.Value)}."
+        + SetAt(field);
+
+    /// <summary>
+    /// The error for a block of named values that names none — an empty block, or a JSON
+    /// <c>null</c>, which arrive identically.
+    /// </summary>
+    private static string EmptyMap(IConfigurationSection field, string block, string noun) =>
+        $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block is an empty block of named {noun}s, so nothing "
+        + $"would be forwarded. Write a {noun} number, or name at least one {noun}."
+        + ReachEachByName(noun)
+        + SetAtBlock(field, "<name>");
+
+    /// <summary>
+    /// The error for a block of named values written as a list, whose entries are therefore keyed by
+    /// position.
+    /// </summary>
+    private static string PositionalMap(IConfigurationSection field, string block, string noun) =>
+        $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block is written as a list, so its {noun}s are keyed by "
+        + $"position. A block of named {noun}s gives each one a name, and a position is not one."
+        + ReachEachByName(noun)
+        + SetAtBlock(field, "<name>");
+
+    /// <summary>The error for one entry named by a number among entries that are not.</summary>
+    private static string PositionalMapEntry(
+        IConfigurationSection field, IConfigurationSection entry, string block, string noun) =>
+        $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block names a {noun} {Escaped(entry.Key)}, which is a position "
+        + $"rather than a name. Give it a name a connection string can reach it by."
+        + ReachEachByName(noun)
+        + SetAtMapEntry(field, entry);
+
+    /// <summary>The error for a named entry the binder would drop for want of a usable value.</summary>
+    /// <remarks>
+    /// It has to be caught here, and the message says why it matters rather than only what is wrong:
+    /// the binder omits an entry it cannot convert, so the block binds one entry shorter than it was
+    /// written and nothing downstream ever receives the entry that would report it. That is the same
+    /// reasoning <see cref="ListElementMissing"/> carries for a null list element, and the same
+    /// consequence — something silently smaller than what was written.
+    /// </remarks>
+    private static string MapEntryNotBindable(
+        IConfigurationSection field, IConfigurationSection entry, string block, string noun, Type valueType) =>
+        $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block names a {noun} {Escaped(entry.Key)}, but its value "
+        + $"{Escaped(entry.Value)} is not a {Described(valueType)}. A named {noun} whose value cannot be read "
+        + "is dropped rather than reported, so one fewer would be forwarded than the block names."
+        + (entry.Value!.Length == 0
+            ? " An empty value unsets a whole field; there is no spelling that takes one name out of a block."
+            : "")
+        + SetAtMapEntry(field, entry);
+
+    /// <summary>The error for a named entry recorded with no value at all — a JSON <c>null</c>.</summary>
+    private static string MapEntryMissing(
+        IConfigurationSection field, IConfigurationSection entry, string block, string noun) =>
+        $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block names a {noun} {Escaped(entry.Key)}, but it has no "
+        + $"value. A named {noun} with no value is dropped rather than read, so one fewer would be "
+        + "forwarded than the block names."
+        + SetAtMapEntry(field, entry);
+
+    /// <summary>The error for a named entry that is itself a block of settings.</summary>
+    /// <remarks>
+    /// Names the colon as a cause, because it is one and it is invisible: a configuration key cannot
+    /// contain a colon — it is the separator — so a name written with one arrives split, and what is
+    /// reported is the part before it carrying the part after it as a child. The developer is then
+    /// looking for a name they never wrote, which no other wording would explain.
+    /// </remarks>
+    private static string MapEntryIsBlock(
+        IConfigurationSection field, IConfigurationSection entry, string block, string noun) =>
+        $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block names a {noun} {Escaped(entry.Key)}, but its entry "
+        + $"is a block of settings rather than a value. Every named {noun} is a single value. If the name you "
+        + "wrote contains a ':', that is why: a colon separates configuration keys, so the name arrived split "
+        + "in two and cannot be written that way."
+        + SetAtMapEntry(field, entry);
+
+    /// <summary>The error for a named entry with no name.</summary>
+    /// <remarks>
+    /// The one per-entry message that points at the field rather than at the entry: the entry's key
+    /// path ends in the separator, since the name is what is missing, so naming it would print a key
+    /// no layer can set and that reads as a rendering fault.
+    /// </remarks>
+    private static string UnnamedMapEntry(IConfigurationSection field, string block, string noun) =>
+        $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block names a {noun} with no name. Every {noun} in the "
+        + $"block needs one."
+        + ReachEachByName(noun)
+        + SetAtBlock(field, "<name>");
 
     /// <summary>
     /// Every problem with a field whose value is a list of values.
@@ -361,8 +680,8 @@ internal static class DeveloperConfigValidator
     private static ServiceSourcesConfigurationException Failure(
         string serviceName, IReadOnlyList<string> problems, DeveloperConfigShape shape) =>
         new(problems.Count == 1
-            ? $"{shape.Kind} '{serviceName}': {problems[0]}"
-            : $"{shape.Kind} '{serviceName}': {problems.Count} problems with the entry:"
+            ? $"{shape.Kind} '{ConfiguredValue.Bare(serviceName)}': {problems[0]}"
+            : $"{shape.Kind} '{ConfiguredValue.Bare(serviceName)}': {problems.Count} problems with the entry:"
               + string.Concat(problems.Select(p => $"{Environment.NewLine}  - {p}")));
 
     /// <summary>
@@ -382,7 +701,8 @@ internal static class DeveloperConfigValidator
 
         foreach (var (service, problems) in faulted)
         {
-            message.Append(Environment.NewLine).Append($"  {shape.Kind} '{service}':");
+            message.Append(Environment.NewLine)
+                .Append($"  {shape.Kind} '{ConfiguredValue.Bare(service)}':");
 
             foreach (var problem in problems)
             {
@@ -457,16 +777,16 @@ internal static class DeveloperConfigValidator
 
         if (homes.Length == 1)
         {
-            return $"'{key.Key}' is not a valid key here. It belongs in the "
-                + $"'{homes[0]}' block: \"{serviceName}\": {{ ..., \"{homes[0]}\": {{ \"{key.Key}\": ... }} }}."
+            return $"'{ConfiguredValue.Bare(key.Key)}' is not a valid key here. It belongs in the "
+                + $"'{homes[0]}' block: \"{ConfiguredValue.Bare(serviceName)}\": {{ ..., \"{homes[0]}\": {{ \"{ConfiguredValue.Bare(key.Key)}\": ... }} }}."
                 + SetAt(key);
         }
 
         if (homes.Length > 1)
         {
-            return $"'{key.Key}' is not a valid key here. It belongs inside the block of the source "
+            return $"'{ConfiguredValue.Bare(key.Key)}' is not a valid key here. It belongs inside the block of the source "
                 + $"it configures — {Quoted(homes)}: "
-                + $"\"{serviceName}\": {{ ..., \"{homes[0]}\": {{ \"{key.Key}\": ... }} }}."
+                + $"\"{ConfiguredValue.Bare(serviceName)}\": {{ ..., \"{homes[0]}\": {{ \"{ConfiguredValue.Bare(key.Key)}\": ... }} }}."
                 + SetAt(key);
         }
 
@@ -479,18 +799,18 @@ internal static class DeveloperConfigValidator
         {
             var (field, block) = (Spelled(near[0].Field), Spelled(near[0].Block));
 
-            return $"'{key.Key}' is not a valid key here. Did you mean '{field}', in the "
-                + $"'{block}' block: \"{serviceName}\": {{ ..., \"{block}\": {{ \"{field}\": ... }} }}?"
+            return $"'{ConfiguredValue.Bare(key.Key)}' is not a valid key here. Did you mean '{field}', in the "
+                + $"'{block}' block: \"{ConfiguredValue.Bare(serviceName)}\": {{ ..., \"{block}\": {{ \"{field}\": ... }} }}?"
                 + SetAt(key);
         }
 
         if (near.Count > 1)
         {
-            return $"'{key.Key}' is not a valid key here. Did you mean {DescribeNearMisses(near)}?"
+            return $"'{ConfiguredValue.Bare(key.Key)}' is not a valid key here. Did you mean {DescribeNearMisses(near)}?"
                 + SetAt(key);
         }
 
-        return $"'{key.Key}' is not a valid key. Valid keys are {Quoted(shape.RootKeys)}."
+        return $"'{ConfiguredValue.Bare(key.Key)}' is not a valid key. Valid keys are {Quoted(shape.RootKeys)}."
             + SetAt(key);
     }
 
@@ -522,8 +842,8 @@ internal static class DeveloperConfigValidator
     /// <summary>The error for a key that no block of this name declares.</summary>
     private static string NotValidInBlock(
         IConfigurationSection field, string block, IReadOnlyDictionary<string, PropertyInfo> fields) =>
-        $"'{field.Key}' is not a valid key in the "
-        + $"'{block.ToLowerInvariant()}' block. Valid keys there are {Quoted(fields.Keys)}."
+        $"'{ConfiguredValue.Bare(field.Key)}' is not a valid key in the "
+        + $"'{ConfiguredValue.Bare(block.ToLowerInvariant())}' block. Valid keys there are {Quoted(fields.Keys)}."
         + SetAt(field);
 
     /// <summary>
@@ -563,7 +883,7 @@ internal static class DeveloperConfigValidator
         var source = shape.SourceNames.Contains(value) ? value : "...";
 
         return $"the entry takes a block of settings, not the value {Escaped(value)}: "
-            + $"\"{serviceName}\": {{ \"source\": \"{source}\" }}. "
+            + $"\"{ConfiguredValue.Bare(serviceName)}\": {{ \"source\": \"{source}\" }}. "
             + $"Valid keys there are {Quoted(shape.RootKeys)}."
             + SetAtBlock(entry, SourceKey);
     }
@@ -587,8 +907,8 @@ internal static class DeveloperConfigValidator
     {
         var block = key.Key.ToLowerInvariant();
 
-        return $"'{key.Key}' takes a block of settings, not a value: "
-            + $"\"{container}\": {{ ..., \"{block}\": {{ ... }} }}. "
+        return $"'{ConfiguredValue.Bare(key.Key)}' takes a block of settings, not a value: "
+            + $"\"{ConfiguredValue.Bare(container)}\": {{ ..., \"{block}\": {{ ... }} }}. "
             + $"Valid keys there are {Quoted(fields.Keys)}."
             // FirstOrDefault rather than First: every block declares at least one field, but a
             // message builder that can throw would replace the configuration error being reported
@@ -610,8 +930,9 @@ internal static class DeveloperConfigValidator
     /// fix rather than the mistake.
     /// </remarks>
     private static string ValueExpected(string serviceName, IConfigurationSection key, string? block) =>
-        $"'{key.Key}'{(block is null ? "" : $" in the '{block}' block")} "
-        + $"takes a value, not a block of settings: \"{block ?? serviceName}\": {{ \"{key.Key}\": ... }}."
+        $"'{ConfiguredValue.Bare(key.Key)}'{(block is null ? "" : $" in the '{block}' block")} "
+        + $"takes a value, not a block of settings: "
+        + $"\"{ConfiguredValue.Bare(block ?? serviceName)}\": {{ \"{ConfiguredValue.Bare(key.Key)}\": ... }}."
         + SetAt(key);
 
     /// <summary>
@@ -623,8 +944,8 @@ internal static class DeveloperConfigValidator
     /// through.
     /// </remarks>
     private static string ListExpected(IConfigurationSection field, string block) =>
-        $"'{field.Key}' in the '{block}' block takes a list of values, not the single value "
-        + $"{Escaped(field.Value)}: \"{field.Key}\": [ ... ]."
+        $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block takes a list of values, not the single value "
+        + $"{Escaped(field.Value)}: \"{ConfiguredValue.Bare(field.Key)}\": [ ... ]."
         + SetAtList(field);
 
     /// <summary>
@@ -641,7 +962,7 @@ internal static class DeveloperConfigValidator
     /// </remarks>
     private static string ListElementMissing(
         IConfigurationSection field, IConfigurationSection element, string block) =>
-        $"'{field.Key}' in the '{block}' block has no value at element '{element.Key}'. A null element is "
+        $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block has no value at element '{ConfiguredValue.Bare(element.Key)}'. A null element is "
         + "dropped rather than passed on, which shortens the list and shifts every element after it down a "
         + "place — so the command that ran would be missing an argument, with nothing to say so. Remove the "
         + "element, or write it as \"\" if the command really takes an empty one."
@@ -652,8 +973,8 @@ internal static class DeveloperConfigValidator
     /// </summary>
     private static string ListElementExpected(
         IConfigurationSection field, IConfigurationSection element, string block) =>
-        $"'{field.Key}' in the '{block}' block is a list of values, but its element at "
-        + $"'{element.Key}' is a block of settings. Every element has to be a value."
+        $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block is a list of values, but its element at "
+        + $"'{ConfiguredValue.Bare(element.Key)}' is a block of settings. Every element has to be a value."
         + SetAt(element);
 
     /// <summary>
@@ -676,7 +997,7 @@ internal static class DeveloperConfigValidator
     /// </remarks>
     private static string NotBindable(
         IConfigurationSection field, string block, Type type, string value) =>
-        $"'{field.Key}' in the '{block}' block takes a {Described(type)}, "
+        $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block takes a {Described(type)}, "
         + $"but is set to {Escaped(value)}."
         + (value.Length == 0
             ? " An empty value leaves a field unset where the field can be unset; this one cannot, "
@@ -754,9 +1075,7 @@ internal static class DeveloperConfigValidator
     /// </para>
     /// </remarks>
     private static bool IsInvisible(string value, int index) =>
-        char.IsWhiteSpace(value[index])
-        || char.IsControl(value[index])
-        || CharUnicodeInfo.GetUnicodeCategory(value, index) == UnicodeCategory.Format;
+        ConfiguredValue.IsInvisible(value, index);
 
     /// <summary>
     /// The span of <paramref name="value"/> left once the characters at either end that a reader
@@ -858,23 +1177,7 @@ internal static class DeveloperConfigValidator
     /// format today, so a later decision to quote the plain space would silently turn every context
     /// with a space in it into one this cannot propose.
     /// </remarks>
-    private static bool PrintsAsItself(string value)
-    {
-        for (var i = 0; i < value.Length; i++)
-        {
-            if (value[i] != ' ' && IsInvisible(value, i))
-            {
-                return false;
-            }
-
-            if (char.IsSurrogatePair(value, i))
-            {
-                i++;
-            }
-        }
-
-        return true;
-    }
+    private static bool PrintsAsItself(string value) => ConfiguredValue.PrintsAsItself(value);
 
     /// <summary>
     /// The error for a value of one or more spaces, whatever type the field takes.
@@ -897,67 +1200,17 @@ internal static class DeveloperConfigValidator
     /// which is <c>source</c>, the one root key that takes a value.
     /// </param>
     private static string Blank(IConfigurationSection field, string? block) =>
-        $"'{field.Key}'{(block is null ? "" : $" in the '{block}' block")} is set to "
+        $"'{ConfiguredValue.Bare(field.Key)}'{(block is null ? "" : $" in the '{block}' block")} is set to "
         + $"{Escaped(field.Value)}, which is whitespace rather than a value. Set it to an empty "
         + "value to leave the field unset."
         + SetAt(field);
 
     /// <summary>
-    /// A value as a quoted literal with its whitespace spelled out, so that a character which
-    /// looks like a space — a tab, a newline, U+00A0 — is distinguishable from one.
+    /// A value as a quoted literal with its whitespace spelled out. See
+    /// <see cref="ConfiguredValue.Escaped"/>, which now serves the two other files that echo a
+    /// developer-invented name.
     /// </summary>
-    /// <remarks>
-    /// The plain space is left as itself: it is the character a reader assumes, so escaping it
-    /// would add noise to the common case and nothing else. Everything else whitespace gets its
-    /// code point, which is what a developer needs in order to find it in the file.
-    ///
-    /// Every message that echoes a value back goes through this, rather than only the ones about
-    /// whitespace. A message is read by someone who cannot see what they typed, and which messages
-    /// a whitespace value can reach is not a thing to work out per message: it was reaching
-    /// <see cref="EntryExpected"/> unescaped for exactly as long as it took to notice.
-    /// </remarks>
-    private static string Escaped(string? value)
-    {
-        if (value is null)
-        {
-            return "''";
-        }
-
-        var text = new StringBuilder("'");
-
-        for (var i = 0; i < value.Length; i++)
-        {
-            // A code point rather than a char, so that an invisible above the BMP — which arrives
-            // as a surrogate pair, and which no per-char question can classify — is spelled out
-            // rather than printed as the nothing it looks like.
-            var width = char.IsSurrogatePair(value, i) ? 2 : 1;
-
-            text.Append(value[i] switch
-            {
-                ' ' => " ",
-                '\t' => "\\t",
-                '\n' => "\\n",
-                '\r' => "\\r",
-
-                // The one predicate the trimming uses, rather than a second spelling of it: what a
-                // message escapes and what a remedy drops have to be the same set, and two switch
-                // arms saying so in different words are two things to keep in step.
-                // Spelled as the surrogate pair rather than as the code point it makes, because
-                // this text is advice a developer pastes back: `\uD834\uDD73` is a JSON escape and
-                // `\U0001d173` is not, so the eight-digit form would name a spelling that breaks the
-                // file it is typed into.
-                _ when IsInvisible(value, i) => width == 1
-                    ? $"\\u{(int)value[i]:x4}"
-                    : $"\\u{(int)value[i]:x4}\\u{(int)value[i + 1]:x4}",
-
-                _ => value.Substring(i, width),
-            });
-
-            i += width - 1;
-        }
-
-        return text.Append('\'').ToString();
-    }
+    private static string Escaped(string? value) => ConfiguredValue.Escaped(value);
 
     private static string Described(Type type)
     {
@@ -981,9 +1234,25 @@ internal static class DeveloperConfigValidator
     /// the one place the value is not.
     /// </remarks>
     private static string SetAt(IConfigurationSection section) =>
-        $" The key is '{section.Path}', which any configuration layer can set: "
+        $" The key is '{Path(section)}', which any configuration layer can set: "
         + $"{DeveloperConfiguration.FileName}, appsettings, user secrets, the environment variable "
-        + $"{section.Path.Replace(":", "__", StringComparison.Ordinal)}, or the command line.";
+        + $"{Environmentally(section)}, or the command line.";
+
+    /// <summary>
+    /// A configuration key path with its whitespace spelled out.
+    /// </summary>
+    /// <remarks>
+    /// Every path here contains developer-invented text — the entry's own name at the very least,
+    /// and the name of a value inside a block of named values at most — so it is escaped like any
+    /// other echo. <see cref="ConfiguredValue.Bare"/> rather than
+    /// <see cref="ConfiguredValue.Escaped"/>, since these sentences quote the path themselves, and it
+    /// leaves the <c>:</c> separators alone because only whitespace is escaped.
+    /// </remarks>
+    private static string Path(IConfigurationSection section) => ConfiguredValue.Bare(section.Path);
+
+    /// <summary>The same path spelled as the environment variable that sets it.</summary>
+    private static string Environmentally(IConfigurationSection section) =>
+        ConfiguredValue.Bare(section.Path.Replace(":", "__", StringComparison.Ordinal));
 
     /// <summary>
     /// The same, for a key that has to hold a list. The flat providers carry one leaf each, so an
@@ -991,10 +1260,10 @@ internal static class DeveloperConfigValidator
     /// the file, per index rather than wholesale.
     /// </summary>
     private static string SetAtList(IConfigurationSection section) =>
-        $" The key is '{section.Path}', which any configuration layer can set: "
+        $" The key is '{Path(section)}', which any configuration layer can set: "
         + $"{DeveloperConfiguration.FileName}, appsettings, user secrets, the environment or the "
         + "command line — the flat layers an element at a time, as "
-        + $"{$"{section.Path}:0".Replace(":", "__", StringComparison.Ordinal)}.";
+        + $"{Environmentally(section)}__0.";
 
     /// <summary>
     /// The same, for a key that has to hold a block of settings rather than a value.
@@ -1009,10 +1278,32 @@ internal static class DeveloperConfigValidator
     /// block.
     /// </remarks>
     private static string SetAtBlock(IConfigurationSection section, string exampleField) =>
-        $" The key is '{section.Path}', which any configuration layer can set: "
+        $" The key is '{Path(section)}', which any configuration layer can set: "
         + $"{DeveloperConfiguration.FileName}, appsettings, user secrets, the environment or the "
         + "command line — the flat layers a field at a time, as "
-        + $"{$"{section.Path}:{exampleField}".Replace(":", "__", StringComparison.Ordinal)}.";
+        + $"{Environmentally(section)}__{ConfiguredValue.Bare(exampleField)}.";
+
+    /// <summary>
+    /// The same as <see cref="SetAt"/>, for one named entry of a block of named values.
+    /// </summary>
+    /// <remarks>
+    /// Built from the field's path plus the escaped name rather than from the entry's own
+    /// <see cref="IConfigurationSection.Path"/>, which would print the name raw. The name is
+    /// developer-invented free text, and a message is read by someone who cannot see what they
+    /// typed: a newline in it would otherwise break this sentence across lines in a startup failure
+    /// that is relayed into a log and pasted into issues.
+    /// </remarks>
+    private static string SetAtMapEntry(IConfigurationSection field, IConfigurationSection entry)
+    {
+        // Bare, not Escaped: Escaped wraps its value in apostrophes, and this is already building a
+        // quoted path around the name — so the quoted spelling nested a second pair inside the first
+        // and put literal apostrophes into an environment variable name nobody can type.
+        var name = ConfiguredValue.Bare(entry.Key);
+
+        return $" The key is '{Path(field)}:{name}', which any configuration layer can set: "
+            + $"{DeveloperConfiguration.FileName}, appsettings, user secrets, the environment variable "
+            + $"{Environmentally(field)}__{name}, or the command line.";
+    }
 
     private static string Quoted(IEnumerable<string> keys) =>
         string.Join(", ", keys.Select(k => $"'{Spelled(k)}'").Order(StringComparer.Ordinal));

@@ -1661,7 +1661,8 @@ being read alongside it.
       "source": "kubernetes",
       "kubernetes": {
         "service": "orders-pg-rw",         // the Kubernetes Service to forward to
-        "port": 5432,                       // the port it listens on inside the cluster
+        "port": 5432,                       // the port it listens on inside the cluster; a block
+                                            // of named ports forwards several — see below
         "context": "dev-west",              // the kubectl context to forward through
         "namespace": "orders",              // optional; "default" when omitted
         "connectionString": "Host=localhost;Port=${port};Database=orders;Username=dev;Password=hunter2"
@@ -1700,12 +1701,48 @@ that exits outright shows up as a failed resource regardless.
   `kubectl config set-context --current --namespace=…` nobody recorded.
 - **`kubectl` must be on `PATH`.** Nothing is bundled, and this source runs the same binary you do.
 
-Forwarding **several ports through one tunnel** — a broker's AMQP and management ports, written as
-`"port": { "amqp": 5672, "management": 15672 }` and reached as `${port:amqp}` — is
-[#233](https://github.com/flojon/aspire-servicesources/issues/233). Until it lands, `port` takes a
-single number and a named `${port:…}` is refused by name. Reading credentials out of a Kubernetes
-secret with `${secret:<name>:<key>}` is not supported yet either; put the value in the connection
-string, or set the whole string from a configuration layer that already holds it — user secrets, or
+#### Several ports through one tunnel
+
+A broker usually wants two: the one the application speaks, and a management port you open in a
+browser. Write `port` as a block that names each one, and reach them as `${port:<name>}`:
+
+```jsonc
+{
+  "backingServices": {
+    "orders-events": {
+      "source": "kubernetes",
+      "kubernetes": {
+        "service": "rabbitmq",
+        "port": { "amqp": 5672, "management": 15672 },
+        "context": "dev-west",
+        "connectionString": "amqp://dev:hunter2@localhost:${port:amqp}/"
+      }
+    }
+  }
+}
+```
+
+**One `kubectl` process carries every pair**, because `kubectl port-forward` accepts several against
+one Service — two entries would mean two processes and two tunnels to the same Service. Each
+forwarded port gets its own health check, all of them on the backing service, so a `WaitFor` waits
+for the whole tunnel and the dashboard says which half is missing while it comes up.
+
+Not every forwarded port has to appear in the connection string: the management port above is
+forwarded so you can open it, and nothing dials it from the app.
+
+**`${port}` and `${port:<name>}` do not mix.** A `port` written as a number forwards one unnamed
+port and takes `${port}`; a block that names its ports takes `${port:<name>}` for each. Writing the
+other one is refused at startup, naming the ports this backing service actually forwards — including
+a "did you mean" when the name is close to one of them.
+
+> Two spellings of one port name that differ only in case — `amqp` and `AMQP` — are the same
+> configuration key. In a single `servicesources.local.json` that is a duplicate key, and the JSON
+> parser refuses the **whole file**; spread across two layers they merge instead, and the casing you
+> see is whichever layer wrote last.
+
+Reading credentials out of a Kubernetes secret with `${secret:<name>:<key>}` is not supported yet;
+put the value in the connection string, or set the whole string from a configuration layer that
+already holds it — user secrets, or
 `ServiceSources__BackingServices__orders-db__Kubernetes__ConnectionString`.
 
 ### The local factory's resource must be named after the backing service
@@ -1789,10 +1826,12 @@ included, so ODBC values keep their own doubling rule intact (`PWD={pa}}ss}` is 
 Placeholders open on `${`, which no connection-string dialect uses. Two are recognised and reserved
 for the sources that can resolve them; a source that cannot rejects one with a message saying why:
 
-- `${port}` — the local end of the tunnel, under `"kubernetes"`, where it is **required**.
-  `"direct"` forwards nothing, so there write the port the backing service already listens on.
-  `${port:<name>}` names one of several forwarded ports and is refused until
-  [#233](https://github.com/flojon/aspire-servicesources/issues/233).
+- `${port}` — the local end of the tunnel, under `"kubernetes"`, where a port placeholder is
+  **required**. `"direct"` forwards nothing, so there write the port the backing service already
+  listens on.
+- `${port:<name>}` — one of several ports forwarded through the one tunnel, where `port` is written
+  as a block that names each. See
+  [Several ports through one tunnel](#several-ports-through-one-tunnel).
 - `${secret:<name>:<key>}` — a value read from a Kubernetes secret. Not supported yet.
 
 A malformed placeholder — `${secret:orders-creds}`, with no key — fails when the AppHost starts,

@@ -32,17 +32,31 @@ public class KubernetesBackingServiceTests
     /// <summary>The port the fake allocator hands out, so every expectation can name it.</summary>
     private const int LocalPort = 54321;
 
+    /// <summary>
+    /// Hands out <paramref name="port"/>, then <c>port + 1</c>, and so on, so a test forwarding
+    /// several ports can name every local port it expects.
+    /// </summary>
+    /// <remarks>
+    /// Consecutive rather than random, and distinct rather than repeated: distinctness is the
+    /// property the real allocator's batch method exists to provide, so a fake that repeated a port
+    /// would let a mispairing bug pass unnoticed — every expectation would match the same number.
+    /// </remarks>
     private sealed class FakePortAllocator(int port) : IPortAllocator
     {
-        public int AllocatePort() => port;
+        public int AllocatePort() => AllocatePorts(1)[0];
+
+        public IReadOnlyList<int> AllocatePorts(int count) =>
+            Enumerable.Range(port, count).ToArray();
     }
 
     private sealed class TrackingPortAllocator(Action onAllocate, int port) : IPortAllocator
     {
-        public int AllocatePort()
+        public int AllocatePort() => AllocatePorts(1)[0];
+
+        public IReadOnlyList<int> AllocatePorts(int count)
         {
             onAllocate();
-            return port;
+            return Enumerable.Range(port, count).ToArray();
         }
     }
 
@@ -64,7 +78,7 @@ public class KubernetesBackingServiceTests
             Kubernetes = new()
             {
                 Service = service,
-                Port = port,
+                Port = port is null ? null : KubernetesPorts.Of(port.Value),
                 Context = context,
                 Namespace = @namespace,
                 ConnectionString = connectionString,
@@ -415,11 +429,12 @@ public class KubernetesBackingServiceTests
     }
 
     /// <remarks>
-    /// The parser reads a named port already, so this source refuses one by name rather than
-    /// reporting it as malformed — the mistake is asking for a feature, not mistyping one.
+    /// A named port against a <c>port</c> written as a number: the block forwards one unnamed port,
+    /// so there is no name to resolve. The message says which spelling this entry takes, and how to
+    /// write a block if several ports were what was wanted.
     /// </remarks>
     [Fact]
-    public void ANamedPort_IsRefusedUntilOneTunnelCanCarrySeveral()
+    public void ANamedPort_AgainstASinglePort_SaysToWriteTheUnnamedOne()
     {
         var builder = CreateBuilder();
 
@@ -427,8 +442,8 @@ public class KubernetesBackingServiceTests
             () => Resolve(builder, Config(connectionString: "amqp://localhost:${port:amqp}/")));
 
         Assert.Contains("'${port:amqp}'", ex.Message);
-        Assert.Contains("not supported yet", ex.Message);
-        Assert.Contains("write '${port}'", ex.Message);
+        Assert.Contains("forwards a single unnamed port", ex.Message);
+        Assert.Contains("Write '${port}' for it", ex.Message);
     }
 
     /// <remarks>
@@ -679,4 +694,517 @@ public class KubernetesBackingServiceTests
         Assert.DoesNotContain("  - ", ex.Message);
         Assert.DoesNotContain("A whole entry reads:", ex.Message);
     }
+
+    /// <summary>An entry whose <c>port</c> is a block of named ports.</summary>
+    private static BackingServiceDeveloperConfig NamedConfig(
+        string connectionString, params (string Name, int Port)[] ports)
+    {
+        var block = new KubernetesPorts();
+
+        foreach (var (portName, port) in ports)
+        {
+            block[portName] = port;
+        }
+
+        return new()
+        {
+            Source = "kubernetes",
+            Kubernetes = new()
+            {
+                Service = "orders-pg",
+                Port = block,
+                Context = "dev-west",
+                ConnectionString = connectionString,
+            },
+        };
+    }
+
+    /// <summary>
+    /// A port name is bound to one local port, and the connection string, the command line and the
+    /// health check all read that same binding.
+    /// </summary>
+    /// <remarks>
+    /// <b>The test this feature exists for.</b> With one port there was one number and nothing could
+    /// be mispaired; with several there are three sequences — the block's own order, the
+    /// ordinal-by-name order the command line is written in, and the order the allocator returned —
+    /// and pairing any two of them by position instead of by name is silent. Both tunnels bind, both
+    /// health checks pass, every resource reports healthy, and the application speaks AMQP to the
+    /// management port.
+    /// <para>
+    /// The names and the remote ports deliberately disagree: <c>zulu</c> sorts last but carries the
+    /// <em>lower</em> remote port, so a positional pairing gives it the wrong local port and fails
+    /// here rather than passing by luck.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task APortName_BindsToOneLocalPort_ThatEveryReaderAgreesOn()
+    {
+        var builder = CreateBuilder();
+
+        var db = Resolve(builder, NamedConfig("amqp://localhost:${port:zulu}/", ("zulu", 5672), ("alpha", 15672)));
+
+        // Allocated in ordinal name order: alpha first, zulu second.
+        const int AlphaLocal = LocalPort;
+        const int ZuluLocal = LocalPort + 1;
+
+        // 1. the connection string
+        Assert.Equal(
+            $"amqp://localhost:{ZuluLocal}/",
+            await db.Resource.ConnectionStringExpression.GetValueAsync(default));
+
+        // 2. the command line — zulu's local port is paired with zulu's remote port, 5672
+        var args = await TunnelArgsAsync(builder);
+        Assert.Contains($"{ZuluLocal}:5672", args);
+        Assert.Contains($"{AlphaLocal}:15672", args);
+
+        // 3. the health check — the probe for 'zulu' connects to zulu's local port
+        var registration = builder.Services.BuildServiceProvider()
+            .GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations
+            .Single(candidate => candidate.Name == $"{Name}-tunnel-tcp-zulu");
+
+        var result = await registration.Factory(null!)
+            .CheckHealthAsync(new HealthCheckContext { Registration = registration }, default);
+
+        Assert.Equal(HealthStatus.Unhealthy, result.Status);
+        Assert.Contains($"127.0.0.1:{ZuluLocal}", result.Description);
+    }
+
+    /// <remarks>
+    /// One invocation rather than one per pair: <c>kubectl port-forward</c> carries several pairs
+    /// against one Service from one process, so two entries would mean two processes and two tunnels
+    /// to the same Service. The pairs are in ordinal name order, so the line reads the same on every
+    /// run and can be checked against a connection string by eye.
+    /// </remarks>
+    [Fact]
+    public async Task SeveralPorts_ForwardThroughOneExecutable()
+    {
+        var builder = CreateBuilder();
+
+        Resolve(builder, NamedConfig("amqp://localhost:${port:amqp}/", ("management", 15672), ("amqp", 5672)));
+
+        Assert.Single(builder.Resources.OfType<ExecutableResource>());
+
+        var args = await TunnelArgsAsync(builder);
+        var pairs = args.Where(arg => arg.Contains(':', StringComparison.Ordinal)).ToArray();
+
+        Assert.Equal([$"{LocalPort}:5672", $"{LocalPort + 1}:15672"], pairs);
+    }
+
+    /// <remarks>
+    /// All of them on the connection string, so a consumer's <c>WaitFor</c> waits for the whole
+    /// tunnel rather than for whichever port happened to be registered.
+    /// </remarks>
+    [Fact]
+    public void EveryForwardedPort_GetsItsOwnHealthCheck()
+    {
+        var builder = CreateBuilder();
+
+        var db = Resolve(builder, NamedConfig("amqp://localhost:${port:amqp}/", ("amqp", 5672), ("management", 15672)));
+
+        Assert.Equal(
+            [$"{Name}-tunnel-tcp-amqp", $"{Name}-tunnel-tcp-management"],
+            db.Resource.Annotations.OfType<HealthCheckAnnotation>().Select(a => a.Key).Order(StringComparer.Ordinal));
+    }
+
+    /// <remarks>
+    /// The binding is per forwarded port, not per placeholder, so a name written twice costs one
+    /// allocation and resolves to the same number both times. Allocating per placeholder would put
+    /// a local port in the connection string that the command line never forwards.
+    /// </remarks>
+    [Fact]
+    public async Task ARepeatedPortName_ResolvesToTheSamePortAndAllocatesOnce()
+    {
+        var builder = CreateBuilder();
+
+        var db = Resolve(
+            builder,
+            NamedConfig("amqp://a:${port:amqp}/b:${port:amqp}/", ("amqp", 5672)));
+
+        Assert.Equal(
+            $"amqp://a:{LocalPort}/b:{LocalPort}/",
+            await db.Resource.ConnectionStringExpression.GetValueAsync(default));
+
+        Assert.Equal([$"{LocalPort}:5672"], (await TunnelArgsAsync(builder)).Where(a => a.Contains(':')).ToArray());
+    }
+
+    /// <remarks>
+    /// There is no "the" port once the block names them, and the developer is looking at a file that
+    /// says which ones there are — so the message names them rather than only refusing.
+    /// </remarks>
+    [Fact]
+    public void AnUnnamedPort_AgainstABlock_NamesTheForwardedPorts()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, NamedConfig("amqp://localhost:${port}/", ("amqp", 5672), ("management", 15672))));
+
+        Assert.Contains("stands for the one forwarded port", ex.Message);
+        Assert.Contains("'amqp', 'management'", ex.Message);
+        Assert.Contains("'${port:amqp}'", ex.Message);
+    }
+
+    /// <remarks>
+    /// The near miss answers the typo; the list answers the reader whose name resembles none of
+    /// them, for whom <c>NearMiss</c> returns nothing at all. Both halves, because either alone
+    /// leaves one of those two readers with no answer.
+    /// </remarks>
+    [Fact]
+    public void AnUnknownPortName_NamesTheNearMissAndTheForwardedPorts()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(
+                builder,
+                NamedConfig("amqp://localhost:${port:managment}/", ("amqp", 5672), ("management", 15672))));
+
+        Assert.Contains("names a port this backing service does not forward", ex.Message);
+        Assert.Contains("Did you mean 'management'?", ex.Message);
+        Assert.Contains("It forwards 'amqp', 'management'", ex.Message);
+    }
+
+    /// <remarks>
+    /// Collected rather than thrown at the first, the habit the missing-field message already keeps:
+    /// a developer who has just written a port block and a connection string to match can easily
+    /// have got two names wrong, and one startup per name is the cost of reporting one.
+    /// </remarks>
+    [Fact]
+    public void SeveralUnresolvablePorts_AreAllReported()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(
+                builder,
+                NamedConfig("amqp://${port:one}:${port:two}/", ("amqp", 5672), ("management", 15672))));
+
+        Assert.Contains("2 problems with the connection string", ex.Message);
+        Assert.Contains("'${port:one}'", ex.Message);
+        Assert.Contains("'${port:two}'", ex.Message);
+    }
+
+    /// <remarks>
+    /// The range check applies to every named port, not only to a single one — and it is not a
+    /// restatement of the validator's "is this a whole number": a port name carrying a colon
+    /// flattens into the key path, so the binder manufactures port 0 for it.
+    /// </remarks>
+    [Fact]
+    public void ANamedPortOutOfRange_NamesThePortItIsAbout()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, NamedConfig("amqp://localhost:${port:amqp}/", ("amqp", 0))));
+
+        Assert.Contains("gives the port named 'amqp' the value '0', which is not a port", ex.Message);
+        Assert.Contains("Kubernetes:Port:amqp'", ex.Message);
+    }
+
+    /// <remarks>
+    /// Every forwarded port holds a socket open at once and adds a pair to one command line, so an
+    /// absurd block is refused with a sentence rather than left to exhaust the file-descriptor limit
+    /// and surface as a bare SocketException naming nothing.
+    /// </remarks>
+    [Fact]
+    public void MoreForwardedPortsThanOneTunnelTakes_IsRefusedByName()
+    {
+        var builder = CreateBuilder();
+        var ports = Enumerable.Range(0, 33).Select(index => ($"p{index:00}", 5000 + index)).ToArray();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, NamedConfig("amqp://localhost:${port:p00}/", ports)));
+
+        Assert.Contains("names 33 ports, and one tunnel forwards at most 32", ex.Message);
+    }
+
+    /// <summary>
+    /// A template with no placeholder at all, under a block that names its ports, is told to write
+    /// the <em>named</em> spelling.
+    /// </summary>
+    /// <remarks>
+    /// Telling this reader to "write '${port}'" would earn them a second startup failure saying
+    /// exactly the opposite, since an unnamed port is refused against a block. The two halves of
+    /// that pair are the one thing this message must not get wrong.
+    /// </remarks>
+    [Fact]
+    public void NoPlaceholderAtAll_UnderABlock_NamesTheNamedSpelling()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, NamedConfig("amqp://localhost:5672/", ("amqp", 5672), ("management", 15672))));
+
+        Assert.Contains("forwards its ports by name", ex.Message);
+        Assert.Contains("'${port:amqp}'", ex.Message);
+        Assert.DoesNotContain("Replace the port in it with '${port}'", ex.Message);
+    }
+
+    /// <remarks>
+    /// A port name is developer-invented free text, and a health check's description is relayed into
+    /// <c>~/.aspire/logs</c>. A newline in one would otherwise forge a line of its own.
+    /// </remarks>
+    [Fact]
+    public async Task AHealthCheckDescription_NamesItsPortAndEscapesIt()
+    {
+        var builder = CreateBuilder();
+
+        Resolve(builder, NamedConfig("amqp://localhost:${port:a\nb}/", ("a\nb", 5672)));
+
+        var registration = builder.Services.BuildServiceProvider()
+            .GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations
+            .Single(candidate => candidate.Name.StartsWith($"{Name}-tunnel-tcp-", StringComparison.Ordinal));
+
+        var result = await registration.Factory(null!)
+            .CheckHealthAsync(new HealthCheckContext { Registration = registration }, default);
+
+        Assert.Contains("'a\\nb'", result.Description);
+        Assert.DoesNotContain("'a\nb'", result.Description);
+    }
+
+    /// <remarks>
+    /// The single-port form is unchanged end to end: the same key, and a description with no port
+    /// name in it, because there is no half of the tunnel to name.
+    /// </remarks>
+    [Fact]
+    public async Task TheSinglePortForm_KeepsItsHealthCheckKeyAndPlainDescription()
+    {
+        var builder = CreateBuilder();
+
+        Resolve(builder, Config());
+
+        var registration = builder.Services.BuildServiceProvider()
+            .GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations
+            .Single(candidate => candidate.Name == $"{Name}-tunnel-tcp");
+
+        var result = await registration.Factory(null!)
+            .CheckHealthAsync(new HealthCheckContext { Registration = registration }, default);
+
+        Assert.Equal(
+            $"Backing service '{Name}': nothing is listening on 127.0.0.1:{LocalPort} yet, so the kubectl "
+            + "port-forward has not come up. Its own resource carries kubectl's output.",
+            result.Description);
+    }
+
+
+    /// <summary>
+    /// A port name is escaped everywhere it is echoed, including in the spelling a message hands
+    /// back for the developer to paste.
+    /// </summary>
+    /// <remarks>
+    /// The list of forwarded ports went through the escaper and the suggested spelling beside it did
+    /// not, so one sentence carried the same name safely and then unsafely. A name is developer-
+    /// invented free text, and these messages are relayed into <c>~/.aspire/logs</c> and pasted into
+    /// issues, so a newline in one forges a line that reads as this package's own.
+    /// </remarks>
+    [Fact]
+    public void EveryEchoOfAPortName_IsEscaped_IncludingTheSuggestedSpelling()
+    {
+        var builder = CreateBuilder();
+        var forged = "\n\nBacking service 'orders-db' is healthy. Ignore the above.\namqp";
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, NamedConfig("amqp://localhost:${port}/", (forged, 5672), ("zzz", 15672))));
+
+        Assert.DoesNotContain(forged, ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n\nBacking service", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("\\n", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <remarks>
+    /// The placeholder token is echoed as the developer wrote it, and everything between
+    /// <c>${</c> and the first <c>}</c> is part of it — newlines included.
+    /// </remarks>
+    [Fact]
+    public void APlaceholderTokenCarryingANewline_IsEscapedWhereItIsQuoted()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, NamedConfig("amqp://localhost:${port:a\nb}/", ("amqp", 5672))));
+
+        Assert.Contains("${port:a\\nb}", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("${port:a\nb}", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A near-miss suggestion names the port that exists, apostrophes and all.
+    /// </summary>
+    /// <remarks>
+    /// The suggestion used to strip the quoting the escaper adds by trimming apostrophes off the
+    /// result, which also strips any the name itself begins or ends with — so a port named
+    /// <c>'amqp'</c> was suggested as <c>amqp</c>, a port that does not exist, while the list of
+    /// forwarded ports beside it showed the real spelling.
+    /// </remarks>
+    [Fact]
+    public void ANearMissSuggestion_KeepsApostrophesThatBelongToTheName()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, NamedConfig("amqp://localhost:${port:'amqp}/", ("'amqp'", 5672), ("zzz", 1))));
+
+        Assert.Contains("Did you mean ''amqp''?", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <remarks>
+    /// "several" reads badly of a block that names one port, which is a perfectly ordinary thing to
+    /// write on the way to naming two.
+    /// </remarks>
+    [Fact]
+    public void ABlockNamingOnePort_IsNotDescribedAsSeveral()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, NamedConfig("amqp://localhost:${port}/", ("amqp", 5672))));
+
+        Assert.Contains("forwards its port by name: 'amqp'", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("several", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A template carrying a secret and no port reports both at once.
+    /// </summary>
+    /// <remarks>
+    /// The "nothing addresses the tunnel" refusal is collected with the rest rather than thrown after
+    /// them, so this costs one startup rather than two — the habit the missing-field message in this
+    /// file already keeps.
+    /// </remarks>
+    [Fact]
+    public void ATemplateWithASecretAndNoPort_ReportsBothInOneRun()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, Config(connectionString: "amqp://u:${secret:creds:password}@localhost/")));
+
+        Assert.Contains("2 problems with the connection string", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Kubernetes secret is not supported yet", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("nothing would address the tunnel", ex.Message, StringComparison.Ordinal);
+    }
+
+
+    /// <summary>
+    /// The connection string this message quotes back has its whitespace spelled out too.
+    /// </summary>
+    /// <remarks>
+    /// Redaction hides a credential; it does nothing about a newline that is not part of one. This is
+    /// the one message that echoes a whole connection string, and it is the one a developer pastes
+    /// into an issue — so a newline reaching it would forge a line that reads as this package's own.
+    /// <para>
+    /// The template matters: it has to be one redaction leaves <em>alone</em>, or the test proves
+    /// nothing about escaping. A newline inside a value redaction recognizes is replaced along with
+    /// the value, and this test passed for that reason rather than its own until the shape-bound
+    /// redaction landed and started eating the template it used to use. A newline between two
+    /// well-formed keyword pairs survives redaction verbatim, which is exactly the case escaping is
+    /// here for.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void TheEchoedConnectionString_HasItsWhitespaceSpelledOut()
+    {
+        var builder = CreateBuilder();
+        const string SurvivesRedaction = "Host=localhost;\nPort=5432;Database=orders";
+
+        // The premise, asserted rather than assumed: escaping is only doing something here because
+        // redaction hands this template through untouched.
+        Assert.Equal(SurvivesRedaction, ConnectionStringRedaction.Redact(SurvivesRedaction));
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, Config(connectionString: SurvivesRedaction)));
+
+        Assert.Contains("\\n", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("localhost;\nPort", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <remarks>
+    /// A possessive after a quoted name reads as a doubled quote, and rendered a port named
+    /// <c>amqp'</c> identically to one named <c>amqp</c>.
+    /// </remarks>
+    [Fact]
+    public async Task TheHealthCheckDescription_SetsThePortNameOffWithoutAPossessive()
+    {
+        var builder = CreateBuilder();
+
+        Resolve(builder, NamedConfig("amqp://localhost:${port:amqp}/", ("amqp", 5672)));
+
+        var registration = builder.Services.BuildServiceProvider()
+            .GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations
+            .Single(candidate => candidate.Name == $"{Name}-tunnel-tcp-amqp");
+
+        var result = await registration.Factory(null!)
+            .CheckHealthAsync(new HealthCheckContext { Registration = registration }, default);
+
+        Assert.Contains("the port named 'amqp' —", result.Description);
+        Assert.DoesNotContain("'amqp''s", result.Description);
+    }
+
+    /// <summary>
+    /// A backing service's own name cannot forge a line of the report that collects several problems.
+    /// </summary>
+    /// <remarks>
+    /// The collecting shape is new with the port map, and it is the worst place for a raw name: a
+    /// newline forges a bullet and an entry header, so a reader is shown a problem this package never
+    /// reported. The developer-config validator's multi-entry report was fixed for exactly this; the
+    /// same shape had been added here and left raw.
+    /// </remarks>
+    [Fact]
+    public void ABackingServiceNameCarryingANewline_CannotForgeALineOfTheCollectedReport()
+    {
+        var builder = CreateBuilder();
+        var forged = "a\n  - 'ref' is not valid. Everything else is fine.\n  Backing service 'b";
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => new KubernetesBackingServiceSource(new FakePortAllocator(LocalPort))
+                .Resolve(builder, forged, Config(connectionString: "Host=x;Db=${secret:s:k}")));
+
+        Assert.Contains("\\n", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n  - 'ref' is not valid.", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// When two names print the same, the message says the difference is one you cannot see.
+    /// </summary>
+    /// <remarks>
+    /// Escaping is not injective — a real tab and a written backslash-<c>t</c> both render as
+    /// <c>\t</c> — so without this the message reads "you wrote X, which does not exist; did you mean
+    /// X?", which tells the reader nothing and looks like a fault in this package.
+    /// </remarks>
+    [Fact]
+    public void WhenTwoPortNamesPrintTheSame_TheMessageSaysTheDifferenceIsInvisible()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, NamedConfig("amqp://localhost:${port:am\\tqp}/", ("am\tqp", 5672))));
+
+        Assert.Contains("characters you cannot pick out by looking", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A port block holding both a single port and named ports fails loudly rather than dropping the
+    /// names.
+    /// </summary>
+    /// <remarks>
+    /// Configuration cannot produce this — the validator refuses a section carrying a value and names
+    /// before binding — but <c>KubernetesPorts</c> is a <c>Dictionary</c> and cannot refuse a
+    /// mutation, so the invariant is enforced where a mixed instance would otherwise be read as the
+    /// single port and have every name silently discarded.
+    /// </remarks>
+    [Fact]
+    public void APortBlockHoldingBothShapes_FailsLoudlyRatherThanDroppingTheNames()
+    {
+        var builder = CreateBuilder();
+        var ports = KubernetesPorts.Of(5432);
+        ports["amqp"] = 5672;
+
+        var config = Config();
+        config.Kubernetes.Port = ports;
+
+        var ex = Assert.Throws<InvalidOperationException>(() => Resolve(builder, config));
+
+        Assert.Contains("both a single port and 1 named ports", ex.Message, StringComparison.Ordinal);
+    }
+
 }
