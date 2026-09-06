@@ -732,7 +732,7 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
 
         return "source 'kubernetes' opens a kubectl port-forward on a local port allocated at startup, but the "
             + $"connection string names no {missing} placeholder to put it in — so nothing would address the "
-            + $"tunnel: \"{shown}\"{note}."
+            + $"tunnel: \"{ConfiguredValue.Bare(shown)}\"{note}."
             + $"{Environment.NewLine}    {remedy}"
             + $"{Environment.NewLine}    If you did write {missing}, a shell expanded it away before the AppHost "
             + "saw it — '${...}' is a shell variable too, and double quotes do not protect it. Single-quote the "

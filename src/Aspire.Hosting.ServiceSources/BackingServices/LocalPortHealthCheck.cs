@@ -55,7 +55,10 @@ internal sealed class LocalPortHealthCheck(string backingServiceName, int port, 
             // otherwise distinguishable only by a local port number nobody chose. Escaped, because
             // the name is developer-invented free text and this description is relayed into
             // ~/.aspire/logs. Nothing is added under the single-port form, which has no half to name.
-            var which = portName is null ? "" : $" port {ConfiguredValue.Escaped(portName)}'s";
+            // "port 'amqp's" would read as a doubled quote, and would render a port named `amqp'`
+            // identically to one named `amqp` — the same ambiguity that made trimming quotes off an
+            // escaped name a bug. The name is set off by a dash instead of by a possessive.
+            var which = portName is null ? "" : $" the port named {ConfiguredValue.Escaped(portName)} —";
 
             return HealthCheckResult.Unhealthy(
                 $"Backing service '{backingServiceName}':{which} nothing is listening on 127.0.0.1:{port} yet, so "

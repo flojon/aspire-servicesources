@@ -541,4 +541,43 @@ public class PortBlockValidationTests
         Assert.DoesNotContain("__port__<port>", ex.Message, StringComparison.Ordinal);
     }
 
+
+    /// <summary>
+    /// A padded index is a name, not a position.
+    /// </summary>
+    /// <remarks>
+    /// Configuration renders an array's keys as <c>0</c>, <c>1</c>, <c>2</c> with no padding, so
+    /// <c>007</c> is a name someone chose. Refusing it as "written as a list" would describe a shape
+    /// the file never had.
+    /// </remarks>
+    [Fact]
+    public void APortNamedWithAPaddedNumber_IsANameRatherThanAPosition() =>
+        Accepted("""{ "007": 5672 }""", "amqp://localhost:${port:007}/");
+
+    /// <summary>
+    /// The key a remedy names has its whitespace spelled out, all the way through the path.
+    /// </summary>
+    /// <remarks>
+    /// The path carries developer-invented text — the entry's own name, and the name of a port
+    /// inside the block — so a newline in either would otherwise break the sentence that exists to
+    /// tell a reader which key to set, in a message relayed into a log and pasted into issues.
+    /// </remarks>
+    [Fact]
+    public void TheKeyPathInARemedy_HasItsWhitespaceSpelledOut()
+    {
+        var builder = TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ServiceSources:BackingServices:orders\n-db:source"] = "kubernetes",
+            ["ServiceSources:BackingServices:orders\n-db:kubernetes:port"] = "abc",
+        });
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => builder.AddBackingService("orders-db", () => builder.AddConnectionString("orders-db")));
+
+        Assert.Contains("orders\\n-db", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("orders\n-db", ex.Message, StringComparison.Ordinal);
+    }
+
 }

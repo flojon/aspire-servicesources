@@ -1071,4 +1071,47 @@ public class KubernetesBackingServiceTests
         Assert.Contains("nothing would address the tunnel", ex.Message, StringComparison.Ordinal);
     }
 
+
+    /// <summary>
+    /// The connection string this message quotes back has its whitespace spelled out too.
+    /// </summary>
+    /// <remarks>
+    /// Redaction hides a credential; it does nothing about a newline. This is the one message that
+    /// echoes a whole connection string, and it is the one a developer pastes into an issue — so a
+    /// template carrying a newline would forge a line that reads as this package's own.
+    /// </remarks>
+    [Fact]
+    public void TheEchoedConnectionString_HasItsWhitespaceSpelledOut()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, Config(connectionString: "Host=localhost;\n\nBacking service 'x': fine.")));
+
+        Assert.Contains("\\n", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n\nBacking service 'x'", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <remarks>
+    /// A possessive after a quoted name reads as a doubled quote, and rendered a port named
+    /// <c>amqp'</c> identically to one named <c>amqp</c>.
+    /// </remarks>
+    [Fact]
+    public async Task TheHealthCheckDescription_SetsThePortNameOffWithoutAPossessive()
+    {
+        var builder = CreateBuilder();
+
+        Resolve(builder, NamedConfig("amqp://localhost:${port:amqp}/", ("amqp", 5672)));
+
+        var registration = builder.Services.BuildServiceProvider()
+            .GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations
+            .Single(candidate => candidate.Name == $"{Name}-tunnel-tcp-amqp");
+
+        var result = await registration.Factory(null!)
+            .CheckHealthAsync(new HealthCheckContext { Registration = registration }, default);
+
+        Assert.Contains("the port named 'amqp' —", result.Description);
+        Assert.DoesNotContain("'amqp''s", result.Description);
+    }
+
 }
