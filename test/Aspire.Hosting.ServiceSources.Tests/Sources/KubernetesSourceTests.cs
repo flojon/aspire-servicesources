@@ -197,7 +197,7 @@ public class KubernetesSourceTests
     [Fact]
     public void Resolve_NoScheme_NamesTheEndpointHttp()
     {
-        var builder = TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
         var service = new KubernetesSource(new FakePortAllocator(54321))
             .Resolve(builder, ServiceName, Metadata(), DevConfig());
@@ -213,7 +213,7 @@ public class KubernetesSourceTests
         // A kubectl port-forward is a byte-transparent TCP tunnel, so TLS terminates at the pod and
         // https://localhost:<localPort> genuinely works. Naming the endpoint "http" regardless left
         // consumers with an http:// URL that a TLS listener rejects (#160).
-        var builder = TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
         var service = new KubernetesSource(new FakePortAllocator(54321))
             .Resolve(builder, ServiceName, Metadata(scheme: "https"), DevConfig());
@@ -227,7 +227,7 @@ public class KubernetesSourceTests
     [Fact]
     public void Resolve_DeveloperScheme_TakesPrecedenceOverCatalogScheme()
     {
-        var builder = TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
         var service = new KubernetesSource(new FakePortAllocator(54321))
             .Resolve(builder, ServiceName, Metadata(scheme: "http"), DevConfig(scheme: "https"));
@@ -239,7 +239,7 @@ public class KubernetesSourceTests
     [Fact]
     public void Resolve_UnsupportedScheme_ThrowsNamingServiceAndScheme()
     {
-        var builder = TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             new KubernetesSource(new FakePortAllocator(54321))
@@ -254,7 +254,7 @@ public class KubernetesSourceTests
     {
         // The scheme is config validation like every check inside BuildPortForwardArgs, so it is
         // resolved before that call reaches its port allocation rather than after it.
-        var builder = TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
         var allocatorCalled = false;
         var allocator = new TrackingPortAllocator(() => allocatorCalled = true, 54321);
 
@@ -269,7 +269,7 @@ public class KubernetesSourceTests
     {
         // Scheme resolution must not run ahead of the checks that name a missing kubernetes block:
         // the block is the more fundamental problem and the one worth reporting.
-        var builder = TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             new KubernetesSource(new FakePortAllocator(54321))

@@ -89,7 +89,7 @@ public class ProcessPrepareCommandRunnerTests
             return;
         }
 
-        var directory = Directory.CreateTempSubdirectory().FullName;
+        var directory = TempDirectories.CreateSubdirectory().FullName;
         WriteSpawningScript(directory);
 
         using var cancellation = new CancellationTokenSource();
@@ -137,7 +137,7 @@ public class ProcessPrepareCommandRunnerTests
             return;
         }
 
-        var directory = Directory.CreateTempSubdirectory().FullName;
+        var directory = TempDirectories.CreateSubdirectory().FullName;
         WriteScript(
             Path.Combine(directory, "daemonize.sh"),
             """
@@ -177,7 +177,7 @@ public class ProcessPrepareCommandRunnerTests
             return;
         }
 
-        var directory = Directory.CreateTempSubdirectory().FullName;
+        var directory = TempDirectories.CreateSubdirectory().FullName;
         WriteScript(
             Path.Combine(directory, "prompt.sh"),
             """
@@ -215,7 +215,7 @@ public class ProcessPrepareCommandRunnerTests
             return;
         }
 
-        var directory = Directory.CreateTempSubdirectory().FullName;
+        var directory = TempDirectories.CreateSubdirectory().FullName;
         WriteScript(
             Path.Combine(directory, "both-streams.sh"),
             """
@@ -253,7 +253,7 @@ public class ProcessPrepareCommandRunnerTests
     [Fact]
     public void AProgramThatDoesNotExist_IsALaunchFailure()
     {
-        var directory = Directory.CreateTempSubdirectory().FullName;
+        var directory = TempDirectories.CreateSubdirectory().FullName;
 
         var ex = Assert.Throws<PrepareLaunchException>(() => ProcessPrepareCommandRunner.Instance.Run(
             directory, ["./not-there.sh"], CancellationToken.None, _ => { }));

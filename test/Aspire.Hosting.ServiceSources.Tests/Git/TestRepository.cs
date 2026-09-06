@@ -20,7 +20,7 @@ internal sealed class TestRepository
 
     /// <summary>A directory inside a fresh temp root that no repository has been created in yet.</summary>
     public static string EmptyDestination(string name = "clone") =>
-        System.IO.Path.Combine(Directory.CreateTempSubdirectory().FullName, name);
+        System.IO.Path.Combine(TempDirectories.CreateSubdirectory().FullName, name);
 
     /// <summary>
     /// A repository with a commit on the default branch holding "main content", a lightweight tag
@@ -28,7 +28,7 @@ internal sealed class TestRepository
     /// </summary>
     public static TestRepository CreateOrigin()
     {
-        var repository = new TestRepository(Directory.CreateTempSubdirectory().FullName);
+        var repository = new TestRepository(TempDirectories.CreateSubdirectory().FullName);
 
         repository.Git("-c", "init.defaultBranch=main", "init", "--quiet", ".");
         repository.Commit("file.txt", "main content", "main commit");

@@ -15,7 +15,7 @@ namespace Aspire.Hosting.ServiceSources.Tests;
 public class ServiceEndpointTests
 {
     private static IDistributedApplicationBuilder Builder() =>
-        TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+        TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
     private sealed class FakePortAllocator : IPortAllocator
     {

@@ -85,7 +85,7 @@ public class GuestLanguageFloorTargetsTests
     private static async Task<(int ExitCode, string Output)> RunProbeAsync(
         string? packageId, string? resolved)
     {
-        var dir = Directory.CreateTempSubdirectory("floor-gate").FullName;
+        var dir = TempDirectories.CreateSubdirectory("floor-gate").FullName;
 
         try
         {

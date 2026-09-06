@@ -23,7 +23,7 @@ public class BackingServiceConfigAuditTests
 {
     private static IDistributedApplicationBuilder CreateBuilder(string json)
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), json);
 
         return TestHelpers.CreateBuilder(dir);

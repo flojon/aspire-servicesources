@@ -16,7 +16,7 @@ public class ServiceSourcesConfigCacheTests
 
     private static string CreateAppHostDirectory(string yaml, string json)
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), yaml);
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), json);
         return dir;

@@ -32,7 +32,7 @@ public class ServiceConfigurationExtensionsTests
     }
 
     private static IDistributedApplicationBuilder Builder() =>
-        TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+        TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
     private static IResourceBuilder<IResourceWithServiceDiscovery> AddContainerService(
         IDistributedApplicationBuilder builder) =>
@@ -217,7 +217,7 @@ public class ServiceConfigurationExtensionsTests
     [Fact]
     public async Task SkippedConfiguration_IsLoggedAtStartup()
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
             services:
               inventory:

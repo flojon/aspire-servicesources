@@ -133,7 +133,7 @@ public class ContainerSourceTests
     [Fact]
     public void Resolve_NoScheme_NamesTheEndpointHttp()
     {
-        var builder = TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
         var service = new ContainerSource().Resolve(builder, ServiceName, Metadata(), DevConfig());
 
@@ -147,7 +147,7 @@ public class ContainerSourceTests
     {
         // An image that serves TLS on its port needs the endpoint named for what it actually
         // speaks, or a consumer is handed an http:// URL the listener rejects (#160).
-        var builder = TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
         var service = new ContainerSource().Resolve(builder, ServiceName, Metadata(scheme: "https"), DevConfig());
 
@@ -160,7 +160,7 @@ public class ContainerSourceTests
     [Fact]
     public void Resolve_UnsupportedScheme_ThrowsNamingServiceAndScheme()
     {
-        var builder = TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             new ContainerSource().Resolve(builder, ServiceName, Metadata(scheme: "grpc"), DevConfig()));

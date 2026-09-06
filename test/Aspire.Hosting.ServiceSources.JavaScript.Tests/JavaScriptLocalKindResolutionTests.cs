@@ -21,7 +21,7 @@ public class JavaScriptLocalKindResolutionTests
             builder, "frontend", repoRoot, yaml is null ? null : TestHelpers.ParseOptionsBlock(yaml));
 
     private static IDistributedApplicationBuilder Builder() =>
-        TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory("servicesources-js-apphost-").FullName);
+        TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory("servicesources-js-apphost-").FullName);
 
     [Fact]
     public void DefaultsToAJavaScriptAppAtTheRepositoryRoot()
