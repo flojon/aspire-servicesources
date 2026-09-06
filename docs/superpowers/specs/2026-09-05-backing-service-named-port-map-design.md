@@ -422,14 +422,45 @@ branch of `RequireEveryPlaceholderIsResolvable`; whichever lands second resolves
 Neither should wait for the other — a single `port` stays valid either way, and the two features
 share no decision.
 
-## Open Questions
+## Questions settled
 
-1. **Is a forwarded port that no placeholder mentions worth a warning?** #206 built a warnings
-   channel for config nothing reads, and an unreferenced named port fits its shape. Not proposed
-   here: the issue's own example forwards a management port on purpose, precisely so a developer can
-   open it in a browser. Left for the human to settle.
-2. **Is a cap of 32 the right number, and is a cap wanted at all?** It exists to turn
-   file-descriptor exhaustion into a sentence. Nothing about the feature needs a limit otherwise.
+Both were left open when this document was written and were settled on 2026-09-06, after the
+implementation existed to look at. Recorded with their reasoning so that neither is re-argued from
+the same starting point.
+
+### A forwarded port that no placeholder mentions is **not** warned about
+
+`BackingServiceConfigAudit` already reports backing-service configuration that nothing read, and an
+unreferenced named port fits that shape exactly — which is what made this a question rather than an
+omission.
+
+It is not warned about because **the deliberate case is the motivating case**. The example this
+feature exists for forwards a broker's management port precisely so a developer can open it, and
+nothing in the configuration distinguishes that from a port someone forgot to use. A warning would
+therefore fire on the documented, correct example, and a channel that cries on correct config is one
+people stop reading — which costs more than the case it would catch, since the mistakes that matter
+are already hard errors: a name the block does not carry is refused at startup, naming the ports that
+are forwarded.
+
+The one thing that is genuinely awkward about the deliberate case, and worth knowing rather than
+warning about: the local port is allocated at startup, so a forwarded port nothing references is
+reachable only by reading the pair off the tunnel resource's command line in the dashboard. That is a
+discoverability gap, and if it ever deserves an answer the answer is a way to *see* the mapping, not a
+warning that the mapping exists.
+
+### The cap stays, at 32 forwarded ports per backing service
+
+Nothing about the feature needs a limit — the motivating case forwards two — so the cap exists for
+exactly one reason: every forwarded port holds a loopback socket open *at the same time* as the
+others, because that simultaneity is what makes the allocated ports distinct. Without a limit a block
+with thousands of entries exhausts the process's file-descriptor budget and surfaces as a bare
+`SocketException` naming no backing service and no key, which is the one message shape this package is
+written never to produce.
+
+32 is arbitrary and deliberately generous. It cannot cost a real configuration anything: a single
+backing service exposing 33 ports is not a thing, and the peak is per backing service rather than
+cumulative — `AllocatePorts` releases its batch before the next service resolves — so many services
+with a few ports each never approach it.
 
 [#144]: https://github.com/flojon/aspire-servicesources/issues/144
 [#233]: https://github.com/flojon/aspire-servicesources/issues/233
