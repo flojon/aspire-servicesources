@@ -1003,6 +1003,14 @@ internal sealed partial class KubernetesBackingServiceSource(
     /// The configuration key one of this block's fields is read from, for a message that has to
     /// name the layer that set it rather than only the file a developer usually writes it in.
     /// </summary>
+    /// <remarks>
+    /// #264: built from this class's own declared property names (<c>Kubernetes</c>, and whatever
+    /// <paramref name="field"/> is passed), because this runs after binding and has no access to
+    /// the raw section a developer actually wrote — unlike
+    /// <c>DeveloperConfigValidator.Path</c>, which walks the raw config and echoes its casing
+    /// verbatim. The two can print the same key with different casing; harmless, since
+    /// configuration keys are case-insensitive.
+    /// </remarks>
     private static string ConfigKey(string name, string field) =>
         $"{DeveloperConfiguration.BackingServicesKey}:{Named(name)}:Kubernetes:{field}";
 

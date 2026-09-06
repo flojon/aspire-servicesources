@@ -789,6 +789,12 @@ public class DeveloperConfigValidatorTests
         Assert.Contains("empty value", ex.Message);
     }
 
+    /// <remarks>
+    /// #264: this is what pins the answer to whether the silent acceptance below is intended —
+    /// confirmed intentional, since it matches the top-level "an empty value unsets a nullable
+    /// field" gesture. <c>NotBindable</c>'s "this one cannot be unset" branch stays unreachable
+    /// through this shape for exactly the reason this test locks in.
+    /// </remarks>
     [Fact]
     public void Validate_EmptyValueWhereANumberGoes_LeavesTheFieldUnset()
     {

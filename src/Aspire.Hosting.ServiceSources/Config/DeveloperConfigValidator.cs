@@ -1247,6 +1247,15 @@ internal static class DeveloperConfigValidator
     /// other echo. <see cref="ConfiguredValue.Bare"/> rather than
     /// <see cref="ConfiguredValue.Escaped"/>, since these sentences quote the path themselves, and it
     /// leaves the <c>:</c> separators alone because only whitespace is escaped.
+    /// <para>
+    /// #264: this echoes the section's own casing — whatever the developer actually wrote — rather
+    /// than the shape's declared casing, which is what a message built after binding (e.g.
+    /// <c>KubernetesBackingServiceSource.ConfigKey</c>) has to use instead, since it only ever sees
+    /// the declared property names and not the raw section that set them. The two can disagree on
+    /// casing for the same key across different messages; this is harmless, since configuration
+    /// keys are case-insensitive, and this echo is arguably the more useful of the two — it is the
+    /// exact text a developer can search their own file for.
+    /// </para>
     /// </remarks>
     private static string Path(IConfigurationSection section) => ConfiguredValue.Bare(section.Path);
 
