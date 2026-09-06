@@ -634,4 +634,43 @@ public class ConnectionStringRedactionTests
 
         Assert.Equal("Initial Catalog=orders;UID=dev", redacted);
     }
+
+    /// <summary>
+    /// A driver or provider name prints whole, whether it is a bare identifier or an ODBC braced
+    /// name — but the braced form is not "anything that is not a brace".
+    /// </summary>
+    /// <remarks>
+    /// An earlier draft of the braced shape was <c>{[^{}]*}</c>, which admitted any character at
+    /// all except a brace and printed <c>Provider={hunter2 not a driver at all}</c> whole. The
+    /// tightened shape still covers the driver names ODBC/OLEDB actually ship, including the
+    /// parenthesised, comma-bearing form Microsoft's Access driver uses, but a value made of nothing
+    /// but words and spaces is a residue this cannot rule out either way — the same trade every
+    /// identifier-shaped key already accepts.
+    /// </remarks>
+    [Theory]
+    [InlineData("Driver=SQLOLEDB;Database=orders", "Driver=SQLOLEDB;Database=orders")]
+    [InlineData("Driver={ODBC Driver 18 for SQL Server};Password=hunter2",
+                "Driver={ODBC Driver 18 for SQL Server};Password=***")]
+    [InlineData("Provider={Microsoft Access Driver (*.mdb, *.accdb)};Database=orders",
+                "Provider={Microsoft Access Driver (*.mdb, *.accdb)};Database=orders")]
+    // No brace, and text that is not an identifier either.
+    [InlineData("Driver={sk-live-abc123XYZ=hunter2}", "Driver=***")]
+    public void ADriverOrProviderName_PrintsWholeUnlessItCarriesStructureTheShapeExcludes(
+        string connectionString, string expected)
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
+
+    /// <summary>
+    /// A host, server or data source value carrying a bogus "scheme" ahead of a colon is masked
+    /// whole, rather than treating any word in front of a colon as a network-library prefix.
+    /// </summary>
+    /// <remarks>
+    /// The permitted prefix is the literal word <c>tcp</c>. An earlier draft accepted any letter-led
+    /// run in front of a colon as a scheme, which let a value with a random-looking token in front of
+    /// a real host — exactly the shape a smuggled secret would take — print whole.
+    /// </remarks>
+    [Theory]
+    [InlineData("Data Source=aB3xK9zQ2mR7pL4w:db.prod.internal", "Data Source=***")]
+    [InlineData("Host=aB3xK9zQ2mR7pL4w:db.prod.internal:5432", "Host=***")]
+    public void AHostValueWithABogusSchemePrefix_IsMaskedWhole(string connectionString, string expected)
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
 }

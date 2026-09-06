@@ -63,22 +63,29 @@ internal static class ConnectionStringRedaction
         new(@"\A[0-9]{1,5}\z", RegexOptions.CultureInvariant, RegexTimeout);
 
     /// <summary>
-    /// A hostname, an IPv4 literal, or a bracketed IPv6 literal, with an optional network-library
-    /// prefix (<c>tcp:</c>, <c>tcp://</c>) in front and an optional <c>:port</c> or <c>,port</c>
+    /// A hostname, an IPv4 literal, or a bracketed IPv6 literal, with an optional <c>tcp:</c> or
+    /// <c>tcp://</c> network-library prefix in front and an optional <c>:port</c> or <c>,port</c>
     /// behind — <c>host</c>, <c>server</c> and <c>data source</c>'s shape.
     /// </summary>
     /// <remarks>
     /// No userinfo, no path, no query: a value carrying any of those is not addressing a host, it is
     /// carrying something this type cannot vouch for — a credential, a file path, an Oracle TNS
-    /// descriptor — and is masked whole rather than partially trusted. <c>tcp:</c> and <c>tcp://</c>
-    /// are SQL Server's and the ODBC/ADO.NET net-library spellings of the same address, both admitted
-    /// so a value with nothing to hide keeps reading as one.
+    /// descriptor — and is masked whole rather than partially trusted.
+    /// <para>
+    /// The permitted prefix is the literal word <c>tcp</c>, not any word: an earlier draft accepted
+    /// <em>any</em> letter-led run in front of a colon as a "scheme", which let
+    /// <c>Data Source=aB3xK9zQ2mR7pL4w:db.prod.internal</c> print whole — the alnum secret in front
+    /// of the colon parsed as a bogus scheme rather than being rejected as part of no legitimate host.
+    /// <c>tcp:</c> and <c>tcp://</c> are SQL Server's and the ODBC/ADO.NET net-library spellings of
+    /// the same address, and are the only prefix this needs to admit for a value with nothing to hide
+    /// to keep reading as one.
+    /// </para>
     /// </remarks>
     private static readonly Regex HostShape = new(
-        @"\A(?:[A-Za-z][A-Za-z0-9+.-]*:(?://)?)?"
+        @"\A(?:tcp:(?://)?)?"
         + @"(?:\[[0-9A-Fa-f:]+\]|[A-Za-z0-9](?:[A-Za-z0-9._-])*)"
         + @"(?:[:,][0-9]{1,5})?\z",
-        RegexOptions.CultureInvariant, RegexTimeout);
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase, RegexTimeout);
 
     /// <summary>
     /// A bare identifier — <c>database</c> and <c>initial catalog</c>'s shape.
@@ -100,8 +107,21 @@ internal static class ConnectionStringRedaction
     /// <summary>
     /// An identifier, or an ODBC braced driver name — <c>driver</c> and <c>provider</c>'s shape.
     /// </summary>
+    /// <remarks>
+    /// The braced form has to admit spaces — <c>{ODBC Driver 18 for SQL Server}</c>,
+    /// <c>{Microsoft Access Driver (*.mdb, *.accdb)}</c> — which is exactly what makes it the
+    /// loosest of the five shapes. <c>[^{}]*</c> is too loose: it admits any character at all except
+    /// a brace, so <c>Provider={hunter2 not a driver at all}</c> printed whole. The character set
+    /// below still covers every driver name ODBC/OLEDB actually ship — letters, digits, space, and
+    /// the punctuation real driver names use (<c>.</c> <c>,</c> <c>(</c> <c>)</c> <c>*</c> <c>_</c>
+    /// <c>+</c> <c>-</c>) — while excluding every character a credential is actually written with:
+    /// <c>=</c>, <c>@</c>, <c>:</c>, and the dialect's own separators. A driver name that happens to
+    /// be made of nothing but words and spaces is the one shape this cannot rule out — the same
+    /// residual every identifier-shaped key accepts — but that is a narrower target than "anything
+    /// that is not a brace".
+    /// </remarks>
     private static readonly Regex DriverShape = new(
-        @"\A(?:\{[^{}]*\}|[A-Za-z0-9_][A-Za-z0-9_.$-]*)\z",
+        @"\A(?:\{[A-Za-z0-9 ,.()*_+-]*\}|[A-Za-z0-9_][A-Za-z0-9_.$-]*)\z",
         RegexOptions.CultureInvariant, RegexTimeout);
 
     /// <summary>
