@@ -1,6 +1,7 @@
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.ServiceSources.BackingServices;
 using Aspire.Hosting.ServiceSources.Config;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
@@ -275,6 +276,41 @@ internal sealed class UrlSource : IServiceSource
         return null;
     }
 
+    /// <summary>
+    /// <paramref name="url"/> with any credentials in it replaced, for the messages that quote it
+    /// back.
+    /// </summary>
+    /// <remarks>
+    /// Both refusals below echo the value, because a developer with several services needs to know
+    /// which one is being refused — and a URL is where credentials live. The wrong-scheme refusal is
+    /// the one that matters: pointing a <c>"url"</c> service at a Redis or AMQP endpoint is an
+    /// ordinary mistake, and those endpoints carry credentials as a matter of course.
+    /// <para>
+    /// <see cref="ConnectionStringRedaction"/> rather than <see cref="GitUrl.RedactAll"/>, which
+    /// only finds a <c>scheme://user:pass@host</c>. A credential arrives in three other ways here
+    /// and that one answers none of them: in a query, as in
+    /// <c>redis://cache:6379?password=…</c>; under a keyword, as in a whole Azure connection string
+    /// pasted into the field; and with no <c>//</c> to hang an authority on, as in
+    /// <c>//token:x-oauth-basic@host</c>, where the secret is the <em>username</em>.
+    /// </para>
+    /// <para>
+    /// A value carrying none of the characters that could delimit or introduce one is echoed as
+    /// written, because there is nothing in it to hide and the echo is how a bare
+    /// <c>orders.example.com</c> — a URL missing its scheme, the most ordinary mistake here — gets
+    /// diagnosed. Passing that through the redaction would answer it with <c>***</c>.
+    /// </para>
+    /// </remarks>
+    private static string Redacted(string url)
+        => url.AsSpan().IndexOfAny(CouldCarryACredential) < 0
+            ? url
+            : ConnectionStringRedaction.Redact(url);
+
+    /// <summary>
+    /// The characters without which a value can hold neither a userinfo nor a pair.
+    /// </summary>
+    private static readonly System.Buffers.SearchValues<char> CouldCarryACredential =
+        System.Buffers.SearchValues.Create("@=;&?, \t\r\n");
+
     internal static Uri ResolveUrl(string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)
     {
         var rawUrl = config.Url.Url ?? metadata.Url?.Url;
@@ -289,13 +325,13 @@ internal sealed class UrlSource : IServiceSource
         if (!Uri.TryCreate(rawUrl, UriKind.Absolute, out var uri))
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': 'url' value '{rawUrl}' is not a valid absolute URL.");
+                $"Service '{serviceName}': 'url' value '{Redacted(rawUrl)}' is not a valid absolute URL.");
         }
 
         if (uri.Scheme is not ("http" or "https"))
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': 'url' value '{rawUrl}' must use the http or https scheme.");
+                $"Service '{serviceName}': 'url' value '{Redacted(rawUrl)}' must use the http or https scheme.");
         }
 
         return uri;
