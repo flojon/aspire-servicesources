@@ -37,6 +37,7 @@ internal sealed class DeveloperConfigShape
         string noun,
         IEnumerable<string> sourceNames)
     {
+        Entry = entry;
         Kind = kind;
         Noun = noun;
         SourceNames = sourceNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -57,6 +58,15 @@ internal sealed class DeveloperConfigShape
             block => DeveloperConfigField.BlockFieldsOf(block.PropertyType)!,
             StringComparer.OrdinalIgnoreCase);
     }
+
+    /// <summary>The type an entry of this kind binds to.</summary>
+    /// <remarks>
+    /// Exposed so that a check can ask about the entry's own properties and not only about what is
+    /// inside its blocks — <c>source</c> lives here and is handled outside the block walk, so a
+    /// field-level rule placed on it would be inert. Nothing in the walk needs this; the test that
+    /// pins where <see cref="NoSurroundingWhitespaceAttribute"/> may be declared does.
+    /// </remarks>
+    public Type Entry { get; }
 
     /// <summary>How this kind of entry is named at the start of a sentence — <c>Service</c>.</summary>
     public string Kind { get; }
@@ -93,15 +103,21 @@ internal sealed class DeveloperConfigShape
     public IReadOnlySet<string> RootKeys { get; }
 
     /// <summary>
-    /// Block name to the keys valid inside it, each carrying the type its value has to bind to.
+    /// Block name to the keys valid inside it, each carrying the property its value binds to.
     /// </summary>
     /// <remarks>
-    /// The type travels with the name because a key can be valid and its value still unbindable —
-    /// a <c>port</c> written as <c>"abc"</c> — and the binder answers that with an exception naming
-    /// a CLR type rather than the field. Checking it here keeps every complaint about an entry
-    /// arriving in the same shape, at the same moment.
+    /// The property travels with the name because a key can be valid and its value still
+    /// unbindable — a <c>port</c> written as <c>"abc"</c> — and the binder answers that with an
+    /// exception naming a CLR type rather than the field. Checking it here keeps every complaint
+    /// about an entry arriving in the same shape, at the same moment.
+    /// <para>
+    /// The whole property rather than its type alone, because a field can also be <em>declared</em>
+    /// with a rule the walk has to see. <see cref="NoSurroundingWhitespaceAttribute"/> is the first:
+    /// it sits on the property, and a dictionary keyed to types would have thrown it away one step
+    /// before the only code that asks about it.
+    /// </para>
     /// </remarks>
-    public IReadOnlyDictionary<string, IReadOnlyDictionary<string, Type>> BlockFields { get; }
+    public IReadOnlyDictionary<string, IReadOnlyDictionary<string, PropertyInfo>> BlockFields { get; }
 
     /// <summary>
     /// The blocks that declare a field named <paramref name="field"/>, in name order, or empty when

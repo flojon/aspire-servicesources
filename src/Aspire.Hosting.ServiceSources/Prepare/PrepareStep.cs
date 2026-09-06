@@ -146,6 +146,13 @@ internal sealed class PrepareStep
                 + "through PATH.");
         }
 
+        if (CheckoutRelativePath.UnusableSegment(program) is { } unusable)
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': {writtenAt}.command runs '{program}', which has a path segment "
+                + $"'{unusable}' — " + CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy);
+        }
+
         if (CheckoutRelativePath.EscapesRoot(program))
         {
             throw new ServiceSourcesConfigurationException(

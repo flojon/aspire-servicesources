@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Text;
+
 namespace Aspire.Hosting.ServiceSources.Config;
 
 /// <summary>
@@ -13,12 +16,37 @@ namespace Aspire.Hosting.ServiceSources.Config;
 internal static class ConfiguredValue
 {
     /// <summary>
+    /// Whether the character at <paramref name="index"/> is one a reader cannot see: whitespace, a
+    /// control character, or one of Unicode's <see cref="UnicodeCategory.Format"/> characters.
+    /// </summary>
+    /// <remarks>
+    /// Asked of the string and an index rather than of a <see cref="char"/>, because the answer for
+    /// half a surrogate pair is <see cref="UnicodeCategory.Surrogate"/> whatever the pair actually
+    /// spells. The invisible characters above the BMP are exactly the ones worth catching — plane 14
+    /// carries the tag block, which exists to be unseeable — so asking per <see cref="char"/> would
+    /// miss the deliberate cases and catch only the accidental ones.
+    /// <para>
+    /// It stops short of a combining mark, which is invisible too and is a real thing to write: a
+    /// decomposed accented letter carries one.
+    /// </para>
+    /// <para>
+    /// It lives here rather than beside the trimming that also asks it, so that what a message
+    /// escapes and what a remedy drops stay the same set — two spellings of one predicate are two
+    /// things to keep in step.
+    /// </para>
+    /// </remarks>
+    public static bool IsInvisible(string value, int index) =>
+        char.IsWhiteSpace(value[index])
+        || char.IsControl(value[index])
+        || CharUnicodeInfo.GetUnicodeCategory(value, index) == UnicodeCategory.Format;
+
+    /// <summary>
     /// A value as a quoted literal with its whitespace spelled out, so that a character which
     /// looks like a space — a tab, a newline, U+00A0 — is distinguishable from one.
     /// </summary>
     /// <remarks>
     /// The plain space is left as itself: it is the character a reader assumes, so escaping it
-    /// would add noise to the common case and nothing else. Everything else whitespace gets its
+    /// would add noise to the common case and nothing else. Everything else invisible gets its
     /// code point, which is what a developer needs in order to find it in the file.
     ///
     /// Every message that echoes a value or a developer-invented key goes through this, rather than
@@ -36,7 +64,8 @@ internal static class ConfiguredValue
 
     /// <summary>
     /// The same escaping without the surrounding quotes, for the places that build a spelling around
-    /// a name rather than quoting the name on its own — <c>${port:&lt;name&gt;}</c>.
+    /// a value rather than quoting it on its own — <c>${port:&lt;name&gt;}</c>, and a configuration
+    /// key path.
     /// </summary>
     /// <remarks>
     /// Its own method rather than <see cref="Escaped"/> with the quotes trimmed back off. Trimming
@@ -44,16 +73,46 @@ internal static class ConfiguredValue
     /// <c>'amqp'</c> came back as <c>amqp</c> — a name that does not exist — in the one sentence
     /// whose job is to hand the reader something to paste.
     /// </remarks>
-    public static string Bare(string? value) =>
-        value is null
-            ? ""
-            : string.Concat(value.Select(c => c switch
+    public static string Bare(string? value)
+    {
+        if (value is null)
+        {
+            return "";
+        }
+
+        var text = new StringBuilder();
+
+        for (var i = 0; i < value.Length; i++)
+        {
+            // A code point rather than a char, so that an invisible above the BMP — which arrives
+            // as a surrogate pair, and which no per-char question can classify — is spelled out
+            // rather than printed as the nothing it looks like.
+            var width = char.IsSurrogatePair(value, i) ? 2 : 1;
+
+            text.Append(value[i] switch
             {
                 ' ' => " ",
                 '\t' => "\\t",
                 '\n' => "\\n",
                 '\r' => "\\r",
-                _ when char.IsWhiteSpace(c) => $"\\u{(int)c:x4}",
-                _ => c.ToString(),
-            }));
+
+                // The one predicate the trimming uses, rather than a second spelling of it: what a
+                // message escapes and what a remedy drops have to be the same set, and two switch
+                // arms saying so in different words are two things to keep in step.
+                // Spelled as the surrogate pair rather than as the code point it makes, because
+                // this text is advice a developer pastes back: `\uD834\uDD73` is a JSON escape and
+                // `\U0001d173` is not, so the eight-digit form would name a spelling that breaks the
+                // file it is typed into.
+                _ when IsInvisible(value, i) => width == 1
+                    ? $"\\u{(int)value[i]:x4}"
+                    : $"\\u{(int)value[i]:x4}\\u{(int)value[i + 1]:x4}",
+
+                _ => value.Substring(i, width),
+            });
+
+            i += width - 1;
+        }
+
+        return text.ToString();
+    }
 }
