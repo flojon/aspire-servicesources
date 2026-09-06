@@ -22,7 +22,7 @@ public class MissingHostingPackageTests
     public void KindWhoseHostingAssemblyIsMissing_IsReportedAsTheMissingPackage(
         string kind, string packageId)
     {
-        var repoRoot = Directory.CreateTempSubdirectory().FullName;
+        var repoRoot = TempDirectories.CreateSubdirectory().FullName;
         var builder = TestHelpers.CreateBuilder(repoRoot);
         builder.AddLocalKind(kind, new AssemblyMissingKind(packageId));
 
@@ -59,7 +59,7 @@ public class MissingHostingPackageTests
     public void KindWhoseHostingAssemblyIsMissingFromValidate_IsReportedTheSameWay(
         string kind, string packageId)
     {
-        var repoRoot = Directory.CreateTempSubdirectory().FullName;
+        var repoRoot = TempDirectories.CreateSubdirectory().FullName;
         var builder = TestHelpers.CreateBuilder(repoRoot);
         builder.AddLocalKind(kind, new AssemblyMissingKind(packageId, fromValidate: true));
 
@@ -81,7 +81,7 @@ public class MissingHostingPackageTests
     [Fact]
     public void KindThatFailsForItsOwnReasons_IsNotReportedAsAMissingPackage()
     {
-        var repoRoot = Directory.CreateTempSubdirectory().FullName;
+        var repoRoot = TempDirectories.CreateSubdirectory().FullName;
         var builder = TestHelpers.CreateBuilder(repoRoot);
         builder.AddLocalKind("javascript", new BrokenKind());
 
@@ -101,7 +101,7 @@ public class MissingHostingPackageTests
     [Fact]
     public void LoadFailureNamingSomeOtherAssembly_KeepsTheGenericMessage()
     {
-        var repoRoot = Directory.CreateTempSubdirectory().FullName;
+        var repoRoot = TempDirectories.CreateSubdirectory().FullName;
         var builder = TestHelpers.CreateBuilder(repoRoot);
         builder.AddLocalKind("javascript", new AssemblyMissingKind("Contoso.Something.Else"));
 
@@ -122,7 +122,7 @@ public class MissingHostingPackageTests
     [Fact]
     public void UnregisteredKind_TellsTheReaderToCallTheRegistrationMethod()
     {
-        var repoRoot = Directory.CreateTempSubdirectory().FullName;
+        var repoRoot = TempDirectories.CreateSubdirectory().FullName;
         var builder = TestHelpers.CreateBuilder(repoRoot);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>

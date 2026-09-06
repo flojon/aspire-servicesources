@@ -14,10 +14,10 @@ public class JavaScriptDeferredCheckoutTests
     /// asserted here has to hold with nothing on disk.
     /// </summary>
     private static string PlannedRepoRoot() => Path.Combine(
-        Directory.CreateTempSubdirectory("servicesources-js-").FullName, "checkouts", "frontend");
+        TempDirectories.CreateSubdirectory("servicesources-js-").FullName, "checkouts", "frontend");
 
     private static IDistributedApplicationBuilder CreateBuilder() =>
-        TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+        TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
     private static DeferredLocalResource ResolveDeferred(
         IDistributedApplicationBuilder builder, string repoRoot, string optionsYaml)

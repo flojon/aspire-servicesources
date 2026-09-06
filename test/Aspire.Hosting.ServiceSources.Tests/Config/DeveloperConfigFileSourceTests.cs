@@ -40,7 +40,7 @@ public class DeveloperConfigFileSourceTests
 
     private static string CreateAppHostDirectory(string? yaml = OrdersCatalog, string source = "local")
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         if (yaml is not null)
         {
             File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), yaml);

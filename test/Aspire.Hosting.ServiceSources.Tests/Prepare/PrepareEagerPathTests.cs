@@ -116,7 +116,7 @@ public class PrepareEagerPathTests
     private static string CreateAppHostDirectory(
         string serviceName, string kind = KindName, string? checkoutPath = null)
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
 
         File.WriteAllText(
             Path.Combine(dir, "servicesources.yaml"),
@@ -288,7 +288,7 @@ public class PrepareEagerPathTests
     /// </summary>
     private static string CreateOwnCheckout(string requires = "app.jar")
     {
-        var checkout = Directory.CreateTempSubdirectory().FullName;
+        var checkout = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(checkout, requires), "already built");
         File.WriteAllText(Path.Combine(checkout, "prepare.sh"), "#!/bin/sh\n");
         return checkout;

@@ -100,7 +100,7 @@ public class DeferredCheckoutTests
 
     private static string CreateAppHostDirectory(params string[] localServices)
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
 
         var yaml = string.Join("\n", localServices.Select(name =>
             $"  {name}:\n    repository: https://example.com/{name}.git\n    project: Service.csproj"));
@@ -270,7 +270,7 @@ public class DeferredCheckoutTests
     public void OptedIn_PathOverride_ResolvesEagerly()
     {
         var dir = CreateAppHostDirectory("orders");
-        var checkout = Directory.CreateTempSubdirectory().FullName;
+        var checkout = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(checkout, "Service.csproj"), "<Project />");
         var builder = TestHelpers.CreateBuilder(dir);
         builder.UseDeferredCheckout();
@@ -399,7 +399,7 @@ public class DeferredCheckoutTests
     [Fact]
     public void LaunchProfileEndpointWarning_NoLaunchSettingsAtAll_SaysNothing()
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         var projectFile = Path.Combine(dir, "Service.csproj");
         File.WriteAllText(projectFile, "<Project />");
 
@@ -430,7 +430,7 @@ public class DeferredCheckoutTests
     [Fact]
     public void LandedLaunchProfile_NoLaunchSettings_IsEmptyRatherThanThrowing()
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         var projectFile = Path.Combine(dir, "Service.csproj");
         File.WriteAllText(projectFile, "<Project />");
 
@@ -443,7 +443,7 @@ public class DeferredCheckoutTests
     [Fact]
     public void LandedLaunchProfile_UnparseableFile_IsEmptyRatherThanThrowing()
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         var projectFile = Path.Combine(dir, "Service.csproj");
         File.WriteAllText(projectFile, "<Project />");
         var properties = Directory.CreateDirectory(Path.Combine(dir, "Properties")).FullName;
@@ -460,7 +460,7 @@ public class DeferredCheckoutTests
     [Fact]
     public void LandedLaunchProfile_SkipsProfilesThatAreNotProjectProfiles()
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         var projectFile = Path.Combine(dir, "Service.csproj");
         File.WriteAllText(projectFile, "<Project />");
         var properties = Directory.CreateDirectory(Path.Combine(dir, "Properties")).FullName;
@@ -612,7 +612,7 @@ public class DeferredCheckoutTests
 
     private static string WriteLaunchSettings(string json)
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         var projectFile = Path.Combine(dir, "Service.csproj");
         File.WriteAllText(projectFile, "<Project />");
 
@@ -625,7 +625,7 @@ public class DeferredCheckoutTests
     private static string WriteProjectWithLaunchProfile(
         string? applicationUrl, string? environmentVariables = null)
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         var projectFile = Path.Combine(dir, "Service.csproj");
         File.WriteAllText(projectFile, "<Project />");
 
@@ -1089,7 +1089,7 @@ public class DeferredCheckoutTests
         // object store and reports no progress at all, so it would leave nothing to observe.
         var repository = new Uri(origin.Path).AbsoluteUri;
 
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(
             Path.Combine(dir, "servicesources.yaml"),
             $"services:\n  orders:\n    repository: {repository}\n    project: Service.csproj\n");
@@ -1189,7 +1189,7 @@ public class DeferredCheckoutTests
         // That is the ordinary path for a deferred service since #177, and the one whose progress
         // has the furthest to travel — the clone begins while the AppHost is still composing, long
         // before there is a resource with a state column to report into.
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(
             Path.Combine(dir, "servicesources.yaml"),
             "services:\n  orders:\n    repository: https://example.com/orders.git\n    project: Service.csproj\n");
@@ -1333,7 +1333,7 @@ public class DeferredCheckoutTests
     [Fact]
     public void DeferredProjectMetadata_MissingCheckout_ReportsEmptyLaunchSettingsRatherThanReadingTheFile()
     {
-        var missing = Path.Combine(Directory.CreateTempSubdirectory().FullName, "Service.csproj");
+        var missing = Path.Combine(TempDirectories.CreateSubdirectory().FullName, "Service.csproj");
 
         var launchSettings = new DeferredProjectMetadata(missing).LaunchSettings;
 
@@ -1346,7 +1346,7 @@ public class DeferredCheckoutTests
     [Fact]
     public void DeferredProjectMetadata_CheckoutHasLanded_DefersToTheRepositorysOwnLaunchSettings()
     {
-        var projectPath = Path.Combine(Directory.CreateTempSubdirectory().FullName, "Service.csproj");
+        var projectPath = Path.Combine(TempDirectories.CreateSubdirectory().FullName, "Service.csproj");
         File.WriteAllText(projectPath, "<Project />");
 
         // Null is how IProjectMetadata says "read Properties/launchSettings.json" — which Aspire

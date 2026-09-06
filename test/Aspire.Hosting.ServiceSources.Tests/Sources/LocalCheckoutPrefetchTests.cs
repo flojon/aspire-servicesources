@@ -130,7 +130,7 @@ public class LocalCheckoutPrefetchTests
     /// </summary>
     private static string CreateAppHostDirectory(params string[] localServices)
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
 
         var yaml = string.Join("\n", localServices.Select(name =>
             $"  {name}:\n    repository: https://example.com/{name}.git\n    project: Service.csproj"));
@@ -148,7 +148,7 @@ public class LocalCheckoutPrefetchTests
     /// </summary>
     private static string CreateAppHostDirectoryOnRef(string defaultRef, params string[] localServices)
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
 
         var yaml = string.Join("\n", localServices.Select(name =>
             $"  {name}:\n    repository: https://example.com/{name}.git\n    project: Service.csproj\n" +
@@ -180,7 +180,7 @@ public class LocalCheckoutPrefetchTests
     /// </summary>
     private static string CreateMonorepoAppHostDirectory(string repository, params string[] localServices)
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
 
         var yaml = string.Join("\n", localServices.Select(name =>
             $"  {name}:\n    repository: {repository}\n    project: Service.csproj"));
@@ -378,7 +378,7 @@ public class LocalCheckoutPrefetchTests
     [Fact]
     public void ServiceNameThatWouldEscapeTheCheckoutDirectory_IsSkippedByThePrefetch()
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(
             Path.Combine(dir, "servicesources.yaml"),
             """
@@ -422,7 +422,7 @@ public class LocalCheckoutPrefetchTests
     [Fact]
     public void ServiceNameThatWouldEscapeOnlyOnWindows_IsSkippedByThePrefetchEverywhere()
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(
             Path.Combine(dir, "servicesources.yaml"),
             """
@@ -578,7 +578,7 @@ public class LocalCheckoutPrefetchTests
     [Fact]
     public void FirstAddService_ConfigurationSpellsAServiceDifferentlyFromTheCatalog_StillPrefetchesIt()
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(
             Path.Combine(dir, "servicesources.yaml"),
             """

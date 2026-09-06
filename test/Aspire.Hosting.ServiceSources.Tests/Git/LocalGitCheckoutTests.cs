@@ -18,7 +18,7 @@ public class LocalGitCheckoutTests
     private static ServiceDeveloperConfig WithPathOverride(string path) =>
         new() { Source = "local", Local = new LocalDeveloperConfig { Path = path } };
 
-    private static string NewAppHostDirectory() => Directory.CreateTempSubdirectory().FullName;
+    private static string NewAppHostDirectory() => TempDirectories.CreateSubdirectory().FullName;
 
     /// <summary>
     /// A directory to compose paths against, never created on disk — for the tests that only ask
@@ -72,7 +72,7 @@ public class LocalGitCheckoutTests
         // override outranks it: that path is the developer's own directory, and this package never
         // clones into it.
         var appHostDirectory = NewAppHostDirectory();
-        var theirs = Directory.CreateTempSubdirectory().FullName;
+        var theirs = TempDirectories.CreateSubdirectory().FullName;
 
         Assert.False(LocalGitCheckout.IsColdManagedCheckout(appHostDirectory, "orders", WithPathOverride(theirs)));
     }

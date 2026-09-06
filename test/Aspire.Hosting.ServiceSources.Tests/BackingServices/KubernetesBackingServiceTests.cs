@@ -47,7 +47,7 @@ public class KubernetesBackingServiceTests
     }
 
     private static IDistributedApplicationBuilder CreateBuilder() =>
-        TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+        TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
     /// <summary>
     /// An entry with every field set, so a test about one of them changes only that one.

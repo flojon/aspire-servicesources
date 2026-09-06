@@ -96,7 +96,7 @@ public class CheckoutPreparationTests
     /// </summary>
     private static string CreateManagedCheckout()
     {
-        var repoRoot = Directory.CreateTempSubdirectory().FullName;
+        var repoRoot = TempDirectories.CreateSubdirectory().FullName;
         Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
         return repoRoot;
     }
@@ -116,7 +116,7 @@ public class CheckoutPreparationTests
     }
 
     private static Fixture NewFixture() =>
-        new(CreateManagedCheckout(), Directory.CreateTempSubdirectory().FullName, new(), new(), new());
+        new(CreateManagedCheckout(), TempDirectories.CreateSubdirectory().FullName, new(), new(), new());
 
     private static void Run(
         Fixture fixture,

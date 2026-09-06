@@ -11,7 +11,7 @@ public class ContainerConsumerTests
 {
     private static string AppHostDirectory(string source)
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
             services:
               inventory:
@@ -52,7 +52,7 @@ public class ContainerConsumerTests
     [Fact]
     public async Task KubernetesSourcedService_IsRegistered_SoAContainerConsumerCanReferenceIt()
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
             services:
               inventory:
@@ -87,7 +87,7 @@ public class ContainerConsumerTests
     [Fact]
     public async Task LocalSourcedService_IsRegistered_SoAContainerConsumerCanReferenceIt()
     {
-        var projectDir = Directory.CreateTempSubdirectory().FullName;
+        var projectDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(projectDir, "Inventory.csproj"), """
             <Project Sdk="Microsoft.NET.Sdk">
               <PropertyGroup>
@@ -96,7 +96,7 @@ public class ContainerConsumerTests
             </Project>
             """);
 
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
             services:
               inventory:
@@ -163,7 +163,7 @@ public class ContainerConsumerTests
         var inventory = builder.AddService("inventory");
         // An executable stands in for every host-process consumer: the pre-flight keys off
         // ContainerResource, so a project takes this same path.
-        builder.AddExecutable("worker", "dotnet", Directory.CreateTempSubdirectory().FullName)
+        builder.AddExecutable("worker", "dotnet", TempDirectories.CreateSubdirectory().FullName)
             .WithReference(inventory);
 
         // Host-process consumers work today and must keep working — the pre-flight is narrow.

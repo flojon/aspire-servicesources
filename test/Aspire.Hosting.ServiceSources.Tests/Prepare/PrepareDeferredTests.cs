@@ -206,7 +206,7 @@ public class PrepareDeferredTests
 
     private static string CreateAppHostDirectory(params string[] localServices)
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
 
         var yaml = string.Join("\n", localServices.Select(name =>
             $"  {name}:\n    repository: https://example.com/{name}.git\n    kind: {KindName}"));
@@ -552,7 +552,7 @@ public class PrepareDeferredTests
     [Fact]
     public async Task ADotnetServiceWhoseProjectFileTheStepProduces_Starts()
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(
             Path.Combine(dir, "servicesources.yaml"),
             "services:\n  orders:\n    repository: https://example.com/orders.git\n"
@@ -608,7 +608,7 @@ public class PrepareDeferredTests
     [Fact]
     public async Task ADotnetServiceWithNoStep_FailsOnTheProjectFileTheStepWouldHaveProduced()
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(
             Path.Combine(dir, "servicesources.yaml"),
             "services:\n  orders:\n    repository: https://example.com/orders.git\n"

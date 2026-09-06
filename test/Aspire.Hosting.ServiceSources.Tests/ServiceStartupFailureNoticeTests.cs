@@ -468,7 +468,7 @@ public class ServiceStartupFailureNoticeTests
         // End to end through the same seam a real run uses: the report is subscribed by the source
         // that tagged the resource, started from BeforeStartEvent, and reads the notification
         // service DCP publishes into.
-        var builder = TestHelpers.CreateBuilderThatCanStart(Directory.CreateTempSubdirectory().FullName);
+        var builder = TestHelpers.CreateBuilderThatCanStart(TempDirectories.CreateSubdirectory().FullName);
 
         var notices = TestHelpers.StreamServiceSourcesWarnings(builder);
 
@@ -500,7 +500,7 @@ public class ServiceStartupFailureNoticeTests
     {
         // Publish mode composes the model, writes the manifest and exits without starting a
         // resource, so there is no start to fail and no console watching for one.
-        var builder = TestHelpers.CreatePublishingBuilder(Directory.CreateTempSubdirectory().FullName);
+        var builder = TestHelpers.CreatePublishingBuilder(TempDirectories.CreateSubdirectory().FullName);
 
         var orders = builder.AddResource(new FakeServiceResource("orders"));
         ResolvedService.Tag(orders, "orders", "local");

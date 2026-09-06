@@ -389,7 +389,7 @@ public class GitCliClientTests
     [Fact]
     public void GetHeadCommitSha_NotARepository_IsNull()
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
 
         Assert.Null(Client().GetHeadCommitSha(dir));
     }

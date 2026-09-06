@@ -14,7 +14,7 @@ public class UseJavaScriptTests
 {
     private static string CreateAppHost(string repoRoot, string catalogOptions = "")
     {
-        var appHostDir = Directory.CreateTempSubdirectory("servicesources-js-apphost-").FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory("servicesources-js-apphost-").FullName;
 
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), $"""
             services:
@@ -110,7 +110,7 @@ public class UseJavaScriptTests
     public void RegisteringTwiceOnTheSameBuilderIsRejected()
     {
         var builder = TestHelpers.CreateBuilder(
-            Directory.CreateTempSubdirectory("servicesources-js-apphost-").FullName);
+            TempDirectories.CreateSubdirectory("servicesources-js-apphost-").FullName);
 
         builder.UseJavaScript();
 

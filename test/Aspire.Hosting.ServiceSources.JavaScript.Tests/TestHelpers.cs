@@ -31,7 +31,7 @@ internal static class TestHelpers
     /// </summary>
     public static string CreateRepo(string? appSubdirectory = null, bool withPackageJson = true)
     {
-        var repoRoot = Directory.CreateTempSubdirectory("servicesources-js-").FullName;
+        var repoRoot = TempDirectories.CreateSubdirectory("servicesources-js-").FullName;
         var appDirectory = appSubdirectory is null ? repoRoot : Path.Combine(repoRoot, appSubdirectory);
         Directory.CreateDirectory(appDirectory);
 

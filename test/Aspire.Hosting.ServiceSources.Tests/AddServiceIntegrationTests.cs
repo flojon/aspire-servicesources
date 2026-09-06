@@ -23,7 +23,7 @@ public class AddServiceIntegrationTests
     [Fact]
     public void AddService_ManagedClone_ClonesRealRepoAndChecksOutFeatureRef()
     {
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
 
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), $$"""
             services:
@@ -58,7 +58,7 @@ public class AddServiceIntegrationTests
     [Fact]
     public void AddService_TwoServicesSameRepoDifferentRefs_BothResolveIndependently()
     {
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
 
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), $$"""
             services:
@@ -91,7 +91,7 @@ public class AddServiceIntegrationTests
     [Fact]
     public void AddService_TwoServicesSameRepoSameRef_BothResolveIndependently()
     {
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
 
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), $$"""
             services:
