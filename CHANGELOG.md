@@ -363,9 +363,10 @@ nothing will fail to build to warn you.
 - **A `kubernetes` `context`, `namespace` or `service` with surrounding whitespace is now refused**
   ([#236]). These values are handed to `kubectl` exactly as written, so a leading or trailing space
   is part of the name it looks for: `--context " dev-west"` matches no context, and a padded
-  namespace is looked up as a namespace that cannot exist. Both sources are covered — a service's
-  `kubernetes` block and a backing service's — because fixing one and not the other would be worse
-  than fixing neither.
+  namespace is looked up as a namespace that cannot exist. `context` and `namespace` are covered on
+  both sources — a service's `kubernetes` block and a backing service's — because fixing one and not
+  the other would be worse than fixing neither. `service` is a backing-service key only; a service
+  takes its Service name from `servicesources.yaml`, which this check does not read.
 
   **An AppHost whose file carries one of these now fails to start, where it used to start and fail
   later** in `kubectl`'s own output in the dashboard. The message names the entry, the key, the value

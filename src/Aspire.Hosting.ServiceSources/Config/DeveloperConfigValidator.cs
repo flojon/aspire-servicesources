@@ -234,10 +234,10 @@ internal static class DeveloperConfigValidator
             // reaching for. Before BindsTo, so the field's own type stays out of the sentence — the
             // same reason Blank is kept apart from NotBindable.
             if (field.Value is { } verbatim
-                && declared.GetCustomAttribute<NoSurroundingWhitespaceAttribute>() is { } handedOn
-                && verbatim != verbatim.Trim())
+                && IsPaddedWithWhitespace(verbatim)
+                && declared.GetCustomAttribute<NoSurroundingWhitespaceAttribute>() is { } rule)
             {
-                problems.Add(SurroundedByWhitespace(field, blockPath, verbatim, handedOn));
+                problems.Add(SurroundedByWhitespace(field, blockPath, verbatim, rule));
                 continue;
             }
 
@@ -700,15 +700,15 @@ internal static class DeveloperConfigValidator
         IConfigurationSection field,
         string block,
         string value,
-        NoSurroundingWhitespaceAttribute handedOn)
+        NoSurroundingWhitespaceAttribute rule)
     {
-        var remedy = TrimUnseeable(value);
+        var remedy = TrimInvisible(value);
         var opening = $"'{field.Key}' in the '{block}' block is set to {Escaped(value)}";
 
-        // Nothing but whitespace and characters with no glyph. Blank did not take it — a byte-order
-        // mark is not whitespace — but what Blank would have said is what this value needs: there is
-        // no spelling left to propose, and the empty value is the gesture for a field nobody meant
-        // to set.
+        // Nothing but whitespace and characters that cannot be seen. Blank did not take it — a
+        // byte-order mark is not whitespace — but what Blank would have said is what this value
+        // needs: there is no spelling left to propose, and the empty value is the gesture for a
+        // field nobody meant to set.
         if (remedy.Length == 0)
         {
             return $"{opening}, which is whitespace and characters with no glyph rather than a "
@@ -716,64 +716,161 @@ internal static class DeveloperConfigValidator
                 + SetAt(field);
         }
 
-        var mechanism = $", and {handedOn.Receiver} is given it exactly as written — so "
-            + $"{handedOn.Receiver} looks for {Escaped(value)} and not {Escaped(remedy)}. ";
+        // The spelling is always named, even when it still carries something invisible of its own.
+        // Withholding it leaves the reader with "retype" and no target, and the escapes are honest
+        // about what is in there — what they cannot convey is *where*, which the sentence does.
+        var caveat = PrintsAsItself(remedy)
+            ? ""
+            : " The escapes in that spelling are characters you cannot see. They sit inside the "
+              + "value rather than around it, which is outside what this rule judges, so retype it "
+              + "if they were not deliberate.";
 
-        // A remedy carrying an invisible character of its own cannot be typed out of this message,
-        // and must not be offered as though it could: an escape like \ufeff is also valid JSON, so
-        // a reader copying it back into the file writes the very value being complained about — and
-        // that one has no whitespace left for anything to catch.
-        var fix = Escaped(remedy) == $"'{remedy}'"
-            ? $"Set it to {Escaped(remedy)}."
-            : $"{Escaped(remedy)} still carries a character with no glyph of its own, so retype the "
-              + "value rather than copying it from here.";
-
-        return opening + mechanism + fix
-            + (handedOn.IfDeliberate is { } deliberate ? $" {deliberate}" : "")
+        return opening
+            + $", and {rule.Receiver} is given it exactly as written — so {rule.Receiver} looks "
+            + $"for {Escaped(value)} and not {Escaped(remedy)}. Set it to {Escaped(remedy)}."
+            + caveat
+            + (rule.IfDeliberate is { } deliberate ? $" {deliberate}" : "")
             + SetAt(field);
     }
 
     /// <summary>
-    /// Whether <paramref name="c"/> is a character a reader cannot see: whitespace, a control
-    /// character, or one of Unicode's <see cref="UnicodeCategory.Format"/> characters.
+    /// Whether the character at <paramref name="index"/> is one a reader cannot see: whitespace, a
+    /// control character, or one of Unicode's <see cref="UnicodeCategory.Format"/> characters.
     /// </summary>
     /// <remarks>
-    /// The same line <see cref="Escaped"/> draws, and for the same reason: these are the characters
-    /// a developer cannot tell apart from nothing at all. It stops short of a combining mark, which
-    /// is invisible too and is a real thing to write — a decomposed accented letter carries one.
+    /// Asked of the string and an index rather than of a <see cref="char"/>, because the answer for
+    /// half a surrogate pair is <see cref="UnicodeCategory.Surrogate"/> whatever the pair actually
+    /// spells. The invisible characters above the BMP are exactly the ones worth catching — plane 14
+    /// carries the tag block, which exists to be unseeable — so asking per <see cref="char"/> would
+    /// miss the deliberate cases and catch only the accidental ones.
+    /// <para>
+    /// It stops short of a combining mark, which is invisible too and is a real thing to write: a
+    /// decomposed accented letter carries one.
+    /// </para>
     /// </remarks>
-    private static bool IsUnseeable(char c) =>
-        char.IsWhiteSpace(c)
-        || char.IsControl(c)
-        || CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.Format;
+    private static bool IsInvisible(string value, int index) =>
+        char.IsWhiteSpace(value[index])
+        || char.IsControl(value[index])
+        || CharUnicodeInfo.GetUnicodeCategory(value, index) == UnicodeCategory.Format;
+
+    /// <summary>
+    /// The span of <paramref name="value"/> left once the characters at either end that a reader
+    /// cannot see are dropped.
+    /// </summary>
+    private static (int Start, int End) VisibleSpan(string value)
+    {
+        var start = 0;
+        var end = value.Length;
+
+        while (start < end && IsInvisible(value, start))
+        {
+            start += char.IsSurrogatePair(value, start) ? 2 : 1;
+        }
+
+        while (end > start)
+        {
+            var begins = end - 1;
+
+            // Step back over a low surrogate so the category is asked of the pair rather than of
+            // half of one.
+            if (begins - 1 >= start
+                && char.IsLowSurrogate(value[begins])
+                && char.IsHighSurrogate(value[begins - 1]))
+            {
+                begins--;
+            }
+
+            if (!IsInvisible(value, begins))
+            {
+                break;
+            }
+
+            end = begins;
+        }
+
+        return (start, end);
+    }
 
     /// <summary>
     /// <paramref name="value"/> without the characters at either end that a reader cannot see.
     /// </summary>
     /// <remarks>
-    /// This computes the spelling a message <em>proposes</em>, and not the rule that fires it. The
-    /// rule stays about whitespace, which is what
-    /// <see href="https://github.com/flojon/aspire-servicesources/issues/236">#236</see> is about;
-    /// the remedy has to be a value the developer can actually type, and one still carrying a
-    /// byte-order mark is not.
+    /// This computes the spelling a message <em>proposes</em>, and it deliberately reaches wider
+    /// than the rule that fires: a remedy is only useful if it is a value that works, and one still
+    /// carrying a byte-order mark at its edge is not.
     /// </remarks>
-    private static string TrimUnseeable(string value)
+    private static string TrimInvisible(string value)
     {
-        var start = 0;
-        var end = value.Length;
-
-        while (start < end && IsUnseeable(value[start]))
-        {
-            start++;
-        }
-
-        while (end > start && IsUnseeable(value[end - 1]))
-        {
-            end--;
-        }
+        var (start, end) = VisibleSpan(value);
 
         return value[start..end];
     }
+
+    /// <summary>
+    /// Whether the padding <see cref="TrimInvisible"/> would remove contains any whitespace.
+    /// </summary>
+    /// <remarks>
+    /// This is the rule, and it is narrower than <see cref="TrimInvisible"/> on purpose.
+    /// <see href="https://github.com/flojon/aspire-servicesources/issues/236">#236</see> is about
+    /// whitespace; a value padded <em>only</em> with characters that cannot be seen is a different
+    /// question, needing its own decision about which code points and which fields, and is left
+    /// open rather than answered as a side effect of this one.
+    /// <para>
+    /// What it may not do is let a stray space through because something invisible sits outside it.
+    /// A paste out of a rendered page is the likeliest way to acquire a zero-width space and a
+    /// stray space together, and <c>value != value.Trim()</c> answers <c>"\u200b dev-west"</c> with
+    /// silence — the whitespace is there, merely not at the edge. So the padding is stripped first
+    /// and then asked whether it held any whitespace.
+    /// </para>
+    /// </remarks>
+    private static bool IsPaddedWithWhitespace(string value)
+    {
+        var (start, end) = VisibleSpan(value);
+
+        return HasWhitespace(value.AsSpan(0, start)) || HasWhitespace(value.AsSpan(end));
+    }
+
+    private static bool HasWhitespace(ReadOnlySpan<char> padding)
+    {
+        foreach (var c in padding)
+        {
+            if (char.IsWhiteSpace(c))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="value"/> would survive <see cref="Escaped"/> unchanged — every
+    /// character printing as itself, the plain space included.
+    /// </summary>
+    /// <remarks>
+    /// Asked directly rather than by comparing <see cref="Escaped"/>'s output with the value, which
+    /// reads as the same question and is not: it couples the answer to how that method happens to
+    /// format today, so a later decision to quote the plain space would silently turn every context
+    /// with a space in it into one this cannot propose.
+    /// </remarks>
+    private static bool PrintsAsItself(string value)
+    {
+        for (var i = 0; i < value.Length; i++)
+        {
+            if (value[i] != ' ' && IsInvisible(value, i))
+            {
+                return false;
+            }
+
+            if (char.IsSurrogatePair(value, i))
+            {
+                i++;
+            }
+        }
+
+        return true;
+    }
+
 
     /// <summary>
     /// The error for a value of one or more spaces, whatever type the field takes.
@@ -815,28 +912,44 @@ internal static class DeveloperConfigValidator
     /// a whitespace value can reach is not a thing to work out per message: it was reaching
     /// <see cref="EntryExpected"/> unescaped for exactly as long as it took to notice.
     /// </remarks>
-    private static string Escaped(string? value) =>
-        value is null
-            ? "''"
-            : $"'{string.Concat(value.Select(c => c switch
+    private static string Escaped(string? value)
+    {
+        if (value is null)
+        {
+            return "''";
+        }
+
+        var text = new StringBuilder("'");
+
+        for (var i = 0; i < value.Length; i++)
+        {
+            // A code point rather than a char, so that an invisible above the BMP — which arrives
+            // as a surrogate pair, and which no per-char question can classify — is spelled out
+            // rather than printed as the nothing it looks like.
+            var width = char.IsSurrogatePair(value, i) ? 2 : 1;
+
+            text.Append(value[i] switch
             {
                 ' ' => " ",
                 '\t' => "\\t",
                 '\n' => "\\n",
                 '\r' => "\\r",
-                _ when char.IsWhiteSpace(c) => $"\\u{(int)c:x4}",
 
-                // A character with no glyph of its own is worse than one that merely looks like a
-                // space: echoed as itself it is not there at all, so the value reads back as
-                // exactly what the developer typed and the message appears to be complaining about
-                // nothing. Control characters and Unicode's Format category are the two slices of
-                // that this can name without reaching a character somebody meant — a combining mark
-                // is invisible too, and a decomposed accented letter carries one.
-                _ when char.IsControl(c) || CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.Format
-                    => $"\\u{(int)c:x4}",
+                // The one predicate the trimming uses, rather than a second spelling of it: what a
+                // message escapes and what a remedy drops have to be the same set, and two switch
+                // arms saying so in different words are two things to keep in step.
+                _ when IsInvisible(value, i) => width == 1
+                    ? $"\\u{(int)value[i]:x4}"
+                    : $"\\U{char.ConvertToUtf32(value, i):x8}",
 
-                _ => c.ToString(),
-            }))}'";
+                _ => value.Substring(i, width),
+            });
+
+            i += width - 1;
+        }
+
+        return text.Append('\'').ToString();
+    }
 
     private static string Described(Type type)
     {

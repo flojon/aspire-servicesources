@@ -72,8 +72,12 @@ public class DeveloperConfigValidatorTests
                 "kubernetes": { "port": "\uFEFF8080" } } } }
             """);
 
-        Assert.Contains("\\ufeff", ex.Message);
-        Assert.DoesNotContain("'\ufeff8080'", ex.Message);
+        Assert.Contains("\\ufeff", ex.Message, StringComparison.Ordinal);
+
+        // Ordinal, and asserted against the raw mark rather than the escape. U+FEFF carries zero
+        // collation weight, so a culture-sensitive comparison against a literal one matches every
+        // string there is — the empty one included — and the assertion silently stops testing.
+        Assert.DoesNotContain("\ufeff8080", ex.Message, StringComparison.Ordinal);
     }
 
     /// <remarks>
@@ -258,10 +262,10 @@ public class DeveloperConfigValidatorTests
 
     /// <remarks>
     /// The trap this rule exists to close, re-created by the rule itself if the remedy is computed
-    /// by trimming whitespace alone. A byte-order mark is not whitespace, so it survives Trim() —
-    /// and ﻿ is a valid JSON escape, so a developer copying the proposed spelling back into
-    /// the file writes the same broken value, this time with no whitespace left to trigger any
-    /// message at all.
+    /// by trimming whitespace alone. A byte-order mark is not whitespace, so it survives Trim(),
+    /// and the proposed spelling would then render on screen as a clean "orders" while carrying the
+    /// mark — so a developer following the advice writes a value that still fails, and this time
+    /// has no whitespace left to trigger any message at all.
     /// </remarks>
     [Fact]
     public void Validate_PaddingAroundAnInvisibleCharacter_ProposesASpellingThatWorks()
@@ -269,14 +273,17 @@ public class DeveloperConfigValidatorTests
         var ex = Load("""
             { "services": { "orders": {
                 "source": "kubernetes",
-                "kubernetes": { "namespace": " ﻿orders" } } } }
+                "kubernetes": { "namespace": " \uFEFForders" } } } }
             """);
 
-        // What arrived is shown with the mark spelled out...
-        Assert.Contains(@"﻿", ex.Message);
+        // What arrived is shown with the mark spelled out. Ordinal, and asserted on the escape
+        // rather than on a raw U+FEFF: that character has zero collation weight, so a
+        // culture-sensitive Contains against a literal one passes against any string at all.
+        Assert.Contains("\\ufeff", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("﻿", ex.Message, StringComparison.Ordinal);
 
         // ...and what to write carries neither the space nor the mark.
-        Assert.Contains("Set it to 'orders'.", ex.Message);
+        Assert.Contains("Set it to 'orders'.", ex.Message, StringComparison.Ordinal);
     }
 
     /// <remarks>
@@ -290,7 +297,7 @@ public class DeveloperConfigValidatorTests
         var ex = Load("""
             { "services": { "orders": {
                 "source": "kubernetes",
-                "kubernetes": { "namespace": " ﻿" } } } }
+                "kubernetes": { "namespace": " \uFEFF" } } } }
             """);
 
         // The distinguishing clause rather than "empty value" alone: Blank's message ends with that
@@ -300,21 +307,60 @@ public class DeveloperConfigValidatorTests
     }
 
     /// <remarks>
-    /// An invisible in the middle survives the remedy, so the remedy cannot be typed out of the
-    /// message. Saying "Set it to" anyway would be the copy-paste trap again, one character further
-    /// in.
+    /// An invisible in the middle survives the remedy. The spelling is still named — a reader told
+    /// only to "retype" has no target — but the message says what the escapes in it are, and that
+    /// they sit inside the value, which is outside what this rule judges.
     /// </remarks>
     [Fact]
-    public void Validate_InvisibleInsideTheValue_AsksForItToBeRetypedRatherThanCopied()
+    public void Validate_InvisibleInsideTheValue_NamesTheSpellingAndSaysWhatIsInIt()
     {
         var ex = Load("""
             { "services": { "orders": {
                 "source": "kubernetes",
-                "kubernetes": { "namespace": " ord﻿ers" } } } }
+                "kubernetes": { "namespace": " ord\uFEFFers" } } } }
             """);
 
-        Assert.Contains("retype", ex.Message);
-        Assert.DoesNotContain(@"Set it to 'ord﻿ers'.", ex.Message);
+        Assert.Contains(@"Set it to 'ord\ufeffers'.", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("characters you cannot see", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("retype", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <remarks>
+    /// A stray space does not escape the rule by having something invisible outside it. A paste out
+    /// of a rendered page is the likeliest way to pick up a zero-width space and a stray space at
+    /// once, and a trigger asking only whether Trim() changes the value answers this with silence.
+    /// </remarks>
+    [Fact]
+    public void Validate_WhitespaceBehindAnInvisible_IsStillRefused()
+    {
+        var ex = Load("""
+            { "services": { "orders": {
+                "source": "kubernetes",
+                "kubernetes": { "context": "\u200b dev-west" } } } }
+            """);
+
+        Assert.Contains("Set it to 'dev-west'.", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <remarks>
+    /// An invisible above the BMP arrives as a surrogate pair, and asking either half for its
+    /// Unicode category answers "Surrogate" whatever the pair spells — so a per-char rule misses
+    /// exactly the block that exists to be unseeable. Left unhandled the remedy would carry the
+    /// character onward while rendering identically to a clean value, which is the copy-paste trap
+    /// this branch exists to close.
+    /// </remarks>
+    [Fact]
+    public void Validate_PaddingWithAnInvisibleAboveTheBmp_IsSpelledOutAndDroppedFromTheRemedy()
+    {
+        // U+1D173 MUSICAL SYMBOL BEGIN BEAM — Unicode category Format, and four bytes wide.
+        var ex = Load("""
+            { "services": { "orders": {
+                "source": "kubernetes",
+                "kubernetes": { "namespace": " \uD834\uDD73orders" } } } }
+            """);
+
+        Assert.Contains(@"\U0001d173", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Set it to 'orders'.", ex.Message, StringComparison.Ordinal);
     }
 
     /// <remarks>
@@ -329,12 +375,12 @@ public class DeveloperConfigValidatorTests
         var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory("""
             { "services": { "orders": {
                 "source": "kubernetes",
-                "kubernetes": { "namespace": "﻿orders", "context": "dev", "port": 8080 } } } }
+                "kubernetes": { "namespace": "\uFEFForders", "context": "dev", "port": 8080 } } } }
             """));
 
         var resolved = ServiceSourcesConfigCache.ResolveService(builder, "orders");
 
-        Assert.Equal("﻿orders", resolved.DeveloperConfig.Kubernetes.Namespace);
+        Assert.Equal("\ufefforders", resolved.DeveloperConfig.Kubernetes.Namespace);
     }
 
     /// <remarks>
@@ -356,9 +402,10 @@ public class DeveloperConfigValidatorTests
 
         var resolved = ServiceSourcesConfigCache.ResolveService(builder, "orders").DeveloperConfig;
 
-        // Not merely "it did not throw": the value has to arrive with its whitespace intact.
-        // Someone "fixing" an exclusion by trimming it at the point of use would pass a no-throw
-        // test, and that is the change this pins against.
+        // Not merely "it did not throw": someone "fixing" an exclusion by trimming it at the point
+        // of use would pass a no-throw test, and that is the change this pins against. The three
+        // string rows assert the whitespace arrives intact; `port` cannot, since it binds to an int
+        // and the space is gone by construction — what its row pins is that the rule never fired.
         var arrived = field switch
         {
             "path" => resolved.Local.Path,
@@ -429,12 +476,18 @@ public class DeveloperConfigValidatorTests
                     ? Leaves(nested).Prepend(field)
                     : [field]);
 
-        var carriers = (
-            from shape in new[] { DeveloperConfigShape.Service, DeveloperConfigShape.BackingService }
-            from block in shape.BlockFields
-            from field in Leaves(block.Value)
-            where field.GetCustomAttribute<NoSurroundingWhitespaceAttribute>() is not null
-            select field).Distinct().ToArray();
+        // Every property configuration could put a value at, for either shape: the entry's own —
+        // which is where `source` lives, and which CollectBlock never sees — plus each block's
+        // fields and everything nested inside them. A scan that looked only at BlockFields would be
+        // blind to both ends of that, and an attribute placed at either would be inert and unnoticed.
+        var shapes = new[] { DeveloperConfigShape.Service, DeveloperConfigShape.BackingService };
+
+        var carriers = shapes
+            .SelectMany(shape => shape.Entry.GetProperties()
+                .Concat(shape.BlockFields.SelectMany(block => Leaves(block.Value))))
+            .Where(field => field.GetCustomAttribute<NoSurroundingWhitespaceAttribute>() is not null)
+            .Distinct()
+            .ToArray();
 
         Assert.Equal(
             new[]

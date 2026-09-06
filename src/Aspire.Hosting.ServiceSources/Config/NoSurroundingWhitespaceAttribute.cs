@@ -11,6 +11,13 @@ namespace Aspire.Hosting.ServiceSources.Config;
 /// It is only for a value that names a thing on the other side of a CLI, where a surrounding space
 /// cannot be part of the name in practice.
 /// <para>
+/// Not every such value wants this. A field whose value is drawn from a closed set is trimmed where
+/// it is read instead — <c>EndpointScheme.Resolve</c> does that for <c>scheme</c>, and the guest
+/// language kinds do it for theirs — because trimming can only ever land on a value that was
+/// already valid. The distinction is whether trimming could resolve to a <em>different real
+/// thing</em>: it cannot for a scheme, and it can for a kubeconfig context name.
+/// </para>
+/// <para>
 /// Refused rather than trimmed away, which is the substance of
 /// <see href="https://github.com/flojon/aspire-servicesources/issues/236">#236</see>. Trimming is
 /// right nearly every time and silent when it is wrong: a kubectl context name is an arbitrary key
@@ -32,7 +39,7 @@ namespace Aspire.Hosting.ServiceSources.Config;
 [AttributeUsage(AttributeTargets.Property)]
 internal sealed class NoSurroundingWhitespaceAttribute(string receiver) : Attribute
 {
-    /// <summary>What receives the value verbatim — <c>kubectl</c>.</summary>
+    /// <inheritdoc cref="NoSurroundingWhitespaceAttribute(string)" path="/param[@name='receiver']"/>
     public string Receiver { get; } = receiver;
 
     /// <summary>

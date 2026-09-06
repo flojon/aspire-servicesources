@@ -37,6 +37,7 @@ internal sealed class DeveloperConfigShape
         string noun,
         IEnumerable<string> sourceNames)
     {
+        Entry = entry;
         Kind = kind;
         Noun = noun;
         SourceNames = sourceNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -57,6 +58,13 @@ internal sealed class DeveloperConfigShape
             block => DeveloperConfigField.BlockFieldsOf(block.PropertyType)!,
             StringComparer.OrdinalIgnoreCase);
     }
+
+    /// <summary>The type an entry of this kind binds to.</summary>
+    /// <remarks>
+    /// Kept so that a check can ask about the entry's own properties and not only about what is
+    /// inside its blocks — <c>source</c> lives here, and is handled outside the block walk.
+    /// </remarks>
+    public Type Entry { get; }
 
     /// <summary>How this kind of entry is named at the start of a sentence — <c>Service</c>.</summary>
     public string Kind { get; }

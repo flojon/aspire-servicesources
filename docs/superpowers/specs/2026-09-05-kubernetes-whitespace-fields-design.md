@@ -192,7 +192,7 @@ validation.
 
 One sentence shape for every opted-in field, because what is true of all of them is the same thing:
 
-> `'namespace' in the 'kubernetes' block is set to ' orders', which is passed to kubectl exactly as
+> `'namespace' in the 'kubernetes' block is set to ' orders', and kubectl is given it exactly as
 > written — so kubectl looks for ' orders' and not 'orders'. Set it to 'orders'.`
 
 plus the `SetAt` suffix every other complaint in this file carries, naming the configuration key the
@@ -253,9 +253,17 @@ that survives trimming cannot be, both of which the rule must recognize rather t
   but whitespace and invisible characters and points at the empty spelling that unsets a field,
   which is what `Blank` would have said had it been reached.
 
-If the remedy still contains an escaped character *inside* it rather than at its edges, the sentence
-degrades from `Set it to 'X'` to naming what is in there and asking the developer to retype the
-value rather than copy it — since copying is precisely what would round-trip the problem.
+If the remedy still contains something invisible *inside* it rather than at its edges, the sentence
+still names the spelling — a reader told only to "retype" has no target — and adds that the escapes
+in it are characters they cannot see, that those sit inside the value rather than around it, and are
+therefore outside what this rule judges.
+
+An earlier revision withheld the spelling in that case, on the stated ground that copying an escaped
+remedy back into the file "writes the very value being complained about". A reviewer disproved that
+by running it: `\ufeff` is a JSON escape, so pasting the remedy into `servicesources.local.json`
+writes exactly the remedy, and it is accepted. The caveat survives for a different and smaller
+reason — a configuration layer that is not JSON takes those six characters literally — and no longer
+withholds advice on the strength of an argument that does not hold.
 
 ## Design
 
@@ -302,8 +310,17 @@ In `CollectBlock`, **after** the existing `Blank` check and **before** `BindsTo`
 - Before `BindsTo`, so the field's own type never enters the sentence — the same reason `Blank` is
   kept apart from `NotBindable`.
 
-The rule fires when `field.Value is { } value && value != value.Trim()`. The null guard is not
-decoration: `Blank` takes only `{ Length: > 0 }` values, so a null reaches this line.
+The rule fires when the value has invisible padding **that contains whitespace** — the padding is
+stripped first, then asked whether any of what came off was whitespace. The null guard on
+`field.Value` is not decoration: `Blank` takes only `{ Length: > 0 }` values, so a null reaches this
+line. The attribute lookup is asked last, so reflection is confined to the rare path rather than run
+for every scalar field of every entry.
+
+The obvious spelling, `value != value.Trim()`, is what this shipped with into review, and it is not
+enough: `"\u200b dev-west"` is not reported, because `Trim` stops at the zero-width space and never
+reaches the stray one behind it. A paste out of a rendered page is the likeliest way to acquire both
+at once. Stripping the invisible padding first and then asking whether it held whitespace keeps the
+rule about whitespace while closing that.
 
 Only block fields are walked here. A future opt-in placed on `source` at the entry root, or on a
 list field, would be inert — which is what the guard test below exists to catch.
@@ -323,7 +340,11 @@ not remove them (verified on .NET 8). Two consequences:
   leaving the trigger alone.
 
 So `Escaped` gains an arm: a character that is `char.IsControl` or in Unicode category `Format`
-renders as its code point. It is the same rule `Escaped` already applies to whitespace that cannot
+renders as its code point. It asks that of the *string and an index* rather than of a `char`,
+because either half of a surrogate pair answers `Surrogate` whatever the pair spells — and the
+invisible characters above the BMP are exactly the ones worth catching, since plane 14 carries a tag
+block that exists to be unseeable. Asking per `char` would have caught the accidental cases and
+missed the deliberate ones. It is the same rule `Escaped` already applies to whitespace that cannot
 be told from a space by looking, extended to characters that cannot be seen at all. Every message in
 this file benefits, and none changes for a value that does not contain one. The two arms cannot
 collide: across the whole BMP no character is both `Format` and whitespace.
@@ -362,7 +383,10 @@ immediately for a `string`, so `NotBindable` can never fire for a string field. 
 this rule touches, it *is* a new echo path rather than a duplicate of an existing one.
 
 It is still the right call, on the narrower ground: these five values are single tokens naming a
-cluster object, the message exists to show a difference that is invisible without it, and
+cluster object — though "token" undersells them, since a context name is routinely
+`arn:aws:eks:eu-west-1:123456789012:cluster/prod` or `gke_my-project_europe-west1_prod`, so this
+does put infrastructure identity into a log that gets pasted into issues. The message exists to show
+a difference that is invisible without it, redacting the value would defeat the whole message, and
 `connectionString` — the one developer-config value that carries credentials by design — is out of
 scope. `KubernetesBackingServiceSource`'s reason for redacting only the connection string, that it
 is the one echoed value which is a whole valid connection string, is unaffected.
@@ -495,6 +519,8 @@ refused, and the `Format`/`Control` line the escaping draws leaves a residue of 
 
 ## Delivery
 
-One commit on `236-ws-trim-45b0`, off `origin/main`. `CHANGELOG.md` gets a `### Changed` entry under
+A commit per step on `236-ws-trim-45b0`, off `origin/main`, so each carries its own test cycle and
+can be rejected on its own. The repository squash-merges, and a squash of a multi-commit branch
+takes the **pull request title** — so that title, not any one commit message, is what lands. `CHANGELOG.md` gets a `### Changed` entry under
 `## [Unreleased]`: this is a new refusal of a file that used to start, which is behaviour a reader
 upgrading needs to know about.
