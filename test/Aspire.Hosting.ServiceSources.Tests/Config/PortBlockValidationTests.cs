@@ -23,7 +23,7 @@ public class PortBlockValidationTests
 {
     private static string AppHostDirectory(string json)
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), json);
         return dir;
     }
@@ -58,7 +58,7 @@ public class PortBlockValidationTests
     private static ServiceSourcesConfigurationException RefusedFromALayer(
         params (string Key, string? Value)[] port)
     {
-        var builder = TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
         builder.Configuration.AddInMemoryCollection(
             new Dictionary<string, string?>
@@ -87,7 +87,7 @@ public class PortBlockValidationTests
     private static ServiceSourcesConfigurationException RefusedFromSettings(
         params (string Key, string? Value)[] settings)
     {
-        var builder = TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
         builder.Configuration.AddInMemoryCollection(
             new Dictionary<string, string?>
@@ -565,7 +565,7 @@ public class PortBlockValidationTests
     [Fact]
     public void TheKeyPathInARemedy_HasItsWhitespaceSpelledOut()
     {
-        var builder = TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
