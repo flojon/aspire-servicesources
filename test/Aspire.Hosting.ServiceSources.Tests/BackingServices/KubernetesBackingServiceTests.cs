@@ -1089,20 +1089,33 @@ public class KubernetesBackingServiceTests
     /// The connection string this message quotes back has its whitespace spelled out too.
     /// </summary>
     /// <remarks>
-    /// Redaction hides a credential; it does nothing about a newline. This is the one message that
-    /// echoes a whole connection string, and it is the one a developer pastes into an issue — so a
-    /// template carrying a newline would forge a line that reads as this package's own.
+    /// Redaction hides a credential; it does nothing about a newline that is not part of one. This is
+    /// the one message that echoes a whole connection string, and it is the one a developer pastes
+    /// into an issue — so a newline reaching it would forge a line that reads as this package's own.
+    /// <para>
+    /// The template matters: it has to be one redaction leaves <em>alone</em>, or the test proves
+    /// nothing about escaping. A newline inside a value redaction recognizes is replaced along with
+    /// the value, and this test passed for that reason rather than its own until the shape-bound
+    /// redaction landed and started eating the template it used to use. A newline between two
+    /// well-formed keyword pairs survives redaction verbatim, which is exactly the case escaping is
+    /// here for.
+    /// </para>
     /// </remarks>
     [Fact]
     public void TheEchoedConnectionString_HasItsWhitespaceSpelledOut()
     {
         var builder = CreateBuilder();
+        const string SurvivesRedaction = "Host=localhost;\nPort=5432;Database=orders";
+
+        // The premise, asserted rather than assumed: escaping is only doing something here because
+        // redaction hands this template through untouched.
+        Assert.Equal(SurvivesRedaction, ConnectionStringRedaction.Redact(SurvivesRedaction));
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => Resolve(builder, Config(connectionString: "Host=localhost;\n\nBacking service 'x': fine.")));
+            () => Resolve(builder, Config(connectionString: SurvivesRedaction)));
 
         Assert.Contains("\\n", ex.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain("\n\nBacking service 'x'", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("localhost;\nPort", ex.Message, StringComparison.Ordinal);
     }
 
     /// <remarks>
