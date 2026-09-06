@@ -234,7 +234,7 @@ internal sealed class ConnectionStringTemplate
 
         // Reassembled from the template's own text rather than from the keyword constants, so every
         // message about this token quotes the spelling the developer wrote — see Segment.AsWritten.
-        var token = unterminated ? $"${{{body}" : $"${{{body}}}";
+        var token = unterminated ? $"${{{TruncateAtFirstBoundary(body)}" : $"${{{body}}}";
 
         if (unterminated)
         {
@@ -291,6 +291,24 @@ internal sealed class ConnectionStringTemplate
 
     /// <summary>Whether a placeholder's name part is a name rather than nothing.</summary>
     private static bool IsNamed(string part) => !string.IsNullOrWhiteSpace(part);
+
+    /// <summary>
+    /// Cuts an unterminated token's body at the first <c>;</c> or whitespace, since neither can
+    /// appear inside a real placeholder — only in whatever the developer wrote after forgetting the
+    /// closing <c>}</c>. Without a bound, that token is quoted whole into the exception message,
+    /// which is everything left in the template: a credential a few characters later included (#257).
+    /// </summary>
+    private static string TruncateAtFirstBoundary(string body)
+    {
+        var end = 0;
+
+        while (end < body.Length && body[end] is not ';' && !char.IsWhiteSpace(body[end]))
+        {
+            end++;
+        }
+
+        return body[..end];
+    }
 
     /// <summary>
     /// Whether a secret's name is one a Kubernetes cluster could carry.

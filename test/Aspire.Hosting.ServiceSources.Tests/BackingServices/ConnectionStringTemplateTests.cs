@@ -206,6 +206,22 @@ public class ConnectionStringTemplateTests
     public void Parse_UnterminatedPlaceholder_IsRejected() =>
         Assert.Contains("no closing '}'", Rejects("Host=localhost;Port=${port").Message);
 
+    /// <summary>
+    /// An unterminated placeholder's quoted token stops at the first <c>;</c> or whitespace, so a
+    /// developer who forgot the closing <c>}</c> before writing the rest of the connection string
+    /// does not have that rest — credentials included — echoed back at them.
+    /// </summary>
+    [Theory]
+    [InlineData("Host=db;Port=${port:main;Database=orders;Password=hunter2", "${port:main")]
+    [InlineData("Host=db;Password=${secret:db:pw;Extra=hunter2", "${secret:db:pw")]
+    public void Parse_UnterminatedPlaceholder_QuotesOnlyUpToTheBoundary(string template, string quoted)
+    {
+        var message = Rejects(template).Message;
+
+        Assert.Contains($"'{quoted}'", message);
+        Assert.DoesNotContain("hunter2", message);
+    }
+
     [Theory]
     [InlineData("${secret}")]
     [InlineData("${secret:orders-creds}")]
