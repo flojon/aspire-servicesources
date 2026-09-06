@@ -14,34 +14,30 @@ namespace Aspire.Hosting.ServiceSources.BackingServices;
 /// <para>
 /// <b>The rule is an allowlist, and the reason is that the alternative is never finished.</b> Naming
 /// the keywords a secret is usually written under leaves every keyword nobody thought of printed in
-/// full; that list was corrected three times in as many reviews, each time by someone finding a
-/// shape it missed. Here the value of every pair is hidden unless its key is one of the few known
-/// to hold nothing — see <see cref="KeysThatHoldNoSecret"/>. A key nobody anticipated reads as
-/// <c>***</c>, which is mildly annoying rather than dangerous.
+/// full. Here the value of every pair is hidden unless its key is one of the few known to hold
+/// nothing — see <see cref="ShapesByKey"/> — and even then only when the <em>whole</em> value
+/// matches the shape that key is known to hold. A key nobody anticipated, or a value that does not
+/// look like what its key should hold, reads as <c>***</c>, which is mildly annoying rather than
+/// dangerous.
 /// </para>
 /// <para>
 /// <b>The invariant, which any change here must be checked against:</b> nothing is printed unless it
-/// has been positively recognised as safe to print — a key name; a value under an allowlisted key;
-/// a URI's scheme, its authority after the userinfo, and its path; a bare <c>host:port</c>; an empty
-/// value; and the separators and spacing between all of those.
+/// has been positively recognised as safe to print — a key name; a value under an allowlisted key
+/// that matches that key's shape in full; a URI's scheme and its authority after the userinfo; a
+/// bare <c>host:port</c>; an empty value; and the separators and spacing between all of those. A
+/// value's extent is no longer "text until something ends it" — there is no delimiter to get wrong,
+/// no quote to honour, no escape to parse, because a value that fails to match end to end is masked
+/// whole rather than partially trusted.
 /// </para>
 /// <para>
-/// The boundary of "recognised" is a tokenizer, so the residue is a pair written behind punctuation
-/// no dialect separates pairs with: <c>Host=h|Custom=hunter2</c> is one value as far as this can
-/// tell, and is printed. Widening the separator set is not the answer — <c>:</c> and <c>/</c> carry
+/// The boundary of "recognised" is still a tokenizer, so the residue is a pair written behind
+/// punctuation no dialect separates pairs with: <c>Host=h|Custom=hunter2</c> is one value as far as
+/// this can tell, and is printed if it happens to match <c>host</c>'s shape, masked otherwise.
+/// Widening the separator set is not the answer — <c>:</c> and <c>/</c> carry
 /// <c>Data Source=tcp:host,1433</c> and every URL — and neither is masking any value containing an
 /// <c>=</c>, which would reduce an Oracle descriptor to nothing. <see cref="KnownCredentialKeywords"/>
 /// covers the conventional names in that position; an unconventional one behind unconventional
 /// punctuation is knowingly left.
-/// </para>
-/// <para>
-/// Redaction by key is only fail-closed if the scan that finds the keys is at least as permissive as
-/// every syntax that could have written the string, so the scan looks for keys rather than for
-/// separators. A pair may be introduced by <c>;</c>, <c>&amp;</c>, <c>?</c> or <c>,</c> — and, inside
-/// a value whose key is allowlisted, by whitespace alone (see <see cref="RedactRecognisedValue"/>).
-/// Space may sit on either side of the <c>=</c>, and a value runs to the next key rather than to the
-/// next separator — which is also why a quoted value carrying a separator, <c>Password='a;b'</c>,
-/// costs nothing to handle.
 /// </para>
 /// </remarks>
 internal static class ConnectionStringRedaction
@@ -58,8 +54,85 @@ internal static class ConnectionStringRedaction
 
     private const string Mask = "***";
 
+    private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(1);
+
     /// <summary>
-    /// The keys whose values are printed.
+    /// A run of ASCII digits, 1 to 5 of them — a port and nothing else.
+    /// </summary>
+    private static readonly Regex PortShape =
+        new(@"\A[0-9]{1,5}\z", RegexOptions.CultureInvariant, RegexTimeout);
+
+    /// <summary>
+    /// A hostname, an IPv4 literal, or a bracketed IPv6 literal, with an optional <c>tcp:</c> or
+    /// <c>tcp://</c> network-library prefix in front and an optional <c>:port</c> or <c>,port</c>
+    /// behind — <c>host</c>, <c>server</c> and <c>data source</c>'s shape.
+    /// </summary>
+    /// <remarks>
+    /// No userinfo, no path, no query: a value carrying any of those is not addressing a host, it is
+    /// carrying something this type cannot vouch for — a credential, a file path, an Oracle TNS
+    /// descriptor — and is masked whole rather than partially trusted.
+    /// <para>
+    /// The permitted prefix is the literal word <c>tcp</c>, not any word: an earlier draft accepted
+    /// <em>any</em> letter-led run in front of a colon as a "scheme", which let
+    /// <c>Data Source=aB3xK9zQ2mR7pL4w:db.prod.internal</c> print whole — the alnum secret in front
+    /// of the colon parsed as a bogus scheme rather than being rejected as part of no legitimate host.
+    /// <c>tcp:</c> and <c>tcp://</c> are SQL Server's and the ODBC/ADO.NET net-library spellings of
+    /// the same address, and are the only prefix this needs to admit for a value with nothing to hide
+    /// to keep reading as one.
+    /// </para>
+    /// <para>
+    /// The three letters are spelled out case by case, <c>[Tt][Cc][Pp]</c>, rather than matched with
+    /// <see cref="RegexOptions.IgnoreCase"/>: that flag folds Unicode case-equivalents too, and under
+    /// <see cref="RegexOptions.CultureInvariant"/> it still maps U+212A KELVIN SIGN to <c>k</c>,
+    /// which would have widened every other letter class in this pattern — not just the three this
+    /// needs — to accept it as well.
+    /// </para>
+    /// </remarks>
+    private static readonly Regex HostShape = new(
+        @"\A(?:[Tt][Cc][Pp]:(?://)?)?"
+        + @"(?:\[[0-9A-Fa-f:]+\]|[A-Za-z0-9](?:[A-Za-z0-9._-])*)"
+        + @"(?:[:,][0-9]{1,5})?\z",
+        RegexOptions.CultureInvariant, RegexTimeout);
+
+    /// <summary>
+    /// A bare identifier — <c>database</c> and <c>initial catalog</c>'s shape.
+    /// </summary>
+    private static readonly Regex IdentifierShape =
+        new(@"\A[A-Za-z0-9_][A-Za-z0-9_.$-]*\z", RegexOptions.CultureInvariant, RegexTimeout);
+
+    /// <summary>
+    /// An identifier, optionally followed by <c>@</c> and another identifier — <c>user</c>'s shape.
+    /// </summary>
+    /// <remarks>
+    /// The trailing <c>@identifier</c> is what keeps <c>UID=a@b.com</c> printing: SqlClient reads an
+    /// email-shaped login name under this key, and it carries no secret of its own.
+    /// </remarks>
+    private static readonly Regex UserShape = new(
+        @"\A[A-Za-z0-9_][A-Za-z0-9_.$-]*(?:@[A-Za-z0-9_][A-Za-z0-9_.$-]*)?\z",
+        RegexOptions.CultureInvariant, RegexTimeout);
+
+    /// <summary>
+    /// An identifier, or an ODBC braced driver name — <c>driver</c> and <c>provider</c>'s shape.
+    /// </summary>
+    /// <remarks>
+    /// The braced form has to admit spaces — <c>{ODBC Driver 18 for SQL Server}</c>,
+    /// <c>{Microsoft Access Driver (*.mdb, *.accdb)}</c> — which is exactly what makes it the
+    /// loosest of the five shapes. <c>[^{}]*</c> is too loose: it admits any character at all except
+    /// a brace, so <c>Provider={hunter2 not a driver at all}</c> printed whole. The character set
+    /// below still covers every driver name ODBC/OLEDB actually ship — letters, digits, space, and
+    /// the punctuation real driver names use (<c>.</c> <c>,</c> <c>(</c> <c>)</c> <c>*</c> <c>_</c>
+    /// <c>+</c> <c>-</c>) — while excluding every character a credential is actually written with:
+    /// <c>=</c>, <c>@</c>, <c>:</c>, and the dialect's own separators. A driver name that happens to
+    /// be made of nothing but words and spaces is the one shape this cannot rule out — the same
+    /// residual every identifier-shaped key accepts — but that is a narrower target than "anything
+    /// that is not a brace".
+    /// </remarks>
+    private static readonly Regex DriverShape = new(
+        @"\A(?:\{[A-Za-z0-9 ,.()*_+-]*\}|[A-Za-z0-9_][A-Za-z0-9_.$-]*)\z",
+        RegexOptions.CultureInvariant, RegexTimeout);
+
+    /// <summary>
+    /// The keys whose values are printed, and the shape each one is known to hold.
     /// </summary>
     /// <remarks>
     /// Deliberately short. Every addition is a fresh judgement that some key can never carry a
@@ -77,10 +150,21 @@ internal static class ConnectionStringRedaction
     /// would read as <c>***</c> while <c>UID=sa</c> printed.
     /// </para>
     /// </remarks>
-    private static readonly HashSet<string> KeysThatHoldNoSecret = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly Dictionary<string, Regex> ShapesByKey = new(StringComparer.OrdinalIgnoreCase)
     {
-        "host", "server", "data source", "port", "database", "initial catalog",
-        "user", "user id", "userid", "username", "uid", "driver", "provider",
+        ["host"] = HostShape,
+        ["server"] = HostShape,
+        ["data source"] = HostShape,
+        ["port"] = PortShape,
+        ["database"] = IdentifierShape,
+        ["initial catalog"] = IdentifierShape,
+        ["user"] = UserShape,
+        ["user id"] = UserShape,
+        ["userid"] = UserShape,
+        ["username"] = UserShape,
+        ["uid"] = UserShape,
+        ["driver"] = DriverShape,
+        ["provider"] = DriverShape,
     };
 
     /// <summary>
@@ -88,20 +172,15 @@ internal static class ConnectionStringRedaction
     /// </summary>
     /// <remarks>
     /// A backstop, not the defence. It runs first and can only replace text with <c>***</c>, so it
-    /// can only ever hide more — which is what makes it impossible for the allowlist to print
-    /// something the keyword list caught. <see cref="Scan"/> can be surprised by a dialect nobody
-    /// modelled, and one shape it is known to miss is a keyword behind a punctuation mark that
-    /// introduces nothing: <c>Data Source=file:pwd=hunter2</c> hides its password inside an
+    /// can only ever hide more — which is what makes it impossible for the shape check below to
+    /// print something the keyword list caught. <see cref="Scan"/> can be surprised by a dialect
+    /// nobody modelled, and one shape it is known to miss is a keyword behind a punctuation mark
+    /// that introduces nothing: <c>Data Source=file:pwd=hunter2</c> hides its password inside an
     /// allowlisted value, where no separator marks it off. An unconditional <c>pwd=</c> finds it.
-    /// <para>
-    /// Keywords only. A URI's <c>user:pass@host</c> is not matched here — <see cref="MaskUri"/> and
-    /// <see cref="MaskAuthority"/> cover every shape of it, including a password carrying <c>/</c>,
-    /// <c>?</c> or <c>#</c> raw, which no lookbehind anchored on <c>://</c> can bound.
     /// <para>
     /// A quoted value is taken whole, because it owns the <c>;</c> inside it. Stopping at that
     /// <c>;</c> masked the first half of <c>Password='a;Host=hunter2'</c> and handed the second half
     /// to a scan that then read it as a host.
-    /// </para>
     /// </para>
     /// </remarks>
     private static readonly Regex KnownCredentialKeywords = new(
@@ -109,7 +188,7 @@ internal static class ConnectionStringRedaction
         + @"(?:'[^']*'|""[^""]*""|[^;]+)",
         RegexOptions.IgnoreCase
         | RegexOptions.CultureInvariant,
-        TimeSpan.FromSeconds(1));
+        RegexTimeout);
 
     /// <summary>
     /// <paramref name="connectionString"/> with everything not recognised as safe to print replaced
@@ -117,11 +196,11 @@ internal static class ConnectionStringRedaction
     /// </summary>
     public static string Redact(string connectionString)
     {
-        string backstopped;
-
         try
         {
-            backstopped = KnownCredentialKeywords.Replace(connectionString, Mask);
+            var backstopped = KnownCredentialKeywords.Replace(connectionString, Mask);
+
+            return Scan(backstopped);
         }
         catch (RegexMatchTimeoutException)
         {
@@ -129,8 +208,6 @@ internal static class ConnectionStringRedaction
             // and it is emphatically not a reason to print the thing this method exists to hide.
             return Unscannable;
         }
-
-        return Scan(backstopped);
     }
 
     /// <summary>
@@ -156,8 +233,20 @@ internal static class ConnectionStringRedaction
             : Rebuild(text, FindPairs(text, whitespaceBeginsAPair: false), RedactPrefix, RedactValue);
 
     /// <summary>
-    /// <paramref name="value"/> under a key the allowlist names, with anything written inside it
-    /// that is a pair of its own held to the same rule.
+    /// What is printed for <paramref name="value"/> under <paramref name="key"/>.
+    /// </summary>
+    /// <remarks>
+    /// An empty value never reaches here: <see cref="Rebuild"/> leaves one exactly as it found it,
+    /// because an empty string cannot be a secret and because it is the entire diagnosis in the case
+    /// this message exists for — a shell that ate a <c>${port}</c> leaves the key behind with
+    /// nothing in it, and masking that would assert something was hidden where nothing was.
+    /// </remarks>
+    private static string RedactValue(string key, string value)
+        => ShapesByKey.TryGetValue(key, out var shape) ? RedactShapedValue(shape, value) : MaskKeepingLeadingSpace(value);
+
+    /// <summary>
+    /// <paramref name="value"/> under a key whose shape is <paramref name="shape"/>, printed whole
+    /// when it matches and masked whole when it does not.
     /// </summary>
     /// <remarks>
     /// libpq's conninfo writes its pairs separated by spaces — <c>host=h port=5432
@@ -168,24 +257,26 @@ internal static class ConnectionStringRedaction
     /// value nothing recognised.
     /// <para>
     /// One level deep, and no deeper: this is the last point at which anything is printed, so there
-    /// is no recursion to bound.
+    /// is no recursion to bound. The head — what precedes the first nested pair — is checked against
+    /// the outer key's own shape, because whatever it could not vouch for taints the pairs found
+    /// after it: in <c>host=db.internal;hunter2 port=5432</c> read one level down, the head is not a
+    /// clean hostname, so nothing here is trusted enough to print.
     /// </para>
     /// </remarks>
-    private static string RedactRecognisedValue(string value)
+    private static string RedactShapedValue(Regex shape, string value)
     {
         var pairs = FindPairs(value, whitespaceBeginsAPair: true);
 
-        // A pair found here was introduced by whitespace, and whitespace inside text nothing
-        // recognised introduces nothing: in 'Host= localhost;2fa= hunter2=x' the scan reads
-        // 'hunter2' as a key of its own and prints it as one, because keys print. Whatever the head
-        // could not vouch for taints the pairs the scan found after it.
-        if (pairs.Count > 0
-            && RecognisedText(value[..pairs[0].KeyStart]).Contains(Mask, StringComparison.Ordinal))
+        if (pairs.Count == 0)
         {
-            return MaskKeepingLeadingSpace(value);
+            return MatchesWhole(shape, value) ? value : MaskKeepingLeadingSpace(value);
         }
 
-        return Rebuild(value, pairs, RecognisedText, RedactNestedValue);
+        var head = value[..pairs[0].KeyStart];
+
+        return MatchesWhole(shape, head)
+            ? Rebuild(value, pairs, _ => head, RedactNestedValue)
+            : MaskKeepingLeadingSpace(value);
     }
 
     /// <summary>
@@ -193,221 +284,71 @@ internal static class ConnectionStringRedaction
     /// </summary>
     /// <remarks>
     /// The mirror of <see cref="RedactValue"/> one level down, and the last point at which anything
-    /// is printed: a recognised value here goes to <see cref="RecognisedText"/> rather than being
-    /// scanned again, and an unrecognised one to <see cref="MaskKeepingLeadingSpace"/> rather than
-    /// back to <see cref="RedactValue"/>, so there is no third level and no cycle to bound.
+    /// is printed: a recognised value here is compared against its own key's shape rather than being
+    /// scanned again, so there is no third level and no cycle to bound.
     /// </remarks>
     private static string RedactNestedValue(string key, string value)
-        => KeysThatHoldNoSecret.Contains(key) ? RecognisedText(value) : MaskKeepingLeadingSpace(value);
+        => ShapesByKey.TryGetValue(key, out var shape) && MatchesWhole(shape, value)
+            ? value
+            : MaskKeepingLeadingSpace(value);
 
     /// <summary>
-    /// The part of <paramref name="text"/> that belongs to the value it was found in, with anything
-    /// beyond it replaced.
+    /// Whether <paramref name="candidate"/>, once its leading layout whitespace is set aside,
+    /// matches <paramref name="shape"/> from end to end.
     /// </summary>
     /// <remarks>
-    /// A value ends where a dialect could have ended it. Whatever follows the first separator was
-    /// not read as a pair — otherwise the scan would have taken it — so it was vetted by nothing and
-    /// is not printed. That is the difference between hiding a value and hiding a key nobody
-    /// anticipated: <c>Host=db.internal;2fa=hunter2</c> has no key the scan can see, because a key
-    /// does not begin with a digit, and printing the value whole printed the password with it.
-    /// <para>
-    /// A quoted value owns the separators inside it, so <c>Data Source="C:\a;b\x.mdb"</c> is one
-    /// value and comes back whole.
-    /// </para>
+    /// Leading space is layout the developer wrote around the <c>=</c>, not part of the value — see
+    /// <see cref="MaskKeepingLeadingSpace"/>, which is what puts it back regardless of the answer
+    /// here. Nothing trailing is ever present: <see cref="Rebuild"/> has already trimmed the
+    /// separators, whitespace among them, off the end before a value reaches this.
     /// </remarks>
-    private static string RecognisedText(string text)
+    private static bool MatchesWhole(Regex shape, string candidate)
     {
-        var start = 0;
+        // Layout at either edge is not content: a head ends wherever the next nested key begins,
+        // which is always right after the whitespace that introduced it — 'x ' in
+        // 'Host=x Custom Port=5432' is not a hostname called 'x ', it is the hostname 'x' plus the
+        // space that comes next.
+        var (_, rest) = SplitLeadingLayout(candidate);
+        var trimmed = TrimTrailingLayout(rest);
 
-        while (start < text.Length && char.IsWhiteSpace(text[start]))
-        {
-            start++;
-        }
-
-        if (start > 0)
-        {
-            // Something written after a space is the value itself only when it carries no '=' of its
-            // own — 'Host = localhost' — which is the same rule EndOfValue applies from the other
-            // side. Carrying one makes it a pair the scan declined to read, and 'port= 2fa=hunter2'
-            // printed a password on the strength of being written after a space.
-            for (var i = start; i < text.Length && !IsSeparator(text[i]); i++)
-            {
-                if (text[i] == '=')
-                {
-                    return text[..start] + Mask;
-                }
-            }
-        }
-
-        var leading = text[..start];
-
-        // Before anything is cut. A password legally carries the very characters this is about to
-        // treat as ends — RFC 3986 admits them raw in a userinfo — so cutting first left
-        // 'Data Source=postgresql://app:pw#1@db:5432' with no '@' to find and printed the password.
-        var unmasked = text[start..];
-
-        // An authority reached across a separator is not one this can read: the text in front of the
-        // '@' was several things, not a userinfo, and masking it as one leaves whatever followed the
-        // '@' looking like a host. That is how 'Host=localhost;2fa=a:b@hunter2' came to print the
-        // secret as its hostname.
-        var lastAt = unmasked.LastIndexOf('@');
-        var separated = false;
-
-        for (var i = 0; i < lastAt; i++)
-        {
-            separated |= IsSeparator(unmasked[i]) || unmasked[i] == '#';
-
-            // A separator and then a '=' is a pair, and a pair in front of the '@' means what
-            // precedes it was never one userinfo. A separator alone is not enough to say so: RFC
-            // 3986 admits ';' ',' and '?' raw in a userinfo, and a password carrying one is the
-            // case the authority rule exists for.
-            if (separated && unmasked[i] == '=')
-            {
-                return leading + Mask;
-            }
-        }
-
-        var authority = MaskAuthority(unmasked);
-
-        // Not by length: 'u:p' and '***' are both three characters.
-        if (!string.Equals(authority, unmasked, StringComparison.Ordinal))
-        {
-            // What follows the '@' is a host, and a host holds no pairs. One written there was
-            // separated from the authority by nothing, so nothing vetted it — and masking the
-            // userinfo in front of it says nothing about it. This also answers the quoted value
-            // whose opening quote the masking above has just consumed, which is how
-            // 'Host='x:y@z=hunter2'' slipped past the rules below.
-            if (authority.AsSpan(authority.IndexOf('@')).Contains('='))
-            {
-                return leading + Mask;
-            }
-        }
-
-        text = authority;
-
-        var end = 0;
-
-        if (text.Length > 0 && text[0] is '"' or '\'')
-        {
-            var close = text.IndexOf(text[0], 1);
-
-            if (close < 0)
-            {
-                // Nothing closes it, so nothing in it was ever delimited, so none of it is known.
-                return leading + Mask;
-            }
-
-            // A quote spans the separators inside it, which is the whole reason to look for one —
-            // but spanning them is not the same as vouching for what they separate. A '=' in there
-            // is a pair the scan was prevented from reading, and the quote is exactly what
-            // prevented it.
-            if (text.AsSpan(1, close - 1).Contains('='))
-            {
-                return leading + Mask;
-            }
-
-            end = close + 1;
-
-            // Text glued to the closing quote was delimited by nothing at all: the quote ended the
-            // value, and whatever is stuck to it was never separated from anything.
-            if (end < text.Length && !IsSeparator(text[end]) && text[end] != '#')
-            {
-                return leading + Mask;
-            }
-        }
-
-        while (end < text.Length && !char.IsWhiteSpace(text[end]) && text[end] is not (';' or '&' or '?' or '#'))
-        {
-            end++;
-        }
-
-        var printed = leading + TrailingFields(text[..end]);
-
-        if (end == text.Length)
-        {
-            return printed;
-        }
-
-        var afterSeparators = end;
-
-        while (afterSeparators < text.Length && (IsSeparator(text[afterSeparators]) || text[afterSeparators] == '#'))
-        {
-            afterSeparators++;
-        }
-
-        return afterSeparators == text.Length
-            ? printed + text[end..]
-            : printed + text[end..afterSeparators] + Mask;
+        return trimmed.Length == 0 || shape.IsMatch(trimmed);
     }
 
     /// <summary>
-    /// <paramref name="value"/> with any comma-separated field after the first shown only where it
-    /// is a port.
+    /// <paramref name="value"/> split into a leading run of dialect punctuation and whatever follows
+    /// it.
     /// </summary>
     /// <remarks>
-    /// A comma inside a value is how SQL Server writes a port — <c>Server=localhost,1433</c> — and
-    /// that is the only thing after one this can vouch for. Anything else there is a field the scan
-    /// never looked at, which is where <c>Host=h,hunter2</c> hid a password. A comma inside a quoted
-    /// span belongs to the value, so the search starts past one.
+    /// Not only whitespace: <c>Port=;2fa=hunter2</c> leaves <c>port</c> with a value beginning at the
+    /// <c>;</c> rather than at a space, because nothing but that <c>;</c> stood between the <c>=</c>
+    /// and the next key. It is still layout, not content — <c>port</c> holds nothing here, and the
+    /// <c>;</c> is what a shell-eaten <c>${port}</c> leaves behind.
     /// </remarks>
-    private static string TrailingFields(string value)
+    private static (string Leading, string Content) SplitLeadingLayout(string value)
     {
-        var searchFrom = 0;
+        var leading = 0;
 
-        if (value.Length > 0 && value[0] is '"' or '\'')
+        while (leading < value.Length && IsSeparator(value[leading]))
         {
-            var close = value.IndexOf(value[0], 1);
-
-            // RecognisedText answers the unterminated case before this is reached, so the quote is
-            // closed — checked anyway, because the arithmetic below would otherwise turn "not found"
-            // into "start at the beginning" and say nothing about having done so.
-            searchFrom = close < 0 ? value.Length : close + 1;
+            leading++;
         }
 
-        var comma = value.IndexOf(',', searchFrom);
-
-        if (comma < 0)
-        {
-            return value;
-        }
-
-        var built = new StringBuilder(value[..comma]);
-
-        // The first piece is what precedes the first comma, which is already appended above.
-        var fields = value[comma..].Split(',');
-
-        for (var i = 1; i < fields.Length; i++)
-        {
-            built.Append(',');
-
-            if (fields[i].Length > 0)
-            {
-                built.Append(IsPort(fields[i]) ? fields[i] : Mask);
-            }
-        }
-
-        return built.ToString();
+        return (value[..leading], value[leading..]);
     }
 
     /// <summary>
-    /// Whether <paramref name="field"/> is a port number and nothing else.
+    /// <paramref name="text"/> with any trailing run of dialect punctuation removed.
     /// </summary>
-    private static bool IsPort(ReadOnlySpan<char> field)
+    private static string TrimTrailingLayout(string text)
     {
-        if (field.Length is 0 or > 5)
+        var end = text.Length;
+
+        while (end > 0 && IsSeparator(text[end - 1]))
         {
-            return false;
+            end--;
         }
 
-        foreach (var c in field)
-        {
-            if (!char.IsAsciiDigit(c))
-            {
-                return false;
-            }
-        }
-
-        return true;
+        return text[..end];
     }
 
     /// <summary>
@@ -475,7 +416,7 @@ internal static class ConnectionStringRedaction
     /// <c>Password=myhost=x</c> is not mistaken for a key of its own. What may begin one differs by
     /// level: at the top of the string one of <c>;</c> <c>&amp;</c> <c>?</c> <c>,</c> must have come
     /// first, optionally followed by space, while inside a value already recognised as safe to print
-    /// space alone will do — see <see cref="RedactRecognisedValue"/>.
+    /// space alone will do — see <see cref="RedactShapedValue"/>.
     /// <para>
     /// A doubled <c>=</c> is skipped rather than accepted: <c>Host==x=hunter2</c> is ADO.NET's
     /// escape for the key <c>host=x</c>, so reading <c>Host</c> as the key would find an allowlisted
@@ -684,45 +625,34 @@ internal static class ConnectionStringRedaction
     }
 
     /// <summary>
-    /// What is printed for <paramref name="value"/> under <paramref name="key"/>.
-    /// </summary>
-    /// <remarks>
-    /// An empty value never reaches here: <see cref="Rebuild"/> leaves one exactly as it found it,
-    /// because an empty string cannot be a secret and because it is the entire diagnosis in the case
-    /// this message exists for — a shell that ate a <c>${port}</c> leaves the key behind with
-    /// nothing in it, and masking that would assert something was hidden where nothing was.
-    /// </remarks>
-    private static string RedactValue(string key, string value)
-        => KeysThatHoldNoSecret.Contains(key) ? RedactRecognisedValue(value) : MaskKeepingLeadingSpace(value);
-
-    /// <summary>
-    /// <c>***</c>, with any space in front of the value left where the developer wrote it.
+    /// <c>***</c>, with any layout in front of the value left where the developer wrote it.
     /// </summary>
     /// <remarks>
     /// So <c>Rotation Key = hunter2</c> reads back as <c>Rotation Key = ***</c> rather than losing
     /// the layout around the value it hid. Both levels end here rather than at each other, which is
     /// what keeps the scan two levels deep and free of a cycle to bound.
+    /// <para>
+    /// Leading punctuation is kept too, not only whitespace: <c>Port=;2fa=hunter2</c> leaves
+    /// <c>port</c> with nothing of its own before the <c>;</c>, and printing <c>Port=;***</c> rather
+    /// than <c>Port=***</c> is what keeps that emptiness visible — it is the diagnosis the message
+    /// exists to deliver when a shell has eaten a <c>${port}</c>.
+    /// </para>
     /// </remarks>
     private static string MaskKeepingLeadingSpace(string value)
     {
-        var leading = 0;
+        var (leading, _) = SplitLeadingLayout(value);
 
-        while (leading < value.Length && char.IsWhiteSpace(value[leading]))
-        {
-            leading++;
-        }
-
-        return value[..leading] + Mask;
+        return leading + Mask;
     }
 
     /// <summary>
     /// <paramref name="value"/> with any <c>user:pass@host</c> authority in it reduced to its host.
     /// </summary>
     /// <remarks>
-    /// An allowlisted key can still hold a URL — <c>Data Source=postgresql://app:pw@db:5432</c> — and
-    /// the scheme is optional, since <c>Data Source=user:pw@h:1433</c> says the same thing without
-    /// one. A <c>:</c> or a <c>/</c> must appear before the <c>@</c> for this to be an authority at
-    /// all, which is what leaves <c>UID=a@b.com</c> alone.
+    /// Used only for the bare-URI prefix — a connection string with no <c>key=</c> in it at all — so
+    /// this is the one place authority masking still applies. A key=value pair under an allowlisted
+    /// key is judged by <see cref="ShapesByKey"/> instead, and a value carrying an authority does not
+    /// match any of those shapes, so it is masked whole rather than reduced to its host.
     /// <para>
     /// The <em>last</em> <c>@</c> is taken, and nothing stops the search at <c>/</c>, <c>?</c> or
     /// <c>#</c>: all three are legal unencoded in a password people actually write, and a rule that

@@ -13,6 +13,12 @@ public class KubernetesSourceTests
         public bool IsAvailable(int candidate) => true;
 
         public int AllocatePort() => port;
+
+        /// <remarks>
+        /// The service-side source forwards exactly one port, so a call here would be a bug rather
+        /// than a case worth standing in for.
+        /// </remarks>
+        public IReadOnlyList<int> AllocatePorts(int count) => throw new NotSupportedException();
     }
 
     private const string ServiceName = "orders";
@@ -289,5 +295,11 @@ public class KubernetesSourceTests
             onAllocate();
             return port;
         }
+
+        /// <remarks>
+        /// The service-side source forwards exactly one port, so a call here would be a bug rather
+        /// than a case worth standing in for.
+        /// </remarks>
+        public IReadOnlyList<int> AllocatePorts(int count) => throw new NotSupportedException();
     }
 }

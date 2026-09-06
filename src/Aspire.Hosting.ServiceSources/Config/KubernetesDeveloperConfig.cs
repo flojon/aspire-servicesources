@@ -19,6 +19,12 @@ internal sealed class KubernetesDeveloperConfig
     public string? Namespace { get; set; }
 
     /// <summary>The port inside the cluster, overriding the catalog's <c>kubernetes.port</c>.</summary>
+    /// <remarks>
+    /// One number, where a <em>backing</em> service's identically-named field also takes a block of
+    /// named ports — see <see cref="KubernetesBackingServiceDeveloperConfig.Port"/>. Deliberate: a
+    /// service has one endpoint and takes its remote port from the catalog, so there is never a
+    /// second port here for a name to tell apart.
+    /// </remarks>
     public int? Port { get; set; }
 
     /// <summary>

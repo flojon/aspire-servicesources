@@ -157,8 +157,31 @@ nothing will fail to build to warn you.
   template whose `${port}` was expanded away before the AppHost ran — `${…}` is a shell variable
   too, and double quotes do not protect it — arrives looking exactly like one that never had it.
 
-  Not in this pass: forwarding several ports through one tunnel (`"port": { "amqp": 5672 }`, reached
-  as `${port:amqp}` — [#233]). It is refused by name rather than misread.
+  **Several ports go through one tunnel** ([#233]). `port` takes either a number or a block that
+  names each port, and a connection string reaches a named one as `${port:<name>}`:
+
+  ```jsonc
+  "orders-events": {
+    "source": "kubernetes",
+    "kubernetes": {
+      "service": "rabbitmq",
+      "port": { "amqp": 5672, "management": 15672 },
+      "context": "dev-west",
+      "connectionString": "amqp://dev:hunter2@localhost:${port:amqp}/"
+    }
+  }
+  ```
+
+  One `kubectl` invocation carries every pair, because it can — measured against a two-port Service
+  in `kind`, where one process forwarded both and carried real traffic on each. Two entries would
+  mean two processes and two tunnels to the same Service. Each forwarded port gets its own health
+  check, and all of them hang off the backing service, so a `WaitFor` waits for the whole tunnel
+  rather than for whichever port happened to be registered.
+
+  A single `port` is unchanged, and `${port}` remains its spelling. The two do not mix: `${port}`
+  against a block that names its ports is refused naming the ports it forwards, and `${port:<name>}`
+  against a single port is refused saying so — each with the spelling that entry actually takes,
+  rather than advice that would earn a second startup failure contradicting the first.
 
 - **A connection string can read its credentials out of a Kubernetes secret: `${secret:<name>:<key>}`**
   ([#144]). The password a backing service needs no longer has to be written into
@@ -215,11 +238,13 @@ nothing will fail to build to warn you.
   the secret was written against — `orders-pg-rw`, `.orders`, `.svc`, or the fully qualified
   `.svc.cluster.local` — is rewritten to `localhost`. Giving up the allocated port is the real cost
   of the mode, so a local port already in use is refused by name up front rather than left to the
-  tunnel's log. Two more things are refused rather than served quietly: a secret whose own port is
-  not the one being forwarded — the tunnel follows `port`, not the secret, and unchecked the app
-  would dial a port nothing serves while every resource reported healthy — and a secret that names
-  the service in no form this can rewrite, which would otherwise reach the app still addressed at
-  the cluster. Per-field placeholders stay preferred wherever the secret offers them.
+  tunnel's log — and, since there is then only the one number to match against, this mode is refused
+  against a block that names its ports the same way `${port}` is: give it a single `port` instead.
+  Two more things are refused rather than served quietly: a secret whose own port is not the one
+  being forwarded — the tunnel follows `port`, not the secret, and unchecked the app would dial a
+  port nothing serves while every resource reported healthy — and a secret that names the service in
+  no form this can rewrite, which would otherwise reach the app still addressed at the cluster.
+  Per-field placeholders stay preferred wherever the secret offers them.
 
 - **`prepare` — a `"local"` checkout can bootstrap itself before its kind judges it** ([#118]). A
   managed checkout is assumed to be runnable the moment it is cloned, which is not true of a

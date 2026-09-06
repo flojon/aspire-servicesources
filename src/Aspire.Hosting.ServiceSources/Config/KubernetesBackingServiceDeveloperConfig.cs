@@ -42,8 +42,16 @@ internal sealed class KubernetesBackingServiceDeveloperConfig
     /// The <em>remote</em> port. The local end is allocated, not configured, so that two backing
     /// services forwarded at once cannot collide — which is also why a connection string writes
     /// <c>${port}</c> rather than a number: the number is not known until the AppHost starts.
+    /// <para>
+    /// A block of named ports as well as a single number, unlike the identically-named
+    /// <see cref="KubernetesDeveloperConfig.Port"/> on the service side, which stays an
+    /// <see cref="int"/>. That is a scope boundary rather than an inconsistency: a <em>service</em>
+    /// has one endpoint, and its remote port comes from the catalog rather than from this file, so
+    /// there was never a second port for a name to tell apart. Only a backing service names its own
+    /// ports, and a broker is the case that wants two.
+    /// </para>
     /// </remarks>
-    public int? Port { get; set; }
+    public KubernetesPorts? Port { get; set; }
 
     /// <summary>The kubectl context the port-forward runs against. Required by this source.</summary>
     /// <remarks>

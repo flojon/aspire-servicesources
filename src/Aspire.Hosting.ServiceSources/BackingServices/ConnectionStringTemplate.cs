@@ -410,7 +410,7 @@ internal sealed class ConnectionStringTemplate
     private static ServiceSourcesConfigurationException Malformed(
         string backingServiceName, string configKey, string placeholder, string problem) =>
         new($"Backing service '{backingServiceName}': the connection string carries the placeholder "
-            + $"'{placeholder}', which cannot be read — {problem} "
+            + $"{Config.ConfiguredValue.Escaped(placeholder)}, which cannot be read — {problem} "
             + $"The key is '{configKey}', which any configuration layer can set: "
             + $"{Config.DeveloperConfiguration.FileName}, appsettings, user secrets, the environment "
             + $"variable {configKey.Replace(":", "__", StringComparison.Ordinal)}, or the command line.");
