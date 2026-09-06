@@ -153,6 +153,13 @@ internal sealed class JavaKindOptions
                 "servicesources.local.json to point at a checkout somewhere else on disk.");
         }
 
+        if (CheckoutRelativePath.UnusableSegment(trimmed) is { } unusable)
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': java.workingDirectory '{trimmed}' has a path segment '{unusable}' — " +
+                CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy);
+        }
+
         if (CheckoutRelativePath.EscapesRoot(trimmed))
         {
             throw new ServiceSourcesConfigurationException(
@@ -199,6 +206,13 @@ internal sealed class JavaKindOptions
         // Against the working directory, not the bare jarPath: '../app.jar' escapes a project at the
         // repository root but not one two directories down. '/' is a separator to EscapesRoot on
         // every platform, so joining with it is safe whichever way workingDirectory was written.
+        if (CheckoutRelativePath.UnusableSegment(jarPath) is { } unusable)
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': java.jarPath '{jarPath}' has a path segment '{unusable}' — " +
+                CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy);
+        }
+
         if (CheckoutRelativePath.EscapesRoot($"{workingDirectory}/{jarPath}"))
         {
             throw new ServiceSourcesConfigurationException(
@@ -235,6 +249,13 @@ internal sealed class JavaKindOptions
                 $"Service '{serviceName}': java.wrapperPath '{trimmed}' is an absolute path, but it must be relative " +
                 "to the root of the service's checkout — it names a wrapper script committed to the repository, not " +
                 "a Maven or Gradle installation on the developer's machine.");
+        }
+
+        if (CheckoutRelativePath.UnusableSegment(trimmed) is { } unusable)
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': java.wrapperPath '{trimmed}' has a path segment '{unusable}' — " +
+                CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy);
         }
 
         if (CheckoutRelativePath.EscapesRoot(trimmed))

@@ -389,6 +389,56 @@ nothing will fail to build to warn you.
   carries until its next tag, and the preview feed orders versions without regard for which
   branch produced them. `RELEASING.md` records what each workflow does on such a branch.
 
+- **A path where a segment is nothing but dots and spaces is now refused, naming the segment**
+  ([#241]). `"..."`, `".. "`, `". "` and `" .."` matched neither `"."` nor `".."` exactly, so the
+  confinement check counted each as an ordinary directory. Every path it governs is affected —
+  `project`, `prepare.command`, and `java.workingDirectory`, `java.jarPath` and `java.wrapperPath` —
+  because they share one implementation.
+
+  **What to change if this breaks your catalog.** The refusal names the segment and what still
+  works:
+
+  ```
+  Service 'orders': project '.../Api.csproj' has a path segment '...' — a segment made only of
+  dots and spaces does not mean the same thing on every platform: it is an ordinary directory name
+  on Linux and macOS, while Windows removes trailing dots and spaces from the end of a path, so as
+  the last segment it is erased and the path names the directory above it instead. Rewrite that
+  segment — if it names a real, committed directory, rename the directory itself, not just this
+  value. '.' and '..' are unaffected, and a segment with anything left after its trailing dots and
+  spaces ('orders.') is fine.
+  ```
+
+  In practice the value is a typo — most often a stray space after `..`, as in `src/.. /Api.csproj`,
+  which is why the message quotes the segment back: a trailing space is invisible in a terminal and
+  in most editors. A repository that genuinely commits a directory named `...` and points `project`
+  at it did resolve on `0.4.0` and now does not; the message says to rename that directory rather
+  than only editing the catalog entry.
+
+  **Why refuse a name the filesystem accepts.** Per Microsoft's [path normalization
+  rules](https://learn.microsoft.com/dotnet/standard/io/file-path-formats), Windows removes all
+  trailing dots and spaces from a path that does not end in a separator — from the end of the
+  *path*, not from every component — and otherwise leaves a segment of three or more dots alone,
+  it being "a valid file/directory name". So one written value means two things: an ordinary
+  directory on Linux and macOS and mid-path on Windows, and erased as the last segment on Windows,
+  where the path then names the directory above it. `servicesources.yaml` is shared across a team,
+  and a value whose meaning depends on who opens it is worth refusing on all of them — the same
+  reasoning [#224] gives for judging a service name lexically rather than resolving it, and the
+  same `TrimEnd` test, now shared between the two rules so they cannot drift apart.
+
+  **No claim is made that this closes an escape**, and the check is not a security fix. Trimming
+  happens after `.` and `..` are evaluated, so a trimmed segment is not re-read as a parent
+  reference; this repository has no Windows leg to settle the point either way, and the honest
+  description is that the depth accounting was wrong rather than exploitable. `.` and `..` keep
+  their meanings exactly, so `src/../Orders.csproj` is accepted as before, and a segment with text
+  left after its trailing dots and spaces (`orders./Orders.csproj`) is an ordinary directory on
+  every platform and still resolves.
+
+  A path that genuinely climbs out keeps its own separate message: `../Evil.csproj` is a *quantity*
+  mistake and still reports that it points outside the checkout, while this is a *spelling* mistake
+  whose value may well name a file sitting inside it. Telling the second developer their path
+  "points outside the service's checkout" said something untrue about the platform they were
+  running on.
+
 ### Fixed
 
 - **A field misspelled at a service entry's root now names the field it was reaching for**
@@ -1161,6 +1211,7 @@ Targets `net10.0`.
 [#222]: https://github.com/flojon/aspire-servicesources/issues/222
 [#224]: https://github.com/flojon/aspire-servicesources/issues/224
 [#233]: https://github.com/flojon/aspire-servicesources/issues/233
+[#241]: https://github.com/flojon/aspire-servicesources/issues/241
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
