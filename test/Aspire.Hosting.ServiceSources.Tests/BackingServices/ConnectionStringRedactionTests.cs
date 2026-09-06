@@ -38,13 +38,21 @@ public class ConnectionStringRedactionTests
         => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
 
     /// <summary>
-    /// A URI authority is reduced to its host, whatever the password inside it contains.
+    /// A bare URI's authority is reduced to its host, whatever the password inside it contains.
     /// </summary>
     /// <remarks>
-    /// The authority is not ended by <c>/</c>, <c>?</c> or <c>#</c>: all three are legal unencoded
-    /// in a password people actually write, and a rule that stopped at them printed the password
-    /// whole. The last <c>@</c> is what bounds it, and the whole userinfo goes — inside one there is
-    /// no telling a username from a password, since <c>redis://:pass@h</c> has only the latter.
+    /// Authority masking survives in exactly this one place: a connection string with no <c>key=</c>
+    /// in it at all, so all of it reaches <c>RedactPrefix</c> rather than a key's own shape. The
+    /// authority is not ended by <c>/</c>, <c>?</c> or <c>#</c>: all three are legal unencoded in a
+    /// password people actually write, and a rule that stopped at them printed the password whole.
+    /// The last <c>@</c> is what bounds it, and the whole userinfo goes — inside one there is no
+    /// telling a username from a password, since <c>redis://:pass@h</c> has only the latter.
+    /// <para>
+    /// A value under an allowlisted key that happens to hold the same shape is a different case —
+    /// see <see cref="ACredentialBearingValueUnderAnAllowlistedKey_IsMaskedWhole"/> — because a value
+    /// is judged against its key's shape rather than by the presence of an authority, and none of the
+    /// five shapes admit one.
+    /// </para>
     /// </remarks>
     [Theory]
     [InlineData("postgresql://orders_app:hunter2@db.internal:5432/orders",
@@ -59,8 +67,6 @@ public class ConnectionStringRedactionTests
     [InlineData("redis://user:pa?ss@db.internal:6379", "redis://***@db.internal:6379")]
     [InlineData("postgresql://app:8Kx/2Qz+w7A=@db.internal:5432/orders",
                 "postgresql://***@db.internal:5432/orders")]
-    // No scheme: a bare authority says the same thing, and an allowlisted key may hold one.
-    [InlineData("Data Source=user:hunter2@h:1433", "Data Source=***@h:1433")]
     // An '@' before the '://' means there is no scheme in front of it, so this is not a URI and
     // there is nothing here to recognise.
     [InlineData("x:y@a://b", "***")]
@@ -148,13 +154,16 @@ public class ConnectionStringRedactionTests
     /// <remarks>
     /// What the retained keyword list is for. Here the password sits inside the value of an
     /// allowlisted key, behind a <c>:</c> that introduces nothing, so the scan has no reason to
-    /// treat it as a pair and would print it. Naming the keyword outright is the backstop that
-    /// makes it impossible for this rewrite to print something the previous one hid.
+    /// treat it as a pair and would print it if the backstop did not catch it first. Naming the
+    /// keyword outright is what makes it impossible for this rewrite to print something the previous
+    /// one hid — and once the backstop has replaced the password with <c>***</c>, what is left,
+    /// <c>file:pwd=***</c>, does not match <c>data source</c>'s shape either, so the whole value is
+    /// masked a second time. Belt and braces: the backstop alone already made this safe.
     /// </remarks>
     [Fact]
     public void AKeywordBehindNoSeparatorAtAll_IsStillMasked()
         => Assert.Equal(
-            "Data Source=file:pwd=***",
+            "Data Source=***",
             ConnectionStringRedaction.Redact("Data Source=file:pwd=hunter2"));
 
     /// <summary>
@@ -175,31 +184,50 @@ public class ConnectionStringRedactionTests
         => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
 
     /// <summary>
-    /// Text inside a recognised value that is not itself recognised does not ride out on it.
+    /// Text inside a recognised value that is not itself recognised takes the whole value with it.
     /// </summary>
     /// <remarks>
-    /// The value of an allowlisted key is printed, and it runs to the next key the scan finds — so
-    /// anything the scan cannot see as a key travels inside it. A key does not begin with a digit,
-    /// or with punctuation, or in a script this does not read, and each of those printed a password
-    /// whole. Worse, silently: the result equalled the input, so the message appended no note and
-    /// said in effect that nothing had been hidden.
+    /// This is the change #256 makes, in the case it was written about: a value's extent is no
+    /// longer "text until something ends it", so what the scan cannot see as a key no longer rides
+    /// out on whatever came before it. <c>Host=db.internal;2fa=hunter2</c> now shows <c>Host=***</c>
+    /// rather than <c>Host=db.internal;***</c> — <c>db.internal</c> alone is a perfectly good
+    /// hostname, but it is not the <em>whole</em> of what <c>host</c> holds here, and the whole is
+    /// what has to match. A key does not begin with a digit, or with punctuation, or in a script this
+    /// does not read, so none of those following rows are recognised as a key of their own either.
     /// </remarks>
     [Theory]
     // A key the scan cannot see, because a key does not begin with a digit.
-    [InlineData("Host=db.internal;2fa=hunter2;Database=orders", "Host=db.internal;***;Database=orders")]
-    [InlineData("host=db.internal port=5432 2fa=hunter2", "host=db.internal port=5432 ***")]
+    [InlineData("Host=db.internal;2fa=hunter2;Database=orders", "Host=***;Database=orders")]
+    // One level down, where the value is reached through a nested pair: '5432' is a perfectly good
+    // port on its own, but 'port' does not hold only '5432' here.
+    [InlineData("host=db.internal port=5432 2fa=hunter2", "host=db.internal port=***")]
     // Nor in a script this does not read, nor behind punctuation outside a key's charset.
-    [InlineData("Host=db.internal;Lösenord=hunter2", "Host=db.internal;***")]
-    [InlineData("Host=db.internal;auth[token]=hunter2", "Host=db.internal;***")]
-    [InlineData("Host=db.internal;my$key=hunter2", "Host=db.internal;***")]
+    [InlineData("Host=db.internal;Lösenord=hunter2", "Host=***")]
+    [InlineData("Host=db.internal;auth[token]=hunter2", "Host=***")]
+    [InlineData("Host=db.internal;my$key=hunter2", "Host=***")]
     // Nor text that is not a pair at all.
-    [InlineData("Host=h;hunter2", "Host=h;***")]
-    [InlineData("Port=5432;hunter2", "Port=5432;***")]
-    [InlineData("Host=h hunter2", "Host=h ***")]
-    [InlineData("Host=h,hunter2", "Host=h,***")]
-    [InlineData("Host=db.internal;Port=;2fa=hunter2", "Host=db.internal;Port=;***")]
+    [InlineData("Host=h;hunter2", "Host=***")]
+    [InlineData("Port=5432;hunter2", "Port=***")]
+    [InlineData("Host=h hunter2", "Host=***")]
+    [InlineData("Host=h,hunter2", "Host=***")]
     public void UnrecognisedTextInsideARecognisedValue_IsMaskedWithIt(string connectionString, string expected)
         => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
+
+    /// <summary>
+    /// A value that is genuinely empty is left showing that, even when garbage follows it.
+    /// </summary>
+    /// <remarks>
+    /// The counterpart to the previous test: <c>Port=</c> here holds nothing of its own — the <c>;</c>
+    /// sits immediately after the <c>=</c> — so there is no non-empty content to fail a shape match,
+    /// and the emptiness is preserved rather than swallowed into a mask that would claim something
+    /// was hidden where nothing was. This is the shell-expansion diagnosis in miniature: an empty
+    /// <c>Port=</c> next to unrelated text a shell left behind.
+    /// </remarks>
+    [Fact]
+    public void AGenuinelyEmptyValue_ShowsItsEmptinessEvenWithGarbageAfterIt()
+        => Assert.Equal(
+            "Host=db.internal;Port=;***",
+            ConnectionStringRedaction.Redact("Host=db.internal;Port=;2fa=hunter2"));
 
     /// <summary>
     /// A quoted value owns the separators inside it, and the tail of one is not a pair.
@@ -234,26 +262,34 @@ public class ConnectionStringRedactionTests
         => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
 
     /// <summary>
-    /// A password is found before anything is cut at a separator.
+    /// A value under an allowlisted key that carries a credential is masked whole.
     /// </summary>
     /// <remarks>
-    /// RFC 3986 admits the sub-delims raw in a userinfo, so a password legally carries the very
-    /// characters a value is ended by. Cutting first left the fragment with no <c>@</c> in it, the
-    /// authority rule then had nothing to find, and the password printed — the same mistake the
-    /// authority rule was written to avoid, displaced into the step before it.
+    /// Authority masking — reducing <c>user:pass@host</c> to <c>***@host</c> — is gone from this
+    /// path. A value is judged against the shape its key is known to hold, and none of the five
+    /// shapes admit a userinfo, so a value carrying one fails to match end to end and is masked in
+    /// full — one of the costs #256 names outright: "a credential-bearing URL... read <c>***</c>."
+    /// <para>
+    /// The last row is one level down, where the value is reached through a nested pair rather than
+    /// a top-level one — the outer <c>Host=q</c> still prints, because <c>q</c> alone matches the
+    /// host shape on its own.
+    /// </para>
     /// </remarks>
     [Theory]
-    [InlineData("Data Source=postgresql://app:hunter2#1@db.internal:5432/orders",
-                "Data Source=postgresql://***@db.internal:5432/orders")]
-    [InlineData("Host=redis://default:hunter2?x@cache:6379", "Host=redis://***@cache:6379")]
-    [InlineData("Data Source=postgresql://app:hunter2;x@db.internal:5432/orders",
-                "Data Source=postgresql://***@db.internal:5432/orders")]
-    [InlineData("Data Source=user:hunter2 tail@h:1433", "Data Source=***@h:1433")]
-    [InlineData("Host=u:hunter2,w@h,1433", "Host=***@h,1433")]
-    [InlineData("Server=user:pa,ss@db.database.windows.net,1433", "Server=***@db.database.windows.net,1433")]
-    // One level down, where the value is reached through a nested pair rather than a top-level one.
-    [InlineData("Host=q host=app:hunter2#x@db:5432", "Host=q host=***@db:5432")]
-    public void AnAuthorityUnderARecognisedKey_IsMaskedBeforeTheValueIsCut(
+    [InlineData("Data Source=postgresql://app:hunter2#1@db.internal:5432/orders", "Data Source=***")]
+    [InlineData("Host=redis://default:hunter2?x@cache:6379", "Host=***")]
+    [InlineData("Data Source=postgresql://app:hunter2;x@db.internal:5432/orders", "Data Source=***")]
+    [InlineData("Data Source=user:hunter2 tail@h:1433", "Data Source=***")]
+    [InlineData("Data Source=user:hunter2@h:1433", "Data Source=***")]
+    [InlineData("Host=u:hunter2,w@h,1433", "Host=***")]
+    [InlineData("Server=user:pa,ss@db.database.windows.net,1433", "Server=***")]
+    [InlineData("Host=q host=app:hunter2#x@db:5432", "Host=q host=***")]
+    // Oracle's 'scott/tiger@//host:1521/svc' separates the name from the secret with a slash rather
+    // than a colon, and is carrying a credential just the same.
+    [InlineData("Data Source=scott/hunter2@//db.internal:1521/orders", "Data Source=***")]
+    [InlineData("Data Source=scott/hunter2@orcl", "Data Source=***")]
+    [InlineData("User Id=scott/hunter2@db", "User Id=***")]
+    public void ACredentialBearingValueUnderAnAllowlistedKey_IsMaskedWhole(
         string connectionString, string expected)
         => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
 
@@ -293,22 +329,6 @@ public class ConnectionStringRedactionTests
     [InlineData("mongodb://u:p@h1:27017,hunter2", "mongodb://***@h1:27017,***")]
     [InlineData("postgres://db:5432/orders,hunter2", "postgres://db:5432/orders,***")]
     public void AHostListInAUriAuthority_ShowsOnlyWhatIsShapedLikeAHost(
-        string connectionString, string expected)
-        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
-
-    /// <summary>
-    /// Oracle separates the name from the secret with a slash, and that is an authority too.
-    /// </summary>
-    /// <remarks>
-    /// <c>scott/tiger@//host:1521/svc</c> is the spelling sqlplus, the thin JDBC driver and every
-    /// Oracle client take. Requiring a <c>:</c> is what leaves <c>UID=a@b.com</c> alone, but on its
-    /// own it left this alone too.
-    /// </remarks>
-    [Theory]
-    [InlineData("Data Source=scott/hunter2@//db.internal:1521/orders", "Data Source=***@//db.internal:1521/orders")]
-    [InlineData("Data Source=scott/hunter2@orcl", "Data Source=***@orcl")]
-    [InlineData("User Id=scott/hunter2@db", "User Id=***@db")]
-    public void OraclesSlashFormCredential_IsMaskedLikeAnyOtherAuthority(
         string connectionString, string expected)
         => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
 
@@ -415,10 +435,6 @@ public class ConnectionStringRedactionTests
     [Theory]
     [InlineData("Server=tcp:db.database.windows.net,1433", "Server=tcp:db.database.windows.net,1433")]
     [InlineData("Server=localhost,1433;Database=orders", "Server=localhost,1433;Database=orders")]
-    [InlineData("Server=localhost,hunter2", "Server=localhost,***")]
-    // A comma inside a quoted value belongs to the value, and an empty field is not a field.
-    [InlineData("Server=\"a,b\",1433", "Server=\"a,b\",1433")]
-    [InlineData("Host=h,,,1433", "Host=h,,,1433")]
     public void ACommaInsideAValue_ShowsAPortAndNothingElse(string connectionString, string expected)
         => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
 
@@ -449,7 +465,6 @@ public class ConnectionStringRedactionTests
     [InlineData("Host=h;Custom Port=")]
     [InlineData("Data Source=tcp://db.internal:1433;UID=a@b.com;Database=orders")]
     [InlineData("tcp://db.internal:1433;UID=a@b.com;Database=orders")]
-    [InlineData("Data Source=\"C:\\a;b\\x.mdb\";Database=orders")]
     [InlineData("Host=h;Port=5432;")]
     [InlineData("Server=tcp:db.database.windows.net,1433;Initial Catalog=orders;User ID=dev")]
     // Spacing is the developer's own layout, and comes back exactly as they wrote it.
@@ -466,26 +481,44 @@ public class ConnectionStringRedactionTests
     [InlineData("Host=\tPort = 5432")]
     [InlineData("Host= Port = ")]
     [InlineData("Host= hunter2")]
-    // An Oracle descriptor is full of '=' and none of it was written after a space, so all of it is
-    // this value.
-    [InlineData("Data Source=(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=h)(PORT=1521)))")]
     // Redis and Kafka address a tunnel with a bare host and port and no keys at all.
     [InlineData("localhost:6379")]
     [InlineData("[::1]:6379")]
     // A comma in a URI lists hosts: a replica set and a broker list are ordinary connection strings.
     [InlineData("mongodb://h1:27017,h2:27017/db")]
-    // A '/' counts towards an authority only alongside an '@'; a path on its own is a value.
-    [InlineData("Data Source=C:/db/x.mdb;Database=orders")]
-    [InlineData("Data Source=/var/lib/pgdata")]
-    [InlineData("user=DOMAIN/alice")]
     // A scheme with nothing after it, and a bare authority marker, are both still just text.
     [InlineData("a://")]
     [InlineData("cassandra://a:9042,b:9042")]
-    // A '#' with nothing after it hides nothing, and is not deleted from the echo.
-    [InlineData("Host=h;Port=5432#")]
-    [InlineData("Host=h#")]
     public void AConnectionStringWithNothingToHide_IsReturnedUnchanged(string connectionString)
         => Assert.Equal(connectionString, ConnectionStringRedaction.Redact(connectionString));
+
+    /// <summary>
+    /// A value under an allowlisted key that does not match that key's shape is masked whole, even
+    /// with nothing secret in it.
+    /// </summary>
+    /// <remarks>
+    /// The cost #256 takes on knowingly: a value's extent is no longer "text until something ends
+    /// it", so a file path, an Oracle TNS descriptor, a bare trailing fragment marker, or a
+    /// domain-qualified username under <c>user</c> reads as <c>***</c> rather than printing through
+    /// on the strength of containing nothing this recognises as dangerous. Each of these carries no
+    /// credential at all, and each is masked anyway, because nothing here vouches for the value
+    /// positively — it merely fails to look like anything to hide.
+    /// </remarks>
+    [Theory]
+    [InlineData("Data Source=\"C:\\a;b\\x.mdb\";Database=orders", "Data Source=***;Database=orders")]
+    [InlineData("Data Source=C:/db/x.mdb;Database=orders", "Data Source=***;Database=orders")]
+    [InlineData("Data Source=/var/lib/pgdata", "Data Source=***")]
+    [InlineData("Data Source=(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=h)(PORT=1521)))", "Data Source=***")]
+    [InlineData("user=DOMAIN/alice", "user=***")]
+    [InlineData("Server=localhost,hunter2", "Server=***")]
+    [InlineData("Host=h,,,1433", "Host=***")]
+    [InlineData("Server=\"a,b\",1433", "Server=***")]
+    // A '#' with nothing after it hid nothing before, but 'h#' and '5432#' are not a hostname or a
+    // port either, so both now mask whole.
+    [InlineData("Host=h;Port=5432#", "Host=h;Port=***")]
+    [InlineData("Host=h#", "Host=***")]
+    public void AnExoticValueUnderAnAllowlistedKey_IsMaskedWhole(string connectionString, string expected)
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
 
     /// <summary>
     /// An empty value is never replaced.
