@@ -1317,7 +1317,6 @@ Targets `net10.0`.
 [#170]: https://github.com/flojon/aspire-servicesources/issues/170
 [#171]: https://github.com/flojon/aspire-servicesources/issues/171
 [#180]: https://github.com/flojon/aspire-servicesources/pull/180
-[#264]: https://github.com/flojon/aspire-servicesources/issues/264
 [#182]: https://github.com/flojon/aspire-servicesources/issues/182
 [#187]: https://github.com/flojon/aspire-servicesources/issues/187
 [#200]: https://github.com/flojon/aspire-servicesources/issues/200
@@ -1330,6 +1329,7 @@ Targets `net10.0`.
 [#233]: https://github.com/flojon/aspire-servicesources/issues/233
 [#236]: https://github.com/flojon/aspire-servicesources/issues/236
 [#241]: https://github.com/flojon/aspire-servicesources/issues/241
+[#264]: https://github.com/flojon/aspire-servicesources/issues/264
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
