@@ -595,7 +595,7 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
             // one that is wrong — as the validator's own per-entry messages do.
             var key = portName is null
                 ? ConfigKey(name, "Port")
-                : $"{ConfigKey(name, "Port")}:{ConfiguredValue.Escaped(portName)}";
+                : $"{ConfigKey(name, "Port")}:{ConfiguredValue.Bare(portName)}";
 
             throw new ServiceSourcesConfigurationException(
                 $"Backing service '{name}': {which}, which is not a port — a port is between "
@@ -719,18 +719,22 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
         // Every clause that names a spelling names the one this entry actually takes. Telling a
         // developer whose block names its ports to write '${port}' would earn them a second startup
         // failure saying the opposite — which is the one thing this message must not do.
-        var spelling = names.Length == 0 ? "'${port}'" : Spelled(names[0]);
+        // What is missing, said no more precisely than it is known: under a block of names, any one
+        // of them would have done, and naming the first would tell a developer who meant the second
+        // that they wrote the wrong one. The remedy below is where a single spelling belongs, because
+        // there it is offered rather than asserted.
+        var missing = names.Length == 0 ? "'${port}'" : "'${port:<name>}'";
 
         var remedy = names.Length == 0
-            ? $"Replace the port in it with {spelling}, as 'Host=localhost;Port=${{port}};Database=orders'."
+            ? "Replace the port in it with '${port}', as 'Host=localhost;Port=${port};Database=orders'."
             : $"This backing service forwards its ports by name — {Quoted(names)} — so name the one this "
-              + $"addresses: replace the port in it with {spelling}.";
+              + $"addresses: replace the port in it with {Spelled(names[0])}.";
 
         return "source 'kubernetes' opens a kubectl port-forward on a local port allocated at startup, but the "
-            + $"connection string names no {spelling} placeholder to put it in — so nothing would address the "
+            + $"connection string names no {missing} placeholder to put it in — so nothing would address the "
             + $"tunnel: \"{shown}\"{note}."
             + $"{Environment.NewLine}    {remedy}"
-            + $"{Environment.NewLine}    If you did write {spelling}, a shell expanded it away before the AppHost "
+            + $"{Environment.NewLine}    If you did write {missing}, a shell expanded it away before the AppHost "
             + "saw it — '${...}' is a shell variable too, and double quotes do not protect it. Single-quote the "
             + "value, and use env 'NAME=value' for a key with a hyphen in it."
             + $"{Environment.NewLine}    A backing service reached at a fixed address you already have — an "

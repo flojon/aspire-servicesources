@@ -885,7 +885,7 @@ public class KubernetesBackingServiceTests
             () => Resolve(builder, NamedConfig("amqp://localhost:${port:amqp}/", ("amqp", 0))));
 
         Assert.Contains("gives the port named 'amqp' the value '0', which is not a port", ex.Message);
-        Assert.Contains("Kubernetes:Port:'amqp'", ex.Message);
+        Assert.Contains("Kubernetes:Port:amqp'", ex.Message);
     }
 
     /// <remarks>

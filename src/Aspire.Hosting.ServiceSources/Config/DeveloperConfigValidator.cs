@@ -391,7 +391,14 @@ internal static class DeveloperConfigValidator
     }
 
     /// <summary>Whether a key is a position rather than a name.</summary>
-    private static bool IsPosition(string key) => int.TryParse(key, out _);
+    /// <remarks>
+    /// Digits and nothing else, because that is what <see cref="IConfiguration"/> keys an array by.
+    /// <see cref="int.TryParse(string, out int)"/> would also claim <c>+1</c>, <c>-1</c> and a
+    /// number padded with spaces, none of which any array produces — so a developer who wrote one of
+    /// those as a name would be told it was a position, which is not what is wrong with it.
+    /// </remarks>
+    private static bool IsPosition(string key) =>
+        key.Length > 0 && key.All(char.IsAsciiDigit);
 
     /// <summary>
     /// How a connection string reaches one of several named values, for the messages that send a
@@ -414,13 +421,38 @@ internal static class DeveloperConfigValidator
     /// neither author can see the other's.
     /// </para>
     /// </remarks>
-    private static string ValueAndNamedEntries(IConfigurationSection field, string block, string noun) =>
-        $"'{field.Key}' in the '{block}' block carries both the value {Escaped(field.Value)} and named "
-        + $"{noun}s ({Quoted(field.GetChildren().Select(entry => entry.Key))}). It takes one or the other, and a "
-        + $"value is read first — so the names would be dropped, and a value that is not a {noun} would take the "
-        + "whole entry with it. Configuration merges layers per key, so this is usually one layer writing a "
-        + $"{noun} number over another layer's block of names."
-        + SetAt(field);
+    private static string ValueAndNamedEntries(IConfigurationSection field, string block, string noun)
+    {
+        var names = QuotedNames(field.GetChildren().Select(entry => entry.Key));
+
+        // The empty value is the gesture that unsets a field, honoured a few lines above for a field
+        // written as a value alone. Here it still unsets — taking the names with it — so it is
+        // refused, and the sentence has to say that rather than talk about a number nobody wrote.
+        var cause = field.Value!.Length == 0
+            ? $"An empty value unsets a field, so a higher layer blanking this key would drop the whole block of "
+              + $"named {noun}s rather than any one of them."
+            : $"Configuration merges layers per key, so this is usually one layer writing a {noun} number over "
+              + "another layer's block of names.";
+
+        return $"'{field.Key}' in the '{block}' block carries both the value {Escaped(field.Value)} and named "
+            + $"{noun}s ({names}). It takes one or the other, and a value is read first — so the names would be "
+            + $"dropped, and a value that is not a {noun} would take the whole entry with it. {cause}"
+            + ReachEachByName(noun)
+            + SetAt(field);
+    }
+
+    /// <summary>
+    /// Developer-invented names, escaped and quoted, in the order configuration holds them.
+    /// </summary>
+    /// <remarks>
+    /// Not <see cref="Quoted"/>, which exists for keys the <em>shape</em> declares: that one runs
+    /// them through <see cref="Spelled"/>, which lowercases the first character — right for a
+    /// PascalCase property name and wrong for a name a developer chose, since it renders
+    /// <c>AMQP</c> as <c>aMQP</c> — and it does not escape, because a declared key cannot contain a
+    /// newline. A name out of a block of named values can contain anything at all.
+    /// </remarks>
+    private static string QuotedNames(IEnumerable<string> names) =>
+        string.Join(", ", names.Select(Escaped));
 
     /// <summary>
     /// The error for a value-or-map field written as a value that is neither a number nor a block.
@@ -438,7 +470,7 @@ internal static class DeveloperConfigValidator
         $"'{field.Key}' in the '{block}' block is an empty block of named {noun}s, so nothing "
         + $"would be forwarded. Write a {noun} number, or name at least one {noun}."
         + ReachEachByName(noun)
-        + SetAtBlock(field, $"<{noun}>");
+        + SetAtBlock(field, "<name>");
 
     /// <summary>
     /// The error for a block of named values written as a list, whose entries are therefore keyed by
@@ -449,7 +481,7 @@ internal static class DeveloperConfigValidator
         + $"position. A block of named {noun}s gives each one a name, because a connection string "
         + $"reaches a {noun} by name and a position is not one."
         + ReachEachByName(noun)
-        + SetAtBlock(field, $"<{noun}>");
+        + SetAtBlock(field, "<name>");
 
     /// <summary>The error for one entry named by a number among entries that are not.</summary>
     private static string PositionalMapEntry(
@@ -510,7 +542,7 @@ internal static class DeveloperConfigValidator
         $"'{field.Key}' in the '{block}' block names a {noun} with no name. Every {noun} in the "
         + $"block needs a name, because a connection string reaches one by name."
         + ReachEachByName(noun)
-        + SetAtBlock(field, $"<{noun}>");
+        + SetAtBlock(field, "<name>");
 
     /// <summary>
     /// Every problem with a field whose value is a list of values.
@@ -1048,7 +1080,10 @@ internal static class DeveloperConfigValidator
     /// </remarks>
     private static string SetAtMapEntry(IConfigurationSection field, IConfigurationSection entry)
     {
-        var name = Escaped(entry.Key);
+        // Bare, not Escaped: Escaped wraps its value in apostrophes, and this is already building a
+        // quoted path around the name — so the quoted spelling nested a second pair inside the first
+        // and put literal apostrophes into an environment variable name nobody can type.
+        var name = ConfiguredValue.Bare(entry.Key);
 
         return $" The key is '{field.Path}:{name}', which any configuration layer can set: "
             + $"{DeveloperConfiguration.FileName}, appsettings, user secrets, the environment variable "

@@ -392,10 +392,23 @@ public class PortBlockValidationTests
     [Theory]
     [InlineData("[5672, 15672]")]
     [InlineData("""{ "": 5672 }""")]
+    [InlineData("""{ "0": 5672, "amqp": 15672 }""")]
     public void AMessageSendingYouToANamedBlock_SaysTheTemplateChangesToo(string port) =>
         Assert.Contains(
             "A connection string reaches each one as '${port:<name>}'.",
             Refused(port).Message,
+            StringComparison.Ordinal);
+
+    /// <remarks>
+    /// The value-and-names message is a fourth that sends a reader to a named block, and it was the
+    /// one that did not say so — resolving it toward the names left the template refusing on the
+    /// next run. Its own case, because it is the one shape a single file cannot write.
+    /// </remarks>
+    [Fact]
+    public void TheValueAndNamesMessage_AlsoSaysTheTemplateChanges() =>
+        Assert.Contains(
+            "A connection string reaches each one as '${port:<name>}'.",
+            RefusedFromSettings(("port", "abc"), ("port:amqp", "5672")).Message,
             StringComparison.Ordinal);
 
     /// <remarks>
@@ -436,5 +449,96 @@ public class PortBlockValidationTests
     [Fact]
     public void ANamedPortInHexadecimal_IsAcceptedBecauseTheBinderAcceptsIt() =>
         Accepted("""{ "amqp": "0x1628" }""", "amqp://localhost:${port:amqp}/");
+
+
+    /// <summary>
+    /// The names echoed by the value-and-names message are escaped, and keep their own casing.
+    /// </summary>
+    /// <remarks>
+    /// This message reached for the quoting helper built for keys the <em>shape</em> declares, which
+    /// lowercases the first character and does not escape — right for a PascalCase property, wrong
+    /// for a name a developer chose. It rendered <c>AMQP</c> as <c>aMQP</c> and let a newline through
+    /// into a startup failure.
+    /// </remarks>
+    [Fact]
+    public void TheValueAndNamesMessage_EscapesTheNamesAndKeepsTheirCasing()
+    {
+        var ex = RefusedFromSettings(
+            ("port", "abc"),
+            ("port:AMQP\n\nBacking service 'x' is healthy.", "5672"));
+
+        Assert.Contains("AMQP", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("aMQP", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n\nBacking service 'x'", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// An empty value alongside names is refused, and says what an empty value would actually do.
+    /// </summary>
+    /// <remarks>
+    /// Blanking a key is the one gesture a higher layer has for dropping what a lower one set, and
+    /// it is honoured for a <c>port</c> written as a value alone. Alongside names it still unsets —
+    /// taking the whole block with it — so it is refused, and the message says that rather than
+    /// talking about a number nobody wrote.
+    /// </remarks>
+    [Fact]
+    public void AnEmptyValueAlongsideNames_SaysWhatBlankingWouldDrop()
+    {
+        var ex = RefusedFromSettings(("port", ""), ("port:amqp", "5672"));
+
+        Assert.Contains("carries both the value '' and named ports ('amqp')", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("would drop the whole block of named ports", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("writing a port number over", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Every key a remedy names can actually be typed: no nested quotes, no apostrophes inside an
+    /// environment variable name.
+    /// </summary>
+    /// <remarks>
+    /// The escaper wraps its value in apostrophes, and the key path builds a quoted path of its own
+    /// around the name — so quoting twice produced <c>'…:port:'amqp''</c> and an environment
+    /// variable with literal quotes in it, in the one sentence whose whole job is to hand the reader
+    /// something to paste.
+    /// </remarks>
+    [Theory]
+    [InlineData("""{ "amqp": "abc" }""")]
+    [InlineData("""{ "amqp": "" }""")]
+    [InlineData("""{ "0": 1, "amqp": 5672 }""")]
+    public void AKeyNamedByARemedy_CarriesNoNestedQuotes(string port)
+    {
+        var ex = Refused(port);
+
+        Assert.Contains("kubernetes:port:", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("port:'", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("port__'", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <remarks>
+    /// A position is a run of digits, which is what configuration keys an array by. <c>+1</c> and
+    /// <c>-1</c> are names — odd ones — and no array produces them, so calling them positions would
+    /// misdiagnose them.
+    /// </remarks>
+    [Fact]
+    public void ANameThatMerelyParsesAsANumber_IsNotCalledAPosition()
+    {
+        var ex = Refused("""{ "+1": {}, "amqp": 5672 }""");
+
+        Assert.DoesNotContain("is a position rather than a name", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <remarks>
+    /// A flat layer writes a block of named values one name at a time, so the spelling the remedy
+    /// shows has to be a name — <c>port__&lt;port&gt;</c> read as a field called <c>port</c>, and
+    /// pasted verbatim produced a port genuinely named <c>&lt;port&gt;</c>.
+    /// </remarks>
+    [Fact]
+    public void TheFlatSpellingForABlockOfNames_NamesAName()
+    {
+        var ex = Refused("[5672, 15672]");
+
+        Assert.Contains("__port__<name>", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("__port__<port>", ex.Message, StringComparison.Ordinal);
+    }
 
 }
