@@ -180,10 +180,11 @@ internal static class ConnectionStringRedaction
     /// <remarks>
     /// The mirror of <see cref="RedactValue"/> one level down, and the last point at which anything
     /// is printed: a recognised value here goes to <see cref="RecognisedText"/> rather than being
-    /// scanned again, so there is no third level and no recursion to bound.
+    /// scanned again, and an unrecognised one to <see cref="MaskKeepingLeadingSpace"/> rather than
+    /// back to <see cref="RedactValue"/>, so there is no third level and no cycle to bound.
     /// </remarks>
     private static string RedactNestedValue(string key, string value)
-        => KeysThatHoldNoSecret.Contains(key) ? RecognisedText(value) : RedactValue(key, value);
+        => KeysThatHoldNoSecret.Contains(key) ? RecognisedText(value) : MaskKeepingLeadingSpace(value);
 
     /// <summary>
     /// The part of <paramref name="text"/> that belongs to the value it was found in, with anything
@@ -215,7 +216,7 @@ internal static class ConnectionStringRedaction
             // own — 'Host = localhost' — which is the same rule EndOfValue applies from the other
             // side. Carrying one makes it a pair the scan declined to read, and 'port= 2fa=hunter2'
             // printed a password on the strength of being written after a space.
-            for (var i = start; i < text.Length && !char.IsWhiteSpace(text[i]) && !IsSeparator(text[i]); i++)
+            for (var i = start; i < text.Length && !IsSeparator(text[i]); i++)
             {
                 if (text[i] == '=')
                 {
@@ -226,7 +227,10 @@ internal static class ConnectionStringRedaction
 
         var leading = text[..start];
 
-        text = text[start..];
+        // Before anything is cut. A password legally carries the very characters this is about to
+        // treat as ends — RFC 3986 admits them raw in a userinfo — so cutting first left
+        // 'Data Source=postgresql://app:pw#1@db:5432' with no '@' to find and printed the password.
+        text = MaskAuthority(text[start..]);
 
         var end = 0;
 
@@ -250,6 +254,13 @@ internal static class ConnectionStringRedaction
             }
 
             end = close + 1;
+
+            // Text glued to the closing quote was delimited by nothing at all: the quote ended the
+            // value, and whatever is stuck to it was never separated from anything.
+            if (end < text.Length && !IsSeparator(text[end]) && text[end] != '#')
+            {
+                return leading + Mask;
+            }
         }
 
         while (end < text.Length && !char.IsWhiteSpace(text[end]) && text[end] is not (';' or '&' or '?' or '#'))
@@ -257,7 +268,7 @@ internal static class ConnectionStringRedaction
             end++;
         }
 
-        var printed = leading + MaskAuthorityAndTrailingFields(text[..end]);
+        var printed = leading + TrailingFields(text[..end]);
 
         if (end == text.Length)
         {
@@ -266,8 +277,7 @@ internal static class ConnectionStringRedaction
 
         var afterSeparators = end;
 
-        while (afterSeparators < text.Length
-               && (char.IsWhiteSpace(text[afterSeparators]) || IsSeparator(text[afterSeparators])))
+        while (afterSeparators < text.Length && (IsSeparator(text[afterSeparators]) || text[afterSeparators] == '#'))
         {
             afterSeparators++;
         }
@@ -278,35 +288,33 @@ internal static class ConnectionStringRedaction
     }
 
     /// <summary>
-    /// <paramref name="value"/> with its authority masked and any comma-separated field after the
-    /// first shown only where it is a port.
+    /// <paramref name="value"/> with any comma-separated field after the first shown only where it
+    /// is a port.
     /// </summary>
     /// <remarks>
     /// A comma inside a value is how SQL Server writes a port — <c>Server=localhost,1433</c> — and
     /// that is the only thing after one this can vouch for. Anything else there is a field the scan
-    /// never looked at, which is where <c>Host=h,hunter2</c> hid a password.
+    /// never looked at, which is where <c>Host=h,hunter2</c> hid a password. A comma inside a quoted
+    /// span belongs to the value, so the search starts past one.
     /// </remarks>
-    private static string MaskAuthorityAndTrailingFields(string value)
+    private static string TrailingFields(string value)
     {
-        // Past a leading quoted span, whose commas belong to the value: 'Server="a,b",1433' has one
-        // field after the quote, not three.
         var searchFrom = 0;
 
         if (value.Length > 0 && value[0] is '"' or '\'')
         {
-            var close = value.IndexOf(value[0], 1);
-
-            searchFrom = close < 0 ? value.Length : close + 1;
+            // An unterminated quote never reaches here: RecognisedText answers that case first.
+            searchFrom = value.IndexOf(value[0], 1) + 1;
         }
 
         var comma = value.IndexOf(',', searchFrom);
 
         if (comma < 0)
         {
-            return MaskAuthority(value);
+            return value;
         }
 
-        var built = new StringBuilder(MaskAuthority(value[..comma]));
+        var built = new StringBuilder(value[..comma]);
 
         // The first piece is what precedes the first comma, which is already appended above.
         var fields = value[comma..].Split(',');
@@ -389,7 +397,9 @@ internal static class ConnectionStringRedaction
             // Key, any space before the '=', and the '=' itself, exactly as written.
             built.Append(text, pair.KeyStart, pair.ValueStart - pair.KeyStart);
 
-            built.Append(value.AsSpan().Trim().Length == 0
+            // Trailing separators, whitespace among them, are already off the end of the region, so
+            // a value that is not empty here ends in a character that is part of it.
+            built.Append(value.Length == 0
                 ? value
                 : redactValue(text[pair.KeyStart..pair.KeyEnd], value));
 
@@ -626,14 +636,18 @@ internal static class ConnectionStringRedaction
     /// nothing in it, and masking that would assert something was hidden where nothing was.
     /// </remarks>
     private static string RedactValue(string key, string value)
-    {
-        if (KeysThatHoldNoSecret.Contains(key))
-        {
-            return RedactRecognisedValue(value);
-        }
+        => KeysThatHoldNoSecret.Contains(key) ? RedactRecognisedValue(value) : MaskKeepingLeadingSpace(value);
 
-        // Space in front of the value is layout the developer wrote, and survives the masking of
-        // what follows it: 'Rotation Key = hunter2' reads back as 'Rotation Key = ***'.
+    /// <summary>
+    /// <c>***</c>, with any space in front of the value left where the developer wrote it.
+    /// </summary>
+    /// <remarks>
+    /// So <c>Rotation Key = hunter2</c> reads back as <c>Rotation Key = ***</c> rather than losing
+    /// the layout around the value it hid. Both levels end here rather than at each other, which is
+    /// what keeps the scan two levels deep and free of a cycle to bound.
+    /// </remarks>
+    private static string MaskKeepingLeadingSpace(string value)
+    {
         var leading = 0;
 
         while (leading < value.Length && char.IsWhiteSpace(value[leading]))
@@ -650,8 +664,8 @@ internal static class ConnectionStringRedaction
     /// <remarks>
     /// An allowlisted key can still hold a URL — <c>Data Source=postgresql://app:pw@db:5432</c> — and
     /// the scheme is optional, since <c>Data Source=user:pw@h:1433</c> says the same thing without
-    /// one. A <c>:</c> must appear before the <c>@</c> for this to be an authority at all, which is
-    /// what leaves <c>UID=a@b.com</c> alone.
+    /// one. A <c>:</c> or a <c>/</c> must appear before the <c>@</c> for this to be an authority at
+    /// all, which is what leaves <c>UID=a@b.com</c> alone.
     /// <para>
     /// The <em>last</em> <c>@</c> is taken, and nothing stops the search at <c>/</c>, <c>?</c> or
     /// <c>#</c>: all three are legal unencoded in a password people actually write, and a rule that
@@ -662,7 +676,15 @@ internal static class ConnectionStringRedaction
     {
         var at = value.LastIndexOf('@');
 
-        if (at <= 0 || value.LastIndexOf(':', at - 1) < 0)
+        if (at <= 0)
+        {
+            return value;
+        }
+
+        // Something has to separate the name from the secret for this to be an authority rather than
+        // an address: ':' in every URL, '/' in Oracle's 'scott/tiger@//host:1521/svc'. Requiring one
+        // is what leaves 'UID=a@b.com' alone.
+        if (value.LastIndexOf(':', at - 1) < 0 && value.LastIndexOf('/', at - 1) < 0)
         {
             return value;
         }
@@ -699,7 +721,7 @@ internal static class ConnectionStringRedaction
         var core = prefix[..coreEnd];
         var trailing = prefix[coreEnd..];
 
-        if (core.Contains("://", StringComparison.Ordinal))
+        if (BeginsWithAScheme(core))
         {
             return MaskUri(core) + trailing;
         }
@@ -725,17 +747,57 @@ internal static class ConnectionStringRedaction
 
         for (var i = 0; i < masked.Length; i++)
         {
-            if (IsSeparator(masked[i]) || masked[i] == '#')
+            // A comma in a URI lists hosts — 'mongodb://h1:27017,h2:27017/db' is how a replica set
+            // is addressed — so it ends the vetted part only where a pair was written after it.
+            if (masked[i] == ',')
             {
-                unvetted = i;
-
-                break;
+                if (!masked.AsSpan(i).Contains('='))
+                {
+                    continue;
+                }
             }
+            else if (!IsSeparator(masked[i]) && masked[i] != '#')
+            {
+                continue;
+            }
+
+            unvetted = i;
+
+            break;
         }
 
         return unvetted < 0 || unvetted == masked.Length - 1
             ? masked
             : string.Concat(masked.AsSpan(0, unvetted + 1), Mask);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="text"/> opens with a scheme, so that what follows is a URI.
+    /// </summary>
+    /// <remarks>
+    /// Merely containing <c>://</c> is not enough, or any text with a URL somewhere in it is printed
+    /// up to its first separator on the strength of the URL — <c>s3cr3t redis://db:6379</c> showed
+    /// the token in front. A scheme is one unbroken run, which <c>jdbc:postgresql://</c> is and
+    /// <c>s3cr3t redis://</c> is not.
+    /// </remarks>
+    private static bool BeginsWithAScheme(string text)
+    {
+        var scheme = text.IndexOf("://", StringComparison.Ordinal);
+
+        if (scheme <= 0)
+        {
+            return false;
+        }
+
+        foreach (var c in text.AsSpan(0, scheme))
+        {
+            if (IsSeparator(c) || c is '#' or '@')
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>

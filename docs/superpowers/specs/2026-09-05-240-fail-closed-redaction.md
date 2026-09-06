@@ -131,12 +131,22 @@ RedactValue(key, value):
     if value is empty            -> value        # an empty string cannot be a secret, and an
                                                  # emptied ${port} is the diagnosis this message
                                                  # exists to deliver
-    if key is not allowlisted    -> "***"
-    return the level-2 scan of value, with MaskAuthority over its head and each nested value
+    if key is not allowlisted    -> "***", keeping any space the developer left in front of it
+    return the level-2 scan of value, with RecognisedText over its head and each nested value
+
+RecognisedText(t):                               # the leaf: nothing below it scans again
+    keep any leading space; if what follows it carries a '=', that is a pair nobody read -> "***"
+    mask the authority across the WHOLE of what remains, before any cutting — a password
+      legally carries the characters about to be treated as ends
+    a quoted span may carry separators, but a '=' inside it, an unterminated quote, or text glued
+      to the closing quote all mean nothing here was delimited -> "***"
+    print up to the first separator or '#'; replace whatever follows it
+    after a ',', print only a port
 
 MaskAuthority(v):                                # an allowlisted key may still hold a URL
     at = the LAST '@' in v;  if none, or at index 0     -> v
-    if no ':' occurs before it                          -> v   # 'UID=a@b.com' is an address
+    if no ':' and no '/' occurs before it               -> v   # 'UID=a@b.com' is an address, but
+                                                               # 'scott/tiger@host' is Oracle's
     keep a leading "scheme://" if one begins at or before that '@', else keep nothing,
     and replace everything up to the '@' with "***"
 
@@ -146,9 +156,11 @@ RedactPrefix(p):
     if the core is host ':' 1-5 digits, or '[' IPv6 ']' ':' digits  -> return p
     return "***"
 
-MaskUri(u):
+MaskUri(u):                                      # only where a scheme opens the text: one unbroken
+                                                 # run before the "://", or it is not a URI at all
     masked = MaskAuthority(u)                    # the same rule; a "://" guarantees its ':'
-    if a '?' remains in masked with anything after it  -> replace what follows it with "***"
+    cut at the first separator or '#' in masked, and replace what follows — a ',' only counts
+    where a pair was written after it, since a ',' in a URI lists hosts
 ```
 
 ADO.NET's `==` escape is handled in exactly one place: the key rule declines `Host==x=hunter2`
@@ -268,8 +280,11 @@ Not closed, and said out loud rather than left to be discovered:
   needs for `user = dev` — and then masks `Catalog=orders` under a key it does not know. Fail-closed,
   and the alternative is teaching the token rule about compound keys.
 - A key absorbs the whitespace inside it, so where two words could be one key or a value followed by
-  a key, they are one key: `host = db port = user = dev` masks from `port` on, reading `db port` as
-  the key. That string is not one any dialect writes, and the reading that would print it is the one
+  a key, they are one key. This bites whenever an `=` is followed by a space and the value's first
+  token is followed by another key — `host = db port = 5432` masks the port, reading `db port` as
+  one key — which is ordinary libpq spacing. Fail-closed and it cannot invert, since merging only
+  lengthens a key and no allowlist entry is a suffix of another; `host=db port = 5432` is unaffected.
+  The same rule reads `host = db port = user = dev` as masking from `port` on. That string is not one any dialect writes, and the reading that would print it is the one
   that let `Custom  Port=hunter2` pass as the allowlisted `Port`.
 - `IsHostAndPort` recognises a shape, not an address, so a token that happens to be `word:digits`
   prints: `AKIAIOSFODNN7EXAMPLE:12345`. Requiring the digits is what keeps a bare secret out.

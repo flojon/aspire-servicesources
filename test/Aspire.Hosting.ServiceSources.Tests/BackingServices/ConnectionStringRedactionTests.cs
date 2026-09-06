@@ -61,9 +61,9 @@ public class ConnectionStringRedactionTests
                 "postgresql://***@db.internal:5432/orders")]
     // No scheme: a bare authority says the same thing, and an allowlisted key may hold one.
     [InlineData("Data Source=user:hunter2@h:1433", "Data Source=***@h:1433")]
-    // An '@' that precedes the scheme belongs to no authority this could resolve, so none of it
-    // is printed.
-    [InlineData("x:y@a://b", "***@a://b")]
+    // An '@' before the '://' means there is no scheme in front of it, so this is not a URI and
+    // there is nothing here to recognise.
+    [InlineData("x:y@a://b", "***")]
     public void AUriAuthority_IsMaskedToItsHost(string connectionString, string expected)
         => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
 
@@ -234,6 +234,75 @@ public class ConnectionStringRedactionTests
         => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
 
     /// <summary>
+    /// A password is found before anything is cut at a separator.
+    /// </summary>
+    /// <remarks>
+    /// RFC 3986 admits the sub-delims raw in a userinfo, so a password legally carries the very
+    /// characters a value is ended by. Cutting first left the fragment with no <c>@</c> in it, the
+    /// authority rule then had nothing to find, and the password printed — the same mistake the
+    /// authority rule was written to avoid, displaced into the step before it.
+    /// </remarks>
+    [Theory]
+    [InlineData("Data Source=postgresql://app:hunter2#1@db.internal:5432/orders",
+                "Data Source=postgresql://***@db.internal:5432/orders")]
+    [InlineData("Host=redis://default:hunter2?x@cache:6379", "Host=redis://***@cache:6379")]
+    [InlineData("Data Source=postgresql://app:hunter2;x@db.internal:5432/orders",
+                "Data Source=postgresql://***@db.internal:5432/orders")]
+    [InlineData("Data Source=user:hunter2 tail@h:1433", "Data Source=***@h:1433")]
+    [InlineData("Host=u:hunter2,w@h,1433", "Host=***@h,1433")]
+    [InlineData("Server=user:pa,ss@db.database.windows.net,1433", "Server=***@db.database.windows.net,1433")]
+    // One level down, where the value is reached through a nested pair rather than a top-level one.
+    [InlineData("Host=q host=app:hunter2#x@db:5432", "Host=q host=***@db:5432")]
+    public void AnAuthorityUnderARecognisedKey_IsMaskedBeforeTheValueIsCut(
+        string connectionString, string expected)
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
+
+    /// <summary>
+    /// Oracle separates the name from the secret with a slash, and that is an authority too.
+    /// </summary>
+    /// <remarks>
+    /// <c>scott/tiger@//host:1521/svc</c> is the spelling sqlplus, the thin JDBC driver and every
+    /// Oracle client take. Requiring a <c>:</c> is what leaves <c>UID=a@b.com</c> alone, but on its
+    /// own it left this alone too.
+    /// </remarks>
+    [Theory]
+    [InlineData("Data Source=scott/hunter2@//db.internal:1521/orders", "Data Source=***@//db.internal:1521/orders")]
+    [InlineData("Data Source=scott/hunter2@orcl", "Data Source=***@orcl")]
+    [InlineData("User Id=scott/hunter2@db", "User Id=***@db")]
+    public void OraclesSlashFormCredential_IsMaskedLikeAnyOtherAuthority(
+        string connectionString, string expected)
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
+
+    /// <summary>
+    /// Text glued to a closing quote was delimited by nothing, so it is shown as nothing.
+    /// </summary>
+    /// <remarks>
+    /// The quote ends the value; whatever is stuck to it was never separated from anything, and
+    /// reading on printed it. One space is the whole difference — <c>Host='a;b' 2fa=hunter2</c> was
+    /// masked all along — which is what made this easy to miss.
+    /// </remarks>
+    [Theory]
+    [InlineData("Host='a;b'2fa=hunter2", "Host=***")]
+    [InlineData("Host=''2fa=hunter2", "Host=***")]
+    [InlineData("Server=\"db;x\"2fa=hunter2", "Server=***")]
+    [InlineData("host=db port=5432 user='a;b'2fa=hunter2", "host=db port=5432 user=***")]
+    public void TextGluedToAClosingQuote_IsNotPartOfTheValue(string connectionString, string expected)
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
+
+    /// <summary>
+    /// A scheme is one unbroken run, not any text with a URL somewhere in it.
+    /// </summary>
+    /// <remarks>
+    /// Treating anything containing <c>://</c> as a URI printed whatever came before the URL on the
+    /// strength of the URL.
+    /// </remarks>
+    [Theory]
+    [InlineData("s3cr3t redis://db.internal:6379", "***")]
+    [InlineData("apikey-s3cr3t;redis://db.internal:6379", "***")]
+    public void TextInFrontOfAUrl_IsNotPartOfTheUrl(string connectionString, string expected)
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
+
+    /// <summary>
     /// A pair written after an empty value is read, rather than riding out on the space.
     /// </summary>
     /// <remarks>
@@ -361,6 +430,12 @@ public class ConnectionStringRedactionTests
     // Redis and Kafka address a tunnel with a bare host and port and no keys at all.
     [InlineData("localhost:6379")]
     [InlineData("[::1]:6379")]
+    // A comma in a URI lists hosts: a replica set and a broker list are ordinary connection strings.
+    [InlineData("mongodb://h1:27017,h2:27017/db")]
+    [InlineData("cassandra://a:9042,b:9042")]
+    // A '#' with nothing after it hides nothing, and is not deleted from the echo.
+    [InlineData("Host=h;Port=5432#")]
+    [InlineData("Host=h#")]
     public void AConnectionStringWithNothingToHide_IsReturnedUnchanged(string connectionString)
         => Assert.Equal(connectionString, ConnectionStringRedaction.Redact(connectionString));
 
