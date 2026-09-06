@@ -333,7 +333,7 @@ not remove them (verified on .NET 8). Two consequences:
 - `"\uFEFForders"` is **not** refused by this rule and reaches kubectl as written. That is a
   separate trap with the same shape, and it is left open here rather than answered badly: a rule
   about invisible characters is a different rule from a rule about whitespace, and it needs its own
-  decision about which code points and which fields. To be recorded on #236.
+  decision about which code points and which fields. Recorded on #236.
 - `" \uFEFForders"` **is** refused — and a remedy computed as `value.Trim()` would be
   `\uFEFForders`, which renders as `orders` and is not `orders`. That is answered in *When the
   remedy is not something the developer can type*, by trimming invisibles out of the remedy while
@@ -428,7 +428,7 @@ always names and quotes a bad context. One attribute and three test rows.
 **A service's own Service name is out, because it is not a developer-config key at all.** It comes
 from `servicesources.yaml` via `KubernetesMetadata`, a different file with a different author, which
 this validator does not walk. Whether the catalog should get whitespace diagnostics of its own is a
-real question about a different file, and is to be recorded on #236 rather than answered here.
+real question about a different file, and is recorded on #236 rather than answered here.
 
 **`connectionString` is out.** The ticket is explicit, and right: a connection string may carry
 trailing whitespace inside a quoted value.
@@ -512,7 +512,7 @@ Cases:
 
 ## Open questions
 
-None blocking. Two things are deliberately left to a comment on #236 rather than answered here:
+None blocking. Two things are deliberately left to a comment on #236 (posted) rather than answered here:
 whether the catalog's `kubernetes.service` should get whitespace diagnostics of its own, and the
 invisible-character gap above — a value padded only with characters that are not whitespace is not
 refused, and the `Format`/`Control` line the escaping draws leaves a residue of its own.
