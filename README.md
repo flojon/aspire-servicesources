@@ -1740,10 +1740,8 @@ a "did you mean" when the name is close to one of them.
 > parser refuses the **whole file**; spread across two layers they merge instead, and the casing you
 > see is whichever layer wrote last.
 
-Reading credentials out of a Kubernetes secret with `${secret:<name>:<key>}` is not supported yet;
-put the value in the connection string, or set the whole string from a configuration layer that
-already holds it — user secrets, or
-`ServiceSources__BackingServices__orders-db__Kubernetes__ConnectionString`.
+Reading credentials out of a Kubernetes secret is covered under
+[Connection-string placeholders](#connection-string-placeholders), with `${secret:<name>:<key>}`.
 
 ### The local factory's resource must be named after the backing service
 
@@ -1826,13 +1824,52 @@ included, so ODBC values keep their own doubling rule intact (`PWD={pa}}ss}` is 
 Placeholders open on `${`, which no connection-string dialect uses. Two are recognised and reserved
 for the sources that can resolve them; a source that cannot rejects one with a message saying why:
 
-- `${port}` — the local end of the tunnel, under `"kubernetes"`, where a port placeholder is
-  **required**. `"direct"` forwards nothing, so there write the port the backing service already
-  listens on.
+- `${port}` — the local end of the tunnel, under `"kubernetes"`, where it is **required** unless the
+  whole connection string is one `${secret:…}` (below), which carries a port already.
+  `"direct"` forwards nothing, so there write the port the backing service already listens on.
 - `${port:<name>}` — one of several ports forwarded through the one tunnel, where `port` is written
   as a block that names each. See
   [Several ports through one tunnel](#several-ports-through-one-tunnel).
-- `${secret:<name>:<key>}` — a value read from a Kubernetes secret. Not supported yet.
+- `${secret:<name>:<key>}` — a value read from a Kubernetes secret, under `"kubernetes"`. The fetch
+  is deferred: the placeholder becomes a parameter Aspire resolves when something first asks for the
+  value, so an unreachable cluster costs one failed parameter rather than an AppHost that will not
+  start. The value is marked secret, so the dashboard masks it, and reading the same placeholder
+  twice fetches once. `"direct"` has no cluster to resolve one against and refuses it, naming
+  `"kubernetes"` as the source that does.
+
+  A secret's name and its keys are letters, digits, `-`, `.` and `_`, with the name starting with a
+  letter or a digit — the cluster's own rule, checked here so that nothing else can be smuggled into
+  the `kubectl` command that reads it.
+
+  **A secret holding the whole connection string** works too, which is the shape a hand-authored
+  Sealed Secret usually has. Write the template as exactly one placeholder:
+
+  ```jsonc
+  {
+    "backingServices": {
+      "orders-db": {
+        "source": "kubernetes",
+        "kubernetes": {
+          "service": "orders-pg-rw",
+          "port": 5432,
+          "context": "dev-west",
+          "namespace": "orders",
+          "connectionString": "${secret:orders-cs:connectionString}"
+        }
+      }
+    }
+  }
+  ```
+
+  Then the port-forward listens on the same port `port` names rather than an allocated one — there
+  is nothing in the template to substitute a local port into — and the in-cluster host the secret
+  was written against is rewritten to `localhost`, in any of the four forms a pod resolves
+  (`orders-pg-rw`, `.orders`, `.svc`, `.svc.cluster.local`), wherever a connection string can put a
+  host. Because the allocated port is given up, a local port already in use is refused up front — and
+  for the same reason, this mode takes a single `port` rather than a block that names several: with
+  only the one number to match against, give it a single port instead. So is a secret whose own port
+  is not the one being forwarded, and one that names the service in no form this can rewrite.
+  Per-field placeholders stay preferred wherever the secret offers them.
 
 A malformed placeholder — `${secret:orders-creds}`, with no key — fails when the AppHost starts,
 naming the backing service and the configuration key, rather than reaching the app as text.
