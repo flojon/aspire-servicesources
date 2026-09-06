@@ -216,6 +216,57 @@ public class ConnectionStringRedactionTests
         => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
 
     /// <summary>
+    /// Quoting a value does not make its contents printable.
+    /// </summary>
+    /// <remarks>
+    /// A quote spans the separators inside it, which is the only reason to look for one — a Windows
+    /// path under <c>Data Source</c> needs that. Spanning them is not vouching for what they
+    /// separate: a <c>=</c> inside the quotes is a pair the scan was stopped from reading, and the
+    /// quote is precisely what stopped it. Printing the span because it was quoted printed the pair
+    /// with it.
+    /// </remarks>
+    [Theory]
+    [InlineData("Host='db.internal;Custom=hunter2';Database=orders", "Host=***;Database=orders")]
+    [InlineData("Server=\"db;auth[token]=hunter2\";Database=orders", "Server=***;Database=orders")]
+    [InlineData("Port='5432;X-Api-Key=hunter2'", "Port=***")]
+    [InlineData("host=db port=5432 user='app;2fa=hunter2'", "host=db port=5432 user=***")]
+    public void AQuotedValueUnderARecognisedKey_IsStillReadForPairs(string connectionString, string expected)
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
+
+    /// <summary>
+    /// An unterminated quote claims nothing beyond itself.
+    /// </summary>
+    /// <remarks>
+    /// A quote with no closing partner delimits nothing, so letting it run to the end of the string
+    /// made one stray apostrophe turn redaction off for everything after it — and, because the
+    /// result then equalled the input, the message said no values had been hidden.
+    /// </remarks>
+    [Theory]
+    [InlineData("Server='db;Bearer=hunter2;Uid=sa;Auth=s3cr3t", "Server=***;Bearer=***;Uid=sa;Auth=***")]
+    [InlineData("Host=\"db;2fa=hunter2;Port=5432", "Host=***;Port=5432")]
+    [InlineData("uid='app;otp=hunter2", "uid=***;otp=***")]
+    [InlineData("Host=';Custom=hunter2", "Host=***;Custom=***")]
+    public void AnUnterminatedQuote_DoesNotClaimTheRestOfTheString(string connectionString, string expected)
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
+
+    /// <summary>
+    /// What follows a bare URI's path is masked whichever separator introduced it.
+    /// </summary>
+    /// <remarks>
+    /// Cutting at <c>?</c> and <c>#</c> but not at the other marks this treats as separators left
+    /// the rest printing, and the keys in these are invisible to the scan — one begins with a digit,
+    /// one is not written in ASCII, one is punctuation — so nothing else was going to catch them.
+    /// </remarks>
+    [Theory]
+    [InlineData("redis://cache:6379/0&2fa=hunter2", "redis://cache:6379/0&***")]
+    [InlineData("redis://cache:6379/0;Lösenord=hunter2", "redis://cache:6379/0;***")]
+    [InlineData("postgres://db:5432/orders,2fa=hunter2", "postgres://db:5432/orders,***")]
+    [InlineData("kafka://k:9092/t 2fa=hunter2", "kafka://k:9092/t ***")]
+    [InlineData("redis://cache:6379/0 auth[token]=hunter2", "redis://cache:6379/0 ***")]
+    public void WhatFollowsABareUrisPath_IsMaskedWhateverIntroducedIt(string connectionString, string expected)
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
+
+    /// <summary>
     /// A URI's fragment is vetted by no more than its query is.
     /// </summary>
     [Theory]
@@ -236,6 +287,9 @@ public class ConnectionStringRedactionTests
     [InlineData("Server=tcp:db.database.windows.net,1433", "Server=tcp:db.database.windows.net,1433")]
     [InlineData("Server=localhost,1433;Database=orders", "Server=localhost,1433;Database=orders")]
     [InlineData("Server=localhost,hunter2", "Server=localhost,***")]
+    // A comma inside a quoted value belongs to the value, and an empty field is not a field.
+    [InlineData("Server=\"a,b\",1433", "Server=\"a,b\",1433")]
+    [InlineData("Host=h,,,1433", "Host=h,,,1433")]
     public void ACommaInsideAValue_ShowsAPortAndNothingElse(string connectionString, string expected)
         => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
 

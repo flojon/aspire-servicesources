@@ -208,7 +208,22 @@ internal static class ConnectionStringRedaction
         {
             var close = text.IndexOf(text[0], 1);
 
-            end = close < 0 ? text.Length : close + 1;
+            if (close < 0)
+            {
+                // Nothing closes it, so nothing in it was ever delimited, so none of it is known.
+                return Mask;
+            }
+
+            // A quote spans the separators inside it, which is the whole reason to look for one —
+            // but spanning them is not the same as vouching for what they separate. A '=' in there
+            // is a pair the scan was prevented from reading, and the quote is exactly what
+            // prevented it.
+            if (text.AsSpan(1, close - 1).Contains('='))
+            {
+                return Mask;
+            }
+
+            end = close + 1;
         }
 
         while (end < text.Length && !char.IsWhiteSpace(text[end]) && text[end] is not (';' or '&' or '?' or '#'))
@@ -247,7 +262,18 @@ internal static class ConnectionStringRedaction
     /// </remarks>
     private static string MaskAuthorityAndTrailingFields(string value)
     {
-        var comma = value.IndexOf(',');
+        // Past a leading quoted span, whose commas belong to the value: 'Server="a,b",1433' has one
+        // field after the quote, not three.
+        var searchFrom = 0;
+
+        if (value.Length > 0 && value[0] is '"' or '\'')
+        {
+            var close = value.IndexOf(value[0], 1);
+
+            searchFrom = close < 0 ? value.Length : close + 1;
+        }
+
+        var comma = value.IndexOf(',', searchFrom);
 
         if (comma < 0)
         {
@@ -256,14 +282,17 @@ internal static class ConnectionStringRedaction
 
         var built = new StringBuilder(MaskAuthority(value[..comma]));
 
-        foreach (var field in value[comma..].Split(','))
-        {
-            if (field.Length == 0)
-            {
-                continue;
-            }
+        // The first piece is what precedes the first comma, which is already appended above.
+        var fields = value[comma..].Split(',');
 
-            built.Append(',').Append(IsPort(field) ? field : Mask);
+        for (var i = 1; i < fields.Length; i++)
+        {
+            built.Append(',');
+
+            if (fields[i].Length > 0)
+            {
+                built.Append(IsPort(fields[i]) ? fields[i] : Mask);
+            }
         }
 
         return built.ToString();
@@ -442,7 +471,10 @@ internal static class ConnectionStringRedaction
         {
             var close = text.IndexOf(text[i], i + 1);
 
-            return close < 0 ? text.Length : close + 1;
+            // An unterminated quote closes nothing, so it cannot be allowed to claim the rest of the
+            // string: doing so stopped every later pair from being found, and one stray apostrophe
+            // turned off redaction for everything after it.
+            return close < 0 ? valueStart : close + 1;
         }
 
         // Only where the '=' was followed by space: an empty value takes the next token, and that
@@ -646,14 +678,27 @@ internal static class ConnectionStringRedaction
     /// <paramref name="uri"/> with its userinfo masked and any unrecognised query text dropped.
     /// </summary>
     /// <remarks>
-    /// Whatever sits after a <c>?</c> or a <c>#</c> and was not recognised as a pair was vetted by
-    /// nothing, so it is replaced rather than printed. A fragment is no more vetted than a query:
-    /// leaving it alone printed <c>redis://h:6379/0#sig2=hunter2</c> whole.
+    /// Whatever follows the first separator and was not recognised as a pair was vetted by nothing,
+    /// so it is replaced rather than printed — every mark this type calls a separator, and <c>#</c>
+    /// besides. Cutting at only some of them left the rest printing: a fragment leaked
+    /// <c>redis://h:6379/0#sig2=hunter2</c>, and a <c>;</c> or <c>&amp;</c> leaked
+    /// <c>redis://cache:6379/0&amp;2fa=hunter2</c>, where the key is invisible to the scan because it
+    /// begins with a digit.
     /// </remarks>
     private static string MaskUri(string uri)
     {
         var masked = MaskAuthority(uri);
-        var unvetted = masked.AsSpan().IndexOfAny('?', '#');
+        var unvetted = -1;
+
+        for (var i = 0; i < masked.Length; i++)
+        {
+            if (IsSeparator(masked[i]) || masked[i] == '#')
+            {
+                unvetted = i;
+
+                break;
+            }
+        }
 
         return unvetted < 0 || unvetted == masked.Length - 1
             ? masked
