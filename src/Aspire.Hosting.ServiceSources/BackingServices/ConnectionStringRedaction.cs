@@ -230,7 +230,24 @@ internal static class ConnectionStringRedaction
         // Before anything is cut. A password legally carries the very characters this is about to
         // treat as ends — RFC 3986 admits them raw in a userinfo — so cutting first left
         // 'Data Source=postgresql://app:pw#1@db:5432' with no '@' to find and printed the password.
-        text = MaskAuthority(text[start..]);
+        var unmasked = text[start..];
+        var authority = MaskAuthority(unmasked);
+
+        // Not by length: 'u:p' and '***' are both three characters.
+        if (!string.Equals(authority, unmasked, StringComparison.Ordinal))
+        {
+            // What follows the '@' is a host, and a host holds no pairs. One written there was
+            // separated from the authority by nothing, so nothing vetted it — and masking the
+            // userinfo in front of it says nothing about it. This also answers the quoted value
+            // whose opening quote the masking above has just consumed, which is how
+            // 'Host='x:y@z=hunter2'' slipped past the rules below.
+            if (authority.AsSpan(authority.IndexOf('@')).Contains('='))
+            {
+                return leading + Mask;
+            }
+        }
+
+        text = authority;
 
         var end = 0;
 
@@ -743,27 +760,56 @@ internal static class ConnectionStringRedaction
     private static string MaskUri(string uri)
     {
         var masked = MaskAuthority(uri);
+        var scheme = masked.IndexOf("://", StringComparison.Ordinal) + 3;
+        var authorityEnd = scheme;
+
+        while (authorityEnd < masked.Length && masked[authorityEnd] is not ('/' or '?' or '#'))
+        {
+            authorityEnd++;
+        }
+
+        // A comma inside the authority lists hosts — 'mongodb://h1:27017,h2:27017/db' is how a
+        // replica set is addressed — and a host there is recognised by its shape. Past the
+        // authority a comma separates nothing this knows about, so it ends the vetted part.
+        var built = new StringBuilder(masked[..scheme]);
+        var hosts = masked[scheme..authorityEnd].Split(',');
+
+        for (var i = 0; i < hosts.Length; i++)
+        {
+            if (i > 0)
+            {
+                built.Append(',');
+            }
+
+            built.Append(i == 0 || IsHostAndPort(hosts[i]) ? hosts[i] : Mask);
+        }
+
+        var hostsEnd = built.Length;
+
+        masked = built.Append(masked, authorityEnd, masked.Length - authorityEnd).ToString();
+
         var unvetted = -1;
 
-        for (var i = 0; i < masked.Length; i++)
+        for (var i = scheme; i < masked.Length; i++)
         {
-            // A comma in a URI lists hosts — 'mongodb://h1:27017,h2:27017/db' is how a replica set
-            // is addressed — so it ends the vetted part only where a pair was written after it.
-            if (masked[i] == ',')
+            var c = masked[i];
+
+            // A path holds no pairs, so a '=' past the authority was separated from it by nothing
+            // and vetted by nothing — 'postgres://u:p@h/db=hunter2' printed on the strength of the
+            // host in front of it.
+            if (c == '=' && i >= hostsEnd)
             {
-                if (!masked.AsSpan(i).Contains('='))
-                {
-                    continue;
-                }
-            }
-            else if (!IsSeparator(masked[i]) && masked[i] != '#')
-            {
-                continue;
+                unvetted = i;
+
+                break;
             }
 
-            unvetted = i;
+            if ((IsSeparator(c) || c == '#') && !(c == ',' && i < hostsEnd))
+            {
+                unvetted = i;
 
-            break;
+                break;
+            }
         }
 
         return unvetted < 0 || unvetted == masked.Length - 1

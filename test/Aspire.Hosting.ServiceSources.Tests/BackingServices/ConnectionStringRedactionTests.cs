@@ -258,6 +258,45 @@ public class ConnectionStringRedactionTests
         => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
 
     /// <summary>
+    /// What follows the <c>@</c> is a host, and a host holds no pairs.
+    /// </summary>
+    /// <remarks>
+    /// Masking the userinfo says nothing about what comes after it, and a pair written there was
+    /// separated from the authority by nothing. This also answers the quoted value whose opening
+    /// quote the authority mask has just consumed — with the quote gone the rules that read a quoted
+    /// span never run, so <c>Host='x:y@z=hunter2'</c> came back with its password on show.
+    /// </remarks>
+    [Theory]
+    [InlineData("Host='x:y@z=hunter2'", "Host=***")]
+    [InlineData("host=db port=5432 user='a:b@c=hunter2'", "host=db port=5432 user=***")]
+    [InlineData("Data Source=\"C:\\a@b=hunter2\\x.mdb\"", "Data Source=***")]
+    [InlineData("Host='a:b@c'2fa=hunter2", "Host=***")]
+    [InlineData("Host=u:p@h:5432/2fa=hunter2", "Host=***")]
+    [InlineData("Host=a:b@c=hunter2", "Host=***")]
+    [InlineData("Host=h port=a:b@c=hunter2", "Host=h port=***")]
+    [InlineData("postgres://u:p@h/db=hunter2", "postgres://***@h/db=***")]
+    public void APairWrittenAfterAnAuthority_IsNotVouchedForByIt(string connectionString, string expected)
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
+
+    /// <summary>
+    /// A comma lists hosts inside a URI's authority, and a host there is recognised by its shape.
+    /// </summary>
+    /// <remarks>
+    /// Letting a comma through wherever no <c>=</c> happened to follow it printed whatever was
+    /// written after the last host, and scanning the remainder at every comma made a long replica
+    /// set quadratic besides. Past the authority a comma separates nothing this knows about.
+    /// </remarks>
+    [Theory]
+    [InlineData("mongodb://h1:27017,hunter2", "mongodb://h1:27017,***")]
+    [InlineData("cassandra://a:9042,hunter2", "cassandra://a:9042,***")]
+    [InlineData("mongodb://h1:27017,h2:27017,hunter2", "mongodb://h1:27017,h2:27017,***")]
+    [InlineData("mongodb://u:p@h1:27017,hunter2", "mongodb://***@h1:27017,***")]
+    [InlineData("postgres://db:5432/orders,hunter2", "postgres://db:5432/orders,***")]
+    public void AHostListInAUriAuthority_ShowsOnlyWhatIsShapedLikeAHost(
+        string connectionString, string expected)
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
+
+    /// <summary>
     /// Oracle separates the name from the secret with a slash, and that is an authority too.
     /// </summary>
     /// <remarks>
@@ -512,6 +551,8 @@ public class ConnectionStringRedactionTests
     // A long run of whitespace is the shape that asks "may a pair begin here?" at every position in
     // it, so it is the one that catches a scan answering that question by walking backwards.
     [InlineData("Host=h; ")]
+    // A replica set with no '=' anywhere: the comma rule must not re-scan the rest at every one.
+    [InlineData("mongodb://h1:27017,")]
     public void AVeryLargeConnectionString_IsScannedInTimeAndWithoutExhaustingTheStack(string unit)
     {
         var pathological = string.Concat(Enumerable.Repeat(unit, 30_000)) + ";Password=hunter2";
