@@ -54,7 +54,8 @@ jobs:
       packages: write
 
     steps:
-      # Everything preview.yml published needs pruning, or its version list is the one that grows
+      # Everything ci.yml's push-to-main publish step published needs pruning, or its version
+      # list is the one that grows
       # without bound. One package, so this is a single step rather than a matrix; should a second
       # packable project ever appear, give it its own job rather than another leg here — a package
       # with no previews yet fails its own prune and must not take the others' down with it.

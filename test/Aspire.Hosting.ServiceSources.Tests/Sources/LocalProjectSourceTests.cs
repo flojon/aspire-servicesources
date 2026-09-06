@@ -1260,4 +1260,26 @@ public class LocalProjectSourceTests
         Assert.Contains(builder.Resources, r => ReferenceEquals(r, service.Resource));
         Assert.IsAssignableFrom<ProjectResource>(service.Resource);
     }
+
+    /// <summary>
+    /// A name that would put the checkout outside <c>.servicesources/checkouts/</c> is refused
+    /// before the clone rather than after it (#224). Aspire's own <c>[ResourceName]</c> validation
+    /// is no help here: it runs when the resource is added to the application model, which is
+    /// several steps past the point where the name has already been made into a path and cloned
+    /// into.
+    /// </summary>
+    [Fact]
+    public void ResolveRepoRoot_ServiceNameThatWouldEscapeTheCheckoutDirectory_ThrowsBeforeCloning()
+    {
+        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var gitClient = new FakeGitClient();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            LocalGitCheckout.ResolveRepoRoot(
+                "../escapee", Metadata(), DevConfig(), appHostDirectory, gitClient));
+
+        Assert.Contains("../escapee", ex.Message);
+        Assert.Empty(gitClient.ClonedRepos);
+        Assert.False(Directory.Exists(Path.Combine(appHostDirectory, ".servicesources", "escapee")));
+    }
 }
