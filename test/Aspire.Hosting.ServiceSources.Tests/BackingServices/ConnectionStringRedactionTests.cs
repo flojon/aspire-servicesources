@@ -338,6 +338,9 @@ public class ConnectionStringRedactionTests
     [Theory]
     [InlineData("s3cr3t redis://db.internal:6379", "***")]
     [InlineData("apikey-s3cr3t;redis://db.internal:6379", "***")]
+    [InlineData("s3cr3t\tredis://db.internal:6379", "***")]
+    // No scheme at all in front of the marker.
+    [InlineData("://db.internal:6379", "***")]
     public void TextInFrontOfAUrl_IsNotPartOfTheUrl(string connectionString, string expected)
         => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
 
@@ -471,6 +474,12 @@ public class ConnectionStringRedactionTests
     [InlineData("[::1]:6379")]
     // A comma in a URI lists hosts: a replica set and a broker list are ordinary connection strings.
     [InlineData("mongodb://h1:27017,h2:27017/db")]
+    // A '/' counts towards an authority only alongside an '@'; a path on its own is a value.
+    [InlineData("Data Source=C:/db/x.mdb;Database=orders")]
+    [InlineData("Data Source=/var/lib/pgdata")]
+    [InlineData("user=DOMAIN/alice")]
+    // A scheme with nothing after it, and a bare authority marker, are both still just text.
+    [InlineData("a://")]
     [InlineData("cassandra://a:9042,b:9042")]
     // A '#' with nothing after it hides nothing, and is not deleted from the echo.
     [InlineData("Host=h;Port=5432#")]

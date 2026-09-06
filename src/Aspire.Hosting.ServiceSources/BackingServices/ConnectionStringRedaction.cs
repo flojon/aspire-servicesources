@@ -320,8 +320,12 @@ internal static class ConnectionStringRedaction
 
         if (value.Length > 0 && value[0] is '"' or '\'')
         {
-            // An unterminated quote never reaches here: RecognisedText answers that case first.
-            searchFrom = value.IndexOf(value[0], 1) + 1;
+            var close = value.IndexOf(value[0], 1);
+
+            // RecognisedText answers the unterminated case before this is reached, so the quote is
+            // closed — checked anyway, because the arithmetic below would otherwise turn "not found"
+            // into "start at the beginning" and say nothing about having done so.
+            searchFrom = close < 0 ? value.Length : close + 1;
         }
 
         var comma = value.IndexOf(',', searchFrom);

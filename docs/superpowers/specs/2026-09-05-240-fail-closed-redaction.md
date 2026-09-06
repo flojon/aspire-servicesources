@@ -57,14 +57,16 @@ Revision 2 tokenized by keys and was right about that, but got the levels wrong 
 review caught in the code rather than on paper. It read whitespace as a separator everywhere, so the
 tail of an unrecognised value was re-read as pairs and any of them under an allowlisted name was
 printed — `Rotation Key=abc user=def` printed `def`. And it read a key as ending at the `=` with no
-space allowed in between, so `RotationKey = hunter2` was not a pair at all: it was swallowed into the
+space allowed in between, so `RotationKey = hunter2` was not a pair at all: it was swallowed into
+the
 previous value, printed in full, and — because the result equalled the input — printed with no note
 saying anything had been hidden. Revision 3 confines nested pairs to values already recognised, lets
 space sit on either side of the `=`, halves the backstop, and answers "may a pair begin here?" in
 constant time rather than by walking backwards over the whitespace (which was quadratic: 2.1 s at
 80 KB of it).
 
-**The design that shipped tokenizes by keys rather than by delimiters.** It does not need to know which dialect
+**The design that shipped tokenizes by keys rather than by delimiters.** It does not need to know
+which dialect
 wrote the string, and it never has to decide whether a `;` is a separator or part of a password.
 
 ## The design
@@ -80,7 +82,8 @@ redact more. That is what makes it impossible for this change to print something
 version hid.
 
 It is not extending the blocklist — nothing is added to it, and it stops being the defence. It is
-also **half the size it was**: the alternative that matched a URI's `user:pass@host`, and with it the
+also **half the size it was**: the alternative that matched a URI's `user:pass@host`, and with it
+the
 `(?:[^@/\s;]*|[^@/\s=]*)` alternation that three separate corrections went into, is deleted. The
 scanner covers every shape that alternation caught and several it did not, so keeping it would have
 pinned its non-obvious justification in the file forever for no coverage.
@@ -113,7 +116,8 @@ Keys and separator runs are copied verbatim, so a string with nothing hidden com
 byte-identical and the caller can tell the two cases apart by comparing.
 
 **The longest key wins.** In `Host=x Custom Port=5432` the short read finds the allowlisted `Port`
-and prints `5432`; the long read finds `Custom Port`, which is recognised as nothing. Leftmost-longest
+and prints `5432`; the long read finds `Custom Port`, which is recognised as nothing.
+Leftmost-longest
 is the fail-closed reading, not a tidiness preference.
 
 **Whitespace introduces a pair only at level 2**, and that is load-bearing. Reading a space as a
@@ -152,7 +156,7 @@ MaskAuthority(v):                                # an allowlisted key may still 
 
 RedactPrefix(p):
     trim a trailing run of separators off p and put it back at the end
-    if the core contains "://"                  -> return MaskUri(core)
+    if a scheme opens the core (one unbroken run before the "://")  -> return MaskUri(core)
     if the core is host ':' 1-5 digits, or '[' IPv6 ']' ':' digits  -> return p
     return "***"
 
@@ -232,7 +236,8 @@ So the real fork is echo-with-values or no echo, and the echo earns its place.
 must stop asserting one. Pinned wording, so the tests can assert it:
 
 - now: `" (a credential in it shown as ***)"`
-- becomes: `" (a value is shown only under a key known to hold no secret; the rest read as ***, which
+- becomes: `" (a value is shown only under a key known to hold no secret; the rest read as ***,
+  which
   does not mean they were secret)"`
 
 The second clause is not padding. Reading the real messages showed that a template of ordinary,
@@ -271,23 +276,37 @@ Not closed, and said out loud rather than left to be discovered:
   `Data Source=a b=c` reads `Data Source=a b=***`. Fail-closed, mildly odd, and the price of libpq.
 - A pair written behind punctuation that no dialect separates pairs with is one value as far as the
   scan can tell, and is printed: `Host=h|Custom=hunter2`, `Host=h:Custom=hunter2`,
-  `Host=h/Custom=hunter2`. Two ways to close it were considered and both cost more than they buy —
+  `Host=h/Custom=hunter2`. The same gap in front of a URL, where a `:` must be allowed so that
+  `jdbc:postgresql://` is a scheme: `s3cr3t:redis://db:6379` prints, while every other spelling
+  (`s3cr3t redis://`, `s3cr3t;redis://`, `s3cr3t,redis://`) is masked. Two ways to close it were
+  considered and both cost more than they buy —
   widening the separator set breaks `Data Source=tcp:host,1433` and every URL, and masking any value
   that contains an `=` reduces an Oracle TNS descriptor to `***` on exactly the message that is
   asking the developer which port they wrote. The keyword backstop covers the conventional names in
   that position; an unconventional name behind unconventional punctuation is knowingly left.
 - `provider= Initial Catalog=orders` reads `Initial` as the empty value's own token — the rule libpq
-  needs for `user = dev` — and then masks `Catalog=orders` under a key it does not know. Fail-closed,
+  needs for `user = dev` — and then masks `Catalog=orders` under a key it does not know.
+  Fail-closed,
   and the alternative is teaching the token rule about compound keys.
 - A key absorbs the whitespace inside it, so where two words could be one key or a value followed by
   a key, they are one key. This bites whenever an `=` is followed by a space and the value's first
   token is followed by another key — `host = db port = 5432` masks the port, reading `db port` as
   one key — which is ordinary libpq spacing. Fail-closed and it cannot invert, since merging only
-  lengthens a key and no allowlist entry is a suffix of another; `host=db port = 5432` is unaffected.
-  The same rule reads `host = db port = user = dev` as masking from `port` on. That string is not one any dialect writes, and the reading that would print it is the one
+  lengthens a key and no allowlist entry is a suffix of another; `host=db port = 5432` is
+  unaffected.
+  The same rule reads `host = db port = user = dev` as masking from `port` on. That string is not
+  one any dialect writes, and the reading that would print it is the one
   that let `Custom  Port=hunter2` pass as the allowlisted `Port`.
 - `IsHostAndPort` recognises a shape, not an address, so a token that happens to be `word:digits`
   prints: `AKIAIOSFODNN7EXAMPLE:12345`. Requiring the digits is what keeps a bare secret out.
+- Text glued to a closing quote is masked along with the value, so a legitimate `Host='a'x` reads
+  `***`. Nothing delimited it, and the shapes that reach this rule are typos.
+- A `/`-path that also carries an `@` is read as an authority and masked — `Data
+  Source=/home/user@corp/db.mdb` becomes `***@corp/db.mdb`. The `/` is there for Oracle's
+  `scott/tiger@host`, and a path with an `@` in it cannot be told from one.
+- A comma-separated host list prints bare (`mongodb://h1:27017,h2:27017/db`) but is masked from the
+  second host under a key (`Data Source=mongodb://h1:27017,h2:27017/db`), because only the prefix
+  path knows where a URI's authority ends.
 - Redaction is not idempotent over arbitrary text. On a string that is not a connection string at
   all, a second pass can mask more than the first — always more, never less.
 
@@ -297,7 +316,8 @@ Not closed, and said out loud rather than left to be discovered:
 blocklist property (the lookbehind anchors on `=`, so `SharedAccessKeyName` is not caught) that
 ceases to exist. Three of its four rows now redact, so it is rehomed to the unit tests as
 `AKeywordThatOnlyLooksLikeACredential_IsMaskedAnyway` with those three rows and their expectations
-inverted — the knowing cost of the inversion, stated as a test. Its fourth row is rehomed as the no-corruption
+inverted — the knowing cost of the inversion, stated as a test. Its fourth row is rehomed as the
+no-corruption
 test. `AConnectionStringWithNoCredential_IsEchoedUntouched` is left **untouched** — it is the best
 regression guard for the ordinary case.
 
@@ -306,7 +326,7 @@ regression guard for the ordinary case.
 | `Host=db.internal;Port=5432;Username=dev;Password=hunter2` | `Password=***`, rest intact |
 | `Host=db.internal;Port=5432;Pwd=hunter2` | `Pwd=***` |
 | `postgresql://orders_app:hunter2@db.internal:5432/orders` | `postgresql://***@db.internal:5432/orders` |
-| `x:y@a://b` | `***@a://b` — an `@` before the scheme resolves no authority, so none of it prints |
+| `x:y@a://b` | `***` — an `@` before the `://` means no scheme, so this is not a URI at all |
 | `redis://:hunter2@db.internal:6379` | `redis://***@db.internal:6379` |
 | `redis://user:pa;ss@db.internal:6379` | `redis://***@db.internal:6379` |
 | `mongodb://user:p;w@db.internal:27017` | `mongodb://***@db.internal:27017` |
@@ -324,7 +344,7 @@ regression guard for the ordinary case.
 | `Host=x Custom Port=5432` | `Host=x Custom Port=***` — longest key wins |
 | `Host=localhost;RotationKey = hunter2;Database=orders` | `RotationKey = ***` — space around `=` hides nothing |
 | `Host = localhost;Port = 5432;Database = orders` | untouched, spacing and all |
-| 30 000 copies of `Host=h; ` | returns in well under a second — the scan is linear in whitespace too |
+| 30 000 copies of `Host=h; ` | returns well under a second — linear in whitespace too |
 | `Data Source=file:pwd=hunter2` | `Data Source=file:pwd=***` — the row the backstop exists for |
 | `localhost:6379,ssl=false` | `localhost:6379,ssl=***` |
 | `localhost` | `***` |
