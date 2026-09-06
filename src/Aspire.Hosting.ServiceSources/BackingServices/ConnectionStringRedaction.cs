@@ -80,12 +80,19 @@ internal static class ConnectionStringRedaction
     /// the same address, and are the only prefix this needs to admit for a value with nothing to hide
     /// to keep reading as one.
     /// </para>
+    /// <para>
+    /// The three letters are spelled out case by case, <c>[Tt][Cc][Pp]</c>, rather than matched with
+    /// <see cref="RegexOptions.IgnoreCase"/>: that flag folds Unicode case-equivalents too, and under
+    /// <see cref="RegexOptions.CultureInvariant"/> it still maps U+212A KELVIN SIGN to <c>k</c>,
+    /// which would have widened every other letter class in this pattern — not just the three this
+    /// needs — to accept it as well.
+    /// </para>
     /// </remarks>
     private static readonly Regex HostShape = new(
-        @"\A(?:tcp:(?://)?)?"
+        @"\A(?:[Tt][Cc][Pp]:(?://)?)?"
         + @"(?:\[[0-9A-Fa-f:]+\]|[A-Za-z0-9](?:[A-Za-z0-9._-])*)"
         + @"(?:[:,][0-9]{1,5})?\z",
-        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase, RegexTimeout);
+        RegexOptions.CultureInvariant, RegexTimeout);
 
     /// <summary>
     /// A bare identifier — <c>database</c> and <c>initial catalog</c>'s shape.
