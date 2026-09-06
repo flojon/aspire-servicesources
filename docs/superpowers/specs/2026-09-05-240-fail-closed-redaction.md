@@ -310,6 +310,37 @@ Not closed, and said out loud rather than left to be discovered:
 - Redaction is not idempotent over arbitrary text. On a string that is not a connection string at
   all, a second pass can mask more than the first — always more, never less.
 
+## Judged against a parser, not only against examples
+
+Every gap found here has been a disagreement about where a value ends — which character separates a
+pair, what a quote spans, what an escape means. `DbConnectionStringBuilder` answers those questions
+already, and answers them as the runtime does, so it judges them better than another hand-written
+list of examples. `ConnectionStringRedactionOracleTests` generates ADO.NET-parseable strings with a
+known secret, asks the parser which key each value sits under, and asserts that no value under an
+unrecognised key survives redaction.
+
+It judges rather than redacts because it cannot do the job. Measured, not assumed:
+
+| input | what the parser does |
+|---|---|
+| `host=db port=5432 user=dev password=hunter2` | one pair, `[host]` = the whole rest — the password inside a value, silently |
+| `jdbc:postgresql://user:pw@h:5432/db?ssl=true` | one pair whose **key** is the URL, password included |
+| `redis://user:hunter2@cache:6379` | throws |
+| `localhost:6379` | throws |
+| `Host=localhost;Port=;Database=orders` | drops `Port=` — the shell-expansion diagnosis, deleted |
+| `Host==x=hunter2` | key `host=x`, value `hunter2` — correct, and better than a hand-rolled read |
+| `Host=h;Password='a;Host=hunter2'` | one value — correct |
+
+It also lowercases keys, re-quotes values, and reports values without offsets, so it cannot hide one
+in place or hand back what the developer wrote. Over the dialect it owns it is authoritative, and
+that is the part worth borrowing.
+
+The oracle found a leak on its first run that five review rounds had not: in
+`Host= localhost;2fa= hunter2=x`, the secret was printed **as a key name**, because a nested pair was
+found inside head text nothing had vouched for. A second followed it —
+`Host=localhost;2fa=a:b@hunter2` printed the secret as a hostname, because masking an authority
+across a separator destroyed the very separator the cut relied on.
+
 ## Tests
 
 `AKeywordThatOnlyLooksLikeACredential_IsNotRedacted` does not survive as it was: it asserts a

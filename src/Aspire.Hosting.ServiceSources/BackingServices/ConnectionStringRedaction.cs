@@ -172,7 +172,21 @@ internal static class ConnectionStringRedaction
     /// </para>
     /// </remarks>
     private static string RedactRecognisedValue(string value)
-        => Rebuild(value, FindPairs(value, whitespaceBeginsAPair: true), RecognisedText, RedactNestedValue);
+    {
+        var pairs = FindPairs(value, whitespaceBeginsAPair: true);
+
+        // A pair found here was introduced by whitespace, and whitespace inside text nothing
+        // recognised introduces nothing: in 'Host= localhost;2fa= hunter2=x' the scan reads
+        // 'hunter2' as a key of its own and prints it as one, because keys print. Whatever the head
+        // could not vouch for taints the pairs the scan found after it.
+        if (pairs.Count > 0
+            && RecognisedText(value[..pairs[0].KeyStart]).Contains(Mask, StringComparison.Ordinal))
+        {
+            return MaskKeepingLeadingSpace(value);
+        }
+
+        return Rebuild(value, pairs, RecognisedText, RedactNestedValue);
+    }
 
     /// <summary>
     /// What is printed for a pair written inside a value that was already recognised.
@@ -231,6 +245,28 @@ internal static class ConnectionStringRedaction
         // treat as ends — RFC 3986 admits them raw in a userinfo — so cutting first left
         // 'Data Source=postgresql://app:pw#1@db:5432' with no '@' to find and printed the password.
         var unmasked = text[start..];
+
+        // An authority reached across a separator is not one this can read: the text in front of the
+        // '@' was several things, not a userinfo, and masking it as one leaves whatever followed the
+        // '@' looking like a host. That is how 'Host=localhost;2fa=a:b@hunter2' came to print the
+        // secret as its hostname.
+        var lastAt = unmasked.LastIndexOf('@');
+        var separated = false;
+
+        for (var i = 0; i < lastAt; i++)
+        {
+            separated |= IsSeparator(unmasked[i]) || unmasked[i] == '#';
+
+            // A separator and then a '=' is a pair, and a pair in front of the '@' means what
+            // precedes it was never one userinfo. A separator alone is not enough to say so: RFC
+            // 3986 admits ';' ',' and '?' raw in a userinfo, and a password carrying one is the
+            // case the authority rule exists for.
+            if (separated && unmasked[i] == '=')
+            {
+                return leading + Mask;
+            }
+        }
+
         var authority = MaskAuthority(unmasked);
 
         // Not by length: 'u:p' and '***' are both three characters.
