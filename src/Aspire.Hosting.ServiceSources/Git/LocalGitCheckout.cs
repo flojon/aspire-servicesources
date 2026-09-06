@@ -137,7 +137,7 @@ internal static class LocalGitCheckout
         // same directory as "orders", so two entries spelled that way would share one checkout.
         // Refusing it is a rule about naming rather than about containment, which belongs to
         // whatever validates the name, not here.
-        return serviceName.TrimEnd('.', ' ').Length > 0;
+        return !CheckoutRelativePath.IsOnlyDotsAndSpaces(serviceName);
     }
 
     /// <summary>
