@@ -11,7 +11,7 @@ internal static class TestHelpers
 
     public static IDistributedApplicationBuilder CreateBuilder() => CreateBuilder(CreateTempDirectory());
 
-    public static string CreateTempDirectory() => Directory.CreateTempSubdirectory().FullName;
+    public static string CreateTempDirectory() => TempDirectories.CreateSubdirectory().FullName;
 
     /// <summary>
     /// The wrapper script names the Community Toolkit's Java integration execs for a Maven goal and

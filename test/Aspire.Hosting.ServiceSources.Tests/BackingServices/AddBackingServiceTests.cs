@@ -23,7 +23,7 @@ public class AddBackingServiceTests
     /// </remarks>
     private static string CreateAppHostDirectory(string? json = null)
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
 
         if (json is not null)
         {

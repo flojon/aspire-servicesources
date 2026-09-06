@@ -75,7 +75,7 @@ public class JavaScriptPrepareStepTests
 
     private static string CreateAppHostDirectory()
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
 
         File.WriteAllText(
             Path.Combine(dir, "servicesources.yaml"),

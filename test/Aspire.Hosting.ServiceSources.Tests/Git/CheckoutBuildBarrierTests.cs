@@ -13,7 +13,7 @@ public class CheckoutBuildBarrierTests
 {
     private static string NewToolDirectory()
     {
-        var dir = Path.Combine(Directory.CreateTempSubdirectory().FullName, ".servicesources");
+        var dir = Path.Combine(TempDirectories.CreateSubdirectory().FullName, ".servicesources");
         Directory.CreateDirectory(dir);
         return dir;
     }

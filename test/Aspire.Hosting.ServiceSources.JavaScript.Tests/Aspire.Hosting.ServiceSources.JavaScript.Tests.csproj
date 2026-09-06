@@ -19,10 +19,16 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <!-- TempDirectories.cs lives in the sibling test project; linked rather than duplicated. -->
+    <Using Include="Aspire.Hosting.ServiceSources.Tests" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Aspire.Hosting.ServiceSources\Aspire.Hosting.ServiceSources.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Aspire.Hosting.ServiceSources.Tests\TempDirectories.cs" Link="TempDirectories.cs" />
   </ItemGroup>
 
 </Project>

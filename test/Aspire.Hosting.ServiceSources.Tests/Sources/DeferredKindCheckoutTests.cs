@@ -179,7 +179,7 @@ public class DeferredKindCheckoutTests
 
     private static string CreateAppHostDirectory(params string[] localServices)
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
 
         var yaml = string.Join("\n", localServices.Select(name =>
             $"  {name}:\n    repository: https://example.com/{name}.git\n    kind: {KindName}"));
@@ -370,7 +370,7 @@ public class DeferredKindCheckoutTests
     public void OptedIn_PathOverride_ResolvesEagerly()
     {
         var dir = CreateAppHostDirectory("frontend");
-        var checkout = Directory.CreateTempSubdirectory().FullName;
+        var checkout = TempDirectories.CreateSubdirectory().FullName;
         Directory.CreateDirectory(Path.Combine(checkout, "app"));
 
         var builder = TestHelpers.CreateBuilder(dir);

@@ -13,7 +13,7 @@ public class BackingServiceConsumerTests
 
     private static IDistributedApplicationBuilder CreateBuilder(string localJson)
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
 
         File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), $"""
             services:

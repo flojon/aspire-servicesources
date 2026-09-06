@@ -67,7 +67,7 @@ public class GuestLanguageKindIsolationTests
         var handler = (ILocalResourceKind)Activator.CreateInstance(type, nonPublic: true)!;
 
         var rawConfig = new Dictionary<object, object> { [typo] = "dev" };
-        var repoRoot = Directory.CreateTempSubdirectory("servicesources-isolation-").FullName;
+        var repoRoot = TempDirectories.CreateSubdirectory("servicesources-isolation-").FullName;
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => handler.Validate("svc", repoRoot, rawConfig));
@@ -94,7 +94,7 @@ public class GuestLanguageKindIsolationTests
 
         // A checkout holding what either kind looks for at the root it defaults to: a package.json
         // for javascript, the Maven wrapper this platform execs for java.
-        var repoRoot = Directory.CreateTempSubdirectory("servicesources-isolation-").FullName;
+        var repoRoot = TempDirectories.CreateSubdirectory("servicesources-isolation-").FullName;
         File.WriteAllText(Path.Combine(repoRoot, "package.json"), """{ "scripts": { "dev": "vite" } }""");
         File.WriteAllText(
             Path.Combine(repoRoot, OperatingSystem.IsWindows() ? "mvnw.cmd" : "mvnw"), "");

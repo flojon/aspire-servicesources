@@ -16,7 +16,7 @@ public class LocalKindRegistryTests
     }
 
     private static IDistributedApplicationBuilder CreateBuilder() =>
-        TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+        TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
     [Fact]
     public void For_SameBuilder_ReturnsSameInstance()

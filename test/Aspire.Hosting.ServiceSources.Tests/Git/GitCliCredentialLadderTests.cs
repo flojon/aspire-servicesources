@@ -239,7 +239,7 @@ public class GitCliCredentialLadderTests
     /// </summary>
     private static string WriteHelperConfig(StubGitServer server)
     {
-        var directory = Directory.CreateTempSubdirectory().FullName;
+        var directory = TempDirectories.CreateSubdirectory().FullName;
         var credentials = Path.Combine(directory, "credentials");
         var host = new Uri(server.RepositoryUrl).Authority;
 

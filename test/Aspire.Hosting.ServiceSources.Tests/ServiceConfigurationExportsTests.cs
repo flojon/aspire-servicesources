@@ -23,7 +23,7 @@ public class ServiceConfigurationExportsTests
     };
 
     private static IDistributedApplicationBuilder Builder() =>
-        TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+        TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
     private static IResourceBuilder<IResourceWithServiceDiscovery> ConfigurableService(
         IDistributedApplicationBuilder builder) =>

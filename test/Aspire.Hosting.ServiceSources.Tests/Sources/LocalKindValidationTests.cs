@@ -61,8 +61,8 @@ public class LocalKindValidationTests
     [Fact]
     public void Validate_IsHandedTheCheckoutResolveGets()
     {
-        var checkout = Directory.CreateTempSubdirectory("servicesources-kind-validate-").FullName;
-        var builder = TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+        var checkout = TempDirectories.CreateSubdirectory("servicesources-kind-validate-").FullName;
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
         var kind = new RecordingKind();
         builder.AddLocalKind(KindName, kind);
 
@@ -78,8 +78,8 @@ public class LocalKindValidationTests
     [Fact]
     public void Validate_RunsImmediatelyBeforeResolve()
     {
-        var checkout = Directory.CreateTempSubdirectory("servicesources-kind-validate-").FullName;
-        var builder = TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+        var checkout = TempDirectories.CreateSubdirectory("servicesources-kind-validate-").FullName;
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
         var kind = new RecordingKind();
         builder.AddLocalKind(KindName, kind);
 
@@ -92,8 +92,8 @@ public class LocalKindValidationTests
     [Fact]
     public void ValidateThatRejects_KeepsTheServiceOutOfTheAppModel()
     {
-        var checkout = Directory.CreateTempSubdirectory("servicesources-kind-validate-").FullName;
-        var builder = TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+        var checkout = TempDirectories.CreateSubdirectory("servicesources-kind-validate-").FullName;
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
         var kind = new RecordingKind(rejectFromValidate: true);
         builder.AddLocalKind(KindName, kind);
 
@@ -118,8 +118,8 @@ public class LocalKindValidationTests
     [Fact]
     public void ValidateThatRejects_IsNotWrappedInTheHandlerFailedMessage()
     {
-        var checkout = Directory.CreateTempSubdirectory("servicesources-kind-validate-").FullName;
-        var builder = TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+        var checkout = TempDirectories.CreateSubdirectory("servicesources-kind-validate-").FullName;
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
         builder.AddLocalKind(KindName, new RecordingKind(rejectFromValidate: true));
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
@@ -141,8 +141,8 @@ public class LocalKindValidationTests
     [Fact]
     public void ValidateThatFaults_IsReportedAgainstTheServiceAndTheKind()
     {
-        var checkout = Directory.CreateTempSubdirectory("servicesources-kind-validate-").FullName;
-        var builder = TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+        var checkout = TempDirectories.CreateSubdirectory("servicesources-kind-validate-").FullName;
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
         builder.AddLocalKind(KindName, new RecordingKind(faultFromValidate: true));
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>

@@ -15,7 +15,7 @@ public class AddServiceTests
     [Fact]
     public void AddService_LocalSourceWithPathOverride_ReturnsTheRealRegisteredProject()
     {
-        var projectDir = Directory.CreateTempSubdirectory().FullName;
+        var projectDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(projectDir, "Orders.csproj"), """
             <Project Sdk="Microsoft.NET.Sdk">
               <PropertyGroup>
@@ -24,7 +24,7 @@ public class AddServiceTests
             </Project>
             """);
 
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
             services:
               orders:
@@ -46,8 +46,8 @@ public class AddServiceTests
     [Fact]
     public void AddService_RelativePathOverride_ResolvesRelativeToAppHostDirectoryNotProcessCwd()
     {
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
-        var projectDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        var projectDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(projectDir, "Orders.csproj"), """
             <Project Sdk="Microsoft.NET.Sdk">
               <PropertyGroup>
@@ -87,7 +87,7 @@ public class AddServiceTests
     [Fact]
     public void AddService_SourceValueSpelledWithACapital_ResolvesTheSameSource()
     {
-        var projectDir = Directory.CreateTempSubdirectory().FullName;
+        var projectDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(projectDir, "Orders.csproj"), """
             <Project Sdk="Microsoft.NET.Sdk">
               <PropertyGroup>
@@ -96,7 +96,7 @@ public class AddServiceTests
             </Project>
             """);
 
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
             services:
               orders:
@@ -128,7 +128,7 @@ public class AddServiceTests
     [Fact]
     public void AddService_MisplacedKey_IsReportedAheadOfResolvingTheSource()
     {
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
             services:
               orders:
@@ -171,7 +171,7 @@ public class AddServiceTests
     [Fact]
     public void AddService_UnknownSource_ReportsItAsUnknownAndNamesTheSourcesThatDoExist()
     {
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
             services:
               orders:
@@ -203,7 +203,7 @@ public class AddServiceTests
     [Fact]
     public async Task AddService_KubernetesSource_AddsPortForwardExecutableAndReturnsIt()
     {
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
             services:
               orders:
@@ -259,7 +259,7 @@ public class AddServiceTests
     [Fact]
     public void AddService_UrlSource_StaysUnregisteredAndResolvesToConfiguredUrl()
     {
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
             services:
               orders:
@@ -289,7 +289,7 @@ public class AddServiceTests
     [Fact]
     public void AddService_UrlSourceLocalOverride_TakesPrecedenceOverCatalogUrl()
     {
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
             services:
               orders:
@@ -313,7 +313,7 @@ public class AddServiceTests
     [Fact]
     public void AddService_UrlSourceMissingUrl_ThrowsNamingServiceAndUrl()
     {
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
             services:
               orders:
@@ -335,7 +335,7 @@ public class AddServiceTests
     [Fact]
     public void AddService_KubernetesSourceMissingContext_ThrowsNamingServiceAndContext()
     {
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
             services:
               orders:
@@ -360,7 +360,7 @@ public class AddServiceTests
     [Fact]
     public void AddService_ContainerSource_AddsContainerAndReturnsIt()
     {
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
             services:
               orders:
@@ -400,7 +400,7 @@ public class AddServiceTests
     [Fact]
     public void AddService_ContainerSourceLocalTagOverride_TakesPrecedenceOverCatalogDefaultTag()
     {
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
             services:
               orders:
@@ -428,7 +428,7 @@ public class AddServiceTests
     [Fact]
     public void AddService_ContainerSourceMissingImage_ThrowsNamingServiceAndImage()
     {
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
             services:
               orders:
@@ -458,7 +458,7 @@ public class AddServiceTests
     [InlineData("""{ "services": { "orders": { "source": "" } } }""")]
     public void AddService_EntryWithNoSource_ReportsItAsNotConfigured(string developerConfig)
     {
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
             services:
               orders:
@@ -492,7 +492,7 @@ public class AddServiceTests
     [Fact]
     public void AddService_PortInsideContainerBlock_ThrowsNamingTheBlockAndItsValidKeys()
     {
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
             services:
               orders:
@@ -521,7 +521,7 @@ public class AddServiceTests
     [Fact]
     public void AddService_KubernetesSourceWithHttpsSchemeInCatalog_ExposesAnHttpsEndpoint()
     {
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
             services:
               orders:
@@ -549,7 +549,7 @@ public class AddServiceTests
     [Fact]
     public void AddService_KubernetesSourceWithSchemeOverrideInDeveloperConfig_TakesPrecedence()
     {
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
             services:
               orders:
@@ -576,7 +576,7 @@ public class AddServiceTests
     [Fact]
     public void AddService_SchemeInsideLocalBlock_ThrowsNamingTheBlockAndItsValidKeys()
     {
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
             services:
               orders:
@@ -602,7 +602,7 @@ public class AddServiceTests
     [Fact]
     public void AddService_SchemeInsideContainerBlock_ThrowsNamingTheBlockAndItsValidKeys()
     {
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
             services:
               orders:
@@ -630,7 +630,7 @@ public class AddServiceTests
     [Fact]
     public void AddService_MisspelledSchemeInCatalogKubernetesBlock_ThrowsNamingTheUnknownProperty()
     {
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
             services:
               orders:
@@ -665,7 +665,7 @@ public class AddServiceTests
     [InlineData("URL")]
     public void AddService_SourceValueInAnyCasing_ResolvesTheSameSource(string source)
     {
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
             services:
               inventory:

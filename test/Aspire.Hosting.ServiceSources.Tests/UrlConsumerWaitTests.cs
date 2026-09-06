@@ -18,7 +18,7 @@ public class UrlConsumerWaitTests
 {
     private static string AppHostDirectory(string source)
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
             services:
               inventory:
@@ -36,7 +36,7 @@ public class UrlConsumerWaitTests
 
     private static IResourceBuilder<ExecutableResource> Consumer(
         IDistributedApplicationBuilder builder, string name) =>
-        builder.AddExecutable(name, "dotnet", Directory.CreateTempSubdirectory().FullName);
+        builder.AddExecutable(name, "dotnet", TempDirectories.CreateSubdirectory().FullName);
 
     /// <summary>
     /// Generous enough that a real hang is what fails the test rather than a slow machine — the
@@ -356,7 +356,7 @@ public class UrlConsumerWaitTests
     [Fact]
     public async Task DroppedWait_IsStillReportedWhenAnEarlierSkipFlushesFirst()
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
             services:
               orders:

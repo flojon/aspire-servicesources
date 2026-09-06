@@ -122,7 +122,7 @@ public class LocalProjectSourceTests
     private static ServiceDeveloperConfig DevConfig(string? path = null, string? @ref = null) =>
         new() { Source = "local", Local = new() { Path = path, Ref = @ref } };
 
-    private static string UnusedAppHostDirectory => Directory.CreateTempSubdirectory().FullName;
+    private static string UnusedAppHostDirectory => TempDirectories.CreateSubdirectory().FullName;
 
     /// <summary>
     /// Mirrors the exact composition <see cref="LocalProjectSource"/> uses in production
@@ -145,7 +145,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_PathIsSet_UsesItDirectlyWithoutTouchingGit()
     {
-        var repoDir = Directory.CreateTempSubdirectory().FullName;
+        var repoDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
         var gitClient = new FakeGitClient();
 
@@ -160,7 +160,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_PathAndRefBothSet_ThrowsNamingServiceAndDoesNotTouchGit()
     {
-        var repoDir = Directory.CreateTempSubdirectory().FullName;
+        var repoDir = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient();
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
@@ -177,7 +177,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveRepoRoot_PathOverridePointsAtMissingDirectory_ThrowsNamingServiceAndPath()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var missing = Path.Combine(appHostDirectory, "frontned");
         var gitClient = new FakeGitClient();
 
@@ -195,8 +195,8 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_RelativePathOverride_AnchorsToAppHostDirectoryNotProcessCwd()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
-        var repoDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
+        var repoDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
         var relativePath = Path.GetRelativePath(appHostDirectory, repoDir);
         var gitClient = new FakeGitClient();
@@ -210,7 +210,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CacheMiss_ClonesIntoAppHostDirectoryUnderServiceName()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient();
 
         var projectPath = ResolveProjectPath(
@@ -232,7 +232,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CacheMiss_UsesDeveloperRefOverCatalogDefaultRef()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient();
 
         ResolveProjectPath(
@@ -245,7 +245,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CacheMiss_FallsBackToCatalogDefaultRefWhenDeveloperRefUnset()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient();
 
         ResolveProjectPath(
@@ -258,7 +258,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CacheMiss_NoRefConfigured_SkipsCheckout()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient();
 
         ResolveProjectPath(
@@ -270,7 +270,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CacheHit_DoesNotCloneOrCheckout()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
         Directory.CreateDirectory(repoDir);
         Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
@@ -287,7 +287,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_DirectoryExistsWithoutGitMarker_TreatedAsCacheMissAndReClones()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
         Directory.CreateDirectory(repoDir);
         var gitClient = new FakeGitClient();
@@ -302,7 +302,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_DirectoryHasContentButNoGitMarker_ClearsTheDebrisAndReClones()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
         Directory.CreateDirectory(repoDir);
         // What an interrupted clone leaves behind: content, but no ".git". libgit2 refuses to clone
@@ -322,7 +322,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CloneDiesPartway_LeavesNoCheckoutDirectoryBehind()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
         var gitClient = new FakeGitClient { PartialCloneException = new InvalidOperationException("connection reset") };
 
@@ -339,7 +339,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CheckoutHasAGitFileRatherThanADirectory_RefusesToDeleteIt()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
         Directory.CreateDirectory(repoDir);
         // A linked worktree ("git worktree add") or a clone made with --separate-git-dir: ".git" is a
@@ -363,7 +363,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_ConcurrentResolutionLandsItsCloneFirst_UsesItRatherThanDeletingIt()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var checkoutsRoot = Path.Combine(appHostDirectory, ".servicesources", "checkouts");
         var repoDir = Path.Combine(checkoutsRoot, ServiceName);
         var gitClient = new FakeGitClient();
@@ -390,7 +390,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_ConcurrentResolutionLandsACloneOfAnotherRepository_ThrowsRatherThanUsingIt()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
         // Same service name, a different repository behind it: two AppHost directories sharing a
         // checkouts root, or a catalog edited between the two runs. Adopting the winner's clone has
@@ -412,7 +412,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_ConcurrentResolutionLandsACheckoutWithUncommittedChanges_DoesNotCheckOutOverThem()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
         // The checkout that won the race is on another ref and has work in flight — the winner is
         // still starting up, or someone is editing in it. Forcing our ref onto it would discard
@@ -435,7 +435,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_ConcurrentResolutionLandsACheckoutAlreadyOnTheRef_LeavesItAlone()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
         var gitClient = new FakeGitClient { CurrentlyCheckedOutRef = "feature/x" };
         gitClient.DuringClone = () =>
@@ -456,7 +456,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CloneFailsOverDebris_LeavesTheDebrisForARetryToClear()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
         Directory.CreateDirectory(repoDir);
         File.WriteAllText(Path.Combine(repoDir, "partial.pack"), "half a clone");
@@ -480,7 +480,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_AbandonedScratchDirectory_IsSweptOnALaterClone()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var checkoutsRoot = Path.Combine(appHostDirectory, ".servicesources", "checkouts");
         var abandoned = Path.Combine(checkoutsRoot, ".incoming-billing-deadbeef");
         Directory.CreateDirectory(abandoned);
@@ -498,7 +498,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_RecentScratchDirectory_IsLeftAlone_SoAConcurrentCloneSurvives()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var checkoutsRoot = Path.Combine(appHostDirectory, ".servicesources", "checkouts");
         var inFlight = Path.Combine(checkoutsRoot, ".incoming-billing-cafe");
         Directory.CreateDirectory(inFlight);
@@ -514,7 +514,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_RetriedAfterAPartialClone_Succeeds()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var failing = new FakeGitClient { PartialCloneException = new InvalidOperationException("connection reset") };
 
         Assert.Throws<ServiceSourcesConfigurationException>(() => ResolveProjectPath(
@@ -532,7 +532,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CacheHit_CleanTree_ReconcilesChangedRef()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
         Directory.CreateDirectory(repoDir);
         Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
@@ -550,7 +550,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CacheHit_CleanTreeAlreadyOnConfiguredRef_SkipsCheckout()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
         Directory.CreateDirectory(repoDir);
         Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
@@ -567,7 +567,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CacheHit_OriginMismatchesConfiguredRepository_Throws()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
         Directory.CreateDirectory(repoDir);
         Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
@@ -587,7 +587,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CacheHit_OriginMatchesConfiguredRepositoryModuloDotGitSuffix_DoesNotThrow()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
         Directory.CreateDirectory(repoDir);
         Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
@@ -603,7 +603,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CacheHit_OriginMatchesConfiguredRepositoryAsSshRemote_DoesNotThrow()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
         Directory.CreateDirectory(repoDir);
         Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
@@ -619,7 +619,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CacheHit_SshOriginNeedingFetch_FetchesIt()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
         Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
         File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
@@ -645,7 +645,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CheckoutFailsWithNonRefException_DoesNotAttemptFetchAndWrapsOriginalException()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient { CheckoutException = new IOException("disk error") };
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
@@ -661,7 +661,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CacheHit_DirtyTreeButAlreadyOnConfiguredRef_DoesNothing()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
         Directory.CreateDirectory(repoDir);
         Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
@@ -682,7 +682,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CacheHit_DirtyTreeAndDifferentRef_ThrowsWithoutTouchingWorkingTree()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
         Directory.CreateDirectory(repoDir);
         Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
@@ -706,7 +706,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_ProjectFileMissing_ThrowsNamingServiceProjectAndRoot()
     {
-        var repoDir = Directory.CreateTempSubdirectory().FullName;
+        var repoDir = TempDirectories.CreateSubdirectory().FullName;
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
@@ -720,8 +720,8 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_ProjectIsAbsolute_IsRefusedRatherThanResolvedOutsideTheCheckout()
     {
-        var repoDir = Directory.CreateTempSubdirectory().FullName;
-        var elsewhere = Path.Combine(Directory.CreateTempSubdirectory().FullName, "Evil.csproj");
+        var repoDir = TempDirectories.CreateSubdirectory().FullName;
+        var elsewhere = Path.Combine(TempDirectories.CreateSubdirectory().FullName, "Evil.csproj");
         File.WriteAllText(elsewhere, "<Project />");
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
@@ -739,7 +739,7 @@ public class LocalProjectSourceTests
     [InlineData(@"\\server\share\Evil.csproj")]
     public void ResolveProjectPath_ProjectAbsoluteOnAnotherPlatform_IsStillRefusedAsAbsolute(string project)
     {
-        var repoDir = Directory.CreateTempSubdirectory().FullName;
+        var repoDir = TempDirectories.CreateSubdirectory().FullName;
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
@@ -754,7 +754,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_ProjectClimbsOutOfTheCheckout_IsRefusedRatherThanResolvedOutsideIt()
     {
-        var parent = Directory.CreateTempSubdirectory().FullName;
+        var parent = TempDirectories.CreateSubdirectory().FullName;
         var repoDir = Directory.CreateDirectory(Path.Combine(parent, "orders")).FullName;
         File.WriteAllText(Path.Combine(parent, "Evil.csproj"), "<Project />");
 
@@ -782,7 +782,7 @@ public class LocalProjectSourceTests
     public void ResolveProjectPath_ProjectSegmentIsOnlyDotsAndSpaces_IsRefusedNamingTheSegment(
         string project, string segment)
     {
-        var repoDir = Directory.CreateTempSubdirectory().FullName;
+        var repoDir = TempDirectories.CreateSubdirectory().FullName;
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
@@ -803,7 +803,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_ProjectClimbsAndComesBack_StaysInsideAndIsAccepted()
     {
-        var repoDir = Directory.CreateTempSubdirectory().FullName;
+        var repoDir = TempDirectories.CreateSubdirectory().FullName;
         Directory.CreateDirectory(Path.Combine(repoDir, "src"));
         File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
 
@@ -822,7 +822,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_ProjectWrittenWithWindowsSeparators_ResolvesOnEveryPlatform()
     {
-        var repoDir = Directory.CreateTempSubdirectory().FullName;
+        var repoDir = TempDirectories.CreateSubdirectory().FullName;
         Directory.CreateDirectory(Path.Combine(repoDir, "src"));
         File.WriteAllText(Path.Combine(repoDir, "src", "Orders.csproj"), "<Project />");
 
@@ -839,7 +839,7 @@ public class LocalProjectSourceTests
     [InlineData(null)]
     public void ResolveProjectPath_ProjectMissing_IsReportedAsTheRequiredKeyItIs(string? project)
     {
-        var repoDir = Directory.CreateTempSubdirectory().FullName;
+        var repoDir = TempDirectories.CreateSubdirectory().FullName;
 
         // Three spellings of the same catalog mistake. Null is the one nothing else produces: a
         // `project:` written with nothing after it parses as null rather than as "", overriding the
@@ -857,7 +857,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void Resolve_EagerPath_ProjectClimbsOutOfTheCheckout_IsRefusedBeforeTheCloneRuns()
     {
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
         {
             ProjectDirectory = appHostDir,
@@ -882,7 +882,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CloneFails_WrapsAsConfigurationExceptionNamingServiceAndRepository()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient { CloneException = new InvalidOperationException("network unreachable") };
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
@@ -897,7 +897,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CloneFailsWithAuthError_MessageNamesAuthenticationAsCause()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient
         {
             CloneException = new GitAuthenticationFailedException("401 unauthorized", new InvalidOperationException()),
@@ -919,7 +919,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CloneFailsAndNoCredentialWasResolved_MessageSaysNoneWereResolved()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient
         {
             CloneException = new GitAuthenticationFailedException(
@@ -948,7 +948,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CloneFailsWithAuthError_DoesNotEchoATokenEmbeddedInTheRepositoryUrl()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient
         {
             CloneException = new GitAuthenticationFailedException("401 unauthorized", new InvalidOperationException()),
@@ -966,7 +966,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CloneFails_DoesNotEchoATokenEmbeddedInTheRepositoryUrl()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient { CloneException = new InvalidOperationException("network unreachable") };
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
@@ -980,7 +980,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_FetchFailsWithAuthError_DoesNotEchoATokenEmbeddedInTheRepositoryUrl()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient
         {
             FailFirstCheckoutOnly = true,
@@ -1002,7 +1002,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_RefMissingAfterFetch_DoesNotEchoATokenEmbeddedInTheRepositoryUrl()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient
         {
             CheckoutException = new ServiceSourcesConfigurationException(
@@ -1023,7 +1023,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_OriginMismatch_DoesNotEchoATokenEmbeddedInEitherUrl()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
         Directory.CreateDirectory(Path.Combine(repoDir, ".git"));
         File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
@@ -1049,7 +1049,7 @@ public class LocalProjectSourceTests
     [InlineData("gitserver:company/orders.git")]
     public void ResolveProjectPath_SshRepositoryUrl_IsClonedLikeAnyOther(string repository)
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient();
 
         // Handed to git as written, in every form git accepts: the developer's SSH agent and
@@ -1063,7 +1063,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_SshRepositoryUrlWithEmbeddedCredentials_DoesNotEchoThemWhenTheCloneFails()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient { CloneException = new InvalidOperationException("clone failed") };
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
@@ -1081,7 +1081,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CheckoutFails_WrapsAsConfigurationExceptionNamingServiceAndRef()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient
         {
             CheckoutException = new ServiceSourcesConfigurationException(
@@ -1100,7 +1100,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CacheMiss_CheckoutFailsOnce_FetchesThenRetriesSuccessfully()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient { FailFirstCheckoutOnly = true };
 
         ResolveProjectPath(
@@ -1115,7 +1115,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CacheMiss_RefMissingEvenAfterFetch_WrapsAsConfigurationException()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient
         {
             CheckoutException = new ServiceSourcesConfigurationException(
@@ -1134,7 +1134,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CacheMiss_FetchItselfFails_WrapsAsConfigurationExceptionNamingService()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient
         {
             FailFirstCheckoutOnly = true,
@@ -1152,7 +1152,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_CacheMiss_FetchFailsWithAuthError_MessageNamesAuthenticationAsCause()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient
         {
             FailFirstCheckoutOnly = true,
@@ -1170,7 +1170,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_TwoServicesSameRepo_GetIndependentNonCollidingPaths()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient();
 
         var ordersPath = ResolveProjectPath(
@@ -1185,7 +1185,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_ManagedClone_WritesGitignoreUnderServiceSourcesDirectory()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient();
 
         ResolveProjectPath(
@@ -1201,7 +1201,7 @@ public class LocalProjectSourceTests
     {
         // The checkout lives inside the AppHost's own repository, so without these MSBuild and
         // NuGet walk past .servicesources and apply the host repository's build settings to it.
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient();
 
         ResolveProjectPath(
@@ -1223,8 +1223,8 @@ public class LocalProjectSourceTests
         // often inside a repository of their own. Nothing is cloned, nothing is placed under
         // .servicesources, and writing tool-owned files into someone else's tree would be
         // overreach: that tree's own MSBuild and NuGet settings are the ones that should apply.
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
-        var overridePath = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
+        var overridePath = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(overridePath, "Orders.csproj"), "<Project />");
 
         ResolveProjectPath(
@@ -1242,7 +1242,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_ManagedClone_DoesNotOverwriteExistingGitignore()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var dir = Path.Combine(appHostDirectory, ".servicesources");
         Directory.CreateDirectory(dir);
         var gitignorePath = Path.Combine(dir, ".gitignore");
@@ -1258,7 +1258,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveProjectPath_ConcurrentResolutionsOfDifferentServices_DoNotRaceOnGitignoreCreation()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var serviceNames = Enumerable.Range(0, 8).Select(i => $"service-{i}").ToArray();
 
         Parallel.ForEach(serviceNames, serviceName =>
@@ -1277,7 +1277,7 @@ public class LocalProjectSourceTests
         // The inverse of the old deferred contract. AddService has to hand back the resource Aspire
         // actually runs, so resolution can no longer wait for BeforeStartEvent. Checkouts stay
         // parallel across services via the prefetch — see LocalCheckoutPrefetchTests.
-        var appHostDir = Directory.CreateTempSubdirectory().FullName;
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
         {
             ProjectDirectory = appHostDir,
@@ -1303,7 +1303,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void ResolveRepoRoot_ServiceNameThatWouldEscapeTheCheckoutDirectory_ThrowsBeforeCloning()
     {
-        var appHostDirectory = Directory.CreateTempSubdirectory().FullName;
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient();
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>

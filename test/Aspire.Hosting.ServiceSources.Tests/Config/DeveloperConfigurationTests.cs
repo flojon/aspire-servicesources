@@ -37,7 +37,7 @@ public class DeveloperConfigurationTests
 
     private static string CreateAppHostDirectory(string yaml, string? json = null)
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), yaml);
         if (json is not null)
         {
@@ -438,7 +438,7 @@ public class DeveloperConfigurationTests
     [Fact]
     public void ResolveService_HigherLayerSwitchesSource_LeavesTheOldSourcesBlockUnread()
     {
-        var checkout = Directory.CreateTempSubdirectory().FullName;
+        var checkout = TempDirectories.CreateSubdirectory().FullName;
         var dir = CreateAppHostDirectory(
             SwitcherCatalog,
             """
@@ -492,7 +492,7 @@ public class DeveloperConfigurationTests
     [Fact]
     public void ResolveService_BlankOverride_DropsTheFieldRatherThanBindingEmpty()
     {
-        var configured = Directory.CreateTempSubdirectory().FullName;
+        var configured = TempDirectories.CreateSubdirectory().FullName;
         var dir = CreateAppHostDirectory(
             BlankingCatalog,
             $$"""

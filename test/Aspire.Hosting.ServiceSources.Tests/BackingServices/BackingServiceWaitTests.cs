@@ -30,7 +30,7 @@ public class BackingServiceWaitTests
 {
     private static IDistributedApplicationBuilder CreateBuilder(string json)
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), json);
 
         return TestHelpers.CreateBuilderThatCanStart(dir);
@@ -102,7 +102,7 @@ public class BackingServiceWaitTests
     [Fact]
     public async Task UrlSourcedService_CarriesTheMarkerAndItsWaitResolves()
     {
-        var dir = Directory.CreateTempSubdirectory().FullName;
+        var dir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
             services:
               inventory:
@@ -117,7 +117,7 @@ public class BackingServiceWaitTests
 
         var inventory = builder.AddService("inventory");
         var worker = builder
-            .AddExecutable("worker", "dotnet", Directory.CreateTempSubdirectory().FullName)
+            .AddExecutable("worker", "dotnet", TempDirectories.CreateSubdirectory().FullName)
             .WaitFor(inventory);
 
         Assert.IsAssignableFrom<IResourceWithoutLifetime>(inventory.Resource);
