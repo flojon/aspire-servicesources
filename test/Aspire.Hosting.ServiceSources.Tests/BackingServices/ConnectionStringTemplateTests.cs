@@ -222,6 +222,53 @@ public class ConnectionStringTemplateTests
         Assert.DoesNotContain("hunter2", message);
     }
 
+    /// <summary>
+    /// A <c>'}'</c> that belongs to unrelated text later in the template — an ODBC
+    /// <c>Driver={SQL Server}</c> is the ordinary case this package's own docs call out as normal —
+    /// does not get mistaken for the placeholder's own close, so the placeholder is still read as
+    /// unterminated and its message still stops at the boundary rather than running past it.
+    /// </summary>
+    [Fact]
+    public void Parse_UnterminatedPlaceholder_IsNotClosedByAStrayLaterBrace()
+    {
+        var message = Rejects("Host=db;Port=${port:main;Password=hunter2;Driver={SQL Server}").Message;
+
+        Assert.Contains("'${port:main'", message);
+        Assert.Contains("no closing '}'", message);
+        Assert.DoesNotContain("hunter2", message);
+    }
+
+    /// <summary>
+    /// The same stray-brace shape, but for a secret — and reached through a rejection that used to
+    /// be raised only for a genuinely terminated placeholder (a bad key). With the close bounded the
+    /// same way, this placeholder is unterminated before any key is ever read.
+    /// </summary>
+    [Fact]
+    public void Parse_UnterminatedSecretPlaceholder_IsNotClosedByAStrayLaterBrace()
+    {
+        var message = Rejects("Host=db;Pw=${secret:creds:pass;Extra=orders;Password=hunter2;Driver={SQL Server}").Message;
+
+        Assert.Contains("'${secret:creds:pass'", message);
+        Assert.Contains("no closing '}'", message);
+        Assert.DoesNotContain("hunter2", message);
+    }
+
+    /// <summary>
+    /// The boundary a genuinely unterminated placeholder's message stops at is not only <c>;</c> and
+    /// whitespace — any character that could not appear in a real placeholder bounds it, so a
+    /// dialect that separates fields with <c>&amp;</c> or <c>,</c> does not leak either.
+    /// </summary>
+    [Theory]
+    [InlineData("Host=db;Port=${port:main&Database=orders&Password=hunter2", "${port:main")]
+    [InlineData("Host=db;Port=${port:main,Database=orders,Password=hunter2", "${port:main")]
+    public void Parse_UnterminatedPlaceholder_QuotesOnlyUpToAnyForeignCharacter(string template, string quoted)
+    {
+        var message = Rejects(template).Message;
+
+        Assert.Contains($"'{quoted}'", message);
+        Assert.DoesNotContain("hunter2", message);
+    }
+
     [Theory]
     [InlineData("${secret}")]
     [InlineData("${secret:orders-creds}")]

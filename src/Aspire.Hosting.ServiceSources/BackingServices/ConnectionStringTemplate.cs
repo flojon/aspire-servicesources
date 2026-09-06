@@ -164,8 +164,17 @@ internal sealed class ConnectionStringTemplate
                 continue;
             }
 
-            var close = template.IndexOf('}', at + 2);
-            var body = close < 0 ? template[(at + 2)..] : template[(at + 2)..close];
+            // The search for a closing '}' does not run past a ';' — the field separator every
+            // connection string this package reads is built on, and the one character no
+            // placeholder's name or key ever legitimately holds. Without this bound, a '}' that
+            // belongs to unrelated text after a missing close — an ODBC `Driver={SQL Server}` is
+            // the ordinary case — would be read as this placeholder's own, swallowing whatever
+            // came between the two braces (#257). A name or key is free to hold anything else,
+            // including whitespace: see the tests pinning a newline and a tab inside one.
+            var semicolon = template.IndexOf(';', at + 2);
+            var searchLimit = semicolon < 0 ? template.Length : semicolon;
+            var close = template.IndexOf('}', at + 2, searchLimit - (at + 2));
+            var body = close < 0 ? template[(at + 2)..searchLimit] : template[(at + 2)..close];
 
             if (!TryReadPlaceholder(body, backingServiceName, configKey, close < 0, out var placeholder))
             {
@@ -199,9 +208,11 @@ internal sealed class ConnectionStringTemplate
     /// Reads the inside of a <c>{…}</c> token, or reports that it is not one of ours.
     /// </summary>
     /// <param name="unterminated">
-    /// Whether the token had no closing brace. Only interesting once the keyword says a placeholder
-    /// was meant: <c>Server=${host</c> is text that happens to end mid-brace, while
-    /// <c>Port=${port</c> is a placeholder someone forgot to close.
+    /// Whether a <c>'}'</c> was found before the next <c>';'</c> (or the end of the template) — not
+    /// whether one exists anywhere later, so a <c>'}'</c> belonging to unrelated text past a missing
+    /// close is never read as this placeholder's own; see the bound in <see cref="Parse"/>. Only
+    /// interesting once the keyword says a placeholder was meant: <c>Server=${host</c> is text that
+    /// happens to end mid-brace, while <c>Port=${port</c> is a placeholder someone forgot to close.
     /// </param>
     /// <returns>
     /// <see langword="true"/> when the token is a placeholder, <see langword="false"/> when its
@@ -234,6 +245,9 @@ internal sealed class ConnectionStringTemplate
 
         // Reassembled from the template's own text rather than from the keyword constants, so every
         // message about this token quotes the spelling the developer wrote — see Segment.AsWritten.
+        // Bounded further when unterminated: `body` already stops at a ';' (see Parse), but with
+        // neither a ';' nor a '}' anywhere, it still runs to the end of the template — so it is cut
+        // again at the first character a legitimate name or key has no reason to hold.
         var token = unterminated ? $"${{{TruncateAtFirstBoundary(body)}" : $"${{{body}}}";
 
         if (unterminated)
@@ -291,24 +305,6 @@ internal sealed class ConnectionStringTemplate
 
     /// <summary>Whether a placeholder's name part is a name rather than nothing.</summary>
     private static bool IsNamed(string part) => !string.IsNullOrWhiteSpace(part);
-
-    /// <summary>
-    /// Cuts an unterminated token's body at the first <c>;</c> or whitespace, since neither can
-    /// appear inside a real placeholder — only in whatever the developer wrote after forgetting the
-    /// closing <c>}</c>. Without a bound, that token is quoted whole into the exception message,
-    /// which is everything left in the template: a credential a few characters later included (#257).
-    /// </summary>
-    private static string TruncateAtFirstBoundary(string body)
-    {
-        var end = 0;
-
-        while (end < body.Length && body[end] is not ';' && !char.IsWhiteSpace(body[end]))
-        {
-            end++;
-        }
-
-        return body[..end];
-    }
 
     /// <summary>
     /// Whether a secret's name is one a Kubernetes cluster could carry.
@@ -385,6 +381,34 @@ internal sealed class ConnectionStringTemplate
     /// </remarks>
     private static bool IsSecretNameChar(char c) =>
         char.IsAsciiLetterOrDigit(c) || c is '-' or '.' or '_';
+
+    /// <summary>
+    /// Cuts an unterminated token's body at the first character a real placeholder's name or key has
+    /// no reason to hold — <c>;</c>, whitespace, or one of a few separators common to the connection-
+    /// string and URI dialects this package's tests exercise (<c>&amp;</c>, <c>,</c>).
+    /// </summary>
+    /// <remarks>
+    /// Reached only once <see cref="Parse"/> has already failed to find a <c>';'</c>-bounded closing
+    /// <c>'}'</c>, so nothing here narrows what a well-formed name or key may hold — see the tests
+    /// pinning a newline, a tab and an apostrophe inside one. What is left, with neither a <c>';'</c>
+    /// nor a <c>'}'</c> anywhere, is everything to the end of the template; without a further bound
+    /// that is quoted whole into the exception message, a credential a few characters later included
+    /// (#257). The set here is necessarily a list of the separators this package's own tests are
+    /// written against rather than a closed rule, since nothing here can enumerate every connection-
+    /// string dialect's punctuation — a real placeholder's own syntax is what actually bounds this
+    /// safely, and does, in the far more common case where a <c>';'</c> or a <c>'}'</c> exists at all.
+    /// </remarks>
+    private static string TruncateAtFirstBoundary(string body)
+    {
+        var end = 0;
+
+        while (end < body.Length && body[end] is not (';' or '&' or ',') && !char.IsWhiteSpace(body[end]))
+        {
+            end++;
+        }
+
+        return body[..end];
+    }
 
     /// <summary>
     /// Appends literal text to a connection-string expression, escaped so that a brace in it stays
