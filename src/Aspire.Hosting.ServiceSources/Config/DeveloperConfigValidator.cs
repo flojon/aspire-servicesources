@@ -263,18 +263,28 @@ internal static class DeveloperConfigValidator
     /// service's <c>kubernetes.port</c>, written either as one port or as a name per port.
     /// </summary>
     /// <remarks>
-    /// The whole of this walk exists because the binder is silent about two of these. A named entry
+    /// The whole of this walk exists because the binder is silent about three of these. A named entry
     /// it cannot convert is <em>dropped</em>, so the map binds one shorter than it was written and
     /// the tunnel forwards a port fewer with nothing to say so — the same failure the list walk's
-    /// null-element check exists for. And a <em>value</em> it cannot convert throws from the binder
+    /// null-element check exists for. A <em>value</em> it cannot convert throws from the binder
     /// itself, naming a CLR type at a colon-separated key, from an exception no handler upstream
-    /// treats as a configuration problem. Both are caught here, before binding runs.
+    /// treats as a configuration problem. And a section carrying a value <em>and</em> names loses the
+    /// names entirely, for the reason given on <see cref="ValueAndNamedEntries"/>.
     /// <para>
     /// The two spellings are told apart the way <see cref="IConfiguration"/> tells them apart:
     /// children mean a block, and a value means a value. Three spellings collapse on the way in and
     /// the difference matters, so each is named below rather than left to be rediscovered — an empty
     /// block and a JSON <c>null</c> are indistinguishable and share a message, while an empty
-    /// <em>array</em> arrives as an empty value and is the gesture that unsets the field.
+    /// <em>array</em> arrives as an empty value and is the gesture that unsets the field. That
+    /// mapping is the JSON provider's rather than a rule of configuration, and it is the one this
+    /// repo resolves through Aspire; an older provider spells the same two shapes the other way
+    /// round.
+    /// </para>
+    /// <para>
+    /// Whether a value binds is asked of the field's own type rather than of anything this file
+    /// knows about ports: <see cref="BindsTo"/> puts it through the very converter the binder will
+    /// use, so the two cannot disagree about the same text. The same goes for each named entry,
+    /// through the value type <see cref="DeveloperConfigField.MapValueTypeOf"/> reports.
     /// </para>
     /// </remarks>
     private static void CollectValueOrMap(
@@ -284,7 +294,19 @@ internal static class DeveloperConfigValidator
         string noun,
         Type fieldType)
     {
-        if (!HasChildren(field))
+        var hasChildren = HasChildren(field);
+
+        // A value *and* names. The binder is value-first, so the value wins and every name is
+        // dropped — and when the value is one it cannot convert, it abandons the whole entry, which
+        // then reads downstream as a backing service nobody configured. Checked before either
+        // spelling's own walk, because neither describes what is wrong here.
+        if (hasChildren && field.Value is not null)
+        {
+            problems.Add(ValueAndNamedEntries(field, blockPath, noun));
+            return;
+        }
+
+        if (!hasChildren)
         {
             // An empty block of named values, or a JSON null: IConfiguration records both as a key
             // with no value and no children, so there is no telling them apart and one message
@@ -310,7 +332,7 @@ internal static class DeveloperConfigValidator
                 return;
             }
 
-            if (!KubernetesPorts.TryParsePort(field.Value, out _))
+            if (!BindsTo(fieldType, field.Value))
             {
                 problems.Add(NotAValueOrMap(field, blockPath, noun));
             }
@@ -322,18 +344,30 @@ internal static class DeveloperConfigValidator
 
         // Every key a position rather than a name: what a JSON array binds to. It would otherwise
         // bind perfectly well as a block named "0", "1", …, reachable as ${port:0} — a spelling
-        // nobody meant to write and nobody should learn.
-        if (entries.All(entry => int.TryParse(entry.Key, out _)))
+        // nobody meant to write and nobody should learn. Reported once for the whole field, because
+        // someone who wrote [5672, 15672] made one mistake and not one per element.
+        if (entries.All(entry => IsPosition(entry.Key)))
         {
             problems.Add(PositionalMap(field, blockPath, noun));
             return;
         }
 
+        var valueType = DeveloperConfigField.MapValueTypeOf(fieldType)!;
+
         foreach (var entry in entries)
         {
             if (string.IsNullOrWhiteSpace(entry.Key))
             {
-                problems.Add(UnnamedMapEntry(field, entry, blockPath, noun));
+                problems.Add(UnnamedMapEntry(field, blockPath, noun));
+                continue;
+            }
+
+            // A name that is a number, among names that are not: the mixed spelling the whole-field
+            // check above cannot claim. Refused for the same reason, since ${port:0} is no more a
+            // name here than it is there.
+            if (IsPosition(entry.Key))
+            {
+                problems.Add(PositionalMapEntry(field, entry, blockPath, noun));
                 continue;
             }
 
@@ -349,12 +383,44 @@ internal static class DeveloperConfigValidator
                 continue;
             }
 
-            if (!KubernetesPorts.TryParsePort(entry.Value, out _))
+            if (!BindsTo(valueType, entry.Value))
             {
-                problems.Add(MapEntryNotBindable(field, entry, blockPath, noun));
+                problems.Add(MapEntryNotBindable(field, entry, blockPath, noun, valueType));
             }
         }
     }
+
+    /// <summary>Whether a key is a position rather than a name.</summary>
+    private static bool IsPosition(string key) => int.TryParse(key, out _);
+
+    /// <summary>
+    /// How a connection string reaches one of several named values, for the messages that send a
+    /// developer to write a block and would otherwise not mention that the template changes too.
+    /// </summary>
+    private static string ReachEachByName(string noun) =>
+        $" A connection string reaches each one as '${{{noun}:<name>}}'.";
+
+    /// <summary>
+    /// The error for a section carrying both a value and named entries.
+    /// </summary>
+    /// <remarks>
+    /// Its own message, and checked ahead of both walks, because it is the one shape whose failure is
+    /// total: the binder takes the value and drops every name, and if the value is one it cannot
+    /// convert it abandons the surrounding entry too — so the backing service reads downstream as one
+    /// nobody configured, which is precisely what this whole file exists to stop.
+    /// <para>
+    /// Nearly always two layers rather than one file: configuration merges per key, so a file writing
+    /// a block of names and an environment variable writing a number both land on this field, and
+    /// neither author can see the other's.
+    /// </para>
+    /// </remarks>
+    private static string ValueAndNamedEntries(IConfigurationSection field, string block, string noun) =>
+        $"'{field.Key}' in the '{block}' block carries both the value {Escaped(field.Value)} and named "
+        + $"{noun}s ({Quoted(field.GetChildren().Select(entry => entry.Key))}). It takes one or the other, and a "
+        + $"value is read first — so the names would be dropped, and a value that is not a {noun} would take the "
+        + "whole entry with it. Configuration merges layers per key, so this is usually one layer writing a "
+        + $"{noun} number over another layer's block of names."
+        + SetAt(field);
 
     /// <summary>
     /// The error for a value-or-map field written as a value that is neither a number nor a block.
@@ -371,22 +437,27 @@ internal static class DeveloperConfigValidator
     private static string EmptyMap(IConfigurationSection field, string block, string noun) =>
         $"'{field.Key}' in the '{block}' block is an empty block of named {noun}s, so nothing "
         + $"would be forwarded. Write a {noun} number, or name at least one {noun}."
+        + ReachEachByName(noun)
         + SetAtBlock(field, $"<{noun}>");
 
     /// <summary>
     /// The error for a block of named values written as a list, whose entries are therefore keyed by
     /// position.
     /// </summary>
-    /// <remarks>
-    /// Worth its own message rather than being reported per entry as a name that is a number: what
-    /// is wrong is the shape, and a reader who wrote <c>[5672, 15672]</c> is not helped by being
-    /// told twice that a port is named '0' and '1'.
-    /// </remarks>
     private static string PositionalMap(IConfigurationSection field, string block, string noun) =>
         $"'{field.Key}' in the '{block}' block is written as a list, so its {noun}s are keyed by "
         + $"position. A block of named {noun}s gives each one a name, because a connection string "
         + $"reaches a {noun} by name and a position is not one."
+        + ReachEachByName(noun)
         + SetAtBlock(field, $"<{noun}>");
+
+    /// <summary>The error for one entry named by a number among entries that are not.</summary>
+    private static string PositionalMapEntry(
+        IConfigurationSection field, IConfigurationSection entry, string block, string noun) =>
+        $"'{field.Key}' in the '{block}' block names a {noun} {Escaped(entry.Key)}, which is a position "
+        + $"rather than a name. Give it a name a connection string can reach it by."
+        + ReachEachByName(noun)
+        + SetAtMapEntry(field, entry);
 
     /// <summary>The error for a named entry the binder would drop for want of a usable value.</summary>
     /// <remarks>
@@ -397,14 +468,14 @@ internal static class DeveloperConfigValidator
     /// consequence — something silently smaller than what was written.
     /// </remarks>
     private static string MapEntryNotBindable(
-        IConfigurationSection field, IConfigurationSection entry, string block, string noun) =>
+        IConfigurationSection field, IConfigurationSection entry, string block, string noun, Type valueType) =>
         $"'{field.Key}' in the '{block}' block names a {noun} {Escaped(entry.Key)}, but its value "
-        + $"{Escaped(entry.Value)} is not a whole number. A named {noun} whose value is not a number "
-        + $"is dropped rather than read, so one fewer would be forwarded than the block names."
+        + $"{Escaped(entry.Value)} is not a {Described(valueType)}. A named {noun} whose value cannot be read "
+        + "is dropped rather than reported, so one fewer would be forwarded than the block names."
         + (entry.Value!.Length == 0
-            ? " An empty value unsets a whole field; it does not take one name out of a block."
+            ? " An empty value unsets a whole field; there is no spelling that takes one name out of a block."
             : "")
-        + SetAt(entry);
+        + SetAtMapEntry(field, entry);
 
     /// <summary>The error for a named entry recorded with no value at all — a JSON <c>null</c>.</summary>
     private static string MapEntryMissing(
@@ -412,21 +483,34 @@ internal static class DeveloperConfigValidator
         $"'{field.Key}' in the '{block}' block names a {noun} {Escaped(entry.Key)}, but it has no "
         + $"value. A named {noun} with no value is dropped rather than read, so one fewer would be "
         + "forwarded than the block names."
-        + SetAt(entry);
+        + SetAtMapEntry(field, entry);
 
     /// <summary>The error for a named entry that is itself a block of settings.</summary>
+    /// <remarks>
+    /// Names the colon as a cause, because it is one and it is invisible: a configuration key cannot
+    /// contain a colon — it is the separator — so a name written with one arrives split, and what is
+    /// reported is the part before it carrying the part after it as a child. The developer is then
+    /// looking for a name they never wrote, which no other wording would explain.
+    /// </remarks>
     private static string MapEntryIsBlock(
         IConfigurationSection field, IConfigurationSection entry, string block, string noun) =>
         $"'{field.Key}' in the '{block}' block names a {noun} {Escaped(entry.Key)}, but its entry "
-        + $"is a block of settings rather than a number. Every named {noun} is a number."
-        + SetAt(entry);
+        + $"is a block of settings rather than a value. Every named {noun} is a single value. If the name you "
+        + "wrote contains a ':', that is why: a colon separates configuration keys, so the name arrived split "
+        + "in two and cannot be written that way."
+        + SetAtMapEntry(field, entry);
 
     /// <summary>The error for a named entry with no name.</summary>
-    private static string UnnamedMapEntry(
-        IConfigurationSection field, IConfigurationSection entry, string block, string noun) =>
+    /// <remarks>
+    /// The one per-entry message that points at the field rather than at the entry: the entry's key
+    /// path ends in the separator, since the name is what is missing, so naming it would print a key
+    /// no layer can set and that reads as a rendering fault.
+    /// </remarks>
+    private static string UnnamedMapEntry(IConfigurationSection field, string block, string noun) =>
         $"'{field.Key}' in the '{block}' block names a {noun} with no name. Every {noun} in the "
         + $"block needs a name, because a connection string reaches one by name."
-        + SetAt(entry);
+        + ReachEachByName(noun)
+        + SetAtBlock(field, $"<{noun}>");
 
     /// <summary>
     /// Every problem with a field whose value is a list of values.
@@ -951,6 +1035,25 @@ internal static class DeveloperConfigValidator
         + $"{DeveloperConfiguration.FileName}, appsettings, user secrets, the environment or the "
         + "command line — the flat layers a field at a time, as "
         + $"{$"{section.Path}:{exampleField}".Replace(":", "__", StringComparison.Ordinal)}.";
+
+    /// <summary>
+    /// The same as <see cref="SetAt"/>, for one named entry of a block of named values.
+    /// </summary>
+    /// <remarks>
+    /// Built from the field's path plus the escaped name rather than from the entry's own
+    /// <see cref="IConfigurationSection.Path"/>, which would print the name raw. The name is
+    /// developer-invented free text, and a message is read by someone who cannot see what they
+    /// typed: a newline in it would otherwise break this sentence across lines in a startup failure
+    /// that is relayed into a log and pasted into issues.
+    /// </remarks>
+    private static string SetAtMapEntry(IConfigurationSection field, IConfigurationSection entry)
+    {
+        var name = Escaped(entry.Key);
+
+        return $" The key is '{field.Path}:{name}', which any configuration layer can set: "
+            + $"{DeveloperConfiguration.FileName}, appsettings, user secrets, the environment variable "
+            + $"{field.Path.Replace(":", "__", StringComparison.Ordinal)}__{name}, or the command line.";
+    }
 
     private static string Quoted(IEnumerable<string> keys) =>
         string.Join(", ", keys.Select(k => $"'{Spelled(k)}'").Order(StringComparer.Ordinal));

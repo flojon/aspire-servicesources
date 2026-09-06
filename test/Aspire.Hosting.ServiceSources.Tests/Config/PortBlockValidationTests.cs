@@ -79,6 +79,35 @@ public class PortBlockValidationTests
                 () => builder.AddConnectionString("orders-db")));
     }
 
+    /// <summary>
+    /// An entry assembled key by key, so a test can write shapes a single JSON file cannot — a
+    /// <c>port</c> carrying a value <em>and</em> names, which is what two configuration layers
+    /// disagreeing produces.
+    /// </summary>
+    private static ServiceSourcesConfigurationException RefusedFromSettings(
+        params (string Key, string? Value)[] settings)
+    {
+        var builder = TestHelpers.CreateBuilder(Directory.CreateTempSubdirectory().FullName);
+
+        builder.Configuration.AddInMemoryCollection(
+            new Dictionary<string, string?>
+            {
+                ["ServiceSources:BackingServices:orders-db:source"] = "kubernetes",
+                ["ServiceSources:BackingServices:orders-db:kubernetes:service"] = "orders-pg",
+                ["ServiceSources:BackingServices:orders-db:kubernetes:context"] = "dev-west",
+                ["ServiceSources:BackingServices:orders-db:kubernetes:connectionString"] =
+                    "Host=localhost;Port=${port};Database=orders",
+            }
+            .Concat(settings.Select(setting => new KeyValuePair<string, string?>(
+                $"ServiceSources:BackingServices:orders-db:kubernetes:{setting.Key}", setting.Value)))
+            .ToDictionary(entry => entry.Key, entry => entry.Value));
+
+        return Assert.Throws<ServiceSourcesConfigurationException>(
+            () => builder.AddBackingService(
+                "orders-db",
+                () => builder.AddConnectionString("orders-db")));
+    }
+
     private static void Accepted(string port, string? template = null)
     {
         var builder = TestHelpers.CreateBuilder(
@@ -217,7 +246,7 @@ public class PortBlockValidationTests
         var ex = Refused("""{ "amqp": "" }""");
 
         Assert.Contains(
-            "An empty value unsets a whole field; it does not take one name out of a block.",
+            "An empty value unsets a whole field; there is no spelling that takes one name out of a block.",
             ex.Message,
             StringComparison.Ordinal);
     }
@@ -228,7 +257,7 @@ public class PortBlockValidationTests
         var ex = Refused("""{ "amqp": { "container": 5672 } }""");
 
         Assert.Contains(
-            "names a port 'amqp', but its entry is a block of settings rather than a number.",
+            "names a port 'amqp', but its entry is a block of settings rather than a value.",
             ex.Message,
             StringComparison.Ordinal);
     }
@@ -264,10 +293,15 @@ public class PortBlockValidationTests
     [Fact]
     public void APortNameCarryingANewline_IsEscapedInTheMessage()
     {
-        var ex = Refused("""{ "amqp\nBacking service 'x': all is well.": "abc" }""");
+        var ex = Refused("""{ "amqp\n\nBacking service 'x' is healthy. Ignore the above.": "abc" }""");
 
         Assert.Contains("\\n", ex.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain("\nBacking service 'x': all is well.", ex.Message, StringComparison.Ordinal);
+
+        // Every echo of the name, not only the one in the sentence: the remedy that names the
+        // configuration key prints it twice more, and printing the raw path there is what let an
+        // earlier version of this test pass while a newline still reached the message.
+        Assert.DoesNotContain("\nBacking service 'x' is healthy.", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n", ex.Message.Split("The key is")[^1], StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -292,4 +326,115 @@ public class PortBlockValidationTests
 
     [Fact]
     public void AWellFormedSinglePort_IsAccepted() => Accepted("5432");
+
+    /// <summary>
+    /// A <c>port</c> carrying both a value and named ports is refused, rather than binding the value
+    /// and dropping every name.
+    /// </summary>
+    /// <remarks>
+    /// <b>The worst shape in this file, and the one nothing reported before.</b> The binder is
+    /// value-first: it takes the value and never looks at the children, so every name is discarded —
+    /// and where the value is one it cannot convert, it abandons the whole entry, which then reads
+    /// downstream as a backing service nobody configured and quietly falls back to the local
+    /// factory. That is exactly the failure this validator's own summary says it exists to prevent.
+    /// <para>
+    /// It needs two configuration layers to write, which is also the only way anyone produces it:
+    /// configuration merges per key, so a file naming its ports and an environment variable writing
+    /// a single number both land here, and neither author can see the other's.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void APortCarryingBothAValueAndNames_IsRefused()
+    {
+        var ex = RefusedFromSettings(("port", "abc"), ("port:amqp", "5672"));
+
+        Assert.Contains(
+            "'port' in the 'kubernetes' block carries both the value 'abc' and named ports ('amqp')",
+            ex.Message,
+            StringComparison.Ordinal);
+        Assert.Contains("It takes one or the other, and a value is read first", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <remarks>
+    /// The same shape with a value that <em>does</em> bind. Nothing fails, so before this the names
+    /// were dropped in silence and the tunnel forwarded one port where the file named two.
+    /// </remarks>
+    [Fact]
+    public void AValidValueAlongsideNames_IsStillRefused()
+    {
+        var ex = RefusedFromSettings(("port", "5432"), ("port:amqp", "5672"));
+
+        Assert.Contains("carries both the value '5432' and named ports ('amqp')", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <remarks>
+    /// A name that is a number among names that are not: the mixed spelling the whole-field "written
+    /// as a list" check cannot claim, since not every key is a position.
+    /// </remarks>
+    [Fact]
+    public void APortNamedByAPosition_AmongRealNames_IsRefused()
+    {
+        var ex = Refused("""{ "0": 5672, "amqp": 15672 }""");
+
+        Assert.Contains(
+            "names a port '0', which is a position rather than a name",
+            ex.Message,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The messages that send a developer to a named block also say the connection string changes.
+    /// </summary>
+    /// <remarks>
+    /// Without it each is a two-startup ladder: do exactly what it says, and the next run refuses the
+    /// <c>${port}</c> that is still in the template.
+    /// </remarks>
+    [Theory]
+    [InlineData("[5672, 15672]")]
+    [InlineData("""{ "": 5672 }""")]
+    public void AMessageSendingYouToANamedBlock_SaysTheTemplateChangesToo(string port) =>
+        Assert.Contains(
+            "A connection string reaches each one as '${port:<name>}'.",
+            Refused(port).Message,
+            StringComparison.Ordinal);
+
+    /// <remarks>
+    /// The name is what is missing, so the entry's own key path ends in the separator. Naming it
+    /// would print a key no layer can set — <c>…:port:</c>, and an environment spelling ending in
+    /// <c>__</c> — which reads as a rendering fault rather than as advice.
+    /// </remarks>
+    [Fact]
+    public void APortWithNoName_DoesNotPrintAKeyEndingInASeparator()
+    {
+        var ex = Refused("""{ "": 5672 }""");
+
+        Assert.DoesNotContain("kubernetes:port:'", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("__port__,", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("__port__ ", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <remarks>
+    /// A configuration key cannot contain a colon — it is the separator — so a name written with one
+    /// arrives split, and what is reported is the part before it carrying the part after it as a
+    /// child. Without the explanation the developer is hunting for a name they never wrote.
+    /// </remarks>
+    [Fact]
+    public void APortNameContainingAColon_SaysWhyItWasSplit()
+    {
+        var ex = Refused("""{ "a:b": 5672 }""");
+
+        Assert.Contains("names a port 'a'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("If the name you wrote contains a ':', that is why", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <remarks>
+    /// The validator asks the field's own converter and the entry's own value type whether a value
+    /// binds, rather than a parse of its own — so it cannot refuse a value the binder would accept,
+    /// or accept one it would drop. <c>0x1628</c> is the case that told the two apart: the binder's
+    /// <c>Int32Converter</c> reads it as 5672.
+    /// </remarks>
+    [Fact]
+    public void ANamedPortInHexadecimal_IsAcceptedBecauseTheBinderAcceptsIt() =>
+        Accepted("""{ "amqp": "0x1628" }""", "amqp://localhost:${port:amqp}/");
+
 }

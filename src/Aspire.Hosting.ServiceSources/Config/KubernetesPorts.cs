@@ -74,13 +74,18 @@ internal sealed class KubernetesPorts : Dictionary<string, int>
     /// agree exactly: a value the validator accepts and the converter rejects reaches the binder,
     /// which answers it by naming a CLR type at a colon-separated key.
     /// <para>
-    /// <see cref="NumberStyles.Integer"/> against
-    /// <see cref="CultureInfo.InvariantCulture"/> is not a preference — it is what the binder itself
-    /// does to a named entry, through <c>Int32Converter.ConvertFromInvariantString</c>. A stricter
-    /// parse here would refuse a value the binder goes on to accept for an entry, and the two halves
-    /// of one block would then disagree about the same text. A negative number parses and is refused
-    /// later, by the range check, which is where a port that is a number but not a port has always
-    /// been answered.
+    /// <see cref="NumberStyles.Integer"/> against <see cref="CultureInfo.InvariantCulture"/> — the
+    /// plain spelling of a number, and deliberately narrower than <c>Int32Converter</c>, which also
+    /// accepts <c>0x1628</c>, <c>#1628</c> and <c>&amp;H1628</c>. Nothing is lost by refusing those:
+    /// the validator asks this same converter whether the value binds, so the two halves of the
+    /// scalar spelling cannot disagree, and a port written in hexadecimal is a mistake worth
+    /// reporting rather than a spelling worth supporting. A <em>named</em> entry is a different
+    /// matter — it is converted by the binder rather than here, so the validator asks the binder's
+    /// own converter about it instead of asking this.
+    /// <para>
+    /// A negative number parses and is refused later, by the range check, which is where a port that
+    /// is a number but not a port has always been answered.
+    /// </para>
     /// </para>
     /// </remarks>
     internal static bool TryParsePort(string value, out int port) =>
@@ -123,6 +128,6 @@ internal sealed class KubernetesPortsConverter : TypeConverter
         return KubernetesPorts.TryParsePort(text, out var port)
             ? KubernetesPorts.Of(port)
             : throw new FormatException(
-                $"'{text}' is neither a port number nor a block of named ports.");
+                $"{ConfiguredValue.Escaped(text)} is neither a port number nor a block of named ports.");
     }
 }

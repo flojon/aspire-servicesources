@@ -32,10 +32,22 @@ internal static class ConfiguredValue
     /// this package rather than as one name.
     /// </para>
     /// </remarks>
-    public static string Escaped(string? value) =>
+    public static string Escaped(string? value) => $"'{Bare(value)}'";
+
+    /// <summary>
+    /// The same escaping without the surrounding quotes, for the places that build a spelling around
+    /// a name rather than quoting the name on its own — <c>${port:&lt;name&gt;}</c>.
+    /// </summary>
+    /// <remarks>
+    /// Its own method rather than <see cref="Escaped"/> with the quotes trimmed back off. Trimming
+    /// also strips apostrophes the value itself begins or ends with, so a port genuinely named
+    /// <c>'amqp'</c> came back as <c>amqp</c> — a name that does not exist — in the one sentence
+    /// whose job is to hand the reader something to paste.
+    /// </remarks>
+    public static string Bare(string? value) =>
         value is null
-            ? "''"
-            : $"'{string.Concat(value.Select(c => c switch
+            ? ""
+            : string.Concat(value.Select(c => c switch
             {
                 ' ' => " ",
                 '\t' => "\\t",
@@ -43,5 +55,5 @@ internal static class ConfiguredValue
                 '\r' => "\\r",
                 _ when char.IsWhiteSpace(c) => $"\\u{(int)c:x4}",
                 _ => c.ToString(),
-            }))}'";
+            }));
 }

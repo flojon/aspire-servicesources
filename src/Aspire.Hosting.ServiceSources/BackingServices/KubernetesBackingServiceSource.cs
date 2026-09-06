@@ -262,7 +262,8 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
 
                 case ConnectionStringTemplate.Secret secret:
                     problems.Add(
-                        $"the connection string carries '{secret.AsWritten}', and reading a value out of a "
+                        $"the connection string carries {ConfiguredValue.Escaped(secret.AsWritten)}, and reading a "
+                        + "value out of a "
                         + "Kubernetes secret is not supported yet. Put the value in the connection string, or set "
                         + "the whole connection string from a configuration layer that already holds it — user "
                         + $"secrets, or {Environmentally(ConfigKey(name, "ConnectionString"))}.");
@@ -274,14 +275,16 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
             }
         }
 
+        // Collected alongside the rest rather than thrown after them, so a template that carries a
+        // secret and no port does not cost two startups to be told both.
+        if (ports == 0)
+        {
+            problems.Add(NothingAddressesTheTunnel(connectionString, requested));
+        }
+
         if (problems.Count > 0)
         {
             throw Failure(name, problems);
-        }
-
-        if (ports == 0)
-        {
-            throw NothingAddressesTheTunnel(name, connectionString, requested);
         }
     }
 
@@ -306,17 +309,18 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     /// </summary>
     private static string UnnamedPortAgainstABlock(
         ConnectionStringTemplate.Port port, IReadOnlyList<string> names) =>
-        $"the connection string carries '{port.AsWritten}', which stands for the one forwarded port, but this "
-        + $"backing service forwards several by name: {Quoted(names)}. Name the one this addresses, as "
-        + $"'${{port:{names[0]}}}'.";
+        $"the connection string carries {ConfiguredValue.Escaped(port.AsWritten)}, which stands for the one "
+        + $"forwarded port, but this backing service forwards {(names.Count == 1 ? "its port" : "several ports")} "
+        + $"by name: {Quoted(names)}. Name the one this addresses, as {Spelled(names[0])}.";
 
     /// <summary>
     /// The error for <c>${port:&lt;name&gt;}</c> where a single unnamed port is forwarded.
     /// </summary>
     private static string NamedPortAgainstASinglePort(string name, ConnectionStringTemplate.Port port) =>
-        $"the connection string carries '{port.AsWritten}', which names one of several forwarded ports, but this "
-        + $"backing service forwards the single port '{ConfigKey(name, "Port")}' names, so write '${{port}}'. To "
-        + "forward several, give each one a name: \"port\": { \"amqp\": 5672, \"management\": 15672 }.";
+        $"the connection string carries {ConfiguredValue.Escaped(port.AsWritten)}, which names one of several "
+        + "forwarded ports, but this backing service forwards a single unnamed port — the one written at "
+        + $"'{ConfigKey(name, "Port")}'. Write '${{port}}' for it. To forward several instead, give each a name: "
+        + "\"port\": { \"amqp\": 5672, \"management\": 15672 }.";
 
     /// <summary>
     /// The error for <c>${port:&lt;name&gt;}</c> naming a port the block does not carry.
@@ -331,15 +335,36 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     private static string NoSuchForwardedPort(
         ConnectionStringTemplate.Port port, IReadOnlyList<string> names)
     {
-        var near = NearMiss.Nearest(port.Name!, names, candidate => candidate);
+        // Only worth asking of a name short enough to be a typo. The edit distance is O(n·m) with
+        // both operands developer-written and neither length-capped, and every other caller in this
+        // package compares against short declared field names rather than against free text.
+        var near = port.Name!.Length <= LongestNameWorthComparing
+            ? NearMiss.Nearest(port.Name!, names, candidate => candidate)
+            : [];
 
-        var suggestion = near.Count == 1
-            ? $" Did you mean '{ConfiguredValue.Escaped(near[0]).Trim('\'')}'?"
-            : "";
+        // Escaped, not trimmed of its quotes: Escaped wraps its value in apostrophes, and stripping
+        // them back off also strips any the name itself begins or ends with — so a port named
+        // 'amqp', apostrophes and all, was suggested as amqp, a port that does not exist.
+        var suggestion = near.Count == 1 ? $" Did you mean {ConfiguredValue.Escaped(near[0])}?" : "";
 
-        return $"the connection string carries '{port.AsWritten}', which names a port this backing service does "
-            + $"not forward.{suggestion} It forwards {Quoted(names)}.";
+        return $"the connection string carries {ConfiguredValue.Escaped(port.AsWritten)}, which names a port this "
+            + $"backing service does not forward.{suggestion} It forwards {Quoted(names)}.";
     }
+
+    /// <summary>
+    /// How long a written port name may be before a near-miss suggestion stops being worth its cost.
+    /// </summary>
+    private const int LongestNameWorthComparing = 128;
+
+    /// <summary>
+    /// A port name as it is written in a connection string placeholder, ready to paste.
+    /// </summary>
+    /// <remarks>
+    /// Escaped like every other echo of a name — the list of forwarded ports beside this one always
+    /// was, so a name carrying a newline was rendered safely in one half of a sentence and forged a
+    /// line in the other. Escaped <em>bare</em>, since this builds its own quoting around the name.
+    /// </remarks>
+    private static string Spelled(string portName) => $"'${{port:{ConfiguredValue.Bare(portName)}}}'";
 
     /// <summary>Developer-invented names, escaped, quoted and in the order they are forwarded.</summary>
     private static string Quoted(IEnumerable<string> names) =>
@@ -456,7 +481,7 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
             throw new ServiceSourcesConfigurationException(
                 $"Backing service '{name}': source 'kubernetes' requires 'kubernetes.{only.Field}' — "
                 + $"{only.WhatItIs}. Add it {where}, or set {Environmentally(ConfigKey(name, only.Property))}."
-                + PortIsWhichEnd(kubernetes));
+                + PortIsWhichEnd(name, kubernetes));
         }
 
         var lines = missing.Select(field =>
@@ -474,7 +499,7 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
 
         throw new ServiceSourcesConfigurationException(
             $"Backing service '{name}': source 'kubernetes' needs {missing.Length} fields the entry does not "
-            + $"have, {where}:{string.Concat(lines)}{blank}{PortIsWhichEnd(kubernetes)}");
+            + $"have, {where}:{string.Concat(lines)}{blank}{PortIsWhichEnd(name, kubernetes)}");
     }
 
     /// <summary>
@@ -486,12 +511,14 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     /// in front of them, and only one of them goes in the file — so the message that asks for it
     /// says which. Nothing to say when the port is already written.
     /// </remarks>
-    private static string PortIsWhichEnd(KubernetesBackingServiceDeveloperConfig kubernetes) =>
+    private static string PortIsWhichEnd(string name, KubernetesBackingServiceDeveloperConfig kubernetes) =>
         kubernetes.Port is { } written && (written.SinglePort is not null || written.Count > 0)
             ? ""
             : $"{Environment.NewLine}{Environment.NewLine}The local end of the tunnel is allocated rather than "
-              + "configured, so a connection string names it as '${port}' and only the cluster's own port is "
-              + "written here.";
+              + "configured, so only the cluster's own port is written here and a connection string names the "
+              + "local end as '${port}' — or, where the block names its ports, as '${port:<name>}'. A block is "
+              + "written a name at a time from a flat layer, as "
+              + $"{Environmentally(ConfigKey(name, "Port"))}__<name>.";
 
     /// <summary>
     /// How many ports one backing service may forward through its tunnel.
@@ -561,12 +588,18 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
         if (port is < 1 or > 65535)
         {
             var which = portName is null
-                ? "'kubernetes.port' is"
-                : $"'kubernetes.port' names a port {ConfiguredValue.Escaped(portName)}, which is";
+                ? $"'kubernetes.port' is '{port}'"
+                : $"'kubernetes.port' gives the port named {ConfiguredValue.Escaped(portName)} the value '{port}'";
+
+            // The named form points at the entry rather than at the block, so the key named is the
+            // one that is wrong — as the validator's own per-entry messages do.
+            var key = portName is null
+                ? ConfigKey(name, "Port")
+                : $"{ConfigKey(name, "Port")}:{ConfiguredValue.Escaped(portName)}";
 
             throw new ServiceSourcesConfigurationException(
-                $"Backing service '{name}': {which} '{port}', which is not a port — a port is between "
-                + $"1 and 65535. The key is '{ConfigKey(name, "Port")}'.");
+                $"Backing service '{name}': {which}, which is not a port — a port is between "
+                + $"1 and 65535. The key is '{key}'.");
         }
 
         return port;
@@ -664,8 +697,8 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
     /// first half of this message, since the spelling they wrote was already right.
     /// </para>
     /// </remarks>
-    private static ServiceSourcesConfigurationException NothingAddressesTheTunnel(
-        string name, string connectionString, IReadOnlyList<(string? Name, int RemotePort)> requested)
+    private static string NothingAddressesTheTunnel(
+        string connectionString, IReadOnlyList<(string? Name, int RemotePort)> requested)
     {
         var shown = Redacted(connectionString);
 
@@ -683,21 +716,24 @@ internal sealed class KubernetesBackingServiceSource(IPortAllocator portAllocato
         // one thing this message must not get wrong.
         var names = requested.Where(port => port.Name is not null).Select(port => port.Name!).ToArray();
 
-        var remedy = names.Length == 0
-            ? "Replace the port in it with '${port}', as 'Host=localhost;Port=${port};Database=orders'."
-            : $"This backing service forwards its ports by name — {Quoted(names)} — so name the one this "
-              + $"addresses: replace the port in it with '${{port:{names[0]}}}'.";
+        // Every clause that names a spelling names the one this entry actually takes. Telling a
+        // developer whose block names its ports to write '${port}' would earn them a second startup
+        // failure saying the opposite — which is the one thing this message must not do.
+        var spelling = names.Length == 0 ? "'${port}'" : Spelled(names[0]);
 
-        return new(
-            $"Backing service '{name}': source 'kubernetes' opens a kubectl port-forward on a local port allocated "
-            + $"at startup, but the connection string names no '${{port}}' placeholder to put it in — so nothing "
-            + $"would address the tunnel: \"{shown}\"{note}. "
-            + remedy
-            + " If you did write it, a shell expanded it "
-            + "away before the AppHost saw it — '${...}' is a shell variable too, and double quotes do not protect "
-            + "it. Single-quote the value, and use env 'NAME=value' for a key with a hyphen in it. A backing "
-            + $"service reached at a fixed address the developer already has — an ingress, or an instance they run "
-            + $"themselves — is source 'direct' rather "
-            + $"than this one. The key is '{ConfigKey(name, "ConnectionString")}'.");
+        var remedy = names.Length == 0
+            ? $"Replace the port in it with {spelling}, as 'Host=localhost;Port=${{port}};Database=orders'."
+            : $"This backing service forwards its ports by name — {Quoted(names)} — so name the one this "
+              + $"addresses: replace the port in it with {spelling}.";
+
+        return "source 'kubernetes' opens a kubectl port-forward on a local port allocated at startup, but the "
+            + $"connection string names no {spelling} placeholder to put it in — so nothing would address the "
+            + $"tunnel: \"{shown}\"{note}."
+            + $"{Environment.NewLine}    {remedy}"
+            + $"{Environment.NewLine}    If you did write {spelling}, a shell expanded it away before the AppHost "
+            + "saw it — '${...}' is a shell variable too, and double quotes do not protect it. Single-quote the "
+            + "value, and use env 'NAME=value' for a key with a hyphen in it."
+            + $"{Environment.NewLine}    A backing service reached at a fixed address you already have — an "
+            + "ingress, or an instance you run yourself — is source 'direct' rather than this one.";
     }
 }

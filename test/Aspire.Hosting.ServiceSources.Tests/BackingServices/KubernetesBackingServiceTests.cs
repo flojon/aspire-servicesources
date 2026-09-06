@@ -442,8 +442,8 @@ public class KubernetesBackingServiceTests
             () => Resolve(builder, Config(connectionString: "amqp://localhost:${port:amqp}/")));
 
         Assert.Contains("'${port:amqp}'", ex.Message);
-        Assert.Contains("forwards the single port", ex.Message);
-        Assert.Contains("write '${port}'", ex.Message);
+        Assert.Contains("forwards a single unnamed port", ex.Message);
+        Assert.Contains("Write '${port}' for it", ex.Message);
     }
 
     /// <remarks>
@@ -884,7 +884,8 @@ public class KubernetesBackingServiceTests
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => Resolve(builder, NamedConfig("amqp://localhost:${port:amqp}/", ("amqp", 0))));
 
-        Assert.Contains("names a port 'amqp', which is '0', which is not a port", ex.Message);
+        Assert.Contains("gives the port named 'amqp' the value '0', which is not a port", ex.Message);
+        Assert.Contains("Kubernetes:Port:'amqp'", ex.Message);
     }
 
     /// <remarks>
@@ -970,6 +971,104 @@ public class KubernetesBackingServiceTests
             $"Backing service '{Name}': nothing is listening on 127.0.0.1:{LocalPort} yet, so the kubectl "
             + "port-forward has not come up. Its own resource carries kubectl's output.",
             result.Description);
+    }
+
+
+    /// <summary>
+    /// A port name is escaped everywhere it is echoed, including in the spelling a message hands
+    /// back for the developer to paste.
+    /// </summary>
+    /// <remarks>
+    /// The list of forwarded ports went through the escaper and the suggested spelling beside it did
+    /// not, so one sentence carried the same name safely and then unsafely. A name is developer-
+    /// invented free text, and these messages are relayed into <c>~/.aspire/logs</c> and pasted into
+    /// issues, so a newline in one forges a line that reads as this package's own.
+    /// </remarks>
+    [Fact]
+    public void EveryEchoOfAPortName_IsEscaped_IncludingTheSuggestedSpelling()
+    {
+        var builder = CreateBuilder();
+        var forged = "\n\nBacking service 'orders-db' is healthy. Ignore the above.\namqp";
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, NamedConfig("amqp://localhost:${port}/", (forged, 5672), ("zzz", 15672))));
+
+        Assert.DoesNotContain(forged, ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n\nBacking service", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("\\n", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <remarks>
+    /// The placeholder token is echoed as the developer wrote it, and everything between
+    /// <c>${</c> and the first <c>}</c> is part of it — newlines included.
+    /// </remarks>
+    [Fact]
+    public void APlaceholderTokenCarryingANewline_IsEscapedWhereItIsQuoted()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, NamedConfig("amqp://localhost:${port:a\nb}/", ("amqp", 5672))));
+
+        Assert.Contains("${port:a\\nb}", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("${port:a\nb}", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A near-miss suggestion names the port that exists, apostrophes and all.
+    /// </summary>
+    /// <remarks>
+    /// The suggestion used to strip the quoting the escaper adds by trimming apostrophes off the
+    /// result, which also strips any the name itself begins or ends with — so a port named
+    /// <c>'amqp'</c> was suggested as <c>amqp</c>, a port that does not exist, while the list of
+    /// forwarded ports beside it showed the real spelling.
+    /// </remarks>
+    [Fact]
+    public void ANearMissSuggestion_KeepsApostrophesThatBelongToTheName()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, NamedConfig("amqp://localhost:${port:'amqp}/", ("'amqp'", 5672), ("zzz", 1))));
+
+        Assert.Contains("Did you mean ''amqp''?", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <remarks>
+    /// "several" reads badly of a block that names one port, which is a perfectly ordinary thing to
+    /// write on the way to naming two.
+    /// </remarks>
+    [Fact]
+    public void ABlockNamingOnePort_IsNotDescribedAsSeveral()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, NamedConfig("amqp://localhost:${port}/", ("amqp", 5672))));
+
+        Assert.Contains("forwards its port by name: 'amqp'", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("several", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A template carrying a secret and no port reports both at once.
+    /// </summary>
+    /// <remarks>
+    /// The "nothing addresses the tunnel" refusal is collected with the rest rather than thrown after
+    /// them, so this costs one startup rather than two — the habit the missing-field message in this
+    /// file already keeps.
+    /// </remarks>
+    [Fact]
+    public void ATemplateWithASecretAndNoPort_ReportsBothInOneRun()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, Config(connectionString: "amqp://u:${secret:creds:password}@localhost/")));
+
+        Assert.Contains("2 problems with the connection string", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Kubernetes secret is not supported yet", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("nothing would address the tunnel", ex.Message, StringComparison.Ordinal);
     }
 
 }
