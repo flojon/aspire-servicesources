@@ -80,12 +80,23 @@ public class UrlSourceTests
     [InlineData("redis://user:hunter2@cache:6379", "cache:6379")]
     [InlineData("ftp://user:hunter2@files.internal/x", "files.internal")]
     [InlineData("redis://:hunter2@cache:6379", "cache:6379")]
-    // No '//' at all, so there is no authority to find and the userinfo has to be recognised by the
-    // ':' in front of its '@' instead.
-    [InlineData("mailto:user:hunter2@host", "host")]
-    [InlineData("user:hunter2@host", "host")]
+    // No '//' at all, so there is no authority to hang a userinfo on.
+    [InlineData("mailto:user:hunter2@host", "url")]
+    [InlineData("user:hunter2@host", "url")]
     // Unparseable, so there is no Uri to read the userinfo off — it has to come out of the text.
     [InlineData("https://user:hunter2@host:notaport/p", "notaport")]
+    // The secret is the username, which is how a PAT is written. Nothing may survive here.
+    [InlineData("//hunter2:x-oauth-basic@cache:6379", "url")]
+    [InlineData("hunter2@host", "url")]
+    // Carried by a query rather than by a userinfo, which is how a Redis or Mongo URL writes one.
+    [InlineData("redis://cache:6379?password=hunter2", "cache:6379")]
+    [InlineData("mongodb://host:27017/db?authSource=admin&password=hunter2", "host:27017")]
+    // A whole connection string pasted into the field, which is what makes the wrong-scheme
+    // refusal the one that matters.
+    [InlineData("Endpoint=sb://ns.servicebus.windows.net/;SharedAccessKey=hunter2", "SharedAccessKey")]
+    [InlineData("Server=db;Database=orders;User Id=sa;Password=hunter2;", "Database=orders")]
+    // Nothing delimits the secret from the host but a comma.
+    [InlineData("redis://cache:6379,hunter2", "cache:6379")]
     public void ResolveUrl_UrlCarryingCredentials_DoesNotEchoThem(string url, string survives)
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
@@ -94,7 +105,8 @@ public class UrlSourceTests
         Assert.DoesNotContain("hunter2", ex.Message, StringComparison.Ordinal);
 
         // The echo still has to say which value was refused, or the developer cannot tell which of
-        // their services this is about.
+        // their services this is about — except where nothing in the value was recognised at all, in
+        // which case the rows above ask only that the message still mentions the 'url' field.
         Assert.Contains(survives, ex.Message, StringComparison.Ordinal);
     }
 
@@ -105,6 +117,10 @@ public class UrlSourceTests
     [InlineData("ftp://orders.example.com")]
     [InlineData("not-a-url")]
     [InlineData("redis://cache.internal:6379")]
+    // A URL missing its scheme is the most ordinary mistake here, and the echo is how it is
+    // diagnosed — so it must not be answered with '***'.
+    [InlineData("orders.example.com")]
+    [InlineData("htttps://orders.example.com")]
     public void ResolveUrl_UrlWithNoCredentials_IsEchoedWhole(string url)
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>

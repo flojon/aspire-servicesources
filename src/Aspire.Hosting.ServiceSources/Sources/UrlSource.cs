@@ -1,8 +1,8 @@
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.ServiceSources.BackingServices;
 using Aspire.Hosting.ServiceSources.Config;
-using Aspire.Hosting.ServiceSources.Git;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
 
@@ -282,32 +282,34 @@ internal sealed class UrlSource : IServiceSource
     /// </summary>
     /// <remarks>
     /// Both refusals below echo the value, because a developer with several services needs to know
-    /// which one is being refused — and a URL is where userinfo lives. The wrong-scheme refusal is
+    /// which one is being refused — and a URL is where credentials live. The wrong-scheme refusal is
     /// the one that matters: pointing a <c>"url"</c> service at a Redis or AMQP endpoint is an
-    /// ordinary mistake, and those URLs carry credentials as a matter of course.
+    /// ordinary mistake, and those endpoints carry credentials as a matter of course.
     /// <para>
-    /// <see cref="GitUrl.RedactAll"/> answers the <c>scheme://user:pass@host</c> shape, including
-    /// where the value did not parse and there is no <see cref="Uri"/> to read the userinfo off.
-    /// What it leaves is a userinfo with no <c>//</c> in front of it — <c>mailto:user:pw@host</c>,
-    /// which is a valid absolute URI and reaches the scheme refusal — so anything still carrying an
-    /// <c>@</c> with a <c>:</c> somewhere before it is cut back to its host as well.
+    /// <see cref="ConnectionStringRedaction"/> rather than <see cref="GitUrl.RedactAll"/>, which
+    /// only finds a <c>scheme://user:pass@host</c>. A credential arrives in three other ways here
+    /// and that one answers none of them: in a query, as in
+    /// <c>redis://cache:6379?password=…</c>; under a keyword, as in a whole Azure connection string
+    /// pasted into the field; and with no <c>//</c> to hang an authority on, as in
+    /// <c>//token:x-oauth-basic@host</c>, where the secret is the <em>username</em>.
+    /// </para>
+    /// <para>
+    /// A value carrying none of the characters that could delimit or introduce one is echoed as
+    /// written, because there is nothing in it to hide and the echo is how a bare
+    /// <c>orders.example.com</c> — a URL missing its scheme, the most ordinary mistake here — gets
+    /// diagnosed. Passing that through the redaction would answer it with <c>***</c>.
     /// </para>
     /// </remarks>
     private static string Redacted(string url)
-    {
-        var withoutAuthority = GitUrl.RedactAll(url);
-        var at = withoutAuthority.LastIndexOf('@');
+        => url.AsSpan().IndexOfAny(CouldCarryACredential) < 0
+            ? url
+            : ConnectionStringRedaction.Redact(url);
 
-        if (at <= 0 || withoutAuthority.LastIndexOf(':', at - 1) < 0)
-        {
-            return withoutAuthority;
-        }
-
-        // The scheme is the half of this worth keeping — it is what the refusal is about.
-        var scheme = withoutAuthority.IndexOf(':');
-
-        return string.Concat(withoutAuthority.AsSpan(0, scheme + 1), withoutAuthority.AsSpan(at));
-    }
+    /// <summary>
+    /// The characters without which a value can hold neither a userinfo nor a pair.
+    /// </summary>
+    private static readonly System.Buffers.SearchValues<char> CouldCarryACredential =
+        System.Buffers.SearchValues.Create("@=;&?, \t\r\n");
 
     internal static Uri ResolveUrl(string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)
     {
