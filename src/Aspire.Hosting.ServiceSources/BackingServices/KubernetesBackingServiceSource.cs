@@ -339,10 +339,10 @@ internal sealed partial class KubernetesBackingServiceSource(
             throw new ServiceSourcesConfigurationException(
                 $"Backing service '{name}': the placeholder '{secret.AsWritten}' becomes a parameter named "
                 + $"'{parameterName}', after the backing service, the secret and the key, and Aspire rejected that "
-                + $"name — \"{WithoutParameterSuffix(ex.Message)}\" The name is {parameterName.Length} characters: "
-                + $"{name.Length} for the backing service, {secret.Name.Length} for the secret and "
-                + $"{secret.Key.Length} for the key. Shorten whichever of those you own — the backing service's "
-                + "name is the one this AppHost decides.",
+                + $"name — \"{WithoutParameterSuffix(ex.Message)}\" It is {parameterName.Length} characters, built "
+                + $"from the backing service ('{name}', {name.Length}), the secret ('{secret.Name}', "
+                + $"{secret.Name.Length}) and the key ('{secret.Key}', {secret.Key.Length}), joined. Shorten "
+                + "whichever of those you own — the backing service's name is the one this AppHost decides.",
                 ex);
         }
     }
@@ -471,7 +471,11 @@ internal sealed partial class KubernetesBackingServiceSource(
             return value;
         }
 
+        RequireRewritableShape(name, value, secret);
+
         var localised = ToLocalhost(value, service, @namespace, out var rewrites, out var ports);
+
+        RequireNothingStillAddressesTheCluster(name, localised, service, @namespace, secret);
 
         // Whole-string mode exists because the fetched string is written for use inside the cluster
         // and is unusable as fetched. If nothing was rewritten, that premise did not hold — the
@@ -493,6 +497,79 @@ internal sealed partial class KubernetesBackingServiceSource(
         RequireSecretPortMatches(name, ports, secret, remotePort);
 
         return localised;
+    }
+
+    /// <summary>
+    /// Refuses a fetched value whose shape this cannot account for, before rewriting any of it.
+    /// </summary>
+    /// <remarks>
+    /// <b>The mode is bounded by what it can parse, rather than by what has been thought of.</b>
+    /// Finding where a host ends means knowing where a value ends, and a quoted or braced value may
+    /// carry the separator inside it — <c>Server={orders;orders}</c> and
+    /// <c>Server="orders;orders"</c> both end a naive region at the first <c>;</c>, leaving the
+    /// second host addressed at the cluster while something was rewritten and the check below saw
+    /// a rewrite happen.
+    /// <para>
+    /// Three rounds of review each found another shape that slipped through a scanner built to
+    /// recognise shapes. So this stops recognising and starts refusing: a value carrying a quote or
+    /// a brace is not rewritten at all. That is a narrow loss — a whole-string secret is a
+    /// hand-authored connection string, and quoting is rare in one — against a class of silent
+    /// leak that patching had not closed in three attempts.
+    /// </para>
+    /// </remarks>
+    private static void RequireRewritableShape(string name, string value, ConnectionStringTemplate.Secret secret)
+    {
+        if (value.AsSpan().IndexOfAny("\"'{}") < 0)
+        {
+            return;
+        }
+
+        throw new KubernetesSecretException(
+            $"Backing service '{name}': the connection string in key '{secret.Key}' of secret '{secret.Name}' "
+            + "quotes or braces one of its values, and this cannot find where a host ends in a value that may "
+            + "carry a separator inside it. Rather than rewrite part of it and leave the rest addressed at the "
+            + "cluster, it is refused. Write the connection string yourself with per-field '${secret:...}' "
+            + "placeholders and a '${port}', which needs no rewriting at all.");
+    }
+
+    /// <summary>
+    /// Refuses a rewritten value that still addresses the cluster somewhere.
+    /// </summary>
+    /// <remarks>
+    /// The rewrite decides what to change; this decides whether to trust the result, and the two
+    /// are deliberately not the same code. Every leak found in this mode has had the same shape —
+    /// one host rewritten, another left — which the "something was rewritten" count cannot see.
+    /// <para>
+    /// It asks only about forms that can be nothing but an address: a name qualified by its
+    /// namespace, and a name carrying a port. A bare service name is left alone, because
+    /// <c>Database=orders</c> beside <c>Host=orders</c> is the ordinary shape and refusing it would
+    /// make the mode unusable for the case it was built for.
+    /// </para>
+    /// </remarks>
+    private static void RequireNothingStillAddressesTheCluster(
+        string name, string localised, string service, string @namespace, ConnectionStringTemplate.Secret secret)
+    {
+        var escaped = Regex.Escape(service);
+
+        var stillAddressed = Regex.Match(
+            localised,
+            $@"(?<![\w.-])(?:{escaped}\.{Regex.Escape(@namespace)}(?:\.svc(?:\.cluster\.local)?)?\.?"
+                + $@"|{escaped}\s*[:,]\s*\d{{1,5}})(?![\w-])",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+            TimeSpan.FromSeconds(1));
+
+        if (!stillAddressed.Success)
+        {
+            return;
+        }
+
+        throw new KubernetesSecretException(
+            $"Backing service '{name}': the connection string in key '{secret.Key}' of secret '{secret.Name}' "
+            + $"still addresses the cluster after rewriting — '{stillAddressed.Value}' was left in it. Something "
+            + "was rewritten, so this is a shape only partly recognised rather than one that names the service "
+            + "in no form at all. Handing it over would send the credentials in it wherever that name resolves "
+            + "here. Write the connection string yourself with per-field '${secret:...}' placeholders and a "
+            + "'${port}', which needs no rewriting.");
     }
 
     /// <summary>
@@ -613,7 +690,11 @@ internal sealed partial class KubernetesBackingServiceSource(
 
         var localised = Regex.Replace(
             connectionString,
-            $"(?<lead>{Keyword})(?<region>[^;]*)"
+            // A keyword's region ends at the ';' that ends its value — or at whitespace, because a
+            // libpq conninfo string ('host=orders port=5432 user=orders') separates its fields with
+            // spaces and carries no ';' at all. Running to the ';' there means running to the end,
+            // which rewrote a 'user=' that happened to equal the service name.
+            $"(?<lead>{Keyword})(?<region>[^;\\s]*)"
                 + $"|(?<lead>//(?:[^/@;\\s]*@)?)(?<region>[^/?;\\s]*)",
             region =>
             {
@@ -663,6 +744,7 @@ internal sealed partial class KubernetesBackingServiceSource(
     /// <summary>A port written as its own field, anchored so a value containing one is not read.</summary>
     [GeneratedRegex(@"(?:\A|;)\s*Port\s*=\s*(?<port>\d{1,5})(?!\d)", RegexOptions.IgnoreCase)]
     private static partial Regex PortField();
+
 
     /// <summary>The port a rewritten host is addressed on, in either shape a host list writes it.</summary>
     /// <remarks>

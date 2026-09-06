@@ -394,6 +394,9 @@ public class ConnectionStringTemplateTests
     [InlineData("${secret:-leading:password}")]
     [InlineData("${secret:trailing-:password}")]
     [InlineData("${secret:trailing.:password}")]
+    [InlineData("${secret:a..b:password}")]
+    [InlineData("${secret:a.-b:password}")]
+    [InlineData("${secret:a-.b:password}")]
     public void Parse_SecretNameNoClusterCouldHold_IsRefused(string template) =>
         Assert.Contains("lower-case letters", Rejects(template).Message);
 

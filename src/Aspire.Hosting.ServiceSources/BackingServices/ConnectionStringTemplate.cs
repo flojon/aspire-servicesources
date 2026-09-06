@@ -320,10 +320,24 @@ internal sealed class ConnectionStringTemplate
     /// "not found".
     /// </remarks>
     private static bool IsSecretName(string part) =>
-        part.Length > 0
-        && IsSecretNameEdge(part[0])
-        && IsSecretNameEdge(part[^1])
-        && part.All(c => IsSecretNameEdge(c) || c is '-' or '.');
+        part.Length > 0 && part.Split('.').All(IsSecretNameLabel);
+
+    /// <summary>
+    /// One dot-separated label of a secret's name.
+    /// </summary>
+    /// <remarks>
+    /// <b>Per label, not per name.</b> RFC 1123 asks each label to begin and end with a letter or a
+    /// digit, which is not the same as asking it of the whole string: checking only the two ends
+    /// admits <c>a..b</c>, <c>a.-b</c> and <c>a-.b</c>, all of which begin and end well and none of
+    /// which a cluster will hold. Verified against one — <c>kubectl create secret generic a..b</c>
+    /// is refused, and <c>kubectl get secret a..b</c> answers "not found", which is exactly the
+    /// indistinguishable failure this check exists to replace with a sentence naming the rule.
+    /// </remarks>
+    private static bool IsSecretNameLabel(string label) =>
+        label.Length > 0
+        && IsSecretNameEdge(label[0])
+        && IsSecretNameEdge(label[^1])
+        && label.All(c => IsSecretNameEdge(c) || c is '-');
 
     /// <summary>A character a secret's name may begin and end with.</summary>
     private static bool IsSecretNameEdge(char c) => char.IsAsciiDigit(c) || char.IsAsciiLetterLower(c);

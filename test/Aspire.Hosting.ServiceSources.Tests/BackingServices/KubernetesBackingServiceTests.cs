@@ -1035,6 +1035,109 @@ public class KubernetesBackingServiceTests
         Assert.Contains("localhost", await db.Resource.ConnectionStringExpression.GetValueAsync(default));
     }
 
+    /// <summary>
+    /// A value this cannot find the end of is refused rather than partly rewritten.
+    /// </summary>
+    /// <remarks>
+    /// A quoted or braced value may carry the separator inside it, so a region ends at the wrong
+    /// place and the host after it keeps addressing the cluster — with something rewritten, so the
+    /// count says the value was handled. Refusing the shape is the fail-closed answer; three rounds
+    /// of teaching a scanner more shapes did not close the class.
+    /// </remarks>
+    [Theory]
+    [InlineData("Server={orders;orders};Database=db")]
+    [InlineData("Server=\"orders;orders\";Database=db")]
+    [InlineData("Host=orders;Extra='a;b'")]
+    public async Task WholeStringSecret_ThatQuotesOrBracesAValue_IsRefusedRatherThanPartlyRewritten(string fetched)
+    {
+        var builder = CreateBuilder();
+
+        var db = Resolve(
+            builder,
+            Config(service: "orders", port: 5432, connectionString: "${secret:cs:connectionString}"),
+            allocator: new OccupiedPortAllocator(occupied: -1),
+            secretReader: new FakeSecretReader(fetched));
+
+        var ex = await Assert.ThrowsAsync<KubernetesSecretException>(
+            () => db.Resource.ConnectionStringExpression.GetValueAsync(default).AsTask());
+
+        Assert.Contains("quotes or braces", ex.Message);
+    }
+
+    /// <summary>
+    /// A value left still addressing the cluster after rewriting is refused, not served.
+    /// </summary>
+    /// <remarks>
+    /// The shape that has produced every leak in this mode: one host rewritten, another left. The
+    /// "something was rewritten" count cannot see it, so the result is checked rather than the
+    /// process trusted. A stray <c>@</c> makes an earlier host read as a URI's user information,
+    /// which is what RFC 3986 says it is — the string is malformed, and refusing beats guessing.
+    /// </remarks>
+    [Fact]
+    public async Task WholeStringSecret_LeftStillAddressingTheCluster_IsRefused()
+    {
+        var builder = CreateBuilder();
+
+        var db = Resolve(
+            builder,
+            Config(service: "orders", port: 27017, connectionString: "${secret:cs:connectionString}"),
+            allocator: new OccupiedPortAllocator(occupied: -1),
+            secretReader: new FakeSecretReader("mongodb://orders:27017,x@orders:27017/db"));
+
+        var ex = await Assert.ThrowsAsync<KubernetesSecretException>(
+            () => db.Resource.ConnectionStringExpression.GetValueAsync(default).AsTask());
+
+        Assert.Contains("still addresses the cluster", ex.Message);
+    }
+
+    /// <remarks>
+    /// libpq conninfo separates fields with spaces and carries no <c>;</c>, so a region running to
+    /// the next <c>;</c> ran to the end of the string and rewrote a <c>user=</c> that happened to
+    /// equal the service name — silent corruption of a credential field.
+    /// </remarks>
+    [Fact]
+    public async Task WholeStringSecret_SpaceSeparatedConninfo_RewritesOnlyTheHostField()
+    {
+        var builder = CreateBuilder();
+
+        var db = Resolve(
+            builder,
+            Config(service: "orders", port: 5432, connectionString: "${secret:cs:connectionString}"),
+            allocator: new OccupiedPortAllocator(occupied: -1),
+            secretReader: new FakeSecretReader("host=orders port=5432 user=orders dbname=app"));
+
+        Assert.Equal(
+            "host=localhost port=5432 user=orders dbname=app",
+            await db.Resource.ConnectionStringExpression.GetValueAsync(default));
+    }
+
+    /// <summary>
+    /// A quoted value carrying what reads as a field is refused with the rest of its shape.
+    /// </summary>
+    /// <remarks>
+    /// <c>Description="port note; Port=9999"</c> puts a well-formed-looking field inside free text,
+    /// which a port scan anchored to the <c>;</c> before it reads as real. It was worth a special
+    /// case only while quoted values were rewritten at all; they are now refused whole, which
+    /// answers this and the host-boundary problem with one rule rather than two scanners.
+    /// </remarks>
+    [Fact]
+    public async Task WholeStringSecret_WithAPortInsideAQuotedValue_IsRefusedWithTheQuotedShape()
+    {
+        var builder = CreateBuilder();
+
+        var db = Resolve(
+            builder,
+            Config(service: "orders", port: 5432, connectionString: "${secret:cs:connectionString}"),
+            allocator: new OccupiedPortAllocator(occupied: -1),
+            secretReader: new FakeSecretReader(
+                "Host=orders;Description=\"port note; Port=9999\";Port=5432"));
+
+        var ex = await Assert.ThrowsAsync<KubernetesSecretException>(
+            () => db.Resource.ConnectionStringExpression.GetValueAsync(default).AsTask());
+
+        Assert.Contains("quotes or braces", ex.Message);
+    }
+
     /// <remarks>
     /// The mirror of the test above: a decoy that matches the forwarded port must not hide a real
     /// mismatch at the host.
