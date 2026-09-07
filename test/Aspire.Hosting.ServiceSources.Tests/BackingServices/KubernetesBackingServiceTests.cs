@@ -655,6 +655,30 @@ public class KubernetesBackingServiceTests
     }
 
     /// <summary>
+    /// A <c>${secret:...}</c> placeholder written under a credential keyword is echoed whole, not
+    /// masked — the shell-expansion advice below it depends on the reader seeing which placeholders
+    /// survived.
+    /// </summary>
+    /// <remarks>
+    /// The issue's own repro (#259). Nothing else in this template needs hiding either, so the
+    /// message carries no "some values were masked" note at all — a placeholder is not a secret.
+    /// </remarks>
+    [Fact]
+    public void ASecretPlaceholderUnderACredentialKeyword_IsEchoedWhole()
+    {
+        var builder = CreateBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(
+                builder,
+                Config(connectionString: "Host=localhost;Password=${secret:orders-creds:password}")));
+
+        Assert.Contains(
+            "\"Host=localhost;Password=${secret:orders-creds:password}\"", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("***", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// An address that merely contains an <c>@</c> is not swept into the redaction.
     /// </summary>
     /// <remarks>

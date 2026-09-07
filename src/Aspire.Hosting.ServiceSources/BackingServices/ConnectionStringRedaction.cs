@@ -23,11 +23,13 @@ namespace Aspire.Hosting.ServiceSources.BackingServices;
 /// <para>
 /// <b>The invariant, which any change here must be checked against:</b> nothing is printed unless it
 /// has been positively recognised as safe to print — a key name; a value under an allowlisted key
-/// that matches that key's shape in full; a URI's scheme and its authority after the userinfo; a
-/// bare <c>host:port</c>; an empty value; and the separators and spacing between all of those. A
-/// value's extent is no longer "text until something ends it" — there is no delimiter to get wrong,
-/// no quote to honour, no escape to parse, because a value that fails to match end to end is masked
-/// whole rather than partially trusted.
+/// that matches that key's shape in full; a value that is exactly a well-formed <c>${port}</c> or
+/// <c>${secret:...}</c> placeholder (see <see cref="IsWellFormedPlaceholder"/>), under any key at
+/// all; a URI's scheme and its authority after the userinfo; a bare <c>host:port</c>; an empty
+/// value; and the separators and spacing between all of those. A value's extent is no longer "text
+/// until something ends it" — there is no delimiter to get wrong, no quote to honour, no escape to
+/// parse, because a value that fails to match end to end is masked whole rather than partially
+/// trusted.
 /// </para>
 /// <para>
 /// The boundary of "recognised" is still a tokenizer, so the residue is a pair written behind
@@ -182,6 +184,24 @@ internal static class ConnectionStringRedaction
     /// <c>;</c> masked the first half of <c>Password='a;Host=hunter2'</c> and handed the second half
     /// to a scan that then read it as a host.
     /// </para>
+    /// <para>
+    /// The one thing this does not blindly hide: a value that is exactly a well-formed
+    /// <c>${port}</c> or <c>${secret:...}</c> placeholder — <see cref="IsWellFormedPlaceholder"/>,
+    /// the same check <see cref="Scan"/> applies under every key below. Masking it here and then
+    /// reading it back masked there would not be a stronger defence, only a redundant one; a
+    /// placeholder is never the secret it stands for, whichever keyword it happens to sit behind.
+    /// </para>
+    /// <para>
+    /// This backstop's own idea of where a value ends (<c>[^;]+</c>, or a quoted run) is coarser
+    /// than <see cref="Scan"/>'s: it does not stop at <c>&amp;</c>, <c>?</c>, <c>,</c> or plain
+    /// whitespace the way <see cref="IsSeparator"/> does, so <c>password=${secret:a:b} dbname=x</c>
+    /// is captured as one span with <c>dbname=x</c> riding along inside it. That span is then not
+    /// <em>exactly</em> a placeholder, so it is masked whole — losing <c>dbname=x</c> from the
+    /// message along with it, rather than printing <c>dbname=***</c> the way a top-level
+    /// <c>;</c>-separated pair would. Fail-closed and unrelated to this exception: it is exactly the
+    /// pre-existing behaviour when the value inside were an ordinary secret instead of a placeholder
+    /// — a value-boundary gap, not a redaction-policy one, and out of scope here.
+    /// </para>
     /// </remarks>
     private static readonly Regex KnownCredentialKeywords = new(
         @"(?<=(?:password|pwd|secret|token|accountkey|accesskey|apikey|signature)\s*=)"
@@ -191,14 +211,73 @@ internal static class ConnectionStringRedaction
         RegexTimeout);
 
     /// <summary>
+    /// A whole <c>${port}</c>, <c>${port:&lt;name&gt;}</c> or <c>${secret:&lt;name&gt;:&lt;key&gt;}</c>
+    /// token — <see cref="ConnectionStringTemplate"/>'s own two keywords, spelled exactly as that
+    /// type recognises them: the keyword matched without regard to case, and each colon-separated
+    /// part after it barred from carrying a <c>:</c> or a <c>}</c> of its own, the same split
+    /// <see cref="ConnectionStringTemplate.Parse"/> makes.
+    /// </summary>
+    /// <remarks>
+    /// Anchored end to end, which is what makes this safe to trust rather than merely convenient:
+    /// nothing can be prepended or appended to a real secret and ride out beside a placeholder,
+    /// because anything beside one fails the match entirely and falls back to being masked whole —
+    /// see <see cref="IsWellFormedPlaceholder"/>. Not a re-validation of the name or the key against
+    /// Kubernetes' own rules the way <see cref="ConnectionStringTemplate"/> does: a template that
+    /// reaches this point either parsed already, in which case the name and key are already known
+    /// good, or arrived through a caller that never parses one at all, in which case the text is
+    /// still nothing but what a developer typed into their own configuration.
+    /// </remarks>
+    private static readonly Regex WellFormedPlaceholderShape = new(
+        @"\A\$\{(?:[Pp][Oo][Rr][Tt](?::[^:{}]+)?|[Ss][Ee][Cc][Rr][Ee][Tt](?::[^:{}]+){2})\}\z",
+        RegexOptions.CultureInvariant, RegexTimeout);
+
+    /// <summary>
+    /// Whether <paramref name="value"/>, once its layout and one matching pair of quotes are set
+    /// aside, is nothing but a <c>${port}</c> or <c>${secret:...}</c> placeholder.
+    /// </summary>
+    /// <remarks>
+    /// A placeholder is config the developer wrote, naming where a value lives rather than carrying
+    /// one — <see cref="ConnectionStringTemplate"/> resolves it later, from a port the AppHost
+    /// allocated or a secret the cluster holds, neither of which this method has ever seen. Printing
+    /// it is safe under any key, allowlisted or not, because <see cref="WellFormedPlaceholderShape"/>
+    /// is anchored end to end: a value recognised here has nothing in it but the placeholder.
+    /// <para>
+    /// The quote check mirrors <see cref="KnownCredentialKeywords"/>'s own: that regex takes a
+    /// quoted value whole, so what reaches the backstop's match evaluator still carries its quotes,
+    /// and the value <see cref="Rebuild"/> hands to <see cref="RedactValue"/> or
+    /// <see cref="RedactNestedValue"/> does too, whenever the pair that owns it was quoted the same
+    /// way. Only one pair is stripped — a placeholder does not nest inside itself.
+    /// </para>
+    /// </remarks>
+    private static bool IsWellFormedPlaceholder(string value)
+    {
+        var (_, rest) = SplitLeadingLayout(value);
+        var trimmed = TrimTrailingLayout(rest);
+
+        if (trimmed.Length >= 2 && trimmed[0] is '\'' or '"' && trimmed[^1] == trimmed[0])
+        {
+            trimmed = trimmed[1..^1];
+        }
+
+        return trimmed.Length > 0 && WellFormedPlaceholderShape.IsMatch(trimmed);
+    }
+
+    /// <summary>
     /// <paramref name="connectionString"/> with everything not recognised as safe to print replaced
     /// by <c>***</c>, or <see cref="Unscannable"/> if the search for credentials did not finish.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="connectionString"/> must be a template — read before <c>${port}</c> and
+    /// <c>${secret:...}</c> are resolved into the values they name. A well-formed placeholder is
+    /// printed whole under any key, on the strength of <see cref="ConnectionStringTemplate"/> never
+    /// having produced one that carries a real value; a string that has already been through
+    /// resolution has no such guarantee, and must never reach here.
+    /// </remarks>
     public static string Redact(string connectionString)
     {
         try
         {
-            var backstopped = KnownCredentialKeywords.Replace(connectionString, Mask);
+            var backstopped = KnownCredentialKeywords.Replace(connectionString, MaskUnlessPlaceholder);
 
             return Scan(backstopped);
         }
@@ -209,6 +288,13 @@ internal static class ConnectionStringRedaction
             return Unscannable;
         }
     }
+
+    /// <summary>
+    /// What the backstop prints for one match: the match itself, verbatim, when it is nothing but a
+    /// placeholder, or <c>***</c> otherwise.
+    /// </summary>
+    private static string MaskUnlessPlaceholder(Match match) =>
+        IsWellFormedPlaceholder(match.Value) ? match.Value : Mask;
 
     /// <summary>
     /// Where one <c>key=value</c> pair sits in the string being scanned.
@@ -240,9 +326,16 @@ internal static class ConnectionStringRedaction
     /// because an empty string cannot be a secret and because it is the entire diagnosis in the case
     /// this message exists for — a shell that ate a <c>${port}</c> leaves the key behind with
     /// nothing in it, and masking that would assert something was hidden where nothing was.
+    /// <para>
+    /// A well-formed placeholder is checked before the key is: see
+    /// <see cref="IsWellFormedPlaceholder"/>. It is safe to print under a key the allowlist has
+    /// never heard of, and under one it actively distrusts — <c>Password=${secret:...}</c> is the
+    /// case this exists for — every bit as much as under one it already trusts.
+    /// </para>
     /// </remarks>
     private static string RedactValue(string key, string value)
-        => ShapesByKey.TryGetValue(key, out var shape) ? RedactShapedValue(shape, value) : MaskKeepingLeadingSpace(value);
+        => IsWellFormedPlaceholder(value) ? value
+         : ShapesByKey.TryGetValue(key, out var shape) ? RedactShapedValue(shape, value) : MaskKeepingLeadingSpace(value);
 
     /// <summary>
     /// <paramref name="value"/> under a key whose shape is <paramref name="shape"/>, printed whole
@@ -285,10 +378,13 @@ internal static class ConnectionStringRedaction
     /// <remarks>
     /// The mirror of <see cref="RedactValue"/> one level down, and the last point at which anything
     /// is printed: a recognised value here is compared against its own key's shape rather than being
-    /// scanned again, so there is no third level and no cycle to bound.
+    /// scanned again, so there is no third level and no cycle to bound. A well-formed placeholder is
+    /// checked first, the same as one level up — libpq's <c>password=${secret:...}</c> reaches here
+    /// exactly as often as its <c>;</c>-separated equivalent reaches <see cref="RedactValue"/>.
     /// </remarks>
     private static string RedactNestedValue(string key, string value)
-        => ShapesByKey.TryGetValue(key, out var shape) && MatchesWhole(shape, value)
+        => IsWellFormedPlaceholder(value) ? value
+         : ShapesByKey.TryGetValue(key, out var shape) && MatchesWhole(shape, value)
             ? value
             : MaskKeepingLeadingSpace(value);
 
