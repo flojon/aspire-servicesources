@@ -751,11 +751,13 @@ nothing will fail to build to warn you.
   disagree about what a number is; `#1628` and `&H1628` are accepted too, for the same reason.
 
 - **The connection string a `kubernetes` backing service quotes back when it has no port to
-  address is now wrapped in apostrophes, like every other value this package echoes** ([#263]).
-  It used to sit inside double quotes while the escaping applied to it left `"` alone, so a
-  connection string legitimately containing one — an ODBC `Data Source="C:\path\to.mdb"`, say —
-  closed the message's own quoting early. Nothing was hidden or corrupted; the value still read in
-  full, just visually split. It now goes through the same helper every other echoed value does.
+  address is now wrapped in apostrophes, with an embedded apostrophe doubled** ([#263]). It used
+  to sit inside double quotes with nothing escaping `"`, so a connection string legitimately
+  containing one — an ODBC `Data Source="C:\path\to.mdb"`, say — closed the message's own quoting
+  early. Nothing was hidden or corrupted; the value still read in full, just visually split.
+  Apostrophes alone would only have moved the same problem onto a value containing one instead
+  (`O'Brien`), so an embedded apostrophe is now doubled — the connection-string convention for
+  escaping the quote delimiter itself.
 
 ### Documentation
 

@@ -450,6 +450,29 @@ internal sealed partial class KubernetesBackingServiceSource(
         string.Join(", ", names.Select(ConfiguredValue.Escaped));
 
     /// <summary>
+    /// The connection string this message quotes back, with an embedded apostrophe doubled rather
+    /// than left alone.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ConfiguredValue.Escaped"/> is not enough here. It spells out whitespace and other
+    /// invisible characters but leaves an apostrophe untouched, which is fine for the short,
+    /// developer-chosen names it is normally used on — a port or key containing one is rare, and
+    /// tolerating it is an accepted trade-off there. A connection string is neither short nor
+    /// developer-chosen in that sense: it is arbitrary text a real system produced, and an
+    /// apostrophe in it — an ODBC value quoted with one, a password, a name like <c>O'Brien</c> — is
+    /// not a corner case. Left unescaped, it would close this message's own quoting exactly as an
+    /// unescaped <c>"</c> did before this echo moved off double quotes.
+    /// <para>
+    /// Doubling the delimiter rather than backslash-escaping it, because that is the actual
+    /// connection-string convention for it — the same rule <c>DbConnectionStringBuilder</c> uses
+    /// for a quote inside a quoted value — so a reader who has ever escaped one in a connection
+    /// string recognizes it here too.
+    /// </para>
+    /// </remarks>
+    private static string QuotedConnectionString(string shown) =>
+        $"'{ConfiguredValue.Bare(shown).Replace("'", "''")}'";
+
+    /// <summary>
     /// Whether the whole connection string is one <c>${secret:...}</c> placeholder and nothing else.
     /// </summary>
     /// <remarks>
@@ -1329,7 +1352,7 @@ internal sealed partial class KubernetesBackingServiceSource(
 
         return "source 'kubernetes' opens a kubectl port-forward on a local port allocated at startup, but the "
             + $"connection string names no {missing} placeholder to put it in — so nothing would address the "
-            + $"tunnel: {ConfiguredValue.Escaped(shown)}{note}."
+            + $"tunnel: {QuotedConnectionString(shown)}{note}."
             + $"{Environment.NewLine}    {remedy}"
             + $"{Environment.NewLine}    If you did write {missing}, a shell expanded it away before the AppHost "
             + "saw it — '${...}' is a shell variable too, and double quotes do not protect it. Single-quote the "

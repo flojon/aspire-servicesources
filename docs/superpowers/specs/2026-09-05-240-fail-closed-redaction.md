@@ -251,12 +251,15 @@ all-allowlisted template still quotes back with no note. That requires the reass
 nothing is trimmed or normalised in redaction itself.
 
 What reaches the message is not that byte-identical string, though: the echo goes through
-`ConfiguredValue.Escaped`, which spells out whitespace and other invisible characters and wraps the
-whole value in apostrophes. A template containing a real tab is quoted back as
-`'Host=localhost\t;Port=5432'`, and one containing a double quote reads correctly inside those
-apostrophes rather than closing the message's own quoting early. This is escaping, not trimming or
-normalisation — every character position redaction produced still reaches the message, spelled out
-rather than dropped — but it means the developer does not see back the exact bytes they wrote, only
+`ConfiguredValue.Bare`, which spells out whitespace and other invisible characters, and is then
+wrapped in apostrophes with any apostrophe in the value doubled — the connection-string convention
+for escaping the quote delimiter itself. A template containing a real tab is quoted back as
+`'Host=localhost\t;Port=5432'`; one containing a double quote or an apostrophe (`O'Brien`) reads
+correctly inside those apostrophes rather than closing the message's own quoting early, the second
+because the apostrophe is doubled rather than left to end the quoting one character short. This is
+escaping, not trimming or normalisation — every character position redaction produced still reaches
+the message, spelled out or doubled rather than dropped — but it means the developer does not see
+back the exact bytes they wrote, only
 every one of them.
 
 ## Comments

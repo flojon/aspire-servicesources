@@ -1903,8 +1903,8 @@ public class KubernetesBackingServiceTests
     /// This is the one message that quotes a whole connection string back, and it used to wrap it in
     /// double quotes while <see cref="ConfiguredValue.Bare"/> — which only spells out whitespace —
     /// left an embedded <c>"</c> alone, so a value like an ODBC <c>Data Source</c> path closed the
-    /// message's own quoting early. It now goes through <see cref="ConfiguredValue.Escaped"/>, which
-    /// wraps it in apostrophes like every other value this package echoes.
+    /// message's own quoting early. It now wraps the value in apostrophes instead, which a bare
+    /// double quote no longer has any reason to disturb.
     /// </remarks>
     [Fact]
     public void TheEchoedConnectionString_IsWrappedInApostrophesSoAnEmbeddedQuoteDoesNotCloseItEarly()
@@ -1919,6 +1919,31 @@ public class KubernetesBackingServiceTests
             () => Resolve(builder, Config(connectionString: ConnectionString)));
 
         Assert.Contains($"tunnel: '{ConnectionString}'", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A connection string containing an apostrophe does not break the quoting of the message that
+    /// echoes it either — moving to apostrophes cannot just trade one embedded-delimiter bug for its
+    /// mirror image.
+    /// </summary>
+    /// <remarks>
+    /// Doubled, the connection-string convention for escaping the quote delimiter itself, rather
+    /// than left alone or backslash-escaped: <c>O'Brien</c> reaches the message as <c>O''Brien</c>.
+    /// </remarks>
+    [Fact]
+    public void TheEchoedConnectionString_DoublesAnEmbeddedApostropheSoItDoesNotCloseTheQuotingEarly()
+    {
+        var builder = CreateBuilder();
+        const string ConnectionString = "redis://cache.internal:6379/O'Brien";
+
+        // The premise, asserted rather than assumed: this proves the quoting, not the redaction.
+        Assert.Equal(ConnectionString, ConnectionStringRedaction.Redact(ConnectionString));
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, Config(connectionString: ConnectionString)));
+
+        Assert.Contains(
+            "tunnel: 'redis://cache.internal:6379/O''Brien'", ex.Message, StringComparison.Ordinal);
     }
 
     /// <remarks>
