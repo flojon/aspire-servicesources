@@ -660,6 +660,21 @@ nothing will fail to build to warn you.
   The single value now asks the same converter a named entry always has, so the two can no longer
   disagree about what a number is; `#1628` and `&H1628` are accepted too, for the same reason.
 
+### Documentation
+
+- **The trust model a resolved service runs under, now in `SECURITY.md`** ([#225]). A catalog entry
+  is an instruction to fetch and execute code the service repository controls — `prepare.command`,
+  MSBuild's evaluation of the checkout's own `.targets` files under `kind: dotnet`, `package.json`
+  lifecycle scripts under `kind: javascript`, and `kind: java`'s own wrapper script — reviewed by
+  people who are often not this AppHost's own team. Pinning `defaultRef`/`local.ref` to a commit SHA
+  is the lever that turns that into a reviewed checkout, and the README and `SECURITY.md` now both
+  say so next to those fields. Also newly stated: a warm managed checkout is never moved on your
+  behalf, so under `prepare`'s default `oncePerCommit`, `git pull` in a service checkout — not
+  anything that reads as approving code execution — is what causes its `prepare` step to run again
+  on the next AppHost start; and that the existing `local.path` consent notice is drawn on blast
+  radius, not provenance, so it says nothing about a managed checkout's own `prepare` step. Nothing
+  in the package changed.
+
 ## [0.4.1] - 2026-09-05
 
 A patch on top of `0.4.0`, cut from the `release/0.4.x` branch off the `v0.4.0` tag rather than
@@ -1397,6 +1412,7 @@ Targets `net10.0`.
 [#220]: https://github.com/flojon/aspire-servicesources/issues/220
 [#222]: https://github.com/flojon/aspire-servicesources/issues/222
 [#224]: https://github.com/flojon/aspire-servicesources/issues/224
+[#225]: https://github.com/flojon/aspire-servicesources/issues/225
 [#233]: https://github.com/flojon/aspire-servicesources/issues/233
 [#236]: https://github.com/flojon/aspire-servicesources/issues/236
 [#241]: https://github.com/flojon/aspire-servicesources/issues/241
