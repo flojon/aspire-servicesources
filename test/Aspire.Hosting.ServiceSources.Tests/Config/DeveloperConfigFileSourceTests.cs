@@ -77,6 +77,21 @@ public class DeveloperConfigFileSourceTests
     }
 
     /// <summary>
+    /// The catalog-in-code entry point — declares no yaml at all, so it is as likely as
+    /// <c>AddBackingService</c> to be an AppHost's first line, which is where a source-dependent
+    /// read of the AppHost's own configuration would go wrong.
+    /// </summary>
+    [Fact]
+    public void AddServiceCatalog_MakesTheFileReadableThroughTheAppHostsOwnConfiguration()
+    {
+        var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory(yaml: null));
+
+        builder.AddServiceCatalog(c => c.AddService("orders"));
+
+        Assert.Equal("local", builder.Configuration[SourceKey]);
+    }
+
+    /// <summary>
     /// The one entry point an AppHost can call without a catalog on disk at all, since a backing
     /// service is declared by the call rather than by <c>servicesources.yaml</c>.
     /// </summary>
@@ -208,7 +223,10 @@ public class DeveloperConfigFileSourceTests
     public void EveryPublicBuilderExtension_RegistersTheFile()
     {
         string[] accountedFor =
-            ["AddBackingService", "AddLocalKind", "AddService", "UseDeferredCheckout", "UseJava", "UseJavaScript"];
+        [
+            "AddBackingService", "AddLocalKind", "AddService", "AddServiceCatalog", "UseDeferredCheckout",
+            "UseJava", "UseJavaScript",
+        ];
 
         var entryPoints = typeof(ServiceSourcesBuilderExtensions).Assembly.GetExportedTypes()
             .SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.Static))

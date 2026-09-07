@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
+using Aspire.Hosting.ServiceSources.Catalog;
 
 namespace Aspire.Hosting.ServiceSources.Config;
 
@@ -14,6 +15,33 @@ internal static class ServiceSourcesConfigCache
     private static readonly ConditionalWeakTable<
         IDistributedApplicationBuilder,
         ConfigLoader<IReadOnlyDictionary<string, BackingServiceDeveloperConfig>>> BackingServiceCache = new();
+
+    private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, CodeCatalogAccumulator> CodeCatalogs = new();
+
+    /// <summary>
+    /// The code-declared catalog accumulator for one AppHost builder, created on first
+    /// <c>AddServiceCatalog</c> call. <see cref="CodeCatalogAccumulator.Builder"/> is read by
+    /// <see cref="LoadedConfig.Load"/>, under the same <see cref="CodeCatalogAccumulator"/> lock
+    /// <see cref="CodeCatalogAccumulator.Configure"/> takes.
+    /// </summary>
+    internal static CodeCatalogAccumulator CodeCatalogFor(IDistributedApplicationBuilder builder) =>
+        CodeCatalogs.GetValue(builder, static _ => new CodeCatalogAccumulator());
+
+    internal sealed class CodeCatalogAccumulator
+    {
+        // Plain object rather than System.Threading.Lock: this package still targets net8.0.
+        private readonly object _gate = new();
+
+        public ServiceCatalogBuilder Builder { get; } = new();
+
+        public void Configure(Action<ServiceCatalogBuilder> configure)
+        {
+            lock (_gate)
+            {
+                configure(Builder);
+            }
+        }
+    }
 
     /// <summary>
     /// The whole loaded configuration, for callers that work across services rather than resolving

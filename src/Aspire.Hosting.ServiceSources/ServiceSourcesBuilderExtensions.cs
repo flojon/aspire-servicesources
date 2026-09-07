@@ -223,6 +223,24 @@ public static class ServiceSourcesBuilderExtensions
     }
 
     /// <summary>
+    /// Declares services in the AppHost's own language instead of (or alongside) <c>servicesources.yaml</c>.
+    /// Must be called before the first <see cref="AddService"/>, which is where the catalog is read —
+    /// see the exception thrown by <see cref="Config.ServiceSourcesConfigCache"/> otherwise. Called more
+    /// than once, entries accumulate; a name declared twice across calls is the same duplicate error as
+    /// within one call.
+    /// </summary>
+    [AspireExport(RunSyncOnBackgroundThread = true)]
+    public static IDistributedApplicationBuilder AddServiceCatalog(
+        this IDistributedApplicationBuilder builder, Action<Catalog.ServiceCatalogBuilder> configure)
+    {
+        DeveloperConfigFileSource.EnsureRegistered(builder);
+
+        Config.ServiceSourcesConfigCache.CodeCatalogFor(builder).Configure(configure);
+
+        return builder;
+    }
+
+    /// <summary>
     /// Refuses a handler whose <c>Validate</c> does not match
     /// <see cref="ILocalResourceKind.Validate"/>, which nothing else would catch.
     /// </summary>
