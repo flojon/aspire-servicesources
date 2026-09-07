@@ -39,4 +39,23 @@ public class ServiceDefinitionBuilderTests
         Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
         Assert.Contains("WithRepository", ex.Message, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void WithUrl_SetsUrlBlock()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("inventory")
+            .WithUrl("https://httpbin.org")
+            .Build();
+
+        Assert.NotNull(definition.Url);
+        Assert.Equal("https://httpbin.org", definition.Url.Url);
+    }
+
+    [Fact]
+    public void WithUrl_CalledTwice_Throws()
+    {
+        var chain = new ServiceCatalogBuilder().AddService("inventory").WithUrl("https://a.example");
+
+        Assert.Throws<ServiceSourcesConfigurationException>(() => chain.WithUrl("https://b.example"));
+    }
 }

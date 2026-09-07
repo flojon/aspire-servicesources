@@ -1,3 +1,4 @@
+using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 
 namespace Aspire.Hosting.ServiceSources.Catalog;
@@ -15,10 +16,11 @@ public sealed class ServiceDefinitionBuilder
     private string? _repository;
     private string? _project;
     private string? _defaultRef;
+    private UrlMetadata? _url;
 
-    // Task 4 adds Url/WithUrl; Task 5 adds Container/WithContainer; Task 6 adds
-    // Kubernetes/WithKubernetes; Task 8 adds Kind/KindOptions/WithKind. Each field starts null and
-    // each With* throws the additive-error below (via RequireUnset) if its field is already set.
+    // Task 5 adds Container/WithContainer; Task 6 adds Kubernetes/WithKubernetes; Task 8 adds
+    // Kind/KindOptions/WithKind. Each field starts null and each With* throws the additive-error
+    // below (via RequireUnset) if its field is already set.
 
     internal ServiceDefinitionBuilder(string serviceName)
     {
@@ -34,6 +36,14 @@ public sealed class ServiceDefinitionBuilder
         _repository = url;
         _project = project;
         _defaultRef = defaultRef;
+        return this;
+    }
+
+    /// <summary>Declares this service's plain URL — the "url" source. See design "The authoring API".</summary>
+    public ServiceDefinitionBuilder WithUrl(string url)
+    {
+        RequireUnset(_url, nameof(WithUrl));
+        _url = new UrlMetadata { Url = url };
         return this;
     }
 
@@ -60,6 +70,7 @@ public sealed class ServiceDefinitionBuilder
         Repository = _repository ?? "",
         Project = _project ?? "",
         DefaultRef = _defaultRef,
+        Url = _url,
         Kind = LocalKinds.Dotnet,
         Origin = CatalogOrigin.Code,
     };
