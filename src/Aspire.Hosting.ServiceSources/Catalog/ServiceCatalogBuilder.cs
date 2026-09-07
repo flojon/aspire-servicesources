@@ -5,8 +5,8 @@ namespace Aspire.Hosting.ServiceSources.Catalog;
 /// <summary>
 /// Accumulates code-declared service entries for one <c>AddServiceCatalog(…)</c> call (or several —
 /// see <see cref="ServiceSourcesBuilderExtensions.AddServiceCatalog"/>, which appends). Frozen once
-/// the catalog is composed (<c>LoadedConfig.Load</c>); any call reaching a frozen builder is ignored,
-/// per design "Composition, freezing, and the errors".
+/// the catalog is composed (<c>LoadedConfig.Load</c>); any call reaching a frozen builder throws
+/// <see cref="InvalidOperationException"/>, per design "Composition, freezing, and the errors".
 /// </summary>
 [AspireExport(ExposeMethods = true)]
 public sealed class ServiceCatalogBuilder
