@@ -440,8 +440,9 @@ that (`~/.nuget/packages`, npm's); a Maven local repository is not, so a step th
 concurrently with *itself*.
 
 **What this deliberately isn't.** One command, one marker, per service: no task runner, no ordering
-between steps, no caching of produced artifacts across developers, no timeout (Ctrl-C works, and a
-country-sized routing graph has no defensible default) and no injected environment variables.
+between steps, no caching of produced artifacts across developers, no timeout (Ctrl-C works on a
+deferred first run, and a country-sized routing graph has no defensible default) and no injected
+environment variables.
 `prepare` also belongs to the `"local"` *service* source; the `"local"` source a
 [backing service](#backing-services-databases-brokers-and-caches) can have means something else
 entirely, with no repository and so nothing to bootstrap.
