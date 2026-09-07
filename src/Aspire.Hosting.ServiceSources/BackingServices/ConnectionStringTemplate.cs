@@ -164,51 +164,34 @@ internal sealed class ConnectionStringTemplate
                 continue;
             }
 
-            // The search for a closing '}' tracks nesting, so a '}' belonging to a different,
-            // balanced '{...}' pair later in the template — an ODBC `Driver={SQL Server}` field is
-            // the ordinary case this file's own docs call normal — is never mistaken for this
-            // placeholder's own close. Only a '}' with no unmatched '{' of its own ends it; a
-            // dialect-specific separator (a ';' between ADO.NET fields, an '@' or '/' in a URI)
-            // would only bound the *search* for as many dialects as it happened to name, so it is
-            // the braces themselves that are tracked rather than any particular punctuation (#257).
-            var depth = 0;
+            // A placeholder's own keyword, name and key can never legitimately contain a brace —
+            // nothing here has ever needed one, and every other brace in a connection string
+            // belongs to something else (an ODBC `Driver={SQL Server}` field is the ordinary case
+            // this file's own docs call normal). So the first brace of either kind decides this
+            // search outright: a '}' is this placeholder's own close, and a '{' means no close
+            // exists to find — this text was never going to be a well-formed placeholder, whatever
+            // unrelated, possibly brace-quoted content follows.
+            //
+            // Earlier attempts tried to track nesting (skip a balanced '{...}' pair elsewhere) and
+            // then ODBC's own doubled-'}' escape for a literal brace inside such a pair — both real
+            // rules this format uses, and both correct as far as they went. But teaching this scan
+            // to model ever more of *other* content's own brace syntax chases an unbounded set of
+            // shapes, and every attempt so far has been found to still leak past the one before it
+            // (#257). Refusing a brace inside the body at all sidesteps needing to model any of it:
+            // nothing this scan has to understand can be mistaken for something it does not.
             var close = -1;
 
             for (var scan = at + 2; scan < template.Length; scan++)
             {
+                if (template[scan] == '}')
+                {
+                    close = scan;
+                    break;
+                }
+
                 if (template[scan] == '{')
                 {
-                    depth++;
-                }
-                else if (template[scan] == '}')
-                {
-                    // A doubled '}' is ODBC's own escape for one literal '}' inside a brace-quoted
-                    // value — see the remarks on this type, and the doubling pinned by
-                    // Parse_BracesInAConnectionString_AreNeverRewritten's `PWD={pa}}ss}`. Read as two
-                    // separate close events instead of one inert pair, the first would pair off an
-                    // outer '{' as usual, but the second would then land back at this placeholder's
-                    // own depth with nothing of its own preceding it — indistinguishable from a
-                    // genuine, unrelated close, and so misread as this placeholder's own (#257).
-                    //
-                    // Only doubling while depth > 0: the escape exists to write a literal '}' inside
-                    // a value some '{' has already opened, so it means nothing once nothing is open.
-                    // Without this gate, an ordinary, already-closed placeholder immediately followed
-                    // by one unrelated stray '}' — `${port:amqp}}` — reads as its own doubled escape
-                    // and swallows its own genuine close along with it, rejecting a placeholder that
-                    // was never broken to begin with.
-                    if (depth > 0 && scan + 1 < template.Length && template[scan + 1] == '}')
-                    {
-                        scan++;
-                        continue;
-                    }
-
-                    if (depth == 0)
-                    {
-                        close = scan;
-                        break;
-                    }
-
-                    depth--;
+                    break;
                 }
             }
 
@@ -246,10 +229,10 @@ internal sealed class ConnectionStringTemplate
     /// Reads the inside of a <c>{…}</c> token, or reports that it is not one of ours.
     /// </summary>
     /// <param name="unterminated">
-    /// Whether a balanced <c>'}'</c> — one with no unmatched <c>'{'</c> of its own before it — was
-    /// found anywhere later in the template; see the bound in <see cref="Parse"/>. Only interesting
-    /// once the keyword says a placeholder was meant: <c>Server=${host</c> is text that happens to
-    /// end mid-brace, while <c>Port=${port</c> is a placeholder someone forgot to close.
+    /// Whether a <c>'}'</c> was found before any <c>'{'</c>; see the search in <see cref="Parse"/>.
+    /// Only interesting once the keyword says a placeholder was meant: <c>Server=${host</c> is text
+    /// that happens to end mid-brace, while <c>Port=${port</c> is a placeholder someone forgot to
+    /// close.
     /// </param>
     /// <returns>
     /// <see langword="true"/> when the token is a placeholder, <see langword="false"/> when its
@@ -282,10 +265,11 @@ internal sealed class ConnectionStringTemplate
 
         // Reassembled from the template's own text rather than from the keyword constants, so every
         // message about this token quotes the spelling the developer wrote — see Segment.AsWritten.
-        // Bounded further when unterminated: with no balanced closing '}' anywhere, `body` still
-        // runs to the end of the template, so it is cut at the first character that could not be
-        // part of a keyword, name or key — never reached for a placeholder that actually closes, so
-        // this narrows nothing a real name or key (a newline or a tab included) may hold.
+        // Bounded further when unterminated: with no '}' found before the end of the template (or
+        // before a '{' that already disqualified it), `body` still runs to wherever the search gave
+        // up, so it is cut at the first character that could not be part of a keyword, name or key
+        // — never reached for a placeholder that actually closes, so this narrows nothing a real
+        // name or key (a newline or a tab included) may hold.
         var token = unterminated ? $"${{{TruncateAtFirstBoundary(body)}" : $"${{{body}}}";
 
         if (unterminated)
@@ -425,17 +409,17 @@ internal sealed class ConnectionStringTemplate
     /// keyword, a port name, or a secret's name or key.
     /// </summary>
     /// <remarks>
-    /// Reached only once <see cref="Parse"/> has already failed to find a balanced closing
-    /// <c>'}'</c> anywhere, so this narrows nothing a well-formed name or key may hold — see the
-    /// tests pinning a newline, a tab and an apostrophe inside one; none of them reach this method,
-    /// because all of them close. What is left, with no <c>'}'</c> anywhere, is everything to the
-    /// end of the template — every field of every other kind that follows in a connection string,
-    /// credentials included — and quoting that whole is #257. An allowlist rather than a list of
-    /// punctuation to stop at: this package supports both a <c>;</c>-delimited dialect and a
-    /// <c>://</c> URI one, and nothing here can enumerate every separator either could still use, so
-    /// the bound is what a keyword, name or key is actually built from — see
-    /// <see cref="IsSecretNameChar"/> — rather than a denylist of characters some other dialect
-    /// happens to punctuate with.
+    /// Reached only once <see cref="Parse"/> has already given up looking for a <c>'}'</c> — because
+    /// there was none before the end of the template, or none before a <c>'{'</c> that disqualified
+    /// this text as a placeholder outright — so this narrows nothing a well-formed name or key may
+    /// hold. See the tests pinning a newline, a tab and an apostrophe inside one; none of them reach
+    /// this method, because all of them close. What is left is everything the search gave up on —
+    /// every field of every other kind that follows in a connection string, credentials included —
+    /// and quoting that whole is #257. An allowlist rather than a list of punctuation to stop at:
+    /// this package supports both a <c>;</c>-delimited dialect and a <c>://</c> URI one, and nothing
+    /// here can enumerate every separator either could still use, so the bound is what a keyword,
+    /// name or key is actually built from — see <see cref="IsSecretNameChar"/> — rather than a
+    /// denylist of characters some other dialect happens to punctuate with.
     /// </remarks>
     private static string TruncateAtFirstBoundary(string body)
     {

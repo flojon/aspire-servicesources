@@ -223,10 +223,11 @@ public class ConnectionStringTemplateTests
     }
 
     /// <summary>
-    /// A <c>'}'</c> that belongs to unrelated text later in the template — an ODBC
-    /// <c>Driver={SQL Server}</c> is the ordinary case this package's own docs call out as normal —
-    /// does not get mistaken for the placeholder's own close, so the placeholder is still read as
-    /// unterminated and its message still stops at the boundary rather than running past it.
+    /// A <c>'{'</c> in what would be a placeholder's own body — an ODBC <c>Driver={SQL Server}</c>
+    /// field later in the template is the ordinary case this package's own docs call out as normal —
+    /// disqualifies it outright, so a <c>'}'</c> belonging to that unrelated field is never mistaken
+    /// for the placeholder's own close: the placeholder is read as unterminated instead, and its
+    /// message stops at the boundary rather than running past it.
     /// </summary>
     [Fact]
     public void Parse_UnterminatedPlaceholder_IsNotClosedByAStrayLaterBrace()
@@ -274,9 +275,9 @@ public class ConnectionStringTemplateTests
 
     /// <summary>
     /// The same stray-brace shape as <see cref="Parse_UnterminatedPlaceholder_IsNotClosedByAStrayLaterBrace"/>,
-    /// but for a URI-style template with no <c>;</c> anywhere — bounding the search on <c>;</c> alone
-    /// would miss this, since nothing there stops the search from running past the '@' and '/' into
-    /// the stray ODBC field. Brace nesting is what has to stop it instead.
+    /// but for a URI-style template with no <c>;</c> anywhere — a dialect-specific separator would
+    /// only bound the search for as many dialects as it happened to name. Disqualifying on the first
+    /// <c>'{'</c> stops it regardless of what separator, if any, the surrounding text uses.
     /// </summary>
     [Fact]
     public void Parse_UnterminatedPlaceholder_IsNotClosedByAStrayLaterBraceInAUriTemplate()
@@ -291,11 +292,10 @@ public class ConnectionStringTemplateTests
     /// <summary>
     /// The same stray-brace shape again, but the unrelated field this time uses ODBC's own doubled-
     /// <c>}}</c> escape for an embedded <c>}</c> — see <c>PWD={pa}}ss}</c>, pinned for literal text
-    /// by <see cref="Parse_BracesInAConnectionString_AreNeverRewritten"/>. Read naively, the first
-    /// <c>}</c> of that pair closes the field's own <c>{</c> as usual, and the second then lands back
-    /// at the placeholder's own depth with nothing preceding it — indistinguishable from a genuine
-    /// close. Brace-depth tracking alone reads that second <c>}</c> as this placeholder's own; the
-    /// doubling needs to be recognized as one inert, escaped unit instead.
+    /// by <see cref="Parse_BracesInAConnectionString_AreNeverRewritten"/>. Disqualifying on the first
+    /// <c>'{'</c> — the field's own opening brace — means the doubling never has to be understood at
+    /// all: whatever this field does with its own braces afterward is never read as this
+    /// placeholder's problem to interpret.
     /// </summary>
     [Theory]
     [InlineData("Port=${port:main;Extra=hunter2;PWD={pa}}ss}")]
@@ -326,16 +326,10 @@ public class ConnectionStringTemplateTests
     }
 
     /// <summary>
-    /// A well-formed placeholder immediately followed by one unrelated stray <c>'}'</c> — nothing
-    /// ever opened a <c>'{'</c> to make it read as ODBC's doubled-close escape — still closes on its
-    /// own, genuine <c>'}'</c>, with the stray one left as ordinary trailing text.
+    /// A well-formed placeholder immediately followed by one unrelated stray <c>'}'</c> still closes
+    /// on its own, genuine <c>'}'</c> — the first one found — with the stray one left as ordinary
+    /// trailing text.
     /// </summary>
-    /// <remarks>
-    /// The doubling exists to write a literal <c>'}'</c> inside a value some <c>'{'</c> has already
-    /// opened, and means nothing once nothing is open. Gating it on <c>depth &gt; 0</c> is what keeps
-    /// this ordinary, never-broken placeholder from being misread as its own doubled escape and
-    /// rejected as unterminated.
-    /// </remarks>
     [Fact]
     public void Parse_WellFormedPlaceholder_ClosesOnItsOwnDespiteATrailingStrayBrace()
     {
@@ -347,6 +341,33 @@ public class ConnectionStringTemplateTests
             segment => Assert.Equal("amqp", Assert.IsType<ConnectionStringTemplate.Port>(segment).Name),
             segment => Assert.Equal("}Extra", Assert.IsType<ConnectionStringTemplate.Literal>(segment).Text));
     }
+
+    /// <summary>
+    /// A raw <c>'{'</c> inside what would be a placeholder's own name disqualifies it outright, even
+    /// when it and its own matching <c>'}'</c> are otherwise perfectly balanced — a name or key can
+    /// never legitimately contain either brace, so nothing about this text was ever going to parse
+    /// as a well-formed placeholder, whatever unrelated, credential-bearing text follows the brace
+    /// that would otherwise have been read as its close.
+    /// </summary>
+    [Theory]
+    [InlineData("${port:{a}}b}Password=hunter2}")]
+    [InlineData("${port:{A}}}Password=hunter2}")]
+    public void Parse_UnterminatedPlaceholder_IsNotClosedByABraceInsideItsOwnName(string template)
+    {
+        var message = Rejects(template).Message;
+
+        Assert.Contains("no closing '}'", message);
+        Assert.DoesNotContain("hunter2", message);
+    }
+
+    /// <summary>
+    /// A placeholder whose own name is nothing but a balanced brace pair — never a shape any test
+    /// asks for, since names have no reason to hold one — is rejected as unterminated rather than
+    /// silently accepted with a name no cluster or forwarded port could ever match.
+    /// </summary>
+    [Fact]
+    public void Parse_PlaceholderWithABraceForAName_IsRejected() =>
+        Assert.Contains("no closing '}'", Rejects("${port:{A}}").Message);
 
     [Theory]
     [InlineData("${secret}")]
