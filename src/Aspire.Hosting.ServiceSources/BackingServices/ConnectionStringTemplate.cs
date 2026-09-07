@@ -263,14 +263,7 @@ internal sealed class ConnectionStringTemplate
             return false;
         }
 
-        // Reassembled from the template's own text rather than from the keyword constants, so every
-        // message about this token quotes the spelling the developer wrote — see Segment.AsWritten.
-        // Kept full and unbounded: this is what an *accepted* placeholder's own Token holds, and a
-        // name or key that legitimately carries a newline or a tab needs it verbatim so a downstream
-        // source can escape it for display — truncating it here would corrupt the value itself.
-        var token = unterminated ? $"${{{body}" : $"${{{body}}}";
-
-        // Every rejection instead quotes a *bounded* copy — reached whether the placeholder is
+        // Every rejection quotes a *bounded* copy of the token — reached whether the placeholder is
         // unterminated or terminated-but-invalid (bad arity, a bad name or a bad key), since neither
         // means the placeholder was accepted, so nothing has validated what `body` actually holds.
         // Left unbounded, an arity or charset failure throws with the full, untruncated `body` — the
@@ -278,15 +271,19 @@ internal sealed class ConnectionStringTemplate
         // sit past a later, unrelated field's own value, credentials included (#257). Shown only
         // when it changes nothing: a body already built entirely from safe characters is quoted
         // whole, closing brace and all, exactly as `Parse_Rejection_QuotesTheTokenAsWritten` pins.
-        var safeBody = TruncateAtFirstBoundary(body);
-        var rejectionToken = unterminated || safeBody.Length < body.Length
-            ? $"${{{safeBody}"
-            : token;
-
+        // Computed lazily — once per throw, never for an accepted placeholder — rather than ahead
+        // of every call, since a rejection is the exceptional case.
         if (unterminated)
         {
-            throw Malformed(backingServiceName, configKey, rejectionToken, "it has no closing '}'.");
+            throw Malformed(backingServiceName, configKey, RejectionToken(body, unterminated: true), "it has no closing '}'.");
         }
+
+        // Reassembled from the template's own text rather than from the keyword constants, so every
+        // message about this token quotes the spelling the developer wrote — see Segment.AsWritten.
+        // Kept full and unbounded: this is what an *accepted* placeholder's own Token holds, and a
+        // name or key that legitimately carries a newline or a tab needs it verbatim so a downstream
+        // source can escape it for display — truncating it here would corrupt the value itself.
+        var token = $"${{{body}}}";
 
         if (keyword.Equals(PortKeyword, StringComparison.OrdinalIgnoreCase))
         {
@@ -295,11 +292,11 @@ internal sealed class ConnectionStringTemplate
                 1 => new Port(Name: null) { Token = token },
                 2 when IsNamed(parts[1]) => new Port(parts[1]) { Token = token },
                 2 => throw Malformed(
-                    backingServiceName, configKey, rejectionToken,
+                    backingServiceName, configKey, RejectionToken(body, unterminated: false),
                     "the port name after 'port:' is empty. Write '${port}' for the only forwarded port, "
                     + "or '${port:<name>}' to name one of several."),
                 _ => throw Malformed(
-                    backingServiceName, configKey, rejectionToken,
+                    backingServiceName, configKey, RejectionToken(body, unterminated: false),
                     $"a port placeholder takes at most one name, and this has {parts.Length - 1} "
                     + "colon-separated parts after 'port'."),
             };
@@ -312,28 +309,41 @@ internal sealed class ConnectionStringTemplate
             3 when IsSecretName(parts[1]) && IsSecretKey(parts[2]) =>
                 new Secret(parts[1], parts[2]) { Token = token },
             3 when !IsNamed(parts[1]) || !IsNamed(parts[2]) => throw Malformed(
-                backingServiceName, configKey, rejectionToken,
+                backingServiceName, configKey, RejectionToken(body, unterminated: false),
                 "the secret name and key must both be given: '${secret:<name>:<key>}'."),
             3 when !IsSecretName(parts[1]) => throw Malformed(
-                backingServiceName, configKey, rejectionToken,
+                backingServiceName, configKey, RejectionToken(body, unterminated: false),
                 "a Kubernetes secret's name is lower-case letters, digits, '-' and '.', beginning and ending "
                 + "with a letter or a digit — narrower than its keys, which also take upper case and '_'. "
                 + "Nothing in a cluster can carry this name as written, so it is refused here rather than left "
                 + "to arrive as an indistinguishable \"not found\" at start time."),
             3 => throw Malformed(
-                backingServiceName, configKey, rejectionToken,
+                backingServiceName, configKey, RejectionToken(body, unterminated: false),
                 "a key inside a Kubernetes secret is letters, digits, '-', '.' and '_', and this key is not. "
                 + "Nothing in a cluster can carry the key as written."),
             < 3 => throw Malformed(
-                backingServiceName, configKey, rejectionToken,
+                backingServiceName, configKey, RejectionToken(body, unterminated: false),
                 "a secret placeholder names a secret and a key inside it: '${secret:<name>:<key>}'."),
             _ => throw Malformed(
-                backingServiceName, configKey, rejectionToken,
+                backingServiceName, configKey, RejectionToken(body, unterminated: false),
                 $"a secret placeholder takes exactly a name and a key, and this has {parts.Length - 1} "
                 + "colon-separated parts after 'secret'."),
         };
 
         return true;
+    }
+
+    /// <summary>
+    /// The token a rejection message quotes — bounded, unlike an accepted placeholder's own
+    /// <c>Token</c>; see the remarks in <see cref="TryReadPlaceholder"/>.
+    /// </summary>
+    private static string RejectionToken(string body, bool unterminated)
+    {
+        var safeBody = TruncateAtFirstBoundary(body);
+
+        return unterminated || safeBody.Length < body.Length
+            ? $"${{{safeBody}"
+            : $"${{{body}}}";
     }
 
     /// <summary>Whether a placeholder's name part is a name rather than nothing.</summary>
