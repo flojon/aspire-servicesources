@@ -96,12 +96,18 @@ public static class ServiceConfigurationExports
     /// Injects a connection string into the resolved service — a database, cache or queue the
     /// AppHost owns.
     /// </summary>
+    /// <param name="connectionName">
+    /// An override of <paramref name="source"/>'s own name for the connection string's key, for a
+    /// consumer whose configuration already reads a particular name, or whose source cannot be
+    /// renamed to match one (#209). Null keeps the default: <paramref name="source"/>'s own name.
+    /// </param>
     [AspireExport]
     [EditorBrowsable(EditorBrowsableState.Never)]
     public static IResourceBuilder<IResourceWithServiceDiscovery> WithServiceConnectionString(
         this IResourceBuilder<IResourceWithServiceDiscovery> service,
-        IResourceBuilder<IResourceWithConnectionString> source) =>
-        service.Configure<IResourceWithEnvironment>(r => r.WithReference(source));
+        IResourceBuilder<IResourceWithConnectionString> source,
+        string? connectionName = null) =>
+        service.Configure<IResourceWithEnvironment>(r => r.WithReference(source, connectionName));
 
     /// <summary>Holds the resolved service back until <paramref name="dependency"/> is healthy.</summary>
     [AspireExport]
