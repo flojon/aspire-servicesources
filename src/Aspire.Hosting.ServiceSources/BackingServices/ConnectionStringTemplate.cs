@@ -182,6 +182,19 @@ internal sealed class ConnectionStringTemplate
                 }
                 else if (template[scan] == '}')
                 {
+                    // A doubled '}' is ODBC's own escape for one literal '}' inside a brace-quoted
+                    // value — see the remarks on this type, and the doubling pinned by
+                    // Parse_BracesInAConnectionString_AreNeverRewritten's `PWD={pa}}ss}`. Read as two
+                    // separate close events instead of one inert pair, the first would pair off an
+                    // outer '{' as usual, but the second would then land back at this placeholder's
+                    // own depth with nothing of its own preceding it — indistinguishable from a
+                    // genuine, unrelated close, and so misread as this placeholder's own (#257).
+                    if (scan + 1 < template.Length && template[scan + 1] == '}')
+                    {
+                        scan++;
+                        continue;
+                    }
+
                     if (depth == 0)
                     {
                         close = scan;

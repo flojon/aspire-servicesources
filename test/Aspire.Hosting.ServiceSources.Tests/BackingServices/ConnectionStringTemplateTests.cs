@@ -289,6 +289,26 @@ public class ConnectionStringTemplateTests
     }
 
     /// <summary>
+    /// The same stray-brace shape again, but the unrelated field this time uses ODBC's own doubled-
+    /// <c>}}</c> escape for an embedded <c>}</c> — see <c>PWD={pa}}ss}</c>, pinned for literal text
+    /// by <see cref="Parse_BracesInAConnectionString_AreNeverRewritten"/>. Read naively, the first
+    /// <c>}</c> of that pair closes the field's own <c>{</c> as usual, and the second then lands back
+    /// at the placeholder's own depth with nothing preceding it — indistinguishable from a genuine
+    /// close. Brace-depth tracking alone reads that second <c>}</c> as this placeholder's own; the
+    /// doubling needs to be recognized as one inert, escaped unit instead.
+    /// </summary>
+    [Theory]
+    [InlineData("Port=${port:main;Extra=hunter2;PWD={pa}}ss}")]
+    [InlineData("Pw=${secret:app;Extra=hunter2;PWD={pa}}ss}")]
+    public void Parse_UnterminatedPlaceholder_IsNotClosedByAnOdbcDoubledBrace(string template)
+    {
+        var message = Rejects(template).Message;
+
+        Assert.Contains("no closing '}'", message);
+        Assert.DoesNotContain("hunter2", message);
+    }
+
+    /// <summary>
     /// An ordinary ODBC <c>Driver={...}</c> field elsewhere in the template is not mistaken for a
     /// well-formed placeholder's own close either — the placeholder here really is terminated, by
     /// its own, immediately-following <c>'}'</c>, and the unrelated field after it is untouched.
