@@ -12,11 +12,13 @@ public sealed class ServiceDefinitionBuilder
 {
     private readonly string _serviceName;
 
-    // Task 3 adds Repository/Project/DefaultRef fields and the single folded WithRepository(url,
-    // project:, defaultRef:) — no separate WithProject method exists. Task 4 adds Url/WithUrl; Task 5
-    // adds Container/WithContainer; Task 6 adds Kubernetes/WithKubernetes; Task 8 adds
-    // Kind/KindOptions/WithKind. Each field starts null and each With* throws the additive-error
-    // below if its field is already set — see Task 3 for the exact error and the shared helper.
+    private string? _repository;
+    private string? _project;
+    private string? _defaultRef;
+
+    // Task 4 adds Url/WithUrl; Task 5 adds Container/WithContainer; Task 6 adds
+    // Kubernetes/WithKubernetes; Task 8 adds Kind/KindOptions/WithKind. Each field starts null and
+    // each With* throws the additive-error below (via RequireUnset) if its field is already set.
 
     internal ServiceDefinitionBuilder(string serviceName)
     {
@@ -25,14 +27,39 @@ public sealed class ServiceDefinitionBuilder
 
     internal string ServiceName => _serviceName;
 
+    /// <summary>Declares this service's repository — the "local" source. See design "The authoring API".</summary>
+    public ServiceDefinitionBuilder WithRepository(string url, string? project = null, string? defaultRef = null)
+    {
+        RequireUnset(_repository, nameof(WithRepository));
+        _repository = url;
+        _project = project;
+        _defaultRef = defaultRef;
+        return this;
+    }
+
+    /// <summary>
+    /// Guards every <c>With*</c> against a second call for the same block, naming the service and the
+    /// block — design "Calls are additive… A second call to the same one is a configuration error".
+    /// </summary>
+    private void RequireUnset(object? current, string blockName)
+    {
+        if (current is not null)
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{_serviceName}': {blockName} was already called. Calls are additive across " +
+                "different blocks, but a repeated call to the same one is not — remove one of the two.");
+        }
+    }
+
     /// <summary>Builds the immutable <see cref="ServiceDefinition"/> this chain describes.</summary>
     internal ServiceDefinition Build() => new()
     {
-        // Repository/Project default to "" (ServiceMetadata's own defaults) until Task 3 sets them —
-        // a service declared with no With* call at all is caught downstream by the same
-        // "no source configured" path an empty yaml entry hits today, not rejected here.
-        Repository = "",
-        Project = "",
+        // Repository/Project default to "" (ServiceMetadata's own defaults) when unset — a service
+        // declared with no With* call at all is caught downstream by the same "no source configured"
+        // path an empty yaml entry hits today, not rejected here.
+        Repository = _repository ?? "",
+        Project = _project ?? "",
+        DefaultRef = _defaultRef,
         Kind = LocalKinds.Dotnet,
         Origin = CatalogOrigin.Code,
     };
