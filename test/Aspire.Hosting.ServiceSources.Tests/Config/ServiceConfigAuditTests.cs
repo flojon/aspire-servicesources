@@ -79,7 +79,11 @@ public class ServiceConfigAuditTests
 
         var warning = Assert.Single(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
 
-        Assert.Contains("'orders'", warning);
+        // The suggestion itself, not just 'orders' appearing anywhere — the trailing "this
+        // AppHost's catalog declares" clause names every catalog entry unconditionally, so
+        // asserting on 'orders' alone would still pass if the near-miss lookup regressed to
+        // finding nothing.
+        Assert.Contains("(did you mean 'orders'?)", warning);
     }
 
     /// <summary>
@@ -199,6 +203,33 @@ public class ServiceConfigAuditTests
         });
 
         builder.AddService("orders");
+
+        var warning = Assert.Single(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+
+        Assert.Contains("servics", warning);
+    }
+
+    /// <summary>
+    /// An empty <c>services</c> section does not count as having the key, so a misspelling beside
+    /// it is still reported.
+    /// </summary>
+    /// <remarks>
+    /// The shape that defeated this check on the backing-service side: <c>"services": { }</c>
+    /// contributes no configuration values, but it <em>is</em> returned by <c>GetChildren()</c> as a
+    /// null-valued entry, so a presence test over those keys saw the key and stopped looking. A
+    /// developer whose real entries sat under a misspelled key beside it was told nothing at all.
+    /// </remarks>
+    [Fact]
+    public async Task EmptySectionBesideAMisspelledRootKey_StillReportsTheMisspelling()
+    {
+        var builder = CreateBuilder(OrdersCatalog, """
+            {
+              "services": { },
+              "servics": { "orders": { "source": "container" } }
+            }
+            """);
+
+        Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
 
         var warning = Assert.Single(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
 
