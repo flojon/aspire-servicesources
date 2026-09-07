@@ -40,6 +40,28 @@ public static class LocalKindConfig
             return null;
         }
 
+        // Branch 1: already the right type — a WithKind(kind, options) call passed a real T. Nothing
+        // to parse; the caller's instance is returned as-is. Per design finding 6, the caller must not
+        // retain or mutate it afterwards — every shipped kind (Java/JavaScript) already respects this
+        // by projecting a fresh immutable record per call, so nothing here needs to defensively copy.
+        if (rawConfig is T alreadyTyped)
+        {
+            return alreadyTyped;
+        }
+
+        // Branch 2: came from code, but for a *different* options type — a WithKind(kind, options) call
+        // passed the wrong kind's options object. CameFromCode must mirror the branch below exactly:
+        // anything YamlDotNet's dynamic deserialization can produce (string, boxed primitive, IList,
+        // IDictionary) is NOT this branch, even if T doesn't match — those fall through to the existing
+        // scalar/list message instead, unchanged.
+        if (CameFromCode(rawConfig))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"{Prefix(serviceName)}the per-kind config block is a '{rawConfig.GetType().Name}', but this " +
+                $"kind expects '{typeof(T).Name}'. Pass the options type this kind's registration method " +
+                "documents, not another kind's.");
+        }
+
         if (rawConfig is not System.Collections.IDictionary)
         {
             // A sequence under the kind key stringifies to its CLR type name, which points the reader
@@ -67,6 +89,34 @@ public static class LocalKindConfig
                 ex);
         }
     }
+
+    /// <summary>
+    /// Whether <paramref name="rawConfig"/> can only have come from a <c>WithKind(kind, options)</c>
+    /// call — i.e. it is none of the shapes YamlDotNet's dynamic deserialization produces. Mirrors the
+    /// scalar/list test above rather than checking <see cref="System.Collections.IList"/> directly, so
+    /// the two branches classify every input the same way (design finding 6).
+    /// </summary>
+    private static bool CameFromCode(object rawConfig) =>
+        rawConfig is not System.Collections.IDictionary
+        && rawConfig is not (System.Collections.IEnumerable and not string)
+        && rawConfig is not string
+        && !YamlScalarTypes.Contains(rawConfig.GetType())
+        && !rawConfig.GetType().IsPrimitive;
+
+    // The CLR types YamlDotNet's dynamic (untyped) deserialization can box a scalar into that
+    // Type.IsPrimitive (checked alongside this set in CameFromCode) doesn't already cover — i.e.
+    // non-primitive value types yaml still produces, like decimal and DateTime. Getting this list
+    // subtly wrong would misclassify a legitimate yaml scalar as "came from code", producing a
+    // confusing wrong-type error instead of the existing scalar/list message.
+    private static readonly HashSet<Type> YamlScalarTypes =
+    [
+        typeof(bool),
+        typeof(decimal),
+        typeof(DateTime),
+        typeof(DateTimeOffset),
+        typeof(Guid),
+        typeof(TimeSpan),
+    ];
 
     private static string Prefix(string? serviceName) =>
         serviceName is null ? "" : $"Service '{serviceName}': ";
