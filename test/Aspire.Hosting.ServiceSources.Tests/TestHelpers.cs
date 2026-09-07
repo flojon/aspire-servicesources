@@ -11,7 +11,7 @@ namespace Aspire.Hosting.ServiceSources.Tests;
 internal static class TestHelpers
 {
     public static IDistributedApplicationBuilder CreateBuilder(string appHostDirectory) =>
-        DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        CreateBuilderCore(new DistributedApplicationOptions
         {
             ProjectDirectory = appHostDirectory,
             Args = [],
@@ -23,11 +23,18 @@ internal static class TestHelpers
     /// resource.
     /// </summary>
     public static IDistributedApplicationBuilder CreatePublishingBuilder(string appHostDirectory) =>
-        DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        CreateBuilderCore(new DistributedApplicationOptions
         {
             ProjectDirectory = appHostDirectory,
             Args = ["--operation", "publish"],
         });
+
+    private static IDistributedApplicationBuilder CreateBuilderCore(DistributedApplicationOptions options)
+    {
+        var builder = DistributedApplication.CreateBuilder(options);
+        BuilderReclaim.Track();
+        return builder;
+    }
 
     /// <summary>
     /// A builder that can actually publish <c>BeforeStartEvent</c>. Aspire's own

@@ -2,12 +2,16 @@ namespace Aspire.Hosting.ServiceSources.Java.Tests;
 
 internal static class TestHelpers
 {
-    public static IDistributedApplicationBuilder CreateBuilder(string appHostDirectory) =>
-        DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+    public static IDistributedApplicationBuilder CreateBuilder(string appHostDirectory)
+    {
+        var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
         {
             ProjectDirectory = appHostDirectory,
             Args = [],
         });
+        BuilderReclaim.Track();
+        return builder;
+    }
 
     public static IDistributedApplicationBuilder CreateBuilder() => CreateBuilder(CreateTempDirectory());
 
