@@ -58,4 +58,25 @@ public class ServiceDefinitionBuilderTests
 
         Assert.Throws<ServiceSourcesConfigurationException>(() => chain.WithUrl("https://b.example"));
     }
+
+    [Fact]
+    public void WithContainer_SetsContainerBlock()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("payments")
+            .WithContainer("nginxdemos/hello", port: 80, defaultTag: "latest")
+            .Build();
+
+        Assert.NotNull(definition.Container);
+        Assert.Equal("nginxdemos/hello", definition.Container.Image);
+        Assert.Equal(80, definition.Container.Port);
+        Assert.Equal("latest", definition.Container.DefaultTag);
+    }
+
+    [Fact]
+    public void WithContainer_CalledTwice_Throws()
+    {
+        var chain = new ServiceCatalogBuilder().AddService("payments").WithContainer("a", 80);
+
+        Assert.Throws<ServiceSourcesConfigurationException>(() => chain.WithContainer("b", 8080));
+    }
 }

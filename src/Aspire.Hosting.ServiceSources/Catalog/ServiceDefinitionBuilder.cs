@@ -17,10 +17,11 @@ public sealed class ServiceDefinitionBuilder
     private string? _project;
     private string? _defaultRef;
     private UrlMetadata? _url;
+    private ContainerMetadata? _container;
 
-    // Task 5 adds Container/WithContainer; Task 6 adds Kubernetes/WithKubernetes; Task 8 adds
-    // Kind/KindOptions/WithKind. Each field starts null and each With* throws the additive-error
-    // below (via RequireUnset) if its field is already set.
+    // Task 6 adds Kubernetes/WithKubernetes; Task 8 adds Kind/KindOptions/WithKind. Each field
+    // starts null and each With* throws the additive-error below (via RequireUnset) if its field is
+    // already set.
 
     internal ServiceDefinitionBuilder(string serviceName)
     {
@@ -44,6 +45,14 @@ public sealed class ServiceDefinitionBuilder
     {
         RequireUnset(_url, nameof(WithUrl));
         _url = new UrlMetadata { Url = url };
+        return this;
+    }
+
+    /// <summary>Declares this service's container image — the "container" source. See design "The authoring API".</summary>
+    public ServiceDefinitionBuilder WithContainer(string image, int port, string? defaultTag = null)
+    {
+        RequireUnset(_container, nameof(WithContainer));
+        _container = new ContainerMetadata { Image = image, Port = port, DefaultTag = defaultTag };
         return this;
     }
 
@@ -71,6 +80,7 @@ public sealed class ServiceDefinitionBuilder
         Project = _project ?? "",
         DefaultRef = _defaultRef,
         Url = _url,
+        Container = _container,
         Kind = LocalKinds.Dotnet,
         Origin = CatalogOrigin.Code,
     };
