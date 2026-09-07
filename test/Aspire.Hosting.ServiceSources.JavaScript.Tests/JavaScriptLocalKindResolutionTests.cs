@@ -91,47 +91,77 @@ public class JavaScriptLocalKindResolutionTests
         Assert.Equal("frontend", app.Resource.Name);
     }
 
-    [Theory]
-    [InlineData("../..")]
-    [InlineData("/etc")]
-    public void AppDirectoryOutsideTheCheckoutIsRejected(string appDirectory)
+    [Fact]
+    public void AppDirectoryOutsideTheCheckoutIsRejected()
     {
-        // Path.Combine returns an absolute appDirectory unchanged and "../.." climbs out of the
-        // checkout, either of which would otherwise run something the service doesn't own.
+        // "../.." climbs above the checkout root, which would otherwise run something the service
+        // doesn't own. The absolute case is covered separately below, with its own message.
         var repoRoot = TestHelpers.CreateRepo();
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => Resolve(Builder(), repoRoot, $"appDirectory: {appDirectory}"));
+            () => Resolve(Builder(), repoRoot, "appDirectory: ../.."));
 
         Assert.Contains("outside the service's checkout", ex.Message);
     }
 
     [Fact]
-    public void AppDirectoryIsComparedWithTheCheckoutTheWayTheFilesystemCompares()
+    public void AppDirectoryClimbingOutIsRejectedEvenWhenItWouldLandBackInTheCheckout()
     {
-        // An appDirectory that climbs out of the checkout and back in ("../Frontend/web") is the one
-        // way its resolved path can differ from the root in casing. Where the filesystem ignores
-        // casing that is the same directory and has to be accepted; where it does not it is a
-        // different directory and the guard has to reject it. Which branch runs is decided by
-        // probing the filesystem rather than by the OS, since a macOS volume can be either.
+        // The confinement check is now lexical (CheckoutRelativePath.EscapesRoot), counting depth
+        // without resolving anything on disk — see #235. It refuses any leading ".." outright, so an
+        // appDirectory that climbs out and back to the checkout's own directory ("../REPONAME/web")
+        // is rejected regardless of what the filesystem would have resolved it to, unlike the old
+        // resolved-path comparison this replaces.
         var repoRoot = TestHelpers.CreateRepo("web");
-        var parent = Path.GetDirectoryName(repoRoot)!;
         var recased = Path.GetFileName(repoRoot).ToUpperInvariant();
-        var appDirectory = $"../{recased}/web";
 
-        if (Directory.Exists(Path.Combine(parent, recased)))
-        {
-            var app = Resolve(Builder(), repoRoot, $"appDirectory: {appDirectory}");
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(Builder(), repoRoot, $"appDirectory: ../{recased}/web"));
 
-            Assert.Equal("frontend", app.Resource.Name);
-        }
-        else
-        {
-            var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-                () => Resolve(Builder(), repoRoot, $"appDirectory: {appDirectory}"));
+        Assert.Contains("outside the service's checkout", ex.Message);
+    }
 
-            Assert.Contains("outside the service's checkout", ex.Message);
-        }
+    [Fact]
+    public void AppDirectoryWithAnAbsolutePathIsRejectedAsAbsolute()
+    {
+        var repoRoot = TestHelpers.CreateRepo();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(Builder(), repoRoot, "appDirectory: /etc"));
+
+        Assert.Contains("appDirectory", ex.Message);
+        Assert.Contains("absolute path", ex.Message);
+    }
+
+    [Fact]
+    public void AppDirectoryWithADotsAndSpacesSegmentIsRejected()
+    {
+        // Shared with java.workingDirectory and the other CheckoutRelativePath consumers: a segment
+        // Windows would erase from the end of a path means something different on every platform.
+        var repoRoot = TestHelpers.CreateRepo();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            // A trailing space alone would be trimmed by the YAML parser before this ever sees it —
+            // a bare "..." segment needs nothing to trim to still be only dots.
+            () => Resolve(Builder(), repoRoot, "appDirectory: web/..."));
+
+        Assert.Contains("appDirectory", ex.Message);
+        Assert.Contains("dots and spaces", ex.Message);
+    }
+
+    [Fact]
+    public void AppDirectoryWrittenWithBackslashesIsNormalizedOnEveryPlatform()
+    {
+        // servicesources.yaml is shared team configuration written on whatever platform authored it —
+        // CheckoutRelativePath.NormalizeSeparators is what lets a Windows-style value still resolve
+        // correctly on Linux/macOS, matching java.workingDirectory's own behaviour.
+        var repoRoot = TestHelpers.CreateRepo("src\\frontend".Replace('\\', Path.DirectorySeparatorChar));
+
+        var app = Resolve(Builder(), repoRoot, "appDirectory: src\\frontend");
+
+        var resource = Assert.IsType<JavaScriptAppResource>(app.Resource);
+        Assert.Equal(
+            Path.Combine(repoRoot, "src", "frontend"), resource.WorkingDirectory);
     }
 
     [Fact]
@@ -149,22 +179,36 @@ public class JavaScriptLocalKindResolutionTests
         Assert.Equal(Path.TrimEndingDirectorySeparator(repoRoot), resource.WorkingDirectory);
     }
 
-    [Theory]
-    [InlineData("../../../../etc/evil.js")]
-    [InlineData("/etc/evil.js")]
-    public void ScriptPathOutsideTheCheckoutIsRejected(string scriptPath)
+    [Fact]
+    public void ScriptPathOutsideTheCheckoutIsRejected()
     {
         // node/bun are handed this file to execute, so it needs the same guard appDirectory gets:
-        // without it a catalog entry runs something the service doesn't own.
+        // without it a catalog entry runs something the service doesn't own. The absolute case is
+        // covered separately below, with its own message.
         var repoRoot = TestHelpers.CreateRepo();
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => Resolve(Builder(), repoRoot, $"""
+            () => Resolve(Builder(), repoRoot, """
                 appType: node
-                scriptPath: {scriptPath}
+                scriptPath: ../../../../etc/evil.js
                 """));
 
         Assert.Contains("outside the service's checkout", ex.Message);
+    }
+
+    [Fact]
+    public void ScriptPathWithAnAbsolutePathIsRejectedAsAbsolute()
+    {
+        var repoRoot = TestHelpers.CreateRepo();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(Builder(), repoRoot, """
+                appType: node
+                scriptPath: /etc/evil.js
+                """));
+
+        Assert.Contains("scriptPath", ex.Message);
+        Assert.Contains("absolute path", ex.Message);
     }
 
     [Fact]
@@ -178,6 +222,26 @@ public class JavaScriptLocalKindResolutionTests
             appType: node
             appDirectory: src/frontend
             scriptPath: server.js
+            """);
+
+        Assert.IsType<NodeAppResource>(app.Resource);
+    }
+
+    [Fact]
+    public void ScriptPathCanClimbOutOfAppDirectoryIntoASiblingStillInsideTheCheckout()
+    {
+        // The anchor is appDirectory, not the checkout root — a scriptPath naming a file in a
+        // sibling directory is a legitimate target (a monorepo's shared entry point, say), and only
+        // climbing past the checkout root itself is refused. See
+        // ScriptPathOutsideTheCheckoutIsRejected above for that boundary.
+        var repoRoot = TestHelpers.CreateRepo("apps/web");
+        var sharedDirectory = Directory.CreateDirectory(Path.Combine(repoRoot, "shared"));
+        File.WriteAllText(Path.Combine(sharedDirectory.FullName, "entry.js"), "");
+
+        var app = Resolve(Builder(), repoRoot, """
+            appType: node
+            appDirectory: apps/web
+            scriptPath: ../../shared/entry.js
             """);
 
         Assert.IsType<NodeAppResource>(app.Resource);

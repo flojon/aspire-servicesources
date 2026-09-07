@@ -513,6 +513,28 @@ nothing will fail to build to warn you.
 
 ### Changed
 
+- **`javascript.appDirectory` and `javascript.scriptPath` are now confined to the checkout by the
+  same lexical check as `project`, `prepare.command` and every `java.*` path** ([#235]). They used
+  to run a resolved check of their own — `Path.GetFullPath` followed by a root-prefix comparison —
+  which disagreed with the lexical one in three ways, all now gone: an absolute value resolved and
+  was reported as merely "outside the checkout" rather than named as absolute; a path segment made
+  only of dots and spaces (see [#241]) was never checked here, so it reached these two paths where
+  every other confined path already refused it; and a value written with `\` separators was never
+  normalized, so `appDirectory: src\frontend` resolved to a single oddly-named directory on Linux
+  and macOS instead of `src/frontend`.
+
+  **One behavior actually narrows.** The resolved check could accept an `appDirectory` that climbed
+  out of the checkout and back into it — `../REPONAME/web`, where `REPONAME` differs from the
+  checkout's own directory name only in case, resolving to the same directory on a case-insensitive
+  filesystem. The lexical check counts depth without resolving anything on disk, so it refuses any
+  leading `..` outright and cannot distinguish "climbed out and back" from "climbed out and stayed
+  out". A catalog that relied on this should name the sibling by relative segments that never leave
+  the checkout, or move the app into it.
+
+  `scriptPath` keeps its own anchoring: it may still climb out of `appDirectory` into a sibling, as
+  long as the combination stays inside the checkout as a whole — the same way `java.jarPath` is
+  allowed to climb out of `java.workingDirectory`.
+
 - **A `kubernetes` `context`, `namespace` or `service` with surrounding whitespace is now refused**
   ([#236]). These values are handed to `kubectl` exactly as written, so a leading or trailing space
   is part of the name it looks for: `--context " dev-west"` matches no context, and a padded
@@ -1463,6 +1485,7 @@ Targets `net10.0`.
 [#224]: https://github.com/flojon/aspire-servicesources/issues/224
 [#225]: https://github.com/flojon/aspire-servicesources/issues/225
 [#233]: https://github.com/flojon/aspire-servicesources/issues/233
+[#235]: https://github.com/flojon/aspire-servicesources/issues/235
 [#236]: https://github.com/flojon/aspire-servicesources/issues/236
 [#241]: https://github.com/flojon/aspire-servicesources/issues/241
 [#264]: https://github.com/flojon/aspire-servicesources/issues/264
