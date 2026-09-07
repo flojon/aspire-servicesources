@@ -438,6 +438,17 @@ nothing will fail to build to warn you.
   the same way. Warnings rather than errors, because a shared file may legitimately carry entries
   for backing services only some configurations add; there is no opt-out.
 
+  **The `services:` side of the same problem is warned about too** ([#215]). A `services` entry
+  naming no service `servicesources.yaml` declares used to be silently skipped — a typo one edit from
+  a real service name (`planning-fronend` against `planning-frontend`) bound, validated, and was
+  never looked up, with nothing to say so. Reported at the same `BeforeStartEvent` point as the
+  backing-service check above, naming the entry and the catalog name it resembles. A misspelled
+  `services` root key is warned about the same way. Left out on purpose: an entry the catalog *does*
+  declare but that no `AddService()` call adds is not silent today — `LocalCheckoutPrefetch` already
+  reports the cost of cloning it speculatively — so that half stays with the over-cloning work it
+  belongs to ([#217]). Warnings rather than errors, and again no opt-out, for the same reason as the
+  backing-service side.
+
 - **A service whose resource never runs is reported in the AppHost's own console** ([#150]). A
   `"local"` checkout that fails to compile used to produce nothing there at all: Aspire's build of
   a checkout is `dotnet run`'s own, so the compiler's output goes to that resource's console in the
@@ -1426,6 +1437,8 @@ Targets `net10.0`.
 [#207]: https://github.com/flojon/aspire-servicesources/issues/207
 [#209]: https://github.com/flojon/aspire-servicesources/issues/209
 [#214]: https://github.com/flojon/aspire-servicesources/issues/214
+[#215]: https://github.com/flojon/aspire-servicesources/issues/215
+[#217]: https://github.com/flojon/aspire-servicesources/issues/217
 [#220]: https://github.com/flojon/aspire-servicesources/issues/220
 [#222]: https://github.com/flojon/aspire-servicesources/issues/222
 [#223]: https://github.com/flojon/aspire-servicesources/issues/223
