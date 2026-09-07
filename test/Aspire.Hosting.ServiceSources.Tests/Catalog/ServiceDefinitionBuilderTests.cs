@@ -112,4 +112,40 @@ public class ServiceDefinitionBuilderTests
         Assert.NotNull(definition.Container);
         Assert.NotNull(definition.Kubernetes);
     }
+
+    [Fact]
+    public void WithKind_SetsKindAndOptions()
+    {
+        var options = new Dictionary<string, object> { ["mavenGoal"] = "spring-boot:run" };
+
+        var definition = new ServiceCatalogBuilder().AddService("catalog")
+            .WithRepository("https://github.com/spring-projects/spring-petclinic")
+            .WithKind("java", options)
+            .Build();
+
+        Assert.Equal("java", definition.Kind);
+        Assert.Same(options, definition.KindOptions);
+    }
+
+    [Fact]
+    public void WithKind_NoOptionsGiven_KindOptionsIsNull()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("svc")
+            .WithRepository("https://example.com/repo")
+            .WithKind("custom")
+            .Build();
+
+        Assert.Equal("custom", definition.Kind);
+        Assert.Null(definition.KindOptions);
+    }
+
+    [Fact]
+    public void WithKind_CalledTwice_Throws()
+    {
+        var chain = new ServiceCatalogBuilder().AddService("svc")
+            .WithRepository("https://example.com/repo")
+            .WithKind("java");
+
+        Assert.Throws<ServiceSourcesConfigurationException>(() => chain.WithKind("javascript"));
+    }
 }

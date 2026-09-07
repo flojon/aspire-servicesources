@@ -19,6 +19,8 @@ public sealed class ServiceDefinitionBuilder
     private UrlMetadata? _url;
     private ContainerMetadata? _container;
     private KubernetesMetadata? _kubernetes;
+    private string? _kind;
+    private object? _kindOptions;
 
     // Task 8 adds Kind/KindOptions/WithKind. Each field starts null and each With* throws the
     // additive-error below (via RequireUnset) if its field is already set.
@@ -68,6 +70,15 @@ public sealed class ServiceDefinitionBuilder
         return this;
     }
 
+    /// <summary>Declares this service's kind (language runtime) and optional kind-specific configuration.</summary>
+    public ServiceDefinitionBuilder WithKind(string kind, object? options = null)
+    {
+        RequireUnset(_kind, nameof(WithKind));
+        _kind = kind;
+        _kindOptions = options;
+        return this;
+    }
+
     /// <summary>
     /// Guards every <c>With*</c> against a second call for the same block, naming the service and the
     /// block — design "Calls are additive… A second call to the same one is a configuration error".
@@ -94,7 +105,8 @@ public sealed class ServiceDefinitionBuilder
         Url = _url,
         Container = _container,
         Kubernetes = _kubernetes,
-        Kind = LocalKinds.Dotnet,
+        Kind = _kind ?? LocalKinds.Dotnet,
+        KindOptions = _kindOptions,
         Origin = CatalogOrigin.Code,
     };
 }
