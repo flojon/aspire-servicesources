@@ -1,4 +1,5 @@
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 
 namespace Aspire.Hosting.ServiceSources.Git;
 
@@ -202,15 +203,15 @@ internal static class LocalGitCheckout
     /// </remarks>
     public static string ResolveRepoRoot(
         string serviceName,
-        ServiceMetadata metadata,
+        ServiceDefinition definition,
         ServiceDeveloperConfig config,
         string appHostDirectory,
         IGitClient gitClient) =>
         ReconcileRepoRoot(
             serviceName,
-            metadata,
+            definition,
             config,
-            PrepareRepoRoot(serviceName, metadata, config, appHostDirectory, gitClient),
+            PrepareRepoRoot(serviceName, definition, config, appHostDirectory, gitClient),
             gitClient);
 
     /// <summary>
@@ -226,7 +227,7 @@ internal static class LocalGitCheckout
     /// </param>
     public static PreparedCheckout PrepareRepoRoot(
         string serviceName,
-        ServiceMetadata metadata,
+        ServiceDefinition definition,
         ServiceDeveloperConfig config,
         string appHostDirectory,
         IGitClient gitClient,
@@ -277,16 +278,16 @@ internal static class LocalGitCheckout
         // checkout, not one we just made, so it gets the same treatment as a checkout found
         // there on a later run: theirs may be a clone of another repository, and may hold
         // work in flight that a checkout would discard.
-        if (CloneIntoPlace(serviceName, metadata, checkoutsRoot, repoRoot, gitClient, progress))
+        if (CloneIntoPlace(serviceName, definition, checkoutsRoot, repoRoot, gitClient, progress))
         {
             return new PreparedCheckout(repoRoot, NeedsReconciliation: true);
         }
 
         // Our own clone, seconds old and holding nothing anyone could lose, so it is put on the
         // configured ref right here — inside the parallel phase — rather than deferred.
-        if (ConfiguredReference(metadata, config) is { } reference)
+        if (ConfiguredReference(definition, config) is { } reference)
         {
-            CheckoutWithFetchRetry(serviceName, metadata, repoRoot, reference, gitClient);
+            CheckoutWithFetchRetry(serviceName, definition, repoRoot, reference, gitClient);
         }
 
         return new PreparedCheckout(repoRoot, NeedsReconciliation: false);
@@ -299,7 +300,7 @@ internal static class LocalGitCheckout
     /// </summary>
     public static string ReconcileRepoRoot(
         string serviceName,
-        ServiceMetadata metadata,
+        ServiceDefinition definition,
         ServiceDeveloperConfig config,
         PreparedCheckout prepared,
         IGitClient gitClient)
@@ -307,7 +308,7 @@ internal static class LocalGitCheckout
         if (prepared.NeedsReconciliation)
         {
             UseExistingCheckout(
-                serviceName, metadata, prepared.RepoRoot, ConfiguredReference(metadata, config), gitClient);
+                serviceName, definition, prepared.RepoRoot, ConfiguredReference(definition, config), gitClient);
         }
 
         return prepared.RepoRoot;
@@ -317,8 +318,8 @@ internal static class LocalGitCheckout
     /// The ref this checkout should sit on, or <see langword="null"/> when neither the developer nor
     /// the catalog named one — in which case whatever the clone already has checked out stands.
     /// </summary>
-    private static string? ConfiguredReference(ServiceMetadata metadata, ServiceDeveloperConfig config) =>
-        config.Local.Ref ?? metadata.DefaultRef;
+    private static string? ConfiguredReference(ServiceDefinition definition, ServiceDeveloperConfig config) =>
+        config.Local.Ref ?? definition.DefaultRef;
 
     /// <summary>
     /// Adopts a checkout this call did not create — one left by an earlier run, or one a concurrent
@@ -327,15 +328,15 @@ internal static class LocalGitCheckout
     /// moving it to <paramref name="reference"/> is safe.
     /// </summary>
     private static void UseExistingCheckout(
-        string serviceName, ServiceMetadata metadata, string repoRoot, string? reference, IGitClient gitClient)
+        string serviceName, ServiceDefinition definition, string repoRoot, string? reference, IGitClient gitClient)
     {
         var existingOrigin = gitClient.GetOriginUrl(repoRoot);
-        if (existingOrigin is not null && !RepositoryUrlsMatch(existingOrigin, metadata.Repository))
+        if (existingOrigin is not null && !RepositoryUrlsMatch(existingOrigin, definition.Repository))
         {
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}': checkout at '{repoRoot}' already contains a clone of " +
                 $"'{GitUrl.Redact(existingOrigin)}', which does not match the configured repository " +
-                $"'{GitUrl.Redact(metadata.Repository)}'. " +
+                $"'{GitUrl.Redact(definition.Repository)}'. " +
                 "Remove the checkout directory or fix the configured repository URL.");
         }
 
@@ -355,7 +356,7 @@ internal static class LocalGitCheckout
         }
         else if (!gitClient.IsRefCheckedOut(repoRoot, reference))
         {
-            CheckoutWithFetchRetry(serviceName, metadata, repoRoot, reference, gitClient);
+            CheckoutWithFetchRetry(serviceName, definition, repoRoot, reference, gitClient);
         }
     }
 
@@ -385,14 +386,14 @@ internal static class LocalGitCheckout
     /// </remarks>
     private static bool CloneIntoPlace(
         string serviceName,
-        ServiceMetadata metadata,
+        ServiceDefinition definition,
         string checkoutsRoot,
         string repoRoot,
         IGitClient gitClient,
         IGitProgressSink? progress)
     {
         // See PrepareRepoRoot: the real URL goes to git, the redacted one goes into messages.
-        var displayRepository = GitUrl.Redact(metadata.Repository);
+        var displayRepository = GitUrl.Redact(definition.Repository);
 
         Directory.CreateDirectory(checkoutsRoot);
         SweepAbandonedScratchDirectories(checkoutsRoot);
@@ -421,7 +422,7 @@ internal static class LocalGitCheckout
         {
             try
             {
-                gitClient.Clone(metadata.Repository, scratch, progress);
+                gitClient.Clone(definition.Repository, scratch, progress);
             }
             catch (GitAuthenticationFailedException ex)
             {
@@ -575,10 +576,10 @@ internal static class LocalGitCheckout
     }
 
     private static void CheckoutWithFetchRetry(
-        string serviceName, ServiceMetadata metadata, string repoRoot, string reference, IGitClient gitClient)
+        string serviceName, ServiceDefinition definition, string repoRoot, string reference, IGitClient gitClient)
     {
         // See PrepareRepoRoot: the real URL goes to git, the redacted one goes into messages.
-        var displayRepository = GitUrl.Redact(metadata.Repository);
+        var displayRepository = GitUrl.Redact(definition.Repository);
 
         try
         {
