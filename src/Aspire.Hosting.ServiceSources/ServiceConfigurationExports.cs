@@ -136,12 +136,7 @@ public static class ServiceConfigurationExports
         this IResourceBuilder<IResourceWithServiceDiscovery> service, string arg) =>
         service.Configure<IResourceWithArgs>(r => r.WithArgs(arg));
 
-    /// <summary>
-    /// Declares an <c>https</c> endpoint on the resolved service. Load-bearing for a deferred
-    /// checkout (#208): Aspire reads endpoints from a launch profile while composing, and a
-    /// first-run checkout that has not landed yet has no launch profile for it to read, so nothing
-    /// declares the endpoint unless the AppHost does.
-    /// </summary>
+    /// <summary>Declares an <c>https</c> endpoint on the resolved service.</summary>
     [AspireExport]
     [EditorBrowsable(EditorBrowsableState.Never)]
     public static IResourceBuilder<IResourceWithServiceDiscovery> WithServiceHttpsEndpoint(

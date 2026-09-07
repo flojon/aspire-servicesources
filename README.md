@@ -1592,6 +1592,8 @@ const payments = await builder
 | `waitForService(dependency)` | `.Configure<IResourceWithWaitSupport>(r => r.WaitFor(dependency))` |
 | `waitForServiceCompletion(dependency, { exitCode })` | `…WaitForCompletion(dependency, exitCode)` |
 | `withServiceArg(arg)` | `.Configure<IResourceWithArgs>(r => r.WithArgs(arg))` |
+| `withServiceHttpsEndpoint()` | `.Configure<IResourceWithEndpoints>(r => r.WithHttpsEndpoint())` |
+| `withServiceHttpEndpoint()` | `…WithHttpEndpoint()` |
 
 They delegate to `Configure<T>`, so out-of-band sources are skipped and logged exactly as above —
 including the wait-ordering exception, which `waitForService` and `waitForServiceCompletion` inherit.
@@ -2116,8 +2118,8 @@ generated SDK referenced an undeclared `ResourceWithServiceDiscoveryPromise` and
 
 That upstream fix is no longer what makes this work. The generator emits the wrapper pair when the
 bare interface appears as an extension-method **receiver** rather than only as a return type, and
-the eight `[AspireExport]` configuration shims above declare exactly that receiver — so they carry
-the wrapper pair for `addService` too. Removing `[AspireExport]` from those eight shims brings all
+the ten `[AspireExport]` configuration shims above declare exactly that receiver — so they carry
+the wrapper pair for `addService` too. Removing `[AspireExport]` from those shims brings all
 six errors back on a current CLI, which is how the cause was isolated; the measurement is in
 [`docs/superpowers/specs/2026-08-30-19507-already-fixed-findings.md`](docs/superpowers/specs/2026-08-30-19507-already-fixed-findings.md).
 

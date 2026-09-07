@@ -98,8 +98,9 @@ public static class ServiceEndpointExtensions
         {
             return $"Service '{name}' exposes no endpoint, so there is none to reference.{source} " +
                    "Give the service an endpoint — a 'scheme'/'port' in servicesources.yaml for a " +
-                   "'kubernetes' or 'container' source, a launch profile for a 'local' one — or declare " +
-                   "one with withServiceHttpEndpoint()/withServiceHttpsEndpoint() (Configure<IResourceWithEndpoints>(r => r.WithHttpEndpoint(...)) in C#).";
+                   "'kubernetes' or 'container' source, a launch profile for a 'local' one, or declare " +
+                   "one explicitly: withServiceHttpEndpoint()/withServiceHttpsEndpoint() in TypeScript, " +
+                   "or Configure<IResourceWithEndpoints>(r => r.WithHttpEndpoint()/WithHttpsEndpoint()) in C#.";
         }
 
         var endpointList = string.Join(", ", names.Select(n => $"'{n}'"));
