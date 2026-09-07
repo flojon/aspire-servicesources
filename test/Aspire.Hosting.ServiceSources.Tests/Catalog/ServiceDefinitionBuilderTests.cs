@@ -79,4 +79,37 @@ public class ServiceDefinitionBuilderTests
 
         Assert.Throws<ServiceSourcesConfigurationException>(() => chain.WithContainer("b", 8080));
     }
+
+    [Fact]
+    public void WithKubernetes_SetsKubernetesBlock()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("payments")
+            .WithKubernetes("payments", port: 8080)
+            .Build();
+
+        Assert.NotNull(definition.Kubernetes);
+        Assert.Equal("payments", definition.Kubernetes.Service);
+        Assert.Equal(8080, definition.Kubernetes.Port);
+    }
+
+    [Fact]
+    public void WithKubernetes_CalledTwice_Throws()
+    {
+        var chain = new ServiceCatalogBuilder().AddService("payments").WithKubernetes("payments");
+
+        Assert.Throws<ServiceSourcesConfigurationException>(() => chain.WithKubernetes("other"));
+    }
+
+    [Fact]
+    public void WithContainerAndWithKubernetes_OnOneEntry_BothSet()
+    {
+        // Design finding 4: one entry may carry every source at once.
+        var definition = new ServiceCatalogBuilder().AddService("payments")
+            .WithContainer("nginxdemos/hello", port: 80)
+            .WithKubernetes("payments", port: 8080)
+            .Build();
+
+        Assert.NotNull(definition.Container);
+        Assert.NotNull(definition.Kubernetes);
+    }
 }

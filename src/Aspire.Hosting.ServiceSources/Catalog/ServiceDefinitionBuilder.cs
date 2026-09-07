@@ -18,10 +18,10 @@ public sealed class ServiceDefinitionBuilder
     private string? _defaultRef;
     private UrlMetadata? _url;
     private ContainerMetadata? _container;
+    private KubernetesMetadata? _kubernetes;
 
-    // Task 6 adds Kubernetes/WithKubernetes; Task 8 adds Kind/KindOptions/WithKind. Each field
-    // starts null and each With* throws the additive-error below (via RequireUnset) if its field is
-    // already set.
+    // Task 8 adds Kind/KindOptions/WithKind. Each field starts null and each With* throws the
+    // additive-error below (via RequireUnset) if its field is already set.
 
     internal ServiceDefinitionBuilder(string serviceName)
     {
@@ -57,6 +57,18 @@ public sealed class ServiceDefinitionBuilder
     }
 
     /// <summary>
+    /// Declares this service's Kubernetes forward target — the "kubernetes" source. See design "The
+    /// authoring API". <see cref="KubernetesMetadata.Scheme"/> has no code-authoring surface in Stage
+    /// 1; it stays null (default <c>http</c>), reachable only via the yaml <c>scheme</c> field.
+    /// </summary>
+    public ServiceDefinitionBuilder WithKubernetes(string service, int? port = null)
+    {
+        RequireUnset(_kubernetes, nameof(WithKubernetes));
+        _kubernetes = new KubernetesMetadata { Service = service, Port = port };
+        return this;
+    }
+
+    /// <summary>
     /// Guards every <c>With*</c> against a second call for the same block, naming the service and the
     /// block — design "Calls are additive… A second call to the same one is a configuration error".
     /// </summary>
@@ -81,6 +93,7 @@ public sealed class ServiceDefinitionBuilder
         DefaultRef = _defaultRef,
         Url = _url,
         Container = _container,
+        Kubernetes = _kubernetes,
         Kind = LocalKinds.Dotnet,
         Origin = CatalogOrigin.Code,
     };
