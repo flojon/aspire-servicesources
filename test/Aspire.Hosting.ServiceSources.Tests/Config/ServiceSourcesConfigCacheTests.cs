@@ -11,7 +11,7 @@ public class ServiceSourcesConfigCacheTests
         DistributedApplication.CreateBuilder(new DistributedApplicationOptions
         {
             ProjectDirectory = appHostDirectory,
-            Args = [],
+            Args = [TestBuilderDefaults.DisableConfigReloadArg],
         });
 
     private static string CreateAppHostDirectory(string yaml, string json)

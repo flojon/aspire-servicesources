@@ -31,9 +31,8 @@ internal static class TestHelpers
 
     private static IDistributedApplicationBuilder CreateBuilderCore(DistributedApplicationOptions options)
     {
-        var builder = DistributedApplication.CreateBuilder(options);
-        BuilderReclaim.Track();
-        return builder;
+        options.Args = [.. options.Args ?? [], TestBuilderDefaults.DisableConfigReloadArg];
+        return DistributedApplication.CreateBuilder(options);
     }
 
     /// <summary>
