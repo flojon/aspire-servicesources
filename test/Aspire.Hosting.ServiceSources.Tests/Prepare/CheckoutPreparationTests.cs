@@ -780,9 +780,11 @@ public class CheckoutPreparationTests
 
     /// <remarks>
     /// A launch failure names the command too — <see cref="CheckoutPreparation.LaunchFailedMessage"/>
-    /// — a fifth site quoting <see cref="PrepareStep.Describe"/> unredacted before #286, and it fires
-    /// on the very first attempt: the command never got to run, let alone print anything, so nothing
-    /// but this message is around to redact.
+    /// — the fourth of #286's four sites quoting <see cref="PrepareStep.Describe"/> unredacted, and
+    /// it fires on the very first attempt: the command never got to run, let alone print anything,
+    /// so nothing but this message is around to redact. (The ticket's own "fifth spelling" is
+    /// <c>IgnoredCatalogStepNotice</c> in <c>PreparePlan.cs</c>, left deliberately unredacted — see
+    /// the CHANGELOG.)
     /// </remarks>
     [Fact]
     public void ACommandThatCannotBeLaunched_HasUrlCredentialsRedactedFromTheCommand()
