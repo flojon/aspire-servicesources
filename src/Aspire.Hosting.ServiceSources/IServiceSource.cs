@@ -1,5 +1,6 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 
 namespace Aspire.Hosting.ServiceSources;
 
@@ -13,5 +14,5 @@ internal interface IServiceSource
     /// exception is <see cref="Sources.UrlSource"/>; see its remarks.
     /// </summary>
     IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
-        IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config);
+        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config);
 }
