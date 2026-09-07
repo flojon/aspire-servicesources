@@ -1,7 +1,7 @@
 # Aspire.Hosting.ServiceSources — Authoring the Service Catalog in Code
 
 **Date:** 2026-09-05
-**Status:** Draft — reviewer decisions recorded 2026-09-07 (see
+**Status:** Accepted — reviewer decisions recorded 2026-09-07 (see
 [Reviewer decisions](#reviewer-decisions)); ready for an implementation plan.
 Revised 2026-09-05 after two reviews: the ordering rule was built on a miscounted set of catalog
 readers, the `servicesources.local.json` requirement was left unsaid, and five ATS shapes this API
