@@ -164,7 +164,37 @@ internal sealed class ConnectionStringTemplate
                 continue;
             }
 
-            var close = template.IndexOf('}', at + 2);
+            // A placeholder's own keyword, name and key can never legitimately contain a brace —
+            // nothing here has ever needed one, and every other brace in a connection string
+            // belongs to something else (an ODBC `Driver={SQL Server}` field is the ordinary case
+            // this file's own docs call normal). So the first brace of either kind decides this
+            // search outright: a '}' is this placeholder's own close, and a '{' means no close
+            // exists to find — this text was never going to be a well-formed placeholder, whatever
+            // unrelated, possibly brace-quoted content follows.
+            //
+            // Earlier attempts tried to track nesting (skip a balanced '{...}' pair elsewhere) and
+            // then ODBC's own doubled-'}' escape for a literal brace inside such a pair — both real
+            // rules this format uses, and both correct as far as they went. But teaching this scan
+            // to model ever more of *other* content's own brace syntax chases an unbounded set of
+            // shapes, and every attempt so far has been found to still leak past the one before it
+            // (#257). Refusing a brace inside the body at all sidesteps needing to model any of it:
+            // nothing this scan has to understand can be mistaken for something it does not.
+            var close = -1;
+
+            for (var scan = at + 2; scan < template.Length; scan++)
+            {
+                if (template[scan] == '}')
+                {
+                    close = scan;
+                    break;
+                }
+
+                if (template[scan] == '{')
+                {
+                    break;
+                }
+            }
+
             var body = close < 0 ? template[(at + 2)..] : template[(at + 2)..close];
 
             if (!TryReadPlaceholder(body, backingServiceName, configKey, close < 0, out var placeholder))
@@ -199,9 +229,10 @@ internal sealed class ConnectionStringTemplate
     /// Reads the inside of a <c>{…}</c> token, or reports that it is not one of ours.
     /// </summary>
     /// <param name="unterminated">
-    /// Whether the token had no closing brace. Only interesting once the keyword says a placeholder
-    /// was meant: <c>Server=${host</c> is text that happens to end mid-brace, while
-    /// <c>Port=${port</c> is a placeholder someone forgot to close.
+    /// Whether a <c>'}'</c> was found before any <c>'{'</c>; see the search in <see cref="Parse"/>.
+    /// Only interesting once the keyword says a placeholder was meant: <c>Server=${host</c> is text
+    /// that happens to end mid-brace, while <c>Port=${port</c> is a placeholder someone forgot to
+    /// close.
     /// </param>
     /// <returns>
     /// <see langword="true"/> when the token is a placeholder, <see langword="false"/> when its
@@ -232,14 +263,27 @@ internal sealed class ConnectionStringTemplate
             return false;
         }
 
-        // Reassembled from the template's own text rather than from the keyword constants, so every
-        // message about this token quotes the spelling the developer wrote — see Segment.AsWritten.
-        var token = unterminated ? $"${{{body}" : $"${{{body}}}";
-
+        // Every rejection quotes a *bounded* copy of the token — reached whether the placeholder is
+        // unterminated or terminated-but-invalid (bad arity, a bad name or a bad key), since neither
+        // means the placeholder was accepted, so nothing has validated what `body` actually holds.
+        // Left unbounded, an arity or charset failure throws with the full, untruncated `body` — the
+        // real close a rejection is not disqualified by (see the search in Parse) can legitimately
+        // sit past a later, unrelated field's own value, credentials included (#257). Shown only
+        // when it changes nothing: a body already built entirely from safe characters is quoted
+        // whole, closing brace and all, exactly as `Parse_Rejection_QuotesTheTokenAsWritten` pins.
+        // Computed lazily — once per throw, never for an accepted placeholder — rather than ahead
+        // of every call, since a rejection is the exceptional case.
         if (unterminated)
         {
-            throw Malformed(backingServiceName, configKey, token, "it has no closing '}'.");
+            throw Malformed(backingServiceName, configKey, RejectionToken(body, unterminated: true), "it has no closing '}'.");
         }
+
+        // Reassembled from the template's own text rather than from the keyword constants, so every
+        // message about this token quotes the spelling the developer wrote — see Segment.AsWritten.
+        // Kept full and unbounded: this is what an *accepted* placeholder's own Token holds, and a
+        // name or key that legitimately carries a newline or a tab needs it verbatim so a downstream
+        // source can escape it for display — truncating it here would corrupt the value itself.
+        var token = $"${{{body}}}";
 
         if (keyword.Equals(PortKeyword, StringComparison.OrdinalIgnoreCase))
         {
@@ -248,11 +292,11 @@ internal sealed class ConnectionStringTemplate
                 1 => new Port(Name: null) { Token = token },
                 2 when IsNamed(parts[1]) => new Port(parts[1]) { Token = token },
                 2 => throw Malformed(
-                    backingServiceName, configKey, token,
+                    backingServiceName, configKey, RejectionToken(body, unterminated: false),
                     "the port name after 'port:' is empty. Write '${port}' for the only forwarded port, "
                     + "or '${port:<name>}' to name one of several."),
                 _ => throw Malformed(
-                    backingServiceName, configKey, token,
+                    backingServiceName, configKey, RejectionToken(body, unterminated: false),
                     $"a port placeholder takes at most one name, and this has {parts.Length - 1} "
                     + "colon-separated parts after 'port'."),
             };
@@ -265,28 +309,41 @@ internal sealed class ConnectionStringTemplate
             3 when IsSecretName(parts[1]) && IsSecretKey(parts[2]) =>
                 new Secret(parts[1], parts[2]) { Token = token },
             3 when !IsNamed(parts[1]) || !IsNamed(parts[2]) => throw Malformed(
-                backingServiceName, configKey, token,
+                backingServiceName, configKey, RejectionToken(body, unterminated: false),
                 "the secret name and key must both be given: '${secret:<name>:<key>}'."),
             3 when !IsSecretName(parts[1]) => throw Malformed(
-                backingServiceName, configKey, token,
+                backingServiceName, configKey, RejectionToken(body, unterminated: false),
                 "a Kubernetes secret's name is lower-case letters, digits, '-' and '.', beginning and ending "
                 + "with a letter or a digit — narrower than its keys, which also take upper case and '_'. "
                 + "Nothing in a cluster can carry this name as written, so it is refused here rather than left "
                 + "to arrive as an indistinguishable \"not found\" at start time."),
             3 => throw Malformed(
-                backingServiceName, configKey, token,
+                backingServiceName, configKey, RejectionToken(body, unterminated: false),
                 "a key inside a Kubernetes secret is letters, digits, '-', '.' and '_', and this key is not. "
                 + "Nothing in a cluster can carry the key as written."),
             < 3 => throw Malformed(
-                backingServiceName, configKey, token,
+                backingServiceName, configKey, RejectionToken(body, unterminated: false),
                 "a secret placeholder names a secret and a key inside it: '${secret:<name>:<key>}'."),
             _ => throw Malformed(
-                backingServiceName, configKey, token,
+                backingServiceName, configKey, RejectionToken(body, unterminated: false),
                 $"a secret placeholder takes exactly a name and a key, and this has {parts.Length - 1} "
                 + "colon-separated parts after 'secret'."),
         };
 
         return true;
+    }
+
+    /// <summary>
+    /// The token a rejection message quotes — bounded, unlike an accepted placeholder's own
+    /// <c>Token</c>; see the remarks in <see cref="TryReadPlaceholder"/>.
+    /// </summary>
+    private static string RejectionToken(string body, bool unterminated)
+    {
+        var safeBody = TruncateAtFirstBoundary(body);
+
+        return unterminated || safeBody.Length < body.Length
+            ? $"${{{safeBody}"
+            : $"${{{body}}}";
     }
 
     /// <summary>Whether a placeholder's name part is a name rather than nothing.</summary>
@@ -367,6 +424,35 @@ internal sealed class ConnectionStringTemplate
     /// </remarks>
     private static bool IsSecretNameChar(char c) =>
         char.IsAsciiLetterOrDigit(c) || c is '-' or '.' or '_';
+
+    /// <summary>
+    /// Cuts an unterminated token's body at the first character that could not be part of a
+    /// keyword, a port name, or a secret's name or key.
+    /// </summary>
+    /// <remarks>
+    /// Reached only once <see cref="Parse"/> has already given up looking for a <c>'}'</c> — because
+    /// there was none before the end of the template, or none before a <c>'{'</c> that disqualified
+    /// this text as a placeholder outright — so this narrows nothing a well-formed name or key may
+    /// hold. See the tests pinning a newline, a tab and an apostrophe inside one; none of them reach
+    /// this method, because all of them close. What is left is everything the search gave up on —
+    /// every field of every other kind that follows in a connection string, credentials included —
+    /// and quoting that whole is #257. An allowlist rather than a list of punctuation to stop at:
+    /// this package supports both a <c>;</c>-delimited dialect and a <c>://</c> URI one, and nothing
+    /// here can enumerate every separator either could still use, so the bound is what a keyword,
+    /// name or key is actually built from — see <see cref="IsSecretNameChar"/> — rather than a
+    /// denylist of characters some other dialect happens to punctuate with.
+    /// </remarks>
+    private static string TruncateAtFirstBoundary(string body)
+    {
+        var end = 0;
+
+        while (end < body.Length && (IsSecretNameChar(body[end]) || body[end] is ':'))
+        {
+            end++;
+        }
+
+        return body[..end];
+    }
 
     /// <summary>
     /// Appends literal text to a connection-string expression, escaped so that a brace in it stays

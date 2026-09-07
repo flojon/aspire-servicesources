@@ -206,6 +206,186 @@ public class ConnectionStringTemplateTests
     public void Parse_UnterminatedPlaceholder_IsRejected() =>
         Assert.Contains("no closing '}'", Rejects("Host=localhost;Port=${port").Message);
 
+    /// <summary>
+    /// An unterminated placeholder's quoted token stops at the first <c>;</c> or whitespace, so a
+    /// developer who forgot the closing <c>}</c> before writing the rest of the connection string
+    /// does not have that rest — credentials included — echoed back at them.
+    /// </summary>
+    [Theory]
+    [InlineData("Host=db;Port=${port:main;Database=orders;Password=hunter2", "${port:main")]
+    [InlineData("Host=db;Password=${secret:db:pw;Extra=hunter2", "${secret:db:pw")]
+    public void Parse_UnterminatedPlaceholder_QuotesOnlyUpToTheBoundary(string template, string quoted)
+    {
+        var message = Rejects(template).Message;
+
+        Assert.Contains($"'{quoted}'", message);
+        Assert.DoesNotContain("hunter2", message);
+    }
+
+    /// <summary>
+    /// A <c>'{'</c> in what would be a placeholder's own body — an ODBC <c>Driver={SQL Server}</c>
+    /// field later in the template is the ordinary case this package's own docs call out as normal —
+    /// disqualifies it outright, so a <c>'}'</c> belonging to that unrelated field is never mistaken
+    /// for the placeholder's own close: the placeholder is read as unterminated instead, and its
+    /// message stops at the boundary rather than running past it.
+    /// </summary>
+    [Fact]
+    public void Parse_UnterminatedPlaceholder_IsNotClosedByAStrayLaterBrace()
+    {
+        var message = Rejects("Host=db;Port=${port:main;Password=hunter2;Driver={SQL Server}").Message;
+
+        Assert.Contains("'${port:main'", message);
+        Assert.Contains("no closing '}'", message);
+        Assert.DoesNotContain("hunter2", message);
+    }
+
+    /// <summary>
+    /// The same stray-brace shape, but for a secret — and reached through a rejection that used to
+    /// be raised only for a genuinely terminated placeholder (a bad key). With the close bounded the
+    /// same way, this placeholder is unterminated before any key is ever read.
+    /// </summary>
+    [Fact]
+    public void Parse_UnterminatedSecretPlaceholder_IsNotClosedByAStrayLaterBrace()
+    {
+        var message = Rejects("Host=db;Pw=${secret:creds:pass;Extra=orders;Password=hunter2;Driver={SQL Server}").Message;
+
+        Assert.Contains("'${secret:creds:pass'", message);
+        Assert.Contains("no closing '}'", message);
+        Assert.DoesNotContain("hunter2", message);
+    }
+
+    /// <summary>
+    /// The boundary a genuinely unterminated placeholder's message stops at is not a list of
+    /// separators — it is an allowlist of what a keyword, name or key can hold, so a dialect that
+    /// separates fields with <c>&amp;</c>, <c>,</c>, or the <c>@</c>/<c>/</c>/<c>?</c> a URI uses
+    /// does not leak either.
+    /// </summary>
+    [Theory]
+    [InlineData("Host=db;Port=${port:main&Database=orders&Password=hunter2", "${port:main")]
+    [InlineData("Host=db;Port=${port:main,Database=orders,Password=hunter2", "${port:main")]
+    [InlineData("postgresql://${port:main@myhost/mydb?password=hunter2", "${port:main")]
+    [InlineData("postgresql://${port:main/mydb?password=hunter2", "${port:main")]
+    public void Parse_UnterminatedPlaceholder_QuotesOnlyUpToAnyForeignCharacter(string template, string quoted)
+    {
+        var message = Rejects(template).Message;
+
+        Assert.Contains($"'{quoted}'", message);
+        Assert.DoesNotContain("hunter2", message);
+    }
+
+    /// <summary>
+    /// The same stray-brace shape as <see cref="Parse_UnterminatedPlaceholder_IsNotClosedByAStrayLaterBrace"/>,
+    /// but for a URI-style template with no <c>;</c> anywhere — a dialect-specific separator would
+    /// only bound the search for as many dialects as it happened to name. Disqualifying on the first
+    /// <c>'{'</c> stops it regardless of what separator, if any, the surrounding text uses.
+    /// </summary>
+    [Fact]
+    public void Parse_UnterminatedPlaceholder_IsNotClosedByAStrayLaterBraceInAUriTemplate()
+    {
+        var message = Rejects("Server=${port:main@host/db?password=hunter2?Driver={SQL Server}").Message;
+
+        Assert.Contains("'${port:main'", message);
+        Assert.Contains("no closing '}'", message);
+        Assert.DoesNotContain("hunter2", message);
+    }
+
+    /// <summary>
+    /// The same stray-brace shape again, but the unrelated field this time uses ODBC's own doubled-
+    /// <c>}}</c> escape for an embedded <c>}</c> — see <c>PWD={pa}}ss}</c>, pinned for literal text
+    /// by <see cref="Parse_BracesInAConnectionString_AreNeverRewritten"/>. Disqualifying on the first
+    /// <c>'{'</c> — the field's own opening brace — means the doubling never has to be understood at
+    /// all: whatever this field does with its own braces afterward is never read as this
+    /// placeholder's problem to interpret.
+    /// </summary>
+    [Theory]
+    [InlineData("Port=${port:main;Extra=hunter2;PWD={pa}}ss}")]
+    [InlineData("Pw=${secret:app;Extra=hunter2;PWD={pa}}ss}")]
+    public void Parse_UnterminatedPlaceholder_IsNotClosedByAnOdbcDoubledBrace(string template)
+    {
+        var message = Rejects(template).Message;
+
+        Assert.Contains("no closing '}'", message);
+        Assert.DoesNotContain("hunter2", message);
+    }
+
+    /// <summary>
+    /// An ordinary ODBC <c>Driver={...}</c> field elsewhere in the template is not mistaken for a
+    /// well-formed placeholder's own close either — the placeholder here really is terminated, by
+    /// its own, immediately-following <c>'}'</c>, and the unrelated field after it is untouched.
+    /// </summary>
+    [Fact]
+    public void Parse_WellFormedPlaceholder_IsUnaffectedByAnOdbcFieldLater()
+    {
+        var segments = Parse("Host=db;Port=${port};Driver={SQL Server}").Segments;
+
+        Assert.Collection(
+            segments,
+            segment => Assert.Equal("Host=db;Port=", Assert.IsType<ConnectionStringTemplate.Literal>(segment).Text),
+            segment => Assert.Null(Assert.IsType<ConnectionStringTemplate.Port>(segment).Name),
+            segment => Assert.Equal(";Driver={SQL Server}", Assert.IsType<ConnectionStringTemplate.Literal>(segment).Text));
+    }
+
+    /// <summary>
+    /// A well-formed placeholder immediately followed by one unrelated stray <c>'}'</c> still closes
+    /// on its own, genuine <c>'}'</c> — the first one found — with the stray one left as ordinary
+    /// trailing text.
+    /// </summary>
+    [Fact]
+    public void Parse_WellFormedPlaceholder_ClosesOnItsOwnDespiteATrailingStrayBrace()
+    {
+        var segments = Parse("Host=db;Port=${port:amqp}}Extra").Segments;
+
+        Assert.Collection(
+            segments,
+            segment => Assert.Equal("Host=db;Port=", Assert.IsType<ConnectionStringTemplate.Literal>(segment).Text),
+            segment => Assert.Equal("amqp", Assert.IsType<ConnectionStringTemplate.Port>(segment).Name),
+            segment => Assert.Equal("}Extra", Assert.IsType<ConnectionStringTemplate.Literal>(segment).Text));
+    }
+
+    /// <summary>
+    /// A placeholder that genuinely closes on a single, real <c>'}'</c> — nothing about the brace
+    /// search is wrong here — but then fails arity validation quotes only the bounded prefix in its
+    /// rejection, not the full body: a secret with too few colon-separated parts is exactly the
+    /// shape a developer hits by simply forgetting the closing brace before writing the rest of the
+    /// connection string, and a later, unrelated field happening to end in its own real <c>'}'</c>
+    /// must not turn that into a credential echoed straight out of a thrown exception.
+    /// </summary>
+    [Fact]
+    public void Parse_SecretFailingArity_DoesNotEchoPastTheBoundary()
+    {
+        var message = Rejects("Host=db;Pw=${secret:orders;Password=hunter2}").Message;
+
+        Assert.Contains("'${secret:orders'", message);
+        Assert.DoesNotContain("hunter2", message);
+    }
+
+    /// <summary>
+    /// A raw <c>'{'</c> inside what would be a placeholder's own name disqualifies it outright, even
+    /// when it and its own matching <c>'}'</c> are otherwise perfectly balanced — a name or key can
+    /// never legitimately contain either brace, so nothing about this text was ever going to parse
+    /// as a well-formed placeholder, whatever unrelated, credential-bearing text follows the brace
+    /// that would otherwise have been read as its close.
+    /// </summary>
+    [Theory]
+    [InlineData("${port:{a}}b}Password=hunter2}")]
+    [InlineData("${port:{A}}}Password=hunter2}")]
+    public void Parse_UnterminatedPlaceholder_IsNotClosedByABraceInsideItsOwnName(string template)
+    {
+        var message = Rejects(template).Message;
+
+        Assert.Contains("no closing '}'", message);
+        Assert.DoesNotContain("hunter2", message);
+    }
+
+    /// <summary>
+    /// A placeholder whose own name is nothing but a balanced brace pair — never a shape any test
+    /// asks for, since names have no reason to hold one — is rejected as unterminated rather than
+    /// silently accepted with a name no cluster or forwarded port could ever match.
+    /// </summary>
+    [Fact]
+    public void Parse_PlaceholderWithABraceForAName_IsRejected() =>
+        Assert.Contains("no closing '}'", Rejects("${port:{A}}").Message);
+
     [Theory]
     [InlineData("${secret}")]
     [InlineData("${secret:orders-creds}")]
