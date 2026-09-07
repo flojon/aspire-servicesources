@@ -1,4 +1,5 @@
 using YamlDotNet.Serialization;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 
 namespace Aspire.Hosting.ServiceSources.Config;
 
@@ -31,4 +32,24 @@ internal sealed class ServiceMetadata
     /// </summary>
     [YamlIgnore]
     public object? KindConfig { get; set; }
+
+    /// <summary>
+    /// Converts this yaml-bound entry into the source-agnostic <see cref="ServiceDefinition"/>
+    /// every downstream consumer reads. <see cref="Kind"/> is already normalized to
+    /// <see cref="LocalKinds.Dotnet"/> by <see cref="ServiceCatalogLoader"/> by the time this runs,
+    /// so no further normalization happens here.
+    /// </summary>
+    public ServiceDefinition ToDefinition(string yamlPath) => new()
+    {
+        Repository = Repository,
+        Project = Project,
+        DefaultRef = DefaultRef,
+        Kubernetes = Kubernetes,
+        Url = Url,
+        Container = Container,
+        Prepare = Prepare,
+        Kind = Kind,
+        KindOptions = KindConfig,
+        Origin = CatalogOrigin.FromYaml(yamlPath),
+    };
 }
