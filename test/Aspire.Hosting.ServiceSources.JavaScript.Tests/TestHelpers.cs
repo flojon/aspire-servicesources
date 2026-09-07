@@ -9,12 +9,16 @@ internal static class TestHelpers
 {
     private static readonly IDeserializer Deserializer = new DeserializerBuilder().Build();
 
-    public static IDistributedApplicationBuilder CreateBuilder(string appHostDirectory) =>
-        DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+    public static IDistributedApplicationBuilder CreateBuilder(string appHostDirectory)
+    {
+        var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
         {
             ProjectDirectory = appHostDirectory,
             Args = [],
         });
+        BuilderReclaim.Track();
+        return builder;
+    }
 
     /// <summary>
     /// Produces the same untyped object the catalog loader hands a kind handler: whatever

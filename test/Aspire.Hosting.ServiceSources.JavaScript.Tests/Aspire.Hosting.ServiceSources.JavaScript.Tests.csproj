@@ -29,6 +29,7 @@
 
   <ItemGroup>
     <Compile Include="..\Aspire.Hosting.ServiceSources.Tests\TempDirectories.cs" Link="TempDirectories.cs" />
+    <Compile Include="..\Aspire.Hosting.ServiceSources.Tests\BuilderReclaim.cs" Link="BuilderReclaim.cs" />
   </ItemGroup>
 
 </Project>
