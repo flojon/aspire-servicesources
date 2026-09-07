@@ -753,6 +753,15 @@ nothing will fail to build to warn you.
   The single value now asks the same converter a named entry always has, so the two can no longer
   disagree about what a number is; `#1628` and `&H1628` are accepted too, for the same reason.
 
+- **The connection string a `kubernetes` backing service quotes back when it has no port to
+  address is now wrapped in apostrophes, with an embedded apostrophe doubled** ([#263]). It used
+  to sit inside double quotes with nothing escaping `"`, so a connection string legitimately
+  containing one — an ODBC `Data Source="C:\path\to.mdb"`, say — closed the message's own quoting
+  early. Nothing was hidden or corrupted; the value still read in full, just visually split.
+  Apostrophes alone would only have moved the same problem onto a value containing one instead
+  (`O'Brien`), so an embedded apostrophe is now doubled — the connection-string convention for
+  escaping the quote delimiter itself.
+
 ### Documentation
 
 - **The trust model a resolved service runs under, now in `SECURITY.md`** ([#225]). A catalog entry
@@ -1515,6 +1524,7 @@ Targets `net10.0`.
 [#235]: https://github.com/flojon/aspire-servicesources/issues/235
 [#236]: https://github.com/flojon/aspire-servicesources/issues/236
 [#241]: https://github.com/flojon/aspire-servicesources/issues/241
+[#263]: https://github.com/flojon/aspire-servicesources/issues/263
 [#264]: https://github.com/flojon/aspire-servicesources/issues/264
 [#279]: https://github.com/flojon/aspire-servicesources/issues/279
 
