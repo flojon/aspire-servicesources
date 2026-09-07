@@ -79,9 +79,15 @@ public class DeveloperConfigurationTests
     }
 
     /// <remarks>
-    /// Environment variables are process-global and xunit runs test classes in parallel, so the
-    /// service this test names must be one no other test uses — otherwise the variable is still
-    /// set while another class builds its own AppHost and silently configures its service.
+    /// A higher layer than the file, arranged as an in-memory configuration source rather than a
+    /// real environment variable: environment variables are process-global, and xunit runs test
+    /// classes in parallel, so one test's variable is still set while another class builds its own
+    /// AppHost and reads it too — including, since #215, an audit that reports any configured entry
+    /// naming no catalog service, which a stray environment variable does for every catalog but the
+    /// one it was written for. The double-underscore translation a real environment variable needs
+    /// is <c>Microsoft.Extensions.Configuration.EnvironmentVariables</c>'s own behaviour, not this
+    /// package's, so proving the merge here in terms of the colon-separated key it translates to
+    /// covers the same code path without the process-wide side effect.
     /// </remarks>
     [Fact]
     public void ResolveService_EnvironmentVariableOverridesTheFile()
@@ -90,19 +96,15 @@ public class DeveloperConfigurationTests
             EnvOverrideCatalog,
             """{ "services": { "envoverride": { "source": "local" } } }""");
 
-        Environment.SetEnvironmentVariable("ServiceSources__Services__envoverride__Source", "url");
-        try
+        var builder = CreateBuilder(dir);
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            var builder = CreateBuilder(dir);
+            ["ServiceSources:Services:envoverride:Source"] = "url",
+        });
 
-            var (_, developerConfig) = ServiceSourcesConfigCache.ResolveService(builder, "envoverride");
+        var (_, developerConfig) = ServiceSourcesConfigCache.ResolveService(builder, "envoverride");
 
-            Assert.Equal("url", developerConfig.Source);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("ServiceSources__Services__envoverride__Source", null);
-        }
+        Assert.Equal("url", developerConfig.Source);
     }
 
     [Fact]
@@ -291,19 +293,18 @@ public class DeveloperConfigurationTests
             EnvOverrideCatalog,
             """{ "services": { "envoverride": { "source": "local" } } }""");
 
-        Environment.SetEnvironmentVariable("ServiceSources__Services__EnvOverride__Source", "url");
-        try
+        var builder = CreateBuilder(dir);
+        // A higher layer than the file, spelled with different casing — an in-memory source rather
+        // than a real environment variable for the reason ResolveService_EnvironmentVariableOverridesTheFile
+        // gives; configuration keys are case-insensitive whichever provider they arrive through.
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            var builder = CreateBuilder(dir);
+            ["ServiceSources:Services:EnvOverride:Source"] = "url",
+        });
 
-            var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "envoverride");
+        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "envoverride");
 
-            Assert.Equal("url", config.Source);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("ServiceSources__Services__EnvOverride__Source", null);
-        }
+        Assert.Equal("url", config.Source);
     }
 
     /// <remarks>
@@ -439,21 +440,21 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(OrdersCatalog);
 
-        Environment.SetEnvironmentVariable("ServiceSources__Services__nofilepayments__Source", "url");
-        try
+        var builder = CreateBuilder(dir);
+        // "Configured only from the environment" as an in-memory source rather than a real
+        // environment variable, for the reason ResolveService_EnvironmentVariableOverridesTheFile
+        // gives — the point here is that no file configures 'orders', which a merged in-memory
+        // layer demonstrates the same way a real environment variable would.
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            var builder = CreateBuilder(dir);
+            ["ServiceSources:Services:nofilepayments:Source"] = "url",
+        });
 
-            var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-                () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
 
-            Assert.Contains($"create '{Path.Combine(dir, "servicesources.local.json")}'", ex.Message);
-            Assert.DoesNotContain("under \"services\" in", ex.Message);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("ServiceSources__Services__nofilepayments__Source", null);
-        }
+        Assert.Contains($"create '{Path.Combine(dir, "servicesources.local.json")}'", ex.Message);
+        Assert.DoesNotContain("under \"services\" in", ex.Message);
     }
 
     private const string SwitcherCatalog = """
@@ -464,8 +465,9 @@ public class DeveloperConfigurationTests
         """;
 
     /// <remarks>
-    /// Environment variables are process-global and xunit runs test classes in parallel, so the
-    /// service this test names must be one no other test uses.
+    /// A higher layer than the file, arranged as an in-memory configuration source rather than real
+    /// environment variables, for the reason ResolveService_EnvironmentVariableOverridesTheFile
+    /// gives.
     /// </remarks>
     [Fact]
     public void ResolveService_HigherLayerSwitchesSource_LeavesTheOldSourcesBlockUnread()
@@ -479,26 +481,21 @@ public class DeveloperConfigurationTests
                 "url": { "url": "http://from-local-json.invalid" } } } }
             """);
 
-        Environment.SetEnvironmentVariable("ServiceSources__Services__switcher__Source", "local");
-        Environment.SetEnvironmentVariable("ServiceSources__Services__switcher__Local__Path", checkout);
-        try
+        var builder = CreateBuilder(dir);
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            var builder = CreateBuilder(dir);
+            ["ServiceSources:Services:switcher:Source"] = "local",
+            ["ServiceSources:Services:switcher:Local:Path"] = checkout,
+        });
 
-            var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "switcher");
+        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "switcher");
 
-            Assert.Equal("local", config.Source);
-            Assert.Equal(checkout, config.Local.Path);
+        Assert.Equal("local", config.Source);
+        Assert.Equal(checkout, config.Local.Path);
 
-            // Still bound, and that is the point: the entry it came from is untouched, and nothing
-            // reads it while the effective source is "local".
-            Assert.Equal("http://from-local-json.invalid", config.Url.Url);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("ServiceSources__Services__switcher__Source", null);
-            Environment.SetEnvironmentVariable("ServiceSources__Services__switcher__Local__Path", null);
-        }
+        // Still bound, and that is the point: the entry it came from is untouched, and nothing
+        // reads it while the effective source is "local".
+        Assert.Equal("http://from-local-json.invalid", config.Url.Url);
     }
 
     private const string BlankingCatalog = """
@@ -1051,9 +1048,8 @@ public class DeveloperConfigurationTests
     /// configuration and names no path of its own. A message asserting the file carried this entry
     /// would be false here, and there is nothing in the value to tell the two apart by.
     /// <para>
-    /// Environment variables are process-global and xunit runs test classes in parallel, so the
-    /// service this names must be one no other test uses — otherwise the variable is still set
-    /// while another class builds its own AppHost and silently configures its service.
+    /// Arranged as an in-memory configuration source rather than a real environment variable, for
+    /// the reason ResolveService_EnvironmentVariableOverridesTheFile gives.
     /// </para>
     /// </remarks>
     [Fact]
@@ -1061,24 +1057,20 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(NearMissEnvCatalog);
 
-        Environment.SetEnvironmentVariable("ServiceSources__Services__nearmisenv__Source", "local");
-        try
+        var builder = CreateBuilder(dir);
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            var builder = CreateBuilder(dir);
+            ["ServiceSources:Services:nearmisenv:Source"] = "local",
+        });
 
-            var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-                () => ServiceSourcesConfigCache.ResolveService(builder, "nearmissenv"));
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "nearmissenv"));
 
-            Assert.Contains(
-                "Note that 'nearmisenv' is configured and reaches no service in "
-                + "'servicesources.yaml'. Did you mean 'nearmissenv'? If so, rename that entry "
-                + "rather than adding a second one.",
-                ex.Message);
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("ServiceSources__Services__nearmisenv__Source", null);
-        }
+        Assert.Contains(
+            "Note that 'nearmisenv' is configured and reaches no service in "
+            + "'servicesources.yaml'. Did you mean 'nearmissenv'? If so, rename that entry "
+            + "rather than adding a second one.",
+            ex.Message);
     }
 
     /// <summary>

@@ -27,7 +27,11 @@ namespace Aspire.Hosting.ServiceSources.Config;
 internal static class DeveloperConfigFileSource
 {
     /// <summary>The key the file uses at its own root, before its entries are re-rooted below.</summary>
-    private const string FileServicesKey = "services";
+    /// <remarks>
+    /// Internal rather than private for the same reason as <see cref="FileBackingServicesKey"/>: a
+    /// message that tells a developer which key to write has to name the key that is actually read.
+    /// </remarks>
+    internal const string FileServicesKey = "services";
 
     /// <summary>The same, for the backing services a service connects to.</summary>
     /// <remarks>

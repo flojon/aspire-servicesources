@@ -89,6 +89,12 @@ public static class ServiceSourcesBuilderExtensions
         // than from whichever line first resolved a service successfully.
         DeveloperConfigFileSource.EnsureRegistered(builder);
 
+        // Also before the resolution, and unconditionally: the audit this arranges is about
+        // services: configuration nothing read, which is a property of the file rather than of any
+        // one call — an AppHost that goes on to fail resolving this very service still deserves to
+        // hear about an unrelated entry nothing else names.
+        ServiceConfigAudit.EnsureSubscribed(builder);
+
         var (metadata, developerConfig) = ServiceSourcesConfigCache.ResolveService(builder, name);
 
         if (!Sources.TryGetValue(developerConfig.Source, out var source))
