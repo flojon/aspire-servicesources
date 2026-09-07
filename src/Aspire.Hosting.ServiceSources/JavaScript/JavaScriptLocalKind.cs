@@ -90,10 +90,11 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
     }
 
     /// <summary>
-    /// Everything decidable without the repository on disk: the options block, and the absolute
-    /// paths the resource will run from — including the containment checks, which are pure path
-    /// arithmetic and so belong on this side of the split, where they also hold for a checkout that
-    /// has not landed yet and let <see cref="ResolveDeferred"/> reject an escaping path outright.
+    /// Everything decidable without the repository on disk: the options block — including the
+    /// containment checks, which are pure path arithmetic and so belong in
+    /// <see cref="ResolveOptions"/>, where they also hold for a checkout that has not landed yet and
+    /// let <see cref="ResolveDeferred"/> reject an escaping path outright — and the absolute paths
+    /// the resource will run from.
     /// </summary>
     private static JavaScriptPlan Plan(string serviceName, string repoRoot, object? rawConfig)
     {
@@ -101,18 +102,17 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
 
         // Trailing separators are trimmed once here: Path.GetFullPath preserves them, and a
         // developer "path" override reaches this handler verbatim — so an override written with the
-        // trailing slash shell tab-completion produces would otherwise make every containment check
-        // below compare against "root//" and reject even the default appDirectory ".".
+        // trailing slash shell tab-completion produces would otherwise make every path below resolve
+        // against "root//" instead of "root".
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(repoRoot));
 
-        var appDirectory = RequireInsideCheckout(serviceName, "appDirectory", root, root, options.AppDirectory);
+        var appDirectory = Path.GetFullPath(Path.Combine(root, options.AppDirectory));
 
-        // Anchored to appDirectory, which is the working directory the integration runs it from, but
-        // still confined to the checkout — a sibling app directory is a legitimate target, anything
-        // outside the repository is not.
+        // Anchored to appDirectory, which is the working directory the integration runs it from —
+        // ResolveOptions already confined the combination to the checkout as a whole.
         var scriptPath = options.ScriptPath is null
             ? null
-            : RequireInsideCheckout(serviceName, "scriptPath", root, appDirectory, options.ScriptPath);
+            : Path.GetFullPath(Path.Combine(appDirectory, options.ScriptPath));
 
         return new JavaScriptPlan(serviceName, options, root, appDirectory, scriptPath);
     }
@@ -276,42 +276,75 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
     }
 
     /// <summary>
-    /// How resolved paths are compared with the checkout root: the way the filesystem itself
-    /// compares them. An <c>appDirectory</c> that climbs out and back in (<c>"../Frontend/web"</c>)
-    /// is the one way a path genuinely inside the checkout can differ from the root in casing, and
-    /// on Windows and macOS that is the same directory — an ordinal comparison would reject it as
-    /// being outside. The trade-off is a case-sensitive macOS volume, where a sibling differing only
-    /// in casing is let through; that is a mistake this check would rather have caught, but a far
-    /// cheaper outcome than refusing a path that really is inside the checkout.
+    /// Confines <paramref name="appDirectory"/> to the checkout, lexically — see
+    /// <see cref="CheckoutRelativePath"/> for why a value is judged without touching disk: it lets
+    /// <see cref="ResolveDeferred"/> reject an escaping path before the clone has happened. This
+    /// catches the mistake, not a determined author: the catalog is a file in the AppHost's own
+    /// repository, and symlinks are deliberately left unresolved so that a checkout linked into
+    /// place from elsewhere — a normal thing to do while working on a service locally — keeps
+    /// working.
     /// </summary>
-    private static readonly StringComparison PathComparison =
-        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
-
-    /// <summary>
-    /// Resolves <paramref name="value"/> against <paramref name="basePath"/> and refuses anything
-    /// that lands outside <paramref name="root"/>. <see cref="Path.Combine(string, string)"/> hands
-    /// back an absolute value unchanged, and <c>"../.."</c> climbs out — either of which would
-    /// silently run something from outside the service's own checkout. This catches the mistake, not
-    /// a determined author: the catalog is a file in the AppHost's own repository, and symlinks are
-    /// deliberately left unresolved so that a checkout linked into place from elsewhere — a normal
-    /// thing to do while working on a service locally — keeps working.
-    /// </summary>
-    private static string RequireInsideCheckout(
-        string serviceName, string field, string root, string basePath, string value)
+    private static string ValidateAppDirectory(string serviceName, string appDirectory)
     {
-        var resolved = Path.GetFullPath(Path.Combine(basePath, value));
-
-        if (!string.Equals(resolved, root, PathComparison)
-            && !resolved.StartsWith(root + Path.DirectorySeparatorChar, PathComparison))
+        if (CheckoutRelativePath.IsAbsolute(appDirectory))
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': javascript {field} '{value}' resolves to '{resolved}', " +
-                "which is outside the service's checkout. It must be a relative path within the repository.");
+                $"Service '{serviceName}': javascript appDirectory '{appDirectory}' is an absolute path, but " +
+                "it must be a relative path within the repository.");
         }
 
-        return resolved;
+        if (CheckoutRelativePath.UnusableSegment(appDirectory) is { } unusable)
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': javascript appDirectory '{appDirectory}' has a path segment " +
+                $"'{unusable}' — {CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy}");
+        }
+
+        if (CheckoutRelativePath.EscapesRoot(appDirectory))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': javascript appDirectory '{appDirectory}' points outside the " +
+                "service's checkout. It must be a relative path within the repository.");
+        }
+
+        return CheckoutRelativePath.NormalizeSeparators(appDirectory);
+    }
+
+    /// <summary>
+    /// Confines <paramref name="scriptPath"/> to the checkout, anchored to
+    /// <paramref name="appDirectory"/> — the working directory the integration runs it from — but
+    /// still confined to the checkout as a whole: a sibling app directory is a legitimate target,
+    /// anything outside the repository is not. Checked against the combination of the two, the way
+    /// <see cref="Java.JavaKindOptions"/> confines <c>jarPath</c> against <c>workingDirectory</c>, so
+    /// a lexical check that only ever sees one relative value at a time still counts depth from the
+    /// checkout root rather than from <paramref name="appDirectory"/> alone.
+    /// </summary>
+    private static string ValidateScriptPath(string serviceName, string scriptPath, string appDirectory)
+    {
+        if (CheckoutRelativePath.IsAbsolute(scriptPath))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': javascript scriptPath '{scriptPath}' is an absolute path, but it " +
+                "must be relative to appDirectory — it names a file in the service's own checkout, not one " +
+                "sitting elsewhere on the developer's machine.");
+        }
+
+        if (CheckoutRelativePath.UnusableSegment(scriptPath) is { } unusable)
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': javascript scriptPath '{scriptPath}' has a path segment " +
+                $"'{unusable}' — {CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy}");
+        }
+
+        if (CheckoutRelativePath.EscapesRoot($"{appDirectory}/{scriptPath}"))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': javascript scriptPath '{scriptPath}', read relative to appDirectory " +
+                $"'{appDirectory}', points outside the service's checkout. It must be a relative path within " +
+                "the repository.");
+        }
+
+        return CheckoutRelativePath.NormalizeSeparators(scriptPath);
     }
 
     /// <summary>
@@ -334,7 +367,8 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
             serviceName, "packageManager", RequireNonBlank(serviceName, "packageManager", options.PackageManager),
             JavaScriptPackageManagers.All, null);
 
-        var appDirectory = RequireNonBlank(serviceName, "appDirectory", options.AppDirectory) ?? ".";
+        var appDirectory = ValidateAppDirectory(
+            serviceName, RequireNonBlank(serviceName, "appDirectory", options.AppDirectory) ?? ".");
         var runScript = RequireNonBlank(serviceName, "runScript", options.RunScript);
         var scriptPath = RequireNonBlank(serviceName, "scriptPath", options.ScriptPath);
         var portEnv = RequireNonBlank(serviceName, "portEnv", options.PortEnv);
@@ -347,6 +381,8 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
                     $"Service '{serviceName}': javascript appType '{appType}' runs a script file directly, so " +
                     "'scriptPath' is required (e.g. scriptPath: server.js).");
             }
+
+            scriptPath = ValidateScriptPath(serviceName, scriptPath, appDirectory);
         }
         else if (scriptPath is not null)
         {
