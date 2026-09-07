@@ -12,6 +12,11 @@ failures for them — finding 3).
 Revised again 2026-09-07 with answers to all six open questions, and a note on #134's own 2026-09-05
 follow-up comment (posted after this draft) proposing repository as a first-class handle — kept out
 of this design; see open question 3's decision.
+Stage 0's ATS probe is measured; see
+[the stage-0 findings](2026-09-07-code-catalog-stage0-ats-probe-findings.md). Four of finding 7's
+five unmeasured shapes cross as specified; the fifth (`addService` on two receivers) collides as
+warned, and the fallback named there (`MethodName`) does not fix it — an explicit capability `id`
+does. Stage 1's plan must give the catalog's `AddService` an explicit id distinct from `addService`.
 **Resolves:** GitHub issue #134 (the service catalog should be authorable in the AppHost's own
 language, so `servicesources.yaml` becomes optional rather than required).
 **Closes:** #73 (split the yaml DTO from the catalog domain model) — decided in open question 4; see
