@@ -181,8 +181,8 @@ The case for splitting anyway rests on two things that are true regardless of fi
   `ServiceMetadata`.
 
 The case against is a measured 12 source files and 19 test files changed for no behaviour change.
-**This is a genuine cost/benefit call and it belongs to the reviewer, not to this document** — see
-open question 4. If the answer is "not now", the fallback is `[YamlIgnore] Origin` on
+**This was a genuine cost/benefit call, decided in Reviewer decisions, question 4: split now.** Had
+the answer been "not now", the fallback would have been `[YamlIgnore] Origin` on
 `ServiceMetadata` plus the new container, which reaches every acceptance criterion, leaves #73 open,
 and cuts the largest single task out of stage 1.
 
@@ -330,9 +330,10 @@ since the catalog is committed* — lands harder on a code catalog than on yaml,
 catalog is unambiguously committed and unambiguously the AppHost's own statement. `defaultSource` is
 one field on the very type this design introduces.
 
-**Recommendation: pull #158 into this work as `.WithDefaultSource("local")`**, or state plainly in
-the README that a code catalog still needs `servicesources.local.json`. Doing neither leaves the
-issue's headline reading as a promise the code does not keep. This is open question 1.
+**Decided (Reviewer decisions, question 1): document the requirement; leave #158 alone.** The
+README must state plainly that a code catalog still needs `servicesources.local.json` — skipping
+that would let the issue's headline read as a promise the code does not keep. See Reviewer
+decisions for why #158 stays a separate, sequenced issue rather than being pulled in.
 
 ### 10. There is no public-API baseline, and the public surface is 11 types
 
