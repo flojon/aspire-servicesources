@@ -64,6 +64,20 @@ public class GitCliCredentialLadderTests
     }
 
     [Fact]
+    public void HostNotConfigured_NoWastedRetryIsAttempted()
+    {
+        using var server = StubGitServer.Accepting("git", EnvironmentToken);
+
+        // Without SERVICESOURCES_GIT_HOST the environment rung was never going to answer on a
+        // retry either — the same env vars decide both attempts — so a second, doomed ref
+        // advertisement request is skipped rather than repeating the first attempt's failure at
+        // the cost of a full extra network round trip.
+        Clone(server, token: EnvironmentToken, host: null);
+
+        Assert.Equal(1, server.Requests.Count(request => request == "GET /repo.git/info/refs"));
+    }
+
+    [Fact]
     public void AConfiguredHelperAnswers_ItsCredentialIsUsedAndTheEnvironmentTokenIsNot()
     {
         using var server = StubGitServer.Accepting(HelperUsername, HelperPassword);

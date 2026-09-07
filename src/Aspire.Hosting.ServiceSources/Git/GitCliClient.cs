@@ -129,7 +129,8 @@ internal sealed partial class GitCliClient(
 
         // "--" so a repository URL or a destination that begins with '-' is read as an argument
         // rather than as an option.
-        RunRemoteCommand(["clone", .. progressOption, "--", repositoryUrl, destinationPath], progress);
+        RunRemoteCommand(
+            ["clone", .. progressOption, "--", repositoryUrl, destinationPath], GitUrl.Parse(repositoryUrl).Host, progress);
     }
 
     public void Checkout(string repositoryPath, string reference)
@@ -174,12 +175,13 @@ internal sealed partial class GitCliClient(
         // A checkout with no origin — one made from a local path with the remote since removed, or
         // an unrelated repository the developer put in place — has nothing to fetch from. Probed
         // rather than inferred from a failed fetch, so a genuine fetch failure still surfaces.
-        if (GetOriginUrl(repositoryPath) is null)
+        var originUrl = GetOriginUrl(repositoryPath);
+        if (originUrl is null)
         {
             return;
         }
 
-        RunRemoteCommand(["-C", repositoryPath, "fetch", "origin"]);
+        RunRemoteCommand(["-C", repositoryPath, "fetch", "origin"], GitUrl.Parse(originUrl).Host);
     }
 
     public bool HasUncommittedChanges(string repositoryPath) =>
@@ -306,7 +308,16 @@ internal sealed partial class GitCliClient(
     /// whole command fails without the environment token ever being offered. Re-running with the
     /// configured helpers cleared gives the token its turn.
     /// </remarks>
-    private void RunRemoteCommand(IReadOnlyList<string> arguments, IGitProgressSink? progress = null)
+    /// <param name="targetHost">
+    /// The host (in <see cref="GitUrl.Host"/> form) this operation talks to, or <see
+    /// langword="null"/> for a local filesystem path with no host at all. Decides whether the
+    /// retry below is worth attempting: the environment-token rung answers only for
+    /// <c>SERVICESOURCES_GIT_HOST</c>, which doesn't change between the first attempt and the
+    /// retry, so a retry the token was never going to be offered on would only repeat the first
+    /// attempt's failure at the cost of a second full network round trip.
+    /// </param>
+    private void RunRemoteCommand(
+        IReadOnlyList<string> arguments, string? targetHost, IGitProgressSink? progress = null)
     {
         var result = GitCommand.Run([.. CredentialLadderOptions(), .. arguments], environmentOverrides, progress);
         if (result.Succeeded)
@@ -314,7 +325,7 @@ internal sealed partial class GitCliClient(
             return;
         }
 
-        if (HasEnvironmentToken && LooksLikeAuthFailure(result.StandardError))
+        if (HasEnvironmentToken && EnvironmentTokenAppliesTo(targetHost) && LooksLikeAuthFailure(result.StandardError))
         {
             // Safe to simply re-run: a failed `git clone` removes the directory it created, and a
             // failed `git fetch` leaves the checkout as it was. The second attempt reports to the
@@ -352,6 +363,22 @@ internal sealed partial class GitCliClient(
             && environmentOverrides.TryGetValue(TokenEnvironmentVariable, out var overridden)
                 ? overridden
                 : Environment.GetEnvironmentVariable(TokenEnvironmentVariable));
+
+    /// <summary>
+    /// Whether the environment-token rung would answer for <paramref name="targetHost"/> — the
+    /// same comparison <see cref="EnvironmentCredentialHelper"/> makes at runtime, read here only
+    /// to decide whether a retry is worth attempting at all. Read from the same place git reads
+    /// it, for the same reason <see cref="HasEnvironmentToken"/> is.
+    /// </summary>
+    private bool EnvironmentTokenAppliesTo(string? targetHost) =>
+        targetHost is not null
+        && string.Equals(targetHost, ConfiguredHost, StringComparison.OrdinalIgnoreCase);
+
+    private string? ConfiguredHost =>
+        environmentOverrides is not null
+        && environmentOverrides.TryGetValue(HostEnvironmentVariable, out var overridden)
+            ? overridden
+            : Environment.GetEnvironmentVariable(HostEnvironmentVariable);
 
     /// <summary>
     /// Appends the environment-variable helper after whatever the developer has configured, so it

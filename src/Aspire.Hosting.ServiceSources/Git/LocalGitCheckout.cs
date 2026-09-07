@@ -653,8 +653,8 @@ internal static class LocalGitCheckout
               "carried only the machine's integrated credential, which a token-authenticated host " +
               "cannot use. `git credential fill` returned nothing for this host: either " +
               "SERVICESOURCES_GIT_TOKEN is unset or empty, or SERVICESOURCES_GIT_HOST doesn't name " +
-              "this host (it is required, and must match exactly — host and, if the URL has one, " +
-              "port). Configure a git credential helper (`git credential fill` must resolve " +
+              "this host (it is required, matched case-insensitively — host and, if the URL has " +
+              "one, port). Configure a git credential helper (`git credential fill` must resolve " +
               "credentials for this host in the environment the AppHost runs in, which is not " +
               "necessarily your shell) or set the SERVICESOURCES_GIT_USERNAME/" +
               "SERVICESOURCES_GIT_TOKEN/SERVICESOURCES_GIT_HOST environment variables."
