@@ -254,19 +254,55 @@ public class ConnectionStringTemplateTests
     }
 
     /// <summary>
-    /// The boundary a genuinely unterminated placeholder's message stops at is not only <c>;</c> and
-    /// whitespace — any character that could not appear in a real placeholder bounds it, so a
-    /// dialect that separates fields with <c>&amp;</c> or <c>,</c> does not leak either.
+    /// The boundary a genuinely unterminated placeholder's message stops at is not a list of
+    /// separators — it is an allowlist of what a keyword, name or key can hold, so a dialect that
+    /// separates fields with <c>&amp;</c>, <c>,</c>, or the <c>@</c>/<c>/</c>/<c>?</c> a URI uses
+    /// does not leak either.
     /// </summary>
     [Theory]
     [InlineData("Host=db;Port=${port:main&Database=orders&Password=hunter2", "${port:main")]
     [InlineData("Host=db;Port=${port:main,Database=orders,Password=hunter2", "${port:main")]
+    [InlineData("postgresql://${port:main@myhost/mydb?password=hunter2", "${port:main")]
+    [InlineData("postgresql://${port:main/mydb?password=hunter2", "${port:main")]
     public void Parse_UnterminatedPlaceholder_QuotesOnlyUpToAnyForeignCharacter(string template, string quoted)
     {
         var message = Rejects(template).Message;
 
         Assert.Contains($"'{quoted}'", message);
         Assert.DoesNotContain("hunter2", message);
+    }
+
+    /// <summary>
+    /// The same stray-brace shape as <see cref="Parse_UnterminatedPlaceholder_IsNotClosedByAStrayLaterBrace"/>,
+    /// but for a URI-style template with no <c>;</c> anywhere — bounding the search on <c>;</c> alone
+    /// would miss this, since nothing there stops the search from running past the '@' and '/' into
+    /// the stray ODBC field. Brace nesting is what has to stop it instead.
+    /// </summary>
+    [Fact]
+    public void Parse_UnterminatedPlaceholder_IsNotClosedByAStrayLaterBraceInAUriTemplate()
+    {
+        var message = Rejects("Server=${port:main@host/db?password=hunter2?Driver={SQL Server}").Message;
+
+        Assert.Contains("'${port:main'", message);
+        Assert.Contains("no closing '}'", message);
+        Assert.DoesNotContain("hunter2", message);
+    }
+
+    /// <summary>
+    /// An ordinary ODBC <c>Driver={...}</c> field elsewhere in the template is not mistaken for a
+    /// well-formed placeholder's own close either — the placeholder here really is terminated, by
+    /// its own, immediately-following <c>'}'</c>, and the unrelated field after it is untouched.
+    /// </summary>
+    [Fact]
+    public void Parse_WellFormedPlaceholder_IsUnaffectedByAnOdbcFieldLater()
+    {
+        var segments = Parse("Host=db;Port=${port};Driver={SQL Server}").Segments;
+
+        Assert.Collection(
+            segments,
+            segment => Assert.Equal("Host=db;Port=", Assert.IsType<ConnectionStringTemplate.Literal>(segment).Text),
+            segment => Assert.Null(Assert.IsType<ConnectionStringTemplate.Port>(segment).Name),
+            segment => Assert.Equal(";Driver={SQL Server}", Assert.IsType<ConnectionStringTemplate.Literal>(segment).Text));
     }
 
     [Theory]
