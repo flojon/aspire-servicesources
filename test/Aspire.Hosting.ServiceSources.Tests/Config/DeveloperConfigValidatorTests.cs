@@ -829,6 +829,37 @@ public class DeveloperConfigValidatorTests
     }
 
     /// <remarks>
+    /// #262: the same value-or-map field reached through the *other* check ahead of it —
+    /// <c>ValueAndNamedEntries</c>, which fires when configuration merges a value over one layer's
+    /// block of named ports. This is nearly always two layers rather than one file (see that
+    /// method's own remarks), so it is reproduced the same way here: the JSON file writes the named
+    /// block, and an in-memory layer added after it writes the value, exactly as an environment
+    /// variable would.
+    /// </remarks>
+    [Fact]
+    public void Validate_ValueAndNamedPortsBothPresent_RedactsAConnectionStringPastedAsTheValue()
+    {
+        var dir = CreateAppHostDirectory("""
+            { "backingServices": { "orders-db": {
+                "source": "kubernetes",
+                "kubernetes": { "port": { "amqp": 5672 } } } } }
+            """);
+        var builder = TestHelpers.CreateBuilder(dir);
+
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ServiceSources:BackingServices:orders-db:kubernetes:port"] = "Host=db;Password=hunter2",
+        });
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.BackingServicesFor(builder));
+
+        Assert.Contains("carries both the value", ex.Message);
+        Assert.Contains("Host=db;Password=***", ex.Message);
+        Assert.DoesNotContain("hunter2", ex.Message);
+    }
+
+    /// <remarks>
     /// #262: redaction is gated on the value's own shape, not on which message is quoting it, so an
     /// ordinary typo that carries no <c>key=value</c> pair keeps printing in full — a git ref, a path,
     /// the prepare-step argument the issue itself names as worth showing whole.

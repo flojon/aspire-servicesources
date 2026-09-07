@@ -701,4 +701,27 @@ public class ConnectionStringRedactionTests
     [InlineData("redis://user:hunter2@db.internal:6379", false)]
     public void LooksLikeConnectionString_AsksWhetherAKeyValuePairIsPresent(string value, bool expected)
         => Assert.Equal(expected, ConnectionStringRedaction.LooksLikeConnectionString(value));
+
+    /// <summary>
+    /// A credential-shaped pair behind punctuation <see cref="FindPairs"/> does not recognise as a
+    /// separator is still caught, because <see cref="Redact"/>'s own keyword backstop does not ask
+    /// what came before the pair.
+    /// </summary>
+    /// <remarks>
+    /// #262: an earlier draft of this gate asked only <see cref="FindPairs"/>, which only lets a
+    /// pair begin right after <c>;</c>, <c>&amp;</c>, <c>?</c>, <c>,</c> or the start of the string.
+    /// <c>db:Password=hunter2</c> has a colon in front of the pair — none of those — so that draft
+    /// found no pair at all and let the password print in full, even though calling
+    /// <see cref="Redact"/> directly (bypassing the gate) correctly masks it via the keyword
+    /// backstop. The gate has to agree with what <see cref="Redact"/> would actually do, not with a
+    /// narrower question of its own.
+    /// </remarks>
+    [Theory]
+    [InlineData("db:Password=hunter2")]
+    [InlineData("redis://host:6379/db:password=hunter2")]
+    public void LooksLikeConnectionString_CatchesAKeywordBehindAnUnrecognisedSeparator(string value)
+    {
+        Assert.True(ConnectionStringRedaction.LooksLikeConnectionString(value));
+        Assert.DoesNotContain("hunter2", ConnectionStringRedaction.Redact(value));
+    }
 }

@@ -200,13 +200,45 @@ internal static class ConnectionStringRedaction
     /// masks whole anything with no recognised shape, so running it unconditionally would replace
     /// those with a useless <c>***</c> for no credential ever at risk in them.
     /// <para>
-    /// A single <c>key=value</c> pair is enough: it is the shape every dialect this type covers is
-    /// built from, and a value that has none of them is not addressed by this type regardless of
-    /// what else it fails to be.
+    /// Asks the same two questions <see cref="Redact"/> itself asks, because a value it would
+    /// change is exactly a value worth calling it for. A <c>key=value</c> pair is one of them, and
+    /// is enough on its own — it is the shape every dialect this type covers is built from. But
+    /// <see cref="FindPairs"/> only lets a pair begin after a separator this type recognises
+    /// (<c>;</c>, <c>&amp;</c>, <c>?</c>, <c>,</c>, or the start of the string), so
+    /// <c>db:Password=hunter2</c> — a colon in front, which is none of those — finds no pair at
+    /// all even though it plainly carries one. <see cref="KnownCredentialKeywords"/> is what
+    /// catches that: it is <see cref="Redact"/>'s own backstop, run without regard to separators,
+    /// and asking it here as well as asking for a pair is what keeps this gate from ever answering
+    /// "no" to a value <see cref="Redact"/> would answer "yes" to.
     /// </para>
     /// </remarks>
     public static bool LooksLikeConnectionString(string value) =>
-        FindPairs(value, whitespaceBeginsAPair: false).Count > 0;
+        FindPairs(value, whitespaceBeginsAPair: false).Count > 0
+        || MatchesKnownCredentialKeyword(value);
+
+    /// <summary>
+    /// Whether <see cref="KnownCredentialKeywords"/> finds a match, treating a timeout as a match
+    /// rather than a miss.
+    /// </summary>
+    /// <remarks>
+    /// A gate answering "no" is a promise that nothing here needs hiding, and a regex that gave up
+    /// partway through has proven no such thing — the pathological input <see cref="Redact"/>
+    /// itself falls back to <see cref="Unscannable"/> for is not evidence of safety, it is evidence
+    /// the search never finished. Answering "yes" costs nothing here: it only sends the value on to
+    /// <see cref="Redact"/>, which meets the same input with the same timeout and the same
+    /// fail-closed answer.
+    /// </remarks>
+    private static bool MatchesKnownCredentialKeyword(string value)
+    {
+        try
+        {
+            return KnownCredentialKeywords.IsMatch(value);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return true;
+        }
+    }
 
     /// <summary>
     /// <paramref name="connectionString"/> with everything not recognised as safe to print replaced

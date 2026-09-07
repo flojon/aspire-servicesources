@@ -459,7 +459,7 @@ internal static class DeveloperConfigValidator
             : $"Configuration merges layers per key, so this is usually one layer writing a {noun} number over "
               + "another layer's block of names.";
 
-        return $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block carries both the value {Escaped(field.Value)} and named "
+        return $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block carries both the value {EscapedFieldValue(field.Value)} and named "
             + $"{noun}s ({names}). It takes one or the other, and a value is read first — so the names would be "
             + $"dropped, and a value that is not a {noun} would take the whole entry with it. {cause}"
             + ReachEachByName(noun)
@@ -484,7 +484,7 @@ internal static class DeveloperConfigValidator
     /// </summary>
     private static string NotAValueOrMap(IConfigurationSection field, string block, string noun) =>
         $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block takes a {noun} number or a block of named {noun}s, "
-        + $"but is set to {EscapedUnbindableValue(field.Value)}."
+        + $"but is set to {EscapedFieldValue(field.Value)}."
         + SetAt(field);
 
     /// <summary>
@@ -526,7 +526,7 @@ internal static class DeveloperConfigValidator
     private static string MapEntryNotBindable(
         IConfigurationSection field, IConfigurationSection entry, string block, string noun, Type valueType) =>
         $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block names a {noun} {Escaped(entry.Key)}, but its value "
-        + $"{EscapedUnbindableValue(entry.Value)} is not a {Described(valueType)}. A named {noun} whose value cannot be read "
+        + $"{EscapedFieldValue(entry.Value)} is not a {Described(valueType)}. A named {noun} whose value cannot be read "
         + "is dropped rather than reported, so one fewer would be forwarded than the block names."
         + (entry.Value!.Length == 0
             ? " An empty value unsets a whole field; there is no spelling that takes one name out of a block."
@@ -999,7 +999,7 @@ internal static class DeveloperConfigValidator
     private static string NotBindable(
         IConfigurationSection field, string block, Type type, string value) =>
         $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block takes a {Described(type)}, "
-        + $"but is set to {EscapedUnbindableValue(value)}."
+        + $"but is set to {EscapedFieldValue(value)}."
         + (value.Length == 0
             ? " An empty value leaves a field unset where the field can be unset; this one cannot, "
               + "so it needs a value."
@@ -1214,19 +1214,29 @@ internal static class DeveloperConfigValidator
     private static string Escaped(string? value) => ConfiguredValue.Escaped(value);
 
     /// <summary>
-    /// A value that failed to bind, quoted the way <see cref="Escaped"/> quotes any other value,
-    /// except that a value shaped like a connection string is redacted first.
+    /// A value written where a value-or-map field goes — <c>kubernetes.port</c> is the one this
+    /// package ships — quoted the way <see cref="Escaped"/> quotes any other value, except that a
+    /// value shaped like a connection string is redacted first.
     /// </summary>
     /// <remarks>
-    /// Reserved for the messages that report a value nothing could bind to the field's type: pasting
-    /// a connection string where a port number or a block of named ports goes is an easy slip — the
-    /// two sit one above the other in a <c>kubernetes</c> block — and every one of these messages used
-    /// to quote whatever it was handed back in full, password included. Gated on
-    /// <see cref="ConnectionStringRedaction.LooksLikeConnectionString"/> rather than applied
-    /// unconditionally, so the many values that fail to bind for an ordinary reason — a git ref, a
-    /// path, a hexadecimal port — keep printing exactly as written.
+    /// <c>port</c> sits directly above <c>connectionString</c> in a <c>kubernetes</c> block, so a
+    /// connection string pasted into the wrong one is an easy slip, and every message that quotes
+    /// such a field's own value back — whether the value failed to bind, or sits beside a block of
+    /// named entries it should not — used to do so in full, credentials included. Not extended to
+    /// every value this file ever echoes: a field with no adjacent secret-shaped sibling has no
+    /// reason to receive a connection string by mistake, and gating its message anyway would cost
+    /// real messages their usefulness for no risk ever present — <see cref="ListExpected"/>'s own
+    /// value is routinely a shell command with a leading <c>VAR=value</c>, which this gate would
+    /// otherwise mistake for a secret.
+    /// <para>
+    /// Gated on <see cref="ConnectionStringRedaction.LooksLikeConnectionString"/> rather than
+    /// applied unconditionally, so the many values that are wrong for an ordinary reason — a git
+    /// ref, a path, a hexadecimal port — keep printing exactly as written. A value that is
+    /// entirely whitespace never reaches here having anything worth redacting: <see cref="Blank"/>
+    /// quotes it directly, since whitespace alone cannot carry a credential.
+    /// </para>
     /// </remarks>
-    private static string EscapedUnbindableValue(string? value) =>
+    private static string EscapedFieldValue(string? value) =>
         Escaped(value is not null && ConnectionStringRedaction.LooksLikeConnectionString(value)
             ? ConnectionStringRedaction.Redact(value)
             : value);
