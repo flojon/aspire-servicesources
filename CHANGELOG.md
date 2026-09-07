@@ -311,10 +311,13 @@ nothing will fail to build to warn you.
   under `~/.aspire/logs/` rather than the dashboard — **and a capped copy, its first and last lines
   with anything dropped between them marked as elided, also lands in the service's resource log**
   once the dashboard exists ([#214]), so the record still ends up where the service is even on a
-  run the console alone would have hidden it from. **Ctrl-C during that run reaches the command's
-  own process tree**, so interrupting a long import ends it rather than leaving it, and its
-  children, running with no AppHost to belong to. There is no timeout: a legitimate bootstrap can
-  take an hour.
+  run the console alone would have hidden it from. **Ctrl-C during a cold checkout's bootstrap
+  reaches the command's own process tree** on the run that creates it under
+  `UseDeferredCheckout()`, so interrupting a long import there ends it rather than leaving it, and
+  its children, running with no AppHost to belong to — composition has no token to hand the eager
+  path, the one most AppHosts take by default, so Ctrl-C during every other run's bootstrap leaves
+  the command orphaned instead ([#279]). There is no timeout: a legitimate bootstrap can take an
+  hour.
 
   **`aspire publish` does not run it.** Publish composes the model, writes the manifest and exits,
   and a bootstrap produces what a service needs in order to *run* — so nothing in a manifest depends
@@ -761,6 +764,15 @@ nothing will fail to build to warn you.
   same way `GitCommand.Deliver` already redacts git's own progress lines before they reach the
   same kind of sink — which also covers the tail a failed step's exception message quotes, since
   it is built from the same already-redacted lines.
+
+- **The connection string a `kubernetes` backing service quotes back when it has no port to
+  address is now wrapped in apostrophes, with an embedded apostrophe doubled** ([#263]). It used
+  to sit inside double quotes with nothing escaping `"`, so a connection string legitimately
+  containing one — an ODBC `Data Source="C:\path\to.mdb"`, say — closed the message's own quoting
+  early. Nothing was hidden or corrupted; the value still read in full, just visually split.
+  Apostrophes alone would only have moved the same problem onto a value containing one instead
+  (`O'Brien`), so an embedded apostrophe is now doubled — the connection-string convention for
+  escaping the quote delimiter itself.
 
 ### Documentation
 
@@ -1524,8 +1536,10 @@ Targets `net10.0`.
 [#235]: https://github.com/flojon/aspire-servicesources/issues/235
 [#236]: https://github.com/flojon/aspire-servicesources/issues/236
 [#241]: https://github.com/flojon/aspire-servicesources/issues/241
+[#263]: https://github.com/flojon/aspire-servicesources/issues/263
 [#264]: https://github.com/flojon/aspire-servicesources/issues/264
 [#270]: https://github.com/flojon/aspire-servicesources/issues/270
+[#279]: https://github.com/flojon/aspire-servicesources/issues/279
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
