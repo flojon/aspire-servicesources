@@ -109,6 +109,23 @@ nothing will fail to build to warn you.
   arrived transitively and neither remedy is yours to apply, `ServiceSourcesSkipGuestLanguageFloorCheck=true`
   turns the build-time check off for that project and leaves the run-time report standing.
 
+- **`SERVICESOURCES_GIT_TOKEN` is now scoped to one host, and requires
+  `SERVICESOURCES_GIT_HOST` to be set at all** ([#223]). The environment-token credential helper
+  used to answer every `git credential fill` request it was consulted for, regardless of which
+  host git was asking about — a catalog listing services from more than one host would offer this
+  token to all of them, not just the one it was meant for. It now reads the host git asks about
+  and only answers when it matches `SERVICESOURCES_GIT_HOST` (host, and port if the URL has one —
+  the same `host:port` shape `git credential` itself uses, case-insensitively).
+
+  **This breaks a deployment that relies on `SERVICESOURCES_GIT_TOKEN` alone.** Without
+  `SERVICESOURCES_GIT_HOST` the helper now answers nothing, where it previously answered
+  everything — the safe default, not the compatible one. To migrate, set
+  `SERVICESOURCES_GIT_HOST` to the host (and port) the token is for, e.g.
+  `git.internal.example` or `git.internal.example:8443`. `SERVICESOURCES_GIT_USERNAME` is
+  unaffected; nothing changes for a repository resolved through your own git credential helper
+  (Git Credential Manager, `osxkeychain`, `libsecret`, ...) rather than this environment-variable
+  rung.
+
 ### Added
 
 - **A backing service can be reached in a dev cluster: `source: "kubernetes"`** ([#144]). The
@@ -1380,6 +1397,7 @@ Targets `net10.0`.
 [#214]: https://github.com/flojon/aspire-servicesources/issues/214
 [#220]: https://github.com/flojon/aspire-servicesources/issues/220
 [#222]: https://github.com/flojon/aspire-servicesources/issues/222
+[#223]: https://github.com/flojon/aspire-servicesources/issues/223
 [#224]: https://github.com/flojon/aspire-servicesources/issues/224
 [#233]: https://github.com/flojon/aspire-servicesources/issues/233
 [#236]: https://github.com/flojon/aspire-servicesources/issues/236

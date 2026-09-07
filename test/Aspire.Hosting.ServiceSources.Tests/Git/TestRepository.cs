@@ -118,6 +118,7 @@ internal sealed class TestRepository
             ["SSH_ASKPASS"] = null,
             ["SERVICESOURCES_GIT_USERNAME"] = null,
             ["SERVICESOURCES_GIT_TOKEN"] = null,
+            ["SERVICESOURCES_GIT_HOST"] = null,
         };
     }
 }

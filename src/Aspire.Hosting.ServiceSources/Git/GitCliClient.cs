@@ -32,8 +32,16 @@ internal sealed partial class GitCliClient(
     private const string TokenEnvironmentVariable = "SERVICESOURCES_GIT_TOKEN";
 
     /// <summary>
+    /// The host (host:port, in the form <see cref="GitUrl.Host"/> and <c>git credential</c> both
+    /// use) that <see cref="TokenEnvironmentVariable"/> may be offered to. Required: unset means
+    /// the token is offered to no host at all.
+    /// </summary>
+    private const string HostEnvironmentVariable = "SERVICESOURCES_GIT_HOST";
+
+    /// <summary>
     /// A <c>credential.helper</c> that answers from
-    /// <c>SERVICESOURCES_GIT_USERNAME</c>/<c>SERVICESOURCES_GIT_TOKEN</c>.
+    /// <c>SERVICESOURCES_GIT_USERNAME</c>/<c>SERVICESOURCES_GIT_TOKEN</c>, scoped to
+    /// <c>SERVICESOURCES_GIT_HOST</c>.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -51,11 +59,29 @@ internal sealed partial class GitCliClient(
     /// Silent unless it has a token to give, so git falls through to whatever comes next instead of
     /// answering the challenge with an empty password.
     /// </para>
+    /// <para>
+    /// git writes the request's attributes (<c>protocol=</c>, <c>host=</c>, ...) onto the helper's
+    /// stdin for a <c>get</c>; this reads them to find <c>host=</c> and compares it against
+    /// <c>SERVICESOURCES_GIT_HOST</c>, case-insensitively — hostnames aren't case-sensitive, and
+    /// neither side of the comparison is normalized before this (<see cref="GitUrl.Host"/> keeps
+    /// whatever case the repository URL was written in). A helper that skipped this would offer
+    /// the token to whatever host git happened to be talking to at the time, which defeats the
+    /// point of naming a host at all: a catalog spanning more than one host would leak the token
+    /// to every one of them, not just the one it belongs to.
+    /// </para>
     /// </remarks>
     private const string EnvironmentCredentialHelper =
         "!f() { " +
         "test \"$1\" = get || exit 0; " +
         "test -n \"$" + TokenEnvironmentVariable + "\" || exit 0; " +
+        "test -n \"$" + HostEnvironmentVariable + "\" || exit 0; " +
+        "host=; " +
+        "while IFS= read -r line; do " +
+        "case \"$line\" in host=*) host=${line#host=} ;; esac; " +
+        "done; " +
+        "host=$(printf '%s' \"$host\" | tr A-Z a-z); " +
+        "want=$(printf '%s' \"$" + HostEnvironmentVariable + "\" | tr A-Z a-z); " +
+        "test \"$host\" = \"$want\" || exit 0; " +
         "echo \"username=${" + UsernameEnvironmentVariable + ":-git}\"; " +
         "echo \"password=$" + TokenEnvironmentVariable + "\"; " +
         "}; f";

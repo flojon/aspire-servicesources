@@ -1056,12 +1056,15 @@ Clone and fetch for a managed checkout (no `path` override) authenticate the sam
    cached PAT, a `.netrc`-backed helper — is consulted exactly as it is for a `git clone` you type
    yourself. For an SSH remote that means your SSH agent and `~/.ssh/config`. Nothing to configure
    here: if `git clone <repository>` works in the environment the AppHost runs in, so does this.
-2. **`SERVICESOURCES_GIT_USERNAME`/`SERVICESOURCES_GIT_TOKEN` environment variables**, if the
-   helpers above yield nothing (e.g. no helper configured) — or if what they yielded was refused,
-   see below. `SERVICESOURCES_GIT_TOKEN` alone is enough for hosts that accept any username
-   alongside a personal access token (GitHub, GitLab, Azure DevOps); set
-   `SERVICESOURCES_GIT_USERNAME` too if your host requires a specific one. Supplied to git as a
-   credential helper of last resort, so it never overrides a helper you configured yourself, and
+2. **`SERVICESOURCES_GIT_USERNAME`/`SERVICESOURCES_GIT_TOKEN`/`SERVICESOURCES_GIT_HOST`
+   environment variables**, if the helpers above yield nothing (e.g. no helper configured) — or if
+   what they yielded was refused, see below. `SERVICESOURCES_GIT_TOKEN` alone is enough for hosts
+   that accept any username alongside a personal access token (GitHub, GitLab, Azure DevOps); set
+   `SERVICESOURCES_GIT_USERNAME` too if your host requires a specific one. **`SERVICESOURCES_GIT_HOST`
+   is required** — the host (and port, if the URL has one, e.g. `git.internal.example:8443`) the
+   token is for. Without it the token is offered to no host at all, since a catalog can list
+   services from more than one host and this token belongs to only one of them. Supplied to git as
+   a credential helper of last resort, so it never overrides a helper you configured yourself, and
    the token is read from the environment rather than passed on a command line where other users
    on the machine could read it.
 

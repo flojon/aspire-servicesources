@@ -38,6 +38,32 @@ public class GitCliCredentialLadderTests
     }
 
     [Fact]
+    public void HostNotConfigured_TheEnvironmentTokenIsWithheld()
+    {
+        using var server = StubGitServer.Accepting("git", EnvironmentToken);
+
+        // A token configured with no host at all is offered to nothing — the safe default. Without
+        // SERVICESOURCES_GIT_HOST this clone has no credential to try, so it never gets past the
+        // unauthenticated request.
+        Clone(server, token: EnvironmentToken, host: null);
+
+        Assert.Empty(OfferedCredentials(server));
+    }
+
+    [Fact]
+    public void HostConfiguredForADifferentHost_TheEnvironmentTokenIsWithheld()
+    {
+        using var server = StubGitServer.Accepting("git", EnvironmentToken);
+
+        // The token is scoped to a host this clone never talks to, so it must not be offered here —
+        // this is the leak #223 exists to close: a catalog spanning more than one host must not
+        // hand this host's clone a token meant for another.
+        Clone(server, token: EnvironmentToken, host: "git.internal.example:9999");
+
+        Assert.Empty(OfferedCredentials(server));
+    }
+
+    [Fact]
     public void AConfiguredHelperAnswers_ItsCredentialIsUsedAndTheEnvironmentTokenIsNot()
     {
         using var server = StubGitServer.Accepting(HelperUsername, HelperPassword);
@@ -178,6 +204,15 @@ public class GitCliCredentialLadderTests
             .Distinct();
 
     /// <summary>
+    /// Sentinel for the <c>host</c> parameter of <see cref="Environment"/>/<see cref="Clone"/>:
+    /// derive <c>SERVICESOURCES_GIT_HOST</c> from the stub server's own authority, so a test that
+    /// doesn't care about host-scoping still exercises a token the ladder is allowed to offer.
+    /// Distinct from <see langword="null"/>, which means "leave it unset" — the case a test asks
+    /// for explicitly to prove the token is withheld without it.
+    /// </summary>
+    private const string MatchingHost = "<matching-host>";
+
+    /// <summary>
     /// Clones from the stub, swallowing the failure. No stub serves a real repository, so a clone
     /// always ends in an error whatever the credentials — only the handshake is under test.
     /// </summary>
@@ -186,11 +221,12 @@ public class GitCliCredentialLadderTests
         string? token = null,
         string? username = null,
         bool configureHelper = false,
-        IGitProgressSink? progress = null)
+        IGitProgressSink? progress = null,
+        string? host = MatchingHost)
     {
         try
         {
-            new GitCliClient(Environment(token, username, configureHelper, server))
+            new GitCliClient(Environment(token, username, configureHelper, server, host))
                 .Clone(server.RepositoryUrl, TestRepository.EmptyDestination(), progress);
         }
         catch (Exception ex) when (ex is GitAuthenticationFailedException or GitCommandFailedException)
@@ -209,7 +245,11 @@ public class GitCliCredentialLadderTests
     /// carrying a <c>credential.helper</c>, and optionally the environment-variable credentials.
     /// </summary>
     private static Dictionary<string, string?> Environment(
-        string? token = null, string? username = null, bool configureHelper = false, StubGitServer? server = null)
+        string? token = null,
+        string? username = null,
+        bool configureHelper = false,
+        StubGitServer? server = null,
+        string? host = MatchingHost)
     {
         var environment = TestRepository.IsolatedEnvironment();
 
@@ -221,6 +261,18 @@ public class GitCliCredentialLadderTests
         if (username is not null)
         {
             environment["SERVICESOURCES_GIT_USERNAME"] = username;
+        }
+
+        if (host == MatchingHost)
+        {
+            if (server is not null)
+            {
+                environment["SERVICESOURCES_GIT_HOST"] = new Uri(server.RepositoryUrl).Authority;
+            }
+        }
+        else if (host is not null)
+        {
+            environment["SERVICESOURCES_GIT_HOST"] = host;
         }
 
         if (configureHelper)

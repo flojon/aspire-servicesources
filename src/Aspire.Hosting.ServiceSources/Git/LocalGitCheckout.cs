@@ -651,15 +651,17 @@ internal static class LocalGitCheckout
             // helper is where the gap is rather than the credential's contents.
             ? $"{failureDescription} — no git credentials were resolved for this host, so the request " +
               "carried only the machine's integrated credential, which a token-authenticated host " +
-              "cannot use. `git credential fill` returned nothing for this host and " +
-              "SERVICESOURCES_GIT_TOKEN is unset or empty. Configure a git credential helper (`git " +
-              "credential fill` must resolve credentials for this host in the environment the " +
-              "AppHost runs in, which is not necessarily your shell) or set the " +
-              "SERVICESOURCES_GIT_USERNAME/SERVICESOURCES_GIT_TOKEN environment variables."
+              "cannot use. `git credential fill` returned nothing for this host: either " +
+              "SERVICESOURCES_GIT_TOKEN is unset or empty, or SERVICESOURCES_GIT_HOST doesn't name " +
+              "this host (it is required, and must match exactly — host and, if the URL has one, " +
+              "port). Configure a git credential helper (`git credential fill` must resolve " +
+              "credentials for this host in the environment the AppHost runs in, which is not " +
+              "necessarily your shell) or set the SERVICESOURCES_GIT_USERNAME/" +
+              "SERVICESOURCES_GIT_TOKEN/SERVICESOURCES_GIT_HOST environment variables."
             : $"{failureDescription} — authentication failed, or the repository is not visible to the " +
               "credentials in use. Configure credentials via a git credential helper (`git credential " +
               "fill` must resolve them for this host) or the SERVICESOURCES_GIT_USERNAME/" +
-              "SERVICESOURCES_GIT_TOKEN environment variables.";
+              "SERVICESOURCES_GIT_TOKEN/SERVICESOURCES_GIT_HOST environment variables.";
 
     /// <summary>
     /// Creates the tool-owned <c>.servicesources</c> directory a checkout is about to land under,
