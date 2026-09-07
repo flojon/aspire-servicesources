@@ -100,13 +100,33 @@
                 RegexOptions.Multiline | RegexOptions.Singleline);
             if (!match.Success) return "";
 
+            var section = match.Groups["body"].Value.Trim();
+
+            // nuget.org renders PackageReleaseNotes as plain text, so Keep a Changelog's
+            // markdown shows up as literal punctuation there. Flatten the constructs this
+            // file actually uses - ATX subsection headers ("### Breaking"), bold emphasis,
+            // and inline links - rather than the whole markdown grammar. Inline code
+            // backticks are left alone; they read fine unrendered (`Validate`).
+            section = Regex.Replace(section, @"^\#{1,6}[ \t]+", "", RegexOptions.Multiline);
+
+            // A backtick code span is matched as one opaque token specifically so a literal
+            // "**" inside one (e.g. a `release/**` glob) is never mistaken for a bold
+            // delimiter and paired with an unrelated "**" elsewhere in the section.
+            section = Regex.Replace(
+                section,
+                @"`[^`]*`|\*\*(.+?)\*\*",
+                m => m.Groups[1].Success ? m.Groups[1].Value : m.Value,
+                RegexOptions.Singleline);
+
+            section = Regex.Replace(section, @"\[([^\[\]]+)\]\(([^()]+)\)", "$1 ($2)");
+
             // "([#62])" is a markdown reference link, and its definition lives at the end of
             // the file, outside the section. NuGet renders release notes as plain text, so
             // unwrap it to "(#62)" rather than shipping a link that resolves to nothing.
             // A cross-repository reference carries a prefix - "[microsoft/aspire#19507]",
             // "[NuGetGallery#6948]" - and needs the same unwrapping. Only a label ending in
             // "#<digits>" is one of these, which leaves "[AspireExport]" and the like alone.
-            return Regex.Replace(match.Groups["body"].Value.Trim(), @"\[([^\[\]]*\#\d+)\]", "$1");
+            return Regex.Replace(section, @"\[([^\[\]]*\#\d+)\]", "$1");
         };
 
         var changelog = File.ReadAllText(ChangelogFile);
