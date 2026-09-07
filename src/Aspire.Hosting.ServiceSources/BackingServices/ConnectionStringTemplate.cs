@@ -265,16 +265,27 @@ internal sealed class ConnectionStringTemplate
 
         // Reassembled from the template's own text rather than from the keyword constants, so every
         // message about this token quotes the spelling the developer wrote — see Segment.AsWritten.
-        // Bounded further when unterminated: with no '}' found before the end of the template (or
-        // before a '{' that already disqualified it), `body` still runs to wherever the search gave
-        // up, so it is cut at the first character that could not be part of a keyword, name or key
-        // — never reached for a placeholder that actually closes, so this narrows nothing a real
-        // name or key (a newline or a tab included) may hold.
-        var token = unterminated ? $"${{{TruncateAtFirstBoundary(body)}" : $"${{{body}}}";
+        // Kept full and unbounded: this is what an *accepted* placeholder's own Token holds, and a
+        // name or key that legitimately carries a newline or a tab needs it verbatim so a downstream
+        // source can escape it for display — truncating it here would corrupt the value itself.
+        var token = unterminated ? $"${{{body}" : $"${{{body}}}";
+
+        // Every rejection instead quotes a *bounded* copy — reached whether the placeholder is
+        // unterminated or terminated-but-invalid (bad arity, a bad name or a bad key), since neither
+        // means the placeholder was accepted, so nothing has validated what `body` actually holds.
+        // Left unbounded, an arity or charset failure throws with the full, untruncated `body` — the
+        // real close a rejection is not disqualified by (see the search in Parse) can legitimately
+        // sit past a later, unrelated field's own value, credentials included (#257). Shown only
+        // when it changes nothing: a body already built entirely from safe characters is quoted
+        // whole, closing brace and all, exactly as `Parse_Rejection_QuotesTheTokenAsWritten` pins.
+        var safeBody = TruncateAtFirstBoundary(body);
+        var rejectionToken = unterminated || safeBody.Length < body.Length
+            ? $"${{{safeBody}"
+            : token;
 
         if (unterminated)
         {
-            throw Malformed(backingServiceName, configKey, token, "it has no closing '}'.");
+            throw Malformed(backingServiceName, configKey, rejectionToken, "it has no closing '}'.");
         }
 
         if (keyword.Equals(PortKeyword, StringComparison.OrdinalIgnoreCase))
@@ -284,11 +295,11 @@ internal sealed class ConnectionStringTemplate
                 1 => new Port(Name: null) { Token = token },
                 2 when IsNamed(parts[1]) => new Port(parts[1]) { Token = token },
                 2 => throw Malformed(
-                    backingServiceName, configKey, token,
+                    backingServiceName, configKey, rejectionToken,
                     "the port name after 'port:' is empty. Write '${port}' for the only forwarded port, "
                     + "or '${port:<name>}' to name one of several."),
                 _ => throw Malformed(
-                    backingServiceName, configKey, token,
+                    backingServiceName, configKey, rejectionToken,
                     $"a port placeholder takes at most one name, and this has {parts.Length - 1} "
                     + "colon-separated parts after 'port'."),
             };
@@ -301,23 +312,23 @@ internal sealed class ConnectionStringTemplate
             3 when IsSecretName(parts[1]) && IsSecretKey(parts[2]) =>
                 new Secret(parts[1], parts[2]) { Token = token },
             3 when !IsNamed(parts[1]) || !IsNamed(parts[2]) => throw Malformed(
-                backingServiceName, configKey, token,
+                backingServiceName, configKey, rejectionToken,
                 "the secret name and key must both be given: '${secret:<name>:<key>}'."),
             3 when !IsSecretName(parts[1]) => throw Malformed(
-                backingServiceName, configKey, token,
+                backingServiceName, configKey, rejectionToken,
                 "a Kubernetes secret's name is lower-case letters, digits, '-' and '.', beginning and ending "
                 + "with a letter or a digit — narrower than its keys, which also take upper case and '_'. "
                 + "Nothing in a cluster can carry this name as written, so it is refused here rather than left "
                 + "to arrive as an indistinguishable \"not found\" at start time."),
             3 => throw Malformed(
-                backingServiceName, configKey, token,
+                backingServiceName, configKey, rejectionToken,
                 "a key inside a Kubernetes secret is letters, digits, '-', '.' and '_', and this key is not. "
                 + "Nothing in a cluster can carry the key as written."),
             < 3 => throw Malformed(
-                backingServiceName, configKey, token,
+                backingServiceName, configKey, rejectionToken,
                 "a secret placeholder names a secret and a key inside it: '${secret:<name>:<key>}'."),
             _ => throw Malformed(
-                backingServiceName, configKey, token,
+                backingServiceName, configKey, rejectionToken,
                 $"a secret placeholder takes exactly a name and a key, and this has {parts.Length - 1} "
                 + "colon-separated parts after 'secret'."),
         };

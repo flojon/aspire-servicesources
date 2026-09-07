@@ -343,6 +343,23 @@ public class ConnectionStringTemplateTests
     }
 
     /// <summary>
+    /// A placeholder that genuinely closes on a single, real <c>'}'</c> — nothing about the brace
+    /// search is wrong here — but then fails arity validation quotes only the bounded prefix in its
+    /// rejection, not the full body: a secret with too few colon-separated parts is exactly the
+    /// shape a developer hits by simply forgetting the closing brace before writing the rest of the
+    /// connection string, and a later, unrelated field happening to end in its own real <c>'}'</c>
+    /// must not turn that into a credential echoed straight out of a thrown exception.
+    /// </summary>
+    [Fact]
+    public void Parse_SecretFailingArity_DoesNotEchoPastTheBoundary()
+    {
+        var message = Rejects("Host=db;Pw=${secret:orders;Password=hunter2}").Message;
+
+        Assert.Contains("'${secret:orders'", message);
+        Assert.DoesNotContain("hunter2", message);
+    }
+
+    /// <summary>
     /// A raw <c>'{'</c> inside what would be a placeholder's own name disqualifies it outright, even
     /// when it and its own matching <c>'}'</c> are otherwise perfectly balanced — a name or key can
     /// never legitimately contain either brace, so nothing about this text was ever going to parse
