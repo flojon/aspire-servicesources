@@ -201,6 +201,26 @@ public class ServiceConfigurationExportsTests
     }
 
     [Fact]
+    public void WithServiceHttpsEndpoint_AppliesToTheRealResource()
+    {
+        var builder = Builder();
+
+        var service = ConfigurableService(builder).WithServiceHttpsEndpoint();
+
+        Assert.Contains(service.Resource.Annotations.OfType<EndpointAnnotation>(), e => e.UriScheme == "https");
+    }
+
+    [Fact]
+    public void WithServiceHttpEndpoint_AppliesToTheRealResource()
+    {
+        var builder = Builder();
+
+        var service = ConfigurableService(builder).WithServiceHttpEndpoint();
+
+        Assert.Contains(service.Resource.Annotations.OfType<EndpointAnnotation>(), e => e.UriScheme == "http");
+    }
+
+    [Fact]
     public void Exports_InheritConfigureSkipBehaviourForOutOfBandSources()
     {
         var builder = Builder();
@@ -208,6 +228,23 @@ public class ServiceConfigurationExportsTests
         var service = UrlService(builder).WithServiceEnvironment("A", "B");
 
         Assert.Empty(service.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>());
+        Assert.Contains("inventory", Assert.Single(ServiceSourcesWarnings.For(builder).Messages));
+    }
+
+    [Fact]
+    public void WithServiceHttpsEndpoint_InheritsConfigureSkipBehaviourForOutOfBandSources()
+    {
+        // The property the ticket names as making the shim safe to write unscoped (#208): a
+        // service a developer has switched to "url" is skipped and logged rather than misconfigured.
+        // A "url" resource already carries an EndpointAnnotation for its own URL, so the check is
+        // that the shim added no *second* one, not that none exists.
+        var builder = Builder();
+        var url = UrlService(builder);
+        var before = url.Resource.Annotations.OfType<EndpointAnnotation>().ToList();
+
+        var service = url.WithServiceHttpsEndpoint();
+
+        Assert.Equal(before, service.Resource.Annotations.OfType<EndpointAnnotation>().ToList());
         Assert.Contains("inventory", Assert.Single(ServiceSourcesWarnings.For(builder).Messages));
     }
 

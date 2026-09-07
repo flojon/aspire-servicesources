@@ -20,12 +20,17 @@ const inventory = await builder.addService('inventory');
 const payments = await builder
   .addService('payments')
   .withServiceEnvironment('DEMO_INJECTED_BY_APPHOST', 'true')
-  .withServiceReference(inventory);
+  .withServiceReference(inventory)
+  // Load-bearing for a deferred checkout (#208), not for this sample — both services here
+  // resolve through "container", which is already on disk, so declaring the endpoint changes
+  // nothing about how payments runs. Present so the typecheck-typescript CI job compiles a real
+  // call to it, the same way getServiceEndpoint() below is exercised rather than merely generated.
+  .withServiceHttpsEndpoint();
 
 // addService()'s declared return type is a bare Aspire interface, IResourceBuilder<
 // IResourceWithServiceDiscovery>, rather than a concrete resource class — a shape the TypeScript
 // generator emits no *Promise/*PromiseImpl wrapper pair for on its own (microsoft/aspire#19507).
-// What supplies the pair here is the eight [AspireExport] configuration shims behind the
+// What supplies the pair here is the ten [AspireExport] configuration shims behind the
 // withService* calls above: the generator emits it when the bare interface appears as an
 // extension-method receiver, which those shims declare, so they carry it for addService too. With
 // the wrapper types emitted, the resolved handle also flows into Aspire's *own* withReference(),
