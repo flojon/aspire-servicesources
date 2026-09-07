@@ -266,7 +266,10 @@ services:
   macOS and fails to start on Windows, and wants `windowsCommand: ["npm.cmd", "ci"]` beside it. The
   same goes for `yarn`, `pnpm` and `tsc`. The launch failure names this as the likely cause.
 - The command runs with the checkout as its working directory, with no shell between it and the
-  tool, and both its streams are relayed line by line as they arrive, tagged with the service:
+  tool, and both its streams are relayed line by line as they arrive, tagged with the service.
+  **A tool that prints a progress meter floods this** — a plain `curl` download, for one — since
+  every carriage-return-terminated update becomes its own line; prefer `curl -sS` or
+  `--no-progress-meter` (or the equivalent for whatever tool the command runs):
 
   ```
   [prepare routing] Downloading graphhopper-web-11.0.jar...
@@ -280,7 +283,10 @@ services:
   runs — which is what a four-minute import needs, so that it reads as an initialization phase
   rather than as a hang. Every other run reports to the AppHost's standard output: under
   `dotnet run` that is your terminal, and under `aspire run` the CLI relays it, live, into its own
-  log under `~/.aspire/logs/` rather than printing it.
+  log under `~/.aspire/logs/` rather than printing it. A capped copy — its first and last lines,
+  with anything in between marked as elided — also lands in the same resource log once the
+  dashboard exists, so the record ends up where the service is even on a run the console alone
+  would have hidden it from.
 - A non-zero exit fails the service, naming it, the resolved command, the exit code and the tail of
   the output. During composition that fails the AppHost, exactly as a bad `repository` or a missing
   `project` does; on a deferred first run it costs that one service and nothing else.

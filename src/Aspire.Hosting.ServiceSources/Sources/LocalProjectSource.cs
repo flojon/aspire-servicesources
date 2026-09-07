@@ -149,9 +149,14 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
             // manifest that describes none of it.
             if (builder.ExecutionContext.IsRunMode)
             {
+                // Wrapped rather than passed straight through: the console keeps every line live,
+                // exactly as before, and a capped copy also lands in this service's own resource
+                // log once BeforeStartEvent gives access to one — see
+                // BufferingPrepareOutputSink for why the console alone is not enough under
+                // `aspire run`.
                 CheckoutPreparation.Run(
                     serviceName, step, repoRoot, builder.AppHostDirectory, managedCheckout, gitClient,
-                    _prepareRunner, ConsolePrepareOutputSink.Instance);
+                    _prepareRunner, BufferingPrepareOutputSink.Wrap(builder, serviceName, ConsolePrepareOutputSink.Instance));
             }
             else if (CheckoutPreparation.WouldRun(
                 serviceName, step, repoRoot, builder.AppHostDirectory, managedCheckout, gitClient))
