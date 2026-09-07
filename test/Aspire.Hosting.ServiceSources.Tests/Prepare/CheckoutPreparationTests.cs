@@ -783,8 +783,9 @@ public class CheckoutPreparationTests
     /// — the fourth of #286's four sites quoting <see cref="PrepareStep.Describe"/> unredacted, and
     /// it fires on the very first attempt: the command never got to run, let alone print anything,
     /// so nothing but this message is around to redact. (The ticket's own "fifth spelling" is
-    /// <c>IgnoredCatalogStepNotice</c> in <c>PreparePlan.cs</c>, left deliberately unredacted — see
-    /// the CHANGELOG.)
+    /// <c>IgnoredCatalogStepNotice</c> in <c>PreparePlan.cs</c> — see
+    /// <see cref="PreparePlanTests.PathCheckout_TheNoticesCommand_HasUrlCredentialsRedacted"/> in
+    /// <c>PreparePlanTests.cs</c>.)
     /// </remarks>
     [Fact]
     public void ACommandThatCannotBeLaunched_HasUrlCredentialsRedactedFromTheCommand()
