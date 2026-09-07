@@ -13,6 +13,10 @@ namespace Aspire.Hosting.ServiceSources.Prepare;
 /// <c>ResourceLoggerService.GetLogger(resource)</c> and publishes resource state, so the same lines
 /// reach the service's own resource log and are visible in the dashboard, which is where a
 /// country-sized import has to read as an initialization phase rather than as an apparent hang.
+/// <c>LocalProjectSource</c> composes the eager path's console sink with
+/// <c>BufferingPrepareOutputSink</c> for exactly the same reason: a capped copy still needs to reach
+/// the resource log once <c>BeforeStartEvent</c> makes one available, since the console alone is
+/// invisible under <c>aspire run</c>.
 /// </remarks>
 internal interface IPrepareOutputSink
 {

@@ -153,6 +153,66 @@ public class BufferingPrepareOutputSinkTests
     }
 
     [Fact]
+    public async Task Flush_UsesSingularWording_WhenExactlyOneLineWasElided()
+    {
+        var builder = TestHelpers.CreateBuilderThatCanStart(TempDirectories.CreateSubdirectory().FullName);
+        var orders = AddTaggedResource(builder, "orders");
+
+        var sink = BufferingPrepareOutputSink.Wrap(builder, "orders", new RecordingSink());
+        const int total = 41; // head(20) + 1 elided + tail(20)
+        for (var i = 0; i < total; i++)
+        {
+            sink.Report($"line {i}");
+        }
+
+        var services = builder.Services.BuildServiceProvider();
+        await PublishBeforeStartEventAsync(builder, services);
+
+        var logged = await ReadLogsAsync(services, orders.Resource, expectedCount: 41);
+
+        var marker = logged[20];
+        Assert.Contains("1 line elided", marker);
+        Assert.DoesNotContain("1 lines elided", marker);
+    }
+
+    [Fact]
+    public async Task Flush_WritesNothing_ForAServiceWrappedButNeverReported()
+    {
+        var builder = TestHelpers.CreateBuilderThatCanStart(TempDirectories.CreateSubdirectory().FullName);
+        var orders = AddTaggedResource(builder, "orders");
+        var routing = AddTaggedResource(builder, "routing");
+
+        // "routing" is wrapped — e.g. CheckoutPreparation.Run decided the step should not run — but
+        // Report is never called on it, so its buffer stays empty.
+        BufferingPrepareOutputSink.Wrap(builder, "routing", new RecordingSink());
+        BufferingPrepareOutputSink.Wrap(builder, "orders", new RecordingSink()).Report("orders line");
+
+        var services = builder.Services.BuildServiceProvider();
+        await PublishBeforeStartEventAsync(builder, services);
+
+        Assert.Equal(["orders line"], await ReadLogsAsync(services, orders.Resource, expectedCount: 1));
+
+        // Nothing was ever written for "routing". There is no line to wait for, so this bounds the
+        // wait itself rather than asking ReadLogsAsync to wait for a count that would never arrive.
+        var routingLines = new List<string>();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        try
+        {
+            await foreach (var batch in services.GetRequiredService<ResourceLoggerService>()
+                .WatchAsync(routing.Resource).WithCancellation(cts.Token))
+            {
+                routingLines.AddRange(batch.Select(log => log.Content));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected: the watch never yields anything for "routing", so it can only end this way.
+        }
+
+        Assert.Empty(routingLines);
+    }
+
+    [Fact]
     public async Task Flush_KeepsEachServicesBufferSeparate()
     {
         var builder = TestHelpers.CreateBuilderThatCanStart(TempDirectories.CreateSubdirectory().FullName);
