@@ -1,20 +1,26 @@
 # Aspire.Hosting.ServiceSources — Authoring the Service Catalog in Code
 
 **Date:** 2026-09-05
-**Status:** Draft — for review before an implementation plan is written. Nothing here has shipped.
+**Status:** Draft — reviewer decisions recorded 2026-09-07 (see
+[Reviewer decisions](#reviewer-decisions)); ready for an implementation plan.
 Revised 2026-09-05 after two reviews: the ordering rule was built on a miscounted set of catalog
 readers, the `servicesources.local.json` requirement was left unsaid, and five ATS shapes this API
 depends on turn out never to have been measured. All three are corrected below.
 Revised again after a second round (an `OrdinalIgnoreCase` catalog would change lookup for existing
 yaml AppHosts — finding 11) and a third (parsing `prepare.mode` at catalog load would newly latch
 failures for them — finding 3).
+Revised again 2026-09-07 with answers to all six open questions, and a note on #134's own 2026-09-05
+follow-up comment (posted after this draft) proposing repository as a first-class handle — kept out
+of this design; see open question 3's decision.
 **Resolves:** GitHub issue #134 (the service catalog should be authorable in the AppHost's own
 language, so `servicesources.yaml` becomes optional rather than required).
-**Would also resolve:** #73 (split the yaml DTO from the catalog domain model) — see
+**Closes:** #73 (split the yaml DTO from the catalog domain model) — decided in open question 4; see
 [The domain type](#the-domain-type).
 **Re-scopes:** #133 (nest kind options under a fixed key) — see [Kind options](#kind-options).
-**Wants a decision alongside:** #158 (`defaultSource`) — see finding 9.
-**Leaves a seam for:** #11 (the central registry).
+**Deferred, not pulled in:** #158 (`defaultSource`) — decided in open question 1; the README documents
+the requirement instead. See finding 9.
+**Leaves a seam for:** #11 (the central registry). Also leaves #134's 2026-09-05 repository-handle
+comment as a separate, unstarted follow-up — see open question 3.
 **Builds on:** [the typed-catalog ATS findings](2026-08-30-typed-catalog-ats-findings.md) (#71,
 amended by #143) and [the 19507 findings](2026-08-30-19507-already-fixed-findings.md) (#88/#137).
 
@@ -420,11 +426,12 @@ plus **19 test files** that construct or pass `ServiceMetadata` directly, across
 projects. It is a mechanical change, but it is not a small one, and it is why the split is a task of
 its own rather than a side effect.
 
-> **Alternative, genuinely open:** put `Origin` on `ServiceMetadata` with `[YamlIgnore]` and keep the
-> new container only for the merged map. It works — `KindConfig` already does exactly this — and it
-> removes the largest task in stage 1. What it keeps is the opt-out trap in finding 3: the next
-> field added without the attribute widens the yaml schema and shrinks the kind registry's allowed
-> names, with nothing to catch it. Finding 3 tallies both sides; open question 4 asks for the call.
+> **Alternative, considered and rejected (open question 4):** put `Origin` on `ServiceMetadata` with
+> `[YamlIgnore]` and keep the new container only for the merged map. It works — `KindConfig` already
+> does exactly this — and it removes the largest task in stage 1. What it keeps is the opt-out trap
+> in finding 3: the next field added without the attribute widens the yaml schema and shrinks the
+> kind registry's allowed names, with nothing to catch it. **Decided against** — split now, closing
+> #73. See [Reviewer decisions](#reviewer-decisions).
 
 ### The authoring API
 
@@ -461,6 +468,17 @@ service and the block, not a silent overwrite. `WithProject` and `defaultRef` mo
 rather than standing beside it; the plan should try folding them into it
 (`WithRepository(url, project:, defaultRef:)`) if finding 7's probe clears optional parameters, since
 that also removes a chain.
+
+**Not addressed here: repository as a shared handle.** #134 picked up a follow-up comment on
+2026-09-05, after this draft, proposing `AddRepository(url, defaultRef:)` return a fluent handle so
+several services can share one repository/ref (`monorepo.AddService("orders")`,
+`monorepo.AddService("payments")`), fixing #66 as a side effect by keying managed checkouts on
+repository identity rather than service name. That's a real, independently-motivated idea, and it
+would touch the domain type introduced here (a `Repository` record referenced by id, not an inline
+URL+ref pair) — but it is a deliberate follow-up, not part of this design; see
+[Reviewer decisions](#reviewer-decisions), question 3. `WithRepository(url, defaultRef:)` as specified
+above does not foreclose it: the shared handle can be layered on the same way `AddServiceCatalog` was
+kept separate from `AddService` (settled in #143 recommendation 7).
 
 Public types (all `sealed`, except the enum):
 
@@ -596,8 +614,11 @@ ever touched under `_gate`; the probe takes the same lock. This matters because
 
 ## What this deliberately does not do
 
-- **It does not remove `servicesources.local.json`.** Finding 9. Unless #158 is pulled in, a code
-  catalog still needs a `source` per service.
+- **It does not remove `servicesources.local.json`.** Finding 9. #158 (`defaultSource`) is deliberately
+  not pulled in — decided in open question 1 — so a code catalog still needs a `source` per service.
+- **It does not add repository grouping.** The 2026-09-05 follow-up comment on #134 (repository as a
+  shared handle, fixing #66 as a side effect) is a separate, unstarted follow-up — decided in open
+  question 3.
 - **It does not remove yaml.** The loader stays as one provider; whether yaml is retired at 1.0 is
   left open.
 - **It does not merge code and yaml entries for one service.** Duplicates are an error.
@@ -641,7 +662,8 @@ design rests on the shape crossing ATS, and shipping the public builders in one 
 discovering in the next that they do not project would be a breaking change in a package with no
 ApiCompat (finding 10). Stage 2 is then purely additive.
 
-**This staging is a recommendation, not a decision.** The issue reads as one deliverable.
+**This staging is decided** — see [Reviewer decisions](#reviewer-decisions), question 2. The issue
+reads as one deliverable; the three stages are the delivery shape, not three separate issues.
 
 ---
 
@@ -699,18 +721,66 @@ Mirroring the repo's layout, `Method_Condition_ExpectedOutcome`:
 
 ---
 
-## Open questions for the reviewer
+## Reviewer decisions
+
+Recorded 2026-09-07. Each original question is kept verbatim, with the decision beneath it.
 
 1. **`servicesources.local.json`, and #158.** Finding 9. Pull `defaultSource` into this work so the
    headline goal is actually reached, or document the requirement and leave #158 alone? This is the
    one that changes what the feature *is*.
+
+   **Decided: document the requirement; leave #158 alone.** #158's own investigation (comment
+   2026-08-31) turned up unresolved problems of its own — the clone-storm re-creation against
+   `LocalCheckoutPrefetch`, and #157's precedence ordering putting a committed default on the wrong
+   side — that this design should not inherit by absorbing the issue. The README states plainly that
+   a code catalog still needs `servicesources.local.json` (finding 9); #158 stays a separate,
+   sequenced issue, explicitly noted there as needing a code-catalog twin from day one.
+
 2. **Staging.** Three stages as above, or one PR?
+
+   **Decided: three stages.** Stage 0's throwaway ATS probe is cheap insurance in a package with no
+   ApiCompat tooling (finding 10): freezing five or six new public types on shapes finding 7 says were
+   never measured is exactly the mistake that turns into a breaking change later. Splitting 1/2 also
+   ships acceptance criteria 3 and 4 without waiting on the `AsJava`/`AsJavaScript` typed handles.
+
 3. **`With*` versus the issue's `From*`**, and whether `WithProject`/`defaultRef` fold into
    `WithRepository`.
+
+   **Decided: keep `With*`.** Finding 4 already settles this — `From*` reads as mutually exclusive,
+   which is false once one entry can carry every source at once. Fold `WithProject`/`defaultRef` into
+   `WithRepository` once stage 0 clears optional parameters, as already written in
+   [The authoring API](#the-authoring-api).
+
+   **New since this draft, and deliberately kept out:** #134 got a same-day follow-up comment
+   (2026-09-05, a few hours after this PR opened) proposing repository as a first-class handle —
+   `AddRepository(url, defaultRef:)` returning a shared handle so several services can name one
+   repository/ref, fixing #66 as a side effect by keying managed checkouts on repository identity
+   instead of service name. It's a real, independently-motivated idea, and it would touch the domain
+   type this design introduces (a `Repository` record referenced by an id, not an inline URL+ref
+   pair). **Decided: keep it a separate follow-up**, not folded into this design — reopening the
+   domain type and the authoring API after four rounds of review already settled both is a worse trade
+   than letting it land as its own issue once this one ships. `WithRepository(url, defaultRef:)` as
+   specified here does not foreclose it.
+
 4. **Is the DTO/domain split worth it now?** Finding 3 tallies it: the honest forcing case is one
    field (`Origin`) plus a reflection trap, against 12 source and 19 test files changed for no
    behaviour change — and `KindConfig` proves the cheap `[YamlIgnore]` route works. Split (closing
    #73), or take the cheap route and leave #73 open? This is the largest single cost in the plan.
+
+   **Decided: split now, closing #73.** The cost is mechanical and fully scoped by finding 3's own
+   file list; the reflection trap is a standing defect that taxes every future field added to
+   `ServiceMetadata` until it's fixed, not a one-time cost. Question 3's repository-handle follow-up is
+   about to propose exactly such a field (a `Repository` reference) — better to land the clean split
+   now than retrofit it onto the DTO under more pressure later.
+
 5. **Is yaml targeted for removal at 1.0?** This design assumes kept indefinitely as one provider.
+
+   **Decided: leave open.** It changes nothing in this design either way — yaml stays "one provider"
+   regardless of the answer — and yaml still serves a real purpose (editing the catalog without
+   rebuilding the AppHost). Revisit post-1.0 against actual adoption rather than deciding it here.
+
 6. **Serialization.** `ServiceDefinition` is left plainly serializable for #11 but nothing serializes
    it. Is that the right amount of anticipation?
+
+   **Decided: right amount.** Plainly serializable with no format committed is the minimum seam #11
+   needs; committing to a wire format nobody has asked for yet would be speculative.
