@@ -95,7 +95,7 @@ public static class ServiceSourcesBuilderExtensions
         // hear about an unrelated entry nothing else names.
         ServiceConfigAudit.EnsureSubscribed(builder);
 
-        var (metadata, developerConfig) = ServiceSourcesConfigCache.ResolveService(builder, name);
+        var (definition, developerConfig) = ServiceSourcesConfigCache.ResolveService(builder, name);
 
         if (!Sources.TryGetValue(developerConfig.Source, out var source))
         {
@@ -118,7 +118,7 @@ public static class ServiceSourcesBuilderExtensions
                 + $"{key.Replace(":", "__", StringComparison.Ordinal)}, or the command line.");
         }
 
-        return source.Resolve(builder, name, metadata, developerConfig);
+        return source.Resolve(builder, name, definition, developerConfig);
     }
 
     /// <summary>

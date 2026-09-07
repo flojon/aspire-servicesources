@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using Aspire.Hosting.ServiceSources.Catalog;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 
 namespace Aspire.Hosting.ServiceSources.Config;
 
@@ -88,7 +89,7 @@ internal static class ServiceSourcesConfigCache
                 new ConfigLoader<IReadOnlyDictionary<string, BackingServiceDeveloperConfig>>())
             .Load(builder, DeveloperConfiguration.ReadBackingServicesFrom);
 
-    public static (ServiceMetadata Metadata, ServiceDeveloperConfig DeveloperConfig) ResolveService(
+    public static (ServiceDefinition Definition, ServiceDeveloperConfig DeveloperConfig) ResolveService(
         IDistributedApplicationBuilder builder, string serviceName)
     {
         var loaded = LoadedFor(builder);
@@ -114,7 +115,12 @@ internal static class ServiceSourcesConfigCache
             throw loaded.DeveloperConfig.NotConfiguredError(serviceName);
         }
 
-        return (metadata, developerConfig);
+        // Recomputed rather than carried on LoadedConfig, which LoadedConfig.Load already builds
+        // this same path to load the catalog from — composing that plumbing into LoadedConfig
+        // itself belongs to Task 10, alongside merging code-declared entries in.
+        var yamlPath = Path.Combine(builder.AppHostDirectory, "servicesources.yaml");
+
+        return (metadata.ToDefinition(yamlPath), developerConfig);
     }
 
     /// <summary>
