@@ -29,11 +29,19 @@ internal static class TestHelpers
             Args = ["--operation", "publish"],
         });
 
+    /// <summary>
+    /// Disables the Generic Host's default <c>reloadOnChange</c> watch on <c>appsettings.json</c>.
+    /// A test AppHost never outlives its own method, so nothing needs to see a live edit to that
+    /// file — and without this, every builder leaves behind a <c>FileSystemWatcher</c> (one inotify
+    /// instance on Linux) that isn't collectible until the builder itself becomes unreachable. See
+    /// https://github.com/flojon/aspire-servicesources/issues/287.
+    /// </summary>
+    internal const string DisableConfigReloadArg = "--hostBuilder:reloadConfigOnChange=false";
+
     private static IDistributedApplicationBuilder CreateBuilderCore(DistributedApplicationOptions options)
     {
-        var builder = DistributedApplication.CreateBuilder(options);
-        BuilderReclaim.Track();
-        return builder;
+        options.Args = [.. options.Args ?? [], DisableConfigReloadArg];
+        return DistributedApplication.CreateBuilder(options);
     }
 
     /// <summary>

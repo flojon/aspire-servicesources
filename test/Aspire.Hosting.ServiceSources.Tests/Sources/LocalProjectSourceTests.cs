@@ -861,7 +861,7 @@ public class LocalProjectSourceTests
         var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
         {
             ProjectDirectory = appHostDir,
-            Args = [],
+            Args = [TestHelpers.DisableConfigReloadArg],
         });
         var gitClient = new FakeGitClient();
 
@@ -1283,7 +1283,7 @@ public class LocalProjectSourceTests
         var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
         {
             ProjectDirectory = appHostDir,
-            Args = [],
+            Args = [TestHelpers.DisableConfigReloadArg],
         });
         var gitClient = new FakeGitClient();
         var source = new LocalProjectSource(gitClient);

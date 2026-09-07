@@ -9,16 +9,21 @@ internal static class TestHelpers
 {
     private static readonly IDeserializer Deserializer = new DeserializerBuilder().Build();
 
-    public static IDistributedApplicationBuilder CreateBuilder(string appHostDirectory)
-    {
-        var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+    /// <summary>
+    /// Disables the Generic Host's default <c>reloadOnChange</c> watch on <c>appsettings.json</c>.
+    /// A test AppHost never outlives its own method, so nothing needs to see a live edit to that
+    /// file — and without this, every builder leaves behind a <c>FileSystemWatcher</c> (one inotify
+    /// instance on Linux) that isn't collectible until the builder itself becomes unreachable. See
+    /// https://github.com/flojon/aspire-servicesources/issues/287.
+    /// </summary>
+    private const string DisableConfigReloadArg = "--hostBuilder:reloadConfigOnChange=false";
+
+    public static IDistributedApplicationBuilder CreateBuilder(string appHostDirectory) =>
+        DistributedApplication.CreateBuilder(new DistributedApplicationOptions
         {
             ProjectDirectory = appHostDirectory,
-            Args = [],
+            Args = [DisableConfigReloadArg],
         });
-        BuilderReclaim.Track();
-        return builder;
-    }
 
     /// <summary>
     /// Produces the same untyped object the catalog loader hands a kind handler: whatever
