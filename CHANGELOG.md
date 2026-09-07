@@ -665,54 +665,6 @@ nothing will fail to build to warn you.
 
 ### Fixed
 
-- **A misspelled service name in `servicesources.local.json` now names the entry it was reaching
-  for** ([#181]). A service name one letter off is the last near miss that produces a fully valid
-  entry nothing reads: it sits in the file correctly shaped, and the AppHost reports the service as
-  one nobody configured and tells you to add the entry you are looking at.
-
-  ```jsonc
-  // servicesources.yaml declares 'orders'
-  { "services": { "order": { "source": "local", "local": { "path": "/home/dev/code/orders" } } } }
-  ```
-
-  Every word of the old message was true and its advice worked — writing the entry a second time
-  under the right spelling does configure the service — it just never mentioned that the fix was
-  one character, and following it left the misspelled entry behind as a second, dead one. It now
-  adds: *Note that 'order' is configured and reaches no service in 'servicesources.yaml'. Did you
-  mean 'orders'? If so, rename that entry rather than adding a second one.*
-
-  The suggestion has to survive being followed, so it is made only when two questions agree. Of the
-  entries `servicesources.yaml` cannot account for, which is closest to the service that failed —
-  and of the services `servicesources.yaml` declares, which is that entry closest to. An entry
-  naming a service the catalog *does* declare is that service's entry whatever else it resembles,
-  so a file configuring both `order` and `orders` for two real services is never told one of them
-  is a typo. And an entry closer to some *other* declared service is left for that service to name:
-  with `cart` and `carts` both declared, a `crat` entry is one edit from the first and two from the
-  second, so a failing `carts` says nothing about it and a failing `cart` names it. Asking only the
-  first question there would have told you to rename the entry configuring `cart` onto `carts`,
-  which costs you the configuration and leaves the next failure with nothing to say.
-
-  Where the service already has an entry of its own and what is missing from it is the `source` key
-  rather than a letter, the note says so instead: *Did you mean 'orders'? An entry for 'orders' is
-  there already, so the source belongs on that one rather than on 'order'.* Telling you to rename
-  onto a name the file already uses would ask for a second `"orders"` key in one object, which the
-  JSON parser refuses to load at all once the two collide on a field.
-
-  Nothing is said about an unused entry on its own account. An AppHost need not add every service
-  the file mentions, so a developer switching between two AppHosts out of one file, or keeping an
-  entry for a service they have stopped adding, is doing nothing wrong and hears nothing — the file
-  is searched only from inside a failure, and a file whose entries all resolve is never searched at
-  all. What that leaves is one accepted false positive: an entry that is genuinely for something
-  else, but is nearer the failing service than any service this catalog declares, is offered as its
-  misspelling. The cost is two or three hedged sentences in an error already being thrown, which is
-  the trade the root-key near miss already makes.
-
-  The tolerance is the one [#182] settled, taken from the service name rather than the entry: one
-  edit for a name of four letters or fewer, two for anything longer, with a swapped pair counting
-  as one edit. So `crat` is answered with `cart`, while `carted` — two edits from `cart`, and long
-  enough to have allowed itself two — is left alone. Two entries the same distance away are
-  separated ordinally, so the message names the same one on every run.
-
 - **A field misspelled at a service entry's root now names the field it was reaching for**
   ([#182]). Spelled correctly, a field written flat at the entry root is walked through the move
   into its block: *'path' is not a valid key here. It belongs in the 'local' block: `"orders": {
@@ -747,45 +699,12 @@ nothing will fail to build to warn you.
   `service` has two equally close candidates instead of a clear winner. The message names the
   ordinally first, as it already did for any exact tie, so it stays the same on every run.
 
-- **A port written in hexadecimal as a single value is now accepted, the same as a named one**
-  ([#264]). `"port": "0x1628"` was refused — *takes a port number or a block of named ports* —
-  while the identical spelling as a named entry, `"port": { "amqp": "0x1628" }`, bound as `5672`.
-  The single value now asks the same converter a named entry always has, so the two can no longer
-  disagree about what a number is; `#1628` and `&H1628` are accepted too, for the same reason.
-
-- **A `prepare` step's output now has URL credentials redacted before it reaches a resource log**
-  ([#270]). A `prepare` command comes from the catalog rather than from the developer running the
-  AppHost, and its stdout/stderr is therefore third-party runtime output the AppHost does not
-  control — the trust boundary [#118] already treats as needing to be logged loudly rather than
-  trusted silently. Without this, a command that echoed a credential-bearing URL (a verbose
-  `curl -v`, a tool printing the remote it just fetched from) landed that credential in the
-  resource log — dashboard-visible, screen-shareable, and exportable via OTLP. Every line is now
-  redacted once, at the one point both the eager and deferred paths already funnel through, the
-  same way `GitCommand.Deliver` already redacts git's own progress lines before they reach the
-  same kind of sink — which also covers the tail a failed step's exception message quotes, since
-  it is built from the same already-redacted lines.
-
-- **A `prepare` step's own command, not only its output, now has URL credentials redacted before
-  it reaches a resource log** ([#286]). [#270] redacted what a command *printed*; the command
-  *itself* was still echoed verbatim — in the line announcing a decision to run it, the
-  publish-mode skip notice, and both of a failed step's exception messages (a non-zero exit and a
-  launch failure) — so a credential passed as an argument (`local.prepare.command` is developer
-  configuration, and a step that fetches a private artifact is exactly what it exists for) reached
-  the same sink regardless of whether the command ever printed a line. All four now go through the
-  same `GitUrl.RedactAll` the output already does. The one place a command is still echoed in full
-  is the notice offering an unset `path` checkout's inherited catalog step to copy into
-  `servicesources.local.json` — there the command is the catalog's own, already committed to the
-  repository the notice is about, and redacting it would break the copy-paste the notice exists
-  for.
-
-- **The connection string a `kubernetes` backing service quotes back when it has no port to
-  address is now wrapped in apostrophes, with an embedded apostrophe doubled** ([#263]). It used
-  to sit inside double quotes with nothing escaping `"`, so a connection string legitimately
-  containing one — an ODBC `Data Source="C:\path\to.mdb"`, say — closed the message's own quoting
-  early. Nothing was hidden or corrupted; the value still read in full, just visually split.
-  Apostrophes alone would only have moved the same problem onto a value containing one instead
-  (`O'Brien`), so an embedded apostrophe is now doubled — the connection-string convention for
-  escaping the quote delimiter itself.
+- **A `"url"`-sourced service's refusal messages no longer echo the credentials in the URL they
+  quote back** ([#258]). Both the "not a valid absolute URL" and the wrong-scheme refusal echo the
+  configured value so a developer with several services knows which one is being refused, and a
+  URL is where userinfo lives — pointing a `"url"` service at a Redis or AMQP endpoint is an
+  ordinary mistake, and those URLs carry credentials as a matter of course. Neither redacted it;
+  both now do.
 
 ### Documentation
 
@@ -1529,7 +1448,6 @@ Targets `net10.0`.
 [#170]: https://github.com/flojon/aspire-servicesources/issues/170
 [#171]: https://github.com/flojon/aspire-servicesources/issues/171
 [#180]: https://github.com/flojon/aspire-servicesources/pull/180
-[#181]: https://github.com/flojon/aspire-servicesources/issues/181
 [#182]: https://github.com/flojon/aspire-servicesources/issues/182
 [#187]: https://github.com/flojon/aspire-servicesources/issues/187
 [#200]: https://github.com/flojon/aspire-servicesources/issues/200
@@ -1549,11 +1467,8 @@ Targets `net10.0`.
 [#235]: https://github.com/flojon/aspire-servicesources/issues/235
 [#236]: https://github.com/flojon/aspire-servicesources/issues/236
 [#241]: https://github.com/flojon/aspire-servicesources/issues/241
-[#263]: https://github.com/flojon/aspire-servicesources/issues/263
-[#264]: https://github.com/flojon/aspire-servicesources/issues/264
-[#270]: https://github.com/flojon/aspire-servicesources/issues/270
+[#258]: https://github.com/flojon/aspire-servicesources/issues/258
 [#279]: https://github.com/flojon/aspire-servicesources/issues/279
-[#286]: https://github.com/flojon/aspire-servicesources/issues/286
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
