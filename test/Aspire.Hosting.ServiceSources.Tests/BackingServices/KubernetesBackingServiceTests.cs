@@ -650,7 +650,7 @@ public class KubernetesBackingServiceTests
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => Resolve(builder, Config(connectionString: "Host=db.internal;Port=5432;Database=orders")));
 
-        Assert.Contains("\"Host=db.internal;Port=5432;Database=orders\"", ex.Message);
+        Assert.Contains("'Host=db.internal;Port=5432;Database=orders'", ex.Message);
         Assert.DoesNotContain("***", ex.Message);
     }
 
@@ -674,7 +674,7 @@ public class KubernetesBackingServiceTests
                 Config(connectionString: "Host=localhost;Password=${secret:orders-creds:password}")));
 
         Assert.Contains(
-            "\"Host=localhost;Password=${secret:orders-creds:password}\"", ex.Message, StringComparison.Ordinal);
+            "'Host=localhost;Password=${secret:orders-creds:password}'", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("***", ex.Message, StringComparison.Ordinal);
     }
 
@@ -1893,6 +1893,32 @@ public class KubernetesBackingServiceTests
 
         Assert.Contains("\\n", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("localhost;\nPort", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A connection string containing a double quote does not break the quoting of the message that
+    /// echoes it.
+    /// </summary>
+    /// <remarks>
+    /// This is the one message that quotes a whole connection string back, and it used to wrap it in
+    /// double quotes while <see cref="ConfiguredValue.Bare"/> — which only spells out whitespace —
+    /// left an embedded <c>"</c> alone, so a value like an ODBC <c>Data Source</c> path closed the
+    /// message's own quoting early. It now goes through <see cref="ConfiguredValue.Escaped"/>, which
+    /// wraps it in apostrophes like every other value this package echoes.
+    /// </remarks>
+    [Fact]
+    public void TheEchoedConnectionString_IsWrappedInApostrophesSoAnEmbeddedQuoteDoesNotCloseItEarly()
+    {
+        var builder = CreateBuilder();
+        const string ConnectionString = "redis://cache.internal:6379/\"tail\"";
+
+        // The premise, asserted rather than assumed: this proves the quoting, not the redaction.
+        Assert.Equal(ConnectionString, ConnectionStringRedaction.Redact(ConnectionString));
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => Resolve(builder, Config(connectionString: ConnectionString)));
+
+        Assert.Contains($"tunnel: '{ConnectionString}'", ex.Message, StringComparison.Ordinal);
     }
 
     /// <remarks>

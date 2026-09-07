@@ -246,9 +246,18 @@ and a boolean, and a note saying values were "not known to be safe" reads as an 
 them. Saying what the rule is, and that it is not a claim about the value, is the honest version.
 
 Its guard keeps the same two arms — `shown == connectionString || shown == Unscannable` — so an
-all-allowlisted template still quotes back exactly what the developer wrote, with no note. That
-requires the reassembly to be **byte-identical** when nothing is replaced: keys and separator runs
-are copied verbatim, and nothing is trimmed or normalised on the way out.
+all-allowlisted template still quotes back with no note. That requires the reassembly to be
+**byte-identical** when nothing is replaced: keys and separator runs are copied verbatim, and
+nothing is trimmed or normalised in redaction itself.
+
+What reaches the message is not that byte-identical string, though: the echo goes through
+`ConfiguredValue.Escaped`, which spells out whitespace and other invisible characters and wraps the
+whole value in apostrophes. A template containing a real tab is quoted back as
+`'Host=localhost\t;Port=5432'`, and one containing a double quote reads correctly inside those
+apostrophes rather than closing the message's own quoting early. This is escaping, not trimming or
+normalisation — every character position redaction produced still reaches the message, spelled out
+rather than dropped — but it means the developer does not see back the exact bytes they wrote, only
+every one of them.
 
 ## Comments
 
