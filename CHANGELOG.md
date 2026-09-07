@@ -290,9 +290,14 @@ nothing will fail to build to warn you.
   the service's own resource log and the service carries a **Preparing** state while it runs, so a
   country-sized import reads as an initialization phase rather than as a hang — and a failure there
   costs that one service rather than the AppHost. Every other run reports to the AppHost's standard
-  output. **Ctrl-C during that run reaches the command's own process tree**, so interrupting a long
-  import ends it rather than leaving it, and its children, running with no AppHost to belong to.
-  There is no timeout: a legitimate bootstrap can take an hour.
+  output — under `aspire run`, the documented way to start an AppHost, that means the CLI's own log
+  under `~/.aspire/logs/` rather than the dashboard — **and a capped copy, its first and last lines
+  with anything dropped between them marked as elided, also lands in the service's resource log**
+  once the dashboard exists ([#214]), so the record still ends up where the service is even on a
+  run the console alone would have hidden it from. **Ctrl-C during that run reaches the command's
+  own process tree**, so interrupting a long import ends it rather than leaving it, and its
+  children, running with no AppHost to belong to. There is no timeout: a legitimate bootstrap can
+  take an hour.
 
   **`aspire publish` does not run it.** Publish composes the model, writes the manifest and exits,
   and a bootstrap produces what a service needs in order to *run* — so nothing in a manifest depends
@@ -1372,6 +1377,7 @@ Targets `net10.0`.
 [#206]: https://github.com/flojon/aspire-servicesources/issues/206
 [#207]: https://github.com/flojon/aspire-servicesources/issues/207
 [#209]: https://github.com/flojon/aspire-servicesources/issues/209
+[#214]: https://github.com/flojon/aspire-servicesources/issues/214
 [#220]: https://github.com/flojon/aspire-servicesources/issues/220
 [#222]: https://github.com/flojon/aspire-servicesources/issues/222
 [#224]: https://github.com/flojon/aspire-servicesources/issues/224
