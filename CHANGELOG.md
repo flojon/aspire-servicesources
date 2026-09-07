@@ -639,6 +639,24 @@ nothing will fail to build to warn you.
   The single value now asks the same converter a named entry always has, so the two can no longer
   disagree about what a number is; `#1628` and `&H1628` are accepted too, for the same reason.
 
+- **A value that fails to bind is no longer echoed in full when it looks like a connection string**
+  ([#262]). `port` sits directly above `connectionString` in a `kubernetes` block, and pasting a
+  connection string into the former by mistake used to print it whole, password included:
+
+  ```jsonc
+  "kubernetes": { "port": "Host=db;Password=hunter2" }
+  ```
+
+  > 'port' in the 'kubernetes' block takes a port number or a block of named ports, but is set to
+  > **'Host=db;Password=hunter2'**.
+
+  The value is now run through the same allowlist redaction [#240] gave the `connectionString`
+  field's own echo, wherever a value that failed to bind is quoted back — the value-or-map error
+  above, the per-entry error for a named port, and the plain scalar error every other field shares.
+  Redaction only fires when the value itself parses as one or more `key=value` pairs, so the many
+  ordinary values that fail to bind for an unrelated reason — a path, a git ref, a hexadecimal port
+  — keep printing exactly as written.
+
 ## [0.4.1] - 2026-09-05
 
 A patch on top of `0.4.0`, cut from the `release/0.4.x` branch off the `v0.4.0` tag rather than
@@ -1377,7 +1395,9 @@ Targets `net10.0`.
 [#224]: https://github.com/flojon/aspire-servicesources/issues/224
 [#233]: https://github.com/flojon/aspire-servicesources/issues/233
 [#236]: https://github.com/flojon/aspire-servicesources/issues/236
+[#240]: https://github.com/flojon/aspire-servicesources/issues/240
 [#241]: https://github.com/flojon/aspire-servicesources/issues/241
+[#262]: https://github.com/flojon/aspire-servicesources/issues/262
 [#264]: https://github.com/flojon/aspire-servicesources/issues/264
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507

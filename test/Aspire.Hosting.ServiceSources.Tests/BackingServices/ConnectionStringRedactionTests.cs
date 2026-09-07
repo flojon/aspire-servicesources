@@ -673,4 +673,32 @@ public class ConnectionStringRedactionTests
     [InlineData("Host=aB3xK9zQ2mR7pL4w:db.prod.internal:5432", "Host=***")]
     public void AHostValueWithABogusSchemePrefix_IsMaskedWhole(string connectionString, string expected)
         => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
+
+    /// <summary>
+    /// The gate a caller outside this type asks before spending <see cref="Redact"/> on a value it
+    /// did not itself recognise as a connection string.
+    /// </summary>
+    /// <remarks>
+    /// #262: <see cref="Redact"/> masks whole anything it cannot vouch for — a bare word with no
+    /// <c>key=value</c> pair and no recognisable host:port or scheme reaches <c>RedactPrefix</c> and
+    /// comes back as <c>***</c>. That is the right call for a connection string with a shape nothing
+    /// here understands, and the wrong one for a value that was never a connection string at all: a
+    /// git ref, a path, a hexadecimal port. This is what a caller with values of both kinds asks
+    /// first, so it can leave the second kind alone.
+    /// </remarks>
+    [Theory]
+    [InlineData("Host=db;Password=hunter2", true)]
+    [InlineData("host=db.internal port=5432 password=hunter2", true)]
+    [InlineData("a=b", true)]
+    [InlineData("refs/heads/main", false)]
+    [InlineData("/home/dev/code/orders", false)]
+    [InlineData("0x1628", false)]
+    [InlineData("abc", false)]
+    [InlineData("", false)]
+    // A bare URI's userinfo carries a credential too, but has no 'key=value' pair — out of scope for
+    // this gate, which only ever sees values quoted by a message that failed to bind them as ports,
+    // names or the other value-shaped fields the validator's unbindable-value messages cover.
+    [InlineData("redis://user:hunter2@db.internal:6379", false)]
+    public void LooksLikeConnectionString_AsksWhetherAKeyValuePairIsPresent(string value, bool expected)
+        => Assert.Equal(expected, ConnectionStringRedaction.LooksLikeConnectionString(value));
 }

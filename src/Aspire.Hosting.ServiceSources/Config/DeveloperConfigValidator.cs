@@ -1,3 +1,4 @@
+using Aspire.Hosting.ServiceSources.BackingServices;
 using Microsoft.Extensions.Configuration;
 using System.ComponentModel;
 using System.Globalization;
@@ -483,7 +484,7 @@ internal static class DeveloperConfigValidator
     /// </summary>
     private static string NotAValueOrMap(IConfigurationSection field, string block, string noun) =>
         $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block takes a {noun} number or a block of named {noun}s, "
-        + $"but is set to {Escaped(field.Value)}."
+        + $"but is set to {EscapedUnbindableValue(field.Value)}."
         + SetAt(field);
 
     /// <summary>
@@ -525,7 +526,7 @@ internal static class DeveloperConfigValidator
     private static string MapEntryNotBindable(
         IConfigurationSection field, IConfigurationSection entry, string block, string noun, Type valueType) =>
         $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block names a {noun} {Escaped(entry.Key)}, but its value "
-        + $"{Escaped(entry.Value)} is not a {Described(valueType)}. A named {noun} whose value cannot be read "
+        + $"{EscapedUnbindableValue(entry.Value)} is not a {Described(valueType)}. A named {noun} whose value cannot be read "
         + "is dropped rather than reported, so one fewer would be forwarded than the block names."
         + (entry.Value!.Length == 0
             ? " An empty value unsets a whole field; there is no spelling that takes one name out of a block."
@@ -998,7 +999,7 @@ internal static class DeveloperConfigValidator
     private static string NotBindable(
         IConfigurationSection field, string block, Type type, string value) =>
         $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block takes a {Described(type)}, "
-        + $"but is set to {Escaped(value)}."
+        + $"but is set to {EscapedUnbindableValue(value)}."
         + (value.Length == 0
             ? " An empty value leaves a field unset where the field can be unset; this one cannot, "
               + "so it needs a value."
@@ -1211,6 +1212,24 @@ internal static class DeveloperConfigValidator
     /// developer-invented name.
     /// </summary>
     private static string Escaped(string? value) => ConfiguredValue.Escaped(value);
+
+    /// <summary>
+    /// A value that failed to bind, quoted the way <see cref="Escaped"/> quotes any other value,
+    /// except that a value shaped like a connection string is redacted first.
+    /// </summary>
+    /// <remarks>
+    /// Reserved for the messages that report a value nothing could bind to the field's type: pasting
+    /// a connection string where a port number or a block of named ports goes is an easy slip — the
+    /// two sit one above the other in a <c>kubernetes</c> block — and every one of these messages used
+    /// to quote whatever it was handed back in full, password included. Gated on
+    /// <see cref="ConnectionStringRedaction.LooksLikeConnectionString"/> rather than applied
+    /// unconditionally, so the many values that fail to bind for an ordinary reason — a git ref, a
+    /// path, a hexadecimal port — keep printing exactly as written.
+    /// </remarks>
+    private static string EscapedUnbindableValue(string? value) =>
+        Escaped(value is not null && ConnectionStringRedaction.LooksLikeConnectionString(value)
+            ? ConnectionStringRedaction.Redact(value)
+            : value);
 
     private static string Described(Type type)
     {

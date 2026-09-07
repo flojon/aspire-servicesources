@@ -191,6 +191,24 @@ internal static class ConnectionStringRedaction
         RegexTimeout);
 
     /// <summary>
+    /// Whether <paramref name="value"/> is worth passing through <see cref="Redact"/> at all.
+    /// </summary>
+    /// <remarks>
+    /// The gate a caller outside this type needs before redacting a value it did not itself write as
+    /// a connection string — the validator echoes every value it could not bind to a field's type,
+    /// and most of those are not one: a path, a git ref, a hexadecimal port. <see cref="Redact"/>
+    /// masks whole anything with no recognised shape, so running it unconditionally would replace
+    /// those with a useless <c>***</c> for no credential ever at risk in them.
+    /// <para>
+    /// A single <c>key=value</c> pair is enough: it is the shape every dialect this type covers is
+    /// built from, and a value that has none of them is not addressed by this type regardless of
+    /// what else it fails to be.
+    /// </para>
+    /// </remarks>
+    public static bool LooksLikeConnectionString(string value) =>
+        FindPairs(value, whitespaceBeginsAPair: false).Count > 0;
+
+    /// <summary>
     /// <paramref name="connectionString"/> with everything not recognised as safe to print replaced
     /// by <c>***</c>, or <see cref="Unscannable"/> if the search for credentials did not finish.
     /// </summary>

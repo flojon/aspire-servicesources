@@ -770,6 +770,82 @@ public class DeveloperConfigValidatorTests
     }
 
     /// <remarks>
+    /// #262: a scalar field's own message — <c>KubernetesMetadata.Port</c> here — echoed whatever it
+    /// was set to via the same <c>Escaped</c> every other complaint uses, so a connection string
+    /// pasted where a port number goes printed its password in full. The message still says what the
+    /// field takes; only the quoted value changes.
+    /// </remarks>
+    [Fact]
+    public void Validate_ValueThatCannotBind_RedactsAConnectionStringPastedIn()
+    {
+        var ex = Load("""
+            { "services": { "orders": {
+                "source": "kubernetes",
+                "kubernetes": { "port": "Host=db;Password=hunter2" } } } }
+            """);
+
+        Assert.Contains("'port' in the 'kubernetes' block takes a whole number", ex.Message);
+        Assert.Contains("Host=db;Password=***", ex.Message);
+        Assert.DoesNotContain("hunter2", ex.Message);
+    }
+
+    /// <remarks>
+    /// #262: the value-or-map half of the same bug. A backing service's <c>kubernetes.port</c> takes
+    /// either a number or a block of named ports, and a value that is neither used to be quoted back
+    /// whole — the reproduction the issue was filed with.
+    /// </remarks>
+    [Fact]
+    public void Validate_PortValueThatIsNeitherANumberNorABlock_RedactsAConnectionStringPastedIn()
+    {
+        var ex = LoadBackingService("""
+            { "backingServices": { "orders-db": {
+                "source": "kubernetes",
+                "kubernetes": { "port": "Host=db;Password=hunter2" } } } }
+            """);
+
+        Assert.Contains(
+            "'port' in the 'kubernetes' block takes a port number or a block of named ports", ex.Message);
+        Assert.Contains("Host=db;Password=***", ex.Message);
+        Assert.DoesNotContain("hunter2", ex.Message);
+    }
+
+    /// <remarks>
+    /// #262: the per-entry message. A named port the binder would drop for want of a usable value
+    /// quotes that value too, and a connection string is exactly the kind of value nothing here can
+    /// convert to a port number.
+    /// </remarks>
+    [Fact]
+    public void Validate_NamedPortValueThatCannotBind_RedactsAConnectionStringPastedIn()
+    {
+        var ex = LoadBackingService("""
+            { "backingServices": { "orders-db": {
+                "source": "kubernetes",
+                "kubernetes": { "port": { "amqp": "Host=db;Password=hunter2" } } } } }
+            """);
+
+        Assert.Contains("names a port 'amqp', but its value", ex.Message);
+        Assert.Contains("Host=db;Password=***", ex.Message);
+        Assert.DoesNotContain("hunter2", ex.Message);
+    }
+
+    /// <remarks>
+    /// #262: redaction is gated on the value's own shape, not on which message is quoting it, so an
+    /// ordinary typo that carries no <c>key=value</c> pair keeps printing in full — a git ref, a path,
+    /// the prepare-step argument the issue itself names as worth showing whole.
+    /// </remarks>
+    [Fact]
+    public void Validate_ValueThatCannotBindAndIsNotConnectionStringShaped_PrintsItInFull()
+    {
+        var ex = LoadBackingService("""
+            { "backingServices": { "orders-db": {
+                "source": "kubernetes",
+                "kubernetes": { "port": "refs/heads/main" } } } }
+            """);
+
+        Assert.Contains("'refs/heads/main'", ex.Message);
+    }
+
+    /// <remarks>
     /// Emptying a key is the only gesture configuration offers for dropping a value a lower layer
     /// set, and whitespace is that gesture missed by a character rather than the gesture itself. It
     /// is refused whatever the field's type — see the string case below, which the binder itself
