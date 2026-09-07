@@ -325,6 +325,29 @@ public class ConnectionStringTemplateTests
             segment => Assert.Equal(";Driver={SQL Server}", Assert.IsType<ConnectionStringTemplate.Literal>(segment).Text));
     }
 
+    /// <summary>
+    /// A well-formed placeholder immediately followed by one unrelated stray <c>'}'</c> — nothing
+    /// ever opened a <c>'{'</c> to make it read as ODBC's doubled-close escape — still closes on its
+    /// own, genuine <c>'}'</c>, with the stray one left as ordinary trailing text.
+    /// </summary>
+    /// <remarks>
+    /// The doubling exists to write a literal <c>'}'</c> inside a value some <c>'{'</c> has already
+    /// opened, and means nothing once nothing is open. Gating it on <c>depth &gt; 0</c> is what keeps
+    /// this ordinary, never-broken placeholder from being misread as its own doubled escape and
+    /// rejected as unterminated.
+    /// </remarks>
+    [Fact]
+    public void Parse_WellFormedPlaceholder_ClosesOnItsOwnDespiteATrailingStrayBrace()
+    {
+        var segments = Parse("Host=db;Port=${port:amqp}}Extra").Segments;
+
+        Assert.Collection(
+            segments,
+            segment => Assert.Equal("Host=db;Port=", Assert.IsType<ConnectionStringTemplate.Literal>(segment).Text),
+            segment => Assert.Equal("amqp", Assert.IsType<ConnectionStringTemplate.Port>(segment).Name),
+            segment => Assert.Equal("}Extra", Assert.IsType<ConnectionStringTemplate.Literal>(segment).Text));
+    }
+
     [Theory]
     [InlineData("${secret}")]
     [InlineData("${secret:orders-creds}")]

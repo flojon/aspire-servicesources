@@ -189,7 +189,14 @@ internal sealed class ConnectionStringTemplate
                     // outer '{' as usual, but the second would then land back at this placeholder's
                     // own depth with nothing of its own preceding it — indistinguishable from a
                     // genuine, unrelated close, and so misread as this placeholder's own (#257).
-                    if (scan + 1 < template.Length && template[scan + 1] == '}')
+                    //
+                    // Only doubling while depth > 0: the escape exists to write a literal '}' inside
+                    // a value some '{' has already opened, so it means nothing once nothing is open.
+                    // Without this gate, an ordinary, already-closed placeholder immediately followed
+                    // by one unrelated stray '}' — `${port:amqp}}` — reads as its own doubled escape
+                    // and swallows its own genuine close along with it, rejecting a placeholder that
+                    // was never broken to begin with.
+                    if (depth > 0 && scan + 1 < template.Length && template[scan + 1] == '}')
                     {
                         scan++;
                         continue;
