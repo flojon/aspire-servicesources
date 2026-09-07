@@ -18,7 +18,7 @@ public class DeveloperConfigurationTests
         DistributedApplication.CreateBuilder(new DistributedApplicationOptions
         {
             ProjectDirectory = appHostDirectory,
-            Args = [TestHelpers.DisableConfigReloadArg],
+            Args = [TestBuilderDefaults.DisableConfigReloadArg],
         });
 
     private const string OrdersCatalog = """
@@ -245,7 +245,7 @@ public class DeveloperConfigurationTests
         var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
         {
             ProjectDirectory = dir,
-            Args = ["--contentRoot", dir, TestHelpers.DisableConfigReloadArg],
+            Args = ["--contentRoot", dir, TestBuilderDefaults.DisableConfigReloadArg],
         });
 
         var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
@@ -273,7 +273,7 @@ public class DeveloperConfigurationTests
         var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
         {
             ProjectDirectory = dir,
-            Args = ["--contentRoot", dir, "--environment", "Cluster", TestHelpers.DisableConfigReloadArg],
+            Args = ["--contentRoot", dir, "--environment", "Cluster", TestBuilderDefaults.DisableConfigReloadArg],
         });
 
         var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
