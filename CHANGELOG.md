@@ -494,6 +494,23 @@ nothing will fail to build to warn you.
   `connectionName` is optional and defaults to the source resource's own name, matching today's
   behavior when omitted.
 
+- **`withServiceHttpsEndpoint()` and `withServiceHttpEndpoint()`** ([#208]). The exported shim set
+  covered environment, references, waits and args, but nothing let a guest-language AppHost declare
+  an endpoint on the resolved service — every other shape has a TypeScript equivalent of
+  `Configure<T>`, this one didn't. It becomes load-bearing the moment a deferred checkout is the
+  default: Aspire reads endpoints from a launch profile while composing, and a first-run checkout
+  that hasn't landed on disk yet has no launch profile for it to read, so nothing declares the
+  endpoint unless the AppHost does.
+
+  ```typescript
+  builder.addService('common-auth').withServiceHttpsEndpoint();
+  ```
+
+  Like every shim here, it delegates to `Configure<IResourceWithEndpoints>`, so it inherits that
+  method's skip-and-warn behavior for free: safe to write unconditionally, since a service a
+  developer has switched to `url` or `kubernetes` in `servicesources.local.json` is skipped rather
+  than misconfigured.
+
 ### Changed
 
 - **A `kubernetes` `context`, `namespace` or `service` with surrounding whitespace is now refused**
@@ -1435,6 +1452,7 @@ Targets `net10.0`.
 [#200]: https://github.com/flojon/aspire-servicesources/issues/200
 [#206]: https://github.com/flojon/aspire-servicesources/issues/206
 [#207]: https://github.com/flojon/aspire-servicesources/issues/207
+[#208]: https://github.com/flojon/aspire-servicesources/issues/208
 [#209]: https://github.com/flojon/aspire-servicesources/issues/209
 [#214]: https://github.com/flojon/aspire-servicesources/issues/214
 [#215]: https://github.com/flojon/aspire-servicesources/issues/215
