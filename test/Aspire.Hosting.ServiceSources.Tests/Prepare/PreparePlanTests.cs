@@ -318,9 +318,35 @@ public class PreparePlanTests
         Assert.Null(plan.Step);
         Assert.NotNull(plan.IgnoredCatalogNotice);
         Assert.Contains($"'{ServiceName}'", plan.IgnoredCatalogNotice!);
-        // Carried verbatim, so it can be copied into the local file.
+        // Carried verbatim (it has no credential in it), so it can be copied into the local file.
         Assert.Contains("\"./prepare.sh\"", plan.IgnoredCatalogNotice);
         Assert.Contains("local.path", plan.IgnoredCatalogNotice);
+    }
+
+    /// <remarks>
+    /// The one #286 originally left unredacted, on the grounds that a redacted command is not
+    /// paste-able — the notice's whole reason to exist. Revisited after the fix shipped: the
+    /// catalog command here can legitimately carry a credential the same way an argument to curl
+    /// or git can (<c>local.prepare.command</c> is where a real token would live), so the
+    /// credential is now stripped the same way the other four sites strip theirs. What survives is
+    /// still copy-pasteable JSON — the developer just fills the token back in from their own
+    /// secret once it is in <c>servicesources.local.json</c>, which is where it belongs anyway.
+    /// </remarks>
+    [Fact]
+    public void PathCheckout_TheNoticesCommand_HasUrlCredentialsRedacted()
+    {
+        var plan = Plan(
+            Catalog(["curl", "-u", "https://ci-user:hunter2@nexus.example.com/repo/artifact.jar"]),
+            managedCheckout: false);
+
+        var notice = plan.IgnoredCatalogNotice!;
+
+        Assert.DoesNotContain("hunter2", notice);
+        Assert.Contains("https://nexus.example.com/repo/artifact.jar", notice);
+
+        var array = notice[notice.IndexOf('[')..(notice.IndexOf(']') + 1)];
+        var parsed = System.Text.Json.JsonSerializer.Deserialize<string[]>(array);
+        Assert.Equal<string[]>(["curl", "-u", "https://nexus.example.com/repo/artifact.jar"], parsed!);
     }
 
     /// <summary>

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Git;
 
 namespace Aspire.Hosting.ServiceSources.Prepare;
 
@@ -265,6 +266,16 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
     /// — a different string: <c>C:\temp\x</c> written raw contains <c>\t</c>, which JSON reads as a
     /// tab.
     /// </para>
+    /// <para>
+    /// Each argument goes through <see cref="GitUrl.RedactAll"/> before it is serialized — the same
+    /// helper the other four sites #286 found use — so a credential the catalog command carries does
+    /// not reach the log the notice is printed to. This is a step down from the other four: there the
+    /// text redacted was only ever meant to be read, but here it is meant to be pasted, and stripping
+    /// the userinfo out of a URL argument leaves a snippet whose credential the developer must supply
+    /// themselves once it lands in their own file. That is the intended shape of the result, not a
+    /// side effect: a token belongs in the developer's local configuration, not the catalog it was
+    /// copied from.
+    /// </para>
     /// </remarks>
     private static string IgnoredCatalogStepNotice(string serviceName, IReadOnlyList<string> command) =>
         $"Service '{serviceName}': its catalog entry declares a '{CatalogBlock}' step, which was not run — "
@@ -272,7 +283,9 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
         + "command in a directory this tool does not own unless you asked for it there. Nothing establishes "
         + "that the directory is even a checkout of the repository the catalog names. To run it, copy it into "
         + $"{DeveloperConfiguration.FileName}: \"{serviceName}\": {{ ..., \"local\": {{ \"{CatalogBlock}\": "
-        + $"{{ \"command\": [{string.Join(", ", command.Select(a => JsonSerializer.Serialize<string>(a)))}] }} }} }} — or "
+        + "{ \"command\": ["
+        + string.Join(", ", command.Select(a => JsonSerializer.Serialize<string>(GitUrl.RedactAll(a))))
+        + "] } } } — or "
         + $"declare {{ \"{CatalogBlock}\": {{ \"mode\": \"never\" }} }} to say that nothing should run there. "
         + "Either one silences this notice; it repeats on every start until one of them is there.";
 }
