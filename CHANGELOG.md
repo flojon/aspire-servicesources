@@ -620,17 +620,23 @@ nothing will fail to build to warn you.
   multi-module project root by walking up for the nearest ancestor `.mvn` directory, so a jar-run
   Java service (one with no `mvnw` of its own to stop the walk first) could pick up your
   repository's `.mvn/maven.config`, `jvm.config` or `extensions.xml`. `.servicesources/` now also
-  gets an empty `.mvn/` directory, refreshed the same way as the other six barriers.
+  gets an empty `.mvn/` directory. Unlike the other six barriers, there is nothing in it to keep in
+  sync, so — unlike them — it is created once and then left alone, including anything a service or
+  a developer later adds inside it.
 
-  **pnpm, Yarn, npm and Gradle are not fixed by this issue**, and the README now says why. pnpm
-  looked barrierable the same way — the nearest `pnpm-workspace.yaml` wins — but a `packages: []`
-  file at `.servicesources/` doesn't terminate the walk; it makes `.servicesources` a workspace
-  root with nothing in it, and `pnpm install` inside the checkout then silently installs nothing
-  at all rather than failing loud or leaking config. Yarn Berry merges rcfiles from every ancestor
-  instead of stopping at the nearest one, Node's `node_modules` resolution walks every ancestor
-  with no terminator, and Gradle's settings-file search already fails loud when it hits a host
-  repository's `settings.gradle`. See the README's "Some JavaScript and Gradle leaks can't be
-  barriered" section.
+  **pnpm, Yarn, Node's own module resolution and Gradle are not fixed by this issue** (npm's own
+  `.npmrc` was never actually a leak — see the README for why), and the README now says why the
+  other four aren't either. pnpm looked barrierable the same way — the nearest `pnpm-workspace.yaml`
+  wins — but a `packages: []` file at `.servicesources/` doesn't terminate the walk; it makes
+  `.servicesources` a workspace root with nothing in it, and `pnpm install` inside the checkout then
+  silently installs nothing at all rather than failing loud or leaking config. Yarn Berry merges
+  rcfiles from every ancestor instead of stopping at the nearest one, and Node's `node_modules`
+  resolution walks every ancestor with no terminator — a dependency your repository happens to have
+  installed above the checkout can resolve into a service that never declared it, passing on your
+  machine and failing only in the service's own CI. Gradle's settings-file search is the one
+  exception that already fails loud, naming the fix, when it hits a host repository's
+  `settings.gradle`. See the README's "Some JavaScript and Gradle leaks can't be barriered"
+  section.
 
 ### Fixed
 

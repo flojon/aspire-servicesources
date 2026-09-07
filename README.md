@@ -718,10 +718,12 @@ depends on don't work that way, and no file placed in `.servicesources/` fixes t
 | Node's `node_modules` resolution | Node consults every ancestor's `node_modules` in turn; an empty directory does not stop the search the way an empty file stops MSBuild. A dependency your repository happens to have installed above the checkout can resolve into a service that never declared it — passing on your machine and failing in the service's own CI. |
 | Gradle's settings-file search | Searched in the cwd and every ancestor up to the filesystem root, stopping at the first hit — so a single-project repository carrying `gradlew` and `build.gradle` but no `settings.gradle` is captured by your repository's. A barrier gains nothing here: Gradle reports *"not part of the build defined by settings file … must have its own settings file"* regardless of what a barrier file said, so the failure is loud and already names the fix. |
 
-None of these are silently exploitable the way the NuGet gap is — Yarn, `node_modules` and pnpm
-fail either loudly (a missing or unexpected dependency) or, in pnpm's case, by installing nothing
-at all, which a service's own health check or a missing `node_modules` directory surfaces quickly.
-Open an issue if one of them costs you real time.
+Gradle is the one loud failure here, naming its own fix. The other three are not: Yarn silently
+applies whatever your repository's `.yarnrc.yml` says (a registry, a linker mode, a scope) with no
+error at all; `node_modules` silently resolves a dependency the checkout never declared, the same
+"works on your machine, fails in CI" shape as the NuGet gap above; and pnpm's is the quietest of
+all — a full install that reports success while installing nothing. Open an issue if one of them
+costs you real time.
 
 #### Several services from one repository
 
