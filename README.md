@@ -198,6 +198,11 @@ service pointed at your own directory with `path` needs no git at all.
   as a quick override — use `path` for that too. The `.servicesources/` directory gitignores itself
   on first use — no need to add it to your own `.gitignore` — and shields what it holds from your
   AppHost repository's build settings (see below).
+
+  `ref`/`defaultRef` accept a commit SHA, not only a branch or tag — and a SHA is how a team turns
+  "whatever's at the tip the first time each developer clones" into a reviewed checkout, since a
+  resolved service can build and run code the checkout's own repository controls (see
+  [`SECURITY.md`](SECURITY.md)). It costs a catalog edit per bump; that's the actual trade.
 - Set `path` to point at a checkout you manage yourself (e.g. an existing local clone). It's
   used as-is — no clone, no checkout, no fetch, ever. A relative `path` is anchored to the
   AppHost directory, and must name a directory that already exists. `ref` cannot be combined
@@ -312,6 +317,13 @@ services:
 | `always` | every start | an incremental script that decides its own work |
 | `never` | — | opting out of a step the catalog declared |
 
+**"the checkout moves to another commit" is more concrete than it sounds.** A warm managed checkout
+is never fetched or moved on your behalf — the commit only moves when you move it — so under the
+default `oncePerCommit`, **`git pull` in a service checkout is what causes `prepare` to run again on
+the next AppHost start.** That's an ordinary, frequent action, and nothing about running it reads as
+"approve a script to run on my machine"; see [`SECURITY.md`](SECURITY.md) for why that's worth
+knowing rather than just worth stating.
+
 The `once` vs `oncePerCommit` question is **"does the repository define this step?"** rather than
 "how often" — and the test is where the *version* is written, not where the expensive part is.
 
@@ -390,6 +402,15 @@ catalog command for it to apply to.) The marker for such a checkout lives in the
 `<AppHostDirectory>/.servicesources/prepare/<service>.json`, keyed on the resolved path as well as
 the command — writing into a directory this tool doesn't own is the one thing `path` promises never
 to happen.
+
+**This notice is not a general consent rule, and it's easy to read it as one.** It exists because a
+`path` checkout is *your* working tree — the axis it protects is blast radius, not letting a
+catalog command mutate a directory this tool doesn't own. A managed checkout under
+`.servicesources/checkouts/` is exactly the opposite: fully tool-owned, so nothing here asks before
+its `prepare` step (or the `dotnet`/`javascript`/`java` build that follows it) runs the first time —
+yet that script is foreign code in the sense that matters for [`SECURITY.md`](SECURITY.md): written
+and reviewed by the service repository, not by you. Meeting this notice on a `path` service is not a
+sign that a managed one asks first too.
 
 **Overriding a catalog step per developer.** Your block is merged over the catalog's **per field**,
 with one exception: `mode` overrides on its own, and `command`/`windowsCommand` are replaced
@@ -2132,4 +2153,5 @@ history, including the phase 2 backlog (repo auto-update, config discovery walk-
 dependency/infrastructure resolution, and more).
 
 Changes are recorded in [`CHANGELOG.md`](CHANGELOG.md); how a release is cut is in
-[`RELEASING.md`](RELEASING.md).
+[`RELEASING.md`](RELEASING.md); the trust model a resolved service runs under is in
+[`SECURITY.md`](SECURITY.md).
