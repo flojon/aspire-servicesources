@@ -640,8 +640,8 @@ repository turns on central package management, and least visibly as your `packa
 confining that repository's restores to your feeds (a leak that hides behind a warm
 `~/.nuget/packages` and only surfaces on a clean machine or in CI).
 
-So alongside the `.gitignore`, `.servicesources/` gets six tool-managed files that end those walks
-there:
+So alongside the `.gitignore`, `.servicesources/` gets six tool-managed files, plus an empty
+`.mvn` directory, that end those walks there:
 
 | File | Content | Stops |
 | --- | --- | --- |
@@ -650,15 +650,20 @@ there:
 | `nuget.config` | `<packageSourceMapping><clear /></packageSourceMapping>` | your repository's package source mapping (see the note below) |
 | `.editorconfig` | `root = true` | your repository's code style and analyzer severities |
 | `global.json` | `{}` | your repository's SDK pin and `msbuild-sdks` versions |
+| `.mvn/` | empty directory | your repository's `.mvn/maven.config`, `jvm.config` and `extensions.xml`, and Maven's own root-directory detection, for a **jar**-run Java service (one without its own `mvnw`, which already stops the walk at the checkout) |
 
-Each is written with a comment saying what it is and why it's there, since you'll find them on disk
-with no git history to explain them, and all are rewritten whenever their content is out of date,
-so upgrading the package updates them.
+Each of the six files is written with a comment saying what it is and why it's there, since you'll
+find them on disk with no git history to explain them, and all six are rewritten whenever their
+content is out of date, so upgrading the package updates them. `.mvn/` is the exception: Maven
+only asks whether the directory exists, so there is no content to write a comment into or to keep
+up to date — the directory is created once and then left alone, including anything Maven or a
+developer later adds inside it (a `maven-wrapper.properties` for a service that grows its own
+`mvnw`, for instance).
 
 Each barrier drops a constraint the checkout never opted into, and only supplies what a checkout
 lacks. A checkout carrying its own `Directory.Build.props`, `Directory.Packages.props`,
-`.editorconfig` or `global.json` is found first and keeps its own settings, including central
-package management if that's how that repository builds.
+`.editorconfig`, `global.json` or `.mvn/` is found first and keeps its own settings, including
+central package management if that's how that repository builds.
 
 Four of these are worth a note:
 
@@ -698,6 +703,25 @@ Two upward searches are deliberately left alone, because neither has a neutral v
 also a decision: `Directory.Build.rsp` (MSBuild takes the first one found walking up from the
 project, so your repository's response-file arguments still apply) and `.config/dotnet-tools.json`
 (which affects `dotnet tool` run inside a checkout). Open an issue if either bites you.
+
+#### Some JavaScript and Gradle leaks can't be barriered
+
+The barrier pattern above only works for a tool that **stops at the nearest file it finds while
+walking up**. Several of the JavaScript and Gradle mechanisms a `javascript` or `java` service
+depends on don't work that way, and no file placed in `.servicesources/` fixes them:
+
+| Mechanism | Why a barrier doesn't work |
+| --- | --- |
+| npm's `.npmrc` | Not actually a leak: npm's local config comes from the *closest* ancestor holding `package.json` or `node_modules`, which is the checkout itself, so your repository's `.npmrc` never reaches it. |
+| pnpm's `pnpm-workspace.yaml` | The nearest ancestor wins, so it looks barrierable — but a `packages: []` file at `.servicesources/` doesn't terminate the walk the way an empty `Directory.Build.props` does. It makes `.servicesources` a workspace root with zero matching projects, and `pnpm install` inside the checkout then reports `Scope: all 0 workspace projects`, exits `0`, and installs nothing — a silent no-op that is worse than the leak it would replace. Neither a checkout-level `.npmrc` (`ignore-workspace=true`) nor the equivalent environment variable changes this; only the `--ignore-workspace` CLI flag does, and this tool does not control how the install command is invoked. |
+| Yarn Berry's `.yarnrc.yml` | Yarn *merges* rcfiles from the cwd and every ancestor rather than stopping at the nearest one, and there is no `root: true` equivalent to end the merge. Neutralizing it would mean enumerating every setting (`yarnPath`, `npmRegistryServer`, `nodeLinker`, `npmScopes`, …) and re-stating a default for each. |
+| Node's `node_modules` resolution | Node consults every ancestor's `node_modules` in turn; an empty directory does not stop the search the way an empty file stops MSBuild. A dependency your repository happens to have installed above the checkout can resolve into a service that never declared it — passing on your machine and failing in the service's own CI. |
+| Gradle's settings-file search | Searched in the cwd and every ancestor up to the filesystem root, stopping at the first hit — so a single-project repository carrying `gradlew` and `build.gradle` but no `settings.gradle` is captured by your repository's. A barrier gains nothing here: Gradle reports *"not part of the build defined by settings file … must have its own settings file"* regardless of what a barrier file said, so the failure is loud and already names the fix. |
+
+None of these are silently exploitable the way the NuGet gap is — Yarn, `node_modules` and pnpm
+fail either loudly (a missing or unexpected dependency) or, in pnpm's case, by installing nothing
+at all, which a service's own health check or a missing `node_modules` directory surfaces quickly.
+Open an issue if one of them costs you real time.
 
 #### Several services from one repository
 

@@ -615,6 +615,23 @@ nothing will fail to build to warn you.
   "points outside the service's checkout" said something untrue about the platform they were
   running on.
 
+- **A managed checkout no longer inherits the AppHost repository's Maven configuration either**
+  ([#124]), the guest-language follow-up to [#119]'s MSBuild/NuGet barriers. Maven finds its
+  multi-module project root by walking up for the nearest ancestor `.mvn` directory, so a jar-run
+  Java service (one with no `mvnw` of its own to stop the walk first) could pick up your
+  repository's `.mvn/maven.config`, `jvm.config` or `extensions.xml`. `.servicesources/` now also
+  gets an empty `.mvn/` directory, refreshed the same way as the other six barriers.
+
+  **pnpm, Yarn, npm and Gradle are not fixed by this issue**, and the README now says why. pnpm
+  looked barrierable the same way — the nearest `pnpm-workspace.yaml` wins — but a `packages: []`
+  file at `.servicesources/` doesn't terminate the walk; it makes `.servicesources` a workspace
+  root with nothing in it, and `pnpm install` inside the checkout then silently installs nothing
+  at all rather than failing loud or leaking config. Yarn Berry merges rcfiles from every ancestor
+  instead of stopping at the nearest one, Node's `node_modules` resolution walks every ancestor
+  with no terminator, and Gradle's settings-file search already fails loud when it hits a host
+  repository's `settings.gradle`. See the README's "Some JavaScript and Gradle leaks can't be
+  barriered" section.
+
 ### Fixed
 
 - **A misspelled service name in `servicesources.local.json` now names the entry it was reaching
@@ -1434,6 +1451,7 @@ Targets `net10.0`.
 [#118]: https://github.com/flojon/aspire-servicesources/issues/118
 [#119]: https://github.com/flojon/aspire-servicesources/issues/119
 [#122]: https://github.com/flojon/aspire-servicesources/issues/122
+[#124]: https://github.com/flojon/aspire-servicesources/issues/124
 [#125]: https://github.com/flojon/aspire-servicesources/issues/125
 [#130]: https://github.com/flojon/aspire-servicesources/issues/130
 [#131]: https://github.com/flojon/aspire-servicesources/issues/131

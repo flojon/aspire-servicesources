@@ -1214,6 +1214,7 @@ public class LocalProjectSourceTests
         Assert.True(File.Exists(Path.Combine(dir, "nuget.config")));
         Assert.True(File.Exists(Path.Combine(dir, ".editorconfig")));
         Assert.True(File.Exists(Path.Combine(dir, "global.json")));
+        Assert.True(Directory.Exists(Path.Combine(dir, ".mvn")));
     }
 
     [Fact]
@@ -1237,6 +1238,7 @@ public class LocalProjectSourceTests
         Assert.False(Directory.Exists(Path.Combine(appHostDirectory, ".servicesources")));
         Assert.False(File.Exists(Path.Combine(overridePath, "Directory.Build.props")));
         Assert.False(File.Exists(Path.Combine(overridePath, "nuget.config")));
+        Assert.False(Directory.Exists(Path.Combine(overridePath, ".mvn")));
     }
 
     [Fact]

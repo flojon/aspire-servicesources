@@ -118,6 +118,38 @@ public class CheckoutBuildBarrierTests
     }
 
     [Fact]
+    public void Ensure_CreatesAnEmptyMvnDirectory()
+    {
+        // Maven's root-directory detection walks up looking for a .mvn sibling directory and stops
+        // at the first one it finds; an empty one here ends that walk before it reaches the
+        // AppHost's repository. Verified against Maven 3.9: maven.multiModuleProjectDirectory
+        // resolves to this directory, and a maven.config one level up is not applied.
+        var dir = NewToolDirectory();
+
+        CheckoutBuildBarrier.Ensure(dir);
+
+        var mvnDir = Path.Combine(dir, ".mvn");
+        Assert.True(Directory.Exists(mvnDir));
+        Assert.Empty(Directory.GetFileSystemEntries(mvnDir));
+    }
+
+    [Fact]
+    public void Ensure_RunAgain_LeavesAHandWrittenFileInsideMvnAlone()
+    {
+        // .mvn/ is created empty, but a jar-mode service that later grows a wrapper writes its own
+        // maven-wrapper.properties there, and a developer could add extensions.xml by hand.
+        // Directory creation must not disturb either.
+        var dir = NewToolDirectory();
+        CheckoutBuildBarrier.Ensure(dir);
+        var placed = Path.Combine(dir, ".mvn", "extensions.xml");
+        File.WriteAllText(placed, "<extensions/>");
+
+        CheckoutBuildBarrier.Ensure(dir);
+
+        Assert.Equal("<extensions/>", File.ReadAllText(placed));
+    }
+
+    [Fact]
     public void Ensure_RunAgainOverItsOwnOutput_DoesNotRewriteTheFiles()
     {
         var dir = NewToolDirectory();
@@ -178,7 +210,7 @@ public class CheckoutBuildBarrierTests
     }
 
     [Fact]
-    public void Ensure_LeavesTheSixBarriersAndNothingElse()
+    public void Ensure_LeavesTheSixFilesAndTheMvnDirectoryAndNothingElse()
     {
         // The scratch file each write renames into place is deleted in a finally, so a leftover
         // here means a write path that loses one. Asserted by exact set rather than by presence,
@@ -197,6 +229,7 @@ public class CheckoutBuildBarrierTests
                 "nuget.config",
             ],
             Directory.GetFiles(dir).Select(Path.GetFileName).Order(StringComparer.Ordinal));
+        Assert.Equal([".mvn"], Directory.GetDirectories(dir).Select(Path.GetFileName));
     }
 
     [Fact]
@@ -254,6 +287,7 @@ public class CheckoutBuildBarrierTests
         Assert.True(File.Exists(Path.Combine(dir, "Directory.Packages.props")));
         Assert.True(File.Exists(Path.Combine(dir, ".editorconfig")));
         Assert.True(File.Exists(Path.Combine(dir, "global.json")));
+        Assert.True(Directory.Exists(Path.Combine(dir, ".mvn")));
     }
 
     [Fact]
@@ -310,6 +344,7 @@ public class CheckoutBuildBarrierTests
             new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip });
         Assert.Equal(JsonValueKind.Object, globalJson.RootElement.ValueKind);
         Assert.Contains("root = true", File.ReadAllText(Path.Combine(dir, ".editorconfig")));
+        Assert.True(Directory.Exists(Path.Combine(dir, ".mvn")));
 
         // Sixteen racing writers each create a uniquely named scratch file; every one of them has
         // to be gone, or the race leaks a file per losing write.
