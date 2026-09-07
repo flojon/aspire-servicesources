@@ -121,6 +121,22 @@
             Section = body(changelog, "Unreleased");
             SectionName = Section.Length > 0 ? "Unreleased" : "";
         }
+
+        // nuget.org rejects a push outright once PackageReleaseNotes passes 35000 characters
+        // ("A nuget package's ReleaseNotes property may not be more than 35000 characters
+        // long."), and that happens at push time - nothing before it (pack, restore, the
+        // release-shape check in ci.yml, which overrides PackageReleaseNotes to a short
+        // literal precisely so it never exercises real changelog content) catches an
+        // oversized section. Leave headroom below the cap for the prefix/suffix text this
+        // target wraps Section in below, all of which are well under 1000 characters.
+        const int MaxSectionLength = 34000;
+        if (Section.Length > MaxSectionLength)
+        {
+            var cut = Section.LastIndexOf('\n', MaxSectionLength);
+            if (cut < 0) cut = MaxSectionLength;
+            Section = Section.Substring(0, cut).TrimEnd()
+                + "\n\n… truncated for nuget.org's 35000-character release notes limit. Full entry in CHANGELOG.md.";
+        }
       ]]></Code>
     </Task>
   </UsingTask>
