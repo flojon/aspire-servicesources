@@ -753,6 +753,18 @@ nothing will fail to build to warn you.
   The single value now asks the same converter a named entry always has, so the two can no longer
   disagree about what a number is; `#1628` and `&H1628` are accepted too, for the same reason.
 
+- **A `prepare` step's output now has URL credentials redacted before it reaches a resource log**
+  ([#270]). A `prepare` command comes from the catalog rather than from the developer running the
+  AppHost, and its stdout/stderr is therefore third-party runtime output the AppHost does not
+  control — the trust boundary [#118] already treats as needing to be logged loudly rather than
+  trusted silently. Without this, a command that echoed a credential-bearing URL (a verbose
+  `curl -v`, a tool printing the remote it just fetched from) landed that credential in the
+  resource log — dashboard-visible, screen-shareable, and exportable via OTLP. Every line is now
+  redacted once, at the one point both the eager and deferred paths already funnel through, the
+  same way `GitCommand.Deliver` already redacts git's own progress lines before they reach the
+  same kind of sink — which also covers the tail a failed step's exception message quotes, since
+  it is built from the same already-redacted lines.
+
 - **The connection string a `kubernetes` backing service quotes back when it has no port to
   address is now wrapped in apostrophes, with an embedded apostrophe doubled** ([#263]). It used
   to sit inside double quotes with nothing escaping `"`, so a connection string legitimately
@@ -1526,6 +1538,7 @@ Targets `net10.0`.
 [#241]: https://github.com/flojon/aspire-servicesources/issues/241
 [#263]: https://github.com/flojon/aspire-servicesources/issues/263
 [#264]: https://github.com/flojon/aspire-servicesources/issues/264
+[#270]: https://github.com/flojon/aspire-servicesources/issues/270
 [#279]: https://github.com/flojon/aspire-servicesources/issues/279
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
