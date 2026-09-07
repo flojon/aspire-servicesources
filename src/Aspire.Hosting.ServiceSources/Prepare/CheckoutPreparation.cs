@@ -267,15 +267,26 @@ internal static class CheckoutPreparation
         {
             return runner.Run(repoRoot, step.Command, cancellationToken, line =>
             {
+                // The command comes from the catalog, not from the developer running the AppHost —
+                // the trust boundary #118 already treats as needing to be logged loudly rather than
+                // trusted silently. Its output is therefore third-party runtime output the AppHost
+                // does not control, and it goes straight to a sink that puts it in the resource's
+                // logs — dashboard-visible, screen-shareable, exportable via OTLP. Redacted here,
+                // once, the same way GitCommand.Deliver redacts git's own progress lines before they
+                // reach the same kind of sink: a credential-shaped URL the command echoes (a verbose
+                // `curl -v`, a tool printing the remote it just fetched) never reaches either the
+                // sink below or the tail this failure message quotes (#270).
+                var redacted = GitUrl.RedactAll(line);
+
                 // Both of the command's streams are read, and a process-backed runner reads them on
                 // separate threads, so this callback is re-entered concurrently. The queue is not
                 // thread-safe, and reporting is serialized alongside it so two half-lines cannot be
                 // interleaved into one.
                 lock (tail)
                 {
-                    sink.Report($"{tag} {line}");
+                    sink.Report($"{tag} {redacted}");
 
-                    tail.Enqueue(line);
+                    tail.Enqueue(redacted);
                     if (tail.Count > OutputTailLines)
                     {
                         tail.Dequeue();

@@ -444,6 +444,28 @@ public class CheckoutPreparationTests
     }
 
     /// <remarks>
+    /// A `prepare` command comes from the catalog, not from the developer running the AppHost —
+    /// exactly the trust boundary #118 already treats as needing to be logged loudly rather than
+    /// trusted silently. Its output is therefore third-party runtime output the AppHost does not
+    /// control, in the same category <see cref="GitCommand.Deliver"/> already redacts for git's
+    /// own progress lines before they reach the same kind of sink (#270). A verbose command that
+    /// echoes a URL with embedded credentials — a misconfigured `curl -v`, a tool printing the
+    /// remote it just fetched from — must not carry that credential into the resource log.
+    /// </remarks>
+    [Fact]
+    public void TheCommandsOutput_HasUrlCredentialsRedactedBeforeItReachesTheSink()
+    {
+        var fixture = NewFixture();
+        fixture.Runner.Output = ["fetching https://user:s3cr3t-token@example.com/data.tar.gz"];
+
+        Run(fixture, Step());
+
+        var reported = Assert.Single(fixture.Sink.Lines.Skip(1));
+        Assert.DoesNotContain("s3cr3t-token", reported);
+        Assert.Contains("https://example.com/data.tar.gz", reported);
+    }
+
+    /// <remarks>
     /// A process-backed runner reads the command's two streams on separate threads, so the callback
     /// is re-entered concurrently — which the output tail, a plain queue, cannot survive unguarded.
     /// Reproduced with a runner that reports from two threads at once, as the real one does.
@@ -527,6 +549,25 @@ public class CheckoutPreparationTests
         Assert.Contains("./prepare.sh --full", ex.Message);
         Assert.Contains("code 17", ex.Message);
         Assert.Contains("boom", ex.Message);
+    }
+
+    /// <remarks>
+    /// The tail a failure quotes is built from the same lines already handed to the sink, so it
+    /// carries the same redaction rather than a second, separate one that could drift from it —
+    /// the ticket's own question about whether <see cref="CheckoutPreparation.FailedMessage"/>
+    /// needs the same treatment (#270).
+    /// </remarks>
+    [Fact]
+    public void ANonZeroExit_HasUrlCredentialsRedactedFromTheQuotedTail()
+    {
+        var fixture = NewFixture();
+        fixture.Runner.ExitCode = 1;
+        fixture.Runner.Output = ["fetching https://user:s3cr3t-token@example.com/data.tar.gz", "boom"];
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => Run(fixture, Step()));
+
+        Assert.DoesNotContain("s3cr3t-token", ex.Message);
+        Assert.Contains("https://example.com/data.tar.gz", ex.Message);
     }
 
     [Fact]
