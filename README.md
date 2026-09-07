@@ -1077,10 +1077,14 @@ Clone and fetch for a managed checkout (no `path` override) authenticate the sam
    cached PAT, a `.netrc`-backed helper — is consulted exactly as it is for a `git clone` you type
    yourself. For an SSH remote that means your SSH agent and `~/.ssh/config`. Nothing to configure
    here: if `git clone <repository>` works in the environment the AppHost runs in, so does this.
-2. **`SERVICESOURCES_GIT_USERNAME`/`SERVICESOURCES_GIT_TOKEN` environment variables**, if the
-   helpers above yield nothing (e.g. no helper configured) — or if what they yielded was refused,
-   see below. `SERVICESOURCES_GIT_TOKEN` alone is enough for hosts that accept any username
-   alongside a personal access token (GitHub, GitLab, Azure DevOps); set
+2. **`SERVICESOURCES_GIT_USERNAME`/`SERVICESOURCES_GIT_TOKEN`/`SERVICESOURCES_GIT_HOST`
+   environment variables**, if the helpers above yield nothing (e.g. no helper configured) — or if
+   what they yielded was refused, see below. **`SERVICESOURCES_GIT_HOST` is required** — the host
+   (and port, if the URL has one, e.g. `git.internal.example:8443`), matched case-insensitively,
+   that the token is for. Without it the token is offered to no host at all, since a catalog can
+   list services from more than one host and this token belongs to only one of them.
+   `SERVICESOURCES_GIT_TOKEN` alone (alongside `SERVICESOURCES_GIT_HOST`) is enough for hosts that
+   accept any username alongside a personal access token (GitHub, GitLab, Azure DevOps); set
    `SERVICESOURCES_GIT_USERNAME` too if your host requires a specific one. Supplied to git as a
    credential helper of last resort, so it never overrides a helper you configured yourself, and
    the token is read from the environment rather than passed on a command line where other users
@@ -1119,11 +1123,12 @@ the credentials in use can't see. A rate-limited response is deliberately left o
 hosts answer it with the same `403` as a token that's missing a scope: there the credential is
 fine and the fix is to wait, so it's reported as the transport failure it is.
 
-When the ladder resolves *nothing* — no helper yields a credential and neither environment
-variable is set — the error says so specifically instead of blaming authentication, because
-nothing was ever offered for the host to refuse. Watch for this when the helper works in your
-shell but not under the AppHost: helpers run in whatever environment the AppHost process
-inherits, which is not necessarily your interactive one.
+When the ladder resolves *nothing* — no helper yields a credential, and the environment rung has
+nothing to offer either because `SERVICESOURCES_GIT_TOKEN` is unset or because
+`SERVICESOURCES_GIT_HOST` doesn't name this host — the error says so specifically instead of
+blaming authentication, because nothing was ever offered for the host to refuse. Watch for this
+when the helper works in your shell but not under the AppHost: helpers run in whatever
+environment the AppHost process inherits, which is not necessarily your interactive one.
 
 **SSH works.** A `repository` written as `git@host:org/repo`, `host:org/repo` or `ssh://...` is
 handed to `git` as written and resolved by your SSH agent and `~/.ssh/config`, the same as any
@@ -2133,8 +2138,8 @@ line per underlying cause:
 Unhandled exception. Service 'reportdata': failed to clone repository 'https://github.com/acme/reportdata' into
 '/src/report-service/src/Report.AppHost/.servicesources/checkouts/reportdata' — authentication failed, or the
 repository is not visible to the credentials in use. Configure credentials via a git credential helper (`git
-credential fill` must resolve them for this host) or the SERVICESOURCES_GIT_USERNAME/SERVICESOURCES_GIT_TOKEN
-environment variables.
+credential fill` must resolve them for this host) or the SERVICESOURCES_GIT_USERNAME/SERVICESOURCES_GIT_TOKEN/
+SERVICESOURCES_GIT_HOST environment variables.
   caused by: unexpected http status code: 404
   (set SERVICESOURCES_FULL_ERRORS=1 for the full exception detail, including stack traces)
 ```
