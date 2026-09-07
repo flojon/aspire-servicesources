@@ -23,15 +23,28 @@ public static class LocalKindConfig
 
     /// <summary>
     /// Returns <see langword="null"/> when <paramref name="rawConfig"/> is <see langword="null"/>
-    /// (i.e. the service's yaml had no block matching its <c>kind</c>). Round-trips
-    /// <paramref name="rawConfig"/> back through yaml rather than reflecting over it directly,
-    /// since it arrives as an untyped <c>Dictionary&lt;object, object&gt;</c> produced by
-    /// YamlDotNet's dynamic deserialization. Pass <paramref name="serviceName"/> so a malformed
-    /// block names the offending service.
+    /// (i.e. the service's yaml had no block matching its <c>kind</c>). When
+    /// <paramref name="rawConfig"/> is already an instance of <typeparamref name="T"/> — as when a
+    /// service was declared in code via <c>WithKind(kind, options)</c> rather than yaml — it is
+    /// returned unchanged, with no parsing. Otherwise it is round-tripped back through yaml rather
+    /// than reflected over directly, since it arrives as an untyped
+    /// <c>Dictionary&lt;object, object&gt;</c> produced by YamlDotNet's dynamic deserialization.
+    /// Pass <paramref name="serviceName"/> so a malformed block names the offending service.
     /// </summary>
+    /// <remarks>
+    /// The already-typed instance this method returns for a code-declared service is the exact
+    /// object the caller of <c>WithKind</c> passed in, shared across every
+    /// <c>Validate</c>/<c>Resolve</c>/<c>ResolveDeferred</c> call that reads it — local-kind
+    /// implementations must treat the returned options object as read-only and must not mutate or
+    /// retain a reference expecting it to stay unchanged by other code (design finding 6). This
+    /// mirrors the existing yaml-sourced case, where the returned instance is freshly deserialized
+    /// per call and safe to treat the same way.
+    /// </remarks>
     /// <exception cref="ServiceSourcesConfigurationException">
-    /// The block isn't a mapping (usually an indentation slip), or it contains a property that
-    /// <typeparamref name="T"/> doesn't define (usually a typo).
+    /// <paramref name="rawConfig"/> is an instance of some type other than <typeparamref name="T"/>
+    /// that could only have come from code (not yaml) — the wrong kind's options object was passed.
+    /// Otherwise, for a yaml-sourced block: it isn't a mapping (usually an indentation slip), or it
+    /// contains a property that <typeparamref name="T"/> doesn't define (usually a typo).
     /// </exception>
     public static T? Parse<T>(object? rawConfig, string? serviceName = null) where T : class
     {
@@ -110,7 +123,6 @@ public static class LocalKindConfig
     // confusing wrong-type error instead of the existing scalar/list message.
     private static readonly HashSet<Type> YamlScalarTypes =
     [
-        typeof(bool),
         typeof(decimal),
         typeof(DateTime),
         typeof(DateTimeOffset),
