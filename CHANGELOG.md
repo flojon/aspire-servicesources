@@ -9,6 +9,11 @@ version is below `1.0.0`, a breaking change can ship in a minor release, so each
 behaves differently is called out under **Changed** — read those before upgrading too, since
 nothing will fail to build to warn you.
 
+**Fixed** entries cover only bugs in already-*released* behavior. A bug introduced and fixed
+within the same `[Unreleased]` cycle never shipped, so there is nothing for a consumer to have
+hit and nothing to read about — the feature ships correct the first time, as if the bug had
+never existed. Check the tag of the last release before adding one.
+
 ## [Unreleased]
 
 ### Breaking
