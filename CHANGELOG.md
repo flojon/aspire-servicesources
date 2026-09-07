@@ -621,8 +621,8 @@ nothing will fail to build to warn you.
   Java service (one with no `mvnw` of its own to stop the walk first) could pick up your
   repository's `.mvn/maven.config`, `jvm.config` or `extensions.xml`. `.servicesources/` now also
   gets an empty `.mvn/` directory. Unlike the other six barriers, there is nothing in it to keep in
-  sync, so — unlike them — it is created once and then left alone, including anything a service or
-  a developer later adds inside it.
+  sync, so it is created once and then left alone, including anything a service or a developer
+  later adds inside it.
 
   **pnpm, Yarn, Node's own module resolution and Gradle are not fixed by this issue** (npm's own
   `.npmrc` was never actually a leak — see the README for why), and the README now says why the
