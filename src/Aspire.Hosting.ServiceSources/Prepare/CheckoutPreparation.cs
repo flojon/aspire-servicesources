@@ -58,7 +58,7 @@ internal static class CheckoutPreparation
     /// </para>
     /// </remarks>
     public static string SkippedOutsideRunModeNotice(string serviceName, PrepareStep step) =>
-        $"{Tag(serviceName)} Not running the prepare step '{step.Describe()}': this AppHost is composing a "
+        $"{Tag(serviceName)} Not running the prepare step '{RedactedDescribe(step)}': this AppHost is composing a "
         + "manifest rather than running anything, and a bootstrap produces what the service needs in order to "
         + "run. If the service is then reported as missing a file its prepare step would have produced, that "
         + "is why — run the AppHost once to materialize the checkout.";
@@ -106,7 +106,7 @@ internal static class CheckoutPreparation
         var checkoutPath = decision.CheckoutPath;
         var commit = decision.Commit;
 
-        sink.Report($"{Tag(serviceName)} {reason} Running: {step.Describe()}");
+        sink.Report($"{Tag(serviceName)} {reason} Running: {RedactedDescribe(step)}");
 
         var tail = new Queue<string>(OutputTailLines);
         var exitCode = Launch(serviceName, step, repoRoot, runner, sink, tail, cancellationToken);
@@ -306,6 +306,18 @@ internal static class CheckoutPreparation
     /// </summary>
     private static string Tag(string serviceName) => $"[prepare {serviceName}]";
 
+    /// <summary>
+    /// <see cref="PrepareStep.Describe"/>, with any URL credentials it echoes removed.
+    /// </summary>
+    /// <remarks>
+    /// The command comes from the same untrusted-by-default source its own output does — the catalog,
+    /// or a developer's <c>local.prepare.command</c>, which can legitimately carry a token the same
+    /// way an argument to <c>curl</c> or <c>git</c> can — so every message that names the command
+    /// gets the same redaction #270 already gives its output, rather than only the lines it prints
+    /// (#286).
+    /// </remarks>
+    private static string RedactedDescribe(PrepareStep step) => GitUrl.RedactAll(step.Describe());
+
     /// <param name="quoted">
     /// The output tail, already snapshotted by the caller — this must not enumerate the live queue,
     /// which a still-running stream reader can be appending to.
@@ -313,7 +325,7 @@ internal static class CheckoutPreparation
     private static string FailedMessage(
         string serviceName, PrepareStep step, int exitCode, string[] quoted)
     {
-        return $"Service '{serviceName}': its prepare step failed. The command '{step.Describe()}' exited with "
+        return $"Service '{serviceName}': its prepare step failed. The command '{RedactedDescribe(step)}' exited with "
             + $"code {exitCode}, so the checkout was left as the command found it and nothing was recorded as "
             + "completed — the step will run again from the beginning on the next start."
             + (quoted.Length == 0
@@ -331,7 +343,7 @@ internal static class CheckoutPreparation
     /// </remarks>
     private static string LaunchFailedMessage(string serviceName, PrepareStep step, PrepareLaunchException ex) =>
         $"Service '{serviceName}': its prepare step could not be started. {ex.Message} The command is "
-        + $"'{step.Describe()}', run with the service's checkout as its working directory; its first element has "
+        + $"'{RedactedDescribe(step)}', run with the service's checkout as its working directory; its first element has "
         + "to be a path to something executable inside the checkout, or the name of a program on PATH."
         + (step.WindowsWithoutVariant
             ? " This AppHost is running on Windows and the block declares no 'windowsCommand', so the command "

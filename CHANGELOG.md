@@ -765,6 +765,19 @@ nothing will fail to build to warn you.
   same kind of sink — which also covers the tail a failed step's exception message quotes, since
   it is built from the same already-redacted lines.
 
+- **A `prepare` step's own command, not only its output, now has URL credentials redacted before
+  it reaches a resource log** ([#286]). [#270] redacted what a command *printed*; the command
+  *itself* was still echoed verbatim — in the line announcing a decision to run it, the
+  publish-mode skip notice, and both of a failed step's exception messages (a non-zero exit and a
+  launch failure) — so a credential passed as an argument (`local.prepare.command` is developer
+  configuration, and a step that fetches a private artifact is exactly what it exists for) reached
+  the same sink regardless of whether the command ever printed a line. All four now go through the
+  same `GitUrl.RedactAll` the output already does. The one place a command is still echoed in full
+  is the notice offering an unset `path` checkout's inherited catalog step to copy into
+  `servicesources.local.json` — there the command is the catalog's own, already committed to the
+  repository the notice is about, and redacting it would break the copy-paste the notice exists
+  for.
+
 - **The connection string a `kubernetes` backing service quotes back when it has no port to
   address is now wrapped in apostrophes, with an embedded apostrophe doubled** ([#263]). It used
   to sit inside double quotes with nothing escaping `"`, so a connection string legitimately
@@ -1540,6 +1553,7 @@ Targets `net10.0`.
 [#264]: https://github.com/flojon/aspire-servicesources/issues/264
 [#270]: https://github.com/flojon/aspire-servicesources/issues/270
 [#279]: https://github.com/flojon/aspire-servicesources/issues/279
+[#286]: https://github.com/flojon/aspire-servicesources/issues/286
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

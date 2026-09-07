@@ -348,6 +348,22 @@ public class CheckoutPreparationTests
         Assert.False(File.Exists(fixture.MarkerPath));
     }
 
+    /// <remarks>
+    /// The publish-mode skip names the step it declined to run — the first of the four sites #286
+    /// found still quoting <see cref="PrepareStep.Describe"/> unredacted after #270's fix covered
+    /// only a command's own output.
+    /// </remarks>
+    [Fact]
+    public void SkippedOutsideRunModeNotice_HasUrlCredentialsRedactedFromTheCommand()
+    {
+        var step = Step("oncePerCommit", "curl", "https://user:s3cr3t-token@example.com/artifact.jar");
+
+        var notice = CheckoutPreparation.SkippedOutsideRunModeNotice(ServiceName, step);
+
+        Assert.DoesNotContain("s3cr3t-token", notice);
+        Assert.Contains("https://example.com/artifact.jar", notice);
+    }
+
     // ---- what is reported ---------------------------------------------------
 
     [Fact]
@@ -466,6 +482,23 @@ public class CheckoutPreparationTests
     }
 
     /// <remarks>
+    /// #270 redacted the command's <em>output</em>; the command a decision-to-run announces is its
+    /// own line into the same sink, and a `local.prepare.command` can carry a credential just as
+    /// legitimately as anything the command later prints (#286).
+    /// </remarks>
+    [Fact]
+    public void TheAnnouncementOfADecisionToRun_HasUrlCredentialsRedactedFromTheCommand()
+    {
+        var fixture = NewFixture();
+
+        Run(fixture, Step("oncePerCommit", "curl", "https://user:s3cr3t-token@example.com/artifact.jar"));
+
+        var announcement = fixture.Sink.Lines[0];
+        Assert.DoesNotContain("s3cr3t-token", announcement);
+        Assert.Contains("https://example.com/artifact.jar", announcement);
+    }
+
+    /// <remarks>
     /// A process-backed runner reads the command's two streams on separate threads, so the callback
     /// is re-entered concurrently — which the output tail, a plain queue, cannot survive unguarded.
     /// Reproduced with a runner that reports from two threads at once, as the real one does.
@@ -568,6 +601,25 @@ public class CheckoutPreparationTests
 
         Assert.DoesNotContain("s3cr3t-token", ex.Message);
         Assert.Contains("https://example.com/data.tar.gz", ex.Message);
+    }
+
+    /// <remarks>
+    /// The tail's own redaction (above) covers what the command <em>printed</em>. The failure
+    /// message also quotes the command <em>itself</em> — <see cref="PrepareStep.Describe"/> — which
+    /// carried no redaction at all until #286: a command that never printed anything still names
+    /// itself, credential included, the moment it exits non-zero.
+    /// </remarks>
+    [Fact]
+    public void ANonZeroExit_HasUrlCredentialsRedactedFromTheQuotedCommand()
+    {
+        var fixture = NewFixture();
+        fixture.Runner.ExitCode = 1;
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => Run(
+            fixture, Step("oncePerCommit", "curl", "https://user:s3cr3t-token@example.com/artifact.jar")));
+
+        Assert.DoesNotContain("s3cr3t-token", ex.Message);
+        Assert.Contains("https://example.com/artifact.jar", ex.Message);
     }
 
     [Fact]
@@ -724,6 +776,25 @@ public class CheckoutPreparationTests
 
         Assert.Contains("declares no 'windowsCommand'", ex.Message);
         Assert.Contains("prepare.ps1", ex.Message);
+    }
+
+    /// <remarks>
+    /// A launch failure names the command too — <see cref="CheckoutPreparation.LaunchFailedMessage"/>
+    /// — a fifth site quoting <see cref="PrepareStep.Describe"/> unredacted before #286, and it fires
+    /// on the very first attempt: the command never got to run, let alone print anything, so nothing
+    /// but this message is around to redact.
+    /// </remarks>
+    [Fact]
+    public void ACommandThatCannotBeLaunched_HasUrlCredentialsRedactedFromTheCommand()
+    {
+        var fixture = NewFixture();
+        fixture.Runner.LaunchException = new PrepareLaunchException("no such file");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => Run(
+            fixture, Step("oncePerCommit", "curl", "https://user:s3cr3t-token@example.com/artifact.jar")));
+
+        Assert.DoesNotContain("s3cr3t-token", ex.Message);
+        Assert.Contains("https://example.com/artifact.jar", ex.Message);
     }
 
     // ---- a path checkout's marker ------------------------------------------
