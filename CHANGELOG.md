@@ -450,6 +450,22 @@ nothing will fail to build to warn you.
   why belongs to the process Aspire launched, whose streams this package does not own. Needs no
   opt-in, and nothing about how a failure reaches the dashboard changes.
 
+- **`withServiceConnectionString` takes a `connectionName`** ([#209]). A guest-language AppHost
+  previously had no way to choose the environment variable a connection string arrives under — the
+  exported shim's `WithReference` had no such argument, so the key always followed the referenced
+  resource's own name. The only remedy was renaming that resource, which is not always available:
+  an app whose configuration already reads a particular name, or a resource that is not the
+  caller's to rename, had nothing to reach for. TypeScript now takes the same argument a project's
+  `withReference` already does:
+
+  ```typescript
+  service.withServiceConnectionString(db, { connectionName: 'OrdersDb' });
+  // ConnectionStrings__OrdersDb, regardless of db's own resource name
+  ```
+
+  `connectionName` is optional and defaults to the source resource's own name, matching today's
+  behavior when omitted.
+
 ### Changed
 
 - **A `kubernetes` `context`, `namespace` or `service` with surrounding whitespace is now refused**

@@ -1,4 +1,5 @@
 using System.Reflection;
+using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Sources;
@@ -38,6 +39,39 @@ public class ServiceConfigurationExportsTests
         typeof(ServiceConfigurationExports)
             .GetMethods(BindingFlags.Public | BindingFlags.Static)
             .Where(m => m.GetCustomAttributes(typeof(AspireExportAttribute), inherit: false).Length > 0);
+
+    /// <summary>
+    /// The environment the callbacks past <paramref name="alreadyPresent"/> contribute, with every
+    /// value provider resolved. Mirrors <c>BackingServiceConsumerTests</c>' own helper, which reaches
+    /// past the same limitation: a plain test builder cannot run <c>WithProjectDefaults</c> to
+    /// completion, so counting before and after the call under test is what isolates the callbacks
+    /// this test added from everything Aspire's own resource setup contributed.
+    /// </summary>
+    private static async Task<Dictionary<string, string>> MaterializeEnvironmentAsync(
+        IResource resource, int alreadyPresent)
+    {
+        var context = new EnvironmentCallbackContext(
+            new DistributedApplicationExecutionContext(DistributedApplicationOperation.Run), resource);
+
+        foreach (var callback in resource.Annotations.OfType<EnvironmentCallbackAnnotation>().Skip(alreadyPresent))
+        {
+            await callback.Callback(context);
+        }
+
+        var materialized = new Dictionary<string, string>();
+
+        foreach (var (key, value) in context.EnvironmentVariables)
+        {
+            materialized[key] = value switch
+            {
+                string text => text,
+                IValueProvider provider => await provider.GetValueAsync(default) ?? "",
+                _ => value.ToString() ?? "",
+            };
+        }
+
+        return materialized;
+    }
 
     [Fact]
     public void EveryExportedMethodIsNonGeneric()
@@ -92,6 +126,46 @@ public class ServiceConfigurationExportsTests
         var service = ConfigurableService(builder).WithServiceEnvironment("DBUSERNAME", "postgres");
 
         Assert.NotEmpty(service.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>());
+    }
+
+    [Fact]
+    public async Task WithServiceConnectionString_KeysOnTheSourceResourcesOwnName()
+    {
+        var builder = Builder();
+        var db = builder.AddConnectionString(
+            "orders-db", ReferenceExpression.Create($"Host=localhost;Database=orders"));
+
+        var service = ConfigurableService(builder);
+        var beforeTheReference = service.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>().Count();
+
+        service.WithServiceConnectionString(db);
+
+        var environment = await MaterializeEnvironmentAsync(service.Resource, beforeTheReference);
+
+        Assert.Equal("Host=localhost;Database=orders", environment["ConnectionStrings__orders-db"]);
+    }
+
+    /// <summary>
+    /// #209: the gap this parameter closes. A guest-language AppHost previously had to rename the
+    /// source resource to control the key a consumer's configuration reads it under; this is the
+    /// same escape hatch <c>WithReference(source, connectionName)</c> gives a C# AppHost.
+    /// </summary>
+    [Fact]
+    public async Task WithServiceConnectionString_WithConnectionName_OverridesTheKey()
+    {
+        var builder = Builder();
+        var db = builder.AddConnectionString(
+            "orders-db", ReferenceExpression.Create($"Host=localhost;Database=orders"));
+
+        var service = ConfigurableService(builder);
+        var beforeTheReference = service.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>().Count();
+
+        service.WithServiceConnectionString(db, "OrdersDb");
+
+        var environment = await MaterializeEnvironmentAsync(service.Resource, beforeTheReference);
+
+        Assert.Equal("Host=localhost;Database=orders", environment["ConnectionStrings__OrdersDb"]);
+        Assert.DoesNotContain("ConnectionStrings__orders-db", environment.Keys);
     }
 
     [Fact]
