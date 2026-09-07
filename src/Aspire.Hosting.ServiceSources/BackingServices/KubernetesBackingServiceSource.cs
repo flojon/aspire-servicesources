@@ -1303,7 +1303,9 @@ internal sealed partial class KubernetesBackingServiceSource(
         // wonder which part of it the package had hidden.
         var note = shown == connectionString || shown == ConnectionStringRedaction.Unscannable
             ? ""
-            : " (a value is shown only under a key known to hold no secret; the rest read as ***, which does not mean they were secret)";
+            : " (a value is shown only when it is itself a well-formed placeholder, or when it sits "
+              + "under a key known to hold no secret; the rest read as ***, which does not mean they "
+              + "were secret)";
 
         // The advice has to follow the block that was written. Telling someone whose block names
         // its ports to "write '${port}'" earns them a second startup failure that contradicts this

@@ -673,4 +673,80 @@ public class ConnectionStringRedactionTests
     [InlineData("Host=aB3xK9zQ2mR7pL4w:db.prod.internal:5432", "Host=***")]
     public void AHostValueWithABogusSchemePrefix_IsMaskedWhole(string connectionString, string expected)
         => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
+
+    /// <summary>
+    /// A value that is exactly one well-formed <c>${port}</c> or <c>${secret:...}</c> placeholder
+    /// prints whole, under any key — credential-shaped or not.
+    /// </summary>
+    /// <remarks>
+    /// A placeholder is config the developer wrote, naming where a value lives rather than carrying
+    /// one; <see cref="ConnectionStringTemplate"/> resolves it later, from a port the AppHost
+    /// allocated or a secret the cluster holds, neither of which this method has ever seen. Printing
+    /// it does not weaken the allowlist: the shape is anchored end to end, so nothing can ride in
+    /// beside it and reach print on its coat-tails — see
+    /// <see cref="AValueThatIsAPlaceholderPlusSomethingElse_IsStillMaskedWhole"/>.
+    /// </remarks>
+    [Theory]
+    // The issue's own repro: a secret placeholder under 'Password', the credential keyword itself.
+    [InlineData("Host=localhost;Password=${secret:orders-creds:password}",
+                "Host=localhost;Password=${secret:orders-creds:password}")]
+    [InlineData("Password=${port}", "Password=${port}")]
+    [InlineData("Password=${port:amqp}", "Password=${port:amqp}")]
+    [InlineData("Secret=${secret:orders-creds:password}", "Secret=${secret:orders-creds:password}")]
+    // Keyword casing is not the developer's to get wrong here either.
+    [InlineData("Password=${PORT}", "Password=${PORT}")]
+    [InlineData("Password=${SECRET:creds:KEY}", "Password=${SECRET:creds:KEY}")]
+    // Quoted, because a quoted value is taken whole by the backstop before Scan ever sees it.
+    [InlineData("Password='${secret:orders-creds:password}'", "Password='${secret:orders-creds:password}'")]
+    // libpq's space-separated form, one level down from an allowlisted key.
+    [InlineData("host=db.internal password=${secret:creds:password}",
+                "host=db.internal password=${secret:creds:password}")]
+    // Under an allowlisted key too: the same shape, resolved to a hostname rather than a password.
+    [InlineData("Host=${secret:cluster:hostname}", "Host=${secret:cluster:hostname}")]
+    public void AWellFormedPlaceholder_PrintsWholeUnderAnyKey(string connectionString, string expected)
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
+
+    /// <summary>
+    /// A value that merely contains a placeholder, rather than being exactly one, is still masked.
+    /// </summary>
+    /// <remarks>
+    /// The recognition is "occupies a value entirely", not "somewhere in it" — a secret pasted next
+    /// to a placeholder does not get a free ride out on its shape.
+    /// </remarks>
+    [Theory]
+    [InlineData("Password=${port}hunter2", "Password=***")]
+    [InlineData("Password=hunter2${secret:creds:password}", "Password=***")]
+    [InlineData("Password=${secret:creds:password}extra", "Password=***")]
+    // Three colon-separated parts after 'secret:' is not this package's own grammar for one.
+    [InlineData("Password=${secret:a:b:c}", "Password=***")]
+    // A real secret sharing a quote pair with a trailing placeholder: the backstop's quoted
+    // alternative takes only the first quoted run, which is not a placeholder on its own, and the
+    // stray quote left dangling after it fails the top-level scan too.
+    [InlineData("Password='hunter2'${port}'", "Password=***")]
+    // One pair of quotes is stripped, not two: a placeholder does not nest inside itself.
+    [InlineData("Password=''${port}''", "Password=***")]
+    public void AValueThatIsAPlaceholderPlusSomethingElse_IsStillMaskedWhole(
+        string connectionString, string expected)
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
+
+    /// <summary>
+    /// A placeholder immediately followed by another field on a separator this backstop's own value
+    /// scan does not recognise is masked along with that field, rather than only the placeholder.
+    /// </summary>
+    /// <remarks>
+    /// Pre-existing, and unrelated to this fix: <see cref="ConnectionStringRedaction"/>'s
+    /// credential-keyword backstop finds a value's end with <c>[^;]+</c>, not with the fuller
+    /// separator set <see cref="Scan"/> uses, so <c>dbname=mydb</c> here is captured as part of the
+    /// same span as the placeholder in front of it. That combined span is not <em>exactly</em> one
+    /// placeholder, so it is masked whole — the same outcome an ordinary secret in this position
+    /// already produced before this fix, and a value-boundary question for a different issue rather
+    /// than a redaction-policy one.
+    /// </remarks>
+    [Theory]
+    [InlineData("host=db.internal password=${secret:creds:password} dbname=mydb",
+                "host=db.internal password=***")]
+    [InlineData("Host=x;Password=${secret:a:b}&Extra=y", "Host=x;Password=***")]
+    public void APlaceholderFollowedByMoreOnAnUnrecognisedSeparator_IsMaskedWithIt(
+        string connectionString, string expected)
+        => Assert.Equal(expected, ConnectionStringRedaction.Redact(connectionString));
 }
