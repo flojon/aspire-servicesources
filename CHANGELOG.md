@@ -16,6 +16,8 @@ never existed. Check the tag of the last release before adding one.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-07
+
 ### Breaking
 
 - **`ILocalResourceKind.Validate` takes the service's resolved checkout directory**
@@ -1395,7 +1397,8 @@ Targets `net10.0`.
 - Fail-fast configuration validation with `ServiceSourcesConfigurationException`.
 - MIT license, README, symbol packages, and Trusted Publishing (OIDC) to nuget.org.
 
-[Unreleased]: https://github.com/flojon/aspire-servicesources/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/flojon/aspire-servicesources/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/flojon/aspire-servicesources/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/flojon/aspire-servicesources/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/flojon/aspire-servicesources/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/flojon/aspire-servicesources/compare/v0.3.0...v0.3.1
