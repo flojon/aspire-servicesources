@@ -1,5 +1,6 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 using IPortAllocator = Aspire.Hosting.ServiceSources.PortAllocation.IPortAllocator;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
@@ -7,16 +8,16 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceSource
 {
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
-        IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)
+        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
     {
         // The block is checked first so a missing one is reported as that rather than as a scheme
         // problem, and the scheme ahead of BuildPortForwardArgs, whose last act is to allocate a
         // port: an unsupported scheme is config validation like the rest and shouldn't burn an
         // allocation on its way to throwing.
-        var kubernetes = RequireKubernetesBlock(serviceName, metadata);
+        var kubernetes = RequireKubernetesBlock(serviceName, definition);
         var scheme = EndpointScheme.Resolve(serviceName, "kubernetes", config.Kubernetes.Scheme, kubernetes.Scheme);
 
-        var args = BuildPortForwardArgs(serviceName, metadata, config, portAllocator, out var localPort, out _);
+        var args = BuildPortForwardArgs(serviceName, definition, config, portAllocator, out var localPort, out _);
 
         // Built by hand rather than via AddExecutable so the resource can be a
         // ServiceExecutableResource, which adds the IResourceWithServiceDiscovery that
@@ -38,13 +39,13 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
 
     internal static string[] BuildPortForwardArgs(
         string serviceName,
-        ServiceMetadata metadata,
+        ServiceDefinition definition,
         ServiceDeveloperConfig config,
         IPortAllocator portAllocator,
         out int localPort,
         out int remotePort)
     {
-        var kubernetes = RequireKubernetesBlock(serviceName, metadata);
+        var kubernetes = RequireKubernetesBlock(serviceName, definition);
 
         if (string.IsNullOrWhiteSpace(config.Kubernetes.Context))
         {
@@ -73,14 +74,14 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
     /// The service's <c>kubernetes</c> block, which both the port-forward arguments and the endpoint
     /// scheme are read from, so its absence is the first thing either reports.
     /// </summary>
-    private static KubernetesMetadata RequireKubernetesBlock(string serviceName, ServiceMetadata metadata)
+    private static KubernetesMetadata RequireKubernetesBlock(string serviceName, ServiceDefinition definition)
     {
-        if (metadata.Kubernetes is null || string.IsNullOrWhiteSpace(metadata.Kubernetes.Service))
+        if (definition.Kubernetes is null || string.IsNullOrWhiteSpace(definition.Kubernetes.Service))
         {
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}' source is 'kubernetes' but servicesources.yaml has no kubernetes.service entry.");
         }
 
-        return metadata.Kubernetes;
+        return definition.Kubernetes;
     }
 }
