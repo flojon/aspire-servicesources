@@ -3,11 +3,21 @@
 **Date:** 2026-09-08
 **Status:** Draft — needs the six [open questions](#open-questions) answered before an implementation
 plan is written.
+Revised 2026-09-08, same day: the first draft treated the Stage-1 authoring surface as frozen and
+argued three decisions from "no ApiCompat tooling, so a break is uncatchable". That premise was
+wrong — **Stage 1 is in no release tag** (see [What is frozen](#what-is-frozen-and-what-is-not)), so
+the C# surface is free. One decision changes as a result (`WithRepository`'s `project:` parameter is
+dropped), the sequencing constraint against #134 Stage 2 disappears, and one alternative that only
+breakage makes available is recorded and rejected. **The architecture is unchanged**, because the
+constraints that shaped it are released on-disk and file formats, not signatures.
 **Resolves:** #291 (`AddRepository` returning a shared handle, so several services can name one
 repository and one ref).
 **Closes:** #66 (two services in one repository clone it twice) — not as a special case, but because
 the shared checkout falls out of the shared record. #66 is marked `blocked-by: #134`, and the part
-that blocked it (a domain type to hang a repository record on) shipped in Stage 1.
+that blocked it (a domain type to hang a repository record on) shipped in Stage 1. **Closes it for
+catalogs that adopt grouping**, not for every catalog — #66's own option A would have done the
+latter, at the cost of migrating every existing checkout; see the alternative under
+[`CheckoutName`](#checkoutname-what-makes-criterion-6-hold).
 **Builds on:** [the repository-handle findings](2026-09-08-repository-handle-findings.md), read out
 of `b2ccca4` — every `file:line` claim below is evidenced there and is not repeated;
 [the code-catalog design](2026-09-05-servicesources-code-catalog-design.md), whose reviewer decision
@@ -49,6 +59,26 @@ builder.AddServiceCatalog(catalog =>
         .WithProject("Inventory.Api.csproj");
 });
 ```
+
+## What is frozen, and what is not
+
+The latest release is `v0.5.1`, and the split runs straight through the middle of this design:
+
+| | in `v0.5.1` | so a change is |
+| --- | --- | --- |
+| `Catalog/ServiceCatalogBuilder.cs`, `Catalog/ServiceDefinitionBuilder.cs`, `AddServiceCatalog` | **absent** — the whole directory | **free** |
+| `ServiceDefinition`, `RepositoryDefinition`, `CodeServiceCatalog` | absent, and `internal` regardless | free |
+| `checkouts/<serviceName>` as the managed checkout path | **present** (`LocalGitCheckout.cs:52` there) | a **migration of developers' working trees** |
+| the `servicesources.yaml` format | present | a break for every existing catalog |
+| the `servicesources.local.json` schema | present | a break for every existing developer |
+
+So "the API is not released yet" frees exactly one thing: **the C# and TypeScript authoring surface
+this design adds to.** It frees none of the four constraints that actually shaped the design, because
+those are on-disk state and committed file formats. In particular it does **not** license renaming
+the checkout directory: that is not a signature anyone recompiles against, it is a working tree
+holding uncommitted work, and criterion 6 below stands whatever the API policy is.
+
+Where an argument below turns on compatibility, it now says which of these two it means.
 
 ## The acceptance criteria, quoted
 
@@ -142,6 +172,32 @@ needs no derivation: the `repositories:` key *is* the name. Every name — deriv
 goes through `LocalGitCheckout.IsContainedCheckoutDirectoryName`, the #224 traversal guard, because
 a URL ending in `/..` and a `repositories:` key of `../evil` are both developer input.
 
+> **Alternative, considered and rejected — key *every* checkout by a URL-derived name.** This is
+> **#66's own recommended option A** (*"`checkouts/<slug-of-repository>`, shared by every service that
+> names it"*), and it disagrees with #291, which requires that two services naming one URL without a
+> group stay independent (criterion 2). It is worth stating plainly which one this design follows and
+> what that costs, because the two close #66 for different populations.
+>
+> URL-keying for everyone is the stronger fix on one axis: it collapses the duplicate clone for
+> **existing** catalogs, including the yaml monorepo user who is cloning five times today and who,
+> under this design, keeps doing so until they rewrite their catalog into `repositories:`/`repositoryRef:`.
+> That is a real limitation of the choice made here — **#66 closes for adopters, not for everyone.**
+>
+> **Rejected on three counts, none of which "the API is unreleased" relieves.** (a) It renames every
+> existing `checkouts/<service>` directory — a migration of working trees holding uncommitted work,
+> which is on-disk state, not a signature. (b) It makes the ref conflict *newly reachable* for people
+> who never asked for grouping: two services on one URL with different `local.ref` values work today
+> and would become a configuration error. (c) It makes every checkout directory an implicit function
+> of a URL string, so editing a URL re-clones. Declaration-based sharing costs the undeclared monorepo
+> user a catalog edit; URL-keying costs every existing user a migration they did not ask for.
+>
+> **The mitigation, and why [open question 5](#open-questions) matters more than it looks.** Two
+> ungrouped services naming one upstream is exactly the shape that wants grouping and has not been
+> told so. A warning there — "these two services name one repository and are cloned twice; group them
+> under `repositories:` to share one tree" — turns this design's limitation into a prompt, at the cost
+> of one notice. That is the cheap half of option A's benefit with none of its migration, and it is
+> recommended if question 5 is answered "warn".
+
 **One namespace, checked once.** Anonymous names (service names) and grouped names share the
 `checkouts/` directory namespace, so a service `orders` and a repository derived to `orders` from
 `github.com/x/orders.git` collide on a directory while naming different URLs.
@@ -151,19 +207,39 @@ declarations and suggesting `name:`.
 
 ### The authoring API
 
-Two public types are added, and one method:
+One public type is added, one method added, one method narrowed:
 
-| Type | Role |
+| | Change |
 | --- | --- |
-| `RepositoryDefinitionBuilder` | `AddService(string)` → a `ServiceDefinitionBuilder` bound to this repository; `WithPrepare(…)` |
-| — | `ServiceCatalogBuilder.AddRepository(string url, string? name = null, string? defaultRef = null)` |
-| — | `ServiceDefinitionBuilder.WithProject(string project)` |
+| `RepositoryDefinitionBuilder` | **new** — `AddService(string)` → a `ServiceDefinitionBuilder` bound to this repository; `WithPrepare(…)` |
+| `ServiceCatalogBuilder.AddRepository(string url, string? name = null, string? defaultRef = null)` | **new** |
+| `ServiceDefinitionBuilder.WithProject(string project)` | **new** |
+| `ServiceDefinitionBuilder.WithRepository(string url, string? defaultRef = null)` | **narrowed** — loses `project:`; see below |
 
 `WithProject` is new and necessary: Stage 1 has no project-only setter — `WithRepository(string url,
 string? project = null, string? defaultRef = null)` is the only way to set one, and a grouped service
-must not restate the URL. It becomes the primitive, with `WithRepository`'s `project:` parameter
-delegating to it, so the existing additive rule (`RequireUnset` per block) covers setting the project
-twice by either route.
+must not restate the URL.
+
+**`WithRepository` loses its `project:` parameter**, becoming `WithRepository(string url, string?
+defaultRef = null)`. Stage 1 folded `project:` in on the code-catalog design's own instruction — *"the
+plan should try folding them into it… since that also removes a chain"* — but the chain comes back
+regardless the moment a grouped service has to set a project without a URL. Keeping both leaves two
+ways to say one thing, and the two would then have to agree about which wins. Dropping it also makes
+the grouped and ungrouped chains read alike:
+
+```csharp
+monorepo.AddService("orders").WithProject("src/Orders.Api/Orders.Api.csproj");
+
+catalog.AddService("inventory")
+    .WithRepository("https://github.com/example/inventory", defaultRef: "main")
+    .WithProject("Inventory.Api.csproj");
+```
+
+This is a **source break against Stage 1**, which is why the first draft did not propose it and
+instead parked it as an open question. It is free: Stage 1 is in no release tag, so nothing outside
+this repository's own two samples compiles against `WithRepository`'s three-parameter form. The
+additive rule (`RequireUnset` per block) then covers setting the project twice, with only one route
+to set it at all.
 
 **ATS ids.** `AddRepository` generates a capability id nothing else claims. `AddService` is the
 problem: `ServiceSourcesBuilderExtensions.AddService` (shipped) and
@@ -182,6 +258,23 @@ await orders.withProject('src/Orders.Api/Orders.Api.csproj');
 decided, so `WithRepository` on it is a configuration error naming both the service and the
 repository. The reverse — `WithProject` on an ungrouped service — is fine: it sets the project on that
 service's anonymous record.
+
+> **Alternative, considered and rejected — a separate builder type for grouped services.** Since the
+> surface is free (Stage 1 is unreleased), `monorepo.AddService(…)` could return a type that simply
+> has no `WithRepository`, turning the configuration error above into a **compile** error. That is
+> #291's own stated ambition — *"the collision becomes unrepresentable rather than merely rejected"* —
+> applied one level further in, and on the C# side it is strictly better.
+>
+> **Rejected on ATS cost.** The two types would share `WithProject`, `WithUrl`, `WithContainer`,
+> `WithKubernetes`, `WithKind` and `WithPrepare`, so each becomes a **second receiver** for its
+> generated capability id — the exact collision Stage 0's finding 5 measured, and measured as
+> *silent*: an `ASPIREEXPORT013` warning, and a real risk of a call invoking the wrong capability at
+> runtime. That is six more explicit `[AspireExport("…")]` ids to buy one compile-time check, on the
+> single mechanism in this package that has already failed once and failed quietly. Sharing the
+> methods through a base class might avoid it, but **whether ATS projects inherited instance methods
+> is unmeasured**, and Stage 0 exists precisely because unmeasured ATS shapes in this package have
+> been wrong before. One runtime error message, in one place, is the cheaper trade — but see
+> [open question 3](#open-questions) if you would rather pay for the probe.
 
 ### Yaml, additively
 
@@ -245,8 +338,11 @@ The step runs once per checkout, and finding 3 shows the marker already assumes 
   `repositories:` entry. Two members of one group cannot each declare a step for the one tree.
 - **`WithPrepare`** stays on `ServiceDefinitionBuilder` (where #134 Stage 2 puts it) as the
   anonymous-record setter, and is added to `RepositoryDefinitionBuilder`. Called on a grouped
-  service it is the same error as the yaml case. **No public break in either direction**, which is
-  why Stage 2 need not wait.
+  service it is the same error as the yaml case. Keeping it on both is an **ergonomic** choice, not a
+  compatibility one: putting it only on the repository handle would be free to do, and would make the
+  grouped-service error unrepresentable, but it would force `catalog.AddRepository(url).AddService("routing")`
+  on a single-service AppHost whose only sin is needing a bootstrap command — the verbosity #291
+  explicitly set out to avoid for the one-service case.
 
 `PreparePlan.For(serviceName, catalog, developer, managedCheckout, windows)` has one call site
 (`LocalProjectSource.cs:60`) and already branches on `managedCheckout` — which turns out to answer
@@ -323,16 +419,25 @@ catalogs, and the `CheckoutName` uniqueness of the section above.
 
 Stage 2 adds `WithPrepare` and the typed `AsJava`/`AsJavaScript` handles. It touches neither the
 repository fields on the domain type nor the checkout keying, so **there is no code dependency in
-either direction.** What matters is only that `WithPrepare` ships on the service builder and gains a
-repository-level twin here, rather than shipping on the service and being *moved*: this package has
-no ApiCompat tooling (code-catalog design finding 10), so a move is a break nothing would catch.
-Either order works if that holds. Stage 2 first is preferred, because it is smaller and already
-specified.
+either direction, and — Stage 1 being unreleased — no compatibility constraint either.** The two are
+simply independent; either can land first.
+
+The first draft argued a constraint here: that Stage 2 must ship `WithPrepare` on the service builder
+and gain a repository twin rather than have it *moved* later, because with no ApiCompat tooling a
+move is an uncatchable break. The premise is void — nothing outside this repository compiles against
+Stage 2's surface either. `WithPrepare` still ends up on both builders, but now for the reason in
+[the prepare section](#prepare-moves-to-the-repository) alone: an ungrouped service should not have
+to call `AddRepository` just to declare a bootstrap command.
+
+Stage 2 first is still mildly preferred, because it is smaller and already specified — a scheduling
+preference, not a dependency.
 
 ## What this deliberately does not do
 
 - **It does not unify two ungrouped services naming one URL.** That is criterion 2, and it is the
   line between "the developer said these are one repository" and "these strings happen to match".
+  It is also the design's main self-imposed limit — see the rejected URL-keying alternative under
+  [`CheckoutName`](#checkoutname-what-makes-criterion-6-hold).
 - **It does not implement #66's option B** (one tree per distinct ref). Option A is chosen, as #66
   recommends; B stays the fallback if a real use case for two refs in one AppHost run turns up.
 - **It does not add per-repository *kinds* or projects.** A repository groups a URL, a ref and a
@@ -362,7 +467,7 @@ Two stages, matching the repo's delivery shape:
 | Stage | Contents | Acceptance reached |
 | --- | --- | --- |
 | **1** | `RepositoryDefinition` + `CheckoutName`, with **every** record anonymous. Both producers mint one per service; the ~8 consumer files read through it. No new public API, no new yaml, no behaviour change. | None — but criterion 6 is proved here, by the existing suite passing untouched. |
-| **2** | `AddRepository`/`RepositoryDefinitionBuilder`/`WithProject`; yaml `repositories:`/`repositoryRef:`; the third developer-config shape; the checkout and prefetch re-keying; prepare moved; samples, README, changelog. | All six. **#66 closes here.** |
+| **2** | `AddRepository`/`RepositoryDefinitionBuilder`/`WithProject`, and `WithRepository` narrowed; yaml `repositories:`/`repositoryRef:`; the third developer-config shape; the checkout and prefetch re-keying; prepare moved; samples, README, changelog. | All six. **#66 closes here, for catalogs that group.** |
 
 Stage 1 is deliberately a no-behaviour-change refactor that must go in green with nothing else in
 it — it is the stage that can silently break criterion 6, and the only way to see that it has not is
@@ -376,8 +481,9 @@ Mirroring the repo's layout, `Method_Condition_ExpectedOutcome`:
 - `Catalog/RepositoryHandleTests.cs` — `AddRepository` derives its name from the URL and strips
   `.git`; an explicit `name:` wins; a derived name colliding with another repository is refused
   asking for `name:`; a name that is not a contained directory name is refused (#224);
-  `WithRepository` on a grouped service is an error naming both; `WithProject` sets the project by
-  either route and twice is the additive error.
+  `WithRepository` on a grouped service is an error naming both; `WithProject` sets the project, and
+  called twice is the additive error. The four existing `WithRepository` test files move off the
+  dropped `project:` parameter.
 - `Catalog/CatalogCompositionTests.cs` — extended: a repository name colliding with an ungrouped
   service's name is refused at composition, naming both; a repository name declared in both catalogs
   is the duplicate error; a code service cannot reach a yaml repository.
@@ -405,6 +511,11 @@ Mirroring the repo's layout, `Method_Condition_ExpectedOutcome`:
   reference.
 - Both code-catalog samples gain a grouped repository; `DemoAppHostTypeScript/servicesources.yaml`
   gains a `repositories:`/`repositoryRef:` pair.
+- Both code-catalog samples also **must** be updated for the narrowed `WithRepository`: they are the
+  only callers of its `project:` parameter outside the tests
+  (`DemoAppHostCodeCatalog/Program.cs`, and `withRepository(url, { project: … })` in
+  `DemoAppHostTypeScriptCodeCatalog/apphost.mts`). The `📘 typescript export surface` CI job builds
+  the latter, so a missed update fails the build rather than shipping.
 - CHANGELOG: the feature, `#66` fixed, and the `repositoryRef` kind-name narrowing.
 
 ## Open questions
@@ -416,18 +527,25 @@ Mirroring the repo's layout, `Method_Condition_ExpectedOutcome`:
    that explicit at the cost of the sketch's ergonomics.
 2. **Is a repository with no services an error?** `catalog.AddRepository(…)` with nothing added to it
    is representable and harmless (nothing reads it). Report it, or leave it?
-3. **Do `WithRepository`'s `project:` and `defaultRef:` parameters survive?** Now that `WithProject`
-   exists and the ref belongs to the record, `WithRepository(url, project:, defaultRef:)` is three
-   ways to say two things. Keeping them is source-compatible with Stage 1 and better for the
-   single-service case; dropping either is a break, and Stage 1 has shipped.
+3. **Worth measuring whether ATS projects inherited instance methods?** It is the one thing that
+   would make the separate-builder-type alternative above cheap — a shared base carrying the six
+   `With*` methods, with `WithRepository` only on the ungrouped subclass, turning a runtime error
+   into a compile error at no capability-id cost. A Stage-0-style throwaway probe would settle it in
+   an afternoon. Skip it and take the runtime error (this design's choice), or probe first?
 4. **Should `defaultRef` on the handle be required?** #291's sketch passes it every time. Optional
    matches today's `ServiceMetadata.DefaultRef` being nullable (meaning "whatever the clone's default
    branch is"), which is a real and common answer for a monorepo.
-5. **Two repositories, one upstream — warn or stay silent?** `RepositoryUrlsMatch` already knows how
-   to compare two spellings. A warning would catch a developer who meant to group and did not; it
-   would also fire on someone who deliberately wants two trees.
+5. **Two ungrouped services, one upstream — warn or stay silent?** *(More consequential than it
+   looks — see the rejected URL-keying alternative.)* `RepositoryUrlsMatch` already knows how to
+   compare two spellings. Because this design closes #66 for catalogs that adopt grouping and not for
+   those that don't, a warning is the one cheap thing that tells today's monorepo user their five
+   clones are avoidable. It would also fire on someone who deliberately wants two trees, so it needs
+   to be a notice rather than an error, and probably suppressible.
 6. **Is `RepositoryDefinitionBuilder` the right name?** It is symmetric with
    `ServiceDefinition`/`ServiceDefinitionBuilder`, and long. `RepositoryBuilder` is shorter and less
-   precise. Public type, no ApiCompat, so it is worth one minute now.
+   precise. Free to settle either way while Stage 1 is unreleased, and worth the minute now rather
+   than after the first tag that ships it.
 
-Questions 1 and 3 change the public surface rather than its details; the rest are local.
+Question 3 is the only one that could still change the shape of the public surface; the rest are
+local. **All six are now cheap to get wrong and cheap to revisit** — that is what Stage 1 being
+unreleased buys, and it is worth spending before the 0.6.0 tag rather than after.
