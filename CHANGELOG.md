@@ -138,6 +138,15 @@ protection then blocked reusing the name, so this version carries what would hav
 
 ### Added
 
+- **The service catalog can be authored in code** ([#134]). `builder.AddServiceCatalog(catalog => …)`
+  declares services in the AppHost's own language — C# directly, TypeScript (and other guest
+  languages) through Aspire's Type System — instead of, or alongside, `servicesources.yaml`. All
+  four sources are covered: `WithRepository`/`WithKind` for `"local"`, `WithUrl` for `"url"`,
+  `WithContainer` for `"container"`, `WithKubernetes` for `"kubernetes"`. A service declared in both
+  catalogs is an error naming both sources — not a merge, and not a silent precedence rule. Yaml
+  stays fully supported as one provider; `servicesources.local.json` is still required either way —
+  see the README's "Authoring the catalog in code" section.
+
 - **A backing service can be reached in a dev cluster: `source: "kubernetes"`** ([#144]). The
   database, broker or cache a service connects to now has the third source the service side has had
   all along — a `kubectl port-forward` this AppHost opens and Aspire manages, with the connection
@@ -525,6 +534,12 @@ protection then blocked reusing the name, so this version carries what would hav
   than misconfigured.
 
 ### Changed
+
+- **`LocalKindConfig.Parse<T>` accepts an already-typed instance** ([#134]). A `WithKind(kind,
+  options)` call in code can pass an already-typed options object directly — `Parse<T>` now returns
+  it unchanged instead of round-tripping it through yaml, and throws a clearer error naming both
+  types if the options object doesn't match what the kind expects. A dictionary (the shape yaml
+  itself produces) still round-trips exactly as before.
 
 - **`javascript.appDirectory` and `javascript.scriptPath` are now confined to the checkout by the
   same lexical check as `project`, `prepare.command` and every `java.*` path** ([#235]). They used
