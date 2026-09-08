@@ -5,6 +5,9 @@
 design. The design it feeds is
 [2026-09-08-repository-handle-design.md](2026-09-08-repository-handle-design.md), which cites these
 findings rather than re-deriving them.
+**Finding 11 is superseded** — it asserted an ATS capability-id collision that
+[the question-3 probe](2026-09-08-repository-handle-q3-ats-probe-findings.md) measured as not
+occurring for instance methods. See the note on it.
 **Investigates:** #291 (`AddRepository` returning a shared handle), which also closes #66 (two
 services in one repository clone it twice).
 **Read out of the code at** `origin/main` = `b2ccca4` (#134 Stage 1, "core split +
@@ -280,6 +283,18 @@ catalog's spelling; repository entries need the same treatment against the decla
 names, for the same reason.
 
 ### 11. ATS: a third `addService` receiver collides on capability id
+
+> **Superseded 2026-09-08 — this finding is wrong, and measurably so.** It reasoned from Stage 0's
+> finding 5 without checking that the shape transferred, and it does not: Stage 0 measured an
+> *extension* method (keyed `{Assembly}/{method}`), whereas every `AddService` at issue here is an
+> *instance* method on an `ExposeMethods = true` type, whose capability id is **receiver-qualified**
+> (`…Catalog/ServiceCatalogBuilder.addService`). Two receivers therefore cannot collide. Measured in
+> [the question-3 ATS probe](2026-09-08-repository-handle-q3-ats-probe-findings.md), findings 1 and 4,
+> which also show that removing Stage 1's `addServiceToCatalog` id builds with `0 Warning(s)` and
+> projects `addService` on both receivers with nothing dropped. **No explicit id is needed**, and
+> `addServiceToRepository` below should be read as plain `AddService` → `addService`. The rest of this
+> finding — the shapes already measured, and the CI job that guards them — still holds. Kept
+> unedited below so the mistake and its correction are both legible.
 
 Stage 0's finding 5 measured this and it is the one row that failed: two receivers exposing a method
 that generates the capability id `…/addService` collide, silently, and `MethodName` does **not** fix

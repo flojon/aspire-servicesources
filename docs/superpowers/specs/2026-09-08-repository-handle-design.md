@@ -1,17 +1,20 @@
 # Aspire.Hosting.ServiceSources — Repository as a First-Class Handle
 
 **Date:** 2026-09-08
-**Status:** Draft — needs the six [open questions](#open-questions) answered before an implementation
-plan is written. One decision is already recorded: closing #66 for adopters only is **accepted**, so
-declaration-based sharing stands and no checkout is migrated — see
-[Reviewer decisions](#reviewer-decisions).
+**Status:** **Accepted** — all six open questions answered 2026-09-08, recorded under
+[Reviewer decisions](#reviewer-decisions); ready for an implementation plan. Question 3 was settled by
+measurement, not judgement: see
+[the question-3 ATS probe findings](2026-09-08-repository-handle-q3-ats-probe-findings.md), which also
+turned this design's rejected separate-builder-type alternative into its recommended shape and
+removed two runtime errors in favour of compile errors.
 Revised 2026-09-08, same day: the first draft treated the Stage-1 authoring surface as frozen and
 argued three decisions from "no ApiCompat tooling, so a break is uncatchable". That premise was
 wrong — **Stage 1 is in no release tag** (see [What is frozen](#what-is-frozen-and-what-is-not)), so
 the C# surface is free. One decision changes as a result (`WithRepository`'s `project:` parameter is
 dropped), the sequencing constraint against #134 Stage 2 disappears, and one alternative that only
-breakage makes available is recorded and rejected. **The architecture is unchanged**, because the
-constraints that shaped it are released on-disk and file formats, not signatures.
+breakage makes available — splitting the builder types — was opened up, then adopted once the
+question-3 probe measured its cost away. **The architecture is unchanged** throughout, because the
+constraints that shaped it are released on-disk state and file formats, not signatures.
 **Resolves:** #291 (`AddRepository` returning a shared handle, so several services can name one
 repository and one ref).
 **Closes:** #66 (two services in one repository clone it twice) — not as a special case, but because
@@ -119,8 +122,11 @@ that decide the shape below, in one line each:
    silently stops working. `prepare` has to move to the repository.
 4. **`local.path` already means "not a managed checkout"** (finding 4). The split-back-out opt-out
    #291 leaves open already exists and already means what it should.
-5. **`RepositoryDefinitionBuilder.AddService` is a third receiver for a colliding ATS capability id**
-   (finding 11). Stage 0 measured that collision as silent, and measured `MethodName` as not fixing it.
+5. **ATS capability ids for instance methods are receiver-qualified, so nothing here collides**
+   ([question-3 probe](2026-09-08-repository-handle-q3-ats-probe-findings.md), finding 1). Findings
+   document 11 and Stage 0's finding 5 both read as though a third `AddService` would collide; that
+   was measured on an *extension* method, keyed by assembly, and does not generalise to the instance
+   methods this design adds. The same probe is why the builder types can be split at all.
 
 ---
 
@@ -194,12 +200,12 @@ a URL ending in `/..` and a `repositories:` key of `../evil` are both developer 
 > of a URL string, so editing a URL re-clones. Declaration-based sharing costs the undeclared monorepo
 > user a catalog edit; URL-keying costs every existing user a migration they did not ask for.
 >
-> **The mitigation, and why [open question 5](#open-questions) matters more than it looks.** Two
+> **The mitigation, and why question 5 mattered more than it looked.** Two
 > ungrouped services naming one upstream is exactly the shape that wants grouping and has not been
 > told so. A warning there — "these two services name one repository and are cloned twice; group them
 > under `repositories:` to share one tree" — turns this design's limitation into a prompt, at the cost
-> of one notice. That is the cheap half of option A's benefit with none of its migration, and it is
-> recommended if question 5 is answered "warn".
+> of one notice. That is the cheap half of option A's benefit with none of its migration, and
+> question 5 was **decided "warn"** on exactly that reasoning.
 >
 > **Settled:** the adopters-only scope is accepted — see
 > [Reviewer decisions](#is-closing-66-for-adopters-only-acceptable). This alternative is kept so it is
@@ -214,14 +220,22 @@ declarations and suggesting `name:`.
 
 ### The authoring API
 
-One public type is added, one method added, one method narrowed:
-
 | | Change |
 | --- | --- |
-| `RepositoryDefinitionBuilder` | **new** — `AddService(string)` → a `ServiceDefinitionBuilder` bound to this repository; `WithPrepare(…)` |
+| `RepositoryBuilder` | **new**, exported — `AddService(string)` → a `GroupedServiceDefinitionBuilder`; `WithPrepare(…)` |
+| `GroupedServiceDefinitionBuilder` | **new**, exported — the shared `With*` chain and nothing else |
+| `ServiceDefinitionBuilderBase<TSelf>` | **new**, public but **not** exported — carries the shared `With*` methods for both concrete builders |
 | `ServiceCatalogBuilder.AddRepository(string url, string? name = null, string? defaultRef = null)` | **new** |
-| `ServiceDefinitionBuilder.WithProject(string project)` | **new** |
+| `ServiceDefinitionBuilder` | now derives from `ServiceDefinitionBuilderBase<ServiceDefinitionBuilder>`; keeps `WithRepository` and `WithPrepare` |
+| `ServiceDefinitionBuilder.WithProject(string project)` | **new** (on the base, so both builders have it) |
 | `ServiceDefinitionBuilder.WithRepository(string url, string? defaultRef = null)` | **narrowed** — loses `project:`; see below |
+
+**`RepositoryBuilder`, not `RepositoryDefinitionBuilder`** (open question 6). The "Definition" infix
+earns its place in `ServiceDefinitionBuilder` because there is a `ServiceCatalogBuilder` beside it to
+be distinguished from; there is no second repository builder. And the type's primary method is
+`AddService` — it is the grouping handle services are added to, not merely a builder of one
+`RepositoryDefinition` record — so `RepositoryDefinitionBuilder` would mis-describe it while being
+six characters longer. The domain record stays `RepositoryDefinition`.
 
 `WithProject` is new and necessary: Stage 1 has no project-only setter — `WithRepository(string url,
 string? project = null, string? defaultRef = null)` is the only way to set one, and a grouped service
@@ -248,40 +262,80 @@ this repository's own two samples compiles against `WithRepository`'s three-para
 additive rule (`RequireUnset` per block) then covers setting the project twice, with only one route
 to set it at all.
 
-**ATS ids.** `AddRepository` generates a capability id nothing else claims. `AddService` is the
-problem: `ServiceSourcesBuilderExtensions.AddService` (shipped) and
-`ServiceCatalogBuilder.AddService` (Stage 1, explicit id `addServiceToCatalog`) already had to be
-separated, and this is a third. It gets `[AspireExport("addServiceToRepository")]`. Everything else
-in the shape is measured: a handle returned from a method on a handle is what
-`catalog.addServiceToCatalog(…)` already does end to end, and optional parameter bags cross.
+**ATS ids: none needed.** An earlier draft budgeted an explicit `[AspireExport("addServiceToRepository")]`
+here, reading Stage 0's finding 5 as meaning that a third `AddService` would collide. It would not.
+Finding 1 of [the question-3 probe](2026-09-08-repository-handle-q3-ats-probe-findings.md): capability
+ids for `ExposeMethods` **instance** methods are receiver-qualified
+(`…Catalog/ServiceCatalogBuilder.addService`), so two receivers cannot collide on a method name.
+Stage 0's collision was measured on an *extension* method, which is keyed by assembly
+(`…ServiceSources/addService`) — a different scheme that does not generalise. Measured directly:
+two receivers each carrying an instance `AddService`, with no explicit ids, alongside the shipped
+extension `AddService`, build with `0 Warning(s)` and project all three.
+
+So `RepositoryBuilder.AddService` is plain `[AspireExport]`, and the TypeScript reads exactly as #291
+sketched it:
 
 ```typescript
 const monorepo = await catalog.addRepository('https://github.com/example/monorepo', { defaultRef: 'main' });
-const orders = await monorepo.addServiceToRepository('orders');
+const orders = await monorepo.addService('orders');
 await orders.withProject('src/Orders.Api/Orders.Api.csproj');
 ```
 
-**Errors on the chain.** A service reached through `monorepo.AddService(…)` has its repository
-decided, so `WithRepository` on it is a configuration error naming both the service and the
-repository. The reverse — `WithProject` on an ungrouped service — is fine: it sets the project on that
-service's anonymous record.
+**This also makes Stage 1's `addServiceToCatalog` a name invented for nothing** — removing it is
+free (unreleased) and one sample calls it. That is a #134 correction rather than part of this design;
+see the probe's recommendation 3.
 
-> **Alternative, considered and rejected — a separate builder type for grouped services.** Since the
-> surface is free (Stage 1 is unreleased), `monorepo.AddService(…)` could return a type that simply
-> has no `WithRepository`, turning the configuration error above into a **compile** error. That is
-> #291's own stated ambition — *"the collision becomes unrepresentable rather than merely rejected"* —
-> applied one level further in, and on the C# side it is strictly better.
->
-> **Rejected on ATS cost.** The two types would share `WithProject`, `WithUrl`, `WithContainer`,
-> `WithKubernetes`, `WithKind` and `WithPrepare`, so each becomes a **second receiver** for its
-> generated capability id — the exact collision Stage 0's finding 5 measured, and measured as
-> *silent*: an `ASPIREEXPORT013` warning, and a real risk of a call invoking the wrong capability at
-> runtime. That is six more explicit `[AspireExport("…")]` ids to buy one compile-time check, on the
-> single mechanism in this package that has already failed once and failed quietly. Sharing the
-> methods through a base class might avoid it, but **whether ATS projects inherited instance methods
-> is unmeasured**, and Stage 0 exists precisely because unmeasured ATS shapes in this package have
-> been wrong before. One runtime error message, in one place, is the cheaper trade — but see
-> [open question 3](#open-questions) if you would rather pay for the probe.
+**Errors on the chain.** A service reached through `monorepo.AddService(…)` has its repository
+decided, so `WithRepository` and `WithPrepare` on it **do not compile** — its builder type does not
+carry them. In TypeScript the generated interface carries exactly the declared and inherited methods
+and nothing else (probe findings 2 and 3), so the same two calls should fail strict `tsc` with the
+`TS2339: Property … does not exist on type …` that Stage 0 recorded for the analogous case — expected
+by that measurement rather than probed for these two names specifically, and the
+`📘 typescript export surface` job is what would run it. Neither needs a runtime check. The reverse —
+`WithProject` on an ungrouped service — is fine: it is on the shared base, and sets the project on
+that service's anonymous record.
+
+**And two of those errors are compile errors, not runtime ones.** An earlier draft rejected a
+separate builder type for grouped services on an ATS cost that
+[the question-3 probe](2026-09-08-repository-handle-q3-ats-probe-findings.md) has since measured away.
+The shared `With*` methods live on a **public, unexported generic base**, and each concrete builder
+inherits them:
+
+```csharp
+public abstract class ServiceDefinitionBuilderBase<TSelf>          // public (C# accessibility), NOT [AspireExport]
+    where TSelf : ServiceDefinitionBuilderBase<TSelf>
+{
+    public TSelf WithProject(string project) { … }
+    public TSelf WithUrl(string url) { … }
+    public TSelf WithContainer(string image, int port, string? defaultTag = null) { … }
+    public TSelf WithKubernetes(string service, int? port = null) { … }
+    public TSelf WithKind(string kind, object? options = null) { … }
+}
+
+[AspireExport(ExposeMethods = true)]
+public sealed class ServiceDefinitionBuilder : ServiceDefinitionBuilderBase<ServiceDefinitionBuilder>
+{
+    public ServiceDefinitionBuilder WithRepository(string url, string? defaultRef = null) { … }
+    public ServiceDefinitionBuilder WithPrepare(…) { … }            // the anonymous-record setter
+}
+
+[AspireExport(ExposeMethods = true)]
+public sealed class GroupedServiceDefinitionBuilder : ServiceDefinitionBuilderBase<GroupedServiceDefinitionBuilder>
+{
+    // deliberately empty: no WithRepository, no WithPrepare — its repository owns both
+}
+```
+
+So `monorepo.AddService("orders").WithRepository(…)` and `.WithPrepare(…)` **do not compile**, which
+is #291's "unrepresentable rather than merely rejected" applied one level further in. The probe
+measured all four things this depends on: the base's methods project onto both derived handles, the
+unexported base does not appear in the generated SDK at all, the generic parameter resolves to the
+derived type so fluent chains survive (`q3ProbeSharedFluent(…).q3ProbeOnlyOnEpsilon(…)` type-checks),
+and there is no capability-id collision because ids for `ExposeMethods` instance methods are
+**receiver-qualified**.
+
+The base must be `public` — C# forbids a public type deriving from an internal one — but it carries
+no `[AspireExport]`, so it stays out of the TypeScript surface entirely.
 
 ### Yaml, additively
 
@@ -344,12 +398,14 @@ The step runs once per checkout, and finding 3 shows the marker already assumes 
 - **Yaml `prepare:` on a service carrying `repositoryRef:`** is an error pointing at the
   `repositories:` entry. Two members of one group cannot each declare a step for the one tree.
 - **`WithPrepare`** stays on `ServiceDefinitionBuilder` (where #134 Stage 2 puts it) as the
-  anonymous-record setter, and is added to `RepositoryDefinitionBuilder`. Called on a grouped
-  service it is the same error as the yaml case. Keeping it on both is an **ergonomic** choice, not a
-  compatibility one: putting it only on the repository handle would be free to do, and would make the
-  grouped-service error unrepresentable, but it would force `catalog.AddRepository(url).AddService("routing")`
-  on a single-service AppHost whose only sin is needing a bootstrap command — the verbosity #291
-  explicitly set out to avoid for the one-service case.
+  anonymous-record setter, and is added to `RepositoryBuilder`. It is deliberately **not** on the
+  shared base, so calling it on a grouped service does not compile — the yaml equivalent stays a
+  configuration error, since yaml has no type system to refuse it. Keeping it on the ungrouped
+  builder at all is an **ergonomic** choice, not a compatibility one: putting it only on the
+  repository handle would be free, but it would force
+  `catalog.AddRepository(url).AddService("routing")` on a single-service AppHost whose only sin is
+  needing a bootstrap command — the verbosity #291 explicitly set out to avoid for the one-service
+  case.
 
 `PreparePlan.For(serviceName, catalog, developer, managedCheckout, windows)` has one call site
 (`LocalProjectSource.cs:60`) and already branches on `managedCheckout` — which turns out to answer
@@ -460,8 +516,8 @@ preference, not a dependency.
   is committed here.
 - **Two `AddRepository` calls naming the same upstream in different spellings** (`.git` suffix, ssh
   vs https) stay two records with two checkouts. `CheckoutName` uniqueness makes a directory clash
-  unreachable, so the cost is a duplicate clone the developer asked for by writing it twice. See
-  open question 5.
+  unreachable, so the cost is a duplicate clone the developer asked for by writing it twice — which
+  the notice decided under question 5 is what points out.
 - **A grouped repository's ref is a single value for the whole AppHost run.** That is the point, and
   #66 argues it is the coherent model ("a monorepo pinned to two different commits in one AppHost run
   is arguably already a mistake"), but it is a capability today's shape technically has.
@@ -474,7 +530,7 @@ Two stages, matching the repo's delivery shape:
 | Stage | Contents | Acceptance reached |
 | --- | --- | --- |
 | **1** | `RepositoryDefinition` + `CheckoutName`, with **every** record anonymous. Both producers mint one per service; the ~8 consumer files read through it. No new public API, no new yaml, no behaviour change. | None — but criterion 6 is proved here, by the existing suite passing untouched. |
-| **2** | `AddRepository`/`RepositoryDefinitionBuilder`/`WithProject`, and `WithRepository` narrowed; yaml `repositories:`/`repositoryRef:`; the third developer-config shape; the checkout and prefetch re-keying; prepare moved; samples, README, changelog. | All six. **#66 closes here, for catalogs that group.** |
+| **2** | `AddRepository`/`RepositoryBuilder`/`GroupedServiceDefinitionBuilder`/`ServiceDefinitionBuilderBase<TSelf>`/`WithProject`, and `WithRepository` narrowed; yaml `repositories:`/`repositoryRef:`; the third developer-config shape; the checkout and prefetch re-keying; prepare moved; samples, README, changelog. | All six. **#66 closes here, for catalogs that group.** |
 
 Stage 1 is deliberately a no-behaviour-change refactor that must go in green with nothing else in
 it — it is the stage that can silently break criterion 6, and the only way to see that it has not is
@@ -488,9 +544,14 @@ Mirroring the repo's layout, `Method_Condition_ExpectedOutcome`:
 - `Catalog/RepositoryHandleTests.cs` — `AddRepository` derives its name from the URL and strips
   `.git`; an explicit `name:` wins; a derived name colliding with another repository is refused
   asking for `name:`; a name that is not a contained directory name is refused (#224);
-  `WithRepository` on a grouped service is an error naming both; `WithProject` sets the project, and
-  called twice is the additive error. The four existing `WithRepository` test files move off the
-  dropped `project:` parameter.
+  `WithProject` sets the project, and called twice is the additive error. The four existing
+  `WithRepository` test files move off the dropped `project:` parameter. There is **no** test for
+  `WithRepository` on a grouped service — it does not compile, which is the point; the guard for that
+  is a `📘 typescript export surface` run plus the generated-interface assertion below.
+- `Catalog/AtsSurfaceTests.cs` (or the existing export-surface check) — the generated
+  `GroupedServiceDefinitionBuilder` interface carries the shared `With*` methods and **not**
+  `withRepository`/`withPrepare`. This is the only automated guard that the split builder types keep
+  working: nothing in C# fails if a later refactor moves a method onto the shared base by accident.
 - `Catalog/CatalogCompositionTests.cs` — extended: a repository name colliding with an ungrouped
   service's name is refused at composition, naming both; a repository name declared in both catalogs
   is the duplicate error; a code service cannot reach a yaml repository.
@@ -531,41 +592,55 @@ Mirroring the repo's layout, `Method_Condition_ExpectedOutcome`:
 
 ## Open questions
 
-1. **Does `AddRepository` derive its name, or require one?** This design derives it from the URL with
-   an optional `name:` override, which keeps #291's sketch verbatim and gives a readable
-   `checkouts/monorepo`. The cost is that the checkout directory becomes an implicit function of the
-   URL, so a URL edit renames the tree — and a renamed tree is a re-clone. Requiring the name makes
-   that explicit at the cost of the sketch's ergonomics.
-2. **Is a repository with no services an error?** `catalog.AddRepository(…)` with nothing added to it
-   is representable and harmless (nothing reads it). Report it, or leave it?
-3. **Worth measuring whether ATS projects inherited instance methods?** It is the one thing that
-   would make the separate-builder-type alternative above cheap — a shared base carrying the six
-   `With*` methods, with `WithRepository` only on the ungrouped subclass, turning a runtime error
-   into a compile error at no capability-id cost. A Stage-0-style throwaway probe would settle it in
-   an afternoon. Skip it and take the runtime error (this design's choice), or probe first?
-4. **Should `defaultRef` on the handle be required?** #291's sketch passes it every time. Optional
-   matches today's `ServiceMetadata.DefaultRef` being nullable (meaning "whatever the clone's default
-   branch is"), which is a real and common answer for a monorepo.
-5. **Two ungrouped services, one upstream — warn or stay silent?** *(More consequential than it
-   looks — see the rejected URL-keying alternative.)* `RepositoryUrlsMatch` already knows how to
-   compare two spellings. Because this design closes #66 for catalogs that adopt grouping and not for
-   those that don't, a warning is the one cheap thing that tells today's monorepo user their five
-   clones are avoidable. It would also fire on someone who deliberately wants two trees, so it needs
-   to be a notice rather than an error, and probably suppressible.
-6. **Is `RepositoryDefinitionBuilder` the right name?** It is symmetric with
-   `ServiceDefinition`/`ServiceDefinitionBuilder`, and long. `RepositoryBuilder` is shorter and less
-   precise. Free to settle either way while Stage 1 is unreleased, and worth the minute now rather
-   than after the first tag that ships it.
+**None outstanding.** All six were answered on 2026-09-08; the answers are recorded under
+[Reviewer decisions](#reviewer-decisions) below, and question 3 was settled by measurement rather
+than judgement — see
+[the question-3 ATS probe findings](2026-09-08-repository-handle-q3-ats-probe-findings.md).
 
-Question 3 is the only one that could still change the shape of the public surface; the rest are
-local. **All six are now cheap to get wrong and cheap to revisit** — that is what Stage 1 being
-unreleased buys, and it is worth spending before the 0.6.0 tag rather than after.
-
----
+The design is ready for an implementation plan. One item is deliberately left for #134 rather than
+folded in here: reverting Stage 1's `addServiceToCatalog` capability id to plain `AddService`, now
+that the collision it was invented to dodge is measured not to exist (probe recommendation 3).
 
 ## Reviewer decisions
 
 Recorded as they arrive. Each question is kept as it was asked, with the decision beneath it.
+
+### The six open questions
+
+Answered 2026-09-08. Five were accepted as the design already had them; one was measured.
+
+1. **Does `AddRepository` derive its name, or require one?**
+   **Decided: derive it**, from the URL's last path segment with `.git` stripped, overridable with
+   `name:`. Accepted as drafted, with the implication acknowledged: the checkout directory is a
+   function of the URL, so editing a URL renames the tree and the next start re-clones. The
+   `CheckoutName` uniqueness check is what keeps a derived name from colliding silently.
+2. **Is a repository with no services an error?**
+   **Decided: leave it unreported.** Nothing reads it; there is no failure to explain.
+3. **Worth measuring whether ATS projects inherited instance methods?**
+   **Decided: measure it — and the measurement changed the design.** See
+   [the probe findings](2026-09-08-repository-handle-q3-ats-probe-findings.md). All four shapes cross:
+   inherited methods project from an unexported base onto both derived handles, the base stays out of
+   the generated SDK, a generic self-typed base keeps fluent chains intact, and capability ids for
+   `ExposeMethods` instance methods are **receiver-qualified**, so nothing collides. Consequences:
+   the builder types are **split** (`ServiceDefinitionBuilder` /
+   `GroupedServiceDefinitionBuilder` over `ServiceDefinitionBuilderBase<TSelf>`), `WithRepository` and
+   `WithPrepare` on a grouped service become **compile** errors rather than runtime ones, and the
+   planned `addServiceToRepository` explicit id is dropped — plain `AddService` projects as
+   `addService`, exactly as #291 sketched. It also showed Stage 0's finding 5 to be specific to
+   *extension* methods, which makes Stage 1's `addServiceToCatalog` a name invented for a collision
+   that cannot occur; reverting it is left to #134.
+4. **Should `defaultRef` on the handle be required?**
+   **Decided: optional**, matching today's nullable `DefaultRef` — "whatever the clone's default
+   branch is" is a real answer, and a common one for a monorepo.
+5. **Two ungrouped services, one upstream — warn or stay silent?**
+   **Decided: warn**, as a suppressible notice rather than an error. It is the mechanism by which the
+   opt-in below is discoverable, so it is not optional polish; but it must not fail a start, because
+   two trees can be deliberate.
+6. **Is `RepositoryDefinitionBuilder` the right name?**
+   **Decided: `RepositoryBuilder`.** Reasoning in [The authoring API](#the-authoring-api) — the type's
+   primary method is `AddService`, so it is a grouping handle rather than a builder of one record, and
+   there is no second repository builder for a "Definition" infix to disambiguate from. The domain
+   record stays `RepositoryDefinition`.
 
 ### Is closing #66 for adopters only acceptable?
 
@@ -583,10 +658,9 @@ Two consequences worth carrying into the plan rather than rediscovering:
 
 - **The fix has to be discoverable, or the opt-in is theoretical.** A developer cloning five times
   today has no signal that a rewrite would stop it — nothing in the current output mentions that two
-  services share an upstream. That makes [open question 5](#open-questions)'s notice the *mechanism*
-  of the opt-in rather than a nicety, and it raises its priority accordingly. It stays open because
-  "warn" versus "document only" is still a judgement about noise: it would also fire on a developer
-  who deliberately wants two trees.
+  services share an upstream. That made question 5's notice the *mechanism* of the opt-in rather than
+  a nicety, and it was **decided "warn"** on that basis — a suppressible notice, never an error,
+  since two trees can be deliberate.
 - **The README carries the burden either way.** The monorepo shape has to be shown as the recommended
   way to express several services in one repository, not as an advanced variant, or the syntax nobody
   is pushed toward is the syntax nobody adopts.
