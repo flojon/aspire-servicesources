@@ -1,5 +1,6 @@
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
+using Aspire.Hosting.ServiceSources.Prepare;
 
 namespace Aspire.Hosting.ServiceSources.Catalog;
 
@@ -87,13 +88,42 @@ public sealed class ServiceDefinitionBuilder
     /// <c>npm.exe</c>).
     /// </param>
     /// <param name="mode">
-    /// How often the step runs: <c>"oncePerCommit"</c> (the default when left unset), <c>"once"</c>,
-    /// <c>"always"</c>, or <c>"never"</c>.
+    /// How often the step runs: <see cref="PrepareMode.OncePerCommit"/> (the default when left
+    /// unset), <see cref="PrepareMode.Once"/>, <see cref="PrepareMode.Always"/>, or
+    /// <see cref="PrepareMode.Never"/> — the enum behind yaml's four <c>mode</c> spellings.
     /// </param>
-    public ServiceDefinitionBuilder WithPrepare(string[] command, string[]? windowsCommand = null, string? mode = null)
+    /// <exception cref="ServiceSourcesConfigurationException">
+    /// <paramref name="mode"/> is not one of the four. A caller crossing the AppHost transport layer
+    /// can hand an enum parameter an integer that names no member, and that is a mistake in an
+    /// AppHost rather than a bug in here.
+    /// </exception>
+    public ServiceDefinitionBuilder WithPrepare(
+        string[] command, string[]? windowsCommand = null, PrepareMode mode = PrepareMode.OncePerCommit)
     {
         RequireUnset(_prepare, nameof(WithPrepare));
-        _prepare = new PrepareMetadata { Command = command, WindowsCommand = windowsCommand, Mode = mode };
+
+        // Before PrepareModes.Written, which is a lookup over the defined members and total only
+        // over those.
+        if (!Enum.IsDefined(mode))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{_serviceName}': {nameof(WithPrepare)} was given mode '{(int)mode}', which is not a "
+                + $"{nameof(PrepareMode)}. Set it to one of "
+                + string.Join(", ", Enum.GetValues<PrepareMode>().Select(m => $"{nameof(PrepareMode)}.{m}"))
+                + " — the four the yaml block spells "
+                + string.Join(", ", Enum.GetValues<PrepareMode>().Select(m => $"'{PrepareModes.Written(m)}'"))
+                + ".");
+        }
+
+        // Stored as the spelling the yaml block uses, so that PrepareMetadata.Mode carries one
+        // representation whichever file the block came from and PreparePlan parses it in one place.
+        _prepare = new PrepareMetadata
+        {
+            Command = command,
+            WindowsCommand = windowsCommand,
+            Mode = PrepareModes.Written(mode),
+        };
+
         return this;
     }
 
