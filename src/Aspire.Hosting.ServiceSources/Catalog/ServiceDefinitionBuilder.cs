@@ -19,6 +19,7 @@ public sealed class ServiceDefinitionBuilder
     private UrlMetadata? _url;
     private ContainerMetadata? _container;
     private KubernetesMetadata? _kubernetes;
+    private PrepareMetadata? _prepare;
     private string? _kind;
     private object? _kindOptions;
 
@@ -67,6 +68,35 @@ public sealed class ServiceDefinitionBuilder
         return this;
     }
 
+    /// <summary>
+    /// Declares a bootstrap command the <c>"local"</c> source runs inside the materialized checkout
+    /// before the kind is allowed to judge it — the code-authoring equivalent of yaml's
+    /// <c>prepare:</c> block. See the "prepare" step design
+    /// (<c>docs/superpowers/specs/2026-08-28-servicesources-prepare-step-design.md</c>) for what it
+    /// runs and when.
+    /// </summary>
+    /// <param name="command">
+    /// The command, as argv rather than a shell string — no quoting or word-splitting rules to get
+    /// wrong. A first element that looks like a path is resolved against the checkout and confined
+    /// to it; a bare name goes through <c>PATH</c>.
+    /// </param>
+    /// <param name="windowsCommand">
+    /// Replaces <paramref name="command"/> on Windows. Left unset, <paramref name="command"/> runs
+    /// there too — correct for a program that is a real executable on every platform, wrong for one
+    /// that is a <c>.cmd</c>/<c>.bat</c> shim there (<c>npm</c> is the case to know: there is no
+    /// <c>npm.exe</c>).
+    /// </param>
+    /// <param name="mode">
+    /// How often the step runs: <c>"oncePerCommit"</c> (the default when left unset), <c>"once"</c>,
+    /// <c>"always"</c>, or <c>"never"</c>.
+    /// </param>
+    public ServiceDefinitionBuilder WithPrepare(string[] command, string[]? windowsCommand = null, string? mode = null)
+    {
+        RequireUnset(_prepare, nameof(WithPrepare));
+        _prepare = new PrepareMetadata { Command = command, WindowsCommand = windowsCommand, Mode = mode };
+        return this;
+    }
+
     /// <summary>Declares this service's kind (language runtime) and optional kind-specific configuration.</summary>
     public ServiceDefinitionBuilder WithKind(string kind, object? options = null)
     {
@@ -102,6 +132,7 @@ public sealed class ServiceDefinitionBuilder
         Url = _url,
         Container = _container,
         Kubernetes = _kubernetes,
+        Prepare = _prepare,
         Kind = _kind ?? LocalKinds.Dotnet,
         KindOptions = _kindOptions,
         Origin = CatalogOrigin.Code,

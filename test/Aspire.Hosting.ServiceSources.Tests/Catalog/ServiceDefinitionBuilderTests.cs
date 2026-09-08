@@ -148,4 +148,54 @@ public class ServiceDefinitionBuilderTests
 
         Assert.Throws<ServiceSourcesConfigurationException>(() => chain.WithKind("javascript"));
     }
+
+    [Fact]
+    public void WithPrepare_SetsCommandWindowsCommandAndMode()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("catalog")
+            .WithRepository("https://github.com/example/catalog")
+            .WithPrepare(["./prepare.sh"], windowsCommand: ["prepare.cmd"], mode: "once")
+            .Build();
+
+        Assert.NotNull(definition.Prepare);
+        Assert.Equal(["./prepare.sh"], definition.Prepare.Command);
+        Assert.Equal(["prepare.cmd"], definition.Prepare.WindowsCommand);
+        Assert.Equal("once", definition.Prepare.Mode);
+    }
+
+    [Fact]
+    public void WithPrepare_WindowsCommandAndModeOmitted_StayNull()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("catalog")
+            .WithRepository("https://github.com/example/catalog")
+            .WithPrepare(["./prepare.sh"])
+            .Build();
+
+        Assert.Null(definition.Prepare!.WindowsCommand);
+        Assert.Null(definition.Prepare.Mode);
+    }
+
+    [Fact]
+    public void WithPrepare_CalledTwice_ThrowsNamingServiceAndBlock()
+    {
+        var chain = new ServiceCatalogBuilder().AddService("catalog")
+            .WithRepository("https://github.com/example/catalog")
+            .WithPrepare(["a.sh"]);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => chain.WithPrepare(["b.sh"]));
+
+        Assert.Contains("catalog", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("WithPrepare", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithPrepare_NotCalled_PrepareStaysNull()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("orders")
+            .WithRepository("https://github.com/example/orders")
+            .Build();
+
+        Assert.Null(definition.Prepare);
+    }
 }
