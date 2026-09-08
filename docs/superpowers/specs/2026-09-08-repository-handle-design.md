@@ -2,7 +2,9 @@
 
 **Date:** 2026-09-08
 **Status:** Draft — needs the six [open questions](#open-questions) answered before an implementation
-plan is written.
+plan is written. One decision is already recorded: closing #66 for adopters only is **accepted**, so
+declaration-based sharing stands and no checkout is migrated — see
+[Reviewer decisions](#reviewer-decisions).
 Revised 2026-09-08, same day: the first draft treated the Stage-1 authoring surface as frozen and
 argued three decisions from "no ApiCompat tooling, so a break is uncatchable". That premise was
 wrong — **Stage 1 is in no release tag** (see [What is frozen](#what-is-frozen-and-what-is-not)), so
@@ -17,7 +19,8 @@ the shared checkout falls out of the shared record. #66 is marked `blocked-by: #
 that blocked it (a domain type to hang a repository record on) shipped in Stage 1. **Closes it for
 catalogs that adopt grouping**, not for every catalog — #66's own option A would have done the
 latter, at the cost of migrating every existing checkout; see the alternative under
-[`CheckoutName`](#checkoutname-what-makes-criterion-6-hold).
+[`CheckoutName`](#checkoutname-what-makes-criterion-6-hold). That scope is **accepted**: developers
+opt in by switching to the new syntax ([Reviewer decisions](#reviewer-decisions)).
 **Builds on:** [the repository-handle findings](2026-09-08-repository-handle-findings.md), read out
 of `b2ccca4` — every `file:line` claim below is evidenced there and is not repeated;
 [the code-catalog design](2026-09-05-servicesources-code-catalog-design.md), whose reviewer decision
@@ -197,6 +200,10 @@ a URL ending in `/..` and a `repositories:` key of `../evil` are both developer 
 > under `repositories:` to share one tree" — turns this design's limitation into a prompt, at the cost
 > of one notice. That is the cheap half of option A's benefit with none of its migration, and it is
 > recommended if question 5 is answered "warn".
+>
+> **Settled:** the adopters-only scope is accepted — see
+> [Reviewer decisions](#is-closing-66-for-adopters-only-acceptable). This alternative is kept so it is
+> not re-proposed, not as a live option.
 
 **One namespace, checked once.** Anonymous names (service names) and grouped names share the
 `checkouts/` directory namespace, so a service `orders` and a repository derived to `orders` from
@@ -506,9 +513,13 @@ Mirroring the repo's layout, `Method_Condition_ExpectedOutcome`:
 
 ## Documentation
 
-- README: the monorepo shape, in the code and yaml catalog sections; `local.path` documented as the
-  per-service escape from a group; the `repositories:` block in the `servicesources.local.json`
-  reference.
+- README: the monorepo shape, in the code and yaml catalog sections, presented as **the** way to
+  express several services in one repository rather than as an advanced variant — the opt-in is only
+  real if the docs push toward it (see [Reviewer decisions](#reviewer-decisions)). Plus `local.path`
+  documented as the per-service escape from a group, and the `repositories:` block in the
+  `servicesources.local.json` reference.
+- CHANGELOG should say plainly that an existing catalog keeps its per-service checkouts until it is
+  rewritten, so the #66 fix is not read as automatic.
 - Both code-catalog samples gain a grouped repository; `DemoAppHostTypeScript/servicesources.yaml`
   gains a `repositories:`/`repositoryRef:` pair.
 - Both code-catalog samples also **must** be updated for the narrowed `WithRepository`: they are the
@@ -549,3 +560,33 @@ Mirroring the repo's layout, `Method_Condition_ExpectedOutcome`:
 Question 3 is the only one that could still change the shape of the public surface; the rest are
 local. **All six are now cheap to get wrong and cheap to revisit** — that is what Stage 1 being
 unreleased buys, and it is worth spending before the 0.6.0 tag rather than after.
+
+---
+
+## Reviewer decisions
+
+Recorded as they arrive. Each question is kept as it was asked, with the decision beneath it.
+
+### Is closing #66 for adopters only acceptable?
+
+Raised 2026-09-08 against the rejected URL-keying alternative under
+[`CheckoutName`](#checkoutname-what-makes-criterion-6-hold): this design shares a checkout only where
+the catalog *declares* a shared repository, so an existing monorepo catalog keeps cloning N times
+until it is rewritten into `repositories:`/`repositoryRef:`. #66's own recommended option A would
+have fixed those catalogs too, by keying every checkout on a URL slug.
+
+**Decided: acceptable — developers opt in by switching to the new syntax.** So declaration-based
+sharing stands, criterion 2 stands, and no existing checkout is migrated. This closes the fork; the
+alternative stays recorded above so it is not re-proposed, not as a live option.
+
+Two consequences worth carrying into the plan rather than rediscovering:
+
+- **The fix has to be discoverable, or the opt-in is theoretical.** A developer cloning five times
+  today has no signal that a rewrite would stop it — nothing in the current output mentions that two
+  services share an upstream. That makes [open question 5](#open-questions)'s notice the *mechanism*
+  of the opt-in rather than a nicety, and it raises its priority accordingly. It stays open because
+  "warn" versus "document only" is still a judgement about noise: it would also fire on a developer
+  who deliberately wants two trees.
+- **The README carries the burden either way.** The monorepo shape has to be shown as the recommended
+  way to express several services in one repository, not as an advanced variant, or the syntax nobody
+  is pushed toward is the syntax nobody adopts.
