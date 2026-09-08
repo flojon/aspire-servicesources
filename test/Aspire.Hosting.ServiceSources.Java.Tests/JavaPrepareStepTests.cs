@@ -1,4 +1,5 @@
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Prepare;
 using Aspire.Hosting.ServiceSources.Sources;
@@ -88,14 +89,14 @@ public class JavaPrepareStepTests
         return dir;
     }
 
-    private static ServiceMetadata Metadata(PrepareMetadata? prepare, params (string Key, object Value)[] block) =>
-        new()
+    private static ServiceDefinition Definition(PrepareMetadata? prepare, params (string Key, object Value)[] block) =>
+        new ServiceMetadata
         {
             Repository = "https://github.com/example/routing",
             Kind = "java",
             Prepare = prepare,
             KindConfig = Block(block),
-        };
+        }.ToDefinition("servicesources.yaml");
 
     private static PrepareMetadata Prepare() => new() { Command = ["./prepare.sh"] };
 
@@ -118,7 +119,7 @@ public class JavaPrepareStepTests
         var runner = new FakePrepareRunner("graphhopper-web-11.0.jar");
 
         var service = new LocalProjectSource(new FakeGitClient(), runner)
-            .Resolve(builder, ServiceName, Metadata(Prepare(), GraphHopperBlock), DevConfig());
+            .Resolve(builder, ServiceName, Definition(Prepare(), GraphHopperBlock), DevConfig());
 
         Assert.Equal(1, runner.Runs);
         Assert.Equal(ServiceName, service.Resource.Name);
@@ -147,7 +148,7 @@ public class JavaPrepareStepTests
             builder.UseJava();
 
             new LocalProjectSource(new FakeGitClient(), runner)
-                .Resolve(builder, ServiceName, Metadata(Prepare(), GraphHopperBlock), DevConfig());
+                .Resolve(builder, ServiceName, Definition(Prepare(), GraphHopperBlock), DevConfig());
         }
 
         Assert.Equal(1, runner.Runs);
@@ -171,7 +172,7 @@ public class JavaPrepareStepTests
             () => new LocalProjectSource(new FakeGitClient(), new FakePrepareRunner("app.jar")).Resolve(
                 builder,
                 ServiceName,
-                Metadata(prepare: null, ("jarPath", "app.jar"), ("workingDirectory", "generated"), ("port", 8989)),
+                Definition(prepare: null, ("jarPath", "app.jar"), ("workingDirectory", "generated"), ("port", 8989)),
                 DevConfig()));
 
         Assert.Contains("workingDirectory", ex.Message);
@@ -192,7 +193,7 @@ public class JavaPrepareStepTests
             .Resolve(
                 builder,
                 ServiceName,
-                Metadata(Prepare(), ("jarPath", "app.jar"), ("workingDirectory", "generated"), ("port", 8989)),
+                Definition(Prepare(), ("jarPath", "app.jar"), ("workingDirectory", "generated"), ("port", 8989)),
                 DevConfig());
 
         Assert.Equal(ServiceName, service.Resource.Name);

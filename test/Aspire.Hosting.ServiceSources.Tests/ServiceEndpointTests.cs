@@ -1,6 +1,7 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 using IPortAllocator = Aspire.Hosting.ServiceSources.PortAllocation.IPortAllocator;
 using Aspire.Hosting.ServiceSources.Sources;
 
@@ -35,7 +36,8 @@ public class ServiceEndpointTests
         new ContainerSource().Resolve(
             builder,
             "orders",
-            new ServiceMetadata { Container = new ContainerMetadata { Image = "ghcr.io/company/orders", Port = 8080, Scheme = scheme } },
+            new ServiceMetadata { Container = new ContainerMetadata { Image = "ghcr.io/company/orders", Port = 8080, Scheme = scheme } }
+                .ToDefinition("servicesources.yaml"),
             new ServiceDeveloperConfig { Source = "container" });
 
     private static IResourceBuilder<IResourceWithServiceDiscovery> KubernetesService(
@@ -43,7 +45,8 @@ public class ServiceEndpointTests
         new KubernetesSource(new FakePortAllocator()).Resolve(
             builder,
             "orders",
-            new ServiceMetadata { Kubernetes = new KubernetesMetadata { Service = "orders-svc", Port = 8080, Scheme = scheme } },
+            new ServiceMetadata { Kubernetes = new KubernetesMetadata { Service = "orders-svc", Port = 8080, Scheme = scheme } }
+                .ToDefinition("servicesources.yaml"),
             new ServiceDeveloperConfig { Source = "kubernetes", Kubernetes = new() { Context = "dev-west" } });
 
     /// <summary>
@@ -106,7 +109,8 @@ public class ServiceEndpointTests
         var service = new UrlSource().Resolve(
             Builder(),
             "orders",
-            new ServiceMetadata { Url = new UrlMetadata { Url = "https://orders.example.com" } },
+            new ServiceMetadata { Url = new UrlMetadata { Url = "https://orders.example.com" } }
+                .ToDefinition("servicesources.yaml"),
             new ServiceDeveloperConfig { Source = "url" });
 
         var endpoint = service.GetServiceEndpoint();
