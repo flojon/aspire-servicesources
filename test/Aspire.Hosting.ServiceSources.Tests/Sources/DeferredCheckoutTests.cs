@@ -1,6 +1,7 @@
 using System.Net.Sockets;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Tests.Git;
 using Aspire.Hosting.ServiceSources.Sources;
@@ -112,8 +113,11 @@ public class DeferredCheckoutTests
         return dir;
     }
 
-    private static ServiceMetadata Metadata(string name, string project = "Service.csproj") =>
-        new() { Repository = $"https://example.com/{name}.git", Project = project };
+    private static ServiceDefinition Definition(string name, string project = "Service.csproj") =>
+        new ServiceMetadata
+        {
+            Repository = $"https://example.com/{name}.git", Project = project,
+        }.ToDefinition("servicesources.yaml");
 
     private static ServiceDeveloperConfig DevConfig(string? path = null) =>
         new() { Source = "local", Local = new() { Path = path } };
@@ -142,7 +146,7 @@ public class DeferredCheckoutTests
         var dir = CreateAppHostDirectory("orders");
         var builder = TestHelpers.CreateBuilder(dir);
 
-        var service = new LocalProjectSource(new FakeGitClient()).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        var service = new LocalProjectSource(new FakeGitClient()).Resolve(builder, "orders", Definition("orders"), DevConfig());
 
         // Default off: the behaviour change is user-visible, so nobody gets it without asking.
         Assert.False(IsDeferred(service.Resource));
@@ -161,7 +165,7 @@ public class DeferredCheckoutTests
 
         // Composition runs to completion with the clone deliberately wedged open. Under the eager
         // path this call would sit here until the gate was released — which is the whole complaint.
-        var service = new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        var service = new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
 
         var repoRoot = ExpectedRepoRoot(dir, "orders");
 
@@ -193,7 +197,7 @@ public class DeferredCheckoutTests
         // the same value and must not disagree about it.
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             new LocalProjectSource(client).Resolve(
-                builder, "orders", Metadata("orders", project: "../../Evil.csproj"), DevConfig()));
+                builder, "orders", Definition("orders", project: "../../Evil.csproj"), DevConfig()));
 
         Assert.Contains("orders", ex.Message);
         Assert.Contains("outside", ex.Message);
@@ -215,7 +219,7 @@ public class DeferredCheckoutTests
         var gate = client.BlockFor("https://example.com/orders.git");
 
         var service = new LocalProjectSource(client).Resolve(
-            builder, "orders", Metadata("orders", project: @"src\Service.csproj"), DevConfig());
+            builder, "orders", Definition("orders", project: @"src\Service.csproj"), DevConfig());
 
         // What this registration does with the value, rather than only whether it rejects one: the
         // deferred path builds the project path itself, and this is the one DCP freezes into the
@@ -242,7 +246,7 @@ public class DeferredCheckoutTests
         // paid for and the landed checkout re-read.
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             new LocalProjectSource(client).Resolve(
-                builder, "orders", Metadata("orders", project: ""), DevConfig()));
+                builder, "orders", Definition("orders", project: ""), DevConfig()));
 
         Assert.Contains("'project' is required", ex.Message);
         Assert.DoesNotContain(builder.Resources, r => string.Equals(r.Name, "orders", StringComparison.Ordinal));
@@ -258,7 +262,7 @@ public class DeferredCheckoutTests
         builder.UseDeferredCheckout();
 
         var git = new FakeGitClient();
-        var service = new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        var service = new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
 
         // Every run after the first. Nothing to wait for, so nothing to defer — and the eager path
         // is the one that reads the repository's own launchSettings.json during composition.
@@ -276,7 +280,7 @@ public class DeferredCheckoutTests
         builder.UseDeferredCheckout();
 
         var service = new LocalProjectSource(new FakeGitClient())
-            .Resolve(builder, "orders", Metadata("orders"), DevConfig(path: checkout));
+            .Resolve(builder, "orders", Definition("orders"), DevConfig(path: checkout));
 
         // 'path' is the developer's own directory: there is no clone to wait for, and this package
         // is not entitled to create anything at that path if it is missing.
@@ -291,7 +295,7 @@ public class DeferredCheckoutTests
         builder.UseDeferredCheckout();
 
         var git = new FakeGitClient();
-        var service = new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        var service = new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
 
         // Publish mode writes a manifest and exits: no dashboard to reach early, no DCP, no resource
         // lifecycle. A deferred resource there would be described from a .csproj that is not on disk
@@ -325,7 +329,7 @@ public class DeferredCheckoutTests
 
         var git = new FakeGitClient();
         var gate = git.BlockFor("https://example.com/orders.git");
-        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig()).WithHttpEndpoint();
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
 
         // The claim the whole design rests on: Aspire will carry a ProjectResource whose .csproj is
         // not on disk all the way through composition. AddProject(name, missingPath) will not — it
@@ -348,7 +352,7 @@ public class DeferredCheckoutTests
 
         var git = new FakeGitClient();
         var gate = git.BlockFor("https://example.com/orders.git");
-        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
 
         // A run-to-completion worker has no applicationUrl on either path, so it cannot declare an
         // endpoint honestly and must not have to. Whether the project actually wanted one is a
@@ -655,7 +659,7 @@ public class DeferredCheckoutTests
 
         var git = new FakeGitClient();
         var gate = git.BlockFor("https://example.com/orders.git");
-        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
 
         // The prefetch decides what to report at BeforeStartEvent, before a deferred service has
         // waited on its checkout. StartCheckout is what keeps this one out of that report: the
@@ -678,7 +682,7 @@ public class DeferredCheckoutTests
         var git = new FakeGitClient();
         var gate = git.BlockFor("https://example.com/orders.git");
         var orders = new LocalProjectSource(git)
-            .Resolve(builder, "orders", Metadata("orders"), DevConfig())
+            .Resolve(builder, "orders", Definition("orders"), DevConfig())
             .WithHttpEndpoint();
 
         var repoRoot = ExpectedRepoRoot(dir, "orders");
@@ -707,7 +711,7 @@ public class DeferredCheckoutTests
 
         var git = new FakeGitClient();
         var orders = new LocalProjectSource(git)
-            .Resolve(builder, "orders", Metadata("orders"), DevConfig())
+            .Resolve(builder, "orders", Definition("orders"), DevConfig())
             .WithHttpEndpoint();
 
         var repoRoot = ExpectedRepoRoot(dir, "orders");
@@ -737,7 +741,7 @@ public class DeferredCheckoutTests
         var git = new FakeGitClient();
         git.FailFor("https://example.com/orders.git", new InvalidOperationException("no such repo"));
         var orders = new LocalProjectSource(git)
-            .Resolve(builder, "orders", Metadata("orders"), DevConfig())
+            .Resolve(builder, "orders", Definition("orders"), DevConfig())
             .WithHttpEndpoint();
 
         var services = builder.Services.BuildServiceProvider();
@@ -763,7 +767,7 @@ public class DeferredCheckoutTests
         var git = new FakeGitClient();
         git.FailFor("https://example.com/orders.git", new InvalidOperationException("no such repo"));
         var orders = new LocalProjectSource(git)
-            .Resolve(builder, "orders", Metadata("orders"), DevConfig())
+            .Resolve(builder, "orders", Definition("orders"), DevConfig())
             .WithHttpEndpoint();
 
         var services = builder.Services.BuildServiceProvider();
@@ -794,7 +798,7 @@ public class DeferredCheckoutTests
 
         var git = new FakeGitClient();
         new LocalProjectSource(git)
-            .Resolve(builder, "orders", Metadata("orders"), DevConfig())
+            .Resolve(builder, "orders", Definition("orders"), DevConfig())
             .WithHttpEndpoint();
 
         var services = builder.Services.BuildServiceProvider();
@@ -844,7 +848,7 @@ public class DeferredCheckoutTests
                 """);
 
             var orders = new LocalProjectSource(git)
-                .Resolve(builder, "orders", Metadata("orders"), DevConfig())
+                .Resolve(builder, "orders", Definition("orders"), DevConfig())
                 .WithHttpEndpoint();
 
             var services = builder.Services.BuildServiceProvider();
@@ -903,7 +907,7 @@ public class DeferredCheckoutTests
             """);
 
         var orders = new LocalProjectSource(git)
-            .Resolve(builder, "orders", Metadata("orders"), DevConfig())
+            .Resolve(builder, "orders", Definition("orders"), DevConfig())
             .WithHttpEndpoint();
 
         var services = builder.Services.BuildServiceProvider();
@@ -950,7 +954,7 @@ public class DeferredCheckoutTests
             """);
 
         var orders = new LocalProjectSource(git)
-            .Resolve(builder, "orders", Metadata("orders"), DevConfig())
+            .Resolve(builder, "orders", Definition("orders"), DevConfig())
             .WithHttpEndpoint();
 
         var services = builder.Services.BuildServiceProvider();
@@ -992,7 +996,7 @@ public class DeferredCheckoutTests
         var gate = git.BlockFor("https://example.com/orders.git");
 
         var orders = new LocalProjectSource(git)
-            .Resolve(builder, "orders", Metadata("orders"), DevConfig())
+            .Resolve(builder, "orders", Definition("orders"), DevConfig())
             .WithHttpEndpoint();
 
         var services = builder.Services.BuildServiceProvider();
@@ -1106,7 +1110,8 @@ public class DeferredCheckoutTests
             .Resolve(
                 builder,
                 "orders",
-                new ServiceMetadata { Repository = repository, Project = "Service.csproj" },
+                new ServiceMetadata { Repository = repository, Project = "Service.csproj" }
+                    .ToDefinition("servicesources.yaml"),
                 DevConfig())
             .WithHttpEndpoint();
 
@@ -1215,7 +1220,7 @@ public class DeferredCheckoutTests
         var gate = git.BlockFor("https://example.com/orders.git");
 
         var orders = new LocalProjectSource(git)
-            .Resolve(builder, "orders", Metadata("orders"), DevConfig())
+            .Resolve(builder, "orders", Definition("orders"), DevConfig())
             .WithHttpEndpoint();
 
         var services = builder.Services.BuildServiceProvider();

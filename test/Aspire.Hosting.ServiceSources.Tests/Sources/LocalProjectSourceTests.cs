@@ -2,6 +2,7 @@ using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Sources;
 
@@ -116,8 +117,8 @@ public class LocalProjectSourceTests
 
     private const string ServiceName = "orders";
 
-    private static ServiceMetadata Metadata(string repository = "https://github.com/company/orders", string project = "Orders.csproj", string? defaultRef = null) =>
-        new() { Repository = repository, Project = project, DefaultRef = defaultRef };
+    private static ServiceDefinition Definition(string repository = "https://github.com/company/orders", string project = "Orders.csproj", string? defaultRef = null) =>
+        new ServiceMetadata { Repository = repository, Project = project, DefaultRef = defaultRef }.ToDefinition("servicesources.yaml");
 
     private static ServiceDeveloperConfig DevConfig(string? path = null, string? @ref = null) =>
         new() { Source = "local", Local = new() { Path = path, Ref = @ref } };
@@ -132,14 +133,14 @@ public class LocalProjectSourceTests
     /// </summary>
     private static string ResolveProjectPath(
         string serviceName,
-        ServiceMetadata metadata,
+        ServiceDefinition definition,
         ServiceDeveloperConfig config,
         string appHostDirectory,
         IGitClient gitClient)
     {
-        var repoRoot = LocalGitCheckout.ResolveRepoRoot(serviceName, metadata, config, appHostDirectory, gitClient);
+        var repoRoot = LocalGitCheckout.ResolveRepoRoot(serviceName, definition, config, appHostDirectory, gitClient);
 
-        return LocalProjectSource.ResolveProjectFile(serviceName, repoRoot, metadata.Project);
+        return LocalProjectSource.ResolveProjectFile(serviceName, repoRoot, definition.Project);
     }
 
     [Fact]
@@ -150,7 +151,7 @@ public class LocalProjectSourceTests
         var gitClient = new FakeGitClient();
 
         var projectPath = ResolveProjectPath(
-            ServiceName, Metadata(project: "Orders.csproj"), DevConfig(path: repoDir), UnusedAppHostDirectory, gitClient);
+            ServiceName, Definition(project: "Orders.csproj"), DevConfig(path: repoDir), UnusedAppHostDirectory, gitClient);
 
         Assert.Equal(Path.Combine(repoDir, "Orders.csproj"), projectPath);
         Assert.Empty(gitClient.ClonedRepos);
@@ -165,7 +166,7 @@ public class LocalProjectSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
-                ServiceName, Metadata(project: "Orders.csproj"), DevConfig(path: repoDir, @ref: "feature/x"), UnusedAppHostDirectory, gitClient));
+                ServiceName, Definition(project: "Orders.csproj"), DevConfig(path: repoDir, @ref: "feature/x"), UnusedAppHostDirectory, gitClient));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("ref", ex.Message);
@@ -185,7 +186,7 @@ public class LocalProjectSourceTests
         // the guard every kind shares: for a non-dotnet kind nothing downstream would catch it.
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             LocalGitCheckout.ResolveRepoRoot(
-                ServiceName, Metadata(), DevConfig(path: "frontned"), appHostDirectory, gitClient));
+                ServiceName, Definition(), DevConfig(path: "frontned"), appHostDirectory, gitClient));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains(missing, ex.Message);
@@ -202,7 +203,7 @@ public class LocalProjectSourceTests
         var gitClient = new FakeGitClient();
 
         var projectPath = ResolveProjectPath(
-            ServiceName, Metadata(project: "Orders.csproj"), DevConfig(path: relativePath), appHostDirectory, gitClient);
+            ServiceName, Definition(project: "Orders.csproj"), DevConfig(path: relativePath), appHostDirectory, gitClient);
 
         Assert.Equal(Path.Combine(repoDir, "Orders.csproj"), projectPath);
     }
@@ -214,7 +215,7 @@ public class LocalProjectSourceTests
         var gitClient = new FakeGitClient();
 
         var projectPath = ResolveProjectPath(
-            ServiceName, Metadata(repository: "https://github.com/company/orders"), DevConfig(), appHostDirectory, gitClient);
+            ServiceName, Definition(repository: "https://github.com/company/orders"), DevConfig(), appHostDirectory, gitClient);
 
         var expectedRepoRoot = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
 
@@ -236,7 +237,7 @@ public class LocalProjectSourceTests
         var gitClient = new FakeGitClient();
 
         ResolveProjectPath(
-            ServiceName, Metadata(defaultRef: "main"), DevConfig(@ref: "feature/x"), appHostDirectory, gitClient);
+            ServiceName, Definition(defaultRef: "main"), DevConfig(@ref: "feature/x"), appHostDirectory, gitClient);
 
         var (_, reference) = Assert.Single(gitClient.CheckedOutRefs);
         Assert.Equal("feature/x", reference);
@@ -249,7 +250,7 @@ public class LocalProjectSourceTests
         var gitClient = new FakeGitClient();
 
         ResolveProjectPath(
-            ServiceName, Metadata(defaultRef: "main"), DevConfig(@ref: null), appHostDirectory, gitClient);
+            ServiceName, Definition(defaultRef: "main"), DevConfig(@ref: null), appHostDirectory, gitClient);
 
         var (_, reference) = Assert.Single(gitClient.CheckedOutRefs);
         Assert.Equal("main", reference);
@@ -262,7 +263,7 @@ public class LocalProjectSourceTests
         var gitClient = new FakeGitClient();
 
         ResolveProjectPath(
-            ServiceName, Metadata(defaultRef: null), DevConfig(@ref: null), appHostDirectory, gitClient);
+            ServiceName, Definition(defaultRef: null), DevConfig(@ref: null), appHostDirectory, gitClient);
 
         Assert.Empty(gitClient.CheckedOutRefs);
     }
@@ -278,7 +279,7 @@ public class LocalProjectSourceTests
         var gitClient = new FakeGitClient();
 
         ResolveProjectPath(
-            ServiceName, Metadata(defaultRef: null), DevConfig(), appHostDirectory, gitClient);
+            ServiceName, Definition(defaultRef: null), DevConfig(), appHostDirectory, gitClient);
 
         Assert.Empty(gitClient.ClonedRepos);
         Assert.Empty(gitClient.CheckedOutRefs);
@@ -293,7 +294,7 @@ public class LocalProjectSourceTests
         var gitClient = new FakeGitClient();
 
         ResolveProjectPath(
-            ServiceName, Metadata(repository: "https://github.com/company/orders"), DevConfig(), appHostDirectory, gitClient);
+            ServiceName, Definition(repository: "https://github.com/company/orders"), DevConfig(), appHostDirectory, gitClient);
 
         Assert.Equal("https://github.com/company/orders", Assert.Single(gitClient.ClonedRepos).RepositoryUrl);
         Assert.True(File.Exists(Path.Combine(repoDir, "Orders.csproj")));
@@ -312,7 +313,7 @@ public class LocalProjectSourceTests
         var gitClient = new FakeGitClient();
 
         var projectPath = ResolveProjectPath(
-            ServiceName, Metadata(), DevConfig(), appHostDirectory, gitClient);
+            ServiceName, Definition(), DevConfig(), appHostDirectory, gitClient);
 
         Assert.Single(gitClient.ClonedRepos);
         Assert.False(File.Exists(Path.Combine(repoDir, "partial.pack")));
@@ -327,7 +328,7 @@ public class LocalProjectSourceTests
         var gitClient = new FakeGitClient { PartialCloneException = new InvalidOperationException("connection reset") };
 
         Assert.Throws<ServiceSourcesConfigurationException>(() => ResolveProjectPath(
-            ServiceName, Metadata(), DevConfig(), appHostDirectory, gitClient));
+            ServiceName, Definition(), DevConfig(), appHostDirectory, gitClient));
 
         // The half-written clone must not be observable as the checkout: leaving it there is what
         // poisons the directory for every later run.
@@ -351,7 +352,7 @@ public class LocalProjectSourceTests
         var gitClient = new FakeGitClient();
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ResolveProjectPath(
-            ServiceName, Metadata(), DevConfig(), appHostDirectory, gitClient));
+            ServiceName, Definition(), DevConfig(), appHostDirectory, gitClient));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("worktree", ex.Message);
@@ -379,7 +380,7 @@ public class LocalProjectSourceTests
             File.WriteAllText(Path.Combine(repoDir, "theirs.txt"), "work only the other process has");
         };
 
-        var projectPath = ResolveProjectPath(ServiceName, Metadata(), DevConfig(), appHostDirectory, gitClient);
+        var projectPath = ResolveProjectPath(ServiceName, Definition(), DevConfig(), appHostDirectory, gitClient);
 
         Assert.True(File.Exists(Path.Combine(repoDir, "theirs.txt")));
         Assert.Equal(Path.Combine(repoDir, "Orders.csproj"), projectPath);
@@ -403,7 +404,7 @@ public class LocalProjectSourceTests
         };
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            ResolveProjectPath(ServiceName, Metadata(), DevConfig(), appHostDirectory, gitClient));
+            ResolveProjectPath(ServiceName, Definition(), DevConfig(), appHostDirectory, gitClient));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("https://github.com/company/billing", ex.Message);
@@ -425,7 +426,7 @@ public class LocalProjectSourceTests
         };
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            ResolveProjectPath(ServiceName, Metadata(), DevConfig(@ref: "feature/x"), appHostDirectory, gitClient));
+            ResolveProjectPath(ServiceName, Definition(), DevConfig(@ref: "feature/x"), appHostDirectory, gitClient));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("uncommitted changes", ex.Message);
@@ -445,7 +446,7 @@ public class LocalProjectSourceTests
         };
 
         var projectPath = ResolveProjectPath(
-            ServiceName, Metadata(), DevConfig(@ref: "feature/x"), appHostDirectory, gitClient);
+            ServiceName, Definition(), DevConfig(@ref: "feature/x"), appHostDirectory, gitClient);
 
         Assert.Equal(Path.Combine(repoDir, "Orders.csproj"), projectPath);
         // Already where it needs to be: adopting it is not a reason to re-run a checkout over a
@@ -462,7 +463,7 @@ public class LocalProjectSourceTests
         File.WriteAllText(Path.Combine(repoDir, "partial.pack"), "half a clone");
 
         Assert.Throws<ServiceSourcesConfigurationException>(() => ResolveProjectPath(
-            ServiceName, Metadata(), DevConfig(), appHostDirectory,
+            ServiceName, Definition(), DevConfig(), appHostDirectory,
             new FakeGitClient { CloneException = new InvalidOperationException("connection reset") }));
 
         // Removing the destination is deferred until a replacement is in hand, so a clone that never
@@ -471,7 +472,7 @@ public class LocalProjectSourceTests
         Assert.True(File.Exists(Path.Combine(repoDir, "partial.pack")));
 
         var projectPath = ResolveProjectPath(
-            ServiceName, Metadata(), DevConfig(), appHostDirectory, new FakeGitClient());
+            ServiceName, Definition(), DevConfig(), appHostDirectory, new FakeGitClient());
 
         Assert.False(File.Exists(Path.Combine(repoDir, "partial.pack")));
         Assert.Equal(Path.Combine(repoDir, "Orders.csproj"), projectPath);
@@ -490,7 +491,7 @@ public class LocalProjectSourceTests
         Directory.SetLastWriteTimeUtc(abandoned, DateTime.UtcNow - TimeSpan.FromDays(3));
         var gitClient = new FakeGitClient();
 
-        ResolveProjectPath(ServiceName, Metadata(), DevConfig(), appHostDirectory, gitClient);
+        ResolveProjectPath(ServiceName, Definition(), DevConfig(), appHostDirectory, gitClient);
 
         Assert.False(Directory.Exists(abandoned));
     }
@@ -505,7 +506,7 @@ public class LocalProjectSourceTests
         File.WriteAllText(Path.Combine(inFlight, "partial.pack"), "a clone happening right now");
         var gitClient = new FakeGitClient();
 
-        ResolveProjectPath(ServiceName, Metadata(), DevConfig(), appHostDirectory, gitClient);
+        ResolveProjectPath(ServiceName, Definition(), DevConfig(), appHostDirectory, gitClient);
 
         // Sweeping on age is what keeps a second AppHost's in-flight clone safe from this one.
         Assert.True(Directory.Exists(inFlight));
@@ -518,11 +519,11 @@ public class LocalProjectSourceTests
         var failing = new FakeGitClient { PartialCloneException = new InvalidOperationException("connection reset") };
 
         Assert.Throws<ServiceSourcesConfigurationException>(() => ResolveProjectPath(
-            ServiceName, Metadata(), DevConfig(), appHostDirectory, failing));
+            ServiceName, Definition(), DevConfig(), appHostDirectory, failing));
 
         // The whole point of the rename: a failed attempt costs nothing but the download.
         var projectPath = ResolveProjectPath(
-            ServiceName, Metadata(), DevConfig(), appHostDirectory, new FakeGitClient());
+            ServiceName, Definition(), DevConfig(), appHostDirectory, new FakeGitClient());
 
         Assert.Equal(
             Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName, "Orders.csproj"),
@@ -540,7 +541,7 @@ public class LocalProjectSourceTests
         var gitClient = new FakeGitClient();
 
         ResolveProjectPath(
-            ServiceName, Metadata(defaultRef: "main"), DevConfig(@ref: "feature/x"), appHostDirectory, gitClient);
+            ServiceName, Definition(defaultRef: "main"), DevConfig(@ref: "feature/x"), appHostDirectory, gitClient);
 
         var (repositoryPath, reference) = Assert.Single(gitClient.CheckedOutRefs);
         Assert.Equal(repoDir, repositoryPath);
@@ -558,7 +559,7 @@ public class LocalProjectSourceTests
         var gitClient = new FakeGitClient { CurrentlyCheckedOutRef = "feature/x" };
 
         ResolveProjectPath(
-            ServiceName, Metadata(defaultRef: "main"), DevConfig(@ref: "feature/x"), appHostDirectory, gitClient);
+            ServiceName, Definition(defaultRef: "main"), DevConfig(@ref: "feature/x"), appHostDirectory, gitClient);
 
         Assert.Empty(gitClient.CheckedOutRefs);
         Assert.Empty(gitClient.FetchedRepos);
@@ -576,7 +577,7 @@ public class LocalProjectSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
-                ServiceName, Metadata(repository: "https://github.com/company/orders"), DevConfig(), appHostDirectory, gitClient));
+                ServiceName, Definition(repository: "https://github.com/company/orders"), DevConfig(), appHostDirectory, gitClient));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("company/other-repo", ex.Message);
@@ -595,7 +596,7 @@ public class LocalProjectSourceTests
         var gitClient = new FakeGitClient { OriginUrl = "https://github.com/company/orders.git" };
 
         var projectPath = ResolveProjectPath(
-            ServiceName, Metadata(repository: "https://github.com/company/orders"), DevConfig(), appHostDirectory, gitClient);
+            ServiceName, Definition(repository: "https://github.com/company/orders"), DevConfig(), appHostDirectory, gitClient);
 
         Assert.Equal(Path.Combine(repoDir, "Orders.csproj"), projectPath);
     }
@@ -611,7 +612,7 @@ public class LocalProjectSourceTests
         var gitClient = new FakeGitClient { OriginUrl = "git@github.com:company/orders.git" };
 
         var projectPath = ResolveProjectPath(
-            ServiceName, Metadata(repository: "https://github.com/company/orders"), DevConfig(), appHostDirectory, gitClient);
+            ServiceName, Definition(repository: "https://github.com/company/orders"), DevConfig(), appHostDirectory, gitClient);
 
         Assert.Equal(Path.Combine(repoDir, "Orders.csproj"), projectPath);
     }
@@ -633,7 +634,7 @@ public class LocalProjectSourceTests
 
         var projectPath = ResolveProjectPath(
             ServiceName,
-            Metadata(repository: "https://github.com/company/orders", defaultRef: "feature/late"),
+            Definition(repository: "https://github.com/company/orders", defaultRef: "feature/late"),
             DevConfig(),
             appHostDirectory,
             gitClient);
@@ -650,7 +651,7 @@ public class LocalProjectSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
-                ServiceName, Metadata(defaultRef: "main"), DevConfig(), appHostDirectory, gitClient));
+                ServiceName, Definition(defaultRef: "main"), DevConfig(), appHostDirectory, gitClient));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("main", ex.Message);
@@ -673,7 +674,7 @@ public class LocalProjectSourceTests
         };
 
         var projectPath = ResolveProjectPath(
-            ServiceName, Metadata(defaultRef: "main"), DevConfig(@ref: "feature/x"), appHostDirectory, gitClient);
+            ServiceName, Definition(defaultRef: "main"), DevConfig(@ref: "feature/x"), appHostDirectory, gitClient);
 
         Assert.Equal(Path.Combine(repoDir, "Orders.csproj"), projectPath);
         Assert.Empty(gitClient.CheckedOutRefs);
@@ -695,7 +696,7 @@ public class LocalProjectSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
-                ServiceName, Metadata(defaultRef: "main"), DevConfig(@ref: "feature/x"), appHostDirectory, gitClient));
+                ServiceName, Definition(defaultRef: "main"), DevConfig(@ref: "feature/x"), appHostDirectory, gitClient));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("feature/x", ex.Message);
@@ -710,7 +711,7 @@ public class LocalProjectSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
-                ServiceName, Metadata(project: "src/Missing.csproj"), DevConfig(path: repoDir), UnusedAppHostDirectory, new FakeGitClient()));
+                ServiceName, Definition(project: "src/Missing.csproj"), DevConfig(path: repoDir), UnusedAppHostDirectory, new FakeGitClient()));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("src/Missing.csproj", ex.Message);
@@ -726,7 +727,7 @@ public class LocalProjectSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
-                ServiceName, Metadata(project: elsewhere), DevConfig(path: repoDir), UnusedAppHostDirectory,
+                ServiceName, Definition(project: elsewhere), DevConfig(path: repoDir), UnusedAppHostDirectory,
                 new FakeGitClient()));
 
         Assert.Contains(ServiceName, ex.Message);
@@ -743,7 +744,7 @@ public class LocalProjectSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
-                ServiceName, Metadata(project: project), DevConfig(path: repoDir), UnusedAppHostDirectory,
+                ServiceName, Definition(project: project), DevConfig(path: repoDir), UnusedAppHostDirectory,
                 new FakeGitClient()));
 
         // Reported as the absolute path it is on whichever platform the AppHost runs, rather than as
@@ -760,7 +761,7 @@ public class LocalProjectSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
-                ServiceName, Metadata(project: "../Evil.csproj"), DevConfig(path: repoDir), UnusedAppHostDirectory,
+                ServiceName, Definition(project: "../Evil.csproj"), DevConfig(path: repoDir), UnusedAppHostDirectory,
                 new FakeGitClient()));
 
         Assert.Contains(ServiceName, ex.Message);
@@ -786,7 +787,7 @@ public class LocalProjectSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
-                ServiceName, Metadata(project: project), DevConfig(path: repoDir), UnusedAppHostDirectory,
+                ServiceName, Definition(project: project), DevConfig(path: repoDir), UnusedAppHostDirectory,
                 new FakeGitClient()));
 
         Assert.Contains(ServiceName, ex.Message);
@@ -810,7 +811,7 @@ public class LocalProjectSourceTests
         // Counted rather than pattern-matched: a '..' that a preceding segment pays for never leaves
         // the checkout, so it is not the thing being refused.
         var projectPath = ResolveProjectPath(
-            ServiceName, Metadata(project: "src/../Orders.csproj"), DevConfig(path: repoDir), UnusedAppHostDirectory,
+            ServiceName, Definition(project: "src/../Orders.csproj"), DevConfig(path: repoDir), UnusedAppHostDirectory,
             new FakeGitClient());
 
         // Compared resolved: the accepted value keeps the separators it was written with, and only
@@ -827,7 +828,7 @@ public class LocalProjectSourceTests
         File.WriteAllText(Path.Combine(repoDir, "src", "Orders.csproj"), "<Project />");
 
         var projectPath = ResolveProjectPath(
-            ServiceName, Metadata(project: @"src\Orders.csproj"), DevConfig(path: repoDir), UnusedAppHostDirectory,
+            ServiceName, Definition(project: @"src\Orders.csproj"), DevConfig(path: repoDir), UnusedAppHostDirectory,
             new FakeGitClient());
 
         Assert.Equal(Path.Combine(repoDir, "src", "Orders.csproj"), projectPath);
@@ -847,7 +848,7 @@ public class LocalProjectSourceTests
         // this. Whitespace survives quoting. All three are a service that names no project file.
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
-                ServiceName, Metadata(project: project!), DevConfig(path: repoDir), UnusedAppHostDirectory,
+                ServiceName, Definition(project: project!), DevConfig(path: repoDir), UnusedAppHostDirectory,
                 new FakeGitClient()));
 
         Assert.Contains(ServiceName, ex.Message);
@@ -867,7 +868,7 @@ public class LocalProjectSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             new LocalProjectSource(gitClient).Resolve(
-                builder, ServiceName, Metadata(project: "../../Evil.csproj"), DevConfig()));
+                builder, ServiceName, Definition(project: "../../Evil.csproj"), DevConfig()));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("outside", ex.Message);
@@ -887,7 +888,7 @@ public class LocalProjectSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
-                ServiceName, Metadata(repository: "https://github.com/company/orders"), DevConfig(), appHostDirectory, gitClient));
+                ServiceName, Definition(repository: "https://github.com/company/orders"), DevConfig(), appHostDirectory, gitClient));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("https://github.com/company/orders", ex.Message);
@@ -905,7 +906,7 @@ public class LocalProjectSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
-                ServiceName, Metadata(repository: "https://github.com/company/orders"), DevConfig(), appHostDirectory, gitClient));
+                ServiceName, Definition(repository: "https://github.com/company/orders"), DevConfig(), appHostDirectory, gitClient));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("https://github.com/company/orders", ex.Message);
@@ -930,7 +931,7 @@ public class LocalProjectSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
-                ServiceName, Metadata(repository: "https://github.com/company/orders"), DevConfig(), appHostDirectory, gitClient));
+                ServiceName, Definition(repository: "https://github.com/company/orders"), DevConfig(), appHostDirectory, gitClient));
 
         // "Authentication failed" would send the developer hunting for a token that was rejected.
         // Nothing was ever sent: the helper yielded nothing and no environment token was set.
@@ -956,7 +957,7 @@ public class LocalProjectSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
-                ServiceName, Metadata(repository: RepositoryWithToken), DevConfig(), appHostDirectory, gitClient));
+                ServiceName, Definition(repository: RepositoryWithToken), DevConfig(), appHostDirectory, gitClient));
 
         Assert.DoesNotContain(EmbeddedToken, ex.Message);
         // Still has to name the repository well enough for the developer to act on it.
@@ -971,7 +972,7 @@ public class LocalProjectSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
-                ServiceName, Metadata(repository: RepositoryWithToken), DevConfig(), appHostDirectory, gitClient));
+                ServiceName, Definition(repository: RepositoryWithToken), DevConfig(), appHostDirectory, gitClient));
 
         Assert.DoesNotContain(EmbeddedToken, ex.Message);
         Assert.Contains("github.com/company/orders", ex.Message);
@@ -990,7 +991,7 @@ public class LocalProjectSourceTests
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
                 ServiceName,
-                Metadata(repository: RepositoryWithToken, defaultRef: "feature/late"),
+                Definition(repository: RepositoryWithToken, defaultRef: "feature/late"),
                 DevConfig(),
                 appHostDirectory,
                 gitClient));
@@ -1012,7 +1013,7 @@ public class LocalProjectSourceTests
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
                 ServiceName,
-                Metadata(repository: RepositoryWithToken, defaultRef: "does-not-exist"),
+                Definition(repository: RepositoryWithToken, defaultRef: "does-not-exist"),
                 DevConfig(),
                 appHostDirectory,
                 gitClient));
@@ -1036,7 +1037,7 @@ public class LocalProjectSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
-                ServiceName, Metadata(repository: RepositoryWithToken), DevConfig(), appHostDirectory, gitClient));
+                ServiceName, Definition(repository: RepositoryWithToken), DevConfig(), appHostDirectory, gitClient));
 
         Assert.DoesNotContain(EmbeddedToken, ex.Message);
         Assert.Contains("company/other-repo", ex.Message);
@@ -1055,7 +1056,7 @@ public class LocalProjectSourceTests
         // Handed to git as written, in every form git accepts: the developer's SSH agent and
         // ~/.ssh/config are what resolve it, and this package has no reason to second-guess them.
         ResolveProjectPath(
-            ServiceName, Metadata(repository: repository), DevConfig(), appHostDirectory, gitClient);
+            ServiceName, Definition(repository: repository), DevConfig(), appHostDirectory, gitClient);
 
         Assert.Equal(repository, Assert.Single(gitClient.ClonedRepos).RepositoryUrl);
     }
@@ -1069,7 +1070,7 @@ public class LocalProjectSourceTests
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
                 ServiceName,
-                Metadata(repository: $"ssh://alice:{EmbeddedToken}@github.com/company/orders"),
+                Definition(repository: $"ssh://alice:{EmbeddedToken}@github.com/company/orders"),
                 DevConfig(),
                 appHostDirectory,
                 gitClient));
@@ -1090,7 +1091,7 @@ public class LocalProjectSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
-                ServiceName, Metadata(defaultRef: "missing-ref"), DevConfig(), appHostDirectory, gitClient));
+                ServiceName, Definition(defaultRef: "missing-ref"), DevConfig(), appHostDirectory, gitClient));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("missing-ref", ex.Message);
@@ -1104,7 +1105,7 @@ public class LocalProjectSourceTests
         var gitClient = new FakeGitClient { FailFirstCheckoutOnly = true };
 
         ResolveProjectPath(
-            ServiceName, Metadata(defaultRef: "feature/late"), DevConfig(), appHostDirectory, gitClient);
+            ServiceName, Definition(defaultRef: "feature/late"), DevConfig(), appHostDirectory, gitClient);
 
         var repoDir = Path.Combine(appHostDirectory, ".servicesources", "checkouts", ServiceName);
         Assert.Equal(new[] { repoDir }, gitClient.FetchedRepos);
@@ -1124,7 +1125,7 @@ public class LocalProjectSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
-                ServiceName, Metadata(defaultRef: "does-not-exist"), DevConfig(), appHostDirectory, gitClient));
+                ServiceName, Definition(defaultRef: "does-not-exist"), DevConfig(), appHostDirectory, gitClient));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("does-not-exist", ex.Message);
@@ -1143,7 +1144,7 @@ public class LocalProjectSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
-                ServiceName, Metadata(defaultRef: "feature/late"), DevConfig(), appHostDirectory, gitClient));
+                ServiceName, Definition(defaultRef: "feature/late"), DevConfig(), appHostDirectory, gitClient));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.IsType<InvalidOperationException>(ex.InnerException);
@@ -1161,7 +1162,7 @@ public class LocalProjectSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             ResolveProjectPath(
-                ServiceName, Metadata(defaultRef: "feature/late"), DevConfig(), appHostDirectory, gitClient));
+                ServiceName, Definition(defaultRef: "feature/late"), DevConfig(), appHostDirectory, gitClient));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("authentication", ex.Message, StringComparison.OrdinalIgnoreCase);
@@ -1174,9 +1175,9 @@ public class LocalProjectSourceTests
         var gitClient = new FakeGitClient();
 
         var ordersPath = ResolveProjectPath(
-            "orders", Metadata(repository: "https://github.com/team-a/orders"), DevConfig(), appHostDirectory, gitClient);
+            "orders", Definition(repository: "https://github.com/team-a/orders"), DevConfig(), appHostDirectory, gitClient);
         var billingPath = ResolveProjectPath(
-            "billing", Metadata(repository: "https://github.com/team-a/orders"), DevConfig(), appHostDirectory, gitClient);
+            "billing", Definition(repository: "https://github.com/team-a/orders"), DevConfig(), appHostDirectory, gitClient);
 
         Assert.NotEqual(ordersPath, billingPath);
         Assert.Equal(2, gitClient.ClonedRepos.Count);
@@ -1189,7 +1190,7 @@ public class LocalProjectSourceTests
         var gitClient = new FakeGitClient();
 
         ResolveProjectPath(
-            ServiceName, Metadata(), DevConfig(), appHostDirectory, gitClient);
+            ServiceName, Definition(), DevConfig(), appHostDirectory, gitClient);
 
         var gitignorePath = Path.Combine(appHostDirectory, ".servicesources", ".gitignore");
         Assert.True(File.Exists(gitignorePath));
@@ -1205,7 +1206,7 @@ public class LocalProjectSourceTests
         var gitClient = new FakeGitClient();
 
         ResolveProjectPath(
-            ServiceName, Metadata(), DevConfig(), appHostDirectory, gitClient);
+            ServiceName, Definition(), DevConfig(), appHostDirectory, gitClient);
 
         var dir = Path.Combine(appHostDirectory, ".servicesources");
         Assert.True(File.Exists(Path.Combine(dir, "Directory.Build.props")));
@@ -1230,7 +1231,7 @@ public class LocalProjectSourceTests
 
         ResolveProjectPath(
             ServiceName,
-            Metadata(project: "Orders.csproj"),
+            Definition(project: "Orders.csproj"),
             DevConfig(path: overridePath),
             appHostDirectory,
             new FakeGitClient());
@@ -1252,7 +1253,7 @@ public class LocalProjectSourceTests
         var gitClient = new FakeGitClient();
 
         ResolveProjectPath(
-            ServiceName, Metadata(), DevConfig(), appHostDirectory, gitClient);
+            ServiceName, Definition(), DevConfig(), appHostDirectory, gitClient);
 
         Assert.Equal("custom content", File.ReadAllText(gitignorePath));
     }
@@ -1266,7 +1267,7 @@ public class LocalProjectSourceTests
         Parallel.ForEach(serviceNames, serviceName =>
         {
             ResolveProjectPath(
-                serviceName, Metadata(), DevConfig(), appHostDirectory, new FakeGitClient());
+                serviceName, Definition(), DevConfig(), appHostDirectory, new FakeGitClient());
         });
 
         var gitignorePath = Path.Combine(appHostDirectory, ".servicesources", ".gitignore");
@@ -1288,7 +1289,7 @@ public class LocalProjectSourceTests
         var gitClient = new FakeGitClient();
         var source = new LocalProjectSource(gitClient);
 
-        var service = source.Resolve(builder, ServiceName, Metadata(), DevConfig());
+        var service = source.Resolve(builder, ServiceName, Definition(), DevConfig());
 
         Assert.NotEmpty(gitClient.ClonedRepos);
         Assert.Contains(builder.Resources, r => ReferenceEquals(r, service.Resource));
@@ -1310,7 +1311,7 @@ public class LocalProjectSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             LocalGitCheckout.ResolveRepoRoot(
-                "../escapee", Metadata(), DevConfig(), appHostDirectory, gitClient));
+                "../escapee", Definition(), DevConfig(), appHostDirectory, gitClient));
 
         Assert.Contains("../escapee", ex.Message);
         Assert.Empty(gitClient.ClonedRepos);

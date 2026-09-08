@@ -1,6 +1,7 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 using IPortAllocator = Aspire.Hosting.ServiceSources.PortAllocation.IPortAllocator;
 using Aspire.Hosting.ServiceSources.Sources;
 
@@ -23,16 +24,16 @@ public class KubernetesSourceTests
 
     private const string ServiceName = "orders";
 
-    private static ServiceMetadata Metadata(
+    private static ServiceDefinition Definition(
         string? kubernetesService = "orders-svc", int? kubernetesPort = 8080, string? scheme = null) =>
-        new()
+        new ServiceMetadata
         {
             Repository = "https://github.com/company/orders",
             Project = "Orders.csproj",
             Kubernetes = kubernetesService is null
                 ? null
                 : new KubernetesMetadata { Service = kubernetesService, Port = kubernetesPort, Scheme = scheme },
-        };
+        }.ToDefinition("servicesources.yaml");
 
     private static ServiceDeveloperConfig DevConfig(
         string? context = "dev-west", string? @namespace = null, int? port = null, string? scheme = null) =>
@@ -46,7 +47,7 @@ public class KubernetesSourceTests
     public void BuildPortForwardArgs_AllFieldsSet_BuildsArgsInOrder()
     {
         var args = KubernetesSource.BuildPortForwardArgs(
-            ServiceName, Metadata(kubernetesService: "orders-svc", kubernetesPort: 8080),
+            ServiceName, Definition(kubernetesService: "orders-svc", kubernetesPort: 8080),
             DevConfig(context: "dev-west", @namespace: "orders", port: null),
             new FakePortAllocator(54321), out var localPort, out var remotePort);
 
@@ -61,7 +62,7 @@ public class KubernetesSourceTests
     public void BuildPortForwardArgs_NamespaceOmitted_DefaultsToDefaultNamespace()
     {
         var args = KubernetesSource.BuildPortForwardArgs(
-            ServiceName, Metadata(), DevConfig(@namespace: null),
+            ServiceName, Definition(), DevConfig(@namespace: null),
             new FakePortAllocator(1), out _, out _);
 
         Assert.Contains("--namespace", args);
@@ -72,7 +73,7 @@ public class KubernetesSourceTests
     public void BuildPortForwardArgs_LocalPortOverride_TakesPrecedenceOverCatalogPort()
     {
         KubernetesSource.BuildPortForwardArgs(
-            ServiceName, Metadata(kubernetesPort: 8080), DevConfig(port: 9090),
+            ServiceName, Definition(kubernetesPort: 8080), DevConfig(port: 9090),
             new FakePortAllocator(1), out _, out var remotePort);
 
         Assert.Equal(9090, remotePort);
@@ -82,7 +83,7 @@ public class KubernetesSourceTests
     public void BuildPortForwardArgs_LocalPortUnset_FallsBackToCatalogPort()
     {
         KubernetesSource.BuildPortForwardArgs(
-            ServiceName, Metadata(kubernetesPort: 8080), DevConfig(port: null),
+            ServiceName, Definition(kubernetesPort: 8080), DevConfig(port: null),
             new FakePortAllocator(1), out _, out var remotePort);
 
         Assert.Equal(8080, remotePort);
@@ -93,7 +94,7 @@ public class KubernetesSourceTests
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             KubernetesSource.BuildPortForwardArgs(
-                ServiceName, Metadata(kubernetesService: null), DevConfig(),
+                ServiceName, Definition(kubernetesService: null), DevConfig(),
                 new FakePortAllocator(1), out _, out _));
 
         Assert.Contains(ServiceName, ex.Message);
@@ -105,7 +106,7 @@ public class KubernetesSourceTests
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             KubernetesSource.BuildPortForwardArgs(
-                ServiceName, Metadata(), DevConfig(context: null),
+                ServiceName, Definition(), DevConfig(context: null),
                 new FakePortAllocator(1), out _, out _));
 
         Assert.Contains(ServiceName, ex.Message);
@@ -117,7 +118,7 @@ public class KubernetesSourceTests
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             KubernetesSource.BuildPortForwardArgs(
-                ServiceName, Metadata(kubernetesService: ""), DevConfig(),
+                ServiceName, Definition(kubernetesService: ""), DevConfig(),
                 new FakePortAllocator(1), out _, out _));
 
         Assert.Contains(ServiceName, ex.Message);
@@ -129,7 +130,7 @@ public class KubernetesSourceTests
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             KubernetesSource.BuildPortForwardArgs(
-                ServiceName, Metadata(), DevConfig(context: ""),
+                ServiceName, Definition(), DevConfig(context: ""),
                 new FakePortAllocator(1), out _, out _));
 
         Assert.Contains(ServiceName, ex.Message);
@@ -141,7 +142,7 @@ public class KubernetesSourceTests
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             KubernetesSource.BuildPortForwardArgs(
-                ServiceName, Metadata(kubernetesPort: null), DevConfig(port: null),
+                ServiceName, Definition(kubernetesPort: null), DevConfig(port: null),
                 new FakePortAllocator(1), out _, out _));
 
         Assert.Contains(ServiceName, ex.Message);
@@ -153,7 +154,7 @@ public class KubernetesSourceTests
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             KubernetesSource.BuildPortForwardArgs(
-                ServiceName, Metadata(kubernetesPort: 0), DevConfig(port: null),
+                ServiceName, Definition(kubernetesPort: 0), DevConfig(port: null),
                 new FakePortAllocator(1), out _, out _));
 
         Assert.Contains(ServiceName, ex.Message);
@@ -165,7 +166,7 @@ public class KubernetesSourceTests
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             KubernetesSource.BuildPortForwardArgs(
-                ServiceName, Metadata(kubernetesPort: 8080), DevConfig(port: 70000),
+                ServiceName, Definition(kubernetesPort: 8080), DevConfig(port: 70000),
                 new FakePortAllocator(1), out _, out _));
 
         Assert.Contains(ServiceName, ex.Message);
@@ -180,7 +181,7 @@ public class KubernetesSourceTests
 
         Assert.Throws<ServiceSourcesConfigurationException>(() =>
             KubernetesSource.BuildPortForwardArgs(
-                ServiceName, Metadata(kubernetesPort: 70000), DevConfig(),
+                ServiceName, Definition(kubernetesPort: 70000), DevConfig(),
                 allocator, out _, out _));
 
         Assert.False(allocatorCalled);
@@ -196,7 +197,7 @@ public class KubernetesSourceTests
 
         Assert.Throws<ServiceSourcesConfigurationException>(() =>
             KubernetesSource.BuildPortForwardArgs(
-                ServiceName, Metadata(kubernetesService: null), DevConfig(),
+                ServiceName, Definition(kubernetesService: null), DevConfig(),
                 allocator, out _, out _));
 
         Assert.False(allocatorCalled);
@@ -208,7 +209,7 @@ public class KubernetesSourceTests
         var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
         var service = new KubernetesSource(new FakePortAllocator(54321))
-            .Resolve(builder, ServiceName, Metadata(), DevConfig());
+            .Resolve(builder, ServiceName, Definition(), DevConfig());
 
         var endpoint = Assert.Single(service.Resource.Annotations.OfType<EndpointAnnotation>());
         Assert.Equal("http", endpoint.Name);
@@ -224,7 +225,7 @@ public class KubernetesSourceTests
         var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
         var service = new KubernetesSource(new FakePortAllocator(54321))
-            .Resolve(builder, ServiceName, Metadata(scheme: "https"), DevConfig());
+            .Resolve(builder, ServiceName, Definition(scheme: "https"), DevConfig());
 
         var endpoint = Assert.Single(service.Resource.Annotations.OfType<EndpointAnnotation>());
         Assert.Equal("https", endpoint.Name);
@@ -238,7 +239,7 @@ public class KubernetesSourceTests
         var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
         var service = new KubernetesSource(new FakePortAllocator(54321))
-            .Resolve(builder, ServiceName, Metadata(scheme: "http"), DevConfig(scheme: "https"));
+            .Resolve(builder, ServiceName, Definition(scheme: "http"), DevConfig(scheme: "https"));
 
         var endpoint = Assert.Single(service.Resource.Annotations.OfType<EndpointAnnotation>());
         Assert.Equal("https", endpoint.Name);
@@ -251,7 +252,7 @@ public class KubernetesSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             new KubernetesSource(new FakePortAllocator(54321))
-                .Resolve(builder, ServiceName, Metadata(scheme: "grpc"), DevConfig()));
+                .Resolve(builder, ServiceName, Definition(scheme: "grpc"), DevConfig()));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("grpc", ex.Message);
@@ -267,7 +268,7 @@ public class KubernetesSourceTests
         var allocator = new TrackingPortAllocator(() => allocatorCalled = true, 54321);
 
         Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            new KubernetesSource(allocator).Resolve(builder, ServiceName, Metadata(scheme: "grpc"), DevConfig()));
+            new KubernetesSource(allocator).Resolve(builder, ServiceName, Definition(scheme: "grpc"), DevConfig()));
 
         Assert.False(allocatorCalled);
     }
@@ -281,7 +282,7 @@ public class KubernetesSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             new KubernetesSource(new FakePortAllocator(54321))
-                .Resolve(builder, ServiceName, Metadata(kubernetesService: null, scheme: "grpc"), DevConfig()));
+                .Resolve(builder, ServiceName, Definition(kubernetesService: null, scheme: "grpc"), DevConfig()));
 
         Assert.Contains("kubernetes.service", ex.Message);
     }

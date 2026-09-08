@@ -1,5 +1,6 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Sources;
 
@@ -67,7 +68,7 @@ public class LocalKindValidationTests
         builder.AddLocalKind(KindName, kind);
 
         new LocalProjectSource(new UnusedGitClient())
-            .Resolve(builder, ServiceName, Metadata(), DevConfig(checkout));
+            .Resolve(builder, ServiceName, Definition(), DevConfig(checkout));
 
         // The same directory, and one that exists — without both, a kind still cannot check that a
         // path its options block names is actually in the repository.
@@ -84,7 +85,7 @@ public class LocalKindValidationTests
         builder.AddLocalKind(KindName, kind);
 
         new LocalProjectSource(new UnusedGitClient())
-            .Resolve(builder, ServiceName, Metadata(), DevConfig(checkout));
+            .Resolve(builder, ServiceName, Definition(), DevConfig(checkout));
 
         Assert.Equal([nameof(ILocalResourceKind.Validate), nameof(ILocalResourceKind.Resolve)], kind.Calls);
     }
@@ -99,7 +100,7 @@ public class LocalKindValidationTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             new LocalProjectSource(new UnusedGitClient())
-                .Resolve(builder, ServiceName, Metadata(), DevConfig(checkout)));
+                .Resolve(builder, ServiceName, Definition(), DevConfig(checkout)));
 
         // The ordering that makes reporting a checkout-relative problem from Validate worth the
         // signature: the handler is never asked to build anything, so nothing of this service is in
@@ -124,7 +125,7 @@ public class LocalKindValidationTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             new LocalProjectSource(new UnusedGitClient())
-                .Resolve(builder, ServiceName, Metadata(), DevConfig(checkout)));
+                .Resolve(builder, ServiceName, Definition(), DevConfig(checkout)));
 
         Assert.Contains(checkout, ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("failed while creating", ex.Message, StringComparison.Ordinal);
@@ -147,7 +148,7 @@ public class LocalKindValidationTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             new LocalProjectSource(new UnusedGitClient())
-                .Resolve(builder, ServiceName, Metadata(), DevConfig(checkout)));
+                .Resolve(builder, ServiceName, Definition(), DevConfig(checkout)));
 
         Assert.Contains(ServiceName, ex.Message, StringComparison.Ordinal);
         Assert.Contains(KindName, ex.Message, StringComparison.Ordinal);
@@ -158,11 +159,11 @@ public class LocalKindValidationTests
     private sealed class StandInResource(string name, string workingDirectory)
         : ExecutableResource(name, "run", workingDirectory), IResourceWithServiceDiscovery;
 
-    private static ServiceMetadata Metadata() => new()
+    private static ServiceDefinition Definition() => new ServiceMetadata
     {
         Repository = "https://example.com/frontend.git",
         Kind = KindName,
-    };
+    }.ToDefinition("servicesources.yaml");
 
     private static ServiceDeveloperConfig DevConfig(string path) =>
         new() { Source = "local", Local = new() { Path = path } };

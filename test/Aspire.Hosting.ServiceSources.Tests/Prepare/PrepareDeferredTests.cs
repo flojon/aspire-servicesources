@@ -1,5 +1,6 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Prepare;
 using Aspire.Hosting.ServiceSources.Sources;
@@ -218,8 +219,11 @@ public class PrepareDeferredTests
         return dir;
     }
 
-    private static ServiceMetadata Metadata(string name, PrepareMetadata? prepare = null) =>
-        new() { Repository = $"https://example.com/{name}.git", Kind = KindName, Prepare = prepare };
+    private static ServiceDefinition Definition(string name, PrepareMetadata? prepare = null) =>
+        new ServiceMetadata
+        {
+            Repository = $"https://example.com/{name}.git", Kind = KindName, Prepare = prepare,
+        }.ToDefinition("servicesources.yaml");
 
     private static PrepareMetadata Prepare(string? mode = null) =>
         new() { Command = ["./prepare.sh"], Mode = mode };
@@ -300,7 +304,7 @@ public class PrepareDeferredTests
         var runner = new FakeRunner(journal, produces: "app.jar");
 
         var routing = new LocalProjectSource(git, runner)
-            .Resolve(builder, "routing", Metadata("routing", Prepare()), DevConfig());
+            .Resolve(builder, "routing", Definition("routing", Prepare()), DevConfig());
 
         // Composition is over and the clone has not even finished, so nothing can have prepared.
         Assert.Equal(0, runner.Runs);
@@ -331,7 +335,7 @@ public class PrepareDeferredTests
         builder.AddLocalKind(KindName, new StandInKind(journal, "app.jar"));
 
         var routing = new LocalProjectSource(new FakeGitClient(), new FakeRunner(journal, produces: "app.jar"))
-            .Resolve(builder, "routing", Metadata("routing", Prepare()), DevConfig());
+            .Resolve(builder, "routing", Definition("routing", Prepare()), DevConfig());
 
         var services = builder.Services.BuildServiceProvider();
         await builder.Eventing.PublishAsync(
@@ -358,7 +362,7 @@ public class PrepareDeferredTests
         builder.AddLocalKind(KindName, new StandInKind(journal, "package.json", withHelper: true));
 
         var frontend = new LocalProjectSource(new FakeGitClient(), new FakeRunner(journal, produces: "package.json"))
-            .Resolve(builder, "frontend", Metadata("frontend", Prepare()), DevConfig());
+            .Resolve(builder, "frontend", Definition("frontend", Prepare()), DevConfig());
 
         var services = builder.Services.BuildServiceProvider();
         await builder.Eventing.PublishAsync(
@@ -397,7 +401,7 @@ public class PrepareDeferredTests
         builder.AddLocalKind(KindName, new StandInKind(journal, "package.json", withHelper: true));
 
         var frontend = new LocalProjectSource(new FakeGitClient(), new FakeRunner(journal) { ExitCode = 4 })
-            .Resolve(builder, "frontend", Metadata("frontend", Prepare()), DevConfig());
+            .Resolve(builder, "frontend", Definition("frontend", Prepare()), DevConfig());
 
         var installer = Assert.Single(builder.Resources, r => r.Name == "frontend-installer");
 
@@ -433,7 +437,7 @@ public class PrepareDeferredTests
         builder.AddLocalKind(KindName, new StandInKind(journal, "app.jar"));
 
         var routing = new LocalProjectSource(new FakeGitClient(), new FakeRunner(journal) { ExitCode = 9 })
-            .Resolve(builder, "routing", Metadata("routing", Prepare()), DevConfig());
+            .Resolve(builder, "routing", Definition("routing", Prepare()), DevConfig());
 
         var services = builder.Services.BuildServiceProvider();
         await builder.Eventing.PublishAsync(
@@ -471,7 +475,7 @@ public class PrepareDeferredTests
         builder.AddLocalKind(KindName, new StandInKind(journal, "app.jar"));
 
         var routing = new LocalProjectSource(new FakeGitClient(), new FakeRunner(journal) { ExitCode = 9 })
-            .Resolve(builder, "routing", Metadata("routing", Prepare()), DevConfig());
+            .Resolve(builder, "routing", Definition("routing", Prepare()), DevConfig());
 
         var services = builder.Services.BuildServiceProvider();
         await builder.Eventing.PublishAsync(
@@ -513,9 +517,9 @@ public class PrepareDeferredTests
         var quick = new FakeRunner(journal, produces: "app.jar");
 
         var routing = new LocalProjectSource(git, slow)
-            .Resolve(builder, "routing", Metadata("routing", Prepare()), DevConfig());
+            .Resolve(builder, "routing", Definition("routing", Prepare()), DevConfig());
         var tiles = new LocalProjectSource(git, quick)
-            .Resolve(builder, "tiles", Metadata("tiles", Prepare()), DevConfig());
+            .Resolve(builder, "tiles", Definition("tiles", Prepare()), DevConfig());
 
         var services = builder.Services.BuildServiceProvider();
         await builder.Eventing.PublishAsync(
@@ -575,7 +579,7 @@ public class PrepareDeferredTests
                 Repository = "https://example.com/orders.git",
                 Project = "Generated.csproj",
                 Prepare = Prepare(),
-            },
+            }.ToDefinition("servicesources.yaml"),
             DevConfig());
 
         // Nothing has been prepared yet, and the project file the resource was registered against
@@ -627,7 +631,7 @@ public class PrepareDeferredTests
             {
                 Repository = "https://example.com/orders.git",
                 Project = "Generated.csproj",
-            },
+            }.ToDefinition("servicesources.yaml"),
             DevConfig());
 
         var services = builder.Services.BuildServiceProvider();
@@ -668,7 +672,7 @@ public class PrepareDeferredTests
 
         var runner = new FakeRunner(journal) { WaitsForCancellation = true };
         var routing = new LocalProjectSource(new FakeGitClient(), runner)
-            .Resolve(builder, "routing", Metadata("routing", Prepare()), DevConfig());
+            .Resolve(builder, "routing", Definition("routing", Prepare()), DevConfig());
 
         var services = builder.Services.BuildServiceProvider();
         await builder.Eventing.PublishAsync(
@@ -713,7 +717,7 @@ public class PrepareDeferredTests
 
         var runner = new FakeRunner(journal);
         new LocalProjectSource(new FakeGitClient(), runner)
-            .Resolve(builder, "routing", Metadata("routing", Prepare("always")), DevConfig());
+            .Resolve(builder, "routing", Definition("routing", Prepare("always")), DevConfig());
 
         // During composition, before anything was deferred.
         Assert.Equal(1, runner.Runs);

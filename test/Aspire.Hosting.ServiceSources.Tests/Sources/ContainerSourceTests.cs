@@ -1,6 +1,7 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Sources;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Sources;
@@ -9,16 +10,16 @@ public class ContainerSourceTests
 {
     private const string ServiceName = "orders";
 
-    private static ServiceMetadata Metadata(
+    private static ServiceDefinition Definition(
         string? image = "ghcr.io/company/orders", int? port = 8080, string? defaultTag = null, string? scheme = null) =>
-        new()
+        new ServiceMetadata
         {
             Repository = "https://github.com/company/orders",
             Project = "Orders.csproj",
             Container = image is null
                 ? null
                 : new ContainerMetadata { Image = image, Port = port, DefaultTag = defaultTag, Scheme = scheme },
-        };
+        }.ToDefinition("servicesources.yaml");
 
     private static ServiceDeveloperConfig DevConfig(string? tag = null) =>
         new() { Source = "container", Container = new() { Tag = tag } };
@@ -27,7 +28,7 @@ public class ContainerSourceTests
     public void ResolveContainerConfig_NoTagAnywhere_ReturnsNullTag()
     {
         var (image, tag, port) = ContainerSource.ResolveContainerConfig(
-            ServiceName, Metadata(image: "ghcr.io/company/orders", port: 8080, defaultTag: null), DevConfig(tag: null));
+            ServiceName, Definition(image: "ghcr.io/company/orders", port: 8080, defaultTag: null), DevConfig(tag: null));
 
         Assert.Equal("ghcr.io/company/orders", image);
         Assert.Null(tag);
@@ -38,7 +39,7 @@ public class ContainerSourceTests
     public void ResolveContainerConfig_LocalTagOverride_TakesPrecedenceOverCatalogDefaultTag()
     {
         var (_, tag, _) = ContainerSource.ResolveContainerConfig(
-            ServiceName, Metadata(defaultTag: "latest"), DevConfig(tag: "v1.4.2"));
+            ServiceName, Definition(defaultTag: "latest"), DevConfig(tag: "v1.4.2"));
 
         Assert.Equal("v1.4.2", tag);
     }
@@ -47,7 +48,7 @@ public class ContainerSourceTests
     public void ResolveContainerConfig_LocalTagUnset_FallsBackToCatalogDefaultTag()
     {
         var (_, tag, _) = ContainerSource.ResolveContainerConfig(
-            ServiceName, Metadata(defaultTag: "latest"), DevConfig(tag: null));
+            ServiceName, Definition(defaultTag: "latest"), DevConfig(tag: null));
 
         Assert.Equal("latest", tag);
     }
@@ -56,7 +57,7 @@ public class ContainerSourceTests
     public void ResolveContainerConfig_EmptyLocalTag_FallsBackToCatalogDefaultTag()
     {
         var (_, tag, _) = ContainerSource.ResolveContainerConfig(
-            ServiceName, Metadata(defaultTag: "latest"), DevConfig(tag: ""));
+            ServiceName, Definition(defaultTag: "latest"), DevConfig(tag: ""));
 
         Assert.Equal("latest", tag);
     }
@@ -65,7 +66,7 @@ public class ContainerSourceTests
     public void ResolveContainerConfig_WhitespaceLocalTag_FallsBackToCatalogDefaultTag()
     {
         var (_, tag, _) = ContainerSource.ResolveContainerConfig(
-            ServiceName, Metadata(defaultTag: "latest"), DevConfig(tag: "   "));
+            ServiceName, Definition(defaultTag: "latest"), DevConfig(tag: "   "));
 
         Assert.Equal("latest", tag);
     }
@@ -74,7 +75,7 @@ public class ContainerSourceTests
     public void ResolveContainerConfig_NoContainerBlock_ThrowsNamingServiceAndImage()
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            ContainerSource.ResolveContainerConfig(ServiceName, Metadata(image: null), DevConfig()));
+            ContainerSource.ResolveContainerConfig(ServiceName, Definition(image: null), DevConfig()));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("container.image", ex.Message);
@@ -84,7 +85,7 @@ public class ContainerSourceTests
     public void ResolveContainerConfig_EmptyImage_ThrowsNamingServiceAndImage()
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            ContainerSource.ResolveContainerConfig(ServiceName, Metadata(image: ""), DevConfig()));
+            ContainerSource.ResolveContainerConfig(ServiceName, Definition(image: ""), DevConfig()));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("container.image", ex.Message);
@@ -94,7 +95,7 @@ public class ContainerSourceTests
     public void ResolveContainerConfig_WhitespaceImage_ThrowsNamingServiceAndImage()
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            ContainerSource.ResolveContainerConfig(ServiceName, Metadata(image: "   "), DevConfig()));
+            ContainerSource.ResolveContainerConfig(ServiceName, Definition(image: "   "), DevConfig()));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("container.image", ex.Message);
@@ -104,7 +105,7 @@ public class ContainerSourceTests
     public void ResolveContainerConfig_MissingPort_ThrowsNamingServiceAndPort()
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            ContainerSource.ResolveContainerConfig(ServiceName, Metadata(port: null), DevConfig()));
+            ContainerSource.ResolveContainerConfig(ServiceName, Definition(port: null), DevConfig()));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("container.port", ex.Message);
@@ -114,7 +115,7 @@ public class ContainerSourceTests
     public void ResolveContainerConfig_ZeroPort_ThrowsNamingServiceAndPort()
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            ContainerSource.ResolveContainerConfig(ServiceName, Metadata(port: 0), DevConfig()));
+            ContainerSource.ResolveContainerConfig(ServiceName, Definition(port: 0), DevConfig()));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("port", ex.Message);
@@ -124,7 +125,7 @@ public class ContainerSourceTests
     public void ResolveContainerConfig_PortAboveValidRange_ThrowsNamingServiceAndPort()
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            ContainerSource.ResolveContainerConfig(ServiceName, Metadata(port: 70000), DevConfig()));
+            ContainerSource.ResolveContainerConfig(ServiceName, Definition(port: 70000), DevConfig()));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("port", ex.Message);
@@ -135,7 +136,7 @@ public class ContainerSourceTests
     {
         var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
-        var service = new ContainerSource().Resolve(builder, ServiceName, Metadata(), DevConfig());
+        var service = new ContainerSource().Resolve(builder, ServiceName, Definition(), DevConfig());
 
         var endpoint = Assert.Single(service.Resource.Annotations.OfType<EndpointAnnotation>());
         Assert.Equal("http", endpoint.Name);
@@ -149,7 +150,7 @@ public class ContainerSourceTests
         // speaks, or a consumer is handed an http:// URL the listener rejects (#160).
         var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
-        var service = new ContainerSource().Resolve(builder, ServiceName, Metadata(scheme: "https"), DevConfig());
+        var service = new ContainerSource().Resolve(builder, ServiceName, Definition(scheme: "https"), DevConfig());
 
         var endpoint = Assert.Single(service.Resource.Annotations.OfType<EndpointAnnotation>());
         Assert.Equal("https", endpoint.Name);
@@ -163,7 +164,7 @@ public class ContainerSourceTests
         var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            new ContainerSource().Resolve(builder, ServiceName, Metadata(scheme: "grpc"), DevConfig()));
+            new ContainerSource().Resolve(builder, ServiceName, Definition(scheme: "grpc"), DevConfig()));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("grpc", ex.Message);

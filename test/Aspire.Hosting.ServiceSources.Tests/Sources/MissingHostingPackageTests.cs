@@ -1,5 +1,6 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Sources;
 
@@ -28,7 +29,7 @@ public class MissingHostingPackageTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             new LocalProjectSource(new UnusedGitClient())
-                .Resolve(builder, ServiceName, Metadata(kind), DevConfig(repoRoot)));
+                .Resolve(builder, ServiceName, Definition(kind), DevConfig(repoRoot)));
 
         Assert.Contains(ServiceName, ex.Message, StringComparison.Ordinal);
         Assert.Contains(kind, ex.Message, StringComparison.Ordinal);
@@ -65,7 +66,7 @@ public class MissingHostingPackageTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             new LocalProjectSource(new UnusedGitClient())
-                .Resolve(builder, ServiceName, Metadata(kind), DevConfig(repoRoot)));
+                .Resolve(builder, ServiceName, Definition(kind), DevConfig(repoRoot)));
 
         Assert.Contains(ServiceName, ex.Message, StringComparison.Ordinal);
         Assert.Contains(kind, ex.Message, StringComparison.Ordinal);
@@ -87,7 +88,7 @@ public class MissingHostingPackageTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             new LocalProjectSource(new UnusedGitClient())
-                .Resolve(builder, ServiceName, Metadata("javascript"), DevConfig(repoRoot)));
+                .Resolve(builder, ServiceName, Definition("javascript"), DevConfig(repoRoot)));
 
         Assert.DoesNotContain("Aspire.Hosting.JavaScript", ex.Message, StringComparison.Ordinal);
         Assert.Contains(nameof(ILocalResourceKind.Validate), ex.Message, StringComparison.Ordinal);
@@ -107,7 +108,7 @@ public class MissingHostingPackageTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             new LocalProjectSource(new UnusedGitClient())
-                .Resolve(builder, ServiceName, Metadata("javascript"), DevConfig(repoRoot)));
+                .Resolve(builder, ServiceName, Definition("javascript"), DevConfig(repoRoot)));
 
         Assert.DoesNotContain("dotnet add package", ex.Message, StringComparison.Ordinal);
         Assert.Contains(nameof(ILocalResourceKind.Validate), ex.Message, StringComparison.Ordinal);
@@ -127,7 +128,7 @@ public class MissingHostingPackageTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             new LocalProjectSource(new UnusedGitClient())
-                .Resolve(builder, ServiceName, Metadata("javascript"), DevConfig(repoRoot)));
+                .Resolve(builder, ServiceName, Definition("javascript"), DevConfig(repoRoot)));
 
         Assert.Contains("is not registered", ex.Message, StringComparison.Ordinal);
         Assert.Contains("UseJavaScript()", ex.Message, StringComparison.Ordinal);
@@ -243,11 +244,11 @@ public class MissingHostingPackageTests
         Assert.Null(message);
     }
 
-    private static ServiceMetadata Metadata(string kind) => new()
+    private static ServiceDefinition Definition(string kind) => new ServiceMetadata
     {
         Repository = "https://example.com/frontend.git",
         Kind = kind,
-    };
+    }.ToDefinition("servicesources.yaml");
 
     private static ServiceDeveloperConfig DevConfig(string path) =>
         new() { Source = "local", Local = new() { Path = path } };
