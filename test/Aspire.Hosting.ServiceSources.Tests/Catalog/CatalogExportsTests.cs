@@ -73,7 +73,7 @@ public class CatalogExportsTests
 
         string[] expected =
         [
-            "addService", "addBackingService", "getServiceEndpoint", "useJava", "useJavaScript",
+            "addService", "addBackingService", "asJava", "getServiceEndpoint", "useJava", "useJavaScript",
             "addServiceCatalog", "addServiceToCatalog",
             CamelCase(nameof(ServiceConfigurationExports.WithServiceEnvironment)),
             CamelCase(nameof(ServiceConfigurationExports.WithServiceEnvironmentFromParameter)),
