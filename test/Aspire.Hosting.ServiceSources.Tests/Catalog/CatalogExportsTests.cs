@@ -91,6 +91,13 @@ public class CatalogExportsTests
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithKubernetes))}",
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithPrepare))}",
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithKind))}",
+            "JavaKindOptionsBuilder.workingDirectory",
+            "JavaKindOptionsBuilder.mavenGoal",
+            "JavaKindOptionsBuilder.gradleTask",
+            "JavaKindOptionsBuilder.jarPath",
+            "JavaKindOptionsBuilder.wrapperPath",
+            "JavaKindOptionsBuilder.args",
+            "JavaKindOptionsBuilder.port",
         ];
 
         Assert.Equal(expected.OrderBy(id => id, StringComparer.Ordinal), ids.OrderBy(id => id, StringComparer.Ordinal));
