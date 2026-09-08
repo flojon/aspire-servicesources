@@ -2,7 +2,9 @@
 
 **Date:** 2026-09-08
 **Status:** Investigation. Answers "how do we implement #291 once #134 Stage 2 lands"; not itself a
-design. The design doc it feeds should reuse the findings below rather than re-derive them.
+design. The design it feeds is
+[2026-09-08-repository-handle-design.md](2026-09-08-repository-handle-design.md), which cites these
+findings rather than re-deriving them.
 **Investigates:** #291 (`AddRepository` returning a shared handle), which also closes #66 (two
 services in one repository clone it twice).
 **Read out of the code at** `origin/main` = `b2ccca4` (#134 Stage 1, "core split +
