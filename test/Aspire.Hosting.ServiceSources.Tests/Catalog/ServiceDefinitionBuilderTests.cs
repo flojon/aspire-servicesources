@@ -158,8 +158,8 @@ public class ServiceDefinitionBuilderTests
             .Build();
 
         Assert.NotNull(definition.Prepare);
-        Assert.Equal(["./prepare.sh"], definition.Prepare.Command);
-        Assert.Equal(["prepare.cmd"], definition.Prepare.WindowsCommand);
+        Assert.Equal(["./prepare.sh"], definition.Prepare.Command!);
+        Assert.Equal(["prepare.cmd"], definition.Prepare.WindowsCommand!);
         Assert.Equal("once", definition.Prepare.Mode);
     }
 
