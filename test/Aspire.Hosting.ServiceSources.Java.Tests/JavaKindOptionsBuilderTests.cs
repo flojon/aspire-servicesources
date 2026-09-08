@@ -18,7 +18,7 @@ public class JavaKindOptionsBuilderTests
         Assert.Equal("services/api", options.WorkingDirectory);
         Assert.Equal("spring-boot:run", options.MavenGoal);
         Assert.Equal("mvnw", options.WrapperPath);
-        Assert.Equal(["-Dspring-boot.run.profiles=dev"], options.Args);
+        Assert.Equal(["-Dspring-boot.run.profiles=dev"], options.Args!);
         Assert.Equal(8080, options.Port);
         Assert.Null(options.GradleTask);
         Assert.Null(options.JarPath);
