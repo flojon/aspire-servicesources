@@ -63,14 +63,11 @@ public static class LocalKindConfig
             return alreadyTyped;
         }
 
-        // Branch 1b: a guest-language WithKind(kind, options) call. Aspire's Type System marshals
-        // the options object across as a JsonObject, which implements IDictionary<string, JsonNode>
-        // but not the non-generic IDictionary the yaml path below tests for — and it does implement
-        // IEnumerable, so without this branch it is classified as "a list" and rejected, leaving the
-        // per-kind block unreachable from every guest language. Yaml is a superset of JSON, so the
-        // same strict deserializer reads it, which is what keeps the unknown-property check that a
-        // code-authored block needs just as much as a yaml one. A JsonArray or JsonValue is
-        // deliberately left to fall through: those keep the list/scalar shape message.
+        // Branch 1b: a guest language's WithKind block, which Aspire's Type System marshals across as
+        // a JsonObject — not the non-generic IDictionary the yaml path tests for, so without this it
+        // is rejected as "a list". Yaml is a superset of JSON, so the same strict deserializer reads
+        // it, keeping the unknown-property check. JsonArray/JsonValue fall through to the shape
+        // messages.
         if (rawConfig is JsonObject jsonObject)
         {
             return Deserialize<T>(jsonObject.ToJsonString(), serviceName);
@@ -106,8 +103,8 @@ public static class LocalKindConfig
     }
 
     /// <summary>
-    /// Reads a block that is already yaml text — serialized from yaml's own untyped shape, or a
-    /// guest language's JSON, which is valid yaml.
+    /// Reads a block already in yaml text: yaml's own untyped shape re-serialized, or a guest
+    /// language's JSON, which is valid yaml.
     /// </summary>
     private static T? Deserialize<T>(string yaml, string? serviceName) where T : class
     {

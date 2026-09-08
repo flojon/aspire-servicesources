@@ -31,17 +31,9 @@ public class LocalKindConfigTests
         public string? RunScript { get; set; }
     }
 
-    /// <summary>
-    /// The shape a guest-language <c>withKind(kind, { options: … })</c> call actually delivers.
-    /// </summary>
-    /// <remarks>
-    /// Aspire's Type System marshals the options object across as a <see cref="JsonObject"/>, not as
-    /// the <c>Dictionary&lt;object, object&gt;</c> yaml produces. It implements
-    /// <c>IDictionary&lt;string, JsonNode&gt;</c> but not the non-generic <c>IDictionary</c> the yaml
-    /// path tests for, and it does implement <c>IEnumerable</c> — so it was classified as "a list"
-    /// and rejected, which left the per-kind block unreachable from every guest language. Measured
-    /// against a running TypeScript AppHost, not inferred.
-    /// </remarks>
+    // What a guest language's withKind(kind, { options: … }) actually delivers: a JsonObject, which
+    // the yaml path's non-generic IDictionary test misses and its IEnumerable test then rejects as
+    // "a list". Measured against a running TypeScript AppHost.
     [Fact]
     public void Parse_JsonObjectFromGuestLanguage_MapsCamelCaseKeysToProperties()
     {
@@ -57,8 +49,8 @@ public class LocalKindConfigTests
     [Fact]
     public void Parse_JsonObjectWithSequenceAndNumber_MapsBothThroughUnchanged()
     {
-        // The java kind's jarPath block: a string array and an int in one object, which is where a
-        // JSON-to-yaml text round-trip would break if flow sequences or numeric scalars did not read.
+        // The java kind's jarPath block: where a JSON-to-yaml round-trip would break if flow
+        // sequences or numeric scalars did not read.
         var raw = JsonNode.Parse(
             """{"jarPath":"graphhopper-web-11.0.jar","args":["server","gh-config-local.yml"],"port":8989}""");
 
@@ -66,15 +58,14 @@ public class LocalKindConfigTests
 
         Assert.NotNull(options);
         Assert.Equal("graphhopper-web-11.0.jar", options.JarPath);
-        Assert.Equal(["server", "gh-config-local.yml"], options.Args);
+        Assert.Equal(["server", "gh-config-local.yml"], Assert.IsType<string[]>(options.Args));
         Assert.Equal(8989, options.Port);
     }
 
     [Fact]
     public void Parse_JsonObjectWithUnknownProperty_ThrowsNamingPropertyAndService()
     {
-        // The typo check has to survive the new branch: a code-authored block is exactly as
-        // typo-prone as a yaml one, and nothing else validates it.
+        // A code-authored block is as typo-prone as a yaml one, and nothing else validates it.
         var raw = JsonNode.Parse("""{"runScrip":"start"}""");
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
@@ -87,8 +78,7 @@ public class LocalKindConfigTests
     [Fact]
     public void Parse_JsonArrayFromGuestLanguage_StillReportsListShape()
     {
-        // A guest that passes an array where the block belongs keeps the shape message, rather than
-        // reaching the new branch and failing as a deserialization error.
+        // The wrong shape keeps the shape message instead of reaching the new branch.
         var raw = JsonNode.Parse("""["appDirectory"]""");
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
