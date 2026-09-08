@@ -137,7 +137,7 @@ internal static class ServiceConfigAudit
         });
 
         return $"Service configuration that nothing read: {string.Join(", ", described)}. No service in "
-            + $"'servicesources.yaml' is named {(orphans.Count == 1 ? "it" : "any of them")}, so "
+            + $"this AppHost's catalog is named {(orphans.Count == 1 ? "it" : "any of them")}, so "
             + $"{(orphans.Count == 1 ? "the entry configures" : "the entries configure")} nothing. This AppHost's "
             + $"catalog declares: {string.Join(", ", candidates.Select(name => $"'{name}'"))}. Correct the key "
             + $"under \"{DeveloperConfigFileSource.FileServicesKey}\" in '{DeveloperConfiguration.FileName}', or "

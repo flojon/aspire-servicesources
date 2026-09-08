@@ -43,26 +43,99 @@ public class CatalogExportsTests
     }
 
     [Fact]
-    public void NoTwoExportedCatalogMethods_ShareAGeneratedCapabilityId()
+    public void NoTwoExportedMethodsInTheAssembly_ShareAGeneratedCapabilityId()
     {
-        // Belt-and-suspenders against the Stage 0 regression (docs/superpowers/specs/
+        // Widened from a hardcoded { ServiceCatalogBuilder, ServiceDefinitionBuilder } pair to the
+        // whole assembly: Stage 0's actual measured collision was cross-type —
+        // ServiceCatalogBuilder.AddService vs. ServiceSourcesBuilderExtensions.AddService — which a
+        // two-type list cannot catch if the explicit [AspireExport("addServiceToCatalog")] id were
+        // ever accidentally removed. This reflects over every exported method in the assembly the
+        // same way the ATS generator itself would discover them, rather than over a hand-picked
+        // subset. Belt-and-suspenders against the Stage 0 regression (docs/superpowers/specs/
         // 2026-09-07-code-catalog-stage0-ats-probe-findings.md): build already fails with
         // ASPIREEXPORT013 on a real collision, but this asserts the intent directly rather than
-        // relying on the analyzer alone catching a future one. Every public instance method on
-        // both types is exported (ExposeMethods = true), not just the ones individually carrying
-        // [AspireExport] — a filter that only looked at method-level attributes would silently
-        // stop checking the five ExposeMethods-derived With* methods, the larger half of the
-        // surface this test exists to guard.
-        var ids = new List<string>();
-        foreach (var type in new[] { typeof(ServiceCatalogBuilder), typeof(ServiceDefinitionBuilder) })
-        {
-            foreach (var method in PublicInstanceMethods(type))
-            {
-                ids.Add(CapabilityId(type, method));
-            }
-        }
+        // relying on the analyzer alone catching a future one.
+        var ids = ExportedMethods().Select(m => CapabilityId(m.DeclaringType!, m)).ToList();
 
         Assert.Equal(ids.Count, ids.Distinct(StringComparer.Ordinal).Count());
+    }
+
+    /// <summary>
+    /// The set of ids the guard above found, as evidence that the widened scan discovers exactly
+    /// this stage's known exported surface — no more, no less. A different set here means either
+    /// the reflection logic is wrong or there's a real assembly surface the fix-round brief wasn't
+    /// told about, and should be investigated rather than silently reconciled by editing this list.
+    /// </summary>
+    [Fact]
+    public void ExportedIds_MatchTheKnownSurface()
+    {
+        var ids = ExportedMethods().Select(m => CapabilityId(m.DeclaringType!, m)).ToHashSet(StringComparer.Ordinal);
+
+        string[] expected =
+        [
+            "addService", "addBackingService", "getServiceEndpoint", "useJava", "useJavaScript",
+            "addServiceCatalog", "addServiceToCatalog",
+            CamelCase(nameof(ServiceConfigurationExports.WithServiceEnvironment)),
+            CamelCase(nameof(ServiceConfigurationExports.WithServiceEnvironmentFromParameter)),
+            CamelCase(nameof(ServiceConfigurationExports.WithServiceEnvironmentFromEndpoint)),
+            CamelCase(nameof(ServiceConfigurationExports.WithServiceReference)),
+            CamelCase(nameof(ServiceConfigurationExports.WithServiceConnectionString)),
+            CamelCase(nameof(ServiceConfigurationExports.WaitForService)),
+            CamelCase(nameof(ServiceConfigurationExports.WaitForServiceCompletion)),
+            CamelCase(nameof(ServiceConfigurationExports.WithServiceArg)),
+            CamelCase(nameof(ServiceConfigurationExports.WithServiceHttpsEndpoint)),
+            CamelCase(nameof(ServiceConfigurationExports.WithServiceHttpEndpoint)),
+            $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithRepository))}",
+            $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithUrl))}",
+            $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithContainer))}",
+            $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithKubernetes))}",
+            $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithKind))}",
+        ];
+
+        Assert.Equal(expected.OrderBy(id => id, StringComparer.Ordinal), ids.OrderBy(id => id, StringComparer.Ordinal));
+    }
+
+    /// <summary>
+    /// Every method in the assembly ATS would export: one carrying <c>[AspireExport]</c> directly,
+    /// or a public instance method whose declaring type carries
+    /// <c>[AspireExport(ExposeMethods = true)]</c> and that doesn't individually opt out with
+    /// <c>[AspireExportIgnore]</c> — the same discovery the ATS generator itself would do.
+    /// </summary>
+    private static IEnumerable<MethodInfo> ExportedMethods()
+    {
+        var assembly = typeof(ServiceCatalogBuilder).Assembly;
+
+        foreach (var type in assembly.GetTypes().Where(t => t.IsPublic))
+        {
+            var typeExport = type.GetCustomAttribute<AspireExportAttribute>();
+            var typeExposesMethods = typeExport is { ExposeMethods: true };
+
+            foreach (var method in type.GetMethods(
+                BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+            {
+                if (method.IsSpecialName)
+                {
+                    // Property accessors, operators — not something ATS exports as a method.
+                    continue;
+                }
+
+                var methodExport = method.GetCustomAttribute<AspireExportAttribute>();
+
+                if (methodExport is not null)
+                {
+                    yield return method;
+                    continue;
+                }
+
+                if (typeExposesMethods
+                    && method.IsPublic
+                    && !method.IsStatic
+                    && method.GetCustomAttribute<AspireExportIgnoreAttribute>() is null)
+                {
+                    yield return method;
+                }
+            }
+        }
     }
 
     /// <summary>

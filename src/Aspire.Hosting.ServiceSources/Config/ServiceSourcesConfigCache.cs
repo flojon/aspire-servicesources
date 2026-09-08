@@ -133,7 +133,7 @@ internal static class ServiceSourcesConfigCache
         if (!loaded.Catalog.Services.TryGetValue(serviceName, out var definition))
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}' was not found in the service catalog.");
+                $"Service '{serviceName}' was not found in the service catalog{DescribeCatalogSources(loaded)}.");
         }
 
         if (!loaded.DeveloperConfig.Services.TryGetValue(serviceName, out var developerConfig))
@@ -152,6 +152,26 @@ internal static class ServiceSourcesConfigCache
         }
 
         return (definition, developerConfig);
+    }
+
+    /// <summary>
+    /// Names whichever catalog source(s) actually contributed to <paramref name="loaded"/>, for a
+    /// not-found error that must never claim a code-only service could have been found in a yaml
+    /// file that doesn't exist for this AppHost (design finding 5), while still naming
+    /// 'servicesources.yaml' for the still-majority yaml-only AppHost, which loses real diagnostics
+    /// without it.
+    /// </summary>
+    private static string DescribeCatalogSources(LoadedConfig loaded)
+    {
+        if (loaded.YamlPath is null)
+        {
+            // Code-only catalog: no yaml file exists for this AppHost.
+            return "";
+        }
+
+        return loaded.HasCodeEntries
+            ? $" (declared in {CatalogOrigin.Code.Describe()} and in {CatalogOrigin.FromYaml(loaded.YamlPath).Describe()})"
+            : $" ({CatalogOrigin.FromYaml(loaded.YamlPath).Describe()})";
     }
 
     /// <summary>
@@ -215,6 +235,17 @@ internal static class ServiceSourcesConfigCache
         public required Catalog.CodeServiceCatalog Catalog { get; init; }
 
         public required DeveloperConfiguration DeveloperConfig { get; init; }
+
+        /// <summary>
+        /// This AppHost's <c>servicesources.yaml</c> path, if the file exists — <c>null</c> for a
+        /// code-only catalog. Lets <see cref="DescribeCatalogSources"/> name the right thing for a
+        /// not-found service (design finding 5) without claiming a code-only catalog could have been
+        /// found in a yaml file that isn't there.
+        /// </summary>
+        public string? YamlPath { get; init; }
+
+        /// <summary>Whether this AppHost declared at least one service via <c>AddServiceCatalog</c>.</summary>
+        public required bool HasCodeEntries { get; init; }
 
         public static LoadedConfig Load(IDistributedApplicationBuilder builder)
         {
@@ -288,6 +319,8 @@ internal static class ServiceSourcesConfigCache
             {
                 Catalog = catalog,
                 DeveloperConfig = DeveloperConfiguration.ReadFrom(builder, catalog.Services.Keys),
+                YamlPath = yamlExists ? yamlPath : null,
+                HasCodeEntries = codeEntries.Count > 0,
             };
         }
     }

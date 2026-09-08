@@ -25,6 +25,33 @@ public class CatalogErrorMessageTests
         Assert.DoesNotContain("servicesources.yaml", ex.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The orphaned-developer-config-entry warning (<see cref="Config.ServiceConfigAudit"/>) is not
+    /// a <see cref="ServiceSourcesConfigurationException"/> — it's reported through
+    /// <c>ServiceSourcesWarnings</c> once the AppHost is composed — so it needs its own case rather
+    /// than going through <see cref="AssertNoYamlMention"/> above. A code-only catalog with a
+    /// typo'd <c>servicesources.local.json</c> entry used to name 'servicesources.yaml' in this
+    /// message even though no such file exists for this AppHost.
+    /// </summary>
+    [Fact]
+    public async Task OrphanedDeveloperConfigEntry_AgainstCodeOnlyCatalog_WarningNamesNoYamlFile()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), """
+            { "services": {
+                "orders": { "source": "url" },
+                "odrers": { "source": "url" } } }
+            """);
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.AddServiceCatalog(c => c.AddService("orders").WithUrl("https://example.com"));
+        builder.AddService("orders");
+
+        var warning = Assert.Single(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+
+        Assert.Contains("odrers", warning);
+        Assert.DoesNotContain("servicesources.yaml", warning, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ServiceNotDeclared() =>
         AssertNoYamlMention(() =>

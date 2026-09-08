@@ -56,6 +56,53 @@ public class ServiceSourcesConfigCacheTests
 
         Assert.Contains("orders", ex.Message);
         Assert.Contains("not found", ex.Message, StringComparison.OrdinalIgnoreCase);
+        // A yaml-only AppHost still learns which file to open — a real diagnostics loss if it
+        // regressed (design finding 5's "name the right thing").
+        Assert.Contains(Path.Combine(dir, "servicesources.yaml"), ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A code-only catalog's not-found error must never send the developer looking for a
+    /// 'servicesources.yaml' that doesn't exist for this AppHost (design finding 5).
+    /// </summary>
+    [Fact]
+    public void ResolveService_ServiceMissingFromCodeOnlyCatalog_DoesNotNameYamlFile()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"),
+            """{ "services": { "orders": { "source": "url" } } }""");
+
+        var builder = CreateBuilder(dir);
+        builder.AddServiceCatalog(c => c.AddService("payments").WithUrl("https://payments.example"));
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.Contains("orders", ex.Message);
+        Assert.Contains("not found", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("servicesources.yaml", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Both catalogs present names both, since either could plausibly have been where the missing
+    /// service was meant to be declared.
+    /// </summary>
+    [Fact]
+    public void ResolveService_ServiceMissingWithBothCatalogsPresent_NamesBoth()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """{ "services": { "orders": { "source": "local" }, "payments": { "source": "url" } } }""");
+
+        var builder = CreateBuilder(dir);
+        builder.AddServiceCatalog(c => c.AddService("payments").WithUrl("https://payments.example"));
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "shipping"));
+
+        Assert.Contains("shipping", ex.Message);
+        Assert.Contains("code", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(Path.Combine(dir, "servicesources.yaml"), ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

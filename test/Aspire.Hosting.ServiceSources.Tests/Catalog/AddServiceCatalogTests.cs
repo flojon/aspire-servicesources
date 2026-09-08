@@ -17,14 +17,21 @@ public class AddServiceCatalogTests
     public void AddServiceCatalog_CalledTwice_Appends()
     {
         var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "url" }, "payments": { "source": "url" } } }
+            """);
         var builder = CreateBuilder(dir);
 
-        builder.AddServiceCatalog(c => c.AddService("orders"));
-        builder.AddServiceCatalog(c => c.AddService("payments"));
+        builder.AddServiceCatalog(c => c.AddService("orders").WithUrl("https://orders.example"));
+        builder.AddServiceCatalog(c => c.AddService("payments").WithUrl("https://payments.example"));
 
-        // Task 10 wires this into LoadedConfig; until then, assert indirectly is not possible —
-        // this test is completed in Task 10 once ResolveService can see code-declared entries.
-        // For now it asserts only that two calls do not throw.
+        // Both calls' entries end up in the same composed catalog — a second AddServiceCatalog
+        // call appends rather than replacing the first.
+        var (orders, _) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        var (payments, _) = ServiceSourcesConfigCache.ResolveService(builder, "payments");
+
+        Assert.Equal("https://orders.example", orders.Url!.Url);
+        Assert.Equal("https://payments.example", payments.Url!.Url);
     }
 
     [Fact]
