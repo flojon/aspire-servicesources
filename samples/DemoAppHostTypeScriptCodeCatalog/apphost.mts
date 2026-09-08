@@ -1,0 +1,39 @@
+// TypeScript AppHost demonstrating the catalog authored in code — no servicesources.yaml. See
+// samples/DemoAppHostTypeScript/apphost.mts for the yaml-based equivalent.
+import { createBuilder } from './.aspire/modules/aspire.mjs';
+
+const builder = await createBuilder();
+
+await builder.addServiceCatalog(async (catalog) => {
+  const orders = await catalog.addServiceToCatalog('orders');
+  await orders.withRepository('https://github.com/dotnet/aspire-samples', {
+    project: 'samples/health-checks-ui/HealthChecksUI.ApiService/HealthChecksUI.ApiService.csproj',
+    defaultRef: 'main',
+  });
+
+  const inventory = await catalog.addServiceToCatalog('inventory');
+  await inventory.withUrl('https://httpbin.org');
+
+  const payments = await catalog.addServiceToCatalog('payments');
+  await payments.withContainer('nginxdemos/hello', 80, { defaultTag: 'latest' });
+  await payments.withKubernetes('payments', { port: 8080 });
+});
+
+const inventory = await builder.addService('inventory');
+
+const payments = await builder
+  .addService('payments')
+  .withServiceEnvironment('DEMO_INJECTED_BY_APPHOST', 'true')
+  .withServiceReference(inventory)
+  .withServiceHttpsEndpoint();
+
+const probeScript =
+  'console.log("INVENTORY_URL=" + process.env.INVENTORY_URL);' +
+  'console.log("services__inventory__http__0=" + process.env.services__inventory__http__0);';
+
+await builder
+  .addExecutable('probe', process.execPath, '.', ['-e', probeScript])
+  .withEnvironment('INVENTORY_URL', inventory.getServiceEndpoint())
+  .withReference(inventory);
+
+await builder.build().run();

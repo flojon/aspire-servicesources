@@ -1,0 +1,8 @@
+{
+  "appHost": {
+    "path": "apphost.mts"
+  },
+  "packages": {
+    "KoalaSoft.Aspire.Hosting.ServiceSources": "../../src/Aspire.Hosting.ServiceSources/Aspire.Hosting.ServiceSources.csproj"
+  }
+}
