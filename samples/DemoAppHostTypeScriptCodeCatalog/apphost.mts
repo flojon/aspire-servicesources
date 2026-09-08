@@ -1,6 +1,6 @@
 // TypeScript AppHost demonstrating the catalog authored in code — no servicesources.yaml. See
 // samples/DemoAppHostTypeScript/apphost.mts for the yaml-based equivalent.
-import { createBuilder } from './.aspire/modules/aspire.mjs';
+import { createBuilder, PrepareMode } from './.aspire/modules/aspire.mjs';
 
 const builder = await createBuilder();
 
@@ -41,7 +41,9 @@ await builder.addServiceCatalog(async (catalog) => {
     await o.mavenGoal('spring-boot:run');
     await o.port(8080);
   });
-  await catalogService.withPrepare(['./mvnw', '-q', 'dependency:go-offline'], { mode: 'once' });
+  await catalogService.withPrepare(['./mvnw', '-q', 'dependency:go-offline'], {
+    mode: PrepareMode.Once,
+  });
 });
 
 const inventory = await builder.addService('inventory');

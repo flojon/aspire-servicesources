@@ -194,14 +194,21 @@ A `"local"` service can also declare a `prepare:`-equivalent bootstrap command:
 ```csharp
 catalog.AddService("catalog")
     .WithRepository("https://github.com/spring-projects/spring-petclinic")
-    .WithKind("java", options)
-    .WithPrepare(["./mvnw", "-q", "dependency:go-offline"], mode: "once");
+    .AsJava(o => o.MavenGoal("spring-boot:run").Port(8080))
+    .WithPrepare(["./mvnw", "-q", "dependency:go-offline"], mode: PrepareMode.Once);
 ```
 
-`WithPrepare(command, windowsCommand: null, mode: null)` is the code-authoring equivalent of
-yaml's `prepare:` block — see "`prepare`: a checkout that has to bootstrap itself" (under
-`"local"` source options below) for what it runs and when. `mode` accepts the same four
-spellings yaml does: `"oncePerCommit"` (the default), `"once"`, `"always"`, `"never"`.
+`WithPrepare(command, windowsCommand: null, mode: PrepareMode.OncePerCommit)` is the
+code-authoring equivalent of yaml's `prepare:` block — see "`prepare`: a checkout that has to
+bootstrap itself" (under `"local"` source options below) for what it runs and when. `mode`
+takes a `PrepareMode` value — `PrepareMode.OncePerCommit` (the default), `.Once`, `.Always`,
+`.Never` — the enum behind yaml's four `mode` spellings (`"oncePerCommit"`, `"once"`,
+`"always"`, `"never"`).
+
+`WithPrepare`'s `command` parameter is required, so it has no code-authoring equivalent for a
+Windows-only `prepare:` block — one that gives `windowsCommand` but no `command` at all, which
+yaml can express and which runs on Windows only. A prepare step declared in code always has a
+non-Windows command.
 
 Calls are additive — `WithContainer` and `WithKubernetes` above both configure `payments`,
 the same as two separate yaml keys would. A second call to the *same* method for one

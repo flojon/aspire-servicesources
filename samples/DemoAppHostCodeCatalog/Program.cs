@@ -1,5 +1,6 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources;
+using Aspire.Hosting.ServiceSources.Prepare;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
@@ -36,7 +37,7 @@ builder.AddServiceCatalog(catalog =>
     catalog.AddService("catalog")
         .WithRepository("https://github.com/spring-projects/spring-petclinic", defaultRef: "main")
         .AsJava(o => o.MavenGoal("spring-boot:run").Port(8080))
-        .WithPrepare(["./mvnw", "-q", "dependency:go-offline"], mode: "once");
+        .WithPrepare(["./mvnw", "-q", "dependency:go-offline"], mode: PrepareMode.Once);
 });
 
 // "local" source: clones (or uses an existing checkout of) a real project and runs it via
