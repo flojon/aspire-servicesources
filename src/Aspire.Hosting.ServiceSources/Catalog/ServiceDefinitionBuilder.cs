@@ -22,9 +22,6 @@ public sealed class ServiceDefinitionBuilder
     private string? _kind;
     private object? _kindOptions;
 
-    // Task 8 adds Kind/KindOptions/WithKind. Each field starts null and each With* throws the
-    // additive-error below (via RequireUnset) if its field is already set.
-
     internal ServiceDefinitionBuilder(string serviceName)
     {
         _serviceName = serviceName;

@@ -54,7 +54,8 @@ internal sealed class DeveloperConfiguration
     public required IReadOnlyList<string> UndeclaredNames { get; init; }
 
     /// <summary>
-    /// The service names <c>servicesources.yaml</c> declares.
+    /// The service names the catalog declares — code-declared and yaml-declared alike (design
+    /// finding 5).
     /// </summary>
     /// <remarks>
     /// Kept for the second half of the near miss in <see cref="NotConfiguredError"/>: an entry that

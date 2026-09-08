@@ -75,12 +75,15 @@ internal static class LocalGitCheckout
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A service name reaches this package two ways, and only one of them has been checked. From
+    /// A service name reaches this package three ways, and only one of them has been checked. From
     /// <c>AddService(string)</c> it carries Aspire's <c>[ResourceName]</c> — but that is an analyzer
     /// attribute, and the runtime validation behind it happens when the resource is added to the
     /// application model, which is <em>after</em> the checkout it needs has been cloned. From the
-    /// developer configuration it is a raw key that nothing has looked at. Either way the value is
-    /// combined into <c>.servicesources/checkouts/</c> first, so a name containing <c>..</c> clones
+    /// developer configuration it is a raw key that nothing has looked at. From
+    /// <see cref="Catalog.ServiceCatalogBuilder.AddService"/> it is likewise a raw string parameter
+    /// with no analyzer attached — as unchecked as the developer configuration's key. Whichever way
+    /// it arrived, the value is combined into <c>.servicesources/checkouts/</c> first, so a name
+    /// containing <c>..</c> clones
     /// outside the directory that the ignore file and the <see cref="CheckoutBuildBarrier"/> files
     /// <c>EnsureToolDirectory</c> writes exist to cover — which puts the checkout back into the
     /// AppHost's source-control status and inside its build settings (#224).

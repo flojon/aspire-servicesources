@@ -2,7 +2,7 @@ namespace Aspire.Hosting.ServiceSources.Config.Catalog;
 
 /// <summary>
 /// The composed, source-agnostic entry every downstream consumer reads — produced from a yaml
-/// <see cref="ServiceMetadata"/> via <see cref="ServiceMetadataExtensions.ToDefinition"/>, or built
+/// <see cref="ServiceMetadata"/> via <see cref="ServiceMetadata.ToDefinition"/>, or built
 /// directly by <see cref="ServiceDefinitionBuilder"/> for a code-declared service. Two things a
 /// yaml-bound <see cref="ServiceMetadata"/> deliberately does not carry: <see cref="Origin"/> (design
 /// finding 5) and <see cref="KindOptions"/> as an already-typed value rather than a raw yaml block

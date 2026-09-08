@@ -183,6 +183,12 @@ values you type into `servicesources.local.json`:
 | `WithContainer` | `container:` | `"container"` |
 | `WithKubernetes` | `kubernetes:` | `"kubernetes"` |
 
+`WithContainer` and `WithKubernetes` have no code-authoring equivalent for yaml's
+`container.scheme`/`kubernetes.scheme` (documented under the `"container"` and
+`"kubernetes"` source sections below) in this stage — a service that needs `scheme: https`
+still needs a `servicesources.yaml` entry for it; porting one to the code catalog silently
+drops back to the `http` default.
+
 Calls are additive — `WithContainer` and `WithKubernetes` above both configure `payments`,
 the same as two separate yaml keys would. A second call to the *same* method for one
 service is a configuration error naming the service and the block, not a silent overwrite.

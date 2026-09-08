@@ -14,6 +14,10 @@ public sealed class ServiceCatalogBuilder
     private readonly Dictionary<string, ServiceDefinitionBuilder> _entries = new(StringComparer.Ordinal);
     private bool _frozen;
 
+    internal ServiceCatalogBuilder()
+    {
+    }
+
     /// <summary>
     /// Declares a service, returning a chain to configure its source(s). Two code-declared names
     /// differing only by case are rejected here, naming both — see design "Names."
