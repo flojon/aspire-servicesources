@@ -21,7 +21,7 @@ internal static class ServiceSourcesConfigCache
 
     /// <summary>
     /// The code-declared catalog accumulator for one AppHost builder, created on first
-    /// <c>AddServiceCatalog</c> call. <see cref="CodeCatalogAccumulator.Builder"/> is read by
+    /// <c>AddServiceCatalog</c> call. <see cref="CodeCatalogAccumulator.Freeze"/> is called by
     /// <see cref="LoadedConfig.Load"/>, under the same <see cref="CodeCatalogAccumulator"/> lock
     /// <see cref="CodeCatalogAccumulator.Configure"/> takes.
     /// </summary>
@@ -33,13 +33,49 @@ internal static class ServiceSourcesConfigCache
         // Plain object rather than System.Threading.Lock: this package still targets net8.0.
         private readonly object _gate = new();
 
+        private bool _frozen;
+
         public ServiceCatalogBuilder Builder { get; } = new();
 
         public void Configure(Action<ServiceCatalogBuilder> configure)
         {
             lock (_gate)
             {
+                // Raised here rather than left to Builder.AddService's own frozen check, both
+                // because a call that configures nothing (an empty lambda, or one that only
+                // reconfigures an already-declared service and throws its own error first) must
+                // still be caught, and because this is a different failure from "you mutated a
+                // frozen builder" — the AppHost's ordering is wrong, not its use of the builder.
+                // Design: "A ServiceCatalogBuilder captured and mutated after this point
+                // contributes nothing." This error does not latch — it is raised here, in
+                // AddServiceCatalog itself, rather than inside ConfigLoader<LoadedConfig>.Load — so
+                // it would re-throw per call if reached twice. In practice there is only one such
+                // call reachable per builder: the first AddServiceCatalog after resolution throws
+                // and the AppHost stops.
+                if (_frozen)
+                {
+                    throw new ServiceSourcesConfigurationException(
+                        "AddServiceCatalog(…) was called after the service catalog had already been read, so " +
+                        "its entries could not be seen. Because a service is resolved as it is added, the " +
+                        "catalog must be declared before the first AddService(…) — near the top of the AppHost, " +
+                        "next to UseDeferredCheckout() and UseJava().");
+                }
+
                 configure(Builder);
+            }
+        }
+
+        /// <summary>
+        /// Builds every accumulated entry and marks this accumulator frozen, so a later
+        /// <see cref="Configure"/> call reports the ordering error above instead of silently
+        /// contributing nothing.
+        /// </summary>
+        public IReadOnlyDictionary<string, ServiceDefinition> Freeze()
+        {
+            lock (_gate)
+            {
+                _frozen = true;
+                return Builder.Freeze();
             }
         }
     }
@@ -94,10 +130,10 @@ internal static class ServiceSourcesConfigCache
     {
         var loaded = LoadedFor(builder);
 
-        if (!loaded.Catalog.Services.TryGetValue(serviceName, out var metadata))
+        if (!loaded.Catalog.Services.TryGetValue(serviceName, out var definition))
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}' was not found in 'servicesources.yaml'.");
+                $"Service '{serviceName}' was not found in the service catalog.");
         }
 
         if (!loaded.DeveloperConfig.Services.TryGetValue(serviceName, out var developerConfig))
@@ -115,12 +151,7 @@ internal static class ServiceSourcesConfigCache
             throw loaded.DeveloperConfig.NotConfiguredError(serviceName);
         }
 
-        // Recomputed rather than carried on LoadedConfig, which LoadedConfig.Load already builds
-        // this same path to load the catalog from — composing that plumbing into LoadedConfig
-        // itself belongs to Task 10, alongside merging code-declared entries in.
-        var yamlPath = Path.Combine(builder.AppHostDirectory, "servicesources.yaml");
-
-        return (metadata.ToDefinition(yamlPath), developerConfig);
+        return (definition, developerConfig);
     }
 
     /// <summary>
@@ -181,16 +212,78 @@ internal static class ServiceSourcesConfigCache
 
     internal sealed class LoadedConfig
     {
-        public required ServiceCatalog Catalog { get; init; }
+        public required Catalog.CodeServiceCatalog Catalog { get; init; }
 
         public required DeveloperConfiguration DeveloperConfig { get; init; }
 
         public static LoadedConfig Load(IDistributedApplicationBuilder builder)
         {
-            var catalog = ServiceCatalogLoader.Load(Path.Combine(builder.AppHostDirectory, "servicesources.yaml"));
+            // Freeze first, under the same lock CodeCatalogFor's Configure calls take — an
+            // AddServiceCatalog reaching this builder after this point contributes nothing (design:
+            // "A ServiceCatalogBuilder captured and mutated after this point contributes nothing").
+            var codeEntries = CodeCatalogFor(builder).Freeze();
 
-            // The catalog first, and its names handed over: it decides how a service is spelled, and
-            // the developer config's keys arrive from providers that may spell it differently.
+            var yamlPath = Path.Combine(builder.AppHostDirectory, "servicesources.yaml");
+            var yamlExists = File.Exists(yamlPath);
+
+            if (codeEntries.Count == 0 && !yamlExists)
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"No service catalog found. Declare one with builder.AddServiceCatalog(catalog => …) " +
+                    $"before the first AddService(…) call, or create '{yamlPath}'.");
+            }
+
+            var merged = new Dictionary<string, ServiceDefinition>(StringComparer.Ordinal);
+
+            foreach (var (name, definition) in codeEntries)
+            {
+                merged[name] = definition;
+            }
+
+            if (yamlExists)
+            {
+                var yamlCatalog = ServiceCatalogLoader.Load(yamlPath);
+
+                foreach (var (name, metadata) in yamlCatalog.Services)
+                {
+                    // OrdinalIgnoreCase comparison done by hand (design finding 11) — never
+                    // new Dictionary<string, ServiceDefinition>(StringComparer.OrdinalIgnoreCase),
+                    // which would (a) throw a raw ArgumentException on the second yaml case-variant
+                    // instead of the existing AmbiguousCatalogSpellingError, and (b) make lookup
+                    // itself case-insensitive, silently changing behavior for an existing yaml-only
+                    // AppHost (acceptance criterion 3).
+                    //
+                    // Scanned against codeEntries specifically, not against the merged dictionary
+                    // this loop is building: merged already holds earlier yaml entries by the time a
+                    // later one is processed, and scanning it would misreport a same-file yaml-vs-yaml
+                    // case collision (e.g. "orders:" then "Orders:") as a code/yaml duplicate — it has
+                    // to fall through to the AmbiguousCatalogSpellingError below untouched instead.
+                    var codeCollision = codeEntries.Keys.FirstOrDefault(
+                        existing => string.Equals(existing, name, StringComparison.OrdinalIgnoreCase));
+
+                    if (codeCollision is not null)
+                    {
+                        throw new ServiceSourcesConfigurationException(
+                            $"Service '{name}' is declared twice: in {CatalogOrigin.Code.Describe()} and in " +
+                            $"'{yamlPath}'. A service belongs to one catalog; remove one of the two. To vary a " +
+                            "service per developer, set its 'source' in 'servicesources.local.json' instead.");
+                    }
+
+                    // A yaml-vs-yaml case collision (e.g. "orders:" and "Orders:" both in the same
+                    // file) is NOT caught here — ServiceCatalogLoader/ServiceCatalog.Services is
+                    // Ordinal, so both entries survive the yaml load and land here as two distinct
+                    // keys. Left to DeveloperConfiguration.CanonicalizeToCatalog's existing
+                    // AmbiguousCatalogSpellingError, reached via ReadFrom below with the merged
+                    // (Ordinal) key set — unchanged from today.
+                    merged[name] = metadata.ToDefinition(yamlPath);
+                }
+            }
+
+            var catalog = new Catalog.CodeServiceCatalog { Services = merged };
+
+            // The catalog first, and its names handed over: unchanged from before this task, and now
+            // covers code-declared names too (design: "canonical-spelling reconciliation covers
+            // code-declared names too").
             return new LoadedConfig
             {
                 Catalog = catalog,

@@ -517,11 +517,6 @@ internal sealed class LocalCheckoutPrefetch
 
         var appHostDirectory = builder.AppHostDirectory;
 
-        // Recomputed rather than carried on LoadedConfig: LoadedConfig.Load's composition logic is
-        // Task 10's to change, and this is the same expression it already builds internally to load
-        // the catalog in the first place.
-        var yamlPath = Path.Combine(appHostDirectory, "servicesources.yaml");
-
         var deferred = DeferredCheckout.For(builder);
         var kinds = LocalKindRegistry.For(builder);
 
@@ -545,7 +540,7 @@ internal sealed class LocalCheckoutPrefetch
             .Where(entry => LocalGitCheckout.IsContainedCheckoutDirectoryName(entry.Key))
             .Select(entry => (
                 Name: entry.Key,
-                Definition: config.Catalog.Services[entry.Key].ToDefinition(yamlPath),
+                Definition: config.Catalog.Services[entry.Key],
                 Config: entry.Value))
             // Only checkouts there is something to clone for. Everything else resolves to the same
             // answer in GetRepoRoot for a fraction of the code, and reaches nobody at all when the

@@ -55,7 +55,7 @@ public class ServiceSourcesConfigCacheTests
             () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
 
         Assert.Contains("orders", ex.Message);
-        Assert.Contains("servicesources.yaml", ex.Message);
+        Assert.Contains("not found", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
