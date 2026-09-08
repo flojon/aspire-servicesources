@@ -7,9 +7,9 @@ call ([question 7](#open-questions)) outstanding that blocks nothing. Question 3
 measurement, not judgement: see
 [the question-3 ATS probe findings](2026-09-08-repository-handle-q3-ats-probe-findings.md).
 Revised again the same day, after review objected that `monorepo.AddService(…)` inverts ownership:
-services stay on the catalog and the repository handle is **passed** to `WithRepository`. That is a
-real simplification — one service builder instead of two, no generic base — bought by one measured
-trap: an exported overload silently loses a half without an explicit ATS id.
+services stay on the catalog and the repository handle is **passed**, as
+`WithSharedRepository(monorepo)`. That is a real simplification — one service builder instead of two,
+no generic base, no explicit ATS id anywhere, and no silent failure mode to guard.
 Revised 2026-09-08, same day: the first draft treated the Stage-1 authoring surface as frozen and
 argued three decisions from "no ApiCompat tooling, so a break is uncatchable". That premise was
 wrong — **Stage 1 is in no release tag** (see [What is frozen](#what-is-frozen-and-what-is-not)), so
@@ -61,12 +61,12 @@ builder.AddServiceCatalog(catalog =>
     var monorepo = catalog.AddRepository("https://github.com/example/monorepo", defaultRef: "main");
 
     catalog.AddService("orders")
-        .WithRepository(monorepo)
+        .WithSharedRepository(monorepo)
         .WithProject("src/Orders.Api/Orders.Api.csproj");
 
     // Still additive across sources: the repository is the "local" source's block, no more.
     catalog.AddService("payments")
-        .WithRepository(monorepo)
+        .WithSharedRepository(monorepo)
         .WithProject("src/Payments.Api/Payments.Api.csproj")
         .WithContainer("payments", port: 8080);
 
@@ -145,13 +145,14 @@ that decide the shape below, in one line each:
    silently stops working. `prepare` has to move to the repository.
 4. **`local.path` already means "not a managed checkout"** (finding 4). The split-back-out opt-out
    #291 leaves open already exists and already means what it should.
-5. **ATS: a handle crosses as a parameter, but an overload silently loses a half**
+5. **ATS: a handle crosses as a parameter; an overload of one would silently lose a half**
    ([question-3 probe](2026-09-08-repository-handle-q3-ats-probe-findings.md), findings 6–9). The
-   first is what lets services stay on the catalog; the second is the only real cost of doing so, and
-   it needs an explicit id plus `MethodName` to avoid. Relatedly, ids for `ExposeMethods` *instance*
-   methods are receiver-qualified, so findings document 11 and Stage 0's finding 5 — both reading as
-   though a third `AddService` would collide — do not apply; that was an *extension* method, keyed by
-   assembly.
+   first is what lets services stay on the catalog. The second is why the handle form is a
+   *distinctly named* method rather than an overload — an overload needs an explicit id whose own
+   `MethodName` then forces a second TypeScript name anyway, so it buys nothing and costs a silent
+   failure mode. Relatedly, ids for `ExposeMethods` *instance* methods are receiver-qualified, so
+   findings document 11 and Stage 0's finding 5 — both reading as though a third `AddService` would
+   collide — do not apply; that was an *extension* method, keyed by assembly.
 
 ---
 
@@ -251,7 +252,7 @@ One public type added, two methods added, one method narrowed:
 | --- | --- |
 | `RepositoryBuilder` | **new**, exported — returned by `AddRepository`; carries `WithPrepare(…)`, and nothing else. **No `AddService`.** |
 | `ServiceCatalogBuilder.AddRepository(string url, string? name = null, string? defaultRef = null)` | **new** |
-| `ServiceDefinitionBuilder.WithRepository(RepositoryBuilder repository)` | **new** — the shared-repository overload |
+| `ServiceDefinitionBuilder.WithSharedRepository(RepositoryBuilder repository)` | **new** — a distinct name, not an overload; see below |
 | `ServiceDefinitionBuilder.WithProject(string project)` | **new** |
 | `ServiceDefinitionBuilder.WithRepository(string url, string? defaultRef = null)` | **narrowed** — loses `project:`; see below |
 
@@ -279,24 +280,36 @@ becomes the only way to set one, and the additive rule covers setting it twice.
 This is a **source break against Stage 1**, which is free: Stage 1 is in no release tag, so nothing
 outside this repository's own two samples compiles against the three-parameter form.
 
-**The overload needs an explicit ATS id, and this is a trap.** Probe finding 7: an overload pair on
-one exported receiver **silently loses one half** — no `ASPIREEXPORT013`, no error, the second
-overload simply absent from the generated SDK. Findings 8 and 9 give the fix and its cost:
+**Two distinct method names, deliberately not an overload.**
 
 ```csharp
 public ServiceDefinitionBuilder WithRepository(string url, string? defaultRef = null) { … }
 
-[AspireExport("withSharedRepository", MethodName = "withSharedRepository")]
-public ServiceDefinitionBuilder WithRepository(RepositoryBuilder repository) { … }
+public ServiceDefinitionBuilder WithSharedRepository(RepositoryBuilder repository) { … }
 ```
 
-Both arguments are load-bearing: the id separates the capabilities, `MethodName` stops the generated
-*method name* from colliding on the interface. Measured together, both project and both type-check.
+A C# overload pair reads better in C#, and a revision of this design used one. It is the wrong trade,
+for three reasons the probe measured:
 
-Because this is the one place the design uses an explicit id, it is the one place carrying finding
-9's cost: an explicit id is **namespace-scoped** (`…ServiceSources.Catalog/withSharedRepository`)
-rather than receiver-qualified, so it must stay unique across the namespace. Nothing else in the
-design gets one — implicit ids are receiver-scoped and safe.
+- **An exported overload silently loses one half** (probe finding 7). No `ASPIREEXPORT013`, no error —
+  the second overload is simply absent from the generated SDK. It is quieter than the collision stage
+  0 found, which at least warned.
+- **The fix cannot deliver the thing the overload was for.** Finding 8's rescue is
+  `[AspireExport("withSharedRepository", MethodName = "withSharedRepository")]`, and `MethodName` is
+  precisely what forces a *second consumer-visible name*. So TypeScript sees two names either way;
+  the overload buys single-naming in C# only, in a package whose premise is that these are one API in
+  two languages.
+- **It would be the design's only explicit id**, and finding 9 says an explicit id is
+  **namespace-scoped** rather than receiver-qualified — opting out of the protection implicit ids get
+  for free, permanently reserving a namespace-wide name.
+
+With distinct names all three vanish: two implicit, receiver-qualified ids, nothing to reserve, and
+no silent failure mode to guard. Measured clean by **probe finding 6**, which is exactly this shape —
+a distinctly-named instance method taking a handle, projecting with an implicit id and no warnings.
+
+The honest argument the other way is that `WithRepository` is conceptually right for both, since they
+fill the same block, and two names imply they differ. That argument mostly dissolves once TypeScript
+shows two names regardless.
 
 **ATS ids everywhere else: none.** An earlier draft budgeted an explicit
 `[AspireExport("addServiceToRepository")]`, reading Stage 0's finding 5 as meaning a third
@@ -312,15 +325,16 @@ arrives as `Awaitable<RepositoryBuilder>` (probe finding 6):
 const monorepo = catalog.addRepository('https://github.com/example/monorepo', { defaultRef: 'main' });
 
 const orders = await catalog.addService('orders');
-await orders.withSharedRepository(monorepo);
+await orders.withSharedRepository(monorepo);        // implicit id, no [AspireExport] needed
 await orders.withProject('src/Orders.Api/Orders.Api.csproj');
 ```
 
 (`catalog.addService` rather than `addServiceToCatalog` assumes the #134 correction in probe
 recommendation 5 lands; without it the first call keeps Stage 1's name and nothing else changes.)
 
-**Errors on the chain.** Both spellings of `WithRepository` on one service is the existing additive
-error, naming the service and the repository block. `WithPrepare` on a service whose repository came
+**Errors on the chain.** `WithRepository` and `WithSharedRepository` on one service is the existing
+additive error, naming the service and the repository block — they fill the same block, so the
+`RequireUnset` guard already covers it. `WithPrepare` on a service whose repository came
 from a handle is a configuration error pointing at the repository — a runtime error, not a compile
 one: with a single builder type there is no type to withhold the method from. That is the one thing
 the split-builder revision would have caught at compile time, and it is judged not worth two public
@@ -530,14 +544,13 @@ Mirroring the repo's layout, `Method_Condition_ExpectedOutcome`:
 - `Catalog/RepositoryHandleTests.cs` — `AddRepository` derives its name from the URL and strips
   `.git`; an explicit `name:` wins; a derived name colliding with another repository is refused
   asking for `name:`; a name that is not a contained directory name is refused (#224);
-  `WithProject` sets the project, and called twice is the additive error; both spellings of
-  `WithRepository` on one service is that same additive error, naming the repository block. The four
-  existing `WithRepository` test files move off the dropped `project:` parameter.
-- **An export-surface assertion for the overload.** Probe finding 7 says an exported overload loses a
-  half *silently* — no warning, no error — so the generated `ServiceDefinitionBuilder` interface must
-  be asserted to carry **both** `withRepository` and `withSharedRepository`. Nothing in C# fails if a
-  future edit drops the explicit id, and `📘 typescript export surface` only catches it if a sample
-  actually calls the shared form, so a sample must.
+  `WithProject` sets the project, and called twice is the additive error; `WithRepository` and
+  `WithSharedRepository` on one service is that same additive error, naming the repository block. The
+  four existing `WithRepository` test files move off the dropped `project:` parameter.
+- A sample must actually call `withSharedRepository` from TypeScript, so
+  `📘 typescript export surface` exercises the handle-as-parameter path. With distinct names there is
+  no silent-drop failure mode left to assert against (that guard was only needed for the rejected
+  overload), but the path itself is still worth covering end to end.
 - `Catalog/CatalogCompositionTests.cs` — extended: a repository name colliding with an ungrouped
   service's name is refused at composition, naming both; a repository name declared in both catalogs
   is the duplicate error; a code service cannot reach a yaml repository.
@@ -584,12 +597,12 @@ than judgement — see
 [the question-3 ATS probe findings](2026-09-08-repository-handle-q3-ats-probe-findings.md). The
 seventh arose from the ownership decision that followed:
 
-7. **What is the shared-repository overload called in the generated SDK?** C# can keep the idiomatic
-   overload pair (`WithRepository(url)` / `WithRepository(monorepo)`), but ATS needs the second to
-   carry a distinct generated name or it disappears silently (probe finding 7). This design writes
-   `withSharedRepository`, which is accurate but slightly awkward, and "shared" is a small lie when
-   one service uses the handle. `withRepositoryRef` would echo the yaml key exactly, which is a real
-   argument for it. Purely cosmetic, affects TypeScript only, and free to change until the 0.6.0 tag.
+7. **`WithSharedRepository` or `WithRepositoryRef`?** The overload question is settled (see the
+   decision above); what is left is the spelling, and it now applies to **both** languages rather than
+   only the generated SDK. `WithSharedRepository` is accurate, though "shared" is a small lie when one
+   service uses the handle. `WithRepositoryRef` echoes yaml's `repositoryRef:` key exactly, which is a
+   real argument for it given the two surfaces otherwise mirror each other. Purely cosmetic, and free
+   to change until the 0.6.0 tag.
 
 The design is ready for an implementation plan. One item is deliberately left for #134 rather than
 folded in here: reverting Stage 1's `addServiceToCatalog` capability id to plain `AddService`, now
@@ -618,10 +631,33 @@ it). It **simplifies** the design: one service builder instead of two, no generi
 "service names both a handle and a URL" case collapses into the additive `RequireUnset` error that
 already exists for every other block.
 
-It costs two things, both recorded where they land: `WithPrepare` on a grouped service goes back to
-being a runtime error rather than a compile error, and the `WithRepository` overload needs an
-explicit ATS id plus `MethodName` or it vanishes from the generated SDK **silently** (probe findings
-7–9) — which is why an export-surface assertion is now a required test rather than a nice-to-have.
+It costs one thing, recorded where it lands: `WithPrepare` on a grouped service goes back to being a
+runtime error rather than a compile error, since with a single builder type there is no type to
+withhold it from. The second cost this decision briefly carried — an exported overload that vanishes
+silently without an explicit ATS id — was removed by giving the handle form a distinct name instead;
+see [the authoring API](#the-authoring-api).
+
+### Overload or distinct method name for the handle form?
+
+Raised 2026-09-08, on the revision that spelled the handle form as a C# overload of `WithRepository`:
+*"the cost for the overload is just extra code in the extension?"*
+
+**Decided: distinct names — `WithRepository(url, …)` and `WithSharedRepository(handle)`.** The
+attribute really is one line, so if that were the cost the overload would win. It is not the cost:
+
+- The overload's rescue is an explicit id whose `MethodName` argument exists **precisely to force a
+  second consumer-visible name**, so TypeScript sees two names either way (measured). The overload
+  buys single-naming in C# only, in a package whose premise is that these are one API in two
+  languages — so the name *count* would differ between them.
+- It would be the design's only explicit id, and probe finding 9 says an explicit id is
+  namespace-scoped rather than receiver-qualified: opting out of a protection implicit ids get free,
+  and permanently reserving a namespace-wide name.
+- It opts into a failure mode that is **silent** (finding 7) and pays a test to watch it. Distinct
+  names have nothing to watch.
+
+Probe finding 6 already measured the chosen shape clean — a distinctly named instance method taking a
+handle, implicit id, no warnings — which is worth noting because it means the safe shape was measured
+*before* the risky one was proposed.
 
 ### The six open questions
 

@@ -7,8 +7,10 @@ Extended the same day: review objected that `monorepo.AddService(…)` inverts o
 owns services, and a repository is one source's worth of a service's configuration, not a container
 for services — which sent shapes **6–9** after a different question: can a handle travel as a
 *parameter*, so services stay on the catalog? It can (finding 6), which makes the split builder types
-of findings 2–5 unnecessary; but the natural spelling is a C# overload, and an overload **silently
-loses one half** (finding 7). Findings 8 and 9 are the fix and its cost.
+of findings 2–5 unnecessary. The tempting spelling for it is a C# overload, and findings 7–9 are why
+the design does **not** use one: an overload silently loses one half, and the rescue for that cannot
+give both languages a single name. Finding 6's shape — a distinctly named method taking a handle —
+is what the design adopted, and it was measured before the overload was ever proposed.
 **Method:** the same one [stage 0](2026-09-07-code-catalog-stage0-ats-probe-findings.md) used — a
 throwaway probe file under `src/Aspire.Hosting.ServiceSources/`, `aspire restore` in
 `samples/DemoAppHostTypeScript` (whose `aspire.config.json` points at `../../src`), the generated
@@ -356,13 +358,20 @@ the design should actually do:
 1. **Keep services on the catalog and pass the repository handle** — `WithRepository(monorepo)`,
    per shape 6. Drop `AddService` from the repository handle, and with it the split builder types
    and the generic base: they were solving a problem the inverted shape created.
-2. **Spell the handle form as a C# overload with an explicit ATS id**:
-   `[AspireExport("withSharedRepository", MethodName = "withSharedRepository")]` on
-   `WithRepository(RepositoryBuilder)`, per shapes 7 and 8. Without both attributes' arguments it
-   disappears from the SDK with no diagnostic.
-3. **Add an export-surface assertion for it.** Shape 7 fails silently, so the only guard against a
-   future refactor dropping the overload is a test that reads the generated interface — nothing in
-   C# will complain.
+2. **Give the handle form its own method name — do not overload.**
+   `WithSharedRepository(RepositoryBuilder)` beside `WithRepository(string url, …)`, which is
+   shape 6's already-measured shape: implicit receiver-qualified id, no warnings, nothing to
+   configure. An overload (shapes 7 and 8) can be made to work, but it is the wrong trade — shape 8's
+   rescue needs `MethodName`, whose whole purpose is to force a second consumer-visible name, so
+   TypeScript ends up with two names either way and the overload buys single-naming in C# only. It
+   would also be the design's only explicit id, and so its only namespace-scoped one (shape 9).
+   *(This recommendation replaces an earlier one that advised the overload; the reasoning that
+   changed it is that shape 8 cannot deliver one name to both languages.)*
+3. **No export-surface assertion is required once names are distinct** — there is no silent-drop
+   failure mode left. Still cover the handle-as-parameter path from a TypeScript sample, so
+   `📘 typescript export surface` exercises it end to end. If a future design *does* reach for an
+   exported overload, that assertion becomes mandatory, because shape 7 fails with no diagnostic at
+   all and nothing in C# will complain.
 4. **Do not use an explicit id anywhere else**, per shape 9: implicit ids are receiver-scoped and
    safe, explicit ones are namespace-wide and are not.
 5. **Separately, as a #134 correction: revert Stage 1's `addServiceToCatalog` to plain
