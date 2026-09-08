@@ -17,6 +17,20 @@ await builder.addServiceCatalog(async (catalog) => {
   const payments = await catalog.addServiceToCatalog('payments');
   await payments.withContainer('nginxdemos/hello', 80, { defaultTag: 'latest' });
   await payments.withKubernetes('payments', { port: 8080 });
+
+  // Declared only — never passed to builder.addService() below, the same choice Task 13's C#
+  // sample makes for its "catalog" service: running it needs a JDK to build the checkout with
+  // the repo's Maven wrapper, so this only demonstrates WithKind as a catalog-authoring surface.
+  //
+  // withKind's options parameter collapses to an untyped `{ options: any }` bag here: JavaKindOptions
+  // stays internal until a later stage's AsJava lands, so this bag — the same shape yaml's `java:`
+  // block produces — is the only way a TypeScript AppHost author configures the built-in "java"
+  // kind through code for now.
+  const catalogService = await catalog.addServiceToCatalog('catalog');
+  await catalogService.withRepository('https://github.com/spring-projects/spring-petclinic', {
+    defaultRef: 'main',
+  });
+  await catalogService.withKind('java', { options: { mavenGoal: 'spring-boot:run', port: 8080 } });
 });
 
 const inventory = await builder.addService('inventory');
