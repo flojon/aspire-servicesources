@@ -98,6 +98,14 @@ public class CatalogExportsTests
             "JavaKindOptionsBuilder.wrapperPath",
             "JavaKindOptionsBuilder.args",
             "JavaKindOptionsBuilder.port",
+            "JavaScriptKindOptionsBuilder.appDirectory",
+            "JavaScriptKindOptionsBuilder.appType",
+            "JavaScriptKindOptionsBuilder.packageManager",
+            "JavaScriptKindOptionsBuilder.port",
+            "JavaScriptKindOptionsBuilder.portEnv",
+            "JavaScriptKindOptionsBuilder.runScript",
+            "JavaScriptKindOptionsBuilder.scriptPath",
+            "JavaScriptKindOptionsBuilder.targetPort",
         ];
 
         Assert.Equal(expected.OrderBy(id => id, StringComparer.Ordinal), ids.OrderBy(id => id, StringComparer.Ordinal));
