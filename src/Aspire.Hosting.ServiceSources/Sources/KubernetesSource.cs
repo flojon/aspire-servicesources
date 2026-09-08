@@ -15,7 +15,8 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
         // port: an unsupported scheme is config validation like the rest and shouldn't burn an
         // allocation on its way to throwing.
         var kubernetes = RequireKubernetesBlock(serviceName, definition);
-        var scheme = EndpointScheme.Resolve(serviceName, "kubernetes", config.Kubernetes.Scheme, kubernetes.Scheme);
+        var scheme = EndpointScheme.Resolve(
+            serviceName, "kubernetes", config.Kubernetes.Scheme, kubernetes.Scheme, definition.Origin);
 
         var args = BuildPortForwardArgs(serviceName, definition, config, portAllocator, out var localPort, out _);
 
@@ -56,7 +57,7 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
 
         remotePort = config.Kubernetes.Port ?? kubernetes.Port ?? throw new ServiceSourcesConfigurationException(
             $"Service '{serviceName}': no port configured for source 'kubernetes' — set " +
-            "'kubernetes.port' in servicesources.local.json or servicesources.yaml.");
+            $"'kubernetes.port' in servicesources.local.json or in {definition.Origin.Describe()}.");
 
         if (remotePort is < 1 or > 65535)
         {
@@ -79,7 +80,8 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
         if (definition.Kubernetes is null || string.IsNullOrWhiteSpace(definition.Kubernetes.Service))
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}' source is 'kubernetes' but servicesources.yaml has no kubernetes.service entry.");
+                $"Service '{serviceName}' source is 'kubernetes' but {definition.Origin.Describe()} has no " +
+                "kubernetes.service entry.");
         }
 
         return definition.Kubernetes;

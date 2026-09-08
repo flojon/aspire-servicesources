@@ -66,7 +66,7 @@ internal static class LocalGitCheckout
     public static string ContainedNameRuleAndRemedy =>
         "no '/' or '\\' separator, no ':', and not a name made only of dots and spaces — Windows "
         + "strips those from the end of a path component, so such a name is not a directory of its "
-        + "own there. Rename the service in 'servicesources.yaml' and "
+        + "own there. Rename the service in its catalog declaration and "
         + $"'{Config.DeveloperConfiguration.FileName}'.";
 
     /// <summary>

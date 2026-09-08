@@ -320,7 +320,7 @@ internal sealed class UrlSource : IServiceSource
         {
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}' source is 'url' but no URL is configured — set " +
-                "'url.url' in servicesources.local.json or servicesources.yaml.");
+                $"'url.url' in servicesources.local.json or in {definition.Origin.Describe()}.");
         }
 
         if (!Uri.TryCreate(rawUrl, UriKind.Absolute, out var uri))

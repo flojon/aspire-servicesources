@@ -403,8 +403,11 @@ internal sealed class DeveloperConfiguration
     private string MisspelledServiceNameNote(string serviceName) =>
         NearMissForService(serviceName) is not { } configured
             ? ""
-            : $" Note that '{configured}' is configured and reaches no service in "
-              + $"'servicesources.yaml'. Did you mean '{serviceName}'? "
+            // Generalized rather than naming a file: CatalogNames now covers code-declared names
+            // too (design finding 5), and this note has no way to tell which catalog declared
+            // 'serviceName' — code, yaml, or (with two catalogs) either.
+            : $" Note that '{configured}' is configured and reaches no declared service. "
+              + $"Did you mean '{serviceName}'? "
               + (Services.ContainsKey(serviceName)
                   ? $"An entry for '{serviceName}' is there already, so the source belongs on that "
                     + $"one rather than on '{configured}'."

@@ -13,7 +13,8 @@ internal sealed class ContainerSource : IServiceSource
 
         // Catalog-only, exactly as container.port is: the image decides what it serves on that
         // port, so there is nothing per-developer to override.
-        var scheme = EndpointScheme.Resolve(serviceName, "container", developerScheme: null, definition.Container?.Scheme);
+        var scheme = EndpointScheme.Resolve(
+            serviceName, "container", developerScheme: null, definition.Container?.Scheme, definition.Origin);
 
         // Built by hand rather than via AddContainer so the resource can be a
         // ServiceContainerResource, which adds the IResourceWithServiceDiscovery that
@@ -36,11 +37,13 @@ internal sealed class ContainerSource : IServiceSource
         if (definition.Container is null || string.IsNullOrWhiteSpace(definition.Container.Image))
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}' source is 'container' but servicesources.yaml has no container.image entry.");
+                $"Service '{serviceName}' source is 'container' but {definition.Origin.Describe()} has no " +
+                "container.image entry.");
         }
 
         var port = definition.Container.Port ?? throw new ServiceSourcesConfigurationException(
-            $"Service '{serviceName}' source is 'container' but servicesources.yaml has no container.port entry.");
+            $"Service '{serviceName}' source is 'container' but {definition.Origin.Describe()} has no " +
+            "container.port entry.");
 
         if (port is < 1 or > 65535)
         {

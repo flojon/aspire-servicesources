@@ -1,3 +1,5 @@
+using Aspire.Hosting.ServiceSources.Config.Catalog;
+
 namespace Aspire.Hosting.ServiceSources.Sources;
 
 /// <summary>
@@ -34,7 +36,8 @@ internal static class EndpointScheme
     /// <exception cref="ServiceSourcesConfigurationException">
     /// The configured scheme is neither <c>http</c> nor <c>https</c>.
     /// </exception>
-    public static string Resolve(string serviceName, string source, string? developerScheme, string? catalogScheme)
+    public static string Resolve(
+        string serviceName, string source, string? developerScheme, string? catalogScheme, CatalogOrigin catalogOrigin)
     {
         var fromDeveloperConfig = !string.IsNullOrWhiteSpace(developerScheme);
         var configured = fromDeveloperConfig ? developerScheme : catalogScheme;
@@ -51,11 +54,11 @@ internal static class EndpointScheme
             return normalized;
         }
 
-        // Named per origin because the two live in different files, and only one of them is the
-        // file the person reading this error owns.
+        // Named per origin because the two live in different places, and only one of them is the
+        // one the person reading this error owns.
         var origin = fromDeveloperConfig
             ? $"servicesources.local.json's {source}.scheme"
-            : $"servicesources.yaml's {source}.scheme";
+            : $"{catalogOrigin.Describe()}'s {source}.scheme";
 
         throw new ServiceSourcesConfigurationException(
             $"Service '{serviceName}': scheme '{configured}' is not supported for source '{source}' — " +
