@@ -731,6 +731,17 @@ protection then blocked reusing the name, so this version carries what would hav
   radius, not provenance, so it says nothing about a managed checkout's own `prepare` step. Nothing
   in the package changed.
 
+- **The code-catalog design's ATS probe, measured** ([#134]). The accepted design for authoring the
+  service catalog in code depended on five shapes never measured against Aspire's Type System —
+  optional/named parameters, an extension method on a package-owned exported class, a lambda nested
+  inside a lambda, an enum as a parameter, and the generated name `addService` on two receivers. Four
+  cross cleanly as specified. The fifth collides, and the design's own named fallback
+  (`[AspireExport(MethodName = …)]`) does not fix it — that property only renames what a generated
+  SDK calls the method, not the capability ID the collision is keyed on. An explicit capability id
+  (`[AspireExport("…")]`) does. See
+  `docs/superpowers/specs/2026-09-07-code-catalog-stage0-ats-probe-findings.md`. Nothing in the
+  package changed; this stage ships no code.
+
 ## [0.4.1] - 2026-09-05
 
 A patch on top of `0.4.0`, cut from the `release/0.4.x` branch off the `v0.4.0` tag rather than
@@ -1450,6 +1461,7 @@ Targets `net10.0`.
 [#125]: https://github.com/flojon/aspire-servicesources/issues/125
 [#130]: https://github.com/flojon/aspire-servicesources/issues/130
 [#131]: https://github.com/flojon/aspire-servicesources/issues/131
+[#134]: https://github.com/flojon/aspire-servicesources/issues/134
 [#144]: https://github.com/flojon/aspire-servicesources/issues/144
 [#150]: https://github.com/flojon/aspire-servicesources/issues/150
 [#159]: https://github.com/flojon/aspire-servicesources/issues/159
