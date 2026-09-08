@@ -70,6 +70,12 @@ public class EndpointSchemeTests
         Assert.Contains("grpc", ex.Message);
         Assert.Contains("kubernetes.scheme", ex.Message);
         Assert.Contains("servicesources.yaml", ex.Message);
+
+        // Regression guard: CatalogOrigin.Describe() already wraps a yaml path in its own closing
+        // quote ('servicesources.yaml'), so appending a possessive "'s" directly onto it collided
+        // into a doubled apostrophe ('servicesources.yaml''s). The message must read as clean text.
+        Assert.Contains("kubernetes.scheme entry in 'servicesources.yaml'", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("''s", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

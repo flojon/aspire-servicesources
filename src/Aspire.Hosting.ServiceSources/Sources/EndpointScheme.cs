@@ -55,13 +55,13 @@ internal static class EndpointScheme
         }
 
         // Named per origin because the two live in different places, and only one of them is the
-        // one the person reading this error owns.
-        var origin = fromDeveloperConfig
-            ? $"servicesources.local.json's {source}.scheme"
-            : $"{catalogOrigin.Describe()}'s {source}.scheme";
+        // one the person reading this error owns. Phrased as "the X.scheme entry in Y" rather than
+        // "Y's X.scheme" so this never collides with the closing quote CatalogOrigin.Describe()
+        // wraps a yaml path in — "'servicesources.yaml''s" reads as a typo, not a possessive.
+        var origin = fromDeveloperConfig ? "servicesources.local.json" : catalogOrigin.Describe();
 
         throw new ServiceSourcesConfigurationException(
             $"Service '{serviceName}': scheme '{configured}' is not supported for source '{source}' — " +
-            $"use '{Http}' or '{Https}'. Set in {origin}.");
+            $"use '{Http}' or '{Https}'. Set the {source}.scheme entry in {origin}.");
     }
 }

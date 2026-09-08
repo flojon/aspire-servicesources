@@ -77,8 +77,9 @@ internal sealed class DeveloperConfiguration
     /// no-op once the file is registered.
     /// </summary>
     /// <param name="catalogNames">
-    /// The service names <c>servicesources.yaml</c> declares, which decide the spelling the entries
-    /// are keyed by — see <see cref="CanonicalizeToCatalog"/>.
+    /// The service names the catalog declares — code-declared and yaml-declared alike (design
+    /// finding 5) — which decide the spelling the entries are keyed by — see
+    /// <see cref="CanonicalizeToCatalog"/>.
     /// </param>
     public static DeveloperConfiguration ReadFrom(
         IDistributedApplicationBuilder builder, IEnumerable<string> catalogNames)

@@ -64,9 +64,8 @@ internal sealed class JavaKindOptions
         // message has to cover both rather than sending the reader looking for a block they can see.
         var options = LocalKindConfig.Parse<JavaKindOptions>(rawConfig, serviceName)
             ?? throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}' has kind 'java' but its 'java:' block in servicesources.yaml is " +
-                "missing or empty. It must name how to run the service, e.g. 'mavenGoal: spring-boot:run' " +
-                "and 'port: 8080'.");
+                $"Service '{serviceName}' has kind 'java' but its 'java:' block is missing or empty. It " +
+                "must name how to run the service, e.g. 'mavenGoal: spring-boot:run' and 'port: 8080'.");
 
         var port = ValidatePort(serviceName, options.Port);
         var workingDirectory = ValidateWorkingDirectory(serviceName, options.WorkingDirectory);
