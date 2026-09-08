@@ -1397,9 +1397,24 @@ message); finding 11 (hand-rolled `OrdinalIgnoreCase` merge).
 - Consumes: `ServiceCatalogBuilder.Freeze()` (Task 2), `ServiceMetadata.ToDefinition()` (Task 1).
 - Produces: `CodeServiceCatalog` (internal sealed class, one property:
   `IReadOnlyDictionary<string, ServiceDefinition> Services`). `LoadedConfig.Catalog` changes type
-  from `ServiceCatalog` to `CodeServiceCatalog`. `ResolveService`'s return type changes from
-  `(ServiceMetadata Metadata, …)` to `(ServiceDefinition Definition, …)` (mechanical continuation of
-  Task 9, landing here because this is where the merge that produces it lives).
+  from `ServiceCatalog` to `CodeServiceCatalog`.
+
+**Correction to this task's own text, made before dispatch (ledgered as a ruling during Task 2's
+review):** every step below originally assumed `ServiceSourcesConfigCache.CodeCatalogFor(builder)`
+returns the raw `ServiceCatalogBuilder` (`.Builder`) and proposed introducing a second accessor,
+`CodeCatalogAccumulatorFor`, to reach the accumulator for freezing. That assumption is wrong — Task 2
+already made `CodeCatalogFor` return `CodeCatalogAccumulator` itself (not `.Builder`), specifically so
+`AddServiceCatalog`'s `.Configure(...)` call has somewhere to lock. Steps 4 and 6 below are corrected
+to build on that real shape: `CodeCatalogAccumulator` gets one new method, `Freeze()`, added directly
+(no second accessor function), and `CodeCatalogFor`/`AddServiceCatalog` are untouched by this task —
+they already read exactly as needed.
+
+Also note, from Task 9 (already landed): `ResolveService`'s return type is already
+`(ServiceDefinition Definition, ServiceDeveloperConfig DeveloperConfig)`, converting via a **locally
+recomputed** `metadata.ToDefinition(yamlPath)` inside `ResolveService` itself — a deliberate,
+temporary duplication Task 9 left for this task to retire. Step 5 below replaces that per-call
+conversion with reading `ServiceDefinition` values directly out of the merged `Catalog.Services` this
+task builds, removing the duplication.
 
 - [ ] **Step 1: Write the failing composition tests**
 
@@ -1655,6 +1670,9 @@ internal sealed class LoadedConfig
         // Freeze first, under the same lock CodeCatalogFor's Configure calls take — an
         // AddServiceCatalog reaching this builder after this point contributes nothing (design:
         // "A ServiceCatalogBuilder captured and mutated after this point contributes nothing").
+        // CodeCatalogAccumulator.Freeze() is new — added in Step 6 below, alongside the ordering
+        // check on Configure(). Write Step 6 first if implementing in file order rather than plan
+        // order; the two land in the same commit either way.
         var codeEntries = CodeCatalogFor(builder).Freeze();
 
         var yamlPath = Path.Combine(builder.AppHostDirectory, "servicesources.yaml");
@@ -1755,36 +1773,25 @@ here because this line has to change anyway for the type rename, and leaving the
 immediately fail Task 11's blanket test. If Task 11 wants richer per-origin phrasing here, it edits
 this line again — that's expected, not a conflict.)
 
-- [ ] **Step 6: Add the ordering check to `AddServiceCatalog`**
+- [ ] **Step 6: Add the ordering check to `CodeCatalogAccumulator`**
 
-Update `AddServiceCatalog` (from Task 2) to check the "already read" flag before configuring:
-
-```csharp
-[AspireExport(RunSyncOnBackgroundThread = true)]
-public static IDistributedApplicationBuilder AddServiceCatalog(
-    this IDistributedApplicationBuilder builder, Action<Catalog.ServiceCatalogBuilder> configure)
-{
-    DeveloperConfigFileSource.EnsureRegistered(builder);
-
-    Config.ServiceSourcesConfigCache.CodeCatalogFor(builder).Configure(configure);
-
-    return builder;
-}
-```
-
-The "already read" check has to live where the read is tracked — extend `CodeCatalogAccumulator`
-(added in Task 2) with the flag, and have `LoadedConfig.Load`'s call to `Freeze()` set it:
+`AddServiceCatalog` itself (from Task 2) needs no change — it already reads
+`CodeCatalogFor(builder).Configure(configure)`, and `CodeCatalogFor` already returns
+`CodeCatalogAccumulator` (Task 2's real shape, not the raw builder — see this task's note above).
+The "already read" check has to live where the read is tracked, so it goes on the accumulator's
+existing `Configure` method, and the accumulator gains the `Freeze()` method Step 4 above calls:
 
 ```csharp
-// In ServiceSourcesConfigCache.cs, extend CodeCatalogAccumulator:
-private sealed class CodeCatalogAccumulator
+// In ServiceSourcesConfigCache.cs, extend the existing CodeCatalogAccumulator (from Task 2) —
+// add _frozen and Freeze(), and add the ordering check to the existing Configure():
+internal sealed class CodeCatalogAccumulator
 {
     private readonly object _gate = new();
     private bool _frozen;
 
-    public Catalog.ServiceCatalogBuilder Builder { get; } = new();
+    public ServiceCatalogBuilder Builder { get; } = new();
 
-    public void Configure(Action<Catalog.ServiceCatalogBuilder> configure)
+    public void Configure(Action<ServiceCatalogBuilder> configure)
     {
         lock (_gate)
         {
@@ -1801,7 +1808,7 @@ private sealed class CodeCatalogAccumulator
         }
     }
 
-    public IReadOnlyDictionary<string, Catalog.ServiceDefinition> FreezeOnce()
+    public IReadOnlyDictionary<string, ServiceDefinition> Freeze()
     {
         lock (_gate)
         {
@@ -1812,20 +1819,9 @@ private sealed class CodeCatalogAccumulator
 }
 ```
 
-And in `LoadedConfig.Load`, replace `CodeCatalogFor(builder).Freeze()` with a call through the
-accumulator's `FreezeOnce()` — which means `CodeCatalogFor` needs to expose the accumulator, not just
-the builder. Adjust:
-
-```csharp
-private static CodeCatalogAccumulator CodeCatalogAccumulatorFor(IDistributedApplicationBuilder builder) =>
-    CodeCatalogs.GetValue(builder, static _ => new CodeCatalogAccumulator());
-
-internal static Catalog.ServiceCatalogBuilder CodeCatalogFor(IDistributedApplicationBuilder builder) =>
-    CodeCatalogAccumulatorFor(builder).Builder;
-```
-
-And in `LoadedConfig.Load`, `var codeEntries = CodeCatalogAccumulatorFor(builder).FreezeOnce();`
-instead of `CodeCatalogFor(builder).Freeze()`.
+No other accessor function is needed: `CodeCatalogFor(builder)` already returns this
+`CodeCatalogAccumulator`, and Step 4's `CodeCatalogFor(builder).Freeze()` now resolves directly
+against the method added here.
 
 **Note the design's own caveat, worth re-stating in a code comment where this lands:** this error
 does *not* latch — it's raised outside `ConfigLoader<LoadedConfig>.Load`, in `AddServiceCatalog`
