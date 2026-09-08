@@ -16,6 +16,17 @@ never existed. Check the tag of the last release before adding one.
 
 ## [Unreleased]
 
+### Added
+
+- **`WithPrepare` on the code-authored catalog** ([#134]). The code-authoring equivalent of yaml's
+  `prepare:` block — a bootstrap command the `"local"` source runs inside the materialized checkout
+  before the kind is allowed to judge it.
+- **Typed `AsJava`/`AsJavaScript` handles** ([#134]). Sugar over `WithKind("java"/"javascript", …)`:
+  each hands the caller a fluent options handle (`JavaKindOptionsBuilder`/
+  `JavaScriptKindOptionsBuilder`) instead of a raw `Dictionary<string, object>`. The two shipped
+  kinds' options classes (`JavaKindOptions`/`JavaScriptKindOptions`) stay `internal` — only the
+  handles are public.
+
 ## [0.5.1] - 2026-09-07
 
 _There is no 0.5.0. That tag's release failed to publish to nuget.org and GitHub's immutable-release
