@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- No Version here, deliberately: it lives in global.json's `msbuild-sdks`, which is the
+       only place an MSBuild SDK version can be stated from outside the project. Central
+       Package Management does not cover MSBuild SDKs, and a `Version` attribute cannot read
+       $(AspireVersion) either - an <Sdk> reference is resolved before properties are
+       evaluated.
+
+       A Version here would also be worse than redundant. The inline attribute outranks
+       global.json and does so silently - no warning, no MSB4241 - so aspire-matrix.yml's
+       per-leg override would look effective while changing nothing, which is how that
+       workflow came to build a mixed-version Aspire family (#116). ci.yml's `verify repo
+       invariants` job fails if a version reappears here. -->
+  <Sdk Name="Aspire.AppHost.Sdk" />
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsAspireHost>true</IsAspireHost>
+    <IsPackable>false</IsPackable>
+    <!-- An AppHost consumes integrations rather than being one; see Directory.Build.props. -->
+    <IsAspirePolyglotCompatible>false</IsAspirePolyglotCompatible>
+    <!-- ASPIRE010, new in Aspire 13.5.x, fires on every AppHost that has not opted into the
+         Aspire CLI bundle: AspireUseCliBundle defaults to false in Aspire's own SDK, and the
+         warning nags about it. This sample is deliberately built and run without the CLI - the
+         smoke tests in scripts/ use plain dotnet build and dotnet run, and setting
+         AspireUseCliBundle=true is exactly what stops the SDK referencing the DCP and dashboard
+         packages those runs need. So there is nothing to act on here, and the warning is only
+         fatal because ci.yml builds with -warnaserror. -->
+    <NoWarn>$(NoWarn);ASPIRE010</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.AppHost" />
+
+    <!-- This sample's catalog declares kind: java for its "catalog" service, and this is what
+         that costs an AppHost: core compiles against the hosting package but references it with
+         PrivateAssets="all", so it reaches nobody who did not ask for it. An AppHost with no
+         java or javascript service references neither. -->
+    <PackageReference Include="CommunityToolkit.Aspire.Hosting.Java" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Aspire.Hosting.ServiceSources/Aspire.Hosting.ServiceSources.csproj" IsAspireProjectResource="false" />
+  </ItemGroup>
+
+</Project>

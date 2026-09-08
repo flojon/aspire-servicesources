@@ -6,6 +6,7 @@
   </Configurations>
   <Folder Name="/samples/">
     <Project Path="samples/DemoAppHost/DemoAppHost.csproj" />
+    <Project Path="samples/DemoAppHostCodeCatalog/DemoAppHostCodeCatalog.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Aspire.Hosting.ServiceSources/Aspire.Hosting.ServiceSources.csproj" />
