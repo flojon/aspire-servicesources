@@ -1,5 +1,6 @@
 using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Sources;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Sources;
@@ -8,13 +9,13 @@ public class UrlSourceTests
 {
     private const string ServiceName = "orders";
 
-    private static ServiceMetadata Metadata(string? url = "https://orders.example.com") =>
-        new()
+    private static ServiceDefinition Definition(string? url = "https://orders.example.com") =>
+        new ServiceMetadata
         {
             Repository = "https://github.com/company/orders",
             Project = "Orders.csproj",
             Url = url is null ? null : new UrlMetadata { Url = url },
-        };
+        }.ToDefinition("servicesources.yaml");
 
     private static ServiceDeveloperConfig DevConfig(string? urlOverride = null) =>
         new() { Source = "url", Url = new() { Url = urlOverride } };
@@ -22,7 +23,7 @@ public class UrlSourceTests
     [Fact]
     public void ResolveUrl_NoOverride_FallsBackToMetadataUrl()
     {
-        var uri = UrlSource.ResolveUrl(ServiceName, Metadata(url: "https://orders.example.com"), DevConfig());
+        var uri = UrlSource.ResolveUrl(ServiceName, Definition(url: "https://orders.example.com"), DevConfig());
 
         Assert.Equal("https://orders.example.com/", uri.ToString());
     }
@@ -31,7 +32,7 @@ public class UrlSourceTests
     public void ResolveUrl_OverrideSet_TakesPrecedenceOverMetadata()
     {
         var uri = UrlSource.ResolveUrl(
-            ServiceName, Metadata(url: "https://orders.example.com"), DevConfig(urlOverride: "https://orders.dev.internal"));
+            ServiceName, Definition(url: "https://orders.example.com"), DevConfig(urlOverride: "https://orders.dev.internal"));
 
         Assert.Equal("https://orders.dev.internal/", uri.ToString());
     }
@@ -40,7 +41,7 @@ public class UrlSourceTests
     public void ResolveUrl_NeitherSet_ThrowsNamingServiceAndUrl()
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            UrlSource.ResolveUrl(ServiceName, Metadata(url: null), DevConfig()));
+            UrlSource.ResolveUrl(ServiceName, Definition(url: null), DevConfig()));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("url", ex.Message);
@@ -50,7 +51,7 @@ public class UrlSourceTests
     public void ResolveUrl_NotAbsolute_ThrowsNamingServiceAndUrl()
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            UrlSource.ResolveUrl(ServiceName, Metadata(), DevConfig(urlOverride: "not-a-url")));
+            UrlSource.ResolveUrl(ServiceName, Definition(), DevConfig(urlOverride: "not-a-url")));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("url", ex.Message);
@@ -60,7 +61,7 @@ public class UrlSourceTests
     public void ResolveUrl_NonHttpScheme_ThrowsNamingServiceAndScheme()
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            UrlSource.ResolveUrl(ServiceName, Metadata(), DevConfig(urlOverride: "ftp://orders.example.com")));
+            UrlSource.ResolveUrl(ServiceName, Definition(), DevConfig(urlOverride: "ftp://orders.example.com")));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("http", ex.Message);
@@ -100,7 +101,7 @@ public class UrlSourceTests
     public void ResolveUrl_UrlCarryingCredentials_DoesNotEchoThem(string url, string survives)
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            UrlSource.ResolveUrl(ServiceName, Metadata(), DevConfig(urlOverride: url)));
+            UrlSource.ResolveUrl(ServiceName, Definition(), DevConfig(urlOverride: url)));
 
         Assert.DoesNotContain("hunter2", ex.Message, StringComparison.Ordinal);
 
@@ -124,7 +125,7 @@ public class UrlSourceTests
     public void ResolveUrl_UrlWithNoCredentials_IsEchoedWhole(string url)
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            UrlSource.ResolveUrl(ServiceName, Metadata(), DevConfig(urlOverride: url)));
+            UrlSource.ResolveUrl(ServiceName, Definition(), DevConfig(urlOverride: url)));
 
         Assert.Contains($"'{url}'", ex.Message, StringComparison.Ordinal);
     }

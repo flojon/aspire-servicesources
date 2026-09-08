@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Prepare;
 
@@ -18,7 +19,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     private readonly IPrepareCommandRunner _prepareRunner = prepareRunner ?? ProcessPrepareCommandRunner.Instance;
 
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
-        IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)
+        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
     {
         // Before any network work: a machine without a usable git can't clone anything, and
         // finding that out once here beats finding it out as an identical clone failure on every
@@ -26,7 +27,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         // path rather than behind a one-shot flag of its own.
         gitClient.EnsureAvailable();
 
-        var isDotnetKind = string.Equals(metadata.Kind, LocalKinds.Dotnet, StringComparison.Ordinal);
+        var isDotnetKind = string.Equals(definition.Kind, LocalKinds.Dotnet, StringComparison.Ordinal);
 
         // Settled before paying for a checkout: looking the kind up is a dictionary probe against
         // registry state, needs no working tree, and running it after the clone would make a typo'd
@@ -44,7 +45,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         // clone failure rather than the configuration error, and on a cold clone the typo is
         // reported only once the clone has finished. Paid deliberately: a kind's paths are relative
         // to the checkout, so without one in hand the check cannot be made at all.
-        var handler = isDotnetKind ? null : ResolveKindHandler(builder, serviceName, metadata);
+        var handler = isDotnetKind ? null : ResolveKindHandler(builder, serviceName, definition);
 
         // Whether this package owns the checkout directory, which decides whether the service
         // inherits the catalog's prepare block at all and where its completion marker goes.
@@ -57,7 +58,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         // before anything is registered against a directory that does not exist yet. Only what needs
         // the working tree waits for one, which is the division ValidateCheckout draws for a kind.
         var prepare = PreparePlan.For(
-            serviceName, metadata.Prepare, config.Local.Prepare, managedCheckout, OperatingSystem.IsWindows());
+            serviceName, definition.Prepare, config.Local.Prepare, managedCheckout, OperatingSystem.IsWindows());
 
         if (prepare.IgnoredCatalogNotice is { } ignored)
         {
@@ -76,7 +77,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         // being told the value was wrong before any of it started.
         if (isDotnetKind)
         {
-            ValidateProject(serviceName, metadata.Project);
+            ValidateProject(serviceName, definition.Project);
         }
 
         // Starts the checkouts an AddService call would have to block on — every "local" service
@@ -101,11 +102,11 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
             // once it has looked at everything.
             var registered = isDotnetKind
                 ? deferred.Register(
-                    builder, serviceName, metadata, config, prefetch, gitClient, prepare.Step, _prepareRunner)
-                : SupportsDeferredKind(serviceName, metadata, handler!)
+                    builder, serviceName, definition, config, prefetch, gitClient, prepare.Step, _prepareRunner)
+                : SupportsDeferredKind(serviceName, definition, handler!)
                     ? deferred.RegisterKind(
-                        builder, serviceName, metadata, config, prefetch, gitClient, prepare.Step, _prepareRunner,
-                        repoRoot => ResolveDeferredKind(builder, serviceName, metadata, repoRoot, handler!))
+                        builder, serviceName, definition, config, prefetch, gitClient, prepare.Step, _prepareRunner,
+                        repoRoot => ResolveDeferredKind(builder, serviceName, definition, repoRoot, handler!))
                     : null;
 
             if (registered is not null)
@@ -130,7 +131,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         // of the answer; now the prefetch acts on the early answer, so a late decline is also a
         // clone that runs in turn instead of with the others. Correct, and slower — which is why
         // the interface now says so where a handler author reads it.
-        var repoRoot = prefetch.GetRepoRoot(serviceName, metadata, config, builder.AppHostDirectory, gitClient);
+        var repoRoot = prefetch.GetRepoRoot(serviceName, definition, config, builder.AppHostDirectory, gitClient);
 
         // The working tree is complete and reconciled onto its configured ref; the kind has not yet
         // been allowed to judge it. Both halves of that are load-bearing. After the reconciliation,
@@ -172,7 +173,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
 
         if (isDotnetKind)
         {
-            var projectPath = ResolveProjectFile(serviceName, repoRoot, metadata.Project);
+            var projectPath = ResolveProjectFile(serviceName, repoRoot, definition.Project);
 
             // Aspire's own AddProject, with a path that exists — so the project picks up every
             // default it normally would (launch-profile endpoints, OTLP exporter, certificate
@@ -204,9 +205,9 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         // for the same reason: a kind's paths are relative to this directory, so a wrong one can
         // only be recognised here. Immediately before Resolve, and before this service has added
         // anything, so a handler reports it without a half-created resource behind it.
-        ValidateWithKindHandler(serviceName, metadata, repoRoot, handler!);
+        ValidateWithKindHandler(serviceName, definition, repoRoot, handler!);
 
-        return InvokeKindHandler(builder, serviceName, metadata, repoRoot, handler!);
+        return InvokeKindHandler(builder, serviceName, definition, repoRoot, handler!);
     }
 
     /// <summary>
@@ -214,15 +215,15 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// filesystem and network work so it can run as a pre-flight, before the checkout.
     /// </summary>
     private static ILocalResourceKind ResolveKindHandler(
-        IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata)
+        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition)
     {
         var registry = LocalKindRegistry.For(builder);
 
-        if (!registry.TryGet(metadata.Kind, out var handler) || handler is null)
+        if (!registry.TryGet(definition.Kind, out var handler) || handler is null)
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': kind '{metadata.Kind}' is not registered. " +
-                registry.DescribeNearMatch(metadata.Kind) +
+                $"Service '{serviceName}': kind '{definition.Kind}' is not registered. " +
+                registry.DescribeNearMatch(definition.Kind) +
                 "Call the kind's registration method before the first AddService call " +
                 "(builder.UseJavaScript() or builder.UseJava() for the built-in kinds), or " +
                 "register your own with builder.AddLocalKind(name, handler).");
@@ -238,26 +239,26 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// the eager path — it is passed through rather than reported.
     /// </summary>
     private static DeferredLocalResource? ResolveDeferredKind(
-        IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, string repoRoot,
+        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition, string repoRoot,
         ILocalResourceKind handler)
     {
         DeferredLocalResource? registration;
         try
         {
-            registration = handler.ResolveDeferred(builder, serviceName, repoRoot, metadata.KindConfig);
+            registration = handler.ResolveDeferred(builder, serviceName, repoRoot, definition.KindOptions);
         }
         catch (Exception ex) when (ex is not ServiceSourcesConfigurationException)
         {
             throw new ServiceSourcesConfigurationException(
-                GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, metadata.Kind)
-                    ?? DeferredHandlerFailedMessage(serviceName, metadata.Kind),
+                GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, definition.Kind)
+                    ?? DeferredHandlerFailedMessage(serviceName, definition.Kind),
                 ex);
         }
 
         if (registration is not null && registration.Service is null)
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': the handler for kind '{metadata.Kind}' returned a " +
+                $"Service '{serviceName}': the handler for kind '{definition.Kind}' returned a " +
                 $"{nameof(DeferredLocalResource)} with no resource. Return null to decline deferral instead.");
         }
 
@@ -271,16 +272,16 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// AppHost down with a bare exception naming neither the service nor the kind.
     /// </summary>
     private static bool SupportsDeferredKind(
-        string serviceName, ServiceMetadata metadata, ILocalResourceKind handler)
+        string serviceName, ServiceDefinition definition, ILocalResourceKind handler)
     {
         try
         {
-            return handler.SupportsDeferredCheckout(metadata.KindConfig);
+            return handler.SupportsDeferredCheckout(definition.KindOptions);
         }
         catch (Exception ex) when (ex is not ServiceSourcesConfigurationException)
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': the handler for kind '{metadata.Kind}' failed while being asked whether " +
+                $"Service '{serviceName}': the handler for kind '{definition.Kind}' failed while being asked whether " +
                 "it supports a deferred checkout. That call is documented as answering rather than throwing — a " +
                 "block it cannot judge should answer false and let the eager path report it.", ex);
         }
@@ -314,17 +315,17 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// load error just because it happened one call earlier.
     /// </summary>
     private static void ValidateWithKindHandler(
-        string serviceName, ServiceMetadata metadata, string repoRoot, ILocalResourceKind handler)
+        string serviceName, ServiceDefinition definition, string repoRoot, ILocalResourceKind handler)
     {
         try
         {
-            handler.Validate(serviceName, repoRoot, metadata.KindConfig);
+            handler.Validate(serviceName, repoRoot, definition.KindOptions);
         }
         catch (Exception ex) when (ex is not ServiceSourcesConfigurationException)
         {
             throw new ServiceSourcesConfigurationException(
-                GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, metadata.Kind)
-                    ?? ValidateFailedMessage(serviceName, metadata.Kind),
+                GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, definition.Kind)
+                    ?? ValidateFailedMessage(serviceName, definition.Kind),
                 ex);
         }
     }
@@ -342,26 +343,26 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         "call is a fault in the handler.";
 
     private static IResourceBuilder<IResourceWithServiceDiscovery> InvokeKindHandler(
-        IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, string repoRoot,
+        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition, string repoRoot,
         ILocalResourceKind handler)
     {
         IResourceBuilder<IResourceWithServiceDiscovery>? resourceBuilder;
         try
         {
-            resourceBuilder = handler.Resolve(builder, serviceName, repoRoot, metadata.KindConfig);
+            resourceBuilder = handler.Resolve(builder, serviceName, repoRoot, definition.KindOptions);
         }
         catch (Exception ex) when (ex is not ServiceSourcesConfigurationException)
         {
             throw new ServiceSourcesConfigurationException(
-                GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, metadata.Kind)
-                    ?? HandlerFailedMessage(serviceName, metadata.Kind),
+                GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, definition.Kind)
+                    ?? HandlerFailedMessage(serviceName, definition.Kind),
                 ex);
         }
 
         if (resourceBuilder is null)
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': the handler for kind '{metadata.Kind}' returned no resource. " +
+                $"Service '{serviceName}': the handler for kind '{definition.Kind}' returned no resource. " +
                 $"{nameof(ILocalResourceKind)}.{nameof(ILocalResourceKind.Resolve)} must return the resource it created.");
         }
 

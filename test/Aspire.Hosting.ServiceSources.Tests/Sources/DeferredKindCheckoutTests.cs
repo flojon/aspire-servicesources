@@ -1,5 +1,6 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Sources;
 using Microsoft.Extensions.DependencyInjection;
@@ -191,8 +192,9 @@ public class DeferredKindCheckoutTests
         return dir;
     }
 
-    private static ServiceMetadata Metadata(string name) =>
-        new() { Repository = $"https://example.com/{name}.git", Kind = KindName };
+    private static ServiceDefinition Definition(string name) =>
+        new ServiceMetadata { Repository = $"https://example.com/{name}.git", Kind = KindName }
+            .ToDefinition("servicesources.yaml");
 
     private static ServiceDeveloperConfig DevConfig(string? path = null) => new() { Source = "local", Local = new() { Path = path } };
 
@@ -220,7 +222,7 @@ public class DeferredKindCheckoutTests
 
         // The complaint #159 is about: before this, a non-dotnet kind resolved eagerly and this call
         // sat here until the clone it never needed had finished.
-        var service = new LocalProjectSource(git).Resolve(builder, "frontend", Metadata("frontend"), DevConfig());
+        var service = new LocalProjectSource(git).Resolve(builder, "frontend", Definition("frontend"), DevConfig());
 
         Assert.True(IsHeldBack(service.Resource));
         Assert.False(kind.ResolvedEagerly);
@@ -244,7 +246,7 @@ public class DeferredKindCheckoutTests
         var git = new FakeGitClient();
         var gate = git.BlockFor("https://example.com/frontend.git");
 
-        var service = new LocalProjectSource(git).Resolve(builder, "frontend", Metadata("frontend"), DevConfig());
+        var service = new LocalProjectSource(git).Resolve(builder, "frontend", Definition("frontend"), DevConfig());
 
         // This is why java and javascript can be deferred at all where dotnet needed a warning:
         // their endpoints come from the committed catalog, not from a file in the repository, so
@@ -266,7 +268,7 @@ public class DeferredKindCheckoutTests
         builder.AddLocalKind(KindName, kind);
 
         var service = new LocalProjectSource(new FakeGitClient())
-            .Resolve(builder, "frontend", Metadata("frontend"), DevConfig());
+            .Resolve(builder, "frontend", Definition("frontend"), DevConfig());
 
         // Returning null from ResolveDeferred is a kind saying "not me" — a kind that can only learn
         // its endpoints by reading the repository, say. It has to cost nothing but the eager path.
@@ -293,7 +295,7 @@ public class DeferredKindCheckoutTests
         builder.AddLocalKind(KindName, kind);
 
         var git = new FakeGitClient();
-        new LocalProjectSource(git).Resolve(builder, "frontend", Metadata("frontend"), DevConfig());
+        new LocalProjectSource(git).Resolve(builder, "frontend", Definition("frontend"), DevConfig());
 
         Assert.Null(LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage);
 
@@ -319,7 +321,7 @@ public class DeferredKindCheckoutTests
         builder.AddLocalKind(KindName, kind);
 
         var git = new FakeGitClient();
-        new LocalProjectSource(git).Resolve(builder, "frontend", Metadata("frontend"), DevConfig());
+        new LocalProjectSource(git).Resolve(builder, "frontend", Definition("frontend"), DevConfig());
 
         Assert.True(
             SpinWait.SpinUntil(() => git.Cloned.Count == 2, TimeSpan.FromSeconds(30)),
@@ -337,7 +339,7 @@ public class DeferredKindCheckoutTests
         builder.AddLocalKind(KindName, kind);
 
         var service = new LocalProjectSource(new FakeGitClient())
-            .Resolve(builder, "frontend", Metadata("frontend"), DevConfig());
+            .Resolve(builder, "frontend", Definition("frontend"), DevConfig());
 
         // UseDeferredCheckout() stays the only way in, for every kind.
         Assert.True(kind.ResolvedEagerly);
@@ -358,7 +360,7 @@ public class DeferredKindCheckoutTests
         builder.AddLocalKind(KindName, kind);
 
         var git = new FakeGitClient();
-        var service = new LocalProjectSource(git).Resolve(builder, "frontend", Metadata("frontend"), DevConfig());
+        var service = new LocalProjectSource(git).Resolve(builder, "frontend", Definition("frontend"), DevConfig());
 
         // Every run after the first. Deferral only ever claims a checkout that is not there at all.
         Assert.True(kind.ResolvedEagerly);
@@ -380,7 +382,7 @@ public class DeferredKindCheckoutTests
         builder.AddLocalKind(KindName, kind);
 
         var service = new LocalProjectSource(new FakeGitClient())
-            .Resolve(builder, "frontend", Metadata("frontend"), DevConfig(path: checkout));
+            .Resolve(builder, "frontend", Definition("frontend"), DevConfig(path: checkout));
 
         // 'path' is the developer's own directory: nothing to clone, so nothing to wait for.
         Assert.True(kind.ResolvedEagerly);
@@ -398,7 +400,7 @@ public class DeferredKindCheckoutTests
         var git = new FakeGitClient();
         var gate = git.BlockFor("https://example.com/frontend.git");
 
-        var service = new LocalProjectSource(git).Resolve(builder, "frontend", Metadata("frontend"), DevConfig());
+        var service = new LocalProjectSource(git).Resolve(builder, "frontend", Definition("frontend"), DevConfig());
 
         // The javascript case. Aspire.Hosting.JavaScript adds a separate installer resource to run
         // "npm install", which the app already waits for. Holding back only the app would leave DCP
@@ -422,7 +424,7 @@ public class DeferredKindCheckoutTests
 
         var git = new FakeGitClient();
         var gate = git.BlockFor("https://example.com/frontend.git");
-        var service = new LocalProjectSource(git).Resolve(builder, "frontend", Metadata("frontend"), DevConfig());
+        var service = new LocalProjectSource(git).Resolve(builder, "frontend", Definition("frontend"), DevConfig());
 
         var services = builder.Services.BuildServiceProvider();
         await builder.Eventing.PublishAsync(
@@ -450,7 +452,7 @@ public class DeferredKindCheckoutTests
         builder.AddLocalKind(KindName, new StandInKind(withHelper: true));
 
         var git = new FakeGitClient();
-        var service = new LocalProjectSource(git).Resolve(builder, "frontend", Metadata("frontend"), DevConfig());
+        var service = new LocalProjectSource(git).Resolve(builder, "frontend", Definition("frontend"), DevConfig());
         var helper = Named(builder, "frontend-helper");
 
         var services = builder.Services.BuildServiceProvider();
@@ -480,7 +482,7 @@ public class DeferredKindCheckoutTests
 
         var git = new FakeGitClient();
         git.FailFor("https://example.com/frontend.git", new InvalidOperationException("no such repo"));
-        var service = new LocalProjectSource(git).Resolve(builder, "frontend", Metadata("frontend"), DevConfig());
+        var service = new LocalProjectSource(git).Resolve(builder, "frontend", Definition("frontend"), DevConfig());
 
         var services = builder.Services.BuildServiceProvider();
         await builder.Eventing.PublishAsync(
@@ -504,7 +506,7 @@ public class DeferredKindCheckoutTests
         builder.AddLocalKind(KindName, new ThrowingKind());
 
         var exception = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            new LocalProjectSource(new FakeGitClient()).Resolve(builder, "frontend", Metadata("frontend"), DevConfig()));
+            new LocalProjectSource(new FakeGitClient()).Resolve(builder, "frontend", Definition("frontend"), DevConfig()));
 
         // Same wrapping the eager path gives a handler that throws something it shouldn't: the
         // service and the kind are named, and the developer is pointed at the place a check that
@@ -525,7 +527,7 @@ public class DeferredKindCheckoutTests
         var kind = new StandInKind(supportsDeferral: false);
         builder.AddLocalKind(KindName, kind);
 
-        new LocalProjectSource(new FakeGitClient()).Resolve(builder, "frontend", Metadata("frontend"), DevConfig());
+        new LocalProjectSource(new FakeGitClient()).Resolve(builder, "frontend", Definition("frontend"), DevConfig());
 
         // The whole point of the cheap question: it is answerable without the expensive one being
         // asked, because the expensive one adds resources to the app model as a side effect.
@@ -585,7 +587,7 @@ public class DeferredKindCheckoutTests
         builder.AddLocalKind(KindName, kind);
 
         var service = new LocalProjectSource(new FakeGitClient())
-            .Resolve(builder, "frontend", Metadata("frontend"), DevConfig());
+            .Resolve(builder, "frontend", Definition("frontend"), DevConfig());
 
         // A kind may only be able to decide once it has looked at everything, so null out of
         // ResolveDeferred stays honoured even after the cheap probe said yes.
@@ -611,7 +613,7 @@ public class DeferredKindCheckoutTests
         builder.AddLocalKind(KindName, new StandInKind(withParameter: true));
 
         var git = new FakeGitClient();
-        var service = new LocalProjectSource(git).Resolve(builder, "frontend", Metadata("frontend"), DevConfig());
+        var service = new LocalProjectSource(git).Resolve(builder, "frontend", Definition("frontend"), DevConfig());
         var parameter = Named(builder, "frontend-token");
 
         // DCP never creates a parameter, so it never publishes the NotStarted the start task waits
@@ -641,7 +643,7 @@ public class DeferredKindCheckoutTests
         builder.AddLocalKind(KindName, new StandInKind(deferralReturnsNull: true, declineAfterAdding: true));
 
         var exception = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            new LocalProjectSource(new FakeGitClient()).Resolve(builder, "frontend", Metadata("frontend"), DevConfig()));
+            new LocalProjectSource(new FakeGitClient()).Resolve(builder, "frontend", Definition("frontend"), DevConfig()));
 
         // Nothing can come back out of the app model, so a handler that registers before deciding
         // leaves resources behind that then collide with the eager retry registering the same
@@ -660,7 +662,7 @@ public class DeferredKindCheckoutTests
         builder.AddLocalKind(KindName, new StandInKind(withHelper: true, helperWaitsForService: true));
 
         var exception = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            new LocalProjectSource(new FakeGitClient()).Resolve(builder, "frontend", Metadata("frontend"), DevConfig()));
+            new LocalProjectSource(new FakeGitClient()).Resolve(builder, "frontend", Definition("frontend"), DevConfig()));
 
         // Helpers are started before the service, so a helper waiting on the service can never be
         // satisfied — and the start loop awaits each in turn, so it would hang rather than fail.
@@ -681,7 +683,7 @@ public class DeferredKindCheckoutTests
         var git = new FakeGitClient();
         var gate = git.BlockFor("https://example.com/frontend.git");
         git.FailFor("https://example.com/frontend.git", new InvalidOperationException("no such repo"));
-        var service = new LocalProjectSource(git).Resolve(builder, "frontend", Metadata("frontend"), DevConfig());
+        var service = new LocalProjectSource(git).Resolve(builder, "frontend", Definition("frontend"), DevConfig());
         var helper = Named(builder, "frontend-helper");
 
         var services = builder.Services.BuildServiceProvider();

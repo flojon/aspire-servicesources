@@ -95,7 +95,7 @@ public static class ServiceSourcesBuilderExtensions
         // hear about an unrelated entry nothing else names.
         ServiceConfigAudit.EnsureSubscribed(builder);
 
-        var (metadata, developerConfig) = ServiceSourcesConfigCache.ResolveService(builder, name);
+        var (definition, developerConfig) = ServiceSourcesConfigCache.ResolveService(builder, name);
 
         if (!Sources.TryGetValue(developerConfig.Source, out var source))
         {
@@ -118,7 +118,7 @@ public static class ServiceSourcesBuilderExtensions
                 + $"{key.Replace(":", "__", StringComparison.Ordinal)}, or the command line.");
         }
 
-        return source.Resolve(builder, name, metadata, developerConfig);
+        return source.Resolve(builder, name, definition, developerConfig);
     }
 
     /// <summary>
@@ -219,6 +219,24 @@ public static class ServiceSourcesBuilderExtensions
         DeveloperConfigFileSource.EnsureRegistered(builder);
 
         LocalKindRegistry.For(builder).Register(kind, handler);
+        return builder;
+    }
+
+    /// <summary>
+    /// Declares services in the AppHost's own language instead of (or alongside) <c>servicesources.yaml</c>.
+    /// Must be called before the first <see cref="AddService"/>, which is where the catalog is read —
+    /// see the exception thrown by <see cref="Config.ServiceSourcesConfigCache"/> otherwise. Called more
+    /// than once, entries accumulate; a name declared twice across calls is the same duplicate error as
+    /// within one call.
+    /// </summary>
+    [AspireExport(RunSyncOnBackgroundThread = true)]
+    public static IDistributedApplicationBuilder AddServiceCatalog(
+        this IDistributedApplicationBuilder builder, Action<Catalog.ServiceCatalogBuilder> configure)
+    {
+        DeveloperConfigFileSource.EnsureRegistered(builder);
+
+        Config.ServiceSourcesConfigCache.CodeCatalogFor(builder).Configure(configure);
+
         return builder;
     }
 

@@ -1,5 +1,6 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Prepare;
 using Aspire.Hosting.ServiceSources.Sources;
@@ -134,15 +135,15 @@ public class PrepareEagerPathTests
         return dir;
     }
 
-    private static ServiceMetadata Metadata(
+    private static ServiceDefinition Definition(
         string name, string kind = KindName, string project = "Service.csproj", PrepareMetadata? prepare = null) =>
-        new()
+        new ServiceMetadata
         {
             Repository = $"https://example.com/{name}.git",
             Project = project,
             Kind = kind,
             Prepare = prepare,
-        };
+        }.ToDefinition("servicesources.yaml");
 
     private static PrepareMetadata Prepare(params string[] command) =>
         new() { Command = command.Length == 0 ? ["./prepare.sh"] : command };
@@ -160,7 +161,7 @@ public class PrepareEagerPathTests
 
         var runner = new FakeRunner(produces: "app.jar");
         new LocalProjectSource(new FakeGitClient(), runner)
-            .Resolve(builder, "routing", Metadata("routing", prepare: Prepare()), DevConfig());
+            .Resolve(builder, "routing", Definition("routing", prepare: Prepare()), DevConfig());
 
         Assert.Equal(
             Path.Combine(dir, ".servicesources", "checkouts", "routing"),
@@ -183,7 +184,7 @@ public class PrepareEagerPathTests
         builder.AddLocalKind(KindName, kind);
 
         var service = new LocalProjectSource(new FakeGitClient(), new FakeRunner(produces: "app.jar"))
-            .Resolve(builder, "routing", Metadata("routing", prepare: Prepare()), DevConfig());
+            .Resolve(builder, "routing", Definition("routing", prepare: Prepare()), DevConfig());
 
         Assert.Equal(1, kind.ValidateCalls);
         Assert.Equal("routing", service.Resource.Name);
@@ -198,7 +199,7 @@ public class PrepareEagerPathTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => new LocalProjectSource(new FakeGitClient(), new FakeRunner())
-                .Resolve(builder, "routing", Metadata("routing"), DevConfig()));
+                .Resolve(builder, "routing", Definition("routing"), DevConfig()));
 
         Assert.Contains("'app.jar' is not in the checkout", ex.Message);
     }
@@ -217,7 +218,7 @@ public class PrepareEagerPathTests
             .Resolve(
                 builder,
                 "orders",
-                Metadata("orders", LocalKinds.Dotnet, "Generated.csproj", Prepare()),
+                Definition("orders", LocalKinds.Dotnet, "Generated.csproj", Prepare()),
                 DevConfig());
 
         Assert.Equal("orders", service.Resource.Name);
@@ -232,7 +233,7 @@ public class PrepareEagerPathTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => new LocalProjectSource(new FakeGitClient(), new FakeRunner { ExitCode = 3 })
-                .Resolve(builder, "routing", Metadata("routing", prepare: Prepare()), DevConfig()));
+                .Resolve(builder, "routing", Definition("routing", prepare: Prepare()), DevConfig()));
 
         Assert.Contains("'routing'", ex.Message);
         Assert.Contains("prepare step failed", ex.Message);
@@ -257,7 +258,7 @@ public class PrepareEagerPathTests
 
         var runner = new FakeRunner(produces: "app.jar");
         new LocalProjectSource(new FakeGitClient(), runner)
-            .Resolve(builder, "routing", Metadata("routing", prepare: Prepare()), DevConfig());
+            .Resolve(builder, "routing", Definition("routing", prepare: Prepare()), DevConfig());
 
         Assert.Empty(runner.RanIn);
     }
@@ -275,7 +276,7 @@ public class PrepareEagerPathTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => new LocalProjectSource(new FakeGitClient(), new FakeRunner()).Resolve(
-                builder, "routing", Metadata("routing", prepare: Prepare("../../escape.sh")), DevConfig()));
+                builder, "routing", Definition("routing", prepare: Prepare("../../escape.sh")), DevConfig()));
 
         Assert.Contains("points outside the service's checkout", ex.Message);
     }
@@ -304,7 +305,7 @@ public class PrepareEagerPathTests
 
         var runner = new FakeRunner();
         new LocalProjectSource(new FakeGitClient(), runner).Resolve(
-            builder, "routing", Metadata("routing", prepare: Prepare("./prepare.sh", "--full")),
+            builder, "routing", Definition("routing", prepare: Prepare("./prepare.sh", "--full")),
             DevConfig(path: checkout));
 
         Assert.Empty(runner.RanIn);
@@ -326,7 +327,7 @@ public class PrepareEagerPathTests
 
         var runner = new FakeRunner();
         new LocalProjectSource(new FakeGitClient(), runner).Resolve(
-            builder, "routing", Metadata("routing", prepare: Prepare()),
+            builder, "routing", Definition("routing", prepare: Prepare()),
             DevConfig(path: checkout, prepare: new() { Command = ["make", "bootstrap"] }));
 
         Assert.Equal(checkout, Assert.Single(runner.RanIn));
@@ -349,7 +350,7 @@ public class PrepareEagerPathTests
 
         var runner = new FakeRunner();
         new LocalProjectSource(new FakeGitClient(), runner).Resolve(
-            builder, "routing", Metadata("routing", prepare: Prepare()),
+            builder, "routing", Definition("routing", prepare: Prepare()),
             DevConfig(path: checkout, prepare: new() { Mode = "never" }));
 
         Assert.Empty(runner.RanIn);
@@ -379,7 +380,7 @@ public class PrepareEagerPathTests
             builder.AddLocalKind(KindName, new StandInKind("app.jar"));
 
             new LocalProjectSource(new FakeGitClient(), new FakeRunner()).Resolve(
-                builder, "routing", Metadata("routing"), DevConfig(path: checkout, prepare: prepare));
+                builder, "routing", Definition("routing"), DevConfig(path: checkout, prepare: prepare));
         }
 
         Assert.False(Directory.Exists(Path.Combine(withoutStep, ".servicesources")));

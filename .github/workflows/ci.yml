@@ -363,11 +363,13 @@ jobs:
           if-no-files-found: ignore
 
   typecheck-typescript:
-    # samples/DemoAppHostTypeScript is the only thing here that compiles what these packages
-    # export to Aspire's Type System, and codegen is where that surface breaks: a signature the
-    # generator cannot project emits TypeScript referencing types it never declared. The
-    # AddService_IsExportedToAts test and the ASPIREEXPORT* analyzers both stop at the
-    # declarations - neither sees the emitted output.
+    # Two sample AppHosts compile what these packages export to Aspire's Type System, and codegen
+    # is where that surface breaks: a signature the generator cannot project emits TypeScript
+    # referencing types it never declared. The AddService_IsExportedToAts test and the
+    # ASPIREEXPORT* analyzers both stop at the declarations - neither sees the emitted output.
+    # samples/DemoAppHostTypeScript covers the yaml-based catalog; samples/DemoAppHostTypeScriptCodeCatalog
+    # covers AddServiceCatalog's code-declared surface (no servicesources.yaml) - both go through
+    # the same generator, so both are checked, as a matrix leg apiece.
     #
     # Runs alongside `build`, like smoketest-container: its restore and toolchain are its own.
     #
@@ -380,6 +382,17 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+
+    strategy:
+      # One sample's generated output failing to typecheck says nothing about the other's -
+      # both legs should report rather than the second being cancelled by the first's failure.
+      fail-fast: false
+      matrix:
+        include:
+          - sample: samples/DemoAppHostTypeScript
+            slug: yaml
+          - sample: samples/DemoAppHostTypeScriptCodeCatalog
+            slug: code-catalog
 
     env:
       # Pinned rather than floating, because this job compiles generated code: a CLI release
@@ -416,7 +429,7 @@ jobs:
           # drifting from them would check this against a different one than a contributor gets.
           node-version: '22'
           cache: npm
-          cache-dependency-path: samples/DemoAppHostTypeScript/package-lock.json
+          cache-dependency-path: ${{ matrix.sample }}/package-lock.json
 
       # Keyed apart from the other jobs' caches, as smoketest-container spells out: these run
       # concurrently and this one restores only what codegen pulls in, so a shared key would
@@ -457,12 +470,12 @@ jobs:
         id: cache-node-modules
         uses: actions/cache@v6
         with:
-          path: samples/DemoAppHostTypeScript/node_modules
-          key: typescript-node-modules-${{ runner.os }}-${{ hashFiles('samples/DemoAppHostTypeScript/package-lock.json') }}
+          path: ${{ matrix.sample }}/node_modules
+          key: typescript-node-modules-${{ runner.os }}-${{ matrix.slug }}-${{ hashFiles(format('{0}/package-lock.json', matrix.sample)) }}
 
       - name: Install the sample's npm dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
-        working-directory: samples/DemoAppHostTypeScript
+        working-directory: ${{ matrix.sample }}
         run: npm ci
 
       # aspire.config.json points at ../../src rather than a published version, so this
@@ -474,7 +487,7 @@ jobs:
       # that project's bin/ and keeps emitting its old output while reporting success
       # (microsoft/aspire#19603). The whole .aspire/ directory has to go, not just modules/.
       - name: Generate the TypeScript SDK
-        working-directory: samples/DemoAppHostTypeScript
+        working-directory: ${{ matrix.sample }}
         run: aspire restore --non-interactive --nologo
 
       # The step that actually gates the surface: `aspire restore` above reports having
@@ -483,17 +496,18 @@ jobs:
       # tsconfig.apphost.json includes .aspire/modules/**/*.mts deliberately - excluding those
       # generated modules to get a green check would typecheck all but the thing under test.
       - name: Typecheck the generated SDK
-        working-directory: samples/DemoAppHostTypeScript
+        working-directory: ${{ matrix.sample }}
         run: npx tsc --noEmit -p tsconfig.apphost.json
 
       # A failure above is a diagnostic pointing by line into two megabytes of machine-written
-      # TypeScript that exists only on the runner.
+      # TypeScript that exists only on the runner. Named per matrix leg (matrix.slug) - two legs
+      # uploading the same artifact name would collide.
       - name: Upload the generated SDK
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: generated-typescript-sdk
-          path: samples/DemoAppHostTypeScript/.aspire/modules
+          name: generated-typescript-sdk-${{ matrix.slug }}
+          path: ${{ matrix.sample }}/.aspire/modules
           if-no-files-found: ignore
 
   verify-invariants:

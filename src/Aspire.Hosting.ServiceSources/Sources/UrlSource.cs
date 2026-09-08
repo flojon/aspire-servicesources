@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.BackingServices;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
 
@@ -42,9 +43,9 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 internal sealed class UrlSource : IServiceSource
 {
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
-        IDistributedApplicationBuilder builder, string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)
+        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
     {
-        var uri = ResolveUrl(serviceName, metadata, config);
+        var uri = ResolveUrl(serviceName, definition, config);
 
         var resource = new ServiceUrlResource(serviceName);
         var endpoint = new EndpointAnnotation(
@@ -311,15 +312,15 @@ internal sealed class UrlSource : IServiceSource
     private static readonly System.Buffers.SearchValues<char> CouldCarryACredential =
         System.Buffers.SearchValues.Create("@=;&?, \t\r\n");
 
-    internal static Uri ResolveUrl(string serviceName, ServiceMetadata metadata, ServiceDeveloperConfig config)
+    internal static Uri ResolveUrl(string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
     {
-        var rawUrl = config.Url.Url ?? metadata.Url?.Url;
+        var rawUrl = config.Url.Url ?? definition.Url?.Url;
 
         if (string.IsNullOrWhiteSpace(rawUrl))
         {
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}' source is 'url' but no URL is configured — set " +
-                "'url.url' in servicesources.local.json or servicesources.yaml.");
+                $"'url.url' in servicesources.local.json or in {definition.Origin.Describe()}.");
         }
 
         if (!Uri.TryCreate(rawUrl, UriKind.Absolute, out var uri))

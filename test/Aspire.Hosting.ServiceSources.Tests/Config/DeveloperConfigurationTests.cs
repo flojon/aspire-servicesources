@@ -548,7 +548,7 @@ public class DeveloperConfigurationTests
         Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
 
         var prepared = LocalGitCheckout.PrepareRepoRoot(
-            "blanking", new ServiceMetadata(), config, dir, gitClient: null!);
+            "blanking", new ServiceMetadata().ToDefinition("servicesources.yaml"), config, dir, gitClient: null!);
 
         Assert.Equal(repoRoot, prepared.RepoRoot);
         Assert.NotEqual(dir, prepared.RepoRoot);
@@ -890,7 +890,7 @@ public class DeveloperConfigurationTests
             () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
 
         Assert.Contains(
-            "Note that 'order' is configured and reaches no service in 'servicesources.yaml'. "
+            "Note that 'order' is configured and reaches no declared service. "
             + "Did you mean 'orders'? If so, rename that entry rather than adding a second one.",
             ex.Message);
     }
@@ -1067,8 +1067,8 @@ public class DeveloperConfigurationTests
             () => ServiceSourcesConfigCache.ResolveService(builder, "nearmissenv"));
 
         Assert.Contains(
-            "Note that 'nearmisenv' is configured and reaches no service in "
-            + "'servicesources.yaml'. Did you mean 'nearmissenv'? If so, rename that entry "
+            "Note that 'nearmisenv' is configured and reaches no declared service. "
+            + "Did you mean 'nearmissenv'? If so, rename that entry "
             + "rather than adding a second one.",
             ex.Message);
     }

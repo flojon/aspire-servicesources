@@ -1,5 +1,6 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Sources;
 
@@ -192,8 +193,11 @@ public class LocalCheckoutPrefetchTests
         return dir;
     }
 
-    private static ServiceMetadata Metadata(string name, string? defaultRef = null) =>
-        new() { Repository = $"https://example.com/{name}.git", Project = "Service.csproj", DefaultRef = defaultRef };
+    private static ServiceDefinition Definition(string name, string? defaultRef = null) =>
+        new ServiceMetadata
+        {
+            Repository = $"https://example.com/{name}.git", Project = "Service.csproj", DefaultRef = defaultRef,
+        }.ToDefinition("servicesources.yaml");
 
     private static ServiceDeveloperConfig DevConfig() => new() { Source = "local" };
 
@@ -207,7 +211,7 @@ public class LocalCheckoutPrefetchTests
         var source = new LocalProjectSource(git);
 
         // Resolving one service triggers the prefetch for both.
-        source.Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        source.Resolve(builder, "orders", Definition("orders"), DevConfig());
 
         Assert.Equal(2, git.Cloned.Count);
     }
@@ -232,7 +236,7 @@ public class LocalCheckoutPrefetchTests
         var git = new FakeGitClient { StartBarrier = new Barrier(2) };
         var source = new LocalProjectSource(git);
 
-        source.Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        source.Resolve(builder, "orders", Definition("orders"), DevConfig());
 
         Assert.Equal(2, git.Cloned.Count);
     }
@@ -248,7 +252,10 @@ public class LocalCheckoutPrefetchTests
         var git = new FakeGitClient { StartBarrier = new Barrier(2) };
         var source = new LocalProjectSource(git);
 
-        source.Resolve(builder, "orders", new ServiceMetadata { Repository = Repository, Project = "Service.csproj" }, DevConfig());
+        source.Resolve(
+            builder, "orders",
+            new ServiceMetadata { Repository = Repository, Project = "Service.csproj" }.ToDefinition("servicesources.yaml"),
+            DevConfig());
 
         // Checkouts are keyed by service, not by repository, so a monorepo is fetched once per
         // service that lives in it — concurrently, competing for the same bandwidth. Documented
@@ -265,8 +272,8 @@ public class LocalCheckoutPrefetchTests
         var git = new FakeGitClient { StartBarrier = new Barrier(2) };
         var source = new LocalProjectSource(git);
 
-        source.Resolve(builder, "orders", Metadata("orders"), DevConfig());
-        source.Resolve(builder, "billing", Metadata("billing"), DevConfig());
+        source.Resolve(builder, "orders", Definition("orders"), DevConfig());
+        source.Resolve(builder, "billing", Definition("billing"), DevConfig());
 
         // Two services, two clones total — the second AddService cloned nothing more.
         Assert.Equal(2, git.Cloned.Count);
@@ -279,7 +286,7 @@ public class LocalCheckoutPrefetchTests
         var builder = TestHelpers.CreateBuilder(dir);
         var source = new LocalProjectSource(new FakeGitClient());
 
-        var service = source.Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        var service = source.Resolve(builder, "orders", Definition("orders"), DevConfig());
 
         // The heart of #58: the thing AddService returns is in the app model, so DCP gives it a
         // Service object and a container consumer can reference it.
@@ -297,11 +304,11 @@ public class LocalCheckoutPrefetchTests
         var source = new LocalProjectSource(git);
 
         // "billing" failed during the speculative prefetch, but this AppHost only wants "orders".
-        var service = source.Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        var service = source.Resolve(builder, "orders", Definition("orders"), DevConfig());
         Assert.NotNull(service);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => source.Resolve(builder, "billing", Metadata("billing"), DevConfig()));
+            () => source.Resolve(builder, "billing", Definition("billing"), DevConfig()));
         Assert.Contains("billing", ex.Message);
     }
 
@@ -318,7 +325,7 @@ public class LocalCheckoutPrefetchTests
 
         try
         {
-            var resolve = Task.Run(() => source.Resolve(builder, "orders", Metadata("orders"), DevConfig()));
+            var resolve = Task.Run(() => source.Resolve(builder, "orders", Definition("orders"), DevConfig()));
             var finished = await Task.WhenAny(resolve, Task.Delay(TimeSpan.FromSeconds(10)));
 
             Assert.True(
@@ -342,7 +349,7 @@ public class LocalCheckoutPrefetchTests
         var source = new LocalProjectSource(git);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => source.Resolve(builder, "billing", Metadata("billing"), DevConfig()));
+            () => source.Resolve(builder, "billing", Definition("billing"), DevConfig()));
 
         // A plain `throw storedException` would have reset this to the re-throw site, hiding the
         // prefetch worker the clone actually failed on.
@@ -361,7 +368,7 @@ public class LocalCheckoutPrefetchTests
         var builder = TestHelpers.CreateBuilder(dir);
         var git = new FakeGitClient();
 
-        var service = new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        var service = new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
 
         Assert.NotNull(service);
         Assert.Equal(["https://example.com/orders.git"], git.Cloned);
@@ -397,7 +404,7 @@ public class LocalCheckoutPrefetchTests
         var builder = TestHelpers.CreateBuilder(dir);
         var git = new FakeGitClient();
 
-        var service = new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        var service = new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
 
         // Skipped, not fatal: the prefetch is speculative, and this AppHost never asked for the
         // malformed service. The one it did ask for still resolves.
@@ -441,7 +448,7 @@ public class LocalCheckoutPrefetchTests
         var builder = TestHelpers.CreateBuilder(dir);
         var git = new FakeGitClient();
 
-        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
 
         // The candidate set rather than the clone list, for the reason given above: absence from
         // git.Cloned is also true of a clone that simply has not started yet.
@@ -457,9 +464,12 @@ public class LocalCheckoutPrefetchTests
         var builder = TestHelpers.CreateBuilder(dir);
         var handler = new FakeLocalResourceKind();
         builder.AddLocalKind("javascript", handler);
-        var metadata = new ServiceMetadata { Repository = "https://example.com/frontend.git", Kind = "javascript" };
+        var definition = new ServiceMetadata
+        {
+            Repository = "https://example.com/frontend.git", Kind = "javascript",
+        }.ToDefinition("servicesources.yaml");
 
-        var service = new LocalProjectSource(new FakeGitClient()).Resolve(builder, "frontend", metadata, DevConfig());
+        var service = new LocalProjectSource(new FakeGitClient()).Resolve(builder, "frontend", definition, DevConfig());
 
         Assert.Equal("frontend", Assert.Single(handler.Calls).ServiceName);
         Assert.Contains(builder.Resources, r => ReferenceEquals(r, service.Resource));
@@ -470,11 +480,14 @@ public class LocalCheckoutPrefetchTests
     {
         var dir = CreateAppHostDirectory("frontend");
         var builder = TestHelpers.CreateBuilder(dir);
-        var metadata = new ServiceMetadata { Repository = "https://example.com/frontend.git", Kind = "javascript" };
+        var definition = new ServiceMetadata
+        {
+            Repository = "https://example.com/frontend.git", Kind = "javascript",
+        }.ToDefinition("servicesources.yaml");
         var git = new FakeGitClient();
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => new LocalProjectSource(git).Resolve(builder, "frontend", metadata, DevConfig()));
+            () => new LocalProjectSource(git).Resolve(builder, "frontend", definition, DevConfig()));
 
         // The kind lookup is a registry probe, so it has to happen before the checkout: a typo'd
         // kind must not cost a cold clone of this repository — nor, through the prefetch, of every
@@ -493,7 +506,7 @@ public class LocalCheckoutPrefetchTests
         var builder = TestHelpers.CreateBuilder(dir);
         var git = new FakeGitClient { StartBarrier = new Barrier(2) };
 
-        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
 
         // "billing" was cloned because the prefetch cannot know which services the AppHost will
         // add — but the developer can act on that, since the file is theirs. Paying for it in
@@ -515,7 +528,7 @@ public class LocalCheckoutPrefetchTests
         var builder = TestHelpers.CreateBuilder(dir);
         var git = new FakeGitClient();
 
-        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders", defaultRef: "main"), DevConfig());
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders", defaultRef: "main"), DevConfig());
 
         // Both checkouts already existed, so there was nothing to clone...
         Assert.Empty(git.Cloned);
@@ -535,7 +548,7 @@ public class LocalCheckoutPrefetchTests
         var git = new FakeGitClient();
         git.FailFor("https://example.com/billing.git", new InvalidOperationException("no such repo"));
 
-        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
 
         var prefetch = LocalCheckoutPrefetch.For(builder, git);
 
@@ -560,8 +573,8 @@ public class LocalCheckoutPrefetchTests
         var git = new FakeGitClient { StartBarrier = new Barrier(2) };
         var source = new LocalProjectSource(git);
 
-        source.Resolve(builder, "orders", Metadata("orders"), DevConfig());
-        source.Resolve(builder, "billing", Metadata("billing"), DevConfig());
+        source.Resolve(builder, "orders", Definition("orders"), DevConfig());
+        source.Resolve(builder, "billing", Definition("billing"), DevConfig());
 
         // Nothing was speculative in the end, so there is nothing to tell the developer about.
         Assert.Null(LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage);
@@ -599,7 +612,7 @@ public class LocalCheckoutPrefetchTests
         var builder = TestHelpers.CreateBuilder(dir);
         var git = new FakeGitClient { StartBarrier = new Barrier(2) };
 
-        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
 
         Assert.Equal(2, git.Cloned.Count);
         Assert.Contains("https://example.com/billing.git", git.Cloned);
@@ -620,7 +633,7 @@ public class LocalCheckoutPrefetchTests
         builder.UseDeferredCheckout();
         var git = new FakeGitClient();
 
-        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
 
         // Nothing was started speculatively at all. The candidate set is computed synchronously
         // inside the first AddService, so this is already settled by the time Resolve has returned —
@@ -651,8 +664,8 @@ public class LocalCheckoutPrefetchTests
         var git = new FakeGitClient { StartBarrier = new Barrier(2) };
         var source = new LocalProjectSource(git);
 
-        source.Resolve(builder, "orders", Metadata("orders"), DevConfig());
-        source.Resolve(builder, "billing", Metadata("billing"), DevConfig());
+        source.Resolve(builder, "orders", Definition("orders"), DevConfig());
+        source.Resolve(builder, "billing", Definition("billing"), DevConfig());
 
         Assert.True(
             SpinWait.SpinUntil(() => git.Cloned.Count == 2, TimeSpan.FromSeconds(30)),
@@ -674,7 +687,7 @@ public class LocalCheckoutPrefetchTests
         builder.UseDeferredCheckout();
         var git = new FakeGitClient { StartBarrier = new Barrier(2) };
 
-        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
 
         Assert.Equal(2, git.Cloned.Count);
     }
@@ -693,7 +706,7 @@ public class LocalCheckoutPrefetchTests
         var builder = TestHelpers.CreateBuilder(dir);
         var git = new FakeGitClient();
 
-        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
 
         Assert.Equal(["https://example.com/orders.git"], git.Cloned);
         Assert.Null(LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage);
@@ -719,7 +732,7 @@ public class LocalCheckoutPrefetchTests
         var builder = TestHelpers.CreateBuilder(dir);
         var git = new FakeGitClient();
 
-        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
 
         var prefetch = LocalCheckoutPrefetch.For(builder, git);
 
@@ -755,7 +768,7 @@ public class LocalCheckoutPrefetchTests
         var builder = TestHelpers.CreateBuilder(dir);
         var git = new FakeGitClient();
 
-        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
 
         // The fake reports nothing, which is a clone git had nothing to say about — the small
         // repository of the "silence is normal" case. What matters here is that the stream ends.
@@ -771,7 +784,7 @@ public class LocalCheckoutPrefetchTests
         var builder = TestHelpers.CreateBuilder(dir);
         var git = new FakeGitClient();
 
-        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
 
         // A warm checkout: nothing was cloned, so nothing was reported — but the stream still has to
         // end, because whoever is watching waits for that rather than polling.
@@ -788,7 +801,7 @@ public class LocalCheckoutPrefetchTests
         git.FailFor("https://example.com/orders.git", new InvalidOperationException("no such repo"));
 
         Assert.ThrowsAny<Exception>(
-            () => new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig()));
+            () => new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig()));
 
         Assert.Empty(await DrainProgressAsync(LocalCheckoutPrefetch.For(builder, git), "orders"));
     }
@@ -815,7 +828,7 @@ public class LocalCheckoutPrefetchTests
         var builder = TestHelpers.CreateBuilder(dir);
         var git = new FakeGitClient();
 
-        new LocalProjectSource(git).Resolve(builder, "billing", Metadata("billing"), DevConfig());
+        new LocalProjectSource(git).Resolve(builder, "billing", Definition("billing"), DevConfig());
 
         // Nobody asked to watch it, so git was never asked for progress either — which is what
         // keeps --progress off every clone that has no audience. ("orders" is cloned too, by the
@@ -863,7 +876,7 @@ public class LocalCheckoutPrefetchTests
             giveUp.Token);
 
         var resolved = Task.Run(
-            () => prefetch.GetRepoRoot("billing", Metadata("billing"), DevConfig(), dir, git),
+            () => prefetch.GetRepoRoot("billing", Definition("billing"), DevConfig(), dir, git),
             CancellationToken.None);
 
         // The stream is over while the checkout is not. Closing it only when GetRepoRoot returns
@@ -885,7 +898,7 @@ public class LocalCheckoutPrefetchTests
         var git = new FakeGitClient();
 
         // Resolved in full first: the checkout is over, and so is anything that was watching it.
-        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
 
         // A watcher arriving now is too late — there is no clone left to report and nothing that
         // closes a stream would run again to close this one. Handing back an open stream would be
@@ -903,7 +916,7 @@ public class LocalCheckoutPrefetchTests
         git.ReportProgress("https://example.com/orders.git", "Receiving objects:  10% (1/10)");
         git.ReportProgress("https://example.com/billing.git", "Receiving objects:  20% (2/10)");
 
-        new LocalProjectSource(git).Resolve(builder, "orders", Metadata("orders"), DevConfig());
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
 
         var prefetch = LocalCheckoutPrefetch.For(builder, git);
 

@@ -54,7 +54,8 @@ internal sealed class DeveloperConfiguration
     public required IReadOnlyList<string> UndeclaredNames { get; init; }
 
     /// <summary>
-    /// The service names <c>servicesources.yaml</c> declares.
+    /// The service names the catalog declares — code-declared and yaml-declared alike (design
+    /// finding 5).
     /// </summary>
     /// <remarks>
     /// Kept for the second half of the near miss in <see cref="NotConfiguredError"/>: an entry that
@@ -77,8 +78,9 @@ internal sealed class DeveloperConfiguration
     /// no-op once the file is registered.
     /// </summary>
     /// <param name="catalogNames">
-    /// The service names <c>servicesources.yaml</c> declares, which decide the spelling the entries
-    /// are keyed by — see <see cref="CanonicalizeToCatalog"/>.
+    /// The service names the catalog declares — code-declared and yaml-declared alike (design
+    /// finding 5) — which decide the spelling the entries are keyed by — see
+    /// <see cref="CanonicalizeToCatalog"/>.
     /// </param>
     public static DeveloperConfiguration ReadFrom(
         IDistributedApplicationBuilder builder, IEnumerable<string> catalogNames)
@@ -403,8 +405,11 @@ internal sealed class DeveloperConfiguration
     private string MisspelledServiceNameNote(string serviceName) =>
         NearMissForService(serviceName) is not { } configured
             ? ""
-            : $" Note that '{configured}' is configured and reaches no service in "
-              + $"'servicesources.yaml'. Did you mean '{serviceName}'? "
+            // Generalized rather than naming a file: CatalogNames now covers code-declared names
+            // too (design finding 5), and this note has no way to tell which catalog declared
+            // 'serviceName' — code, yaml, or (with two catalogs) either.
+            : $" Note that '{configured}' is configured and reaches no declared service. "
+              + $"Did you mean '{serviceName}'? "
               + (Services.ContainsKey(serviceName)
                   ? $"An entry for '{serviceName}' is there already, so the source belongs on that "
                     + $"one rather than on '{configured}'."

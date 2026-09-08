@@ -1,5 +1,6 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Sources;
 using IPortAllocator = Aspire.Hosting.ServiceSources.PortAllocation.IPortAllocator;
 
@@ -11,20 +12,20 @@ namespace Aspire.Hosting.ServiceSources.Tests;
 /// </summary>
 public class ServiceConfigurationExtensionsTests
 {
-    private static readonly ServiceMetadata ContainerMetadata = new()
+    private static readonly ServiceDefinition ContainerDefinition = new ServiceMetadata
     {
         Container = new ContainerMetadata { Image = "nginxdemos/hello", Port = 8080 },
-    };
+    }.ToDefinition("servicesources.yaml");
 
-    private static readonly ServiceMetadata KubernetesMetadata = new()
+    private static readonly ServiceDefinition KubernetesDefinition = new ServiceMetadata
     {
         Kubernetes = new KubernetesMetadata { Service = "orders", Port = 8080 },
-    };
+    }.ToDefinition("servicesources.yaml");
 
-    private static readonly ServiceMetadata UrlMetadata = new()
+    private static readonly ServiceDefinition UrlDefinition = new ServiceMetadata
     {
         Url = new UrlMetadata { Url = "https://orders.example.com" },
-    };
+    }.ToDefinition("servicesources.yaml");
 
     private sealed class FixedPortAllocator : IPortAllocator
     {
@@ -44,10 +45,10 @@ public class ServiceConfigurationExtensionsTests
 
     private static IResourceBuilder<IResourceWithServiceDiscovery> AddContainerService(
         IDistributedApplicationBuilder builder) =>
-        new ContainerSource().Resolve(builder, "payments", ContainerMetadata, new ServiceDeveloperConfig { Source = "container" });
+        new ContainerSource().Resolve(builder, "payments", ContainerDefinition, new ServiceDeveloperConfig { Source = "container" });
 
     private static IResourceBuilder<IResourceWithServiceDiscovery> AddUrlService(IDistributedApplicationBuilder builder) =>
-        new UrlSource().Resolve(builder, "inventory", UrlMetadata, new ServiceDeveloperConfig { Source = "url" });
+        new UrlSource().Resolve(builder, "inventory", UrlDefinition, new ServiceDeveloperConfig { Source = "url" });
 
     [Fact]
     public void Configure_OnContainerSource_AppliesEnvironmentToTheRealResource()
@@ -166,7 +167,7 @@ public class ServiceConfigurationExtensionsTests
 
         AddUrlService(builder).Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B"));
         new UrlSource()
-            .Resolve(builder, "billing", UrlMetadata, new ServiceDeveloperConfig { Source = "url" })
+            .Resolve(builder, "billing", UrlDefinition, new ServiceDeveloperConfig { Source = "url" })
             .Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B"));
 
         // Grouping is per service, not global — each service names itself and its own remedy.
@@ -178,7 +179,7 @@ public class ServiceConfigurationExtensionsTests
     {
         var builder = Builder();
         var service = new KubernetesSource(new FixedPortAllocator()).Resolve(
-            builder, "orders", KubernetesMetadata,
+            builder, "orders", KubernetesDefinition,
             new ServiceDeveloperConfig { Source = "kubernetes", Kubernetes = new() { Context = "dev" } });
 
         // The port-forward executable would accept environment variables happily, so skipping has to
@@ -195,7 +196,7 @@ public class ServiceConfigurationExtensionsTests
         var builder = Builder();
         var migrations = builder.AddResource(new ServiceContainerResource("migrations")).WithImage("migrate");
         var service = new KubernetesSource(new FixedPortAllocator()).Resolve(
-            builder, "orders", KubernetesMetadata,
+            builder, "orders", KubernetesDefinition,
             new ServiceDeveloperConfig { Source = "kubernetes", Kubernetes = new() { Context = "dev" } });
 
         // Unlike environment variables, start ordering is not "configuring the wrong process": the

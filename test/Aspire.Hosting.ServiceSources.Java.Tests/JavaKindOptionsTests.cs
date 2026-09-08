@@ -1,3 +1,4 @@
+using Aspire.Hosting.ServiceSources.Catalog;
 using static Aspire.Hosting.ServiceSources.Java.Tests.TestHelpers;
 
 namespace Aspire.Hosting.ServiceSources.Java.Tests;
@@ -412,5 +413,37 @@ public class JavaKindOptionsTests
             () => JavaKindOptions.Parse("java-api", "spring-boot:run"));
 
         Assert.Contains("java-api", ex.Message);
+    }
+
+    /// <summary>
+    /// The <c>Dictionary&lt;string, object&gt;</c> shape a <c>WithKind</c> caller passes in code —
+    /// the same shape Task 13's sample (<c>samples/DemoAppHostCodeCatalog/Program.cs</c>) uses —
+    /// rather than yaml's own <c>Dictionary&lt;object, object&gt;</c>. Exercises the CLR-side path
+    /// end to end: <c>ServiceCatalogBuilder</c> → <c>ServiceDefinitionBuilder.WithKind</c> →
+    /// <c>Freeze()</c> → <see cref="JavaKindOptions.Parse"/>, rather than testing
+    /// <see cref="LocalKindConfig.Parse{T}"/> or <c>WithKind</c> storage in isolation.
+    /// </summary>
+    [Fact]
+    public void Parse_DictionaryFromWithKind_ResolvesRunModeAndPort()
+    {
+        var catalogBuilder = new ServiceCatalogBuilder();
+        catalogBuilder.AddService("catalog")
+            .WithRepository("https://github.com/spring-projects/spring-petclinic", defaultRef: "main")
+            .WithKind("java", new Dictionary<string, object>
+            {
+                ["mavenGoal"] = "spring-boot:run",
+                ["port"] = 8080,
+            });
+
+        var frozen = catalogBuilder.Freeze();
+        var definition = frozen["catalog"];
+
+        var options = JavaKindOptions.Parse("catalog", definition.KindOptions);
+
+        Assert.Equal(JavaRunModeKind.MavenGoal, options.RunMode.Kind);
+        Assert.Equal("spring-boot:run", options.RunMode.Value);
+        Assert.Equal(8080, options.Port);
+        Assert.Equal(".", options.WorkingDirectory);
+        Assert.Empty(options.Args);
     }
 }

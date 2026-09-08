@@ -60,7 +60,10 @@ public class ServiceConfigAuditTests
         var warning = Assert.Single(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
 
         Assert.Contains("odrers", warning);
-        Assert.Contains("servicesources.yaml", warning);
+        // Names the AppHost's catalog rather than 'servicesources.yaml' specifically — this
+        // wording is shared with a code-only catalog, which has no yaml file to name (design
+        // finding 5; see CatalogErrorMessageTests for the code-only case).
+        Assert.Contains("this AppHost's catalog", warning);
     }
 
     /// <summary>

@@ -118,7 +118,114 @@ dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources --prerelease
 One package, so one prerelease. The language hosting packages are Aspire's own and come from
 nuget.org as usual — a preview of this package does not imply a preview of those.
 
+## Authoring the catalog in code
+
+Everything `servicesources.yaml` declares can be written in the AppHost's own language
+instead — C# directly, or TypeScript (and any other Aspire guest language) through
+Aspire's Type System — alongside yaml or in place of it. `AddServiceCatalog` takes a
+catalog builder and covers all four sources:
+
+```csharp
+builder.AddServiceCatalog(catalog =>
+{
+    catalog.AddService("orders")
+        .WithRepository(
+            "https://github.com/example/orders",
+            project: "src/Orders.Api/Orders.Api.csproj",
+            defaultRef: "main");
+
+    catalog.AddService("inventory")
+        .WithUrl("https://httpbin.org");
+
+    catalog.AddService("payments")
+        .WithContainer("nginxdemos/hello", port: 80, defaultTag: "latest")
+        .WithKubernetes("payments", port: 8080);
+});
+
+var orders = builder.AddService("orders");
+```
+
+The same idea from a TypeScript AppHost, through Aspire's Type System (the exported
+method is `addServiceToCatalog`, not `addService` — a capability-id collision the two
+would otherwise have; the C# method itself is still `AddService`):
+
+```typescript
+import { createBuilder } from './.aspire/modules/aspire.mjs';
+
+const builder = await createBuilder();
+
+await builder.addServiceCatalog(async (catalog) => {
+  const orders = await catalog.addServiceToCatalog('orders');
+  await orders.withRepository('https://github.com/example/orders', {
+    project: 'src/Orders.Api/Orders.Api.csproj',
+    defaultRef: 'main',
+  });
+
+  const inventory = await catalog.addServiceToCatalog('inventory');
+  await inventory.withUrl('https://httpbin.org');
+});
+```
+
+`AddServiceCatalog` must be called before the first `AddService(...)` call anywhere in the
+AppHost — yaml-based `AddService` calls included — since a service is resolved as soon as
+it's added; calling it after throws, naming the ordering problem. Call it near the top of
+the AppHost, next to `UseDeferredCheckout()` and `UseJava()`/`UseJavaScript()`. It can be
+called more than once — a helper method can contribute its own entries — and calls append
+rather than replace.
+
+**Which builder method enables which `source`**, since the method names are not the four
+values you type into `servicesources.local.json`:
+
+| Builder method | yaml it replaces | `"source"` it enables |
+| --- | --- | --- |
+| `WithRepository` + `WithKind` | `repository:`, `project:`, `defaultRef:`, `kind:` | `"local"` |
+| `WithUrl` | `url:` | `"url"` |
+| `WithContainer` | `container:` | `"container"` |
+| `WithKubernetes` | `kubernetes:` | `"kubernetes"` |
+
+`WithContainer` and `WithKubernetes` have no code-authoring equivalent for yaml's
+`container.scheme`/`kubernetes.scheme` (documented under the `"container"` and
+`"kubernetes"` source sections below) in this stage — a service that needs `scheme: https`
+still needs a `servicesources.yaml` entry for it; porting one to the code catalog silently
+drops back to the `http` default.
+
+Calls are additive — `WithContainer` and `WithKubernetes` above both configure `payments`,
+the same as two separate yaml keys would. A second call to the *same* method for one
+service is a configuration error naming the service and the block, not a silent overwrite.
+A service declared in both the code catalog and `servicesources.yaml` is an error too,
+naming both sources — not a merge, and not a silent precedence rule.
+
+A `"local"` service that isn't the built-in `dotnet` kind takes its options through
+`WithKind`, the same primitive a third-party kind package builds on. Registering and using
+one is three lines:
+
+```csharp
+builder.AddLocalKind("mykind", new MyKindHandler());
+// ...
+catalog.AddService("x").WithKind("mykind", myOptions);
+```
+
+`myOptions` can be a plain `Dictionary<string, object>` — the same shape yaml's `<kind>:`
+block produces — and today that's also the only shape available for the built-in `java`
+kind from code: typed option handles (`AsJava`, `AsJavaScript`) are a later addition, not
+yet shipped.
+
+**A code-declared catalog still needs `servicesources.local.json`.** `AddServiceCatalog`
+says what a service *is* — its repository, its URL, its container image — the same job
+`servicesources.yaml` does. It does not decide how to resolve it for you personally: that
+is still `servicesources.local.json`'s job, per developer, per service, with the same
+`"source"` values (`"local"`/`"url"`/`"container"`/`"kubernetes"`) it always took. A
+service declared only in code and never given a `servicesources.local.json` entry fails to
+resolve exactly as a yaml-declared one would.
+
 ## Getting started
+
+A service catalog can be declared either in `servicesources.yaml` — the walkthrough below
+— or in code via `AddServiceCatalog`, covered in full under
+[Authoring the catalog in code](#authoring-the-catalog-in-code). This walkthrough uses
+yaml because it's the simplest on-ramp; the "in code" section covers the alternative in
+full, and everything else in this README applies the same way regardless of which one you
+use.
 
 **1. Declare the service in `Program.cs`:**
 

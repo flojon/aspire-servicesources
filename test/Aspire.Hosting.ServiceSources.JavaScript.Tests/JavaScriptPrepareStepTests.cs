@@ -1,4 +1,5 @@
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Prepare;
 using Aspire.Hosting.ServiceSources.Sources;
@@ -89,8 +90,8 @@ public class JavaScriptPrepareStepTests
         return dir;
     }
 
-    private static ServiceMetadata Metadata(PrepareMetadata? prepare) =>
-        new()
+    private static ServiceDefinition Definition(PrepareMetadata? prepare) =>
+        new ServiceMetadata
         {
             Repository = "https://example.com/frontend.git",
             Kind = "javascript",
@@ -101,7 +102,7 @@ public class JavaScriptPrepareStepTests
                 runScript: dev
                 port: 3000
                 """),
-        };
+        }.ToDefinition("servicesources.yaml");
 
     private static ServiceDeveloperConfig DevConfig() => new() { Source = "local", Local = new() };
 
@@ -118,7 +119,7 @@ public class JavaScriptPrepareStepTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => new LocalProjectSource(new FakeGitClient(), new FakePrepareRunner())
-                .Resolve(builder, ServiceName, Metadata(prepare: null), DevConfig()));
+                .Resolve(builder, ServiceName, Definition(prepare: null), DevConfig()));
 
         Assert.Contains("package.json", ex.Message);
     }
@@ -133,7 +134,7 @@ public class JavaScriptPrepareStepTests
         var runner = new FakePrepareRunner();
 
         var service = new LocalProjectSource(new FakeGitClient(), runner).Resolve(
-            builder, ServiceName, Metadata(new PrepareMetadata { Command = ["./prepare.sh"] }), DevConfig());
+            builder, ServiceName, Definition(new PrepareMetadata { Command = ["./prepare.sh"] }), DevConfig());
 
         Assert.Equal(1, runner.Runs);
         Assert.Equal(ServiceName, service.Resource.Name);

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Prepare;
 using Aspire.Hosting.ServiceSources.Git;
 using Microsoft.Extensions.DependencyInjection;
@@ -113,7 +114,7 @@ internal sealed class DeferredCheckout
         IResource Resource,
         IReadOnlyList<IResource> HeldBack,
         string RepoRoot,
-        ServiceMetadata Metadata,
+        ServiceDefinition Definition,
         ServiceDeveloperConfig Config,
         string AppHostDirectory,
         LocalCheckoutPrefetch Prefetch,
@@ -206,7 +207,7 @@ internal sealed class DeferredCheckout
     public IResourceBuilder<IResourceWithServiceDiscovery> Register(
         IDistributedApplicationBuilder builder,
         string serviceName,
-        ServiceMetadata metadata,
+        ServiceDefinition definition,
         ServiceDeveloperConfig config,
         LocalCheckoutPrefetch prefetch,
         IGitClient gitClient,
@@ -219,7 +220,7 @@ internal sealed class DeferredCheckout
         // path named here is what DCP freezes into the executable spec and what MSBuild is later
         // pointed at, so a 'project' that climbs out of the checkout has to be refused here too, and
         // by the same code — see LocalProjectSource.ConfineProject.
-        var projectPath = LocalProjectSource.ConfineProject(serviceName, repoRoot, metadata.Project);
+        var projectPath = LocalProjectSource.ConfineProject(serviceName, repoRoot, definition.Project);
 
         var resource = new ProjectResource(serviceName);
 
@@ -236,10 +237,10 @@ internal sealed class DeferredCheckout
 #pragma warning restore ASPIREPROJECTS001
 
         Add(
-            builder, serviceName, resource, [], repoRoot, metadata, config, prefetch, gitClient, prepareStep,
+            builder, serviceName, resource, [], repoRoot, definition, config, prefetch, gitClient, prepareStep,
             prepareRunner,
             (deferredResource, checkoutRoot, logger) =>
-                RestoreLaunchProfile(deferredResource, metadata.Project, checkoutRoot, logger));
+                RestoreLaunchProfile(deferredResource, definition.Project, checkoutRoot, logger));
 
         return ResolvedService.Tag(resourceBuilder, serviceName, "local");
     }
@@ -262,7 +263,7 @@ internal sealed class DeferredCheckout
     public IResourceBuilder<IResourceWithServiceDiscovery>? RegisterKind(
         IDistributedApplicationBuilder builder,
         string serviceName,
-        ServiceMetadata metadata,
+        ServiceDefinition definition,
         ServiceDeveloperConfig config,
         LocalCheckoutPrefetch prefetch,
         IGitClient gitClient,
@@ -289,7 +290,7 @@ internal sealed class DeferredCheckout
             if (builder.Resources.Any(added => !before.Contains(added)))
             {
                 throw new ServiceSourcesConfigurationException(
-                    $"Service '{serviceName}': the handler for kind '{metadata.Kind}' added resources to the app " +
+                    $"Service '{serviceName}': the handler for kind '{definition.Kind}' added resources to the app " +
                     "model and then declined deferral by returning null from ResolveDeferred. Decide before " +
                     "adding anything — SupportsDeferredCheckout is the side-effect-free place to decline — " +
                     "because resources cannot be removed once added, and the eager path registers this service " +
@@ -324,7 +325,7 @@ internal sealed class DeferredCheckout
             if (helper.Annotations.OfType<WaitAnnotation>().Any(wait => ReferenceEquals(wait.Resource, resource)))
             {
                 throw new ServiceSourcesConfigurationException(
-                    $"Service '{serviceName}': the handler for kind '{metadata.Kind}' added resource " +
+                    $"Service '{serviceName}': the handler for kind '{definition.Kind}' added resource " +
                     $"'{helper.Name}' alongside the service and gave it a WaitFor on the service itself. A " +
                     "deferred checkout starts the resources a handler added before the service they belong to, " +
                     "so that wait could never be satisfied. Have the service wait on the helper rather than the " +
@@ -345,10 +346,10 @@ internal sealed class DeferredCheckout
         }
 
         Add(
-            builder, serviceName, resource, heldBack, repoRoot, metadata, config, prefetch, gitClient, prepareStep,
+            builder, serviceName, resource, heldBack, repoRoot, definition, config, prefetch, gitClient, prepareStep,
             prepareRunner,
             (_, checkoutRoot, logger) =>
-                RunCheckoutValidation(registration, serviceName, metadata.Kind, checkoutRoot, logger));
+                RunCheckoutValidation(registration, serviceName, definition.Kind, checkoutRoot, logger));
 
         return ResolvedService.Tag(registration.Service, serviceName, "local");
     }
@@ -433,7 +434,7 @@ internal sealed class DeferredCheckout
         IResource resource,
         IReadOnlyList<IResource> heldBack,
         string repoRoot,
-        ServiceMetadata metadata,
+        ServiceDefinition definition,
         ServiceDeveloperConfig config,
         LocalCheckoutPrefetch prefetch,
         IGitClient gitClient,
@@ -448,12 +449,12 @@ internal sealed class DeferredCheckout
         //
         // It also marks the service requested, which it must: the prefetch decides what to report as
         // speculative work at BeforeStartEvent, before a deferred service has waited on anything.
-        prefetch.StartCheckout(serviceName, metadata, config, builder.AppHostDirectory, gitClient);
+        prefetch.StartCheckout(serviceName, definition, config, builder.AppHostDirectory, gitClient);
 
         lock (_gate)
         {
             _deferred.Add(new Deferred(
-                serviceName, resource, heldBack, repoRoot, metadata, config, builder.AppHostDirectory, prefetch,
+                serviceName, resource, heldBack, repoRoot, definition, config, builder.AppHostDirectory, prefetch,
                 gitClient, prepareStep, prepareRunner, onCheckoutLanded));
         }
 
@@ -702,7 +703,7 @@ internal sealed class DeferredCheckout
 
             logger.LogInformation(
                 "Resolving checkout of {Repository} into {RepoRoot} before starting.",
-                GitUrl.Redact(deferred.Metadata.Repository),
+                GitUrl.Redact(deferred.Definition.Repository),
                 deferred.RepoRoot);
 
             // Claimed here, on this thread, rather than inside the reporting task: the checkout
@@ -723,7 +724,7 @@ internal sealed class DeferredCheckout
             {
                 repoRoot = deferred.Prefetch.GetRepoRoot(
                     deferred.ServiceName,
-                    deferred.Metadata,
+                    deferred.Definition,
                     deferred.Config,
                     deferred.AppHostDirectory,
                     deferred.GitClient);
