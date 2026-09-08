@@ -1,9 +1,14 @@
 # ATS Probe — Inherited Instance Methods on an Exported Handle (#291, open question 3)
 
 **Date:** 2026-09-08
-**Status:** Measured. All four shapes cross. Answers open question 3 of
-[the repository-handle design](2026-09-08-repository-handle-design.md) **yes**, and turns that
-design's rejected separate-builder-type alternative into its recommended shape.
+**Status:** Measured, nine shapes. Answers open question 3 of
+[the repository-handle design](2026-09-08-repository-handle-design.md) **yes**.
+Extended the same day: review objected that `monorepo.AddService(…)` inverts ownership — the catalog
+owns services, and a repository is one source's worth of a service's configuration, not a container
+for services — which sent shapes **6–9** after a different question: can a handle travel as a
+*parameter*, so services stay on the catalog? It can (finding 6), which makes the split builder types
+of findings 2–5 unnecessary; but the natural spelling is a C# overload, and an overload **silently
+loses one half** (finding 7). Findings 8 and 9 are the fix and its cost.
 **Method:** the same one [stage 0](2026-09-07-code-catalog-stage0-ats-probe-findings.md) used — a
 throwaway probe file under `src/Aspire.Hosting.ServiceSources/`, `aspire restore` in
 `samples/DemoAppHostTypeScript` (whose `aspire.config.json` points at `../../src`), the generated
@@ -202,6 +207,113 @@ console.log(await q3Eps.q3ProbeSharedFluent('eps-shared').q3ProbeOnlyOnEpsilon('
 This was the risk that would have made the whole approach not worth it — a shared method returning
 the base would have broken every chain after it, in C# and in TypeScript. It does not.
 
+## 6 — An exported handle crosses as a *parameter*, and need not be awaited
+
+Probed after review raised that `monorepo.AddService("orders")` inverts ownership — the catalog owns
+services; a repository is one source's worth of a service's configuration, not a container for
+services. The shape that does not invert it needs a handle to travel as an argument:
+
+```csharp
+[AspireExport(ExposeMethods = true)]
+public sealed class Q3ProbeServiceHandle
+{
+    public string Q3ProbeWithRepositoryHandle(Q3ProbeRepoHandle repository) => "handle-accepted";
+
+    public string Q3ProbeWithRepositoryHandleAndProject(Q3ProbeRepoHandle repository, string? project = null) =>
+        project ?? "no-project";
+}
+```
+
+Generated:
+
+```typescript
+export interface Q3ProbeServiceHandle {
+    toJSON(): MarshalledHandle;
+    q3ProbeWithRepositoryHandle(repository: Awaitable<Q3ProbeRepoHandle>): Promise<string>;
+    q3ProbeWithRepositoryHandleAndProject(repository: Awaitable<Q3ProbeRepoHandle>, options?: Q3ProbeWithRepositoryHandleAndProjectOptions): Promise<string>;
+}
+```
+
+**Clean, and more forgiving than expected.** The parameter type is `Awaitable<T>`, so a TypeScript
+AppHost can pass the un-awaited promise straight from `AddRepository`:
+
+```typescript
+const q3Repo = builder.q3ProbeRepo();          // deliberately NOT awaited
+await q3Svc.q3ProbeWithRepositoryHandle(q3Repo);
+await q3Svc.q3ProbeWithRepositoryHandle(await builder.q3ProbeRepo());   // awaited works too
+```
+
+An optional scalar beside the handle collapses into the usual options bag. Both forms type-check.
+
+## 7 — An overload pair on one receiver silently loses one, with **no** warning
+
+This is the trap, and it is quieter than the collision stage 0 found. The real choice is
+`WithRepository(string url)` versus `WithRepository(RepositoryBuilder repository)` — a C# overload:
+
+```csharp
+[AspireExport(ExposeMethods = true)]
+public sealed class Q3ProbeOverloadHandle
+{
+    public string Q3ProbeWithRepo(string url) => url;
+    public string Q3ProbeWithRepo(Q3ProbeRepoHandle repository) => "handle";
+}
+```
+
+Build: `0 Warning(s), 0 Error(s)` — **not even an `ASPIREEXPORT013`**. Generated:
+
+```typescript
+export interface Q3ProbeOverloadHandle {
+    toJSON(): MarshalledHandle;
+    q3ProbeWithRepo(url: string): Promise<string>;      // ← the handle overload is simply gone
+}
+```
+
+So an overload is worse than a colliding name: stage 0's collision at least emitted a warning, and
+this emits nothing. A design that overloads an exported instance method loses one overload with no
+signal at all until someone notices the method missing from the SDK.
+
+## 8 — An explicit id plus `MethodName` rescues the overload
+
+```csharp
+public string Q3ProbeWithRepo(string url) => url;
+
+[AspireExport("q3ProbeWithRepoShared", MethodName = "q3ProbeWithRepoShared")]
+public string Q3ProbeWithRepo(Q3ProbeRepoHandle repository) => "handle";
+```
+
+Both project, and both type-check at the call site:
+
+```typescript
+export interface Q3ProbeOverloadHandle {
+    toJSON(): MarshalledHandle;
+    q3ProbeWithRepo(url: string): Promise<string>;
+    q3ProbeWithRepoShared(repository: Awaitable<Q3ProbeRepoHandle>): Promise<string>;
+}
+```
+
+`MethodName` is doing real work here, unlike in stage 0's finding 5 where it was the wrong tool: the
+two ids are already distinct once one is explicit, and `MethodName` is what stops the *generated
+method name* from colliding on the interface. Both are needed — the id to separate the capabilities,
+`MethodName` to separate what the consumer sees.
+
+## 9 — An explicit id is namespace-scoped, so it gives up receiver qualification
+
+Worth knowing before reaching for one. The rescued overload's capability id is:
+
+```
+'Aspire.Hosting.ServiceSources.Catalog/q3ProbeWithRepoShared'
+```
+
+— namespace-qualified, with **no receiver**, unlike the implicit
+`…Catalog/Q3ProbeOverloadHandle.q3ProbeWithRepo` beside it. So an explicit id trades a
+receiver-scoped name for a namespace-wide one and can therefore collide with an explicit id on a
+different receiver.
+
+**Guidance: do not reach for an explicit id unless disambiguating an overload.** Implicit ids are
+already safe across receivers (finding 1); an explicit one opts out of that protection. This is also
+the sharpest form of why Stage 1's `addServiceToCatalog` is a mistake rather than merely redundant —
+it moved a safe receiver-scoped id into the namespace-wide pool for no benefit.
+
 ## Call-site verification
 
 Every shape above exercised together in `samples/DemoAppHostTypeScript/apphost.mts` — inherited
@@ -221,21 +333,41 @@ npx tsc --noEmit -p tsconfig.apphost.json   →   exit 0, no diagnostics
 | 3. Inherited methods project from an **exported** base | Works, but adds an unobtainable handle type — don't |
 | 4. Instance `AddService` on two receivers, no explicit ids | **Clean** — and Stage 1's explicit id was never needed |
 | 5. Generic self-typed base with derived-type fluent returns | **Clean** — chaining survives |
+| 6. An exported handle as a **parameter** | **Clean**, and arrives as `Awaitable<T>` — no `await` required |
+| 7. An **overload pair** on one receiver | **Silently loses one, with no warning at all** |
+| 8. Overload rescued by explicit id **plus** `MethodName` | **Clean** — both needed, one for the id, one for the name |
+| 9. What an explicit id costs | It is **namespace-scoped**, giving up receiver qualification |
 
-**Open question 3 is answered: measure it, and the separate builder type is cheap.** The design's
-rejection of it rested on a cost that does not exist. Two runtime configuration errors —
-`WithRepository` and `WithPrepare` on a grouped service — become compile errors, which is #291's own
-stated ambition applied one level further in.
+**Open question 3 is answered — inherited methods project, and a split builder type is cheap.** But
+shapes 6 and 7, probed afterwards in response to the ownership-inversion review, matter more for what
+the design should actually do:
+
+- **Shape 6 removes the reason to invert ownership.** A handle travels as an argument, so
+  `catalog.AddService("orders").WithRepository(monorepo)` works, and every service stays declared on
+  the catalog. That is the shape the review asked for, and it makes shapes 2, 3 and 5 — the split
+  builder types and the generic base — **unnecessary**: with one builder type there is nothing to
+  split, and the "grouped service also names its own URL" case collapses into the additive
+  `RequireUnset` error the design already has for every other block.
+- **Shape 7 is the one to be careful about.** The natural spelling of that API is a C# overload, and
+  an overload loses one half in silence. Shape 8 is the fix, and shape 9 says what it costs.
 
 **Recommendations:**
 
-1. **Adopt the split builder types** in the repository-handle design: a public, unexported generic
-   base carrying the shared `With*` methods, and two exported derived handles.
-2. **Drop the planned `addServiceToRepository` explicit id** — plain `AddService` on the repository
-   handle projects as `addService`, matching #291's TypeScript sketch verbatim.
-3. **Separately, and as a #134 correction rather than part of #291: revert Stage 1's
-   `addServiceToCatalog` to plain `AddService`.** It is unreleased, one sample calls it
-   (`DemoAppHostTypeScriptCodeCatalog/apphost.mts`), and leaving it means the TypeScript surface
-   carries a name invented to dodge a collision that cannot happen.
-4. **Add a note to the stage-0 findings** recording that its finding 5 is specific to *extension*
+1. **Keep services on the catalog and pass the repository handle** — `WithRepository(monorepo)`,
+   per shape 6. Drop `AddService` from the repository handle, and with it the split builder types
+   and the generic base: they were solving a problem the inverted shape created.
+2. **Spell the handle form as a C# overload with an explicit ATS id**:
+   `[AspireExport("withSharedRepository", MethodName = "withSharedRepository")]` on
+   `WithRepository(RepositoryBuilder)`, per shapes 7 and 8. Without both attributes' arguments it
+   disappears from the SDK with no diagnostic.
+3. **Add an export-surface assertion for it.** Shape 7 fails silently, so the only guard against a
+   future refactor dropping the overload is a test that reads the generated interface — nothing in
+   C# will complain.
+4. **Do not use an explicit id anywhere else**, per shape 9: implicit ids are receiver-scoped and
+   safe, explicit ones are namespace-wide and are not.
+5. **Separately, as a #134 correction: revert Stage 1's `addServiceToCatalog` to plain
+   `AddService`.** It is unreleased, one sample calls it
+   (`DemoAppHostTypeScriptCodeCatalog/apphost.mts`), and by shape 9 it actively traded a safe id for
+   a namespace-wide one to dodge a collision that cannot happen.
+6. **Add a note to the stage-0 findings** recording that its finding 5 is specific to *extension*
    methods, so the next reader does not re-apply it to an instance method and invent another id.
