@@ -5,10 +5,11 @@ import { createBuilder, PrepareMode } from './.aspire/modules/aspire.mjs';
 const builder = await createBuilder();
 
 await builder.addServiceCatalog(async (catalog) => {
-  const orders = await catalog.addServiceToCatalog('orders');
-  await orders.withRepository('https://github.com/dotnet/aspire-samples', { defaultRef: 'main' });
-  await orders.withProject(
-    'samples/health-checks-ui/HealthChecksUI.ApiService/HealthChecksUI.ApiService.csproj');
+  const orders = await catalog.addService('orders');
+  await orders.withRepository('https://github.com/dotnet/aspire-samples', {
+    project: 'samples/health-checks-ui/HealthChecksUI.ApiService/HealthChecksUI.ApiService.csproj',
+    defaultRef: 'main',
+  });
 
   // The monorepo shape (#291): two services sharing one repository handle clone it once instead
   // of once each, and reconcile it onto one ref. addRepository is how you declare a repository
@@ -21,15 +22,14 @@ await builder.addServiceCatalog(async (catalog) => {
   // two are added the same way "orders" already is.
   const webSamples = await catalog.addRepository('https://github.com/dotnet/aspire-samples', {
     name: 'aspire-samples-web',
-    defaultRef: 'main',
   });
 
-  const web = await catalog.addServiceToCatalog('web');
+  const web = await catalog.addService('web');
   await web.withSharedRepository(webSamples);
   await web.withProject(
     'samples/health-checks-ui/HealthChecksUI.ApiService/HealthChecksUI.ApiService.csproj');
 
-  const webUi = await catalog.addServiceToCatalog('web-ui');
+  const webUi = await catalog.addService('web-ui');
   await webUi.withSharedRepository(webSamples);
   await webUi.withProject('samples/health-checks-ui/HealthChecksUI.Web/HealthChecksUI.Web.csproj');
 
@@ -38,11 +38,11 @@ await builder.addServiceCatalog(async (catalog) => {
   // container: block: a "url"-sourced service runs out of band with no Aspire resource, so the
   // payments container below can't reference it (#72) unless inventory also resolves through
   // "container". servicesources.local.json picks the actual source; apphost.mts never changes.
-  const inventory = await catalog.addServiceToCatalog('inventory');
+  const inventory = await catalog.addService('inventory');
   await inventory.withUrl('https://httpbin.org');
   await inventory.withContainer('nginxdemos/hello', 80, { defaultTag: 'latest' });
 
-  const payments = await catalog.addServiceToCatalog('payments');
+  const payments = await catalog.addService('payments');
   await payments.withContainer('nginxdemos/hello', 80, { defaultTag: 'latest' });
   await payments.withKubernetes('payments', { port: 8080 });
 
@@ -52,7 +52,7 @@ await builder.addServiceCatalog(async (catalog) => {
   //
   // asJava/withPrepare are Stage 2's typed alternatives to the untyped withKind bag Stage 1 shipped
   // — see samples/DemoAppHostCodeCatalog/Program.cs for the identical shape in C#.
-  const catalogService = await catalog.addServiceToCatalog('catalog');
+  const catalogService = await catalog.addService('catalog');
   await catalogService.withRepository('https://github.com/spring-projects/spring-petclinic', {
     defaultRef: 'main',
   });

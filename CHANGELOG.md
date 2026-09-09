@@ -88,10 +88,12 @@ never existed. Check the tag of the last release before adding one.
   service catalog in code depended on five shapes never measured against Aspire's Type System —
   optional/named parameters, an extension method on a package-owned exported class, a lambda nested
   inside a lambda, an enum as a parameter, and the generated name `addService` on two receivers. Four
-  cross cleanly as specified. The fifth collides, and the design's own named fallback
-  (`[AspireExport(MethodName = …)]`) does not fix it — that property only renames what a generated
-  SDK calls the method, not the capability ID the collision is keyed on. An explicit capability id
-  (`[AspireExport("…")]`) does. See
+  cross cleanly as specified. The fifth collides for an **extension** method, and the design's own
+  named fallback (`[AspireExport(MethodName = …)]`) does not fix it — that property only renames
+  what a generated SDK calls the method, not the capability ID the collision is keyed on; an
+  explicit capability id (`[AspireExport("…")]`) does. It does not collide for an **instance**
+  method exposed via `ExposeMethods = true` — those are always receiver-qualified, so they need no
+  explicit id ([#309]). See
   `docs/superpowers/specs/2026-09-07-code-catalog-stage0-ats-probe-findings.md`. Nothing in the
   package changed; this stage ships no code.
 
@@ -1563,6 +1565,7 @@ Targets `net10.0`.
 [#258]: https://github.com/flojon/aspire-servicesources/issues/258
 [#279]: https://github.com/flojon/aspire-servicesources/issues/279
 [#291]: https://github.com/flojon/aspire-servicesources/issues/291
+[#309]: https://github.com/flojon/aspire-servicesources/issues/309
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
