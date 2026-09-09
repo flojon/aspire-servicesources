@@ -329,8 +329,9 @@ await orders.withSharedRepository(monorepo);        // implicit id, no [AspireEx
 await orders.withProject('src/Orders.Api/Orders.Api.csproj');
 ```
 
-(`catalog.addService` rather than `addServiceToCatalog` assumes the #134 correction in probe
-recommendation 5 lands; without it the first call keeps Stage 1's name and nothing else changes.)
+(`catalog.addService` rather than `addServiceToCatalog` assumes **#309** lands — the #134
+correction dropping an explicit capability id that was never needed. Without it the first call keeps
+Stage 1's name and nothing else here changes.)
 
 **Errors on the chain.** `WithRepository` and `WithSharedRepository` on one service is the existing
 additive error, naming the service and the repository block — they fill the same block, so the
@@ -606,7 +607,7 @@ seventh arose from the ownership decision that followed:
 
 The design is ready for an implementation plan. One item is deliberately left for #134 rather than
 folded in here: reverting Stage 1's `addServiceToCatalog` capability id to plain `AddService`, now
-that the collision it was invented to dodge is measured not to exist (probe recommendation 3).
+that the collision it was invented to dodge is measured not to exist. Filed as **#309**.
 
 ## Reviewer decisions
 
@@ -680,7 +681,7 @@ Answered 2026-09-08. Five were accepted as the design already had them; one was 
    capability ids for `ExposeMethods` instance methods are receiver-qualified, so the planned
    `addServiceToRepository` id is unnecessary, Stage 0's finding 5 is specific to *extension* methods,
    and this branch's own finding 11 is wrong and marked so. Reverting Stage 1's `addServiceToCatalog`
-   is left to #134.
+   is **#309**.
 4. **Should `defaultRef` on the handle be required?**
    **Decided: optional**, matching today's nullable `DefaultRef` — "whatever the clone's default
    branch is" is a real answer, and a common one for a monorepo.

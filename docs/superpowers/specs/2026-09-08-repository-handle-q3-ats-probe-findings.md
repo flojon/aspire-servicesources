@@ -375,8 +375,11 @@ the design should actually do:
 4. **Do not use an explicit id anywhere else**, per shape 9: implicit ids are receiver-scoped and
    safe, explicit ones are namespace-wide and are not.
 5. **Separately, as a #134 correction: revert Stage 1's `addServiceToCatalog` to plain
-   `AddService`.** It is unreleased, one sample calls it
-   (`DemoAppHostTypeScriptCodeCatalog/apphost.mts`), and by shape 9 it actively traded a safe id for
-   a namespace-wide one to dodge a collision that cannot happen.
+   `AddService`.** Filed as **#309**. It is unreleased, and by shape 9 it actively traded a safe
+   receiver-scoped id for a namespace-wide one to dodge a collision that cannot happen. Note what
+   filing it turned up: `CatalogExportsTests.CapabilityId` models a bare `[AspireExport]` on an
+   instance method as a *flat* id, where the generator emits `{TypeName}.{camelCase}` — so that test
+   fails on the revert while the real build stays clean, and its wrong model is plausibly why the
+   explicit id looked necessary at all. #309 carries both halves.
 6. **Add a note to the stage-0 findings** recording that its finding 5 is specific to *extension*
    methods, so the next reader does not re-apply it to an instance method and invent another id.
