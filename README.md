@@ -156,10 +156,8 @@ const builder = await createBuilder();
 
 await builder.addServiceCatalog(async (catalog) => {
   const orders = await catalog.addService('orders');
-  await orders.withRepository('https://github.com/example/orders', {
-    project: 'src/Orders.Api/Orders.Api.csproj',
-    defaultRef: 'main',
-  });
+  await orders.withRepository('https://github.com/example/orders', { defaultRef: 'main' });
+  await orders.withProject('src/Orders.Api/Orders.Api.csproj');
 
   const inventory = await catalog.addService('inventory');
   await inventory.withUrl('https://httpbin.org');

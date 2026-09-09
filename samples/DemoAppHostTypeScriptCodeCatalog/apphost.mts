@@ -6,10 +6,9 @@ const builder = await createBuilder();
 
 await builder.addServiceCatalog(async (catalog) => {
   const orders = await catalog.addService('orders');
-  await orders.withRepository('https://github.com/dotnet/aspire-samples', {
-    project: 'samples/health-checks-ui/HealthChecksUI.ApiService/HealthChecksUI.ApiService.csproj',
-    defaultRef: 'main',
-  });
+  await orders.withRepository('https://github.com/dotnet/aspire-samples', { defaultRef: 'main' });
+  await orders.withProject(
+    'samples/health-checks-ui/HealthChecksUI.ApiService/HealthChecksUI.ApiService.csproj');
 
   // The monorepo shape (#291): two services sharing one repository handle clone it once instead
   // of once each, and reconcile it onto one ref. addRepository is how you declare a repository
@@ -22,6 +21,7 @@ await builder.addServiceCatalog(async (catalog) => {
   // two are added the same way "orders" already is.
   const webSamples = await catalog.addRepository('https://github.com/dotnet/aspire-samples', {
     name: 'aspire-samples-web',
+    defaultRef: 'main',
   });
 
   const web = await catalog.addService('web');
