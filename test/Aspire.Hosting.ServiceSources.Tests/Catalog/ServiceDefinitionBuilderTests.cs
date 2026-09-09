@@ -19,6 +19,16 @@ public class ServiceDefinitionBuilderTests
     }
 
     [Fact]
+    public void Build_CheckoutNameIsTheServiceName()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("orders")
+            .WithRepository("https://github.com/example/repo")
+            .Build();
+
+        Assert.Equal("orders", definition.Repository.CheckoutName);
+    }
+
+    [Fact]
     public void WithRepository_ProjectOmitted_DefaultsToEmpty()
     {
         var definition = new ServiceCatalogBuilder().AddService("orders")
