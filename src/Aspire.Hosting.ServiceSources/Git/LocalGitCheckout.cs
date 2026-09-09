@@ -25,8 +25,8 @@ internal static class LocalGitCheckout
     public readonly record struct PreparedCheckout(string RepoRoot, bool NeedsReconciliation);
 
     /// <summary>
-    /// Where a package-managed checkout of <paramref name="serviceName"/> lives. A pure function of
-    /// the service name and the AppHost directory — no filesystem access, no network — so a caller
+    /// Where a package-managed checkout of <paramref name="checkoutName"/> lives. A pure function of
+    /// the checkout name and the AppHost directory — no filesystem access, no network — so a caller
     /// can name the path before the clone that fills it has happened.
     /// </summary>
     /// <remarks>
@@ -36,21 +36,27 @@ internal static class LocalGitCheckout
     /// to a <c>path</c> override, which is the developer's own directory rather than one this
     /// package places.
     /// </remarks>
+    /// <param name="checkoutName">
+    /// <see cref="Config.Catalog.RepositoryDefinition.CheckoutName"/> — an ungrouped service's own
+    /// name, or the shared repository's name for a service grouped into one (#291). Every caller
+    /// passes <c>definition.Repository.CheckoutName</c> rather than a service name directly, which is
+    /// what makes two grouped services resolve the identical directory.
+    /// </param>
     /// <exception cref="ServiceSourcesConfigurationException">
-    /// <paramref name="serviceName"/> is not a directory name of its own, and so names a location
+    /// <paramref name="checkoutName"/> is not a directory name of its own, and so names a location
     /// this package does not own. See <see cref="IsContainedCheckoutDirectoryName"/>.
     /// </exception>
-    public static string ManagedRepoRoot(string appHostDirectory, string serviceName)
+    public static string ManagedRepoRoot(string appHostDirectory, string checkoutName)
     {
-        if (!IsContainedCheckoutDirectoryName(serviceName))
+        if (!IsContainedCheckoutDirectoryName(checkoutName))
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}' cannot be given a checkout: a service's name is the name of the "
+                $"'{checkoutName}' cannot be given a managed checkout directory: it is the name of the "
                 + "directory its checkout is cloned into, so it has to be a single directory name — "
                 + ContainedNameRuleAndRemedy);
         }
 
-        return Path.Combine(ToolDirectory.PathIn(appHostDirectory), "checkouts", serviceName);
+        return Path.Combine(ToolDirectory.PathIn(appHostDirectory), "checkouts", checkoutName);
     }
 
     /// <summary>
@@ -160,11 +166,14 @@ internal static class LocalGitCheckout
     public static bool IsManagedCheckout(ServiceDeveloperConfig config) => config.Local.Path is null;
 
     /// <summary>
-    /// Whether a clone still has to happen before this service has a checkout: the package manages
-    /// the directory (<see cref="IsManagedCheckout"/>) and there is nothing at
+    /// Whether a clone still has to happen before this checkout exists: the package manages the
+    /// directory (<see cref="IsManagedCheckout"/>) and there is nothing at
     /// <see cref="ManagedRepoRoot"/> yet. Configuration plus one <c>Directory.Exists</c>, so it is
     /// answerable about a service nobody has added.
     /// </summary>
+    /// <param name="checkoutName">
+    /// <see cref="Config.Catalog.RepositoryDefinition.CheckoutName"/> — see <see cref="ManagedRepoRoot"/>.
+    /// </param>
     /// <remarks>
     /// <para>
     /// The single rule two independent decisions are built on, which is why it lives here rather
@@ -189,9 +198,9 @@ internal static class LocalGitCheckout
     /// </para>
     /// </remarks>
     public static bool IsColdManagedCheckout(
-        string appHostDirectory, string serviceName, ServiceDeveloperConfig config) =>
+        string appHostDirectory, string checkoutName, ServiceDeveloperConfig config) =>
         IsManagedCheckout(config)
-        && !Directory.Exists(ManagedRepoRoot(appHostDirectory, serviceName));
+        && !Directory.Exists(ManagedRepoRoot(appHostDirectory, checkoutName));
 
     /// <summary>
     /// The fully resolved checkout directory: prepared, then reconciled. For callers already
@@ -308,7 +317,7 @@ internal static class LocalGitCheckout
         }
 
         EnsureToolDirectory(appHostDirectory);
-        var repoRoot = ManagedRepoRoot(appHostDirectory, serviceName);
+        var repoRoot = ManagedRepoRoot(appHostDirectory, definition.Repository.CheckoutName);
         var checkoutsRoot = Path.GetDirectoryName(repoRoot)!;
 
         if (Directory.Exists(Path.Combine(repoRoot, ".git")))

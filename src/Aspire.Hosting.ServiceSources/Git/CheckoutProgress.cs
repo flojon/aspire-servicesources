@@ -16,8 +16,10 @@ namespace Aspire.Hosting.ServiceSources.Git;
 /// whenever the dashboard happened to arrive.
 /// </para>
 /// <para>
-/// One instance per service, since the clones run concurrently: one writer (the thread draining
-/// that clone's stderr) and one reader (the background task that starts that service).
+/// One instance per checkout (design #291: two grouped services share one), since clones of
+/// different checkouts run concurrently: one writer (the thread draining that clone's stderr) and
+/// one reader per watcher. <see cref="Sources.CheckoutNameLock"/> keeps two grouped services from
+/// cloning the same checkout at once, so there is never more than one writer for a given instance.
 /// </para>
 /// </remarks>
 internal sealed class CheckoutProgress : IGitProgressSink

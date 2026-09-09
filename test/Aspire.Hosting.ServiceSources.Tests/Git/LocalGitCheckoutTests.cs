@@ -1,4 +1,5 @@
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Git;
@@ -124,5 +125,30 @@ public class LocalGitCheckoutTests
         Assert.Equal(
             Path.Combine(UnusedAppHostDirectory, ".servicesources", "checkouts", "orders"),
             LocalGitCheckout.ManagedRepoRoot(UnusedAppHostDirectory, "orders"));
+    }
+
+    /// <summary>
+    /// The criterion-6 guard the design's Testing section names explicitly (#291): an ungrouped
+    /// service's checkout path must stay byte-identical to what it was before grouping existed, both
+    /// before and after a <see cref="Config.Catalog.RepositoryDefinition"/> exists to route the path
+    /// through. Keeping this green through the rest of Stage 2 is what makes "an existing catalog,
+    /// unmodified, keeps every developer's working tree exactly where it already is" true rather than
+    /// asserted.
+    /// </summary>
+    [Fact]
+    public void UngroupedService_ManagedRepoRootIsExactlyCheckoutsService_BeforeAndAfter()
+    {
+        // Before: the plain string a caller with no RepositoryDefinition in hand would use — the
+        // shape every route into ManagedRepoRoot took prior to #291.
+        var beforePath = LocalGitCheckout.ManagedRepoRoot(UnusedAppHostDirectory, "orders");
+
+        // After: an ungrouped service's own anonymous RepositoryDefinition, whose CheckoutName is
+        // always the owning service's own name (design finding 2) — the value every real caller
+        // (LocalProjectSource, LocalCheckoutPrefetch, DeferredCheckout) now passes.
+        var repository = new RepositoryDefinition { Url = "https://example.com/orders.git", CheckoutName = "orders" };
+        var afterPath = LocalGitCheckout.ManagedRepoRoot(UnusedAppHostDirectory, repository.CheckoutName);
+
+        Assert.Equal(beforePath, afterPath);
+        Assert.Equal(Path.Combine(UnusedAppHostDirectory, ".servicesources", "checkouts", "orders"), afterPath);
     }
 }

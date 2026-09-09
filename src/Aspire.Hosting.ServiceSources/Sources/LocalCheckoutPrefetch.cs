@@ -90,14 +90,29 @@ internal sealed class LocalCheckoutPrefetch
 {
     private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, LocalCheckoutPrefetch> Cache = new();
 
+    /// <summary>
+    /// Keyed by <see cref="Config.Catalog.RepositoryDefinition.CheckoutName"/> rather than by service
+    /// name (#291): two grouped services share one clone, so they share one entry here — whichever
+    /// of them is enumerated first starts it, and every other one finds it already in flight or
+    /// already done.
+    /// </summary>
     private readonly Dictionary<string, Task<CheckoutResult>> _checkouts = new(StringComparer.Ordinal);
 
     /// <summary>
     /// The progress stream of each checkout, created alongside the checkout itself and keyed the
-    /// same way — so a caller that has a checkout to wait on always has somewhere to watch it
-    /// happen, whichever call started it.
+    /// same way — by <c>CheckoutName</c> — so a caller that has a checkout to wait on always has
+    /// somewhere to watch it happen, whichever call started it, and every service sharing that
+    /// checkout watches the identical stream.
     /// </summary>
     private readonly Dictionary<string, CheckoutProgress> _progress = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The reverse index <see cref="_checkouts"/> needs once it is keyed by <c>CheckoutName</c>
+    /// rather than by service: every service name that named a given checkout, so a notice about the
+    /// checkout — <see cref="FailedCheckoutMessage"/>, <see cref="UnusedCheckoutsMessage"/> — can
+    /// name every service on it rather than only the one that happened to start the clone.
+    /// </summary>
+    private readonly Dictionary<string, HashSet<string>> _servicesOnCheckout = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Services whose checkout has already been resolved, so there is nothing left to watch. What
@@ -179,7 +194,14 @@ internal sealed class LocalCheckoutPrefetch
     {
         get
         {
-            var unused = UnusedCheckouts().Select(entry => entry.Name).ToArray();
+            // Flattened to service names, not checkout names: the advice below ("clear
+            // ServiceSources:Services:<service>:source") is per-service, so a shared checkout two
+            // grouped services never added contributes both their names rather than one entry for
+            // the repository.
+            var unused = UnusedCheckouts()
+                .SelectMany(entry => ServicesOnCheckout(entry.CheckoutName))
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToArray();
 
             if (unused.Length == 0)
             {
@@ -212,7 +234,8 @@ internal sealed class LocalCheckoutPrefetch
     public IReadOnlyList<string> FailedUnusedCheckoutMessages =>
         UnusedCheckouts()
             .Where(entry => entry.Checkout.IsCompleted && entry.Checkout.Result.Exception is not null)
-            .Select(entry => FailedCheckoutMessage(entry.Name, entry.Checkout.Result.Exception!))
+            .Select(entry => FailedCheckoutMessage(
+                ServicesOnCheckout(entry.CheckoutName), entry.Checkout.Result.Exception!))
             .ToArray();
 
     /// <summary>
@@ -220,16 +243,53 @@ internal sealed class LocalCheckoutPrefetch
     /// only once every <c>AddService()</c> call has happened, which is why the report waits for
     /// <c>BeforeStartEvent</c>.
     /// </summary>
-    private (string Name, Task<CheckoutResult> Checkout)[] UnusedCheckouts()
+    /// <remarks>
+    /// "Unused" for a shared checkout (#291) means none of the services naming it were requested —
+    /// one grouped service the AppHost adds is enough to make the checkout used, even if others
+    /// sharing it are not; <see cref="_requested"/>/<see cref="_resolved"/> stay per service exactly
+    /// so that distinction survives the re-keying onto <c>CheckoutName</c>.
+    /// </remarks>
+    private (string CheckoutName, Task<CheckoutResult> Checkout)[] UnusedCheckouts()
     {
         lock (_gate)
         {
             return _checkouts
-                .Where(entry => !_requested.Contains(entry.Key))
+                .Where(entry => !ServicesOnCheckoutLocked(entry.Key).Any(_requested.Contains))
                 .OrderBy(entry => entry.Key, StringComparer.Ordinal)
                 .Select(entry => (entry.Key, entry.Value))
                 .ToArray();
         }
+    }
+
+    /// <summary>
+    /// Every service name that named <paramref name="checkoutName"/>, in the order
+    /// <see cref="_servicesOnCheckout"/> happens to hold them — callers that show these to a
+    /// developer sort them themselves.
+    /// </summary>
+    private IReadOnlyCollection<string> ServicesOnCheckout(string checkoutName)
+    {
+        lock (_gate)
+        {
+            return ServicesOnCheckoutLocked(checkoutName);
+        }
+    }
+
+    private IReadOnlyCollection<string> ServicesOnCheckoutLocked(string checkoutName) =>
+        _servicesOnCheckout.TryGetValue(checkoutName, out var services) ? services : [];
+
+    /// <summary>
+    /// Records that <paramref name="serviceName"/> is one of the services naming
+    /// <paramref name="checkoutName"/> — called wherever a service's checkout starts or is resolved,
+    /// under <see cref="_gate"/>.
+    /// </summary>
+    private void RecordServiceOnCheckoutLocked(string serviceName, string checkoutName)
+    {
+        if (!_servicesOnCheckout.TryGetValue(checkoutName, out var services))
+        {
+            _servicesOnCheckout[checkoutName] = services = new HashSet<string>(StringComparer.Ordinal);
+        }
+
+        services.Add(serviceName);
     }
 
     /// <summary>
@@ -252,20 +312,23 @@ internal sealed class LocalCheckoutPrefetch
             logger.LogInformation("{ServiceSourcesNotice}", message);
         }
 
-        foreach (var (name, checkout) in UnusedCheckouts())
+        foreach (var (checkoutName, checkout) in UnusedCheckouts())
         {
+            var serviceNames = ServicesOnCheckout(checkoutName);
+
             // A checkout nothing waits on may still be running here, and startup must not block on
             // one — so the failure is reported when it lands instead. ExecuteSynchronously runs the
             // continuation inline for those already finished, which is the common case by now.
             _ = checkout.ContinueWith(
-                task => ReportFailedCheckout(logger, name, task),
+                task => ReportFailedCheckout(logger, serviceNames, task),
                 CancellationToken.None,
                 TaskContinuationOptions.ExecuteSynchronously,
                 TaskScheduler.Default);
         }
     }
 
-    private static void ReportFailedCheckout(ILogger logger, string serviceName, Task<CheckoutResult> checkout)
+    private static void ReportFailedCheckout(
+        ILogger logger, IReadOnlyCollection<string> serviceNames, Task<CheckoutResult> checkout)
     {
         // Never faulted — the worker captures its exception into the result — so this cannot throw.
         if (checkout.Result.Exception is not { } exception)
@@ -275,7 +338,8 @@ internal sealed class LocalCheckoutPrefetch
 
         try
         {
-            logger.LogWarning(exception, "{ServiceSourcesNotice}", FailedCheckoutMessage(serviceName, exception));
+            logger.LogWarning(
+                exception, "{ServiceSourcesNotice}", FailedCheckoutMessage(serviceNames, exception));
         }
         catch (ObjectDisposedException)
         {
@@ -285,11 +349,25 @@ internal sealed class LocalCheckoutPrefetch
         }
     }
 
-    private static string FailedCheckoutMessage(string serviceName, Exception exception) =>
-        $"'{serviceName}' is configured as 'local', so its git checkout was prefetched, and the prefetch " +
-        $"failed: {exception.Message} This AppHost never adds '{serviceName}', so nothing else reports it — " +
-        $"clear '{DeveloperConfiguration.ServicesKey}:{serviceName}:source' if you don't use it, usually the " +
-        $"service's entry in {DeveloperConfiguration.FileName}, or fix what the failure names.";
+    /// <summary>
+    /// The failure notice for a checkout nothing waits on — one service's, or (#291) every service
+    /// sharing one repository (criterion 5: a failed shared checkout's notice names every service on
+    /// it, not only whichever one happened to start the clone).
+    /// </summary>
+    private static string FailedCheckoutMessage(IReadOnlyCollection<string> serviceNames, Exception exception)
+    {
+        var ordered = serviceNames.OrderBy(name => name, StringComparer.Ordinal).ToArray();
+        var quoted = string.Join(", ", ordered.Select(name => $"'{name}'"));
+        var plural = ordered.Length != 1;
+
+        return $"{quoted} {(plural ? "are" : "is")} configured as 'local'"
+            + (plural ? ", sharing a git checkout, " : ", so its git checkout was prefetched, ")
+            + $"and the prefetch failed: {exception.Message} This AppHost never adds "
+            + $"{(plural ? "any of them" : quoted)}, so nothing else reports it — clear "
+            + string.Join(" and ", ordered.Select(name => $"'{DeveloperConfiguration.ServicesKey}:{name}:source'"))
+            + $" if you don't use {(plural ? "them" : "it")}, usually the entr{(plural ? "ies" : "y")} in "
+            + $"{DeveloperConfiguration.FileName}, or fix what the failure names.";
+    }
 
     /// <summary>
     /// Starts <paramref name="serviceName"/>'s checkout now, and records that the AppHost really
@@ -313,16 +391,20 @@ internal sealed class LocalCheckoutPrefetch
         string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config,
         RepositoryDeveloperConfig? repositoryConfig, string appHostDirectory, IGitClient gitClient)
     {
+        var checkoutName = definition.Repository.CheckoutName;
+
         lock (_gate)
         {
             _requested.Add(serviceName);
+            RecordServiceOnCheckoutLocked(serviceName, checkoutName);
 
-            // One checkout per service, whoever asked for it first. The filter in Run means this is
-            // normally a fresh entry, but the two decisions are made separately and a service in
-            // both sets must still be cloned once.
-            if (!_checkouts.ContainsKey(serviceName))
+            // One checkout per CheckoutName, whoever asked for it first — which, for two grouped
+            // services (#291), means the first of them to register deferred. The filter in Run means
+            // this is normally a fresh entry, but the two decisions are made separately and a
+            // checkout in both sets must still be cloned once.
+            if (!_checkouts.ContainsKey(checkoutName))
             {
-                _checkouts[serviceName] = StartCheckoutTask(
+                _checkouts[checkoutName] = StartCheckoutTask(
                     serviceName, definition, config, repositoryConfig, appHostDirectory, gitClient);
             }
         }
@@ -353,11 +435,16 @@ internal sealed class LocalCheckoutPrefetch
     /// it from its first line.
     /// </para>
     /// </remarks>
-    public CheckoutProgress WatchCheckout(string serviceName)
+    /// <param name="checkoutName">
+    /// <see cref="Config.Catalog.RepositoryDefinition.CheckoutName"/> — the stream is keyed by this,
+    /// not by <paramref name="serviceName"/>, so two grouped services (#291) watching the same
+    /// checkout share the identical stream.
+    /// </param>
+    public CheckoutProgress WatchCheckout(string serviceName, string checkoutName)
     {
         lock (_gate)
         {
-            return WatchCheckoutLocked(serviceName);
+            return WatchCheckoutLocked(serviceName, checkoutName);
         }
     }
 
@@ -366,12 +453,18 @@ internal sealed class LocalCheckoutPrefetch
     /// every checkout start does, so that a stream is in place before the task that writes to it
     /// can run.
     /// </summary>
-    private CheckoutProgress WatchCheckoutLocked(string serviceName)
+    private CheckoutProgress WatchCheckoutLocked(string serviceName, string checkoutName)
     {
-        if (!_progress.TryGetValue(serviceName, out var progress))
+        if (!_progress.TryGetValue(checkoutName, out var progress))
         {
-            _progress[serviceName] = progress = new CheckoutProgress();
+            _progress[checkoutName] = progress = new CheckoutProgress();
 
+            // Only reachable for a service asking about a checkout stream nothing has created yet.
+            // _resolved is per-service (a question about "did the AppHost really ask for this"), so
+            // for a shared checkout this can be false for a grouped service that has not itself
+            // resolved even though the underlying clone finished resolving a different member first
+            // — correctly so, since that member's own request is what this stream would have reported
+            // on, and this one is asking fresh.
             if (_resolved.Contains(serviceName))
             {
                 // Too late to watch: this checkout is already done, so nothing will ever write to
@@ -389,29 +482,36 @@ internal sealed class LocalCheckoutPrefetch
     /// Records that this service's checkout is over and ends whatever was watching it, so that a
     /// watcher arriving afterwards is told so rather than left waiting.
     /// </summary>
-    private void MarkResolved(string serviceName)
+    /// <remarks>
+    /// For a shared checkout (#291), completing the stream as soon as the first grouped service
+    /// resolves is correct rather than premature: every service on it awaits the identical
+    /// <see cref="_checkouts"/> task, so the clone itself is equally over for all of them the moment
+    /// any one of them observes that. <see cref="Git.CheckoutProgress.Complete"/> is idempotent, so a
+    /// second and later resolving member calling this again is harmless.
+    /// </remarks>
+    private void MarkResolved(string serviceName, string checkoutName)
     {
         CheckoutProgress? progress;
 
         lock (_gate)
         {
             _resolved.Add(serviceName);
-            _progress.TryGetValue(serviceName, out progress);
+            _progress.TryGetValue(checkoutName, out progress);
         }
 
         progress?.Complete();
     }
 
     /// <summary>
-    /// The progress stream for <paramref name="serviceName"/> if one exists, without creating one.
+    /// The progress stream for <paramref name="checkoutName"/> if one exists, without creating one.
     /// A checkout nobody is watching reports nothing, which is what keeps <c>--progress</c> off
     /// every clone that has no audience.
     /// </summary>
-    private CheckoutProgress? ProgressFor(string serviceName)
+    private CheckoutProgress? ProgressFor(string checkoutName)
     {
         lock (_gate)
         {
-            return _progress.TryGetValue(serviceName, out var progress) ? progress : null;
+            return _progress.TryGetValue(checkoutName, out var progress) ? progress : null;
         }
     }
 
@@ -436,7 +536,7 @@ internal sealed class LocalCheckoutPrefetch
             // is here so that WatchCheckout's guarantee — the stream always ends, because a watcher
             // waits for that rather than polling — holds even for a checkout started somewhere none
             // of those paths knows about. Ending an already-ended stream is a no-op.
-            MarkResolved(serviceName);
+            MarkResolved(serviceName, definition.Repository.CheckoutName);
         }
     }
 
@@ -444,16 +544,18 @@ internal sealed class LocalCheckoutPrefetch
         string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config,
         RepositoryDeveloperConfig? repositoryConfig, string appHostDirectory, IGitClient gitClient)
     {
+        var checkoutName = definition.Repository.CheckoutName;
         Task<CheckoutResult>? checkout;
 
         lock (_gate)
         {
             _requested.Add(serviceName);
+            RecordServiceOnCheckoutLocked(serviceName, checkoutName);
 
             // Locked because _checkouts is no longer written only during Run: StartCheckout adds to
             // it as deferred services are registered, which is interleaved with the AddService calls
             // that read it here.
-            _checkouts.TryGetValue(serviceName, out checkout);
+            _checkouts.TryGetValue(checkoutName, out checkout);
         }
 
         if (checkout is null)
@@ -469,7 +571,7 @@ internal sealed class LocalCheckoutPrefetch
             // Taken in its two halves rather than through ResolveRepoRoot, so that the stream can
             // be closed between them — at the same moment StartCheckoutTask closes the one it
             // started, rather than after the reconciliation that reports nothing.
-            var progress = ProgressFor(serviceName);
+            var progress = ProgressFor(checkoutName);
 
             LocalGitCheckout.PreparedCheckout prepared;
             try
@@ -551,9 +653,13 @@ internal sealed class LocalCheckoutPrefetch
                     config.Catalog.Services[entry.Key].Repository.CheckoutName)))
             // Only checkouts there is something to clone for. Everything else resolves to the same
             // answer in GetRepoRoot for a fraction of the code, and reaches nobody at all when the
-            // service is never added — which is where speculating over one used to go wrong.
+            // service is never added — which is where speculating over one used to go wrong. Keyed
+            // on CheckoutName rather than the service's own name (#291): a second and later grouped
+            // candidate shares a directory the first already warmed, and judging that "cold" off the
+            // service's own name would launch a redundant speculative clone task for it — harmless
+            // (PrepareRepoRoot no-ops against an existing '.git'), but wasted background work.
             .Where(candidate => LocalGitCheckout.IsColdManagedCheckout(
-                appHostDirectory, candidate.Name, candidate.Config))
+                appHostDirectory, candidate.Definition.Repository.CheckoutName, candidate.Config))
             // ...minus the ones a deferred registration would clone for itself.
             .Where(candidate => !WouldBeDeferredIfAdded(
                 builder, deferred, kinds, candidate.Name, candidate.Definition, candidate.Config))
@@ -566,9 +672,19 @@ internal sealed class LocalCheckoutPrefetch
 
         foreach (var candidate in candidates)
         {
-            _checkouts[candidate.Name] = StartCheckoutTask(
-                candidate.Name, candidate.Definition, candidate.Config, candidate.RepositoryConfig,
-                appHostDirectory, gitClient);
+            var checkoutName = candidate.Definition.Repository.CheckoutName;
+
+            RecordServiceOnCheckoutLocked(candidate.Name, checkoutName);
+
+            // One clone per CheckoutName: a second grouped candidate found later in this same
+            // enumeration shares the first one's entry rather than starting a redundant clone task
+            // for the identical directory (#291).
+            if (!_checkouts.ContainsKey(checkoutName))
+            {
+                _checkouts[checkoutName] = StartCheckoutTask(
+                    candidate.Name, candidate.Definition, candidate.Config, candidate.RepositoryConfig,
+                    appHostDirectory, gitClient);
+            }
         }
     }
 
@@ -611,7 +727,7 @@ internal sealed class LocalCheckoutPrefetch
         ServiceDefinition definition,
         ServiceDeveloperConfig config)
     {
-        if (!deferred.ShouldDefer(builder, serviceName, config))
+        if (!deferred.ShouldDefer(builder, serviceName, definition, config))
         {
             return false;
         }
@@ -662,7 +778,7 @@ internal sealed class LocalCheckoutPrefetch
         string appHostDirectory,
         IGitClient gitClient)
     {
-        var progress = WatchCheckoutLocked(serviceName);
+        var progress = WatchCheckoutLocked(serviceName, definition.Repository.CheckoutName);
 
         return Task.Run(() =>
         {

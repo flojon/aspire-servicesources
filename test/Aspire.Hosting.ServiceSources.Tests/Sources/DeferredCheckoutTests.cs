@@ -140,6 +140,44 @@ public class DeferredCheckoutTests
     private static bool IsDeferred(IResource resource) =>
         resource.Annotations.OfType<ExplicitStartupAnnotation>().Any();
 
+    /// <summary>
+    /// <see cref="DeferredCheckout.ShouldDefer"/> answers "is there anything to clone" from
+    /// <see cref="LocalGitCheckout.IsColdManagedCheckout"/>, keyed on
+    /// <see cref="RepositoryDefinition.CheckoutName"/> (#291) rather than on the service's own name
+    /// — so a grouped service whose own name has never been a checkout path at all still gets a real
+    /// answer, judged against the directory the group actually shares.
+    /// </summary>
+    [Fact]
+    public void ShouldDefer_GroupedService_ChecksTheSharedCheckoutDirectory()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.UseDeferredCheckout();
+
+        var repository = new RepositoryDefinition
+        {
+            Url = "https://example.com/monorepo.git", CheckoutName = "monorepo",
+        };
+        var ordersDefinition = new ServiceDefinition
+        {
+            Repository = repository,
+            Project = "Orders/Orders.csproj",
+            Kind = LocalKinds.Dotnet,
+            Origin = CatalogOrigin.FromYaml("servicesources.yaml"),
+        };
+
+        var deferred = DeferredCheckout.For(builder);
+
+        // Nothing at the shared directory yet: cold, so it defers.
+        Assert.True(deferred.ShouldDefer(builder, "orders", ordersDefinition, DevConfig()));
+
+        // A co-grouped service's checkout has already landed at "monorepo" — "orders" itself was
+        // never cloned into and never will be, but the group's directory exists, so there is nothing
+        // left to defer.
+        Directory.CreateDirectory(Path.Combine(ExpectedRepoRoot(dir, "monorepo"), ".git"));
+        Assert.False(deferred.ShouldDefer(builder, "orders", ordersDefinition, DevConfig()));
+    }
+
     [Fact]
     public void WithoutOptIn_ColdCheckout_StillResolvesEagerly()
     {

@@ -164,7 +164,8 @@ internal sealed class DeferredCheckout
     /// to be the same rule in both places rather than two that happen to agree.
     /// </remarks>
     public bool ShouldDefer(
-        IDistributedApplicationBuilder builder, string serviceName, ServiceDeveloperConfig config)
+        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
+        ServiceDeveloperConfig config)
     {
         lock (_gate)
         {
@@ -198,7 +199,8 @@ internal sealed class DeferredCheckout
         // managed root — a complete checkout, or debris from an interrupted clone — goes down the
         // eager path, which is the one that knows how to tell those apart and what to do about
         // each.
-        return LocalGitCheckout.IsColdManagedCheckout(builder.AppHostDirectory, serviceName, config);
+        return LocalGitCheckout.IsColdManagedCheckout(
+            builder.AppHostDirectory, definition.Repository.CheckoutName, config);
     }
 
     /// <summary>
@@ -216,7 +218,7 @@ internal sealed class DeferredCheckout
         PrepareStep? prepareStep,
         IPrepareCommandRunner prepareRunner)
     {
-        var repoRoot = LocalGitCheckout.ManagedRepoRoot(builder.AppHostDirectory, serviceName);
+        var repoRoot = LocalGitCheckout.ManagedRepoRoot(builder.AppHostDirectory, definition.Repository.CheckoutName);
 
         // Through the same confinement the eager path uses, and before anything is registered: the
         // path named here is what DCP freezes into the executable spec and what MSBuild is later
@@ -274,7 +276,7 @@ internal sealed class DeferredCheckout
         IPrepareCommandRunner prepareRunner,
         Func<string, DeferredLocalResource?> resolveDeferred)
     {
-        var repoRoot = LocalGitCheckout.ManagedRepoRoot(builder.AppHostDirectory, serviceName);
+        var repoRoot = LocalGitCheckout.ManagedRepoRoot(builder.AppHostDirectory, definition.Repository.CheckoutName);
 
         // Everything the handler adds from here on, identified by reference rather than by index:
         // IResourceCollection supports removal, and a handler that removed one would shift every
@@ -715,7 +717,8 @@ internal sealed class DeferredCheckout
             // below may be the thing that starts the clone — a service the prefetch never enumerated
             // is resolved on this call — and it can only report to a stream that already exists by
             // the time it runs.
-            var progress = deferred.Prefetch.WatchCheckout(deferred.ServiceName);
+            var progress = deferred.Prefetch.WatchCheckout(
+                deferred.ServiceName, deferred.Definition.Repository.CheckoutName);
 
             // git's own account of the clone, mirrored onto this resource while it runs. On a task
             // of its own because the call below blocks this one for as long as the clone takes,
