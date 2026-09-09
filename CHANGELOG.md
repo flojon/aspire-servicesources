@@ -26,6 +26,14 @@ never existed. Check the tag of the last release before adding one.
   catalogs is an error naming both sources — not a merge, and not a silent precedence rule. Yaml
   stays fully supported as one provider; `servicesources.local.json` is still required either way —
   see the README's "Authoring the catalog in code" section.
+- **`WithPrepare` on the code-authored catalog** ([#134]). The code-authoring equivalent of yaml's
+  `prepare:` block — a bootstrap command the `"local"` source runs inside the materialized checkout
+  before the kind is allowed to judge it.
+- **Typed `AsJava`/`AsJavaScript` handles** ([#134]). Sugar over `WithKind("java"/"javascript", …)`:
+  each hands the caller a fluent options handle (`JavaKindOptionsBuilder`/
+  `JavaScriptKindOptionsBuilder`) instead of a raw `Dictionary<string, object>`. The two shipped
+  kinds' options classes (`JavaKindOptions`/`JavaScriptKindOptions`) stay `internal` — only the
+  handles are public.
 
 ### Changed
 

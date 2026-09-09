@@ -1,4 +1,5 @@
 using Aspire.Hosting.ServiceSources.Catalog;
+using Aspire.Hosting.ServiceSources.Prepare;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Catalog;
 
@@ -147,5 +148,96 @@ public class ServiceDefinitionBuilderTests
             .WithKind("java");
 
         Assert.Throws<ServiceSourcesConfigurationException>(() => chain.WithKind("javascript"));
+    }
+
+    [Fact]
+    public void WithPrepare_SetsCommandWindowsCommandAndMode()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("catalog")
+            .WithRepository("https://github.com/example/catalog")
+            .WithPrepare(["./prepare.sh"], windowsCommand: ["prepare.cmd"], mode: PrepareMode.Once)
+            .Build();
+
+        Assert.NotNull(definition.Prepare);
+        Assert.Equal(["./prepare.sh"], definition.Prepare.Command!);
+        Assert.Equal(["prepare.cmd"], definition.Prepare.WindowsCommand!);
+        Assert.Equal("once", definition.Prepare.Mode);
+    }
+
+    /// <summary>
+    /// The enum is stored as the spelling the yaml block writes, which is what leaves one
+    /// representation for <see cref="PreparePlan"/> to parse whichever file the block came from.
+    /// </summary>
+    [Fact]
+    public void WithPrepare_ModeOmitted_IsTheDefaultModeWritten()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("catalog")
+            .WithRepository("https://github.com/example/catalog")
+            .WithPrepare(["./prepare.sh"])
+            .Build();
+
+        Assert.Null(definition.Prepare!.WindowsCommand);
+        Assert.Equal("oncePerCommit", definition.Prepare.Mode);
+    }
+
+    [Fact]
+    public void WithPrepare_UndefinedMode_ThrowsNamingTheFourSpellings()
+    {
+        var chain = new ServiceCatalogBuilder().AddService("catalog")
+            .WithRepository("https://github.com/example/catalog");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => chain.WithPrepare(["./prepare.sh"], mode: (PrepareMode)99));
+
+        Assert.Contains("catalog", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("'oncePerCommit'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("'once'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("'always'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("'never'", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The one place <see cref="ServiceDefinition.Prepare"/> is consumed, reached with what
+    /// <see cref="ServiceDefinitionBuilder.WithPrepare"/> produced: the block a code catalog declares
+    /// resolves into a step exactly as the yaml block it replaces does.
+    /// </summary>
+    [Fact]
+    public void WithPrepare_Metadata_ResolvesIntoAPreparePlanStep()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("catalog")
+            .WithRepository("https://github.com/example/catalog")
+            .WithPrepare(["./prepare.sh", "--full"], mode: PrepareMode.Once)
+            .Build();
+
+        var plan = PreparePlan.For(
+            "catalog", definition.Prepare, developer: null, managedCheckout: true, windows: false);
+
+        Assert.NotNull(plan.Step);
+        Assert.Equal<string[]>(["./prepare.sh", "--full"], [.. plan.Step!.Command]);
+        Assert.Equal(PrepareMode.Once, plan.Step.Mode);
+    }
+
+    [Fact]
+    public void WithPrepare_CalledTwice_ThrowsNamingServiceAndBlock()
+    {
+        var chain = new ServiceCatalogBuilder().AddService("catalog")
+            .WithRepository("https://github.com/example/catalog")
+            .WithPrepare(["a.sh"]);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => chain.WithPrepare(["b.sh"]));
+
+        Assert.Contains("catalog", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("WithPrepare", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithPrepare_NotCalled_PrepareStaysNull()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("orders")
+            .WithRepository("https://github.com/example/orders")
+            .Build();
+
+        Assert.Null(definition.Prepare);
     }
 }

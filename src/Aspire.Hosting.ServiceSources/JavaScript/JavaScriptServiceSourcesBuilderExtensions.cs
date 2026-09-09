@@ -1,4 +1,5 @@
 using Aspire.Hosting;
+using Aspire.Hosting.ServiceSources.Catalog;
 
 namespace Aspire.Hosting.ServiceSources;
 
@@ -32,4 +33,26 @@ public static class JavaScriptServiceSourcesBuilderExtensions
     [AspireExport]
     public static IDistributedApplicationBuilder UseJavaScript(this IDistributedApplicationBuilder builder) =>
         builder.AddLocalKind(JavaScriptLocalKind.KindName, new JavaScriptLocalKind());
+
+    /// <summary>
+    /// Configures this code-declared service to run as a <c>javascript</c>-kind <c>"local"</c>
+    /// service, through a typed options handle instead of a raw dictionary. Sugar over
+    /// <c>WithKind("javascript", …)</c> — calling this after <c>WithKind</c> (on either) throws the
+    /// same "already called" error <c>WithKind</c> itself would, since this <em>is</em> that call.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// catalog.AddService("frontend")
+    ///     .WithRepository("https://github.com/example/frontend")
+    ///     .AsJavaScript(o => o.AppType(JavaScriptAppTypes.Vite).Port(3000));
+    /// </code>
+    /// </example>
+    [AspireExport]
+    public static ServiceDefinitionBuilder AsJavaScript(
+        this ServiceDefinitionBuilder builder, Action<JavaScriptKindOptionsBuilder> configure)
+    {
+        var options = new JavaScriptKindOptionsBuilder();
+        configure(options);
+        return builder.WithKind(JavaScriptLocalKind.KindName, options.Build());
+    }
 }

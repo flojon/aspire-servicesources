@@ -1,5 +1,6 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources;
+using Aspire.Hosting.ServiceSources.Prepare;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
@@ -28,17 +29,15 @@ builder.AddServiceCatalog(catalog =>
     // AddServiceCatalog costs nothing extra to declare it — it's servicesources.local.json (below)
     // that decides whether it actually clones anything, exactly as in the yaml sample.
     //
-    // WithKind takes a raw dictionary rather than a typed options object here: JavaKindOptions
-    // stays internal until a later stage's AsJava lands, so this dictionary — the same shape
-    // yaml's `java:` block produces — is the only way a C# AppHost author configures the
-    // built-in "java" kind through code for now.
+    // AsJava is the typed alternative to WithKind("java", <dictionary>) — Stage 1 shipped only the
+    // dictionary form because JavaKindOptions was still internal with no public handle over it.
+    // WithPrepare demonstrates the code-authoring equivalent of yaml's prepare: block; it's declared
+    // here for the same reason the "catalog" service itself is never actually run below — this repo
+    // (spring-petclinic) doesn't need a prepare step, so this exists purely to show the call.
     catalog.AddService("catalog")
         .WithRepository("https://github.com/spring-projects/spring-petclinic", defaultRef: "main")
-        .WithKind("java", new Dictionary<string, object>
-        {
-            ["mavenGoal"] = "spring-boot:run",
-            ["port"] = 8080,
-        });
+        .AsJava(o => o.MavenGoal("spring-boot:run").Port(8080))
+        .WithPrepare(["./mvnw", "-q", "dependency:go-offline"], mode: PrepareMode.Once);
 });
 
 // "local" source: clones (or uses an existing checkout of) a real project and runs it via
