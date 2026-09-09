@@ -51,6 +51,29 @@ public class JavaKindOptionsBuilderTests
     }
 
     [Fact]
+    public void Build_SchemeSet_ProducesMatchingJavaKindOptions()
+    {
+        var options = new JavaKindOptionsBuilder()
+            .MavenGoal("spring-boot:run")
+            .Port(8443)
+            .Scheme("https")
+            .Build();
+
+        Assert.Equal("https", options.Scheme);
+    }
+
+    [Fact]
+    public void Build_SchemeNotSet_LeavesItNull()
+    {
+        var options = new JavaKindOptionsBuilder()
+            .MavenGoal("spring-boot:run")
+            .Port(8080)
+            .Build();
+
+        Assert.Null(options.Scheme);
+    }
+
+    [Fact]
     public void EveryPublicMethod_IsNonGenericAndReturnsItself()
     {
         var methods = typeof(JavaKindOptionsBuilder)

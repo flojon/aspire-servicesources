@@ -271,6 +271,27 @@ public class JavaLocalResourceKindTests
         var endpoint = Assert.Single(resource.Annotations.OfType<EndpointAnnotation>());
         Assert.Equal(8080, endpoint.TargetPort);
         Assert.Equal("http", endpoint.UriScheme);
+        Assert.Equal("http", endpoint.Name);
+    }
+
+    [Fact]
+    public void Resolve_SchemeHttps_AddsAnHttpsEndpointNamedHttps()
+    {
+        var builder = CreateBuilder();
+        var repoRoot = CreateRepoRoot();
+        WriteWrapper(repoRoot, MavenWrapperName);
+
+        var resource = ResolveResource(builder, repoRoot,
+            ("mavenGoal", "spring-boot:run"),
+            ("scheme", "https"),
+            ("port", 8443));
+
+        // Named "https" (rather than the fixed "http" WithHttpEndpoint always used) so
+        // GetServiceEndpoint() resolves to it, and GetEndpoint("https") works directly.
+        var endpoint = Assert.Single(resource.Annotations.OfType<EndpointAnnotation>());
+        Assert.Equal(8443, endpoint.TargetPort);
+        Assert.Equal("https", endpoint.UriScheme);
+        Assert.Equal("https", endpoint.Name);
     }
 
     [Fact]

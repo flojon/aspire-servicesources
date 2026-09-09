@@ -184,8 +184,10 @@ internal sealed class JavaLocalResourceKind : ILocalResourceKind
 
             // AddJavaApp adds no endpoint of its own, so declare the one the service listens on — the
             // whole point of AddService() is handing consumers something they can WithReference().
-            // java.port is required, so this is as true of a deferred service as of a warm one.
-            javaApp.WithHttpEndpoint(targetPort: Options.Port);
+            // java.port is required, so this is as true of a deferred service as of a warm one. Named
+            // after the scheme (matching ContainerSource/KubernetesSource) rather than always "http",
+            // so a https-scheme service is the one GetServiceEndpoint() and GetEndpoint("https") find.
+            javaApp.WithEndpoint(targetPort: Options.Port, scheme: Options.Scheme, name: Options.Scheme);
 
             return javaApp;
         }

@@ -126,6 +126,69 @@ public class JavaKindOptionsTests
     }
 
     [Fact]
+    public void Parse_NoScheme_DefaultsToHttp()
+    {
+        var options = JavaKindOptions.Parse("java-api", Block(
+            ("mavenGoal", "spring-boot:run"),
+            ("port", 8080)));
+
+        Assert.Equal("http", options.Scheme);
+    }
+
+    [Fact]
+    public void Parse_SchemeHttps_IsAccepted()
+    {
+        var options = JavaKindOptions.Parse("java-api", Block(
+            ("mavenGoal", "spring-boot:run"),
+            ("scheme", "https"),
+            ("port", 8080)));
+
+        Assert.Equal("https", options.Scheme);
+    }
+
+    [Theory]
+    [InlineData("HTTPS")]
+    [InlineData("Https")]
+    [InlineData(" https ")]
+    public void Parse_SchemeInAnyCasingOrPadding_NormalizesToLowercase(string scheme)
+    {
+        var options = JavaKindOptions.Parse("java-api", Block(
+            ("mavenGoal", "spring-boot:run"),
+            ("scheme", scheme),
+            ("port", 8080)));
+
+        Assert.Equal("https", options.Scheme);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Parse_BlankScheme_DefaultsToHttp(string scheme)
+    {
+        var options = JavaKindOptions.Parse("java-api", Block(
+            ("mavenGoal", "spring-boot:run"),
+            ("scheme", scheme),
+            ("port", 8080)));
+
+        Assert.Equal("http", options.Scheme);
+    }
+
+    [Fact]
+    public void Parse_UnsupportedScheme_ThrowsNamingTheValueAndSupportedOnes()
+    {
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => JavaKindOptions.Parse("java-api", Block(
+                ("mavenGoal", "spring-boot:run"),
+                ("scheme", "grpc"),
+                ("port", 8080))));
+
+        Assert.Contains("java-api", ex.Message);
+        Assert.Contains("grpc", ex.Message);
+        Assert.Contains("http", ex.Message);
+        Assert.Contains("https", ex.Message);
+    }
+
+    [Fact]
     public void Parse_NoPort_ThrowsNamingPort()
     {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
