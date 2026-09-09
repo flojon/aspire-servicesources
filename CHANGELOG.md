@@ -18,6 +18,14 @@ never existed. Check the tag of the last release before adding one.
 
 ### Added
 
+- **The service catalog can be authored in code** ([#134]). `builder.AddServiceCatalog(catalog => …)`
+  declares services in the AppHost's own language — C# directly, TypeScript (and other guest
+  languages) through Aspire's Type System — instead of, or alongside, `servicesources.yaml`. All
+  four sources are covered: `WithRepository`/`WithKind` for `"local"`, `WithUrl` for `"url"`,
+  `WithContainer` for `"container"`, `WithKubernetes` for `"kubernetes"`. A service declared in both
+  catalogs is an error naming both sources — not a merge, and not a silent precedence rule. Yaml
+  stays fully supported as one provider; `servicesources.local.json` is still required either way —
+  see the README's "Authoring the catalog in code" section.
 - **`WithPrepare` on the code-authored catalog** ([#134]). The code-authoring equivalent of yaml's
   `prepare:` block — a bootstrap command the `"local"` source runs inside the materialized checkout
   before the kind is allowed to judge it.
@@ -26,6 +34,27 @@ never existed. Check the tag of the last release before adding one.
   `JavaScriptKindOptionsBuilder`) instead of a raw `Dictionary<string, object>`. The two shipped
   kinds' options classes (`JavaKindOptions`/`JavaScriptKindOptions`) stay `internal` — only the
   handles are public.
+
+### Changed
+
+- **`LocalKindConfig.Parse<T>` accepts an already-typed instance** ([#134]). A `WithKind(kind,
+  options)` call in code can pass an already-typed options object directly — `Parse<T>` now returns
+  it unchanged instead of round-tripping it through yaml, and throws a clearer error naming both
+  types if the options object doesn't match what the kind expects. A dictionary (the shape yaml
+  itself produces) still round-trips exactly as before.
+
+### Documentation
+
+- **The code-catalog design's ATS probe, measured** ([#134]). The accepted design for authoring the
+  service catalog in code depended on five shapes never measured against Aspire's Type System —
+  optional/named parameters, an extension method on a package-owned exported class, a lambda nested
+  inside a lambda, an enum as a parameter, and the generated name `addService` on two receivers. Four
+  cross cleanly as specified. The fifth collides, and the design's own named fallback
+  (`[AspireExport(MethodName = …)]`) does not fix it — that property only renames what a generated
+  SDK calls the method, not the capability ID the collision is keyed on. An explicit capability id
+  (`[AspireExport("…")]`) does. See
+  `docs/superpowers/specs/2026-09-07-code-catalog-stage0-ats-probe-findings.md`. Nothing in the
+  package changed; this stage ships no code.
 
 ## [0.5.1] - 2026-09-07
 
@@ -148,15 +177,6 @@ protection then blocked reusing the name, so this version carries what would hav
   rung.
 
 ### Added
-
-- **The service catalog can be authored in code** ([#134]). `builder.AddServiceCatalog(catalog => …)`
-  declares services in the AppHost's own language — C# directly, TypeScript (and other guest
-  languages) through Aspire's Type System — instead of, or alongside, `servicesources.yaml`. All
-  four sources are covered: `WithRepository`/`WithKind` for `"local"`, `WithUrl` for `"url"`,
-  `WithContainer` for `"container"`, `WithKubernetes` for `"kubernetes"`. A service declared in both
-  catalogs is an error naming both sources — not a merge, and not a silent precedence rule. Yaml
-  stays fully supported as one provider; `servicesources.local.json` is still required either way —
-  see the README's "Authoring the catalog in code" section.
 
 - **A backing service can be reached in a dev cluster: `source: "kubernetes"`** ([#144]). The
   database, broker or cache a service connects to now has the third source the service side has had
@@ -546,12 +566,6 @@ protection then blocked reusing the name, so this version carries what would hav
 
 ### Changed
 
-- **`LocalKindConfig.Parse<T>` accepts an already-typed instance** ([#134]). A `WithKind(kind,
-  options)` call in code can pass an already-typed options object directly — `Parse<T>` now returns
-  it unchanged instead of round-tripping it through yaml, and throws a clearer error naming both
-  types if the options object doesn't match what the kind expects. A dictionary (the shape yaml
-  itself produces) still round-trips exactly as before.
-
 - **`javascript.appDirectory` and `javascript.scriptPath` are now confined to the checkout by the
   same lexical check as `project`, `prepare.command` and every `java.*` path** ([#235]). They used
   to run a resolved check of their own — `Path.GetFullPath` followed by a root-prefix comparison —
@@ -756,17 +770,6 @@ protection then blocked reusing the name, so this version carries what would hav
   on the next AppHost start; and that the existing `local.path` consent notice is drawn on blast
   radius, not provenance, so it says nothing about a managed checkout's own `prepare` step. Nothing
   in the package changed.
-
-- **The code-catalog design's ATS probe, measured** ([#134]). The accepted design for authoring the
-  service catalog in code depended on five shapes never measured against Aspire's Type System —
-  optional/named parameters, an extension method on a package-owned exported class, a lambda nested
-  inside a lambda, an enum as a parameter, and the generated name `addService` on two receivers. Four
-  cross cleanly as specified. The fifth collides, and the design's own named fallback
-  (`[AspireExport(MethodName = …)]`) does not fix it — that property only renames what a generated
-  SDK calls the method, not the capability ID the collision is keyed on. An explicit capability id
-  (`[AspireExport("…")]`) does. See
-  `docs/superpowers/specs/2026-09-07-code-catalog-stage0-ats-probe-findings.md`. Nothing in the
-  package changed; this stage ships no code.
 
 ## [0.4.1] - 2026-09-05
 
