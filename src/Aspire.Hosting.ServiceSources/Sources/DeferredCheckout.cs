@@ -789,6 +789,7 @@ internal sealed class DeferredCheckout
                         deferred.Definition.Repository.CheckoutName == deferred.ServiceName
                             ? PreparePlan.ServiceLabel(deferred.ServiceName)
                             : PreparePlan.RepositoryLabel(deferred.Definition.Repository.CheckoutName),
+                        deferred.Definition.Repository.CheckoutName,
                         step,
                         repoRoot,
                         deferred.AppHostDirectory,

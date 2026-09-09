@@ -177,8 +177,9 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
                     // BufferingPrepareOutputSink for why the console alone is not enough under
                     // `aspire run`.
                     CheckoutPreparation.Run(
-                        serviceName, label, step, repoRoot, builder.AppHostDirectory, managedCheckout, gitClient,
-                        _prepareRunner, BufferingPrepareOutputSink.Wrap(builder, serviceName, ConsolePrepareOutputSink.Instance));
+                        serviceName, label, definition.Repository.CheckoutName, step, repoRoot,
+                        builder.AppHostDirectory, managedCheckout, gitClient, _prepareRunner,
+                        BufferingPrepareOutputSink.Wrap(builder, serviceName, ConsolePrepareOutputSink.Instance));
                 }
                 else if (CheckoutPreparation.WouldRun(
                     serviceName, step, repoRoot, builder.AppHostDirectory, managedCheckout, gitClient))

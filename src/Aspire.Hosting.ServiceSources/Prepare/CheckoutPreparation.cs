@@ -72,9 +72,17 @@ internal static class CheckoutPreparation
     /// directory instead, which is what makes two grouped services share one completion record).
     /// </param>
     /// <param name="label">
-    /// How every message this run produces names the entity the step belongs to —
+    /// How every <em>sentence</em> this run produces names the entity the step belongs to —
     /// <see cref="PreparePlan.ServiceLabel"/> for an ungrouped service,
-    /// <see cref="PreparePlan.RepositoryLabel"/> for one grouped into a shared repository.
+    /// <see cref="PreparePlan.RepositoryLabel"/> for one grouped into a shared repository. Not what
+    /// the log tag uses — see <paramref name="checkoutName"/>.
+    /// </param>
+    /// <param name="checkoutName">
+    /// <see cref="Config.Catalog.RepositoryDefinition.CheckoutName"/> — what the log tag on every
+    /// line this run reports names, so that two grouped services' shared step reads as one stream
+    /// attributed to the repository rather than to whichever member happened to trigger it. For an
+    /// ungrouped service this is <paramref name="serviceName"/> itself, which is what keeps
+    /// <c>[prepare {name}]</c> byte-identical to the tag before #291 introduced grouping.
     /// </param>
     /// <param name="cancellationToken">
     /// Stops the command. A step can legitimately run for an hour, so the developer interrupting is
@@ -95,6 +103,7 @@ internal static class CheckoutPreparation
     public static void Run(
         string serviceName,
         string label,
+        string checkoutName,
         PrepareStep step,
         string repoRoot,
         string appHostDirectory,
@@ -117,10 +126,10 @@ internal static class CheckoutPreparation
         var checkoutPath = decision.CheckoutPath;
         var commit = decision.Commit;
 
-        sink.Report($"{Tag(label)} {reason} Running: {RedactedDescribe(step)}");
+        sink.Report($"{Tag(checkoutName)} {reason} Running: {RedactedDescribe(step)}");
 
         var tail = new Queue<string>(OutputTailLines);
-        var exitCode = Launch(label, step, repoRoot, runner, sink, tail, cancellationToken);
+        var exitCode = Launch(label, checkoutName, step, repoRoot, runner, sink, tail, cancellationToken);
 
         if (exitCode != 0)
         {
@@ -265,6 +274,7 @@ internal static class CheckoutPreparation
 
     private static int Launch(
         string label,
+        string checkoutName,
         PrepareStep step,
         string repoRoot,
         IPrepareCommandRunner runner,
@@ -272,7 +282,7 @@ internal static class CheckoutPreparation
         Queue<string> tail,
         CancellationToken cancellationToken)
     {
-        var tag = Tag(label);
+        var tag = Tag(checkoutName);
 
         try
         {
@@ -313,9 +323,9 @@ internal static class CheckoutPreparation
 
     /// <summary>
     /// The prefix every line about this step carries, so a step's output is attributable when
-    /// several services report at once.
+    /// several checkouts report at once.
     /// </summary>
-    private static string Tag(string label) => $"[prepare {label}]";
+    private static string Tag(string checkoutName) => $"[prepare {checkoutName}]";
 
     /// <summary>
     /// <see cref="PrepareStep.Describe"/>, with any URL credentials it echoes removed.

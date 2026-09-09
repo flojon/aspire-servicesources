@@ -124,9 +124,11 @@ public class CheckoutPreparationTests
         bool managedCheckout = true,
         CancellationToken cancellationToken = default,
         string? serviceName = null,
-        string? label = null) =>
+        string? label = null,
+        string? checkoutName = null) =>
         CheckoutPreparation.Run(
-            serviceName ?? ServiceName, label ?? PreparePlan.ServiceLabel(ServiceName), step, fixture.RepoRoot,
+            serviceName ?? ServiceName, label ?? PreparePlan.ServiceLabel(ServiceName),
+            checkoutName ?? serviceName ?? ServiceName, step, fixture.RepoRoot,
             fixture.AppHostDirectory, managedCheckout, fixture.Git, fixture.Runner, fixture.Sink, cancellationToken);
 
     // ---- the marker ---------------------------------------------------------
@@ -376,7 +378,7 @@ public class CheckoutPreparationTests
         Run(fixture, Step());
 
         var announcement = fixture.Sink.Lines[0];
-        Assert.Contains("[prepare Service 'routing']", announcement);
+        Assert.Contains("[prepare routing]", announcement);
         Assert.Contains("no completed prepare step is recorded", announcement);
         Assert.Contains("./prepare.sh", announcement);
     }
@@ -455,8 +457,8 @@ public class CheckoutPreparationTests
 
         Assert.Equal(
             [
-                "[prepare Service 'routing'] Downloading graphhopper-web-11.0.jar...",
-                "[prepare Service 'routing'] Importing sweden-latest.osm.pbf",
+                "[prepare routing] Downloading graphhopper-web-11.0.jar...",
+                "[prepare routing] Importing sweden-latest.osm.pbf",
             ],
             fixture.Sink.Lines.Skip(1));
     }
@@ -512,14 +514,14 @@ public class CheckoutPreparationTests
         var runner = new ConcurrentlyReportingRunner();
 
         CheckoutPreparation.Run(
-            ServiceName, PreparePlan.ServiceLabel(ServiceName), Step(), fixture.RepoRoot, fixture.AppHostDirectory,
-            managedCheckout: true, fixture.Git, runner, fixture.Sink);
+            ServiceName, PreparePlan.ServiceLabel(ServiceName), ServiceName, Step(), fixture.RepoRoot,
+            fixture.AppHostDirectory, managedCheckout: true, fixture.Git, runner, fixture.Sink);
 
         // The announcement plus every line both streams wrote, and nothing torn.
         Assert.Equal(
             1 + (ConcurrentlyReportingRunner.PerStream * 2),
             fixture.Sink.Lines.Count);
-        Assert.All(fixture.Sink.Lines, line => Assert.StartsWith("[prepare Service 'routing']", line));
+        Assert.All(fixture.Sink.Lines, line => Assert.StartsWith("[prepare routing]", line));
     }
 
     private sealed class ConcurrentlyReportingRunner : IPrepareCommandRunner
@@ -668,8 +670,8 @@ public class CheckoutPreparationTests
         var runner = new ExitsWhileStillReportingRunner(StillArriving, insideTheCallback);
 
         var run = Task.Run(() => CheckoutPreparation.Run(
-            ServiceName, PreparePlan.ServiceLabel(ServiceName), Step(), fixture.RepoRoot, fixture.AppHostDirectory,
-            managedCheckout: true, fixture.Git, runner, sink));
+            ServiceName, PreparePlan.ServiceLabel(ServiceName), ServiceName, Step(), fixture.RepoRoot,
+            fixture.AppHostDirectory, managedCheckout: true, fixture.Git, runner, sink));
 
         Assert.True(insideTheCallback.Wait(Rendezvous), "the reader never reached the sink");
 
@@ -903,11 +905,11 @@ public class CheckoutPreparationTests
         var appHostDirectory = fixture.AppHostDirectory;
 
         CheckoutPreparation.Run(
-            "orders", PreparePlan.ServiceLabel("orders"), Step(), fixture.RepoRoot, appHostDirectory,
+            "orders", PreparePlan.ServiceLabel("orders"), "orders", Step(), fixture.RepoRoot, appHostDirectory,
             managedCheckout: false, fixture.Git, fixture.Runner, fixture.Sink);
 
         CheckoutPreparation.Run(
-            "payments", PreparePlan.ServiceLabel("payments"), Step(), fixture.RepoRoot, appHostDirectory,
+            "payments", PreparePlan.ServiceLabel("payments"), "payments", Step(), fixture.RepoRoot, appHostDirectory,
             managedCheckout: false, fixture.Git, fixture.Runner, fixture.Sink);
 
         Assert.Equal(2, fixture.Runner.Runs.Count);
@@ -921,8 +923,8 @@ public class CheckoutPreparationTests
     /// managed checkout, so their marker is the same file — <see cref="PrepareMarker.LocationFor"/>
     /// keys a managed checkout's marker on the directory, ignoring the service name entirely — and
     /// the step therefore runs once for the tree rather than once per member. Simulated here by
-    /// pointing two different service names at the identical <c>repoRoot</c>, which is what Task 8's
-    /// re-keying of <c>LocalGitCheckout.ManagedRepoRoot</c> onto <c>CheckoutName</c> makes true for a
+    /// pointing two different service names at the identical <c>repoRoot</c>, the effect
+    /// <c>LocalGitCheckout.ManagedRepoRoot</c>'s re-keying onto <c>CheckoutName</c> produces for a
     /// real grouped repository — this test only needs the marker-sharing consequence of that, not the
     /// re-keying itself.
     /// </summary>
@@ -933,11 +935,11 @@ public class CheckoutPreparationTests
         var label = PreparePlan.RepositoryLabel("monorepo");
 
         CheckoutPreparation.Run(
-            "orders", label, Step(), fixture.RepoRoot, fixture.AppHostDirectory,
+            "orders", label, "monorepo", Step(), fixture.RepoRoot, fixture.AppHostDirectory,
             managedCheckout: true, fixture.Git, fixture.Runner, fixture.Sink);
 
         CheckoutPreparation.Run(
-            "payments", label, Step(), fixture.RepoRoot, fixture.AppHostDirectory,
+            "payments", label, "monorepo", Step(), fixture.RepoRoot, fixture.AppHostDirectory,
             managedCheckout: true, fixture.Git, fixture.Runner, fixture.Sink);
 
         // Once, not twice: the second call's Decide found the first call's marker already
@@ -1023,8 +1025,8 @@ public class CheckoutPreparationTests
 
         var exception = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             CheckoutPreparation.Run(
-                "../../evil", PreparePlan.ServiceLabel("../../evil"), Step(), fixture.RepoRoot, fixture.AppHostDirectory,
-                managedCheckout: false, fixture.Git, fixture.Runner, fixture.Sink));
+                "../../evil", PreparePlan.ServiceLabel("../../evil"), "../../evil", Step(), fixture.RepoRoot,
+                fixture.AppHostDirectory, managedCheckout: false, fixture.Git, fixture.Runner, fixture.Sink));
 
         Assert.Contains("../../evil", exception.Message, StringComparison.Ordinal);
         Assert.Empty(fixture.Runner.Runs);
