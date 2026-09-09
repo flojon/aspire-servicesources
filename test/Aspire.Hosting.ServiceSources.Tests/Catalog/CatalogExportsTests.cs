@@ -73,7 +73,7 @@ public class CatalogExportsTests
 
         string[] expected =
         [
-            "addService", "addBackingService", "getServiceEndpoint", "useJava", "useJavaScript",
+            "addService", "addBackingService", "asJava", "asJavaScript", "getServiceEndpoint", "useJava", "useJavaScript",
             "addServiceCatalog", "addServiceToCatalog",
             CamelCase(nameof(ServiceConfigurationExports.WithServiceEnvironment)),
             CamelCase(nameof(ServiceConfigurationExports.WithServiceEnvironmentFromParameter)),
@@ -89,7 +89,23 @@ public class CatalogExportsTests
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithUrl))}",
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithContainer))}",
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithKubernetes))}",
+            $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithPrepare))}",
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithKind))}",
+            "JavaKindOptionsBuilder.workingDirectory",
+            "JavaKindOptionsBuilder.mavenGoal",
+            "JavaKindOptionsBuilder.gradleTask",
+            "JavaKindOptionsBuilder.jarPath",
+            "JavaKindOptionsBuilder.wrapperPath",
+            "JavaKindOptionsBuilder.args",
+            "JavaKindOptionsBuilder.port",
+            "JavaScriptKindOptionsBuilder.appDirectory",
+            "JavaScriptKindOptionsBuilder.appType",
+            "JavaScriptKindOptionsBuilder.packageManager",
+            "JavaScriptKindOptionsBuilder.port",
+            "JavaScriptKindOptionsBuilder.portEnv",
+            "JavaScriptKindOptionsBuilder.runScript",
+            "JavaScriptKindOptionsBuilder.scriptPath",
+            "JavaScriptKindOptionsBuilder.targetPort",
         ];
 
         Assert.Equal(expected.OrderBy(id => id, StringComparer.Ordinal), ids.OrderBy(id => id, StringComparer.Ordinal));

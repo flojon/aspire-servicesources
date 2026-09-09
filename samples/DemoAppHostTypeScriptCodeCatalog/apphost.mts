@@ -1,6 +1,6 @@
 // TypeScript AppHost demonstrating the catalog authored in code — no servicesources.yaml. See
 // samples/DemoAppHostTypeScript/apphost.mts for the yaml-based equivalent.
-import { createBuilder } from './.aspire/modules/aspire.mjs';
+import { createBuilder, PrepareMode } from './.aspire/modules/aspire.mjs';
 
 const builder = await createBuilder();
 
@@ -28,15 +28,22 @@ await builder.addServiceCatalog(async (catalog) => {
   // sample makes for its "catalog" service: running it needs a JDK to build the checkout with
   // the repo's Maven wrapper, so this only demonstrates WithKind as a catalog-authoring surface.
   //
-  // withKind's options parameter collapses to an untyped `{ options: any }` bag here: JavaKindOptions
-  // stays internal until a later stage's AsJava lands, so this bag — the same shape yaml's `java:`
-  // block produces — is the only way a TypeScript AppHost author configures the built-in "java"
-  // kind through code for now.
+  // asJava/withPrepare are Stage 2's typed alternatives to the untyped withKind bag Stage 1 shipped
+  // — see samples/DemoAppHostCodeCatalog/Program.cs for the identical shape in C#.
   const catalogService = await catalog.addServiceToCatalog('catalog');
   await catalogService.withRepository('https://github.com/spring-projects/spring-petclinic', {
     defaultRef: 'main',
   });
-  await catalogService.withKind('java', { options: { mavenGoal: 'spring-boot:run', port: 8080 } });
+  // asJava is the typed alternative to withKind('java', { options: {...} }) — Stage 1 shipped only
+  // the untyped bag because JavaKindOptions had no public handle yet. The lambda nested inside the
+  // addServiceCatalog lambda is exactly the shape Stage 0 measured crossing ATS.
+  await catalogService.asJava(async (o) => {
+    await o.mavenGoal('spring-boot:run');
+    await o.port(8080);
+  });
+  await catalogService.withPrepare(['./mvnw', '-q', 'dependency:go-offline'], {
+    mode: PrepareMode.Once,
+  });
 });
 
 const inventory = await builder.addService('inventory');

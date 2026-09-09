@@ -189,6 +189,27 @@ values you type into `servicesources.local.json`:
 still needs a `servicesources.yaml` entry for it; porting one to the code catalog silently
 drops back to the `http` default.
 
+A `"local"` service can also declare a `prepare:`-equivalent bootstrap command:
+
+```csharp
+catalog.AddService("catalog")
+    .WithRepository("https://github.com/spring-projects/spring-petclinic")
+    .AsJava(o => o.MavenGoal("spring-boot:run").Port(8080))
+    .WithPrepare(["./mvnw", "-q", "dependency:go-offline"], mode: PrepareMode.Once);
+```
+
+`WithPrepare(command, windowsCommand: null, mode: PrepareMode.OncePerCommit)` is the
+code-authoring equivalent of yaml's `prepare:` block — see "`prepare`: a checkout that has to
+bootstrap itself" (under `"local"` source options below) for what it runs and when. `mode`
+takes a `PrepareMode` value — `PrepareMode.OncePerCommit` (the default), `.Once`, `.Always`,
+`.Never` — the enum behind yaml's four `mode` spellings (`"oncePerCommit"`, `"once"`,
+`"always"`, `"never"`).
+
+`WithPrepare`'s `command` parameter is required, so it has no code-authoring equivalent for a
+Windows-only `prepare:` block — one that gives `windowsCommand` but no `command` at all, which
+yaml can express and which runs on Windows only. A prepare step declared in code always has a
+non-Windows command.
+
 Calls are additive — `WithContainer` and `WithKubernetes` above both configure `payments`,
 the same as two separate yaml keys would. A second call to the *same* method for one
 service is a configuration error naming the service and the block, not a silent overwrite.
@@ -206,9 +227,19 @@ catalog.AddService("x").WithKind("mykind", myOptions);
 ```
 
 `myOptions` can be a plain `Dictionary<string, object>` — the same shape yaml's `<kind>:`
-block produces — and today that's also the only shape available for the built-in `java`
-kind from code: typed option handles (`AsJava`, `AsJavaScript`) are a later addition, not
-yet shipped.
+block produces — which is the only shape available for an out-of-tree kind. The two
+built-in kinds also have a typed alternative: `AsJava`/`AsJavaScript` hand the lambda a
+fluent options handle instead —
+
+```csharp
+catalog.AddService("catalog")
+    .WithRepository("https://github.com/spring-projects/spring-petclinic")
+    .AsJava(o => o.MavenGoal("spring-boot:run").Port(8080));
+```
+
+— which is sugar over `WithKind("java", …)`: calling it twice, or calling it after a plain
+`WithKind` call for the same service, throws the same "already called" error `WithKind`
+itself would.
 
 **A code-declared catalog still needs `servicesources.local.json`.** `AddServiceCatalog`
 says what a service *is* — its repository, its URL, its container image — the same job

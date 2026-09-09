@@ -1,3 +1,4 @@
+using Aspire.Hosting.ServiceSources.Catalog;
 using Aspire.Hosting.ServiceSources.Java;
 
 namespace Aspire.Hosting.ServiceSources;
@@ -38,4 +39,26 @@ public static class JavaServiceSourcesBuilderExtensions
     [AspireExport]
     public static IDistributedApplicationBuilder UseJava(this IDistributedApplicationBuilder builder) =>
         builder.AddLocalKind(JavaLocalResourceKind.KindName, new JavaLocalResourceKind());
+
+    /// <summary>
+    /// Configures this code-declared service to run as a <c>java</c>-kind <c>"local"</c> service,
+    /// through a typed options handle instead of a raw dictionary. Sugar over
+    /// <c>WithKind("java", …)</c> — calling this after <c>WithKind</c> (on either) throws the same
+    /// "already called" error <c>WithKind</c> itself would, since this <em>is</em> that call.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// catalog.AddService("catalog")
+    ///     .WithRepository("https://github.com/spring-projects/spring-petclinic")
+    ///     .AsJava(o => o.MavenGoal("spring-boot:run").Port(8080));
+    /// </code>
+    /// </example>
+    [AspireExport]
+    public static ServiceDefinitionBuilder AsJava(
+        this ServiceDefinitionBuilder builder, Action<JavaKindOptionsBuilder> configure)
+    {
+        var options = new JavaKindOptionsBuilder();
+        configure(options);
+        return builder.WithKind(JavaLocalResourceKind.KindName, options.Build());
+    }
 }

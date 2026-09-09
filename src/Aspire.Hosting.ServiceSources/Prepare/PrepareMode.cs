@@ -5,7 +5,7 @@ namespace Aspire.Hosting.ServiceSources.Prepare;
 /// <see cref="Once"/> is <see cref="OncePerCommit"/> minus the commit, <see cref="Always"/> is
 /// <see cref="Once"/> minus the command.
 /// </summary>
-internal enum PrepareMode
+public enum PrepareMode
 {
     /// <summary>
     /// Re-runs when either the command or the checked-out commit moves. For a bootstrap defined by
