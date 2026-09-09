@@ -125,6 +125,81 @@ public class ServiceDefinitionBuilderTests
     }
 
     [Fact]
+    public void WithHttpEndpoint_AfterWithContainer_SetsContainerScheme()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("payments")
+            .WithContainer("nginxdemos/hello", port: 80)
+            .WithHttpEndpoint()
+            .Build();
+
+        Assert.Equal("http", definition.Container!.Scheme);
+    }
+
+    [Fact]
+    public void WithHttpsEndpoint_AfterWithContainer_SetsContainerScheme()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("payments")
+            .WithContainer("nginxdemos/hello", port: 80)
+            .WithHttpsEndpoint()
+            .Build();
+
+        Assert.Equal("https", definition.Container!.Scheme);
+    }
+
+    [Fact]
+    public void WithHttpsEndpoint_AfterWithKubernetes_SetsKubernetesScheme()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("payments")
+            .WithKubernetes("payments", port: 8080)
+            .WithHttpsEndpoint()
+            .Build();
+
+        Assert.Equal("https", definition.Kubernetes!.Scheme);
+    }
+
+    [Fact]
+    public void WithHttpsEndpoint_TargetsOnlyTheMostRecentlyDeclaredSource()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("payments")
+            .WithContainer("nginxdemos/hello", port: 80)
+            .WithKubernetes("payments", port: 8080)
+            .WithHttpsEndpoint()
+            .Build();
+
+        Assert.Null(definition.Container!.Scheme);
+        Assert.Equal("https", definition.Kubernetes!.Scheme);
+    }
+
+    [Fact]
+    public void WithHttpEndpoint_NoSourceDeclaredYet_Throws()
+    {
+        var chain = new ServiceCatalogBuilder().AddService("payments");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => chain.WithHttpEndpoint());
+
+        Assert.Contains("payments", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithHttpEndpoint_AfterWithUrlOnly_Throws()
+    {
+        // WithUrl doesn't carry a Scheme, so it isn't a valid target either.
+        var chain = new ServiceCatalogBuilder().AddService("payments").WithUrl("https://a.example");
+
+        Assert.Throws<ServiceSourcesConfigurationException>(() => chain.WithHttpEndpoint());
+    }
+
+    [Fact]
+    public void WithHttpsEndpoint_CalledTwiceForSameBlock_Throws()
+    {
+        var chain = new ServiceCatalogBuilder().AddService("payments")
+            .WithContainer("nginxdemos/hello", port: 80)
+            .WithHttpsEndpoint();
+
+        Assert.Throws<ServiceSourcesConfigurationException>(() => chain.WithHttpEndpoint());
+    }
+
+    [Fact]
     public void WithKind_SetsKindAndOptions()
     {
         var options = new Dictionary<string, object> { ["mavenGoal"] = "spring-boot:run" };

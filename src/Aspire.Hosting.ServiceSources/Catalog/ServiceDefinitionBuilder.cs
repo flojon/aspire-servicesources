@@ -1,6 +1,7 @@
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Prepare;
+using Aspire.Hosting.ServiceSources.Sources;
 
 namespace Aspire.Hosting.ServiceSources.Catalog;
 
@@ -23,6 +24,11 @@ public sealed class ServiceDefinitionBuilder
     private PrepareMetadata? _prepare;
     private string? _kind;
     private object? _kindOptions;
+
+    // The ContainerMetadata or KubernetesMetadata most recently created by WithContainer/
+    // WithKubernetes — where WithHttpEndpoint/WithHttpsEndpoint stamp a scheme, matching Aspire's
+    // own "call it right after the thing it names a scheme for" idiom.
+    private object? _schemeOwner;
 
     internal ServiceDefinitionBuilder(string serviceName)
     {
@@ -54,18 +60,52 @@ public sealed class ServiceDefinitionBuilder
     {
         RequireUnset(_container, nameof(WithContainer));
         _container = new ContainerMetadata { Image = image, Port = port, DefaultTag = defaultTag };
+        _schemeOwner = _container;
         return this;
     }
 
     /// <summary>
     /// Declares this service's Kubernetes forward target — the "kubernetes" source. See design "The
-    /// authoring API". <see cref="KubernetesMetadata.Scheme"/> has no code-authoring surface in Stage
-    /// 1; it stays null (default <c>http</c>), reachable only via the yaml <c>scheme</c> field.
+    /// authoring API".
     /// </summary>
     public ServiceDefinitionBuilder WithKubernetes(string service, int? port = null)
     {
         RequireUnset(_kubernetes, nameof(WithKubernetes));
         _kubernetes = new KubernetesMetadata { Service = service, Port = port };
+        _schemeOwner = _kubernetes;
+        return this;
+    }
+
+    /// <summary>
+    /// Names the scheme of the source declared immediately before this call — <see cref="WithContainer"/>
+    /// or <see cref="WithKubernetes"/> — as <c>"http"</c>. Mirrors Aspire's own
+    /// <c>WithHttpEndpoint()</c>/<c>WithHttpsEndpoint()</c> pair; see <see cref="EndpointScheme"/> for
+    /// what a scheme actually changes at resolution time.
+    /// </summary>
+    public ServiceDefinitionBuilder WithHttpEndpoint() => WithScheme(EndpointScheme.Http);
+
+    /// <summary>Names the scheme of the most recently declared source as <c>"https"</c>. See <see cref="WithHttpEndpoint"/>.</summary>
+    public ServiceDefinitionBuilder WithHttpsEndpoint() => WithScheme(EndpointScheme.Https);
+
+    private ServiceDefinitionBuilder WithScheme(string scheme)
+    {
+        switch (_schemeOwner)
+        {
+            case ContainerMetadata container:
+                RequireUnset(container.Scheme, $"{nameof(WithHttpEndpoint)}/{nameof(WithHttpsEndpoint)} for this {nameof(WithContainer)}");
+                container.Scheme = scheme;
+                break;
+            case KubernetesMetadata kubernetes:
+                RequireUnset(kubernetes.Scheme, $"{nameof(WithHttpEndpoint)}/{nameof(WithHttpsEndpoint)} for this {nameof(WithKubernetes)}");
+                kubernetes.Scheme = scheme;
+                break;
+            default:
+                throw new ServiceSourcesConfigurationException(
+                    $"Service '{_serviceName}': {nameof(WithHttpEndpoint)}/{nameof(WithHttpsEndpoint)} must " +
+                    $"immediately follow {nameof(WithContainer)} or {nameof(WithKubernetes)} — there is no " +
+                    "endpoint-bearing source to name a scheme for yet.");
+        }
+
         return this;
     }
 
