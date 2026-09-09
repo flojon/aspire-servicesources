@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using Aspire.Hosting.ServiceSources.Catalog;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
+using Aspire.Hosting.ServiceSources.Git;
 
 namespace Aspire.Hosting.ServiceSources.Config;
 
@@ -288,6 +289,22 @@ internal static class ServiceSourcesConfigCache
 
                 foreach (var (name, repository) in yamlRepositories)
                 {
+                    // A repository's own name is checked here against the code catalog's
+                    // repositories specifically — repositories is seeded from codeRepositories above
+                    // and this loop is the only writer to it before this point, so any existing key
+                    // here really is a code/yaml collision rather than a yaml-vs-yaml one (yaml's own
+                    // ServiceCatalog.Repositories dictionary is Ordinal, same as Services, so two
+                    // yaml entries differing only by case would survive ServiceCatalogLoader.Load
+                    // untouched — left to the same DeveloperConfiguration.CanonicalizeToCatalog path
+                    // that already handles a yaml-vs-yaml service case collision, unchanged by this
+                    // task).
+                    if (repositories.ContainsKey(name))
+                    {
+                        throw new ServiceSourcesConfigurationException(
+                            $"Repository '{name}' is declared twice: in {CatalogOrigin.Code.Describe()} and in " +
+                            $"'{yamlPath}'. A repository belongs to one catalog; remove one of the two.");
+                    }
+
                     repositories[name] = repository;
                 }
 
@@ -324,6 +341,50 @@ internal static class ServiceSourcesConfigCache
                     // (Ordinal) key set — unchanged from today.
                     merged[name] = metadata.ToDefinition(yamlPath, name, yamlRepositories);
                 }
+            }
+
+            // "One namespace, checked once" (design #291): a repository's own name is also the
+            // directory an ungrouped service's own name would claim (design finding 2), so the two
+            // must never collide. A repository dict key is always identical to its own
+            // RepositoryDefinition.CheckoutName by construction (ServiceCatalogBuilder.AddRepository
+            // and ServiceCatalogLoader.Load both key repositories by the name whose CheckoutName they
+            // set), so checking every ungrouped service's own name against the repositories dict is
+            // the whole of this check — no separate reverse index is needed.
+            foreach (var (serviceName, definition) in merged)
+            {
+                if (definition.Repository.CheckoutName == serviceName && repositories.ContainsKey(serviceName))
+                {
+                    throw new ServiceSourcesConfigurationException(
+                        $"'{serviceName}' names both an ungrouped service — whose managed checkout is keyed on " +
+                        "its own name — and a repository declared under the same name, so the two would share " +
+                        "one checkout directory. Rename the service, or the repository, so they no longer match.");
+                }
+            }
+
+            // The warn-and-continue counterpart of the check above (design question 5, settled as
+            // "warn"): two ungrouped services naming the identical repository URL each get their own
+            // checkout, downloaded and reconciled separately, which is exactly what grouping them
+            // would avoid. Not an error — an existing catalog with this shape keeps working — but
+            // worth naming, since it usually means grouping was overlooked rather than intended.
+            foreach (var sharedUrl in merged
+                .Where(entry => entry.Value.Repository.CheckoutName == entry.Key)
+                // A blank Url is not a repository at all: every service gets a RepositoryDefinition
+                // regardless of source (design finding 2 mints an anonymous one unconditionally), so
+                // a kubernetes- or url-sourced service — which never sets 'repository:' — carries one
+                // whose Url defaults to "". Grouping those together would warn about services that
+                // were never candidates for sharing a checkout in the first place.
+                .Where(entry => !string.IsNullOrEmpty(entry.Value.Repository.Url))
+                .GroupBy(entry => entry.Value.Repository.Url, StringComparer.Ordinal)
+                .Where(group => group.Count() > 1))
+            {
+                var serviceNames = sharedUrl.Select(entry => entry.Key).Order(StringComparer.Ordinal).ToArray();
+
+                ServiceSourcesWarnings.For(builder).AddNotice(
+                    $"Services {string.Join(", ", serviceNames.Select(name => $"'{name}'"))} are all 'local' and " +
+                    $"declare the same repository '{GitUrl.Redact(sharedUrl.Key)}', but none of them are grouped " +
+                    "— each gets its own checkout, cloned and reconciled separately. To share one checkout " +
+                    "instead, group them: AddRepository(...)/WithSharedRepository(...) in code, or a " +
+                    "repositories: entry every member's repositoryRef: names, in yaml.");
             }
 
             var catalog = new Catalog.CodeServiceCatalog { Services = merged, Repositories = repositories };
