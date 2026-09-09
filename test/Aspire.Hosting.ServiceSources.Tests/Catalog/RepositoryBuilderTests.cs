@@ -80,6 +80,24 @@ public class RepositoryBuilderTests
         Assert.Contains("case", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// The same redaction requirement as <see cref="AddRepository_NameCollidesWithAnotherRepository_RedactsBothUrls"/>,
+    /// reached through a different failure path: a credentialed URL with no final path segment for
+    /// <c>DeriveName</c> to name a repository after. This branch runs before either of
+    /// <c>AddRepository</c>'s own two checks, and had its own separate (unredacted) message.
+    /// </summary>
+    [Fact]
+    public void AddRepository_NoNameCanBeDerived_RedactsTheUrl()
+    {
+        var catalog = new ServiceCatalogBuilder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => catalog.AddRepository("https://x-access-token:ghp_SUPERSECRETTOKEN@github.com/"));
+
+        Assert.DoesNotContain("ghp_SUPERSECRETTOKEN", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("github.com", ex.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void AddRepository_BlankUrl_Throws() =>
         Assert.Throws<ServiceSourcesConfigurationException>(

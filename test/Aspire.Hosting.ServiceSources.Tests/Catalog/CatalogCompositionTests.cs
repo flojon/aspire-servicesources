@@ -276,6 +276,41 @@ public class CatalogCompositionTests
     }
 
     /// <summary>
+    /// The repository-vs-repository case check is reachable from two yaml entries in the same file,
+    /// not only from a code/yaml pair — yaml's own <c>Repositories</c> dictionary is Ordinal, so
+    /// 'Monorepo:'/'monorepo:' both survive <c>ServiceCatalogLoader.Load</c> and land here as two
+    /// distinct keys. The message must attribute the collision to the actual yaml file, not always
+    /// to "code (AddServiceCatalog)" — a same-file collision has no code side at all.
+    /// </summary>
+    [Fact]
+    public void RepositoryName_DiffersOnlyByCaseWithinTheSameYamlFile_AttributesBothToYaml()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        var yamlPath = Path.Combine(dir, "servicesources.yaml");
+        File.WriteAllText(yamlPath,
+            """
+            repositories:
+              Monorepo:
+                repository: https://example.com/repo-one.git
+              monorepo:
+                repository: https://example.com/repo-two.git
+            services:
+              orders:
+                repositoryRef: Monorepo
+                project: Orders.csproj
+            """);
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.Contains("'monorepo'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("'Monorepo'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(yamlPath, ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("AddServiceCatalog", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Case-only, unlike <see cref="RepositoryName_CollidesWithUngroupedServiceName_ThrowsNamingBoth"/>:
     /// the default filesystem on Windows and macOS does not distinguish 'checkouts/Orders' from
     /// 'checkouts/orders', so the two would still fight over the same directory there even though

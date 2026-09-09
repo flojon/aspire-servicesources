@@ -287,6 +287,14 @@ internal static class ServiceSourcesConfigCache
             {
                 var (yamlCatalog, yamlRepositories) = ServiceCatalogLoader.Load(yamlPath);
 
+                // Snapshotted before the loop below adds to `repositories`: this is what tells the
+                // case-collision message which side is which. Without it, a same-file yaml-vs-yaml
+                // case collision (two 'repositories:' entries differing only by case, both already
+                // added to `repositories` by earlier iterations of this same loop) would be
+                // misreported as a collision with the code catalog even when code declared no
+                // repositories at all.
+                var codeRepositoryNames = repositories.Keys.ToHashSet(StringComparer.Ordinal);
+
                 foreach (var (name, repository) in yamlRepositories)
                 {
                     // A repository's own name is checked here against the code catalog's
@@ -308,15 +316,21 @@ internal static class ServiceSourcesConfigCache
                     // same reasoning ServiceCatalogBuilder.AddRepository's own case check applies to
                     // two code-declared names. The default filesystem on Windows and macOS is
                     // case-insensitive, so 'checkouts/Monorepo' and 'checkouts/monorepo' are the same
-                    // directory there.
+                    // directory there. Reachable from two yaml entries as well as one of each: yaml's
+                    // own Repositories dictionary is Ordinal, so 'Monorepo:'/'monorepo:' in the same
+                    // file both survive ServiceCatalogLoader.Load and land here as two distinct keys.
                     var repositoryCaseCollision = repositories.Keys.FirstOrDefault(
                         existing => string.Equals(existing, name, StringComparison.OrdinalIgnoreCase));
 
                     if (repositoryCaseCollision is not null)
                     {
+                        var collisionOrigin = codeRepositoryNames.Contains(repositoryCaseCollision)
+                            ? CatalogOrigin.Code.Describe()
+                            : $"'{yamlPath}'";
+
                         throw new ServiceSourcesConfigurationException(
                             $"Repository '{name}' in '{yamlPath}' differs only by case from repository " +
-                            $"'{repositoryCaseCollision}' in {CatalogOrigin.Code.Describe()}. Two repositories " +
+                            $"'{repositoryCaseCollision}' in {collisionOrigin}. Two repositories " +
                             "must differ by more than case.");
                     }
 

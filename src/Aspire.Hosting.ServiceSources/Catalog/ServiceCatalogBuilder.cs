@@ -150,8 +150,8 @@ public sealed class ServiceCatalogBuilder
         if (string.IsNullOrWhiteSpace(derived))
         {
             throw new ServiceSourcesConfigurationException(
-                $"AddRepository: no name could be derived from '{url}' — it has no final path segment to name a "
-                + "repository after. Pass an explicit name: AddRepository(url, name: \"...\").");
+                $"AddRepository: no name could be derived from '{GitUrl.Redact(url)}' — it has no final path " +
+                "segment to name a repository after. Pass an explicit name: AddRepository(url, name: \"...\").");
         }
 
         return derived;
