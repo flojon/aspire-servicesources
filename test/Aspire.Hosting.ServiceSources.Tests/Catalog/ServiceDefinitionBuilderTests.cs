@@ -310,7 +310,8 @@ public class ServiceDefinitionBuilderTests
             .Build();
 
         var plan = PreparePlan.For(
-            "catalog", definition.Repository.Prepare, developer: null, managedCheckout: true, windows: false);
+            "catalog", PreparePlan.ServiceLabel("catalog"), definition.Repository.Prepare, developer: null,
+            managedCheckout: true, windows: false);
 
         Assert.NotNull(plan.Step);
         Assert.Equal<string[]>(["./prepare.sh", "--full"], [.. plan.Step!.Command]);

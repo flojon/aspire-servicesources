@@ -80,7 +80,7 @@ internal static class PrepareModes
     /// <exception cref="ServiceSourcesConfigurationException">
     /// <paramref name="written"/> is not one of the four.
     /// </exception>
-    public static PrepareMode Parse(string serviceName, string? written, string writtenAt)
+    public static PrepareMode Parse(string label, string? written, string writtenAt)
     {
         if (written is null)
         {
@@ -98,7 +98,7 @@ internal static class PrepareModes
         }
 
         throw new ServiceSourcesConfigurationException(
-            $"Service '{serviceName}': {writtenAt} is '{written}', which is not a mode. Set it to one of "
+            $"{label}: {writtenAt} is '{written}', which is not a mode. Set it to one of "
             + string.Join(", ", Spellings.Select(s => $"'{s.Written}'"))
             + $" — or leave it out for '{Written(Default)}'.");
     }
