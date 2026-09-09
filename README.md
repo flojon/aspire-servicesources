@@ -139,7 +139,7 @@ builder.AddServiceCatalog(catalog =>
 
     catalog.AddService("payments")
         .WithContainer("nginxdemos/hello", port: 80, defaultTag: "latest")
-        .WithKubernetes("payments", port: 8080);
+        .WithKubernetes("payments", port: 8080).WithHttpsEndpoint();
 });
 
 var orders = builder.AddService("orders");
@@ -183,11 +183,22 @@ values you type into `servicesources.local.json`:
 | `WithContainer` | `container:` | `"container"` |
 | `WithKubernetes` | `kubernetes:` | `"kubernetes"` |
 
-`WithContainer` and `WithKubernetes` have no code-authoring equivalent for yaml's
-`container.scheme`/`kubernetes.scheme` (documented under the `"container"` and
-`"kubernetes"` source sections below) in this stage — a service that needs `scheme: https`
-still needs a `servicesources.yaml` entry for it; porting one to the code catalog silently
-drops back to the `http` default.
+`WithHttpEndpoint()`/`WithHttpsEndpoint()`, chained immediately after `WithContainer` or
+`WithKubernetes`, are the code-authoring equivalent of yaml's `container.scheme`/
+`kubernetes.scheme` (documented under the `"container"` and `"kubernetes"` source sections
+below) — mirroring Aspire's own `WithHttpEndpoint`/`WithHttpsEndpoint` pair. Each names the
+scheme of whichever source block precedes it, so a service declaring both sources sets them
+independently:
+
+```csharp
+catalog.AddService("payments")
+    .WithContainer("nginxdemos/hello", port: 80).WithHttpEndpoint()
+    .WithKubernetes("payments", port: 8080).WithHttpsEndpoint();
+```
+
+Calling either with no `WithContainer`/`WithKubernetes` immediately before it, or calling it
+twice for the same block, is a configuration error naming the service. Left uncalled, a
+block's scheme defaults to `http`, same as yaml.
 
 A `"local"` service can also declare a `prepare:`-equivalent bootstrap command:
 
