@@ -15,9 +15,16 @@ public sealed class ServiceDefinitionBuilder
 {
     private readonly string _serviceName;
 
+    // Holds whichever of the two — the URL string or the RepositoryBuilder handle — WithRepository or
+    // WithSharedRepository set, purely so RequireUnset can guard the two as one additive block: they
+    // fill the same block on ServiceDefinition (design "One service builder, not two"), and a service
+    // naming both is the same "block already set" error whichever order they were called in.
+    private object? _repositorySource;
+
     private string? _repository;
-    private string? _project;
     private string? _defaultRef;
+    private RepositoryBuilder? _sharedRepository;
+    private string? _project;
     private UrlMetadata? _url;
     private ContainerMetadata? _container;
     private KubernetesMetadata? _kubernetes;
@@ -37,13 +44,56 @@ public sealed class ServiceDefinitionBuilder
 
     internal string ServiceName => _serviceName;
 
-    /// <summary>Declares this service's repository — the "local" source. See design "The authoring API".</summary>
-    public ServiceDefinitionBuilder WithRepository(string url, string? project = null, string? defaultRef = null)
+    /// <summary>
+    /// Declares this service's own repository — the "local" source, ungrouped. See design "The
+    /// authoring API". For several services sharing one repository, see
+    /// <see cref="WithSharedRepository"/>.
+    /// </summary>
+    public ServiceDefinitionBuilder WithRepository(string url, string? defaultRef = null)
     {
-        RequireUnset(_repository, nameof(WithRepository));
+        RequireUnset(_repositorySource, nameof(WithRepository));
+        _repositorySource = url;
         _repository = url;
-        _project = project;
         _defaultRef = defaultRef;
+        return this;
+    }
+
+    /// <summary>
+    /// Declares this service's project file, relative to its checkout — the counterpart of yaml's
+    /// <c>project:</c> field. Required for the built-in <c>dotnet</c> kind; unused by every other
+    /// kind, which reads its own paths from <see cref="ServiceDefinitionBuilder.WithKind"/>'s options.
+    /// </summary>
+    public ServiceDefinitionBuilder WithProject(string project)
+    {
+        RequireUnset(_project, nameof(WithProject));
+        _project = project;
+        return this;
+    }
+
+    /// <summary>
+    /// Declares this service's repository as a shared handle — several services naming one
+    /// <see cref="RepositoryBuilder"/> clone it once and share the working tree. See design "The
+    /// authoring API" and the monorepo shape under "Motivation". A service naming both this and
+    /// <see cref="WithRepository"/> is the same additive "block already set" error either fills.
+    /// </summary>
+    public ServiceDefinitionBuilder WithSharedRepository(RepositoryBuilder repository)
+    {
+        RequireUnset(_repositorySource, nameof(WithSharedRepository));
+
+        if (_prepare is not null)
+        {
+            // The same runtime check WithPrepare raises when called after this one — raised here too
+            // so the order the two calls are chained in doesn't decide whether the mistake is caught.
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{_serviceName}': {nameof(WithPrepare)} was already called, but this service's "
+                + $"repository is a shared handle ({nameof(WithSharedRepository)}('{repository.Name}')) — a "
+                + "shared repository's prepare step belongs on the handle, not on one of the services that "
+                + $"share it. Remove the call to {nameof(WithPrepare)} here and call it on the "
+                + $"{nameof(RepositoryBuilder)} returned by AddRepository instead.");
+        }
+
+        _repositorySource = repository;
+        _sharedRepository = repository;
         return this;
     }
 
@@ -142,27 +192,20 @@ public sealed class ServiceDefinitionBuilder
     {
         RequireUnset(_prepare, nameof(WithPrepare));
 
-        // Before PrepareModes.Written, which is a lookup over the defined members and total only
-        // over those.
-        if (!Enum.IsDefined(mode))
+        if (_sharedRepository is not null)
         {
+            // The single-builder decision's one runtime check (design "Errors on the chain"): with
+            // one builder type for both an anonymous and a shared repository, there is no type to
+            // withhold WithPrepare from a grouped service at compile time. The step belongs on the
+            // repository once it is shared — see RepositoryBuilder.WithPrepare.
             throw new ServiceSourcesConfigurationException(
-                $"Service '{_serviceName}': {nameof(WithPrepare)} was given mode '{(int)mode}', which is not a "
-                + $"{nameof(PrepareMode)}. Set it to one of "
-                + string.Join(", ", Enum.GetValues<PrepareMode>().Select(m => $"{nameof(PrepareMode)}.{m}"))
-                + " — the four the yaml block spells "
-                + string.Join(", ", Enum.GetValues<PrepareMode>().Select(m => $"'{PrepareModes.Written(m)}'"))
-                + ".");
+                $"Service '{_serviceName}': {nameof(WithPrepare)} cannot be called here — its repository came "
+                + $"from {nameof(ServiceDefinitionBuilder.WithSharedRepository)}('{_sharedRepository.Name}'), and "
+                + "a shared repository's prepare step belongs on the handle, not on one of the services that "
+                + $"share it. Call WithPrepare on the {nameof(RepositoryBuilder)} returned by AddRepository instead.");
         }
 
-        // Stored as the spelling the yaml block uses, so that PrepareMetadata.Mode carries one
-        // representation whichever file the block came from and PreparePlan parses it in one place.
-        _prepare = new PrepareMetadata
-        {
-            Command = command,
-            WindowsCommand = windowsCommand,
-            Mode = PrepareModes.Written(mode),
-        };
+        _prepare = PrepareMetadataFactory.Create($"Service '{_serviceName}'", command, windowsCommand, mode);
 
         return this;
     }
@@ -196,7 +239,11 @@ public sealed class ServiceDefinitionBuilder
         // Repository/Project default to "" (ServiceMetadata's own defaults) when unset — a service
         // declared with no With* call at all is caught downstream by the same "no source configured"
         // path an empty yaml entry hits today, not rejected here.
-        Repository = new RepositoryDefinition
+        //
+        // A shared handle's RepositoryDefinition is built once and cached by RepositoryBuilder.Build
+        // — every service sharing this handle gets the identical instance back, which is the
+        // reference-equality identity mechanism design "The domain type" describes.
+        Repository = _sharedRepository?.Build() ?? new RepositoryDefinition
         {
             Url = _repository ?? "",
             DefaultRef = _defaultRef,

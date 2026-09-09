@@ -70,7 +70,9 @@ internal static class ServiceSourcesConfigCache
         /// <see cref="Configure"/> call reports the ordering error above instead of silently
         /// contributing nothing.
         /// </summary>
-        public IReadOnlyDictionary<string, ServiceDefinition> Freeze()
+        public (
+            IReadOnlyDictionary<string, ServiceDefinition> Services,
+            IReadOnlyDictionary<string, Catalog.RepositoryDefinition> Repositories) Freeze()
         {
             lock (_gate)
             {
@@ -252,7 +254,7 @@ internal static class ServiceSourcesConfigCache
             // Freeze first, under the same lock CodeCatalogFor's Configure calls take — an
             // AddServiceCatalog reaching this builder after this point contributes nothing (design:
             // "A ServiceCatalogBuilder captured and mutated after this point contributes nothing").
-            var codeEntries = CodeCatalogFor(builder).Freeze();
+            var (codeEntries, codeRepositories) = CodeCatalogFor(builder).Freeze();
 
             var yamlPath = Path.Combine(builder.AppHostDirectory, "servicesources.yaml");
             var yamlExists = File.Exists(yamlPath);
@@ -310,7 +312,17 @@ internal static class ServiceSourcesConfigCache
                 }
             }
 
-            var catalog = new Catalog.CodeServiceCatalog { Services = merged };
+            // Yaml-declared repositories join this set in Task 2/Task 6's work (ServiceCatalogLoader
+            // widens to hand back its own repositories map, and the composition-time checks over the
+            // combined set — a name colliding with an ungrouped service, or declared in both catalogs
+            // — land here beside the existing duplicate-service check above). Code-only for now.
+            var repositories = new Dictionary<string, Catalog.RepositoryDefinition>(StringComparer.Ordinal);
+            foreach (var (name, repository) in codeRepositories)
+            {
+                repositories[name] = repository;
+            }
+
+            var catalog = new Catalog.CodeServiceCatalog { Services = merged, Repositories = repositories };
 
             // The catalog first, and its names handed over: unchanged from before this task, and now
             // covers code-declared names too (design: "canonical-spelling reconciliation covers

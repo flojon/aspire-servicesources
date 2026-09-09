@@ -1,4 +1,5 @@
 using Aspire.Hosting.ServiceSources.Config.Catalog;
+using Aspire.Hosting.ServiceSources.Git;
 
 namespace Aspire.Hosting.ServiceSources.Catalog;
 
@@ -12,6 +13,7 @@ namespace Aspire.Hosting.ServiceSources.Catalog;
 public sealed class ServiceCatalogBuilder
 {
     private readonly Dictionary<string, ServiceDefinitionBuilder> _entries = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, RepositoryBuilder> _repositories = new(StringComparer.Ordinal);
     private bool _frozen;
 
     internal ServiceCatalogBuilder()
@@ -59,10 +61,96 @@ public sealed class ServiceCatalogBuilder
         return _entries[name];
     }
 
-    /// <summary>Builds every accumulated entry and marks this builder frozen.</summary>
-    internal IReadOnlyDictionary<string, ServiceDefinition> Freeze()
+    /// <summary>
+    /// Declares a repository as a shared handle — pass the result to several services'
+    /// <see cref="ServiceDefinitionBuilder.WithSharedRepository"/> to clone it once and share the
+    /// working tree, rather than each cloning their own. See design "The authoring API" and the
+    /// monorepo shape under "Motivation".
+    /// </summary>
+    /// <param name="name">
+    /// This repository's <see cref="RepositoryDefinition.CheckoutName"/> — derived from
+    /// <paramref name="url"/>'s last path segment with a trailing <c>.git</c> stripped when left
+    /// unset, overridable here. Every name, derived or explicit, is validated the same way a service
+    /// name is before it becomes a directory (#224).
+    /// </param>
+    /// <exception cref="ServiceSourcesConfigurationException">
+    /// <paramref name="url"/> is blank; the resolved name cannot be a checkout directory of its own
+    /// (#224); or the resolved name collides with an already-declared repository.
+    /// </exception>
+    public RepositoryBuilder AddRepository(string url, string? name = null, string? defaultRef = null)
+    {
+        if (_frozen)
+        {
+            throw new InvalidOperationException(
+                "This ServiceCatalogBuilder was already frozen by AddServiceCatalog composing the catalog. " +
+                "A builder captured and mutated after that point contributes nothing — declare every service " +
+                "and repository before the first AddService(…)/AddRepository(…) call instead.");
+        }
+
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            throw new ServiceSourcesConfigurationException(
+                "AddRepository: a repository url is required and cannot be empty or whitespace.");
+        }
+
+        var resolvedName = string.IsNullOrWhiteSpace(name) ? DeriveName(url) : name;
+
+        if (!LocalGitCheckout.IsContainedCheckoutDirectoryName(resolvedName))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"AddRepository: '{resolvedName}' cannot be used as this repository's checkout directory name — "
+                + LocalGitCheckout.ContainedNameRuleAndRemedy
+                + (name is null ? $" (derived from '{url}' — pass an explicit name: to override it.)" : ""));
+        }
+
+        if (_repositories.TryGetValue(resolvedName, out var existing))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"AddRepository: '{resolvedName}' is already declared, naming '{existing.Url}'. Two repositories "
+                + $"cannot share one checkout directory name — pass a distinct name: to '{url}' or to the "
+                + "other declaration.");
+        }
+
+        var repository = new RepositoryBuilder(url, resolvedName, defaultRef);
+        _repositories.Add(resolvedName, repository);
+        return repository;
+    }
+
+    /// <summary>
+    /// The name a repository is derived to when <see cref="AddRepository"/> is given no explicit
+    /// <c>name:</c> — the URL's last path segment, with any trailing <c>.git</c> already stripped by
+    /// <see cref="GitUrl.Parse"/>'s own normalization.
+    /// </summary>
+    private static string DeriveName(string url)
+    {
+        var path = GitUrl.Parse(url).Path;
+        var lastSlash = path.LastIndexOf('/');
+        var derived = lastSlash >= 0 ? path[(lastSlash + 1)..] : path;
+
+        if (string.IsNullOrWhiteSpace(derived))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"AddRepository: no name could be derived from '{url}' — it has no final path segment to name a "
+                + "repository after. Pass an explicit name: AddRepository(url, name: \"...\").");
+        }
+
+        return derived;
+    }
+
+    /// <summary>
+    /// Builds every accumulated service and repository entry and marks this builder frozen. Every
+    /// declared repository is built whether or not a service names it — design question 2 decided an
+    /// unused repository goes unreported, so there is nothing here to filter.
+    /// </summary>
+    internal (
+        IReadOnlyDictionary<string, ServiceDefinition> Services,
+        IReadOnlyDictionary<string, RepositoryDefinition> Repositories) Freeze()
     {
         _frozen = true;
-        return _entries.ToDictionary(e => e.Key, e => e.Value.Build(), StringComparer.Ordinal);
+
+        var services = _entries.ToDictionary(e => e.Key, e => e.Value.Build(), StringComparer.Ordinal);
+        var repositories = _repositories.ToDictionary(e => e.Key, e => e.Value.Build(), StringComparer.Ordinal);
+
+        return (services, repositories);
     }
 }

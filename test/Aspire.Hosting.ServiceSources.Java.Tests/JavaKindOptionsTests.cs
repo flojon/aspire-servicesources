@@ -498,8 +498,8 @@ public class JavaKindOptionsTests
                 ["port"] = 8080,
             });
 
-        var frozen = catalogBuilder.Freeze();
-        var definition = frozen["catalog"];
+        var (services, _) = catalogBuilder.Freeze();
+        var definition = services["catalog"];
 
         var options = JavaKindOptions.Parse("catalog", definition.KindOptions);
 

@@ -21,11 +21,15 @@ public class CatalogExportsTests
     [Fact]
     public void EveryPublicMethodOnServiceCatalogBuilder_IsNonGenericAndReturnsABuilderType()
     {
+        // AddService returns ServiceDefinitionBuilder; AddRepository returns RepositoryBuilder
+        // (design "The authoring API" — a distinct builder type, not the same one AddService
+        // returns). Both are builder types ATS can project, which is what this guards.
         foreach (var method in PublicInstanceMethods(typeof(ServiceCatalogBuilder)))
         {
             Assert.False(method.IsGenericMethodDefinition, $"{method.Name} must not be generic.");
             Assert.True(
-                method.ReturnType == typeof(ServiceDefinitionBuilder),
+                method.ReturnType == typeof(ServiceDefinitionBuilder)
+                    || method.ReturnType == typeof(RepositoryBuilder),
                 $"{method.Name} should return a builder type, returned {method.ReturnType}.");
         }
     }
@@ -39,6 +43,18 @@ public class CatalogExportsTests
             Assert.True(
                 method.ReturnType == typeof(ServiceDefinitionBuilder),
                 $"{method.Name} should return {nameof(ServiceDefinitionBuilder)}, returned {method.ReturnType}.");
+        }
+    }
+
+    [Fact]
+    public void EveryPublicMethodOnRepositoryBuilder_IsNonGenericAndReturnsItself()
+    {
+        foreach (var method in PublicInstanceMethods(typeof(RepositoryBuilder)))
+        {
+            Assert.False(method.IsGenericMethodDefinition, $"{method.Name} must not be generic.");
+            Assert.True(
+                method.ReturnType == typeof(RepositoryBuilder),
+                $"{method.Name} should return {nameof(RepositoryBuilder)}, returned {method.ReturnType}.");
         }
     }
 
@@ -86,6 +102,8 @@ public class CatalogExportsTests
             CamelCase(nameof(ServiceConfigurationExports.WithServiceHttpsEndpoint)),
             CamelCase(nameof(ServiceConfigurationExports.WithServiceHttpEndpoint)),
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithRepository))}",
+            $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithProject))}",
+            $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithSharedRepository))}",
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithUrl))}",
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithContainer))}",
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithKubernetes))}",
@@ -93,6 +111,8 @@ public class CatalogExportsTests
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithHttpsEndpoint))}",
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithPrepare))}",
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithKind))}",
+            $"{nameof(ServiceCatalogBuilder)}.{CamelCase(nameof(ServiceCatalogBuilder.AddRepository))}",
+            $"{nameof(RepositoryBuilder)}.{CamelCase(nameof(RepositoryBuilder.WithPrepare))}",
             "JavaKindOptionsBuilder.workingDirectory",
             "JavaKindOptionsBuilder.mavenGoal",
             "JavaKindOptionsBuilder.gradleTask",

@@ -6,10 +6,9 @@ const builder = await createBuilder();
 
 await builder.addServiceCatalog(async (catalog) => {
   const orders = await catalog.addServiceToCatalog('orders');
-  await orders.withRepository('https://github.com/dotnet/aspire-samples', {
-    project: 'samples/health-checks-ui/HealthChecksUI.ApiService/HealthChecksUI.ApiService.csproj',
-    defaultRef: 'main',
-  });
+  await orders.withRepository('https://github.com/dotnet/aspire-samples', { defaultRef: 'main' });
+  await orders.withProject(
+    'samples/health-checks-ui/HealthChecksUI.ApiService/HealthChecksUI.ApiService.csproj');
 
   // Two sources are described here on purpose, the same reason
   // samples/DemoAppHostTypeScript/servicesources.yaml gives inventory both a url: and a

@@ -13,10 +13,8 @@ builder.UseJava();
 builder.AddServiceCatalog(catalog =>
 {
     catalog.AddService("orders")
-        .WithRepository(
-            "https://github.com/dotnet/aspire-samples",
-            project: "samples/health-checks-ui/HealthChecksUI.ApiService/HealthChecksUI.ApiService.csproj",
-            defaultRef: "main");
+        .WithRepository("https://github.com/dotnet/aspire-samples", defaultRef: "main")
+        .WithProject("samples/health-checks-ui/HealthChecksUI.ApiService/HealthChecksUI.ApiService.csproj");
 
     catalog.AddService("inventory")
         .WithUrl("https://httpbin.org");
