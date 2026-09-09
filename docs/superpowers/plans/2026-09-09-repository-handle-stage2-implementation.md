@@ -1,6 +1,8 @@
 # #291 Stage 2 implementation plan — the authoring API, yaml, developer config, and the checkout re-keying
 
-**Status:** Draft
+**Status:** Reviewed 2026-09-09 — one round (fresh reader, code-grounded). Must-fix findings folded in
+below; the three open questions are settled (see "Open questions" at the end, now answered rather than
+open).
 **Implements:** the Stage 2 row of `docs/superpowers/specs/2026-09-08-repository-handle-design.md`'s
 Staging table — "everything with actual new behaviour." Stage 1 (`RepositoryDefinition` +
 `CheckoutName`, all records anonymous) shipped as PR #306, merged to main at `b2ccca4`'s successor
@@ -35,7 +37,7 @@ The six acceptance criteria from the design doc, restated as this plan's exit co
 
 Each task names its test(s) first, per TDD. Tasks 1–3 are pure domain/API and have no dependency on
 4–7; 8 depends on 1 and 3 (needs `CheckoutName` resolution and the developer-config shape to exist);
-9 depends on 1–5 (composition needs both producers). Samples/README/CHANGELOG (10) come last, once
+9 depends on 1–5 (composition needs both producers). Samples/README/CHANGELOG (Task 7) come last, once
 the surface is stable. This matches the TaskCreate list already tracking this session's work
 (tasks #4–#10 there map onto tasks 1–7 here).
 
@@ -50,8 +52,13 @@ the surface is stable. This matches the TaskCreate list already tracking this se
 - `WithSharedRepository_TwoServices_ProduceTheSameRepositoryDefinitionInstance` (identity check —
   `ReferenceEquals`, the design's actual identity mechanism)
 - `WithSharedRepository_ThenWithRepository_ThrowsAdditiveError` and the reverse order
-- `WithRepository_NoLongerTakesProject_CompileTimeOnly` (the four existing `WithRepository(...,
-  project: ...)` call sites in tests move to `.WithRepository(url).WithProject(...)`)
+- `WithRepository_NoLongerTakesProject_CompileTimeOnly` (the real `project:` call sites move to
+  `.WithRepository(url).WithProject(...)` — verified by grep against this commit, there are three, not
+  the design doc's "four": `test/.../Catalog/ServiceDefinitionBuilderTests.cs:13`,
+  `samples/DemoAppHostCodeCatalog/Program.cs:16-19`,
+  `samples/DemoAppHostTypeScriptCodeCatalog/apphost.mts:9-12`. `CatalogErrorMessageTests.cs:147` —
+  the design's other named file — calls `WithRepository` with no `project:` argument, so it is
+  unaffected by the narrowing)
 - `WithProject_CalledTwice_ThrowsAdditiveError`
 - `WithPrepare_OnServiceWithSharedRepository_ThrowsNamingTheRepository` (the one runtime check the
   single-builder decision costs, per design "Errors on the chain")
@@ -69,7 +76,7 @@ the surface is stable. This matches the TaskCreate list already tracking this se
   block). Exposes an internal `Build()` that lazily constructs and **caches** the `RepositoryDefinition`
   instance (`??=`), so every service sharing this handle gets the same reference — this is the
   identity mechanism the design's "Architecture" section describes; nothing compares two identities,
-  but `ServiceDefinitionBuilder.Build()` and the composition-time checks in Task 9 both rely on
+  but `ServiceDefinitionBuilder.Build()` and the composition-time checks in Task 6 both rely on
   reference equality falling out of calling `Build()` once and caching it.
 - `ServiceCatalogBuilder.AddRepository(string url, string? name = null, string? defaultRef = null)`:
   validates `url` non-blank; derives `name` from the URL's last path segment with a trailing `.git`
@@ -95,8 +102,8 @@ the surface is stable. This matches the TaskCreate list already tracking this se
   _sharedRepository.Build()` (the shared instance); else build the anonymous record exactly as Stage 1
   does.
 
-**Test-file mechanical fallout**: the four `WithRepository(url, project: "...", defaultRef: "...")`
-call sites in `ServiceDefinitionBuilderTests.cs` and `CatalogErrorMessageTests.cs` move to
+**Test-file mechanical fallout**: `ServiceDefinitionBuilderTests.cs:13`'s
+`WithRepository(url, project: "...", defaultRef: "...")` moves to
 `.WithRepository(url, defaultRef: "...").WithProject("...")`.
 
 ---
@@ -127,12 +134,20 @@ call sites in `ServiceDefinitionBuilderTests.cs` and `CatalogErrorMessageTests.c
 - `ServiceCatalogLoader.Load`: after the existing per-service loop, a parallel loop over
   `catalog.Repositories` validating unknown top-level keys against
   `YamlPropertyNames(typeof(RepositoryMetadata))` (a new `KnownRepositoryProperties` set, same pattern
-  as `KnownTopLevelProperties`) — no kind-block exemption, since a repository entry has no kind. Then,
+  as `KnownTopLevelProperties`) — no kind-block exemption, since a repository entry has no kind.
+  **Also validate unknown keys nested inside a repository entry's own blocks** (e.g. a typo inside
+  `repositories: monorepo: prepare: { comand: [...] }`) — `KnownNestedProperties`
+  (`ServiceCatalogLoader.cs:29-35`) is derived only from `ServiceMetadata`'s properties today, so a
+  bare port of the existing per-service loop would silently accept that typo. Add a second
+  `KnownNestedProperties`-equivalent derived from `RepositoryMetadata` (or widen the existing one to
+  be keyed by declaring type, since `prepare:`'s nested keys are identical either way — it is the same
+  `PrepareMetadata` type in both places) and run the same nested-key walk over
+  `raw.Repositories[name]`. Then,
   per service: if `RepositoryRef` is set, resolve against the repositories map (error naming the
   service, the ref, and every declared repository name if absent), refuse `Repository`/`DefaultRef`
   set alongside it (two separate checks, two separate messages per the design), refuse `Prepare` set
   alongside it. Repository name uniqueness against the `checkouts/` namespace (colliding with an
-  ungrouped service's own name) is **not** checked here — that is Task 9's composition-time check,
+  ungrouped service's own name) is **not** checked here — that is Task 6's composition-time check,
   because it spans both catalogs and code-declared repositories too.
 - `ServiceMetadata.RepositoryRef`: new `string?` property. `IsReservedKindName` picks this up for
   free (`KnownTopLevelProperties` is derived by reflection) — the CHANGELOG needs to say so (Task 7).
@@ -148,7 +163,7 @@ call sites in `ServiceDefinitionBuilderTests.cs` and `CatalogErrorMessageTests.c
   get the identical instance rather than each minting their own.
 - `ServiceCatalogLoader.Load`'s return type widens (or a new method alongside it does) to also hand
   back the resolved `IReadOnlyDictionary<string, RepositoryDefinition>` for this yaml file, mirroring
-  `ServiceCatalogBuilder.Freeze()`'s widened return — `LoadedConfig.Load` (Task 9) needs both.
+  `ServiceCatalogBuilder.Freeze()`'s widened return — `LoadedConfig.Load` (Task 6) needs both.
 
 ---
 
@@ -179,6 +194,13 @@ call sites in `ServiceDefinitionBuilderTests.cs` and `CatalogErrorMessageTests.c
   JSON snippet (`"\"{serviceName}\": { ... }"`) is unaffected — that snippet is about the *developer's*
   file entry, always keyed by service name regardless of grouping, since a `path` service is never
   grouped (finding 4).
+- **`Prepare/PrepareMode.cs`'s `PrepareModes.Parse(string serviceName, string? written, string
+  writtenAt)` is a second, independent message site the first draft of this plan missed** — it
+  hardcodes `$"Service '{serviceName}': {writtenAt} is '{written}'..."` at `PrepareMode.cs:100-103`,
+  and is `PreparePlan.For`'s `ParseOptional` helper's only caller
+  (`PreparePlan.cs:253`). Its first parameter renames to `label` exactly like `PreparePlan.For`'s does,
+  and its one other caller — `CheckoutPreparationTests.cs:108`, which calls it directly — updates to
+  pass a formatted label. (`PrepareModes.Written` is unaffected: it takes no name/label at all.)
 - `LocalProjectSource.Resolve`'s call site passes `PreparePlan.ServiceLabel(serviceName)` when
   `definition.Repository.CheckoutName == serviceName` (ungrouped — the common case, unchanged
   wording) and `PreparePlan.RepositoryLabel(definition.Repository.CheckoutName)` otherwise. This is
@@ -196,30 +218,17 @@ call sites in `ServiceDefinitionBuilderTests.cs` and `CatalogErrorMessageTests.c
   Concretely: `CheckoutPreparation.Run(string serviceName, string label, PrepareStep step, ...)` —
   two string parameters where there was one, not a widened tuple, so every existing call site is a
   minimal two-argument diff rather than a signature restructure.
-- **Concurrency**: `LocalGitCheckout.ReconcileRepoRoot` (a mutation of the shared working tree — fetch,
-  checkout) and `CheckoutPreparation.Run` (a mutation via an arbitrary bootstrap command) can now both
-  be invoked for the *same* `CheckoutName` from two different services' resolution paths. On the eager
-  path this is not reachable — `AddService()` calls are sequential on the composition thread, so two
-  grouped services' reconcile-then-prepare sequences never interleave. On the **deferred** path
-  (`DeferredCheckout.StartDeferredAsync`, one `Task.Run` per deferred service, none awaited by the
-  composition thread) it is reachable: two cold, deferred, grouped services can both reach
-  `GetRepoRoot` → `ReconcileRepoRoot` and then `CheckoutPreparation.Run` concurrently against one
-  directory. Before this stage that was impossible (every service had its own directory), so this is
-  new exposure the design's prose does not call out by name (it treats the marker as sufficient,
-  which handles *duplicate work* but not a *literal race* between two `git checkout`/two bootstrap
-  commands against the same tree). **Proposed fix**: a small keyed async lock
-  (`internal sealed class CheckoutNameLock` — a `ConcurrentDictionary<string, SemaphoreSlim>` behind a
-  `LockAsync(string checkoutName)` returning an `IDisposable`) held by `LocalCheckoutPrefetch` across
-  reconciliation, and separately acquired by the caller (`LocalProjectSource`/`DeferredCheckout`)
-  around the `CheckoutPreparation.Run` call for the same `CheckoutName` — two acquisitions rather than
-  one lock held end-to-end, because reconciliation happens inside `LocalCheckoutPrefetch` and prepare
-  happens in its caller, and forcing one lock across that boundary would mean passing a held lock
-  object through `LocalProjectSource`/`DeferredCheckout`, which is more invasive than two short
-  critical sections. **This is a plan-review question, not a settled decision** — flag it explicitly
-  in the review round rather than building it on the strength of this plan alone; the alternative is
-  to accept the marker-file race as a known, narrow limitation (first-run-only, deferred-only, grouped
-  services only, and the marker write is a rename so the failure mode is "prepare ran twice" rather
-  than a corrupted marker) and document it instead of adding new locking machinery.
+- **Concurrency — settled, see "Open questions" below.** `LocalGitCheckout.ReconcileRepoRoot` (fetch,
+  checkout) and `CheckoutPreparation.Run` (an arbitrary bootstrap command) can now both be invoked for
+  the *same* `CheckoutName` from two different deferred services' background tasks
+  (`DeferredCheckout.StartDeferredAsync`), which is new exposure this stage introduces. Add
+  `CheckoutNameLock` (a small keyed async lock beside `LocalCheckoutPrefetch`) and acquire it in
+  `DeferredCheckout.StartDeferredAsync`, held across the span from `deferred.Prefetch.GetRepoRoot(...)`
+  through the `CheckoutPreparation.Run` call (`DeferredCheckout.cs:722-786`), keyed on
+  `deferred.Definition.Repository.CheckoutName`. Take the same lock in `LocalProjectSource.Resolve`
+  around the equivalent span too, even though the eager path cannot race today (`AddService()` calls
+  are sequential on the composition thread) — cheap, and keeps the invariant true independent of call
+  order rather than true only by the current shape of the two callers.
 
 ---
 
@@ -232,8 +241,8 @@ call sites in `ServiceDefinitionBuilderTests.cs` and `CatalogErrorMessageTests.c
 - `LocalRef_OnGroupedService_ThrowsNamingServiceRepositoryAndWhereToSetItInstead` (criterion 4)
 - `LocalRef_OnUngroupedService_Unaffected` (regression guard — the existing, still-legal case)
 - `RepositoriesRef_ResolvesAheadOfDefaultRef`
-- `RepositoriesPath_RedirectsTheWholeGroupsCheckout` (see the design note below — flagged for
-  plan-review, same as Task 3's concurrency question)
+- `RepositoriesPath_NonNull_ThrowsReservedError` (see the settled decision below — this replaces
+  `RepositoriesPath_RedirectsTheWholeGroupsCheckout` from this plan's first draft)
 
 **Implementation**:
 
@@ -248,26 +257,21 @@ call sites in `ServiceDefinitionBuilderTests.cs` and `CatalogErrorMessageTests.c
   `Repositories: IReadOnlyDictionary<string, RepositoryDeveloperConfig>` property, read the same way
   `ReadFrom` reads `Services` — validated with `DeveloperConfigValidator.ValidateAll(section,
   DeveloperConfigShape.Repository)`, bound, blank-normalized, and canonicalized to the catalog's
-  repository names. **This needs the composed repository-name set**, which (per Task 2/Task 9) is
+  repository names. **This needs the composed repository-name set**, which (per Task 2/Task 6) is
   known only once code and yaml repositories are merged — so `ReadFrom` widens to take a second
-  `IEnumerable<string> repositoryNames` parameter, supplied by `LoadedConfig.Load` (Task 9) once it
+  `IEnumerable<string> repositoryNames` parameter, supplied by `LoadedConfig.Load` (Task 6) once it
   has composed both catalogs' repositories, mirroring exactly how `catalogNames` is supplied today.
   `CanonicalizeToCatalog`'s logic is reused verbatim (extract it to a shape-agnostic helper taking the
   bound dictionary and the name set, called once for services and once for repositories) rather than
   duplicated.
-- **Design question for review, same status as Task 3's**: does `RepositoryDeveloperConfig.Path`
-  redirect the *whole group's* checkout to a local directory (symmetric with a service's own
-  `local.path`, but at repository scope), with per-service `local.path` still available as the
-  documented per-service escape (finding 4) that takes precedence over it? The design doc names the
-  three fields but does not spell out `Path`'s semantics at repository scope in the same detail it
-  gives `Ref` ("configured here, and only here") and `Prepare` (the whole "prepare moves to the
-  repository" section). This plan assumes the symmetric reading — precedence, most to least specific:
-  service's own `local.path` (full escape) → repository's `local.path` (whole-group redirect) →
-  managed checkout at `checkouts/<CheckoutName>` with ref from repository `local.ref` ??
-  `DefaultRef`. **Flag this explicitly to the plan reviewer**; if the intended scope is narrower
-  (`Path` unused / reserved for a later stage), the field still needs to exist on the type for the
-  shape to match the design's literal `{ Path, Ref, Prepare }`, but the resolution logic below would
-  shrink to just `Ref` and `Prepare`.
+- **`RepositoryDeveloperConfig.Path` — settled, see "Open questions" below: reserved, not a
+  whole-group redirect.** The field exists on the type (the design names the triple literally), but a
+  non-null value is rejected as a configuration error — naming the repository and stating that a
+  group's checkout is not yet redirectable at the repository level, with per-service `local.path` on
+  each member named as the way to split them out individually today. Design finding 4 is explicit that
+  the per-service escape is the *only* one ("No new field, no repository-level list of exceptions"),
+  which is why this plan no longer implements a redirect. Resolution logic below therefore only reads
+  `Ref` and `Prepare` from a repository's developer-config entry.
 - `LocalGitCheckout.ConfiguredReference`, `PrepareRepoRoot`, `ReconcileRepoRoot`, `ResolveRepoRoot`
   each widen with a new `RepositoryDeveloperConfig? repositoryConfig` parameter (nullable, `null`
   meaning "no repository-level entry" — the overwhelming common case for an ungrouped service, which
@@ -275,10 +279,11 @@ call sites in `ServiceDefinitionBuilderTests.cs` and `CatalogErrorMessageTests.c
   that; else `config.Local.Ref ?? definition.Repository.DefaultRef` (ungrouped, unchanged) — with the
   grouped-`local.ref`-is-an-error check (criterion 4) raised in `PrepareRepoRoot` *before*
   `ConfiguredReference` is consulted, naming the service, `definition.Repository.CheckoutName`, and
-  `ServiceSources:Repositories:{CheckoutName}:ref` as where to set it instead. If the `Path` semantics
-  above are confirmed, `PrepareRepoRoot`'s `config.Local.Path is not null` branch grows an `else if
-  (IsGrouped && repositoryConfig?.Path is not null)` branch reusing the same existing-directory
-  validation, ahead of the managed-checkout branch.
+  `ServiceSources:Repositories:{CheckoutName}:ref` as where to set it instead. `PrepareRepoRoot` also
+  raises the reserved-field error for a grouped repository whose developer-config entry sets
+  `repositoryConfig?.Path is not null` (see the settled decision above), checked alongside the
+  `local.ref`-on-grouped-service check, before either the managed-checkout branch or
+  `ConfiguredReference` runs.
 - Callers (`LocalProjectSource.Resolve`, `LocalCheckoutPrefetch`) resolve
   `loaded.DeveloperConfig.Repositories.GetValueOrDefault(definition.Repository.CheckoutName)` once and
   thread it through — the same shape as `config` (`ServiceDeveloperConfig`) is already threaded.
@@ -358,7 +363,14 @@ call sites in `ServiceDefinitionBuilderTests.cs` and `CatalogErrorMessageTests.c
     sharing a `checkoutName` must start **one** `StartCheckoutTask`, not two. Add a
     `HashSet<string> startedCheckouts` local to `Run`, checked before calling `StartCheckoutTask` for
     a candidate, so a second grouped candidate found later in the same enumeration does not start a
-    redundant clone.
+    redundant clone. **Also fix the existing `.Where(candidate => LocalGitCheckout.IsColdManagedCheckout(
+    appHostDirectory, candidate.Name, candidate.Config))` filter** (`LocalCheckoutPrefetch.cs:548-549`)
+    — it is keyed on `candidate.Name` (the service name) today, and must key on
+    `candidate.Definition.Repository.CheckoutName` instead, or a warm grouped checkout (second and
+    later grouped candidate, directory already exists from the first) is misjudged "cold" and an
+    unnecessary speculative clone task is launched for it. The outcome is harmless — `PrepareRepoRoot`
+    no-ops against an existing `.git` — but it is wasted background work and worth fixing alongside
+    the rest of this method's re-keying rather than leaving as a latent inefficiency.
   - `FailedCheckoutMessage`/`ReportFailedCheckout`/`UnusedCheckoutsMessage`/`FailedUnusedCheckoutMessages`:
     these currently read `_checkouts`/`_requested` keyed by service name and produce one message per
     service. Once `_checkouts` is keyed by `checkoutName`, these need the **reverse index** (checkout
@@ -402,16 +414,13 @@ call sites in `ServiceDefinitionBuilderTests.cs` and `CatalogErrorMessageTests.c
 - Repository-name-declared-in-both-catalogs: a plain key collision between the code repositories dict
   and the yaml repositories dict, checked the same way the existing service duplicate check works
   (`LoadedConfig.Load:292-301`), same message shape.
-- The **ungrouped-collision warning** (question 5): after composition, group every *ungrouped*
-  service (`definition.Repository.CheckoutName == serviceName`, i.e. not sharing any handle) by
-  `definition.Repository.Url`; for every URL named by two or more such services, buffer a notice via
-  the existing `ServiceSourcesWarnings` mechanism (`LocalProjectSource.cs:69`'s pattern —
-  `ServiceSourcesWarnings.For(builder).AddNotice(...)`) — but this is decided at **composition** time
-  (`LoadedConfig.Load`), which runs before a builder reference is threaded that deep today. Check
-  whether `ServiceSourcesWarnings.For` takes a builder or something composition already holds; if not,
-  this notice may need to move to a point that does have the builder — most likely
-  `ServiceSourcesConfigCache.LoadedFor`, which does. **Confirm the exact call site during
-  implementation**; this is mechanical once the right seam is found, not a design question.
+- The **ungrouped-collision warning** (question 5) — **settled, see "Open questions" below**: after
+  composition, group every *ungrouped* service (`definition.Repository.CheckoutName == serviceName`,
+  i.e. not sharing any handle) by `definition.Repository.Url`; for every URL named by two or more such
+  services, buffer a notice via the existing `ServiceSourcesWarnings` mechanism
+  (`LocalProjectSource.cs:69`'s pattern — `ServiceSourcesWarnings.For(builder).AddNotice(...)`),
+  called directly inside `LoadedConfig.Load` — which already receives `builder` as its own parameter
+  (`ServiceSourcesConfigCache.cs:250`), so no new plumbing is needed to reach it.
 
 ---
 
@@ -440,18 +449,49 @@ call sites in `ServiceDefinitionBuilderTests.cs` and `CatalogErrorMessageTests.c
 
 ---
 
-## Open questions for the plan-review round
+## Open questions — settled after one review round
 
-1. **The concurrency question (Task 3)**: does the deferred path's newly-possible concurrent
-   reconcile/prepare against one shared checkout need new locking, or is it an acceptable, narrow,
-   documented limitation? This plan defaults to "add a keyed lock" but flags it because the design
-   doc's own prose does not call for one.
-2. **`RepositoryDeveloperConfig.Path`'s semantics (Task 4)**: whole-group redirect (this plan's
-   assumption) versus reserved/no-op for this stage.
-3. **Where the ungrouped-collision warning (Task 6) actually gets buffered**, since `LoadedConfig.Load`
-   does not obviously hold a builder reference today — needs five minutes with the actual code to
-   settle, not a design call, but worth flagging so the reviewer isn't surprised if the eventual PR's
-   call site differs from what's described here.
+All three were put to a fresh reader with the actual code in front of them. Recorded here as
+decisions, not as open items; the corresponding task sections above are amended to match.
+
+1. **The concurrency question (Task 3): settled — add one lock, one acquisition.** The race is real
+   (verified against `LocalCheckoutPrefetch.ResolveRequestedRepoRoot`, `UseExistingCheckout`, and
+   `CheckoutPreparation.Run`): the deferred path's `Task.Run`-per-service means two grouped, cold,
+   deferred services can call `ReconcileRepoRoot` (a real `git fetch`/`checkout`) and then
+   `CheckoutPreparation.Run` (an arbitrary bootstrap command) concurrently against one directory,
+   before either marker exists — this is new exposure Stage 2 introduces, not a pre-existing one.
+   Given this codebase's existing rigor about concurrent-checkout races (`CloneIntoPlace`'s atomic
+   rename dance is exactly this kind of care applied to the clone half), a lock is warranted. **Simpler
+   than this plan's first draft**: one acquisition, not two — in `DeferredCheckout.StartDeferredAsync`,
+   wrapping the span from `deferred.Prefetch.GetRepoRoot(...)` through the `CheckoutPreparation.Run`
+   call (`DeferredCheckout.cs:722-786`) in a single keyed lock held for that whole span, keyed on
+   `deferred.Definition.Repository.CheckoutName`. The eager path (`LocalProjectSource.Resolve`) never
+   needs the lock — `AddService()` calls are sequential on the composition thread, so two grouped eager
+   services never interleave there — but taking the same lock there too, briefly, costs nothing and
+   keeps the invariant ("reconcile+prepare for one checkout never runs twice at once") true regardless
+   of which path a future change might route through. A small keyed-lock utility
+   (`internal sealed class CheckoutNameLock`, a `ConcurrentDictionary<string, SemaphoreSlim>` behind an
+   async `LockAsync(string checkoutName)` returning an `IAsyncDisposable`) lives beside
+   `LocalCheckoutPrefetch`, which already owns the per-checkout-name state this pairs with.
+2. **`RepositoryDeveloperConfig.Path`'s semantics (Task 4): settled — reserved, not a whole-group
+   redirect.** The design's own finding 4 is explicit and points the other way from this plan's first
+   draft: *"`local.path` is the documented escape from a group. **No new field**, no repository-level
+   list of exceptions."* A whole-group `Path` override would be exactly such a new field. The type still
+   declares `Path` — the design's developer-config section names the triple `{ Path, Ref, Prepare }`
+   literally, so the shape has to exist — but its resolution logic does **not** implement a redirect:
+   a non-null `RepositoryDeveloperConfig.Path` is rejected as a configuration error naming the
+   repository and stating that a group's checkout is not yet redirectable at the repository level —
+   use a per-service `local.path` on each member to split them out individually instead. This is a
+   forward-compatible reservation (the field parses and is schema-valid, so a later stage can implement
+   it without a wire-format change) rather than a silent no-op, which would leave a developer writing
+   `"repositories": {"monorepo": {"path": "..."}}}` with no signal that nothing happened.
+3. **Where the ungrouped-collision warning (Task 6) gets buffered: settled, was never actually
+   open.** `ServiceSourcesConfigCache.LoadedConfig.Load` (`ServiceSourcesConfigCache.cs:250`) already
+   receives `IDistributedApplicationBuilder builder` as its parameter — the same builder
+   `ServiceSourcesWarnings.For(builder).AddNotice(...)` needs, and the same pattern
+   `LocalProjectSource.cs:69` already uses for the `path`-checkout ignored-prepare notice. The notice is
+   buffered directly inside `Load`, after composing the merged services and their repositories, with no
+   new plumbing required.
 
 ## Verify legs (from `.github/workflows/ci.yml`)
 
