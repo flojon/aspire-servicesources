@@ -46,8 +46,35 @@ never existed. Check the tag of the last release before adding one.
   after `WithContainer` or `WithKubernetes` to name that source's endpoint scheme — the code-authoring
   surface for what was previously reachable only through yaml's `scheme` field. Mirrors Aspire's own
   `WithHttpEndpoint`/`WithHttpsEndpoint` pair.
+- **Repositories as a first-class handle, and grouping several services onto one checkout**
+  ([#291], fixes [#66]). `AddRepository`/`WithSharedRepository` in code, and `repositories:`/
+  `repositoryRef:` in yaml, let several services share one repository: cloned once and reconciled
+  onto one ref, at `.servicesources/checkouts/<repository name>/`, instead of once per service.
+  **An existing catalog is unaffected until you opt a repository into grouping** — an ungrouped
+  service's checkout path, and everything about how it resolves, is unchanged; two services that
+  happen to name the same `repository:` URL without joining a `repositories:` entry still get one
+  checkout each, and are now suggested (not required) to group. See the README's "Several services
+  from one repository".
+- **`prepare` moves to the repository for a grouped service** ([#291]). A shared repository's
+  bootstrap command is declared once — on the `repositories:` entry, or the handle `AddRepository`
+  returns — rather than on each member service, and runs once for the whole group's shared
+  checkout rather than once per member.
+- **`ServiceSources:Repositories:<name>` developer-config section** ([#291]). The per-repository
+  counterpart of a service's own `local` block: override a grouped repository's `ref` for every
+  member at once, in `servicesources.local.json` or any layer above it, instead of a member's own
+  `local.ref` — which a grouped service can no longer set (its ref belongs to the whole group).
 
 ### Changed
+
+- **`repositoryRef` is a reserved top-level key** ([#291]). Every `ServiceMetadata` property
+  reserves its yaml name against a `kind`'s own name (`AddLocalKind`/`UseJavaScript`/`UseJava`
+  refuse a kind whose name collides with one), and `RepositoryRef` is a new one — a kind literally
+  named `repositoryRef` can no longer be registered. A silent public-behaviour change in the sense
+  the top of this file describes, though vanishingly unlikely to affect anyone in practice.
+- **Two ungrouped services declaring the same repository URL now warn at startup** ([#291]). Not
+  an error — an existing catalog written this way keeps working — but ServiceSources now names
+  them and suggests grouping via `repositoryRef`/`WithSharedRepository` instead of each paying for
+  its own checkout of the same repository.
 
 - **`LocalKindConfig.Parse<T>` accepts an already-typed instance** ([#134]). A `WithKind(kind,
   options)` call in code can pass an already-typed options object directly — `Parse<T>` now returns
@@ -1482,6 +1509,7 @@ Targets `net10.0`.
 [#62]: https://github.com/flojon/aspire-servicesources/pull/62
 [#63]: https://github.com/flojon/aspire-servicesources/issues/63
 [#64]: https://github.com/flojon/aspire-servicesources/pull/64
+[#66]: https://github.com/flojon/aspire-servicesources/issues/66
 [#67]: https://github.com/flojon/aspire-servicesources/pull/67
 [#68]: https://github.com/flojon/aspire-servicesources/pull/68
 [#69]: https://github.com/flojon/aspire-servicesources/issues/69
@@ -1534,6 +1562,7 @@ Targets `net10.0`.
 [#247]: https://github.com/flojon/aspire-servicesources/issues/247
 [#258]: https://github.com/flojon/aspire-servicesources/issues/258
 [#279]: https://github.com/flojon/aspire-servicesources/issues/279
+[#291]: https://github.com/flojon/aspire-servicesources/issues/291
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

@@ -877,51 +877,53 @@ costs you real time.
 
 #### Several services from one repository
 
-A catalog entry maps one service to one thing to run, so a repository holding several services
-gets one entry per service — each naming the same `repository`, and each selecting its own part
-of the tree (`project` for the default `dotnet` kind, or the kind's own options block, such as
-`appDirectory`, for the kinds below):
+Group them: declare the repository once and have each service join it, and every member shares
+one managed checkout automatically — cloned once, reconciled onto one ref, at
+`.servicesources/checkouts/<repository name>/`.
 
 ```yaml
+repositories:
+  monorepo:
+    repository: https://github.com/example/monorepo
+    defaultRef: main
 services:
   orders:
-    repository: https://github.com/example/monorepo
+    repositoryRef: monorepo
     project: src/Orders.Api/Orders.Api.csproj
-    defaultRef: main
   payments:
-    repository: https://github.com/example/monorepo
+    repositoryRef: monorepo
     project: src/Payments.Api/Payments.Api.csproj
-    defaultRef: main
 ```
 
-The catalog is the same either way; what differs is how many checkouts of that repository end
-up on your machine, which each developer chooses in `servicesources.local.json`:
+In code, the equivalent is `AddRepository` and `WithSharedRepository`:
 
-- **One managed checkout per service** — omit `path`. Managed checkouts are keyed by service
-  name, so `orders` and `payments` each get their own independent clone of the repository, at
-  `.servicesources/checkouts/orders/` and `.servicesources/checkouts/payments/`. Each can sit
-  on its own `ref` and neither can disturb the other, but the repository is cloned once per
-  service, and an edit to shared code in one checkout is invisible to the other.
-- **One checkout shared by every service** — set `path`. Clone the repository yourself, then
-  point each service at that same directory; the entry's `project` (or `appDirectory`) is
-  resolved relative to it:
+```csharp
+var monorepo = catalog.AddRepository("https://github.com/example/monorepo", defaultRef: "main");
 
-  ```json
-  {
-    "services": {
-      "orders":   { "source": "local", "local": { "path": "/home/dev/code/monorepo" } },
-      "payments": { "source": "local", "local": { "path": "/home/dev/code/monorepo" } }
-    }
-  }
-  ```
+catalog.AddService("orders")
+    .WithSharedRepository(monorepo)
+    .WithProject("src/Orders.Api/Orders.Api.csproj");
 
-  This is usually what you want when the services share code: one clone, one branch, and an
-  edit to a shared project is picked up by every service at once. The trade-off is that the
-  clone is yours to manage — nothing is ever cloned, fetched or checked out on your behalf —
-  and `local.ref` cannot be combined with `local.path`.
+catalog.AddService("payments")
+    .WithSharedRepository(monorepo)
+    .WithProject("src/Payments.Api/Payments.Api.csproj");
+```
 
-Mixing the two is fine: services you're actively editing can share one `path` checkout while
-the rest stay on managed clones.
+A grouped repository's own `ref` and `prepare` step (see below) belong to the group, not to any
+one member — set them on the `repositories:` entry itself (or `WithPrepare` on the handle
+`AddRepository` returns), and a developer overrides the ref for everyone under
+`ServiceSources:Repositories:<name>:ref` in `servicesources.local.json` rather than a member's own
+`local.ref`, which a grouped service can no longer set.
+
+Two services naming the same `repository:` URL **without** joining a `repositories:` entry are
+not grouped by that alone — each still gets its own checkout, cloned and reconciled separately,
+and ServiceSources warns about it at startup. That is a suggestion, not an error: an existing
+catalog written this way keeps working, and the warning goes away the moment you group them.
+
+**The per-service escape from a group** is `local.path`, the same override an ungrouped service
+has: point one developer's own working copy of one member at a directory you manage yourself.
+There is no repository-level equivalent — `local.path` redirects one service at a time, never a
+whole group's shared checkout in one setting.
 
 ### Non-.NET local services: `kind`
 
@@ -1696,6 +1698,25 @@ command-line form above works in both.
 Note the extra `ServiceSources` root: inside the AppHost's shared configuration the entries are namespaced, while `servicesources.local.json` keeps its bare
 `services` root because it is a file of ours, read from the AppHost directory and re-keyed as it
 joins the chain.
+
+**A grouped repository ([above](#several-services-from-one-repository)) has its own sibling root,
+`repositories`**, keyed by the repository's name rather than by any one member service — a
+developer overriding a group's ref writes it once, for every member, instead of naming the service
+that happens to be first in the group:
+
+```json
+{
+  "repositories": {
+    "monorepo": { "ref": "feature/checkout-redesign" }
+  }
+}
+```
+
+`ServiceSources__Repositories__monorepo__Ref` is the environment-variable spelling, the same
+pattern `ServiceSources__Services__<service>__Local__Ref` uses. `path` exists on the shape but is
+reserved rather than implemented — a group's shared checkout is not yet redirectable in one
+setting, so a non-null value is a configuration error naming the repository; use a member's own
+`local.path` to split it out individually instead (see above).
 
 Two failures are reported differently on purpose, because a typo in a configuration key produces an
 empty section rather than an error:

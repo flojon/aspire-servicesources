@@ -10,6 +10,29 @@ await builder.addServiceCatalog(async (catalog) => {
   await orders.withProject(
     'samples/health-checks-ui/HealthChecksUI.ApiService/HealthChecksUI.ApiService.csproj');
 
+  // The monorepo shape (#291): two services sharing one repository handle clone it once instead
+  // of once each, and reconcile it onto one ref. addRepository is how you declare a repository
+  // with more than one service in it — reach for it whenever that's the shape, not only once a
+  // catalog turns out slow to compose. "web" and "webUi" below are two projects out of the same
+  // aspire-samples checkout "orders" above uses too, on its own (unshared) clone; that pairing is
+  // deliberate, so this file shows both shapes side by side. Declared only — never passed to
+  // builder.addService() below, the same choice made for "orders" not being run twice: adding
+  // them would clone aspire-samples a second time for a demo with nothing more to show once the
+  // two are added the same way "orders" already is.
+  const webSamples = await catalog.addRepository('https://github.com/dotnet/aspire-samples', {
+    name: 'aspire-samples-web',
+    defaultRef: 'main',
+  });
+
+  const web = await catalog.addServiceToCatalog('web');
+  await web.withSharedRepository(webSamples);
+  await web.withProject(
+    'samples/health-checks-ui/HealthChecksUI.ApiService/HealthChecksUI.ApiService.csproj');
+
+  const webUi = await catalog.addServiceToCatalog('web-ui');
+  await webUi.withSharedRepository(webSamples);
+  await webUi.withProject('samples/health-checks-ui/HealthChecksUI.Web/HealthChecksUI.Web.csproj');
+
   // Two sources are described here on purpose, the same reason
   // samples/DemoAppHostTypeScript/servicesources.yaml gives inventory both a url: and a
   // container: block: a "url"-sourced service runs out of band with no Aspire resource, so the
