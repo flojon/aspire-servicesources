@@ -125,7 +125,7 @@ public class CatalogErrorMessageTests
             var builder = CreateBuilder(dir);
             var definition = new ServiceDefinition
             {
-                Repository = "",
+                Repository = new RepositoryDefinition { Url = "", CheckoutName = "svc" },
                 Project = "",
                 Kind = "dotnet",
                 Container = new ContainerMetadata { Image = "nginx", Port = 80, Scheme = "ftp" },

@@ -45,15 +45,15 @@ public class ServiceDefinitionTests
             KindConfig = new Dictionary<object, object> { ["mavenGoal"] = "spring-boot:run" },
         };
 
-        var definition = metadata.ToDefinition("/apphost/servicesources.yaml");
+        var definition = metadata.ToDefinition("/apphost/servicesources.yaml", "orders");
 
-        Assert.Equal(metadata.Repository, definition.Repository);
+        Assert.Equal(metadata.Repository, definition.Repository.Url);
         Assert.Equal(metadata.Project, definition.Project);
-        Assert.Equal(metadata.DefaultRef, definition.DefaultRef);
+        Assert.Equal(metadata.DefaultRef, definition.Repository.DefaultRef);
         Assert.Same(metadata.Kubernetes, definition.Kubernetes);
         Assert.Same(metadata.Url, definition.Url);
         Assert.Same(metadata.Container, definition.Container);
-        Assert.Same(metadata.Prepare, definition.Prepare);
+        Assert.Same(metadata.Prepare, definition.Repository.Prepare);
         Assert.Equal(metadata.Kind, definition.Kind);
         Assert.Same(metadata.KindConfig, definition.KindOptions);
         Assert.Equal(CatalogOrigin.FromYaml("/apphost/servicesources.yaml"), definition.Origin);
@@ -71,10 +71,25 @@ public class ServiceDefinitionTests
     };
 
     /// <summary>
+    /// Properties that moved onto <see cref="ServiceDefinition.Repository"/> instead of staying
+    /// top-level (repository-handle design, #291), keyed by their <see cref="ServiceMetadata"/>
+    /// name, valued by the <see cref="RepositoryDefinition"/> property that now holds them.
+    /// <see cref="ServiceMetadata.Repository"/> (a URL string) becomes
+    /// <see cref="RepositoryDefinition.Url"/> — the one rename inside the move.
+    /// </summary>
+    private static readonly Dictionary<string, string> MovedToRepository = new()
+    {
+        ["Repository"] = "Url",
+        ["DefaultRef"] = "DefaultRef",
+        ["Prepare"] = "Prepare",
+    };
+
+    /// <summary>
     /// Reflection-based drift guard (design's Testing section): a property added to
     /// <see cref="ServiceMetadata"/> and forgotten in <see cref="ServiceMetadata.ToDefinition"/>
     /// would otherwise go unnoticed until a yaml-only value silently failed to reach
-    /// <see cref="ServiceDefinition"/> downstream.
+    /// <see cref="ServiceDefinition"/> downstream (or, for the three in
+    /// <see cref="MovedToRepository"/>, <see cref="RepositoryDefinition"/>).
     /// </summary>
     [Fact]
     public void ServiceMetadataProperties_AllHaveMatchingServiceDefinitionProperty()
@@ -82,9 +97,24 @@ public class ServiceDefinitionTests
         var definitionProperties = typeof(ServiceDefinition)
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .ToDictionary(p => p.Name);
+        var repositoryProperties = typeof(RepositoryDefinition)
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .ToDictionary(p => p.Name);
 
         foreach (var metadataProperty in typeof(ServiceMetadata).GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
+            if (MovedToRepository.TryGetValue(metadataProperty.Name, out var repositoryPropertyName))
+            {
+                Assert.True(
+                    repositoryProperties.TryGetValue(repositoryPropertyName, out var repositoryProperty),
+                    $"ServiceMetadata.{metadataProperty.Name} has no matching RepositoryDefinition.{repositoryPropertyName}. " +
+                    "Update MovedToRepository above, or thread it through ServiceMetadata.ToDefinition() and " +
+                    "ServiceDefinitionBuilder.Build() onto RepositoryDefinition.");
+
+                Assert.Equal(metadataProperty.PropertyType, repositoryProperty!.PropertyType);
+                continue;
+            }
+
             var expectedName = RenamedProperties.GetValueOrDefault(metadataProperty.Name, metadataProperty.Name);
 
             Assert.True(
@@ -99,9 +129,10 @@ public class ServiceDefinitionTests
 
     /// <summary>
     /// Value-level companion to the structural guard above: every property on a fully-populated
-    /// <see cref="ServiceMetadata"/> must actually reach <see cref="ServiceDefinition"/> through
-    /// <see cref="ServiceMetadata.ToDefinition"/>, reflection-driven so a newly added property is
-    /// covered automatically rather than requiring a hand-written assertion.
+    /// <see cref="ServiceMetadata"/> must actually reach <see cref="ServiceDefinition"/> (or, for
+    /// the three in <see cref="MovedToRepository"/>, its <see cref="ServiceDefinition.Repository"/>)
+    /// through <see cref="ServiceMetadata.ToDefinition"/>, reflection-driven so a newly added
+    /// property is covered automatically rather than requiring a hand-written assertion.
     /// </summary>
     [Fact]
     public void ToDefinition_CopiesEveryPropertyValue_ReflectionDriven()
@@ -119,24 +150,47 @@ public class ServiceDefinitionTests
             KindConfig = new Dictionary<object, object> { ["mavenGoal"] = "spring-boot:run" },
         };
 
-        var definition = metadata.ToDefinition("/apphost/servicesources.yaml");
+        var definition = metadata.ToDefinition("/apphost/servicesources.yaml", "orders");
 
         var definitionProperties = typeof(ServiceDefinition)
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .ToDictionary(p => p.Name);
+        var repositoryProperties = typeof(RepositoryDefinition)
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .ToDictionary(p => p.Name);
 
         foreach (var metadataProperty in typeof(ServiceMetadata).GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
-            var expectedName = RenamedProperties.GetValueOrDefault(metadataProperty.Name, metadataProperty.Name);
-            var definitionProperty = definitionProperties[expectedName];
-
             var metadataValue = metadataProperty.GetValue(metadata);
-            var definitionValue = definitionProperty.GetValue(definition);
+
+            object? definitionValue;
+            string reportedName;
+
+            if (MovedToRepository.TryGetValue(metadataProperty.Name, out var repositoryPropertyName))
+            {
+                definitionValue = repositoryProperties[repositoryPropertyName].GetValue(definition.Repository);
+                reportedName = $"Repository.{repositoryPropertyName}";
+            }
+            else
+            {
+                var expectedName = RenamedProperties.GetValueOrDefault(metadataProperty.Name, metadataProperty.Name);
+                definitionValue = definitionProperties[expectedName].GetValue(definition);
+                reportedName = expectedName;
+            }
 
             Assert.True(
                 ReferenceEquals(metadataValue, definitionValue) || Equals(metadataValue, definitionValue),
                 $"ServiceMetadata.{metadataProperty.Name}'s value did not carry through " +
-                $"ToDefinition() to ServiceDefinition.{expectedName}.");
+                $"ToDefinition() to ServiceDefinition.{reportedName}.");
         }
+    }
+
+    [Fact]
+    public void ToDefinition_CheckoutNameIsTheServiceName()
+    {
+        var definition = new ServiceMetadata { Repository = "https://github.com/example/repo" }
+            .ToDefinition("/apphost/servicesources.yaml", "orders");
+
+        Assert.Equal("orders", definition.Repository.CheckoutName);
     }
 }

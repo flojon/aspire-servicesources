@@ -306,7 +306,7 @@ internal static class ServiceSourcesConfigCache
                     // keys. Left to DeveloperConfiguration.CanonicalizeToCatalog's existing
                     // AmbiguousCatalogSpellingError, reached via ReadFrom below with the merged
                     // (Ordinal) key set — unchanged from today.
-                    merged[name] = metadata.ToDefinition(yamlPath);
+                    merged[name] = metadata.ToDefinition(yamlPath, name);
                 }
             }
 

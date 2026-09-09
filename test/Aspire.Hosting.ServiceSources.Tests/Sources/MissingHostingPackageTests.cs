@@ -248,7 +248,7 @@ public class MissingHostingPackageTests
     {
         Repository = "https://example.com/frontend.git",
         Kind = kind,
-    }.ToDefinition("servicesources.yaml");
+    }.ToDefinition("servicesources.yaml", ServiceName);
 
     private static ServiceDeveloperConfig DevConfig(string path) =>
         new() { Source = "local", Local = new() { Path = path } };

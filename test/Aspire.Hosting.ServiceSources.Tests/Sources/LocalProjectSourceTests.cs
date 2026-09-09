@@ -117,8 +117,11 @@ public class LocalProjectSourceTests
 
     private const string ServiceName = "orders";
 
-    private static ServiceDefinition Definition(string repository = "https://github.com/company/orders", string project = "Orders.csproj", string? defaultRef = null) =>
-        new ServiceMetadata { Repository = repository, Project = project, DefaultRef = defaultRef }.ToDefinition("servicesources.yaml");
+    private static ServiceDefinition Definition(
+        string repository = "https://github.com/company/orders", string project = "Orders.csproj",
+        string? defaultRef = null, string serviceName = ServiceName) =>
+        new ServiceMetadata { Repository = repository, Project = project, DefaultRef = defaultRef }
+            .ToDefinition("servicesources.yaml", serviceName);
 
     private static ServiceDeveloperConfig DevConfig(string? path = null, string? @ref = null) =>
         new() { Source = "local", Local = new() { Path = path, Ref = @ref } };
@@ -1175,9 +1178,11 @@ public class LocalProjectSourceTests
         var gitClient = new FakeGitClient();
 
         var ordersPath = ResolveProjectPath(
-            "orders", Definition(repository: "https://github.com/team-a/orders"), DevConfig(), appHostDirectory, gitClient);
+            "orders", Definition(repository: "https://github.com/team-a/orders", serviceName: "orders"),
+            DevConfig(), appHostDirectory, gitClient);
         var billingPath = ResolveProjectPath(
-            "billing", Definition(repository: "https://github.com/team-a/orders"), DevConfig(), appHostDirectory, gitClient);
+            "billing", Definition(repository: "https://github.com/team-a/orders", serviceName: "billing"),
+            DevConfig(), appHostDirectory, gitClient);
 
         Assert.NotEqual(ordersPath, billingPath);
         Assert.Equal(2, gitClient.ClonedRepos.Count);
@@ -1267,7 +1272,7 @@ public class LocalProjectSourceTests
         Parallel.ForEach(serviceNames, serviceName =>
         {
             ResolveProjectPath(
-                serviceName, Definition(), DevConfig(), appHostDirectory, new FakeGitClient());
+                serviceName, Definition(serviceName: serviceName), DevConfig(), appHostDirectory, new FakeGitClient());
         });
 
         var gitignorePath = Path.Combine(appHostDirectory, ".servicesources", ".gitignore");
@@ -1311,7 +1316,7 @@ public class LocalProjectSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             LocalGitCheckout.ResolveRepoRoot(
-                "../escapee", Definition(), DevConfig(), appHostDirectory, gitClient));
+                "../escapee", Definition(serviceName: "../escapee"), DevConfig(), appHostDirectory, gitClient));
 
         Assert.Contains("../escapee", ex.Message);
         Assert.Empty(gitClient.ClonedRepos);

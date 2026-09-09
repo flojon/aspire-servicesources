@@ -117,7 +117,7 @@ public class DeferredCheckoutTests
         new ServiceMetadata
         {
             Repository = $"https://example.com/{name}.git", Project = project,
-        }.ToDefinition("servicesources.yaml");
+        }.ToDefinition("servicesources.yaml", name);
 
     private static ServiceDeveloperConfig DevConfig(string? path = null) =>
         new() { Source = "local", Local = new() { Path = path } };
@@ -1111,7 +1111,7 @@ public class DeferredCheckoutTests
                 builder,
                 "orders",
                 new ServiceMetadata { Repository = repository, Project = "Service.csproj" }
-                    .ToDefinition("servicesources.yaml"),
+                    .ToDefinition("servicesources.yaml", "orders"),
                 DevConfig())
             .WithHttpEndpoint();
 

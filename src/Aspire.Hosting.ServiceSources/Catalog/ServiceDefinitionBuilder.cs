@@ -156,13 +156,17 @@ public sealed class ServiceDefinitionBuilder
         // Repository/Project default to "" (ServiceMetadata's own defaults) when unset — a service
         // declared with no With* call at all is caught downstream by the same "no source configured"
         // path an empty yaml entry hits today, not rejected here.
-        Repository = _repository ?? "",
+        Repository = new RepositoryDefinition
+        {
+            Url = _repository ?? "",
+            DefaultRef = _defaultRef,
+            Prepare = _prepare,
+            CheckoutName = _serviceName,
+        },
         Project = _project ?? "",
-        DefaultRef = _defaultRef,
         Url = _url,
         Container = _container,
         Kubernetes = _kubernetes,
-        Prepare = _prepare,
         Kind = _kind ?? LocalKinds.Dotnet,
         KindOptions = _kindOptions,
         Origin = CatalogOrigin.Code,

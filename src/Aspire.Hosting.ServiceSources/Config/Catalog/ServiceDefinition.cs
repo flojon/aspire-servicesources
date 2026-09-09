@@ -6,23 +6,21 @@ namespace Aspire.Hosting.ServiceSources.Config.Catalog;
 /// directly by <see cref="ServiceDefinitionBuilder"/> for a code-declared service. Two things a
 /// yaml-bound <see cref="ServiceMetadata"/> deliberately does not carry: <see cref="Origin"/> (design
 /// finding 5) and <see cref="KindOptions"/> as an already-typed value rather than a raw yaml block
-/// (design finding 6).
+/// (design finding 6). The repository's url, default ref and prepare command live on
+/// <see cref="RepositoryDefinition"/>, referenced rather than inlined — see repository-handle design
+/// "The domain type" (#291).
 /// </summary>
 internal sealed class ServiceDefinition
 {
-    public required string Repository { get; init; }
+    public required RepositoryDefinition Repository { get; init; }
 
     public required string Project { get; init; }
-
-    public string? DefaultRef { get; init; }
 
     public KubernetesMetadata? Kubernetes { get; init; }
 
     public UrlMetadata? Url { get; init; }
 
     public ContainerMetadata? Container { get; init; }
-
-    public PrepareMetadata? Prepare { get; init; }
 
     public required string Kind { get; init; }
 

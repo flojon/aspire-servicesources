@@ -37,7 +37,7 @@ public class ServiceEndpointTests
             builder,
             "orders",
             new ServiceMetadata { Container = new ContainerMetadata { Image = "ghcr.io/company/orders", Port = 8080, Scheme = scheme } }
-                .ToDefinition("servicesources.yaml"),
+                .ToDefinition("servicesources.yaml", "orders"),
             new ServiceDeveloperConfig { Source = "container" });
 
     private static IResourceBuilder<IResourceWithServiceDiscovery> KubernetesService(
@@ -46,7 +46,7 @@ public class ServiceEndpointTests
             builder,
             "orders",
             new ServiceMetadata { Kubernetes = new KubernetesMetadata { Service = "orders-svc", Port = 8080, Scheme = scheme } }
-                .ToDefinition("servicesources.yaml"),
+                .ToDefinition("servicesources.yaml", "orders"),
             new ServiceDeveloperConfig { Source = "kubernetes", Kubernetes = new() { Context = "dev-west" } });
 
     /// <summary>
@@ -110,7 +110,7 @@ public class ServiceEndpointTests
             Builder(),
             "orders",
             new ServiceMetadata { Url = new UrlMetadata { Url = "https://orders.example.com" } }
-                .ToDefinition("servicesources.yaml"),
+                .ToDefinition("servicesources.yaml", "orders"),
             new ServiceDeveloperConfig { Source = "url" });
 
         var endpoint = service.GetServiceEndpoint();

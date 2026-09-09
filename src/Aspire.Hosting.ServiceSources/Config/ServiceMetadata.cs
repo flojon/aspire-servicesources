@@ -37,17 +37,24 @@ internal sealed class ServiceMetadata
     /// Converts this yaml-bound entry into the source-agnostic <see cref="ServiceDefinition"/>
     /// every downstream consumer reads. <see cref="Kind"/> is already normalized to
     /// <see cref="LocalKinds.Dotnet"/> by <see cref="ServiceCatalogLoader"/> by the time this runs,
-    /// so no further normalization happens here.
+    /// so no further normalization happens here. <paramref name="serviceName"/> mints this service's
+    /// anonymous <see cref="RepositoryDefinition"/> — its <see cref="RepositoryDefinition.CheckoutName"/>
+    /// is the service's own name, which is what keeps an existing checkout path byte-identical
+    /// (repository-handle design finding 2, #291).
     /// </summary>
-    public ServiceDefinition ToDefinition(string yamlPath) => new()
+    public ServiceDefinition ToDefinition(string yamlPath, string serviceName) => new()
     {
-        Repository = Repository,
+        Repository = new RepositoryDefinition
+        {
+            Url = Repository,
+            DefaultRef = DefaultRef,
+            Prepare = Prepare,
+            CheckoutName = serviceName,
+        },
         Project = Project,
-        DefaultRef = DefaultRef,
         Kubernetes = Kubernetes,
         Url = Url,
         Container = Container,
-        Prepare = Prepare,
         Kind = Kind,
         KindOptions = KindConfig,
         Origin = CatalogOrigin.FromYaml(yamlPath),

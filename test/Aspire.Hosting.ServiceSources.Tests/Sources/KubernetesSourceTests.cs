@@ -33,7 +33,7 @@ public class KubernetesSourceTests
             Kubernetes = kubernetesService is null
                 ? null
                 : new KubernetesMetadata { Service = kubernetesService, Port = kubernetesPort, Scheme = scheme },
-        }.ToDefinition("servicesources.yaml");
+        }.ToDefinition("servicesources.yaml", ServiceName);
 
     private static ServiceDeveloperConfig DevConfig(
         string? context = "dev-west", string? @namespace = null, int? port = null, string? scheme = null) =>

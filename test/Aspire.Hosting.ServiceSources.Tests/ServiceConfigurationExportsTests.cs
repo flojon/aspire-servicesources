@@ -29,13 +29,13 @@ public class ServiceConfigurationExportsTests
     private static IResourceBuilder<IResourceWithServiceDiscovery> ConfigurableService(
         IDistributedApplicationBuilder builder) =>
         new ContainerSource().Resolve(
-            builder, "payments", ContainerMetadata.ToDefinition("servicesources.yaml"),
+            builder, "payments", ContainerMetadata.ToDefinition("servicesources.yaml", "payments"),
             new ServiceDeveloperConfig { Source = "container" });
 
     private static IResourceBuilder<IResourceWithServiceDiscovery> UrlService(
         IDistributedApplicationBuilder builder) =>
         new UrlSource().Resolve(
-            builder, "inventory", UrlMetadata.ToDefinition("servicesources.yaml"),
+            builder, "inventory", UrlMetadata.ToDefinition("servicesources.yaml", "inventory"),
             new ServiceDeveloperConfig { Source = "url" });
 
     private static IEnumerable<MethodInfo> ExportedMethods() =>

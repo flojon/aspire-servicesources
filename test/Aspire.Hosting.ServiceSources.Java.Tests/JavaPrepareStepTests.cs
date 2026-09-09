@@ -96,7 +96,7 @@ public class JavaPrepareStepTests
             Kind = "java",
             Prepare = prepare,
             KindConfig = Block(block),
-        }.ToDefinition("servicesources.yaml");
+        }.ToDefinition("servicesources.yaml", ServiceName);
 
     private static PrepareMetadata Prepare() => new() { Command = ["./prepare.sh"] };
 
