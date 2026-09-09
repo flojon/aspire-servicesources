@@ -1056,7 +1056,7 @@ The checkout is cloned exactly as for any other `"local"` service (`path`, `ref`
 | `mavenGoal` | one of these three | Run via the Maven wrapper, e.g. `spring-boot:run`. |
 | `gradleTask` | one of these three | Run via the Gradle wrapper, e.g. `bootRun`. |
 | `jarPath` | one of these three | Run a pre-built jar with `java -jar`, relative to `workingDirectory`. May climb out of it — a monorepo's shared build output directory — but must stay inside the checkout. |
-| `port` | yes | The port the app listens on. Becomes the service's endpoint, so consumers can `WithReference(...)` or `GetServiceEndpoint()` it. |
+| `port` | yes | The port the app listens on. Becomes the service's endpoint (see `scheme` below), so consumers can `WithReference(...)` or `GetServiceEndpoint()` it. |
 | `scheme` | no (defaults to `http`) | The scheme the app serves on `port` — `http` or `https`. |
 | `workingDirectory` | no (defaults to the repository root) | Where in the checkout the project lives — the directory holding `pom.xml` / `build.gradle`, and by default the `mvnw`/`gradlew` wrapper too. Must stay inside the checkout. |
 | `wrapperPath` | no (defaults to the wrapper in `workingDirectory`) | Where the `mvnw`/`gradlew` wrapper script lives, relative to the **repository root** — for the monorepo that commits a single wrapper at its root while the service itself sits further down. Name it without an extension (`gradlew`, not `gradlew.bat`) and it works for the whole team: on Windows the `.cmd`/`.bat` wrapper beside it is the one run. Only meaningful with `mavenGoal` or `gradleTask`. |
