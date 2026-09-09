@@ -42,19 +42,26 @@ internal static class DeveloperConfigFileSource
     /// </remarks>
     internal const string FileBackingServicesKey = "backingServices";
 
+    /// <summary>The same, for a developer's per-repository overrides (#291).</summary>
+    /// <remarks>
+    /// Internal for the same reason as <see cref="FileBackingServicesKey"/>.
+    /// </remarks>
+    internal const string FileRepositoriesKey = "repositories";
+
     /// <summary>
     /// Every subtree of the file that crosses into the AppHost's configuration, and the key it
     /// lands under.
     /// </summary>
     /// <remarks>
-    /// A list rather than a special case per section, so that adding one is adding a line. Both
-    /// keys are too generic to occupy at the root of the AppHost's configuration, which is why
-    /// neither crosses over under the name the file gives it.
+    /// A list rather than a special case per section, so that adding one is adding a line. Every
+    /// key is too generic to occupy at the root of the AppHost's configuration, which is why none
+    /// of them crosses over under the name the file gives it.
     /// </remarks>
     private static readonly (string FileKey, string ConfigurationKey)[] ReRootedSections =
     [
         (FileServicesKey, DeveloperConfiguration.ServicesKey),
         (FileBackingServicesKey, DeveloperConfiguration.BackingServicesKey),
+        (FileRepositoriesKey, DeveloperConfiguration.RepositoriesKey),
     ];
 
     private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, Registration> Registrations = new();

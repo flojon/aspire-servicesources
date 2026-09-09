@@ -16,9 +16,23 @@ internal sealed class DeveloperConfiguration
     /// <summary>The configuration key the per-backing-service entries live under.</summary>
     public const string BackingServicesKey = "ServiceSources:BackingServices";
 
+    /// <summary>
+    /// The configuration key a developer's per-repository overrides live under (#291) — a group of
+    /// services sharing a checkout, keyed by <see cref="Config.Catalog.RepositoryDefinition.CheckoutName"/>
+    /// rather than by any one member service.
+    /// </summary>
+    public const string RepositoriesKey = "ServiceSources:Repositories";
+
     public const string FileName = "servicesources.local.json";
 
     public required IReadOnlyDictionary<string, ServiceDeveloperConfig> Services { get; init; }
+
+    /// <summary>
+    /// A developer's per-repository overrides (#291), keyed on
+    /// <see cref="Config.Catalog.RepositoryDefinition.CheckoutName"/> — empty for the overwhelming
+    /// common case, an AppHost with no grouped repository at all.
+    /// </summary>
+    public required IReadOnlyDictionary<string, RepositoryDeveloperConfig> Repositories { get; init; }
 
     /// <summary>Where a developer would normally author this, named by the errors below.</summary>
     public required string FilePath { get; init; }
@@ -80,16 +94,23 @@ internal sealed class DeveloperConfiguration
     /// <param name="catalogNames">
     /// The service names the catalog declares — code-declared and yaml-declared alike (design
     /// finding 5) — which decide the spelling the entries are keyed by — see
-    /// <see cref="CanonicalizeToCatalog"/>.
+    /// <see cref="CanonicalizeToCatalog{T}"/>.
+    /// </param>
+    /// <param name="repositoryNames">
+    /// The repository names the catalog declares (#291) — code-declared and yaml-declared alike,
+    /// composed across both catalogs by the caller — which decide the spelling
+    /// <see cref="Repositories"/>' entries are keyed by, the same way <paramref name="catalogNames"/>
+    /// decides it for <see cref="Services"/>.
     /// </param>
     public static DeveloperConfiguration ReadFrom(
-        IDistributedApplicationBuilder builder, IEnumerable<string> catalogNames)
+        IDistributedApplicationBuilder builder, IEnumerable<string> catalogNames, IEnumerable<string> repositoryNames)
     {
         DeveloperConfigFileSource.EnsureRegistered(builder);
 
         // Walked more than once below, and held afterwards, so it is read out of the catalog here
         // rather than re-enumerated per use.
         var declaredNames = catalogNames.ToArray();
+        var declaredRepositoryNames = repositoryNames.ToArray();
 
         var path = Path.Combine(builder.AppHostDirectory, FileName);
 
@@ -115,9 +136,28 @@ internal sealed class DeveloperConfiguration
 
         var (services, undeclaredNames) = CanonicalizeToCatalog(bound, declaredNames);
 
+        var repositorySection = builder.Configuration.GetSection(RepositoriesKey);
+
+        DeveloperConfigValidator.ValidateAll(repositorySection.GetChildren(), DeveloperConfigShape.Repository);
+
+        var boundRepositories = repositorySection.Get<Dictionary<string, RepositoryDeveloperConfig>>() ?? [];
+
+        foreach (var config in boundRepositories.Values)
+        {
+            NormalizeBlankToAbsent(config, DeveloperConfigShape.Repository);
+        }
+
+        // The undeclared-repository-names half is discarded: nothing today offers a near-miss
+        // suggestion for a repository entry the way NotConfiguredError does for a service, so there
+        // is nothing yet that would read it. CanonicalizeToCatalog<T> still computes it, being the
+        // one walk that also decides the canonical keying — recomputing it separately would be a
+        // second pass over the same entries to throw the answer away differently.
+        var (repositories, _) = CanonicalizeToCatalog(boundRepositories, declaredRepositoryNames);
+
         return new DeveloperConfiguration
         {
             Services = services,
+            Repositories = repositories,
             UndeclaredNames = undeclaredNames,
             CatalogNames = declaredNames,
             FilePath = path,
@@ -266,9 +306,10 @@ internal sealed class DeveloperConfiguration
     /// entry.
     /// </returns>
     private static (
-        Dictionary<string, ServiceDeveloperConfig> Services,
-        IReadOnlyList<string> UndeclaredNames) CanonicalizeToCatalog(
-        Dictionary<string, ServiceDeveloperConfig> bound, IReadOnlyList<string> catalogNames)
+        Dictionary<string, T> Entries,
+        IReadOnlyList<string> UndeclaredNames) CanonicalizeToCatalog<T>(
+        Dictionary<string, T> bound, IReadOnlyList<string> catalogNames)
+        where T : notnull
     {
         var catalogSpelling = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         foreach (var name in catalogNames)
@@ -285,7 +326,7 @@ internal sealed class DeveloperConfiguration
         // Still case-insensitive after the re-keying: an entry naming a service the catalog doesn't
         // describe has no spelling to adopt, and looking one up has to keep working so that the
         // failure comes from the catalog lookup, which can say so, rather than from a miss here.
-        var canonical = new Dictionary<string, ServiceDeveloperConfig>(StringComparer.OrdinalIgnoreCase);
+        var canonical = new Dictionary<string, T>(StringComparer.OrdinalIgnoreCase);
         var undeclared = new List<string>();
         foreach (var (name, config) in bound)
         {

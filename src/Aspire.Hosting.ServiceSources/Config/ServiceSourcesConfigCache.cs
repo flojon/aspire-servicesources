@@ -334,7 +334,7 @@ internal static class ServiceSourcesConfigCache
             return new LoadedConfig
             {
                 Catalog = catalog,
-                DeveloperConfig = DeveloperConfiguration.ReadFrom(builder, catalog.Services.Keys),
+                DeveloperConfig = DeveloperConfiguration.ReadFrom(builder, catalog.Services.Keys, catalog.Repositories.Keys),
                 YamlPath = yamlExists ? yamlPath : null,
                 HasCodeEntries = codeEntries.Count > 0,
             };

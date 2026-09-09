@@ -19,7 +19,8 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     private readonly IPrepareCommandRunner _prepareRunner = prepareRunner ?? ProcessPrepareCommandRunner.Instance;
 
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
-        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
+        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
+        ServiceDeveloperConfig config, RepositoryDeveloperConfig? repositoryConfig = null)
     {
         // Before any network work: a machine without a usable git can't clone anything, and
         // finding that out once here beats finding it out as an identical clone failure on every
@@ -111,10 +112,12 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
             // once it has looked at everything.
             var registered = isDotnetKind
                 ? deferred.Register(
-                    builder, serviceName, definition, config, prefetch, gitClient, prepare.Step, _prepareRunner)
+                    builder, serviceName, definition, config, repositoryConfig, prefetch, gitClient, prepare.Step,
+                    _prepareRunner)
                 : SupportsDeferredKind(serviceName, definition, handler!)
                     ? deferred.RegisterKind(
-                        builder, serviceName, definition, config, prefetch, gitClient, prepare.Step, _prepareRunner,
+                        builder, serviceName, definition, config, repositoryConfig, prefetch, gitClient,
+                        prepare.Step, _prepareRunner,
                         repoRoot => ResolveDeferredKind(builder, serviceName, definition, repoRoot, handler!))
                     : null;
 
@@ -148,7 +151,8 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         // twice at once over the identical directory. See CheckoutNameLock.
         using (CheckoutNameLock.For(builder).Acquire(definition.Repository.CheckoutName))
         {
-            repoRoot = prefetch.GetRepoRoot(serviceName, definition, config, builder.AppHostDirectory, gitClient);
+            repoRoot = prefetch.GetRepoRoot(
+                serviceName, definition, config, repositoryConfig, builder.AppHostDirectory, gitClient);
 
             // The working tree is complete and reconciled onto its configured ref; the kind has not
             // yet been allowed to judge it. Both halves of that are load-bearing. After the

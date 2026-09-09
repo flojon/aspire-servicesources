@@ -876,7 +876,7 @@ public class LocalCheckoutPrefetchTests
             giveUp.Token);
 
         var resolved = Task.Run(
-            () => prefetch.GetRepoRoot("billing", Definition("billing"), DevConfig(), dir, git),
+            () => prefetch.GetRepoRoot("billing", Definition("billing"), DevConfig(), null, dir, git),
             CancellationToken.None);
 
         // The stream is over while the checkout is not. Closing it only when GetRepoRoot returns

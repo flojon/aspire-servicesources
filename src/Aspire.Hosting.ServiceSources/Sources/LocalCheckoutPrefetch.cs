@@ -309,8 +309,9 @@ internal sealed class LocalCheckoutPrefetch
     /// one would be named as speculative work nobody wanted.
     /// </para>
     /// </remarks>
-    public void StartCheckout(string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config,
-        string appHostDirectory, IGitClient gitClient)
+    public void StartCheckout(
+        string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config,
+        RepositoryDeveloperConfig? repositoryConfig, string appHostDirectory, IGitClient gitClient)
     {
         lock (_gate)
         {
@@ -322,7 +323,7 @@ internal sealed class LocalCheckoutPrefetch
             if (!_checkouts.ContainsKey(serviceName))
             {
                 _checkouts[serviceName] = StartCheckoutTask(
-                    serviceName, definition, config, appHostDirectory, gitClient);
+                    serviceName, definition, config, repositoryConfig, appHostDirectory, gitClient);
             }
         }
     }
@@ -418,12 +419,14 @@ internal sealed class LocalCheckoutPrefetch
     /// The checkout directory for <paramref name="serviceName"/>, re-throwing the failure the
     /// parallel phase recorded for it.
     /// </summary>
-    public string GetRepoRoot(string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config,
-        string appHostDirectory, IGitClient gitClient)
+    public string GetRepoRoot(
+        string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config,
+        RepositoryDeveloperConfig? repositoryConfig, string appHostDirectory, IGitClient gitClient)
     {
         try
         {
-            return ResolveRequestedRepoRoot(serviceName, definition, config, appHostDirectory, gitClient);
+            return ResolveRequestedRepoRoot(
+                serviceName, definition, config, repositoryConfig, appHostDirectory, gitClient);
         }
         finally
         {
@@ -437,8 +440,9 @@ internal sealed class LocalCheckoutPrefetch
         }
     }
 
-    private string ResolveRequestedRepoRoot(string serviceName, ServiceDefinition definition,
-        ServiceDeveloperConfig config, string appHostDirectory, IGitClient gitClient)
+    private string ResolveRequestedRepoRoot(
+        string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config,
+        RepositoryDeveloperConfig? repositoryConfig, string appHostDirectory, IGitClient gitClient)
     {
         Task<CheckoutResult>? checkout;
 
@@ -471,14 +475,15 @@ internal sealed class LocalCheckoutPrefetch
             try
             {
                 prepared = LocalGitCheckout.PrepareRepoRoot(
-                    serviceName, definition, config, appHostDirectory, gitClient, progress);
+                    serviceName, definition, config, repositoryConfig, appHostDirectory, gitClient, progress);
             }
             finally
             {
                 progress?.Complete();
             }
 
-            return LocalGitCheckout.ReconcileRepoRoot(serviceName, definition, config, prepared, gitClient);
+            return LocalGitCheckout.ReconcileRepoRoot(
+                serviceName, definition, config, repositoryConfig, prepared, gitClient);
         }
 
         // Waits on this service's checkout only. The other prefetched checkouts keep running in the
@@ -497,7 +502,7 @@ internal sealed class LocalCheckoutPrefetch
         // mutates a working tree, so it happens here — on the thread of the AddService call that
         // asked for this service, and never for a service the AppHost turns out not to add.
         return LocalGitCheckout.ReconcileRepoRoot(
-            serviceName, definition, config, result.Checkout!.Value, gitClient);
+            serviceName, definition, config, repositoryConfig, result.Checkout!.Value, gitClient);
     }
 
     private void Run(IDistributedApplicationBuilder builder, IGitClient gitClient)
@@ -541,7 +546,9 @@ internal sealed class LocalCheckoutPrefetch
             .Select(entry => (
                 Name: entry.Key,
                 Definition: config.Catalog.Services[entry.Key],
-                Config: entry.Value))
+                Config: entry.Value,
+                RepositoryConfig: config.DeveloperConfig.Repositories.GetValueOrDefault(
+                    config.Catalog.Services[entry.Key].Repository.CheckoutName)))
             // Only checkouts there is something to clone for. Everything else resolves to the same
             // answer in GetRepoRoot for a fraction of the code, and reaches nobody at all when the
             // service is never added — which is where speculating over one used to go wrong.
@@ -560,7 +567,8 @@ internal sealed class LocalCheckoutPrefetch
         foreach (var candidate in candidates)
         {
             _checkouts[candidate.Name] = StartCheckoutTask(
-                candidate.Name, candidate.Definition, candidate.Config, appHostDirectory, gitClient);
+                candidate.Name, candidate.Definition, candidate.Config, candidate.RepositoryConfig,
+                appHostDirectory, gitClient);
         }
     }
 
@@ -650,6 +658,7 @@ internal sealed class LocalCheckoutPrefetch
         string serviceName,
         ServiceDefinition definition,
         ServiceDeveloperConfig config,
+        RepositoryDeveloperConfig? repositoryConfig,
         string appHostDirectory,
         IGitClient gitClient)
     {
@@ -663,7 +672,7 @@ internal sealed class LocalCheckoutPrefetch
                 // may never be added, but reconciling an existing checkout is not — see
                 // GetRepoRoot, which finishes the job for the services that are.
                 var prepared = LocalGitCheckout.PrepareRepoRoot(
-                    serviceName, definition, config, appHostDirectory, gitClient, progress);
+                    serviceName, definition, config, repositoryConfig, appHostDirectory, gitClient, progress);
                 return new CheckoutResult(prepared, null);
             }
             catch (Exception ex)

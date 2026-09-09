@@ -31,6 +31,15 @@ internal sealed class DeveloperConfigShape
         Of<BackingServiceDeveloperConfig>(
             "Backing service", "backing service", ["local", "direct", "kubernetes"]);
 
+    /// <summary>
+    /// A repository entry, keyed under <see cref="DeveloperConfiguration.RepositoriesKey"/> — a
+    /// developer's override for a whole group of services (#291) sharing a checkout, rather than for
+    /// one service's own <c>local</c> block. Empty <c>sourceNames</c>: a repository entry has no
+    /// <c>source</c> field, so there is no bare-value spelling to recognize it against.
+    /// </summary>
+    public static DeveloperConfigShape Repository { get; } =
+        Of<RepositoryDeveloperConfig>("Repository", "repository", []);
+
     private DeveloperConfigShape(
         Type entry,
         string kind,

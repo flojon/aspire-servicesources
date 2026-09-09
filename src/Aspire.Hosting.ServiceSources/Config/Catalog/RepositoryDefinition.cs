@@ -18,10 +18,15 @@ internal sealed class RepositoryDefinition
 
     /// <summary>
     /// The single directory name a managed checkout of this repository is placed under
-    /// (<c>checkouts/&lt;CheckoutName&gt;</c>). For an anonymous (ungrouped) record — every record
-    /// in this stage — this is always the owning service's name, which is what keeps every existing
-    /// checkout path byte-identical (design finding 2, criterion 6). Nothing reads this field yet;
-    /// Stage 2 is what re-keys <c>LocalGitCheckout</c>/<c>LocalCheckoutPrefetch</c> onto it.
+    /// (<c>checkouts/&lt;CheckoutName&gt;</c>). For an anonymous (ungrouped) record this is always
+    /// the owning service's name, which is what keeps every existing checkout path byte-identical
+    /// (design finding 2, criterion 6); a shared record (<c>AddRepository</c>/
+    /// <c>WithSharedRepository</c>, or yaml's <c>repositoryRef</c>) carries the repository's own
+    /// name instead, so every service naming it resolves the identical directory. Read wherever a
+    /// message or a checkout path needs to distinguish "this service" from "this service's
+    /// repository" — see <c>PreparePlan.ServiceLabel</c>/<c>RepositoryLabel</c> and
+    /// <c>LocalGitCheckout.PrepareRepoRoot</c>'s grouped-service checks — and still to be re-keyed
+    /// onto for the checkout directory itself (Task 5/#291).
     /// </summary>
     public required string CheckoutName { get; init; }
 }

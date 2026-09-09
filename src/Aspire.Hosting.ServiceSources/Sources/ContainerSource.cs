@@ -7,7 +7,8 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 internal sealed class ContainerSource : IServiceSource
 {
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
-        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
+        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
+        ServiceDeveloperConfig config, RepositoryDeveloperConfig? repositoryConfig = null)
     {
         var (image, tag, port) = ResolveContainerConfig(serviceName, definition, config);
 

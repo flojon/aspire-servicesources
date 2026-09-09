@@ -118,7 +118,14 @@ public static class ServiceSourcesBuilderExtensions
                 + $"{key.Replace(":", "__", StringComparison.Ordinal)}, or the command line.");
         }
 
-        return source.Resolve(builder, name, definition, developerConfig);
+        // Resolved once here rather than inside each source: the source that actually reads it —
+        // LocalProjectSource — must not depend on ServiceSourcesConfigCache.LoadedFor by itself,
+        // which would tie its unit tests to the whole catalog-loading pipeline that ResolveService
+        // just walked above. This is a cache hit off the same instance ResolveService populated.
+        var repositoryConfig = ServiceSourcesConfigCache.LoadedFor(builder)
+            .DeveloperConfig.Repositories.GetValueOrDefault(definition.Repository.CheckoutName);
+
+        return source.Resolve(builder, name, definition, developerConfig, repositoryConfig);
     }
 
     /// <summary>

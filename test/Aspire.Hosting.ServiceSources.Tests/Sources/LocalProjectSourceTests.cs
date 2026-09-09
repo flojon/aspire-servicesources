@@ -139,9 +139,11 @@ public class LocalProjectSourceTests
         ServiceDefinition definition,
         ServiceDeveloperConfig config,
         string appHostDirectory,
-        IGitClient gitClient)
+        IGitClient gitClient,
+        RepositoryDeveloperConfig? repositoryConfig = null)
     {
-        var repoRoot = LocalGitCheckout.ResolveRepoRoot(serviceName, definition, config, appHostDirectory, gitClient);
+        var repoRoot = LocalGitCheckout.ResolveRepoRoot(
+            serviceName, definition, config, repositoryConfig, appHostDirectory, gitClient);
 
         return LocalProjectSource.ResolveProjectFile(serviceName, repoRoot, definition.Project);
     }
@@ -189,11 +191,106 @@ public class LocalProjectSourceTests
         // the guard every kind shares: for a non-dotnet kind nothing downstream would catch it.
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             LocalGitCheckout.ResolveRepoRoot(
-                ServiceName, Definition(), DevConfig(path: "frontned"), appHostDirectory, gitClient));
+                ServiceName, Definition(), DevConfig(path: "frontned"), null, appHostDirectory, gitClient));
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains(missing, ex.Message);
         Assert.Empty(gitClient.ClonedRepos);
+    }
+
+    /// <summary>
+    /// A service grouped into a shared repository (#291) — <see cref="RepositoryDefinition.CheckoutName"/>
+    /// naming the repository rather than <paramref name="serviceName"/> itself, the same shape
+    /// <c>AddRepository</c>/<c>WithSharedRepository</c> and yaml's <c>repositoryRef</c> both produce.
+    /// </summary>
+    private static ServiceDefinition GroupedDefinition(
+        string serviceName = ServiceName, string checkoutName = "monorepo",
+        string repository = "https://github.com/company/monorepo", string project = "src/Orders/Orders.csproj",
+        string? defaultRef = null) =>
+        new()
+        {
+            Repository = new RepositoryDefinition
+            {
+                Url = repository, DefaultRef = defaultRef, CheckoutName = checkoutName,
+            },
+            Project = project,
+            Kind = LocalKinds.Dotnet,
+            Origin = CatalogOrigin.FromYaml("servicesources.yaml"),
+        };
+
+    /// <summary>
+    /// The grouped-service checks in <see cref="LocalGitCheckout.PrepareRepoRoot"/> (criterion 4, and
+    /// the reserved <c>path</c> field) run before anything touches the filesystem or git, so a
+    /// managed checkout — never created here — is enough to reach them.
+    /// </summary>
+    private static string UnusedManagedAppHostDirectory => TempDirectories.CreateSubdirectory().FullName;
+
+    [Fact]
+    public void PrepareRepoRoot_LocalRefOnGroupedService_ThrowsNamingServiceRepositoryAndWhereToSetItInstead()
+    {
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            LocalGitCheckout.PrepareRepoRoot(
+                ServiceName, GroupedDefinition(), DevConfig(@ref: "feature/x"), repositoryConfig: null,
+                UnusedManagedAppHostDirectory, new FakeGitClient()));
+
+        Assert.Contains($"Service '{ServiceName}'", ex.Message);
+        Assert.Contains("'local.ref' cannot be set", ex.Message);
+        Assert.Contains("monorepo", ex.Message);
+        Assert.Contains("ServiceSources:Repositories:monorepo:ref", ex.Message);
+    }
+
+    [Fact]
+    public void PrepareRepoRoot_LocalRefOnUngroupedService_Unaffected()
+    {
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
+        var gitClient = new FakeGitClient();
+        var repoRoot = LocalGitCheckout.ManagedRepoRoot(appHostDirectory, ServiceName);
+        Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
+
+        // Reaches UseExistingCheckout rather than throwing — the regression guard: a grouped-only
+        // check must never fire for the overwhelming common, ungrouped case.
+        var resolved = LocalGitCheckout.PrepareRepoRoot(
+            ServiceName, Definition(), DevConfig(@ref: "feature/x"), repositoryConfig: null,
+            appHostDirectory, gitClient);
+
+        Assert.Equal(repoRoot, resolved.RepoRoot);
+        Assert.True(resolved.NeedsReconciliation);
+    }
+
+    [Fact]
+    public void PrepareRepoRoot_RepositoryPathOnGroupedService_ThrowsReservedError()
+    {
+        var repositoryConfig = new RepositoryDeveloperConfig { Path = "/some/where" };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            LocalGitCheckout.PrepareRepoRoot(
+                ServiceName, GroupedDefinition(), DevConfig(), repositoryConfig,
+                UnusedManagedAppHostDirectory, new FakeGitClient()));
+
+        Assert.Contains("Repository 'monorepo'", ex.Message);
+        Assert.Contains("ServiceSources:Repositories:monorepo:path", ex.Message);
+        Assert.Contains("reserved", ex.Message);
+        Assert.Contains("local.path", ex.Message);
+    }
+
+    [Fact]
+    public void PrepareRepoRoot_RepositoryRef_ResolvesAheadOfDefaultRef()
+    {
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
+        var gitClient = new FakeGitClient();
+        var repoRoot = LocalGitCheckout.ManagedRepoRoot(appHostDirectory, "monorepo");
+        Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
+
+        var repositoryConfig = new RepositoryDeveloperConfig { Ref = "feature/repo-level" };
+        var definition = GroupedDefinition(defaultRef: "main");
+
+        LocalGitCheckout.ReconcileRepoRoot(
+            ServiceName, definition, DevConfig(), repositoryConfig,
+            new LocalGitCheckout.PreparedCheckout(repoRoot, NeedsReconciliation: true), gitClient);
+
+        var (checkedOutPath, reference) = Assert.Single(gitClient.CheckedOutRefs);
+        Assert.Equal(repoRoot, checkedOutPath);
+        Assert.Equal("feature/repo-level", reference);
     }
 
     [Fact]
@@ -1316,7 +1413,7 @@ public class LocalProjectSourceTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             LocalGitCheckout.ResolveRepoRoot(
-                "../escapee", Definition(serviceName: "../escapee"), DevConfig(), appHostDirectory, gitClient));
+                "../escapee", Definition(serviceName: "../escapee"), DevConfig(), null, appHostDirectory, gitClient));
 
         Assert.Contains("../escapee", ex.Message);
         Assert.Empty(gitClient.ClonedRepos);

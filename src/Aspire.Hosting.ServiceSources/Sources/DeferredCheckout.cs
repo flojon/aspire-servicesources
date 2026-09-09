@@ -116,6 +116,7 @@ internal sealed class DeferredCheckout
         string RepoRoot,
         ServiceDefinition Definition,
         ServiceDeveloperConfig Config,
+        RepositoryDeveloperConfig? RepositoryConfig,
         string AppHostDirectory,
         LocalCheckoutPrefetch Prefetch,
         IGitClient GitClient,
@@ -209,6 +210,7 @@ internal sealed class DeferredCheckout
         string serviceName,
         ServiceDefinition definition,
         ServiceDeveloperConfig config,
+        RepositoryDeveloperConfig? repositoryConfig,
         LocalCheckoutPrefetch prefetch,
         IGitClient gitClient,
         PrepareStep? prepareStep,
@@ -237,8 +239,8 @@ internal sealed class DeferredCheckout
 #pragma warning restore ASPIREPROJECTS001
 
         Add(
-            builder, serviceName, resource, [], repoRoot, definition, config, prefetch, gitClient, prepareStep,
-            prepareRunner,
+            builder, serviceName, resource, [], repoRoot, definition, config, repositoryConfig, prefetch, gitClient,
+            prepareStep, prepareRunner,
             (deferredResource, checkoutRoot, logger) =>
                 RestoreLaunchProfile(deferredResource, definition.Project, checkoutRoot, logger));
 
@@ -265,6 +267,7 @@ internal sealed class DeferredCheckout
         string serviceName,
         ServiceDefinition definition,
         ServiceDeveloperConfig config,
+        RepositoryDeveloperConfig? repositoryConfig,
         LocalCheckoutPrefetch prefetch,
         IGitClient gitClient,
         PrepareStep? prepareStep,
@@ -346,8 +349,8 @@ internal sealed class DeferredCheckout
         }
 
         Add(
-            builder, serviceName, resource, heldBack, repoRoot, definition, config, prefetch, gitClient, prepareStep,
-            prepareRunner,
+            builder, serviceName, resource, heldBack, repoRoot, definition, config, repositoryConfig, prefetch,
+            gitClient, prepareStep, prepareRunner,
             (_, checkoutRoot, logger) =>
                 RunCheckoutValidation(registration, serviceName, definition.Kind, checkoutRoot, logger));
 
@@ -436,6 +439,7 @@ internal sealed class DeferredCheckout
         string repoRoot,
         ServiceDefinition definition,
         ServiceDeveloperConfig config,
+        RepositoryDeveloperConfig? repositoryConfig,
         LocalCheckoutPrefetch prefetch,
         IGitClient gitClient,
         PrepareStep? prepareStep,
@@ -449,13 +453,14 @@ internal sealed class DeferredCheckout
         //
         // It also marks the service requested, which it must: the prefetch decides what to report as
         // speculative work at BeforeStartEvent, before a deferred service has waited on anything.
-        prefetch.StartCheckout(serviceName, definition, config, builder.AppHostDirectory, gitClient);
+        prefetch.StartCheckout(
+            serviceName, definition, config, repositoryConfig, builder.AppHostDirectory, gitClient);
 
         lock (_gate)
         {
             _deferred.Add(new Deferred(
-                serviceName, resource, heldBack, repoRoot, definition, config, builder.AppHostDirectory, prefetch,
-                gitClient, prepareStep, prepareRunner, onCheckoutLanded));
+                serviceName, resource, heldBack, repoRoot, definition, config, repositoryConfig,
+                builder.AppHostDirectory, prefetch, gitClient, prepareStep, prepareRunner, onCheckoutLanded));
         }
 
         EnsureSubscribed(builder);
@@ -736,6 +741,7 @@ internal sealed class DeferredCheckout
                         deferred.ServiceName,
                         deferred.Definition,
                         deferred.Config,
+                        deferred.RepositoryConfig,
                         deferred.AppHostDirectory,
                         deferred.GitClient);
                 }

@@ -208,13 +208,15 @@ internal static class LocalGitCheckout
         string serviceName,
         ServiceDefinition definition,
         ServiceDeveloperConfig config,
+        RepositoryDeveloperConfig? repositoryConfig,
         string appHostDirectory,
         IGitClient gitClient) =>
         ReconcileRepoRoot(
             serviceName,
             definition,
             config,
-            PrepareRepoRoot(serviceName, definition, config, appHostDirectory, gitClient),
+            repositoryConfig,
+            PrepareRepoRoot(serviceName, definition, config, repositoryConfig, appHostDirectory, gitClient),
             gitClient);
 
     /// <summary>
@@ -228,14 +230,52 @@ internal static class LocalGitCheckout
     /// reports progress: a clone is the only part of resolving a checkout that takes long enough to
     /// be worth watching.
     /// </param>
+    /// <param name="repositoryConfig">
+    /// This service's group-level developer-config entry (#291) — <see langword="null"/> for an
+    /// ungrouped service, the overwhelming common case, which never has one. Only its
+    /// <see cref="RepositoryDeveloperConfig.Ref"/> is read here; <see cref="RepositoryDeveloperConfig.Path"/>
+    /// is reserved (see the check below) and <see cref="RepositoryDeveloperConfig.Prepare"/> is a
+    /// caller's concern, not this method's.
+    /// </param>
+    /// <exception cref="ServiceSourcesConfigurationException">
+    /// <paramref name="config"/> sets <c>local.path</c> alongside <c>local.ref</c>; a grouped service
+    /// sets <c>local.ref</c> at all (criterion 4 — its repository's ref is shared, not per-member);
+    /// or <paramref name="repositoryConfig"/> sets <c>path</c>, which is reserved rather than
+    /// implemented as a whole-group checkout redirect.
+    /// </exception>
     public static PreparedCheckout PrepareRepoRoot(
         string serviceName,
         ServiceDefinition definition,
         ServiceDeveloperConfig config,
+        RepositoryDeveloperConfig? repositoryConfig,
         string appHostDirectory,
         IGitClient gitClient,
         IGitProgressSink? progress = null)
     {
+        // Both checked ahead of everything else below — the managed-checkout branch, the ref this
+        // checkout will sit on — because both are about a shape of configuration that must never be
+        // acted on, not about a value to resolve.
+        var grouped = definition.Repository.CheckoutName != serviceName;
+
+        if (grouped && config.Local.Ref is not null)
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{serviceName}': 'local.ref' cannot be set — this service is grouped into the shared " +
+                $"repository '{definition.Repository.CheckoutName}' (#291), whose ref applies to every member " +
+                $"alike rather than to any one of them. Set " +
+                $"'{DeveloperConfiguration.RepositoriesKey}:{definition.Repository.CheckoutName}:ref' instead.");
+        }
+
+        if (grouped && repositoryConfig?.Path is not null)
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Repository '{definition.Repository.CheckoutName}': " +
+                $"'{DeveloperConfiguration.RepositoriesKey}:{definition.Repository.CheckoutName}:path' is " +
+                "reserved and does not redirect the group's checkout — that is not implemented yet. Redirect " +
+                $"one member service's own checkout with its 'local.path' override in " +
+                $"{DeveloperConfiguration.FileName} instead.");
+        }
+
         if (config.Local.Path is not null)
         {
             if (config.Local.Ref is not null)
@@ -288,7 +328,7 @@ internal static class LocalGitCheckout
 
         // Our own clone, seconds old and holding nothing anyone could lose, so it is put on the
         // configured ref right here — inside the parallel phase — rather than deferred.
-        if (ConfiguredReference(definition, config) is { } reference)
+        if (ConfiguredReference(definition, config, repositoryConfig) is { } reference)
         {
             CheckoutWithFetchRetry(serviceName, definition, repoRoot, reference, gitClient);
         }
@@ -305,24 +345,36 @@ internal static class LocalGitCheckout
         string serviceName,
         ServiceDefinition definition,
         ServiceDeveloperConfig config,
+        RepositoryDeveloperConfig? repositoryConfig,
         PreparedCheckout prepared,
         IGitClient gitClient)
     {
         if (prepared.NeedsReconciliation)
         {
             UseExistingCheckout(
-                serviceName, definition, prepared.RepoRoot, ConfiguredReference(definition, config), gitClient);
+                serviceName, definition, prepared.RepoRoot,
+                ConfiguredReference(definition, config, repositoryConfig), gitClient);
         }
 
         return prepared.RepoRoot;
     }
 
     /// <summary>
-    /// The ref this checkout should sit on, or <see langword="null"/> when neither the developer nor
-    /// the catalog named one — in which case whatever the clone already has checked out stands.
+    /// The ref this checkout should sit on, or <see langword="null"/> when nothing named one — in
+    /// which case whatever the clone already has checked out stands.
     /// </summary>
-    private static string? ConfiguredReference(ServiceDefinition definition, ServiceDeveloperConfig config) =>
-        config.Local.Ref ?? definition.Repository.DefaultRef;
+    /// <remarks>
+    /// <paramref name="repositoryConfig"/>'s <see cref="RepositoryDeveloperConfig.Ref"/> takes
+    /// priority over <paramref name="config"/>'s own <c>local.ref</c> — the design's "resolves ahead
+    /// of defaultRef" — but the two are never both live at once in practice: a grouped service's
+    /// <c>local.ref</c> is refused before this ever runs (see <see cref="PrepareRepoRoot"/>'s
+    /// criterion-4 check), so <paramref name="config"/>'s term is dead weight for a grouped service
+    /// and this reduces to today's <c>config.Local.Ref ?? definition.Repository.DefaultRef</c> for an
+    /// ungrouped one, which never has a <paramref name="repositoryConfig"/> to begin with.
+    /// </remarks>
+    private static string? ConfiguredReference(
+        ServiceDefinition definition, ServiceDeveloperConfig config, RepositoryDeveloperConfig? repositoryConfig) =>
+        repositoryConfig?.Ref ?? config.Local.Ref ?? definition.Repository.DefaultRef;
 
     /// <summary>
     /// Adopts a checkout this call did not create — one left by an earlier run, or one a concurrent
