@@ -121,7 +121,7 @@ public class LocalProjectSourceTests
         string repository = "https://github.com/company/orders", string project = "Orders.csproj",
         string? defaultRef = null, string serviceName = ServiceName) =>
         new ServiceMetadata { Repository = repository, Project = project, DefaultRef = defaultRef }
-            .ToDefinition("servicesources.yaml", serviceName);
+            .ToDefinition("servicesources.yaml", serviceName, TestHelpers.EmptyRepositories);
 
     private static ServiceDeveloperConfig DevConfig(string? path = null, string? @ref = null) =>
         new() { Source = "local", Local = new() { Path = path, Ref = @ref } };

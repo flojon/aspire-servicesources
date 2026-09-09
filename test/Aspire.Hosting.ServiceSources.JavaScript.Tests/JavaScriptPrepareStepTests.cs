@@ -102,7 +102,7 @@ public class JavaScriptPrepareStepTests
                 runScript: dev
                 port: 3000
                 """),
-        }.ToDefinition("servicesources.yaml", ServiceName);
+        }.ToDefinition("servicesources.yaml", ServiceName, TestHelpers.EmptyRepositories);
 
     private static ServiceDeveloperConfig DevConfig() => new() { Source = "local", Local = new() };
 

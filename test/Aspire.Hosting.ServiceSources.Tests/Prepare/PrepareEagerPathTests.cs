@@ -143,7 +143,7 @@ public class PrepareEagerPathTests
             Project = project,
             Kind = kind,
             Prepare = prepare,
-        }.ToDefinition("servicesources.yaml", name);
+        }.ToDefinition("servicesources.yaml", name, TestHelpers.EmptyRepositories);
 
     private static PrepareMetadata Prepare(params string[] command) =>
         new() { Command = command.Length == 0 ? ["./prepare.sh"] : command };

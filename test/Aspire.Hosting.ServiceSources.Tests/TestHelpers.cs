@@ -1,6 +1,7 @@
 using System.Threading.Channels;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -10,6 +11,13 @@ namespace Aspire.Hosting.ServiceSources.Tests;
 
 internal static class TestHelpers
 {
+    /// <summary>
+    /// The <c>repositories</c> argument for a <c>ServiceMetadata.ToDefinition</c> call in a test that
+    /// never sets <c>RepositoryRef</c> — shared so those call sites don't each mint their own.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, RepositoryDefinition> EmptyRepositories =
+        new Dictionary<string, RepositoryDefinition>();
+
     public static IDistributedApplicationBuilder CreateBuilder(string appHostDirectory) =>
         CreateBuilderCore(new DistributedApplicationOptions
         {

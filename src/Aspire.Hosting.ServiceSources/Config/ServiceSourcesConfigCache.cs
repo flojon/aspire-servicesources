@@ -273,9 +273,23 @@ internal static class ServiceSourcesConfigCache
                 merged[name] = definition;
             }
 
+            // Seeded from the code catalog's own repositories; a yaml catalog's are merged in below.
+            // Task 9's composition checks (a name colliding with an ungrouped service, or declared in
+            // both catalogs) land here beside the existing duplicate-service check.
+            var repositories = new Dictionary<string, Catalog.RepositoryDefinition>(StringComparer.Ordinal);
+            foreach (var (name, repository) in codeRepositories)
+            {
+                repositories[name] = repository;
+            }
+
             if (yamlExists)
             {
-                var yamlCatalog = ServiceCatalogLoader.Load(yamlPath);
+                var (yamlCatalog, yamlRepositories) = ServiceCatalogLoader.Load(yamlPath);
+
+                foreach (var (name, repository) in yamlRepositories)
+                {
+                    repositories[name] = repository;
+                }
 
                 foreach (var (name, metadata) in yamlCatalog.Services)
                 {
@@ -308,18 +322,8 @@ internal static class ServiceSourcesConfigCache
                     // keys. Left to DeveloperConfiguration.CanonicalizeToCatalog's existing
                     // AmbiguousCatalogSpellingError, reached via ReadFrom below with the merged
                     // (Ordinal) key set — unchanged from today.
-                    merged[name] = metadata.ToDefinition(yamlPath, name);
+                    merged[name] = metadata.ToDefinition(yamlPath, name, yamlRepositories);
                 }
-            }
-
-            // Yaml-declared repositories join this set in Task 2/Task 6's work (ServiceCatalogLoader
-            // widens to hand back its own repositories map, and the composition-time checks over the
-            // combined set — a name colliding with an ungrouped service, or declared in both catalogs
-            // — land here beside the existing duplicate-service check above). Code-only for now.
-            var repositories = new Dictionary<string, Catalog.RepositoryDefinition>(StringComparer.Ordinal);
-            foreach (var (name, repository) in codeRepositories)
-            {
-                repositories[name] = repository;
             }
 
             var catalog = new Catalog.CodeServiceCatalog { Services = merged, Repositories = repositories };
