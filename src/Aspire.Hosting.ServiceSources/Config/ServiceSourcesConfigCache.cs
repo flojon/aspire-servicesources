@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using Aspire.Hosting.ServiceSources.Catalog;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
+using Aspire.Hosting.ServiceSources.Git;
 
 namespace Aspire.Hosting.ServiceSources.Config;
 
@@ -70,7 +71,9 @@ internal static class ServiceSourcesConfigCache
         /// <see cref="Configure"/> call reports the ordering error above instead of silently
         /// contributing nothing.
         /// </summary>
-        public IReadOnlyDictionary<string, ServiceDefinition> Freeze()
+        public (
+            IReadOnlyDictionary<string, ServiceDefinition> Services,
+            IReadOnlyDictionary<string, Catalog.RepositoryDefinition> Repositories) Freeze()
         {
             lock (_gate)
             {
@@ -252,7 +255,7 @@ internal static class ServiceSourcesConfigCache
             // Freeze first, under the same lock CodeCatalogFor's Configure calls take — an
             // AddServiceCatalog reaching this builder after this point contributes nothing (design:
             // "A ServiceCatalogBuilder captured and mutated after this point contributes nothing").
-            var codeEntries = CodeCatalogFor(builder).Freeze();
+            var (codeEntries, codeRepositories) = CodeCatalogFor(builder).Freeze();
 
             var yamlPath = Path.Combine(builder.AppHostDirectory, "servicesources.yaml");
             var yamlExists = File.Exists(yamlPath);
@@ -271,9 +274,68 @@ internal static class ServiceSourcesConfigCache
                 merged[name] = definition;
             }
 
+            // Seeded from the code catalog's own repositories; a yaml catalog's are merged in below.
+            // Task 9's composition checks (a name colliding with an ungrouped service, or declared in
+            // both catalogs) land here beside the existing duplicate-service check.
+            var repositories = new Dictionary<string, Catalog.RepositoryDefinition>(StringComparer.Ordinal);
+            foreach (var (name, repository) in codeRepositories)
+            {
+                repositories[name] = repository;
+            }
+
             if (yamlExists)
             {
-                var yamlCatalog = ServiceCatalogLoader.Load(yamlPath);
+                var (yamlCatalog, yamlRepositories) = ServiceCatalogLoader.Load(yamlPath);
+
+                // Snapshotted before the loop below adds to `repositories`: this is what tells the
+                // case-collision message which side is which. Without it, a same-file yaml-vs-yaml
+                // case collision (two 'repositories:' entries differing only by case, both already
+                // added to `repositories` by earlier iterations of this same loop) would be
+                // misreported as a collision with the code catalog even when code declared no
+                // repositories at all.
+                var codeRepositoryNames = repositories.Keys.ToHashSet(StringComparer.Ordinal);
+
+                foreach (var (name, repository) in yamlRepositories)
+                {
+                    // A repository's own name is checked here against the code catalog's
+                    // repositories specifically — repositories is seeded from codeRepositories above
+                    // and this loop is the only writer to it before this point, so any existing key
+                    // here really is a code/yaml collision rather than a yaml-vs-yaml one.
+                    if (repositories.ContainsKey(name))
+                    {
+                        throw new ServiceSourcesConfigurationException(
+                            $"Repository '{name}' is declared twice: in {CatalogOrigin.Code.Describe()} and in " +
+                            $"'{yamlPath}'. A repository belongs to one catalog; remove one of the two.");
+                    }
+
+                    // Case-only, unlike the equivalent service check further down (which defers to
+                    // DeveloperConfiguration.CanonicalizeToCatalog's AmbiguousCatalogSpellingError):
+                    // that path only fires when a developer's config happens to reference one of the
+                    // ambiguous spellings, and a repository's own name becomes a checkout directory
+                    // unconditionally, whether or not anyone's local config ever mentions it — the
+                    // same reasoning ServiceCatalogBuilder.AddRepository's own case check applies to
+                    // two code-declared names. The default filesystem on Windows and macOS is
+                    // case-insensitive, so 'checkouts/Monorepo' and 'checkouts/monorepo' are the same
+                    // directory there. Reachable from two yaml entries as well as one of each: yaml's
+                    // own Repositories dictionary is Ordinal, so 'Monorepo:'/'monorepo:' in the same
+                    // file both survive ServiceCatalogLoader.Load and land here as two distinct keys.
+                    var repositoryCaseCollision = repositories.Keys.FirstOrDefault(
+                        existing => string.Equals(existing, name, StringComparison.OrdinalIgnoreCase));
+
+                    if (repositoryCaseCollision is not null)
+                    {
+                        var collisionOrigin = codeRepositoryNames.Contains(repositoryCaseCollision)
+                            ? CatalogOrigin.Code.Describe()
+                            : $"'{yamlPath}'";
+
+                        throw new ServiceSourcesConfigurationException(
+                            $"Repository '{name}' in '{yamlPath}' differs only by case from repository " +
+                            $"'{repositoryCaseCollision}' in {collisionOrigin}. Two repositories " +
+                            "must differ by more than case.");
+                    }
+
+                    repositories[name] = repository;
+                }
 
                 foreach (var (name, metadata) in yamlCatalog.Services)
                 {
@@ -306,11 +368,95 @@ internal static class ServiceSourcesConfigCache
                     // keys. Left to DeveloperConfiguration.CanonicalizeToCatalog's existing
                     // AmbiguousCatalogSpellingError, reached via ReadFrom below with the merged
                     // (Ordinal) key set — unchanged from today.
-                    merged[name] = metadata.ToDefinition(yamlPath, name);
+                    merged[name] = metadata.ToDefinition(yamlPath, name, yamlRepositories);
                 }
             }
 
-            var catalog = new Catalog.CodeServiceCatalog { Services = merged };
+            // "One namespace, checked once" (design #291): a repository's own name is also the
+            // directory an ungrouped service's own name would claim (design finding 2), so the two
+            // must never collide. A repository dict key is always identical to its own
+            // RepositoryDefinition.CheckoutName by construction (ServiceCatalogBuilder.AddRepository
+            // and ServiceCatalogLoader.Load both key repositories by the name whose CheckoutName they
+            // set), so checking every ungrouped service's own name against the repositories dict is
+            // the whole of this check — no separate reverse index is needed.
+            foreach (var (serviceName, definition) in merged)
+            {
+                if (definition.Repository.CheckoutName != serviceName)
+                {
+                    // Grouped: this service's own name never becomes a checkout directory, so it has
+                    // nothing to collide with a repository name over.
+                    continue;
+                }
+
+                if (repositories.ContainsKey(serviceName))
+                {
+                    throw new ServiceSourcesConfigurationException(
+                        $"'{serviceName}' names both an ungrouped service — whose managed checkout is keyed on " +
+                        "its own name — and a repository declared under the same name, so the two would share " +
+                        "one checkout directory. Rename the service, or the repository, so they no longer match.");
+                }
+
+                // Case-only — see the repository/repository check above for why this cannot be left
+                // to DeveloperConfiguration.CanonicalizeToCatalog's incidental catch: both an
+                // ungrouped service's own name and a repository's name become checkout directories
+                // unconditionally, and the default filesystem on Windows and macOS does not
+                // distinguish them by case.
+                var serviceCaseCollision = repositories.Keys.FirstOrDefault(
+                    existing => string.Equals(existing, serviceName, StringComparison.OrdinalIgnoreCase));
+
+                if (serviceCaseCollision is not null)
+                {
+                    throw new ServiceSourcesConfigurationException(
+                        $"'{serviceName}' names an ungrouped service, and differs only by case from repository " +
+                        $"'{serviceCaseCollision}' — the two would still share one checkout directory on a " +
+                        "filesystem that does not distinguish them by case. Rename the service, or the " +
+                        "repository, so they no longer match even by case.");
+                }
+            }
+
+            var catalog = new Catalog.CodeServiceCatalog { Services = merged, Repositories = repositories };
+
+            // Read ahead of the warning below rather than at the return statement (its usual place):
+            // the warning has to know which catalog shape each service's developer actually resolves
+            // through, which only this has — the catalog shape alone (a non-blank Repository.Url)
+            // says a service *could* resolve locally, not that it does.
+            var developerConfig = DeveloperConfiguration.ReadFrom(builder, catalog.Services.Keys, catalog.Repositories.Keys);
+
+            // The warn-and-continue counterpart of the check above (design question 5, settled as
+            // "warn"): two ungrouped services naming the identical repository URL each get their own
+            // checkout, downloaded and reconciled separately, which is exactly what grouping them
+            // would avoid. Not an error — an existing catalog with this shape keeps working — but
+            // worth naming, since it usually means grouping was overlooked rather than intended.
+            foreach (var sharedUrl in merged
+                .Where(entry => entry.Value.Repository.CheckoutName == entry.Key)
+                // A blank Url is not a repository at all: every service gets a RepositoryDefinition
+                // regardless of source (design finding 2 mints an anonymous one unconditionally), so
+                // a kubernetes- or url-sourced service — which never sets 'repository:' — carries one
+                // whose Url defaults to "". Grouping those together would warn about services that
+                // were never candidates for sharing a checkout in the first place.
+                .Where(entry => !string.IsNullOrEmpty(entry.Value.Repository.Url))
+                // The catalog shape alone does not say which source is actually in effect: a service
+                // can declare both a 'repository:' block and, say, a 'kubernetes:' block (README
+                // "Combining sources on one catalog entry"), with servicesources.local.json resolving
+                // it through the other one — in which case nothing is ever cloned for it, and this
+                // warning's advice ("share one checkout") describes work that never happens. Matched
+                // the same way LocalCheckoutPrefetch.Run decides what it will actually clone —
+                // case-insensitively, since AddService resolves the source the same way.
+                .Where(entry =>
+                    developerConfig.Services.TryGetValue(entry.Key, out var devConfig)
+                    && string.Equals(devConfig.Source, "local", StringComparison.OrdinalIgnoreCase))
+                .GroupBy(entry => entry.Value.Repository.Url, StringComparer.Ordinal)
+                .Where(group => group.Count() > 1))
+            {
+                var serviceNames = sharedUrl.Select(entry => entry.Key).Order(StringComparer.Ordinal).ToArray();
+
+                ServiceSourcesWarnings.For(builder).AddNotice(
+                    $"Services {string.Join(", ", serviceNames.Select(name => $"'{name}'"))} are all 'local' and " +
+                    $"declare the same repository '{GitUrl.Redact(sharedUrl.Key)}', but none of them are grouped " +
+                    "— each gets its own checkout, cloned and reconciled separately. To share one checkout " +
+                    "instead, group them: AddRepository(...)/WithSharedRepository(...) in code, or a " +
+                    "repositories: entry every member's repositoryRef: names, in yaml.");
+            }
 
             // The catalog first, and its names handed over: unchanged from before this task, and now
             // covers code-declared names too (design: "canonical-spelling reconciliation covers
@@ -318,7 +464,7 @@ internal static class ServiceSourcesConfigCache
             return new LoadedConfig
             {
                 Catalog = catalog,
-                DeveloperConfig = DeveloperConfiguration.ReadFrom(builder, catalog.Services.Keys),
+                DeveloperConfig = developerConfig,
                 YamlPath = yamlExists ? yamlPath : null,
                 HasCodeEntries = codeEntries.Count > 0,
             };

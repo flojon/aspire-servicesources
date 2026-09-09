@@ -21,4 +21,13 @@ internal sealed class RawServiceCatalog
         get => _services;
         set => _services = value ?? [];
     }
+
+    private Dictionary<string, Dictionary<string, object>> _repositories = new();
+
+    /// <summary>The same untyped mirror, for the <c>repositories:</c> root key's own unknown-key checks.</summary>
+    public Dictionary<string, Dictionary<string, object>> Repositories
+    {
+        get => _repositories;
+        set => _repositories = value ?? [];
+    }
 }

@@ -67,7 +67,7 @@ internal sealed class PrepareStep
     /// The command is empty, holds a blank first element, or names something outside the checkout.
     /// </exception>
     public static PrepareStep Create(
-        string serviceName,
+        string label,
         IReadOnlyList<string> command,
         PrepareMode mode,
         string writtenAt,
@@ -76,7 +76,7 @@ internal sealed class PrepareStep
         if (command.Count == 0)
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': {writtenAt}.command is an empty list, so there is no command to run. "
+                $"{label}: {writtenAt}.command is an empty list, so there is no command to run. "
                 + "Give it the program to run and its arguments, e.g. [\"./prepare.sh\"] — or set "
                 + $"{writtenAt}.mode to 'never' to declare that nothing should run.");
         }
@@ -86,7 +86,7 @@ internal sealed class PrepareStep
         if (string.IsNullOrWhiteSpace(program))
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': the first element of {writtenAt}.command is blank, so it names no "
+                $"{label}: the first element of {writtenAt}.command is blank, so it names no "
                 + "program. It has to be the program to run — a path inside the checkout, e.g. "
                 + "\"./prepare.sh\", or a name resolved through PATH, e.g. \"make\".");
         }
@@ -101,14 +101,14 @@ internal sealed class PrepareStep
             if (command[index] is null)
             {
                 throw new ServiceSourcesConfigurationException(
-                    $"Service '{serviceName}': element {index + 1} of {writtenAt}.command is empty — a yaml '~' "
+                    $"{label}: element {index + 1} of {writtenAt}.command is empty — a yaml '~' "
                     + "or a JSON null — which is not an argument. Remove it, or write it as \"\" if the command "
                     + "really takes an empty one.");
             }
         }
 
         return new PrepareStep(
-            [ConfineProgram(serviceName, program, writtenAt), .. command.Skip(1)], mode, windowsWithoutVariant);
+            [ConfineProgram(label, program, writtenAt), .. command.Skip(1)], mode, windowsWithoutVariant);
     }
 
     /// <summary>
@@ -130,7 +130,7 @@ internal sealed class PrepareStep
     /// elsewhere.
     /// </para>
     /// </remarks>
-    private static string ConfineProgram(string serviceName, string program, string writtenAt)
+    private static string ConfineProgram(string label, string program, string writtenAt)
     {
         if (!LooksLikeAPath(program))
         {
@@ -140,8 +140,8 @@ internal sealed class PrepareStep
         if (CheckoutRelativePath.IsAbsolute(program))
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': {writtenAt}.command runs '{program}', which is an absolute path. The "
-                + "command has to be a path relative to the service's checkout — it names a script the repository "
+                $"{label}: {writtenAt}.command runs '{program}', which is an absolute path. The "
+                + "command has to be a path relative to its checkout — it names a script the repository "
                 + "commits, not one sitting elsewhere on a developer's machine — or a bare program name resolved "
                 + "through PATH.");
         }
@@ -149,15 +149,15 @@ internal sealed class PrepareStep
         if (CheckoutRelativePath.UnusableSegment(program) is { } unusable)
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': {writtenAt}.command runs '{program}', which has a path segment "
+                $"{label}: {writtenAt}.command runs '{program}', which has a path segment "
                 + $"'{unusable}' — " + CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy);
         }
 
         if (CheckoutRelativePath.EscapesRoot(program))
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': {writtenAt}.command runs '{program}', which points outside the "
-                + "service's checkout. It must stay within the repository.");
+                $"{label}: {writtenAt}.command runs '{program}', which points outside "
+                + "its checkout. It must stay within the repository.");
         }
 
         return CheckoutRelativePath.NormalizeSeparators(program);

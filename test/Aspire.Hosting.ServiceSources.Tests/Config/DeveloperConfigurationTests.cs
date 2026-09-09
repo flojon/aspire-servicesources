@@ -548,7 +548,8 @@ public class DeveloperConfigurationTests
         Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
 
         var prepared = LocalGitCheckout.PrepareRepoRoot(
-            "blanking", new ServiceMetadata().ToDefinition("servicesources.yaml", "blanking"), config, dir, gitClient: null!);
+            "blanking", new ServiceMetadata().ToDefinition("servicesources.yaml", "blanking", TestHelpers.EmptyRepositories),
+            config, null, dir, gitClient: null!);
 
         Assert.Equal(repoRoot, prepared.RepoRoot);
         Assert.NotEqual(dir, prepared.RepoRoot);

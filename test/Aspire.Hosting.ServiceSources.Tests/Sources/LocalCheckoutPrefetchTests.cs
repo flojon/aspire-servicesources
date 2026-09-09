@@ -177,7 +177,9 @@ public class LocalCheckoutPrefetchTests
 
     /// <summary>
     /// Writes an app host directory whose services all live in <b>one</b> repository — the monorepo
-    /// shape, where each service is a different project inside the same clone.
+    /// shape, where each service is a different project inside the same clone, but declared as
+    /// independent <c>repository:</c> entries so it does <em>not</em> group them (#291): this is the
+    /// negative case, where sharing a URL alone is not sharing a checkout.
     /// </summary>
     private static string CreateMonorepoAppHostDirectory(string repository, params string[] localServices)
     {
@@ -193,11 +195,47 @@ public class LocalCheckoutPrefetchTests
         return dir;
     }
 
+    /// <summary>
+    /// Writes an app host directory whose services are genuinely grouped (#291): a single
+    /// <c>repositories:</c> entry named <paramref name="checkoutName"/>, joined by every service's
+    /// <c>repositoryRef:</c> — the yaml shape that shares one <see cref="RepositoryDefinition"/>
+    /// instance, and so one managed checkout, across all of them.
+    /// </summary>
+    private static string CreateGroupedAppHostDirectory(
+        string repository, string checkoutName, params string[] localServices)
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+
+        var services = string.Join("\n", localServices.Select(name =>
+            $"  {name}:\n    repositoryRef: {checkoutName}\n    project: Service.csproj"));
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.yaml"),
+            $"repositories:\n  {checkoutName}:\n    repository: {repository}\nservices:\n{services}\n");
+
+        var json = string.Join(",", localServices.Select(name => $"\"{name}\": {{ \"source\": \"local\" }}"));
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), $"{{ \"services\": {{ {json} }} }}");
+
+        return dir;
+    }
+
+    /// <summary>
+    /// A service definition grouped (#291) onto <paramref name="repository"/> — the same instance
+    /// passed for every member service, which is what identifies them as sharing one checkout.
+    /// </summary>
+    private static ServiceDefinition GroupedDefinition(RepositoryDefinition repository) =>
+        new()
+        {
+            Repository = repository,
+            Project = "Service.csproj",
+            Kind = LocalKinds.Dotnet,
+            Origin = CatalogOrigin.FromYaml("servicesources.yaml"),
+        };
+
     private static ServiceDefinition Definition(string name, string? defaultRef = null) =>
         new ServiceMetadata
         {
             Repository = $"https://example.com/{name}.git", Project = "Service.csproj", DefaultRef = defaultRef,
-        }.ToDefinition("servicesources.yaml", name);
+        }.ToDefinition("servicesources.yaml", name, TestHelpers.EmptyRepositories);
 
     private static ServiceDeveloperConfig DevConfig() => new() { Source = "local" };
 
@@ -241,8 +279,16 @@ public class LocalCheckoutPrefetchTests
         Assert.Equal(2, git.Cloned.Count);
     }
 
+    /// <remarks>
+    /// The negative case criterion 2 draws (#291): two services naming the identical repository
+    /// <c>repository:</c> URL, each with its own independent (unshared) entry, are not grouped by
+    /// that alone — only <c>repositoryRef:</c>/<c>WithSharedRepository</c> groups. Each still gets
+    /// its own checkout, concurrently, competing for the same bandwidth. This must keep failing to
+    /// change: it is what makes <see cref="FirstAddService_TwoGroupedServices_DownloadsItOnce"/> a
+    /// meaningful contrast rather than a restatement of the same behaviour under a different name.
+    /// </remarks>
     [Fact]
-    public void FirstAddService_TwoServicesInOneRepository_DownloadsItTwiceConcurrently()
+    public void TwoUngroupedServicesOneUrl_StillDownloadsTwice()
     {
         const string Repository = "https://example.com/monorepo.git";
         var dir = CreateMonorepoAppHostDirectory(Repository, "orders", "billing");
@@ -254,14 +300,37 @@ public class LocalCheckoutPrefetchTests
 
         source.Resolve(
             builder, "orders",
-            new ServiceMetadata { Repository = Repository, Project = "Service.csproj" }.ToDefinition("servicesources.yaml", "orders"),
+            new ServiceMetadata { Repository = Repository, Project = "Service.csproj" }.ToDefinition("servicesources.yaml", "orders", TestHelpers.EmptyRepositories),
             DevConfig());
 
-        // Checkouts are keyed by service, not by repository, so a monorepo is fetched once per
-        // service that lives in it — concurrently, competing for the same bandwidth. Documented
-        // rather than asserted-against: each service needs its own working tree (they can sit on
-        // different refs), so sharing one clone is not a drop-in change.
+        // Checkouts are keyed by CheckoutName, and each of these two services' anonymous
+        // RepositoryDefinition carries its own name as that key (design finding 2) — sharing a URL
+        // does not share a CheckoutName — so a monorepo declared this way is still fetched once per
+        // service that lives in it.
         Assert.Equal([Repository, Repository], git.Cloned);
+    }
+
+    /// <summary>
+    /// The positive case #291 exists for: two services sharing one <c>repositories:</c> entry via
+    /// <c>repositoryRef:</c> download it once, not once each — closing #66 for a catalog that
+    /// groups. Contrast with <see cref="TwoUngroupedServicesOneUrl_StillDownloadsTwice"/>, which
+    /// looks almost identical but names two independent, unshared entries.
+    /// </summary>
+    [Fact]
+    public void FirstAddService_TwoGroupedServices_DownloadsItOnce()
+    {
+        const string Repository = "https://example.com/monorepo.git";
+        var dir = CreateGroupedAppHostDirectory(Repository, "monorepo", "orders", "billing");
+        var builder = TestHelpers.CreateBuilder(dir);
+        var git = new FakeGitClient();
+        var source = new LocalProjectSource(git);
+        var repository = new RepositoryDefinition { Url = Repository, CheckoutName = "monorepo" };
+
+        source.Resolve(builder, "orders", GroupedDefinition(repository), DevConfig());
+        source.Resolve(builder, "billing", GroupedDefinition(repository), DevConfig());
+
+        // One clone for the shared repository, not two.
+        Assert.Equal([Repository], git.Cloned);
     }
 
     [Fact]
@@ -467,7 +536,7 @@ public class LocalCheckoutPrefetchTests
         var definition = new ServiceMetadata
         {
             Repository = "https://example.com/frontend.git", Kind = "javascript",
-        }.ToDefinition("servicesources.yaml", "frontend");
+        }.ToDefinition("servicesources.yaml", "frontend", TestHelpers.EmptyRepositories);
 
         var service = new LocalProjectSource(new FakeGitClient()).Resolve(builder, "frontend", definition, DevConfig());
 
@@ -483,7 +552,7 @@ public class LocalCheckoutPrefetchTests
         var definition = new ServiceMetadata
         {
             Repository = "https://example.com/frontend.git", Kind = "javascript",
-        }.ToDefinition("servicesources.yaml", "frontend");
+        }.ToDefinition("servicesources.yaml", "frontend", TestHelpers.EmptyRepositories);
         var git = new FakeGitClient();
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
@@ -562,6 +631,39 @@ public class LocalCheckoutPrefetchTests
 
         var message = Assert.Single(prefetch.FailedUnusedCheckoutMessages);
         Assert.Contains("billing", message);
+        Assert.Contains("failed to clone", message);
+    }
+
+    /// <summary>
+    /// Criterion 5 (#291): a failed shared checkout's notice names every service on it, not only
+    /// whichever one happened to start the clone — the same information
+    /// <see cref="CheckoutFailureForAServiceNeverAdded_IsReportedRatherThanSwallowed"/> checks for
+    /// the single-service case, extended to a repository two services share.
+    /// </summary>
+    [Fact]
+    public void FailedSharedCheckout_MessageNamesEveryServiceOnIt()
+    {
+        const string Repository = "https://example.com/monorepo.git";
+        var dir = CreateGroupedAppHostDirectory(Repository, "monorepo", "cart", "billing");
+        var builder = TestHelpers.CreateBuilder(dir);
+        var git = new FakeGitClient();
+        git.FailFor(Repository, new InvalidOperationException("no such repo"));
+
+        // Neither grouped service is ever added — both are entirely speculative — so the prefetch
+        // alone is enough to start (and fail) their shared clone.
+        var prefetch = LocalCheckoutPrefetch.For(builder, git);
+
+        Assert.True(
+            SpinWait.SpinUntil(
+                () => prefetch.FailedUnusedCheckoutMessages.Count == 1, TimeSpan.FromSeconds(30)),
+            "The failed speculative checkout for the shared repository was never reported.");
+
+        // Neither name is a word the message's own prose contains ("checkout", "local", "clone",
+        // "repository", "prefetch" all appear regardless of which service failed), so finding both
+        // here is a real assertion about the reverse index rather than a coincidence of wording.
+        var message = Assert.Single(prefetch.FailedUnusedCheckoutMessages);
+        Assert.Contains("'cart'", message);
+        Assert.Contains("'billing'", message);
         Assert.Contains("failed to clone", message);
     }
 
@@ -746,9 +848,9 @@ public class LocalCheckoutPrefetchTests
     /// out" forever.
     /// </summary>
     private static async Task<IReadOnlyList<string>> DrainProgressAsync(
-        LocalCheckoutPrefetch prefetch, string serviceName)
+        LocalCheckoutPrefetch prefetch, string serviceName, string? checkoutName = null)
     {
-        var progress = prefetch.WatchCheckout(serviceName);
+        var progress = prefetch.WatchCheckout(serviceName, checkoutName ?? serviceName);
 
         using var giveUp = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
@@ -863,7 +965,7 @@ public class LocalCheckoutPrefetchTests
         var reconciling = git.BlockReconciliation();
 
         var prefetch = LocalCheckoutPrefetch.For(builder, git);
-        var progress = prefetch.WatchCheckout("billing");
+        var progress = prefetch.WatchCheckout("billing", "billing");
 
         using var giveUp = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var streamEnded = Task.Run(
@@ -876,7 +978,7 @@ public class LocalCheckoutPrefetchTests
             giveUp.Token);
 
         var resolved = Task.Run(
-            () => prefetch.GetRepoRoot("billing", Definition("billing"), DevConfig(), dir, git),
+            () => prefetch.GetRepoRoot("billing", Definition("billing"), DevConfig(), null, dir, git),
             CancellationToken.None);
 
         // The stream is over while the checkout is not. Closing it only when GetRepoRoot returns

@@ -13,9 +13,9 @@ public class ServiceCatalogBuilderTests
         builder.AddService("orders");
         builder.AddService("payments");
 
-        var frozen = builder.Freeze();
+        var (services, _) = builder.Freeze();
 
-        Assert.Equal(["orders", "payments"], frozen.Keys.Order());
+        Assert.Equal(["orders", "payments"], services.Keys.Order());
     }
 
     [Theory]
@@ -59,9 +59,9 @@ public class ServiceCatalogBuilderTests
     {
         var builder = new ServiceCatalogBuilder();
         builder.AddService("orders");
-        var frozen = builder.Freeze();
+        var (services, _) = builder.Freeze();
 
         Assert.Throws<InvalidOperationException>(() => builder.AddService("payments"));
-        Assert.Single(frozen);
+        Assert.Single(services);
     }
 }

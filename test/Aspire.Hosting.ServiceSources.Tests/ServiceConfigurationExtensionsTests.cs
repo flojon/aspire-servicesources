@@ -15,17 +15,17 @@ public class ServiceConfigurationExtensionsTests
     private static readonly ServiceDefinition ContainerDefinition = new ServiceMetadata
     {
         Container = new ContainerMetadata { Image = "nginxdemos/hello", Port = 8080 },
-    }.ToDefinition("servicesources.yaml", "payments");
+    }.ToDefinition("servicesources.yaml", "payments", TestHelpers.EmptyRepositories);
 
     private static readonly ServiceDefinition KubernetesDefinition = new ServiceMetadata
     {
         Kubernetes = new KubernetesMetadata { Service = "orders", Port = 8080 },
-    }.ToDefinition("servicesources.yaml", "orders");
+    }.ToDefinition("servicesources.yaml", "orders", TestHelpers.EmptyRepositories);
 
     private static readonly ServiceDefinition UrlDefinition = new ServiceMetadata
     {
         Url = new UrlMetadata { Url = "https://orders.example.com" },
-    }.ToDefinition("servicesources.yaml", "inventory");
+    }.ToDefinition("servicesources.yaml", "inventory", TestHelpers.EmptyRepositories);
 
     private sealed class FixedPortAllocator : IPortAllocator
     {

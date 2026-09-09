@@ -19,7 +19,8 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     private readonly IPrepareCommandRunner _prepareRunner = prepareRunner ?? ProcessPrepareCommandRunner.Instance;
 
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
-        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
+        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
+        ServiceDeveloperConfig config, RepositoryDeveloperConfig? repositoryConfig = null)
     {
         // Before any network work: a machine without a usable git can't clone anything, and
         // finding that out once here beats finding it out as an identical clone failure on every
@@ -51,6 +52,14 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         // inherits the catalog's prepare block at all and where its completion marker goes.
         var managedCheckout = LocalGitCheckout.IsManagedCheckout(config);
 
+        // Whether this service is on its own repository or sharing one with others — the same test
+        // Task 8's grouped-checkout handling reuses. A repository's own CheckoutName is the service's
+        // own name for the common, ungrouped case (design finding 2, #291), so this only diverges for
+        // a service declared through AddRepository/WithSharedRepository or yaml's repositoryRef.
+        var label = definition.Repository.CheckoutName == serviceName
+            ? PreparePlan.ServiceLabel(serviceName)
+            : PreparePlan.RepositoryLabel(definition.Repository.CheckoutName);
+
         // The other configuration check that needs no working tree, and the last one standing in
         // front of the clone now that a kind's own Validate has moved below it. Being core's own it
         // also runs ahead of ShouldDefer, so it covers both paths — a typo'd mode, or a command
@@ -58,7 +67,8 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         // before anything is registered against a directory that does not exist yet. Only what needs
         // the working tree waits for one, which is the division ValidateCheckout draws for a kind.
         var prepare = PreparePlan.For(
-            serviceName, definition.Repository.Prepare, config.Local.Prepare, managedCheckout, OperatingSystem.IsWindows());
+            serviceName, label, definition.Repository.Prepare, config.Local.Prepare, managedCheckout,
+            OperatingSystem.IsWindows());
 
         if (prepare.IgnoredCatalogNotice is { } ignored)
         {
@@ -87,7 +97,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
 
         var deferred = DeferredCheckout.For(builder);
 
-        if (deferred.ShouldDefer(builder, serviceName, config))
+        if (deferred.ShouldDefer(builder, serviceName, definition, config))
         {
             // Nothing is on disk for this service yet, so registering the resource against the path
             // its checkout will have — and starting it once the clone lands — costs the AppHost
@@ -102,10 +112,12 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
             // once it has looked at everything.
             var registered = isDotnetKind
                 ? deferred.Register(
-                    builder, serviceName, definition, config, prefetch, gitClient, prepare.Step, _prepareRunner)
+                    builder, serviceName, definition, config, repositoryConfig, prefetch, gitClient, prepare.Step,
+                    _prepareRunner)
                 : SupportsDeferredKind(serviceName, definition, handler!)
                     ? deferred.RegisterKind(
-                        builder, serviceName, definition, config, prefetch, gitClient, prepare.Step, _prepareRunner,
+                        builder, serviceName, definition, config, repositoryConfig, prefetch, gitClient,
+                        prepare.Step, _prepareRunner,
                         repoRoot => ResolveDeferredKind(builder, serviceName, definition, repoRoot, handler!))
                     : null;
 
@@ -131,43 +143,54 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         // of the answer; now the prefetch acts on the early answer, so a late decline is also a
         // clone that runs in turn instead of with the others. Correct, and slower — which is why
         // the interface now says so where a handler author reads it.
-        var repoRoot = prefetch.GetRepoRoot(serviceName, definition, config, builder.AppHostDirectory, gitClient);
+        string repoRoot;
 
-        // The working tree is complete and reconciled onto its configured ref; the kind has not yet
-        // been allowed to judge it. Both halves of that are load-bearing. After the reconciliation,
-        // so the commit the marker keys on is the commit the step ran against. Before the kind,
-        // because a kind's checkout checks — ResolveProjectFile below for `dotnet`, Validate for
-        // every other — would otherwise reject a checkout for missing precisely the files the step
-        // was about to produce. Neither kind knows this exists.
-        if (prepare.Step is { } step)
+        // Held across this whole span: with grouping (#291), two services can share a CheckoutName,
+        // and this span both reconciles the working tree onto its configured ref (inside
+        // GetRepoRoot) and may run a bootstrap command against it — neither of which is safe to run
+        // twice at once over the identical directory. See CheckoutNameLock.
+        using (CheckoutNameLock.For(builder).Acquire(definition.Repository.CheckoutName))
         {
-            // Run mode only, which is the same gate DeferredCheckout.ShouldDefer applies and for a
-            // related reason: publish mode composes the model, writes the manifest and exits, and a
-            // bootstrap produces what a service needs in order to run. Without this, deferral being
-            // refused in publish mode means every "local" service takes this path, so an
-            // `aspire publish` over a cold checkout pays the full download and import — for the
-            // motivating case, hundreds of megabytes and a multi-minute graph build — to emit a
-            // manifest that describes none of it.
-            if (builder.ExecutionContext.IsRunMode)
+            repoRoot = prefetch.GetRepoRoot(
+                serviceName, definition, config, repositoryConfig, builder.AppHostDirectory, gitClient);
+
+            // The working tree is complete and reconciled onto its configured ref; the kind has not
+            // yet been allowed to judge it. Both halves of that are load-bearing. After the
+            // reconciliation, so the commit the marker keys on is the commit the step ran against.
+            // Before the kind, because a kind's checkout checks — ResolveProjectFile below for
+            // `dotnet`, Validate for every other — would otherwise reject a checkout for missing
+            // precisely the files the step was about to produce. Neither kind knows this exists.
+            if (prepare.Step is { } step)
             {
-                // Wrapped rather than passed straight through: the console keeps every line live,
-                // exactly as before, and a capped copy also lands in this service's own resource
-                // log once BeforeStartEvent gives access to one — see
-                // BufferingPrepareOutputSink for why the console alone is not enough under
-                // `aspire run`.
-                CheckoutPreparation.Run(
-                    serviceName, step, repoRoot, builder.AppHostDirectory, managedCheckout, gitClient,
-                    _prepareRunner, BufferingPrepareOutputSink.Wrap(builder, serviceName, ConsolePrepareOutputSink.Instance));
-            }
-            else if (CheckoutPreparation.WouldRun(
-                serviceName, step, repoRoot, builder.AppHostDirectory, managedCheckout, gitClient))
-            {
-                // Only where the step would actually have run. A warm checkout whose marker already
-                // satisfies it was not going to run one anyway, and naming it there would report a
-                // skip that costs nothing while advising a developer to materialize a checkout they
-                // already have.
-                ConsolePrepareOutputSink.Instance.Report(
-                    CheckoutPreparation.SkippedOutsideRunModeNotice(serviceName, step));
+                // Run mode only, which is the same gate DeferredCheckout.ShouldDefer applies and for
+                // a related reason: publish mode composes the model, writes the manifest and exits,
+                // and a bootstrap produces what a service needs in order to run. Without this,
+                // deferral being refused in publish mode means every "local" service takes this path,
+                // so an `aspire publish` over a cold checkout pays the full download and import — for
+                // the motivating case, hundreds of megabytes and a multi-minute graph build — to emit
+                // a manifest that describes none of it.
+                if (builder.ExecutionContext.IsRunMode)
+                {
+                    // Wrapped rather than passed straight through: the console keeps every line live,
+                    // exactly as before, and a capped copy also lands in this service's own resource
+                    // log once BeforeStartEvent gives access to one — see
+                    // BufferingPrepareOutputSink for why the console alone is not enough under
+                    // `aspire run`.
+                    CheckoutPreparation.Run(
+                        serviceName, label, definition.Repository.CheckoutName, step, repoRoot,
+                        builder.AppHostDirectory, managedCheckout, gitClient, _prepareRunner,
+                        BufferingPrepareOutputSink.Wrap(builder, serviceName, ConsolePrepareOutputSink.Instance));
+                }
+                else if (CheckoutPreparation.WouldRun(
+                    serviceName, step, repoRoot, builder.AppHostDirectory, managedCheckout, gitClient))
+                {
+                    // Only where the step would actually have run. A warm checkout whose marker
+                    // already satisfies it was not going to run one anyway, and naming it there would
+                    // report a skip that costs nothing while advising a developer to materialize a
+                    // checkout they already have.
+                    ConsolePrepareOutputSink.Instance.Report(
+                        CheckoutPreparation.SkippedOutsideRunModeNotice(serviceName, step));
+                }
             }
         }
 

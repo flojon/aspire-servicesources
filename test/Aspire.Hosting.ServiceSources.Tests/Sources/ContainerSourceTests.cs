@@ -19,7 +19,7 @@ public class ContainerSourceTests
             Container = image is null
                 ? null
                 : new ContainerMetadata { Image = image, Port = port, DefaultTag = defaultTag, Scheme = scheme },
-        }.ToDefinition("servicesources.yaml", ServiceName);
+        }.ToDefinition("servicesources.yaml", ServiceName, TestHelpers.EmptyRepositories);
 
     private static ServiceDeveloperConfig DevConfig(string? tag = null) =>
         new() { Source = "container", Container = new() { Tag = tag } };

@@ -43,7 +43,8 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 internal sealed class UrlSource : IServiceSource
 {
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
-        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
+        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
+        ServiceDeveloperConfig config, RepositoryDeveloperConfig? repositoryConfig = null)
     {
         var uri = ResolveUrl(serviceName, definition, config);
 

@@ -45,7 +45,7 @@ public class ServiceDefinitionTests
             KindConfig = new Dictionary<object, object> { ["mavenGoal"] = "spring-boot:run" },
         };
 
-        var definition = metadata.ToDefinition("/apphost/servicesources.yaml", "orders");
+        var definition = metadata.ToDefinition("/apphost/servicesources.yaml", "orders", TestHelpers.EmptyRepositories);
 
         Assert.Equal(metadata.Repository, definition.Repository.Url);
         Assert.Equal(metadata.Project, definition.Project);
@@ -85,6 +85,16 @@ public class ServiceDefinitionTests
     };
 
     /// <summary>
+    /// Properties that <see cref="ServiceMetadata.ToDefinition"/> reads but never copies anywhere:
+    /// <see cref="ServiceMetadata.RepositoryRef"/> only selects which already-built
+    /// <see cref="RepositoryDefinition"/> instance <see cref="ServiceDefinition.Repository"/> ends up
+    /// as (from the caller's <c>repositories</c> map) — unlike <see cref="MovedToRepository"/>'s three
+    /// entries, its own value never appears verbatim anywhere in the result, so there is no property
+    /// or value to assert against.
+    /// </summary>
+    private static readonly HashSet<string> ConsumedNotCarried = ["RepositoryRef"];
+
+    /// <summary>
     /// Reflection-based drift guard (design's Testing section): a property added to
     /// <see cref="ServiceMetadata"/> and forgotten in <see cref="ServiceMetadata.ToDefinition"/>
     /// would otherwise go unnoticed until a yaml-only value silently failed to reach
@@ -103,6 +113,11 @@ public class ServiceDefinitionTests
 
         foreach (var metadataProperty in typeof(ServiceMetadata).GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
+            if (ConsumedNotCarried.Contains(metadataProperty.Name))
+            {
+                continue;
+            }
+
             if (MovedToRepository.TryGetValue(metadataProperty.Name, out var repositoryPropertyName))
             {
                 Assert.True(
@@ -150,7 +165,7 @@ public class ServiceDefinitionTests
             KindConfig = new Dictionary<object, object> { ["mavenGoal"] = "spring-boot:run" },
         };
 
-        var definition = metadata.ToDefinition("/apphost/servicesources.yaml", "orders");
+        var definition = metadata.ToDefinition("/apphost/servicesources.yaml", "orders", TestHelpers.EmptyRepositories);
 
         var definitionProperties = typeof(ServiceDefinition)
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
@@ -161,6 +176,11 @@ public class ServiceDefinitionTests
 
         foreach (var metadataProperty in typeof(ServiceMetadata).GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
+            if (ConsumedNotCarried.Contains(metadataProperty.Name))
+            {
+                continue;
+            }
+
             var metadataValue = metadataProperty.GetValue(metadata);
 
             object? definitionValue;
@@ -189,7 +209,7 @@ public class ServiceDefinitionTests
     public void ToDefinition_CheckoutNameIsTheServiceName()
     {
         var definition = new ServiceMetadata { Repository = "https://github.com/example/repo" }
-            .ToDefinition("/apphost/servicesources.yaml", "orders");
+            .ToDefinition("/apphost/servicesources.yaml", "orders", TestHelpers.EmptyRepositories);
 
         Assert.Equal("orders", definition.Repository.CheckoutName);
     }

@@ -57,6 +57,43 @@ public class DeveloperConfigValidatorTests
             () => ServiceSourcesConfigCache.BackingServicesFor(builder));
     }
 
+    /// <summary>
+    /// The repository half of the same walk (#291) — validated inside the same
+    /// <c>ResolveService</c> call as the service entries, via <c>DeveloperConfiguration.ReadFrom</c>,
+    /// so <see cref="Load"/> already reaches it; no third helper is needed.
+    /// </summary>
+    [Fact]
+    public void Repositories_UnknownKey_ThrowsNamingRepositoryShape()
+    {
+        var ex = Load("""
+            { "repositories": { "monorepo": { "badkey": "x" } } }
+            """);
+
+        Assert.Contains("Repository 'monorepo'", ex.Message);
+        Assert.Contains("badkey", ex.Message);
+        Assert.Contains("'path'", ex.Message);
+        Assert.Contains("'ref'", ex.Message);
+        Assert.Contains("'prepare'", ex.Message);
+    }
+
+    /// <remarks>
+    /// The same near-miss machinery <see cref="DeveloperConfigShape"/> already gives every shape —
+    /// this only proves the third one inherited it rather than needing its own copy. Repositories
+    /// have only one nested block (<c>prepare</c>), so the scenario that exercises the fuzzy
+    /// near-miss walk — rather than the exact-match "belongs in this block" branch a step above it
+    /// — is a typo of one of <em>that</em> block's own fields, written at the repository's root
+    /// instead of inside <c>prepare</c>.
+    /// </remarks>
+    [Fact]
+    public void Repositories_NearMissSuggestion_SameMachineryAsServices()
+    {
+        var ex = Load("""
+            { "repositories": { "monorepo": { "comand": ["./prepare.sh"] } } }
+            """);
+
+        Assert.Contains("Did you mean 'command', in the 'prepare' block", ex.Message);
+    }
+
     /// <remarks>
     /// A byte-order mark is what a copy-paste out of a Windows-authored file leaves behind, and it
     /// has no glyph at all: echoed as itself it is indistinguishable from the value being correct,
@@ -485,7 +522,10 @@ public class DeveloperConfigValidatorTests
         // which is where `source` lives, and which CollectBlock never sees — plus each block's
         // fields and everything nested inside them. A scan that looked only at BlockFields would be
         // blind to both ends of that, and an attribute placed at either would be inert and unnoticed.
-        var shapes = new[] { DeveloperConfigShape.Service, DeveloperConfigShape.BackingService };
+        var shapes = new[]
+        {
+            DeveloperConfigShape.Service, DeveloperConfigShape.BackingService, DeveloperConfigShape.Repository,
+        };
 
         var carriers = shapes
             .SelectMany(shape => shape.Entry.GetProperties()

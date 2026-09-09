@@ -13,10 +13,25 @@ builder.UseJava();
 builder.AddServiceCatalog(catalog =>
 {
     catalog.AddService("orders")
-        .WithRepository(
-            "https://github.com/dotnet/aspire-samples",
-            project: "samples/health-checks-ui/HealthChecksUI.ApiService/HealthChecksUI.ApiService.csproj",
-            defaultRef: "main");
+        .WithRepository("https://github.com/dotnet/aspire-samples", defaultRef: "main")
+        .WithProject("samples/health-checks-ui/HealthChecksUI.ApiService/HealthChecksUI.ApiService.csproj");
+
+    // The monorepo shape (#291): two services sharing one repository handle clone it once instead
+    // of once each, and reconcile it onto one ref. AddRepository is how you declare a repository
+    // with more than one service in it — reach for it whenever that's the shape, not only once a
+    // catalog turns out slow to compose. "web" and "web-ui" below are two projects out of the same
+    // aspire-samples checkout "orders" above uses too, on their own (unshared) clone; that pairing
+    // is deliberate, so this file shows both shapes side by side.
+    var webSamples = catalog.AddRepository(
+        "https://github.com/dotnet/aspire-samples", name: "aspire-samples-web", defaultRef: "main");
+
+    catalog.AddService("web")
+        .WithSharedRepository(webSamples)
+        .WithProject("samples/health-checks-ui/HealthChecksUI.ApiService/HealthChecksUI.ApiService.csproj");
+
+    catalog.AddService("web-ui")
+        .WithSharedRepository(webSamples)
+        .WithProject("samples/health-checks-ui/HealthChecksUI.Web/HealthChecksUI.Web.csproj");
 
     catalog.AddService("inventory")
         .WithUrl("https://httpbin.org");
@@ -64,5 +79,12 @@ var payments = builder.AddService("payments");
 // Spring PetClinic on every run of this sample even with the line below commented out. Unlike the
 // services above it also needs a JDK, since it builds the checkout with the repo's Maven wrapper.
 // var catalog = builder.AddService("catalog");
+
+// "web" and "web-ui" above are declared to show the monorepo shape's own catalog surface, not to
+// be run by this sample: adding them would clone aspire-samples a second time (their shared
+// checkout is a different one from "orders"'s own, unshared clone above) on every run, for a
+// demo that has nothing more to show once the two are added the same way "orders" already is.
+// var web = builder.AddService("web");
+// var webUi = builder.AddService("web-ui");
 
 builder.Build().Run();

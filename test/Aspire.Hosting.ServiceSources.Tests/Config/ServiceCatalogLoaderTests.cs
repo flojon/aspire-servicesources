@@ -19,7 +19,7 @@ public class ServiceCatalogLoaderTests
 
         try
         {
-            var catalog = ServiceCatalogLoader.Load(path);
+            var (catalog, _) = ServiceCatalogLoader.Load(path);
 
             var orders = Assert.Single(catalog.Services);
             Assert.Equal("orders", orders.Key);
@@ -58,7 +58,7 @@ public class ServiceCatalogLoaderTests
 
         try
         {
-            var catalog = ServiceCatalogLoader.Load(path);
+            var (catalog, _) = ServiceCatalogLoader.Load(path);
 
             var orders = Assert.Single(catalog.Services);
             Assert.NotNull(orders.Value.Kubernetes);
@@ -84,7 +84,7 @@ public class ServiceCatalogLoaderTests
 
         try
         {
-            var catalog = ServiceCatalogLoader.Load(path);
+            var (catalog, _) = ServiceCatalogLoader.Load(path);
 
             Assert.Null(catalog.Services["orders"].Kubernetes);
         }
@@ -111,7 +111,7 @@ public class ServiceCatalogLoaderTests
 
         try
         {
-            var catalog = ServiceCatalogLoader.Load(path);
+            var (catalog, _) = ServiceCatalogLoader.Load(path);
 
             var orders = Assert.Single(catalog.Services);
             Assert.NotNull(orders.Value.Container);
@@ -138,7 +138,7 @@ public class ServiceCatalogLoaderTests
 
         try
         {
-            var catalog = ServiceCatalogLoader.Load(path);
+            var (catalog, _) = ServiceCatalogLoader.Load(path);
 
             Assert.Null(catalog.Services["orders"].Container);
         }
@@ -161,7 +161,7 @@ public class ServiceCatalogLoaderTests
 
         try
         {
-            var catalog = ServiceCatalogLoader.Load(path);
+            var (catalog, _) = ServiceCatalogLoader.Load(path);
 
             Assert.Equal("dotnet", catalog.Services["orders"].Kind);
             Assert.Null(catalog.Services["orders"].KindConfig);
@@ -189,7 +189,7 @@ public class ServiceCatalogLoaderTests
 
         try
         {
-            var catalog = ServiceCatalogLoader.Load(path);
+            var (catalog, _) = ServiceCatalogLoader.Load(path);
             var frontend = catalog.Services["frontend"];
 
             Assert.Equal("javascript", frontend.Kind);
@@ -218,7 +218,7 @@ public class ServiceCatalogLoaderTests
 
         try
         {
-            var catalog = ServiceCatalogLoader.Load(path);
+            var (catalog, _) = ServiceCatalogLoader.Load(path);
 
             Assert.Equal("javascript", catalog.Services["frontend"].Kind);
             Assert.Null(catalog.Services["frontend"].KindConfig);
@@ -349,7 +349,7 @@ public class ServiceCatalogLoaderTests
 
         try
         {
-            var catalog = ServiceCatalogLoader.Load(path);
+            var (catalog, _) = ServiceCatalogLoader.Load(path);
 
             Assert.Equal("dotnet", catalog.Services["orders"].Kind);
         }
@@ -409,7 +409,7 @@ public class ServiceCatalogLoaderTests
 
         try
         {
-            var orders = ServiceCatalogLoader.Load(path).Services["orders"];
+            var orders = ServiceCatalogLoader.Load(path).Catalog.Services["orders"];
 
             Assert.Equal("main", orders.DefaultRef);
             Assert.Equal("orders-svc", orders.Kubernetes!.Service);
@@ -465,7 +465,7 @@ public class ServiceCatalogLoaderTests
 
         try
         {
-            var catalog = ServiceCatalogLoader.Load(path);
+            var (catalog, _) = ServiceCatalogLoader.Load(path);
 
             var frontend = catalog.Services["frontend"];
             Assert.Equal("container", frontend.Kind);
@@ -517,7 +517,7 @@ public class ServiceCatalogLoaderTests
 
         try
         {
-            var catalog = ServiceCatalogLoader.Load(path);
+            var (catalog, _) = ServiceCatalogLoader.Load(path);
 
             Assert.Empty(catalog.Services);
         }
@@ -571,7 +571,7 @@ public class ServiceCatalogLoaderTests
 
         try
         {
-            var catalog = ServiceCatalogLoader.Load(path);
+            var (catalog, _) = ServiceCatalogLoader.Load(path);
 
             Assert.Null(catalog.Services["orders"].KindConfig);
         }
@@ -598,7 +598,7 @@ public class ServiceCatalogLoaderTests
 
         try
         {
-            var prepare = ServiceCatalogLoader.Load(path).Services["routing"].Prepare;
+            var prepare = ServiceCatalogLoader.Load(path).Catalog.Services["routing"].Prepare;
 
             Assert.NotNull(prepare);
             Assert.Equal<string[]>(["./prepare.sh", "--full"], prepare!.Command!);
@@ -624,7 +624,7 @@ public class ServiceCatalogLoaderTests
 
         try
         {
-            Assert.Null(ServiceCatalogLoader.Load(path).Services["orders"].Prepare);
+            Assert.Null(ServiceCatalogLoader.Load(path).Catalog.Services["orders"].Prepare);
         }
         finally
         {
@@ -657,6 +657,251 @@ public class ServiceCatalogLoaderTests
             Assert.Contains("command", ex.Message);
             Assert.Contains("windowsCommand", ex.Message);
             Assert.Contains("mode", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData("repositories:\n")]
+    [InlineData("repositories: {}\n")]
+    public void Load_RepositoriesKeyWithNothingUnder_BindsToEmpty(string yaml)
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, yaml);
+
+        try
+        {
+            var (_, repositories) = ServiceCatalogLoader.Load(path);
+
+            Assert.Empty(repositories);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_UnknownKeyInsideRepositoriesEntry_Throws()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            repositories:
+              monorepo:
+                repositry: https://github.com/company/monorepo
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("monorepo", ex.Message);
+            Assert.Contains("repositry", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_UnknownKeyInsideRepositoryPrepareBlock_Throws()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            repositories:
+              monorepo:
+                repository: https://github.com/company/monorepo
+                prepare:
+                  comand: ["./prepare.sh"]
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("monorepo", ex.Message);
+            Assert.Contains("unknown property 'comand' inside 'prepare'", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_RepositoryRefNamingNoRepositoriesEntry_ThrowsListingDeclaredNames()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            repositories:
+              monorepo:
+                repository: https://github.com/company/monorepo
+            services:
+              orders:
+                repositoryRef: nonexistent
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("orders", ex.Message);
+            Assert.Contains("nonexistent", ex.Message);
+            Assert.Contains("monorepo", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_RepositoryRefNamingNoRepositoriesSectionAtAll_ThrowsWithoutADanglingList()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repositoryRef: nonexistent
+                project: src/Orders.Api/Orders.Api.csproj
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("orders", ex.Message);
+            Assert.Contains("nonexistent", ex.Message);
+            // "Expected one of: ." (no repositories: section, so nothing to list) reads as broken
+            // output rather than as "there are none" — the message must say that in words instead.
+            Assert.DoesNotContain("Expected one of:", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// Design "The grouped name": every checkout-directory name goes through
+    /// <c>LocalGitCheckout.IsContainedCheckoutDirectoryName</c>, the #224 traversal guard, whether it
+    /// arrives derived, explicit through <c>AddRepository</c>, or — here — as a yaml
+    /// <c>repositories:</c> key. <c>ServiceCatalogBuilder.AddRepository</c> already refuses the
+    /// equivalent unsafe name at composition time; this is the same check for the yaml authoring
+    /// surface, so the two report the same class of mistake the same way rather than one of them
+    /// falling through to a resolution-time failure deep inside whichever service resolves first.
+    /// </summary>
+    [Fact]
+    public void Load_RepositoriesKeyIsNotAContainedDirectoryName_ThrowsAtLoadTime()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            repositories:
+              ../evil:
+                repository: https://github.com/company/monorepo
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("../evil", ex.Message);
+            Assert.Contains("checkout directory name", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData("repository: https://github.com/company/orders\n")]
+    [InlineData("defaultRef: main\n")]
+    public void Load_RepositoryOrDefaultRefBesideRepositoryRef_ThrowsNamingBothKeys(string conflictingLine)
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path,
+            "repositories:\n" +
+            "  monorepo:\n" +
+            "    repository: https://github.com/company/monorepo\n" +
+            "services:\n" +
+            "  orders:\n" +
+            "    repositoryRef: monorepo\n" +
+            "    " + conflictingLine);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("orders", ex.Message);
+            Assert.Contains("repositoryRef", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_PrepareOnServiceCarryingRepositoryRef_ThrowsPointingAtRepositoriesEntry()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            repositories:
+              monorepo:
+                repository: https://github.com/company/monorepo
+            services:
+              orders:
+                repositoryRef: monorepo
+                prepare:
+                  command: ["./prepare.sh"]
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("orders", ex.Message);
+            Assert.Contains("repositoryRef", ex.Message);
+            Assert.Contains("monorepo", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_TwoServicesShareRepositoryRef_ToDefinitionReturnsTheSameRepositoryDefinitionInstance()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            repositories:
+              monorepo:
+                repository: https://github.com/company/monorepo
+                defaultRef: main
+            services:
+              orders:
+                repositoryRef: monorepo
+                project: src/Orders.Api/Orders.Api.csproj
+              payments:
+                repositoryRef: monorepo
+                project: src/Payments.Api/Payments.Api.csproj
+            """);
+
+        try
+        {
+            var (catalog, repositories) = ServiceCatalogLoader.Load(path);
+
+            var ordersDefinition = catalog.Services["orders"].ToDefinition(path, "orders", repositories);
+            var paymentsDefinition = catalog.Services["payments"].ToDefinition(path, "payments", repositories);
+
+            Assert.Same(ordersDefinition.Repository, paymentsDefinition.Repository);
+            Assert.Equal("monorepo", ordersDefinition.Repository.CheckoutName);
         }
         finally
         {

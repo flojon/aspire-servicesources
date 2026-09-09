@@ -1,4 +1,20 @@
+repositories:
+  # The monorepo shape (#291): every service naming this entry through repositoryRef: below
+  # shares one checkout instead of cloning the repository once each. This is how you declare a
+  # repository with more than one service in it — reach for it whenever that's the shape, not
+  # only once a catalog turns out slow to compose. Declared only — apphost.mts never calls
+  # AddService for "web"/"web-ui", so nothing here actually clones; this is here to show the
+  # yaml shape a real monorepo catalog would use.
+  aspire-samples-web:
+    repository: https://github.com/dotnet/aspire-samples
+    defaultRef: main
 services:
+  web:
+    repositoryRef: aspire-samples-web
+    project: samples/health-checks-ui/HealthChecksUI.ApiService/HealthChecksUI.ApiService.csproj
+  web-ui:
+    repositoryRef: aspire-samples-web
+    project: samples/health-checks-ui/HealthChecksUI.Web/HealthChecksUI.Web.csproj
   inventory:
     # Two sources are described here on purpose. Switching this service between them is a
     # servicesources.local.json edit — apphost.mts never changes. The example config picks

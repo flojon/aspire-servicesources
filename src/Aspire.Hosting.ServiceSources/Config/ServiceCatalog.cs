@@ -16,4 +16,17 @@ internal sealed class ServiceCatalog
         get => _services;
         set => _services = value ?? [];
     }
+
+    private Dictionary<string, RepositoryMetadata> _repositories = new();
+
+    /// <summary>
+    /// <see cref="Services"/>'s null-coercion, for the same reason and at the same root: a bare
+    /// <c>repositories:</c> key with nothing under it deserializes to null, overriding the field
+    /// initializer.
+    /// </summary>
+    public Dictionary<string, RepositoryMetadata> Repositories
+    {
+        get => _repositories;
+        set => _repositories = value ?? [];
+    }
 }

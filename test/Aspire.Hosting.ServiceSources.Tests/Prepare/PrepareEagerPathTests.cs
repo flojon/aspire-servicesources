@@ -143,7 +143,7 @@ public class PrepareEagerPathTests
             Project = project,
             Kind = kind,
             Prepare = prepare,
-        }.ToDefinition("servicesources.yaml", name);
+        }.ToDefinition("servicesources.yaml", name, TestHelpers.EmptyRepositories);
 
     private static PrepareMetadata Prepare(params string[] command) =>
         new() { Command = command.Length == 0 ? ["./prepare.sh"] : command };
@@ -278,7 +278,7 @@ public class PrepareEagerPathTests
             () => new LocalProjectSource(new FakeGitClient(), new FakeRunner()).Resolve(
                 builder, "routing", Definition("routing", prepare: Prepare("../../escape.sh")), DevConfig()));
 
-        Assert.Contains("points outside the service's checkout", ex.Message);
+        Assert.Contains("points outside its checkout", ex.Message);
     }
 
     // ---- path checkouts -----------------------------------------------------

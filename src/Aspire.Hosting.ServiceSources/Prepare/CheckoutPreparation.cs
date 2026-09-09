@@ -66,6 +66,24 @@ internal static class CheckoutPreparation
     /// <summary>
     /// Runs <paramref name="step"/> if its mode and marker say it should, and records the completion.
     /// </summary>
+    /// <param name="serviceName">
+    /// The resolving service's own name — used only for the marker path of a <c>path</c> checkout
+    /// (<see cref="PrepareMarker.LocationFor"/> ignores it for a managed one, keying on the checkout
+    /// directory instead, which is what makes two grouped services share one completion record).
+    /// </param>
+    /// <param name="label">
+    /// How every <em>sentence</em> this run produces names the entity the step belongs to —
+    /// <see cref="PreparePlan.ServiceLabel"/> for an ungrouped service,
+    /// <see cref="PreparePlan.RepositoryLabel"/> for one grouped into a shared repository. Not what
+    /// the log tag uses — see <paramref name="checkoutName"/>.
+    /// </param>
+    /// <param name="checkoutName">
+    /// <see cref="Config.Catalog.RepositoryDefinition.CheckoutName"/> — what the log tag on every
+    /// line this run reports names, so that two grouped services' shared step reads as one stream
+    /// attributed to the repository rather than to whichever member happened to trigger it. For an
+    /// ungrouped service this is <paramref name="serviceName"/> itself, which is what keeps
+    /// <c>[prepare {name}]</c> byte-identical to the tag before #291 introduced grouping.
+    /// </param>
     /// <param name="cancellationToken">
     /// Stops the command. A step can legitimately run for an hour, so the developer interrupting is
     /// the ordinary way a long one ends: the deferred path hands its shutdown token straight to the
@@ -84,6 +102,8 @@ internal static class CheckoutPreparation
     /// </exception>
     public static void Run(
         string serviceName,
+        string label,
+        string checkoutName,
         PrepareStep step,
         string repoRoot,
         string appHostDirectory,
@@ -106,10 +126,10 @@ internal static class CheckoutPreparation
         var checkoutPath = decision.CheckoutPath;
         var commit = decision.Commit;
 
-        sink.Report($"{Tag(serviceName)} {reason} Running: {RedactedDescribe(step)}");
+        sink.Report($"{Tag(checkoutName)} {reason} Running: {RedactedDescribe(step)}");
 
         var tail = new Queue<string>(OutputTailLines);
-        var exitCode = Launch(serviceName, step, repoRoot, runner, sink, tail, cancellationToken);
+        var exitCode = Launch(label, checkoutName, step, repoRoot, runner, sink, tail, cancellationToken);
 
         if (exitCode != 0)
         {
@@ -124,7 +144,7 @@ internal static class CheckoutPreparation
                 quoted = [.. tail];
             }
 
-            throw new ServiceSourcesConfigurationException(FailedMessage(serviceName, step, exitCode, quoted));
+            throw new ServiceSourcesConfigurationException(FailedMessage(label, step, exitCode, quoted));
         }
 
         // `always` records nothing: it is the mode whose command decides its own work, so a marker
@@ -253,7 +273,8 @@ internal static class CheckoutPreparation
     }
 
     private static int Launch(
-        string serviceName,
+        string label,
+        string checkoutName,
         PrepareStep step,
         string repoRoot,
         IPrepareCommandRunner runner,
@@ -261,7 +282,7 @@ internal static class CheckoutPreparation
         Queue<string> tail,
         CancellationToken cancellationToken)
     {
-        var tag = Tag(serviceName);
+        var tag = Tag(checkoutName);
 
         try
         {
@@ -296,15 +317,15 @@ internal static class CheckoutPreparation
         }
         catch (PrepareLaunchException ex)
         {
-            throw new ServiceSourcesConfigurationException(LaunchFailedMessage(serviceName, step, ex), ex);
+            throw new ServiceSourcesConfigurationException(LaunchFailedMessage(label, step, ex), ex);
         }
     }
 
     /// <summary>
     /// The prefix every line about this step carries, so a step's output is attributable when
-    /// several services report at once.
+    /// several checkouts report at once.
     /// </summary>
-    private static string Tag(string serviceName) => $"[prepare {serviceName}]";
+    private static string Tag(string checkoutName) => $"[prepare {checkoutName}]";
 
     /// <summary>
     /// <see cref="PrepareStep.Describe"/>, with any URL credentials it echoes removed.
@@ -323,9 +344,9 @@ internal static class CheckoutPreparation
     /// which a still-running stream reader can be appending to.
     /// </param>
     private static string FailedMessage(
-        string serviceName, PrepareStep step, int exitCode, string[] quoted)
+        string label, PrepareStep step, int exitCode, string[] quoted)
     {
-        return $"Service '{serviceName}': its prepare step failed. The command '{RedactedDescribe(step)}' exited with "
+        return $"{label}: its prepare step failed. The command '{RedactedDescribe(step)}' exited with "
             + $"code {exitCode}, so the checkout was left as the command found it and nothing was recorded as "
             + "completed — the step will run again from the beginning on the next start."
             + (quoted.Length == 0
@@ -341,9 +362,9 @@ internal static class CheckoutPreparation
     /// this failure the configuration can be read off — a POSIX script has no execute bit there and
     /// no interpreter to reach it.
     /// </remarks>
-    private static string LaunchFailedMessage(string serviceName, PrepareStep step, PrepareLaunchException ex) =>
-        $"Service '{serviceName}': its prepare step could not be started. {ex.Message} The command is "
-        + $"'{RedactedDescribe(step)}', run with the service's checkout as its working directory; its first element has "
+    private static string LaunchFailedMessage(string label, PrepareStep step, PrepareLaunchException ex) =>
+        $"{label}: its prepare step could not be started. {ex.Message} The command is "
+        + $"'{RedactedDescribe(step)}', run with its checkout as its working directory; its first element has "
         + "to be a path to something executable inside the checkout, or the name of a program on PATH."
         + (step.WindowsWithoutVariant
             ? " This AppHost is running on Windows and the block declares no 'windowsCommand', so the command "

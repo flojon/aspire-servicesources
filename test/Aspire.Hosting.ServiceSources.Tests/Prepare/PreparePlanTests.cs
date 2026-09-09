@@ -24,16 +24,19 @@ public class PreparePlanTests
         PrepareMetadata? catalog = null,
         PrepareDeveloperConfig? developer = null,
         bool managedCheckout = true,
-        bool windows = false) =>
-        PreparePlan.For(ServiceName, catalog, developer, managedCheckout, windows);
+        bool windows = false,
+        string? label = null) =>
+        PreparePlan.For(
+            ServiceName, label ?? PreparePlan.ServiceLabel(ServiceName), catalog, developer, managedCheckout, windows);
 
     private static ServiceSourcesConfigurationException Rejects(
         PrepareMetadata? catalog = null,
         PrepareDeveloperConfig? developer = null,
         bool managedCheckout = true,
-        bool windows = false) =>
+        bool windows = false,
+        string? label = null) =>
         Assert.Throws<ServiceSourcesConfigurationException>(
-            () => Plan(catalog, developer, managedCheckout, windows));
+            () => Plan(catalog, developer, managedCheckout, windows, label));
 
     [Fact]
     public void NoBlockAnywhere_IsNoStep()
@@ -85,6 +88,22 @@ public class PreparePlanTests
         Assert.Contains("'once'", ex.Message);
         Assert.Contains("'always'", ex.Message);
         Assert.Contains("'never'", ex.Message);
+    }
+
+    /// <summary>
+    /// The repository-handle design (#291): a grouped service's <c>prepare</c> block now belongs to
+    /// the repository it shares, so a failure names that repository — never any one member service —
+    /// which is what a developer needs to know where to fix the block.
+    /// </summary>
+    [Fact]
+    public void For_GroupedRepository_UsesRepositoryLabelInMessages()
+    {
+        var ex = Rejects(
+            Catalog(["./prepare.sh"], mode: "sometimes"),
+            label: PreparePlan.RepositoryLabel("monorepo"));
+
+        Assert.Contains("Repository 'monorepo'", ex.Message);
+        Assert.DoesNotContain($"'{ServiceName}'", ex.Message);
     }
 
     /// <remarks>
@@ -264,7 +283,7 @@ public class PreparePlanTests
     {
         var ex = Rejects(Catalog([program]));
 
-        Assert.Contains("points outside the service's checkout", ex.Message);
+        Assert.Contains("points outside its checkout", ex.Message);
     }
 
     [Theory]
@@ -415,7 +434,7 @@ public class PreparePlanTests
     {
         var ex = Rejects(Catalog(["../../escape.sh"]), managedCheckout: false);
 
-        Assert.Contains("points outside the service's checkout", ex.Message);
+        Assert.Contains("points outside its checkout", ex.Message);
     }
 
     [Fact]

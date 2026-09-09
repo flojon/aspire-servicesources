@@ -223,7 +223,7 @@ public class PrepareDeferredTests
         new ServiceMetadata
         {
             Repository = $"https://example.com/{name}.git", Kind = KindName, Prepare = prepare,
-        }.ToDefinition("servicesources.yaml", name);
+        }.ToDefinition("servicesources.yaml", name, TestHelpers.EmptyRepositories);
 
     private static PrepareMetadata Prepare(string? mode = null) =>
         new() { Command = ["./prepare.sh"], Mode = mode };
@@ -579,7 +579,7 @@ public class PrepareDeferredTests
                 Repository = "https://example.com/orders.git",
                 Project = "Generated.csproj",
                 Prepare = Prepare(),
-            }.ToDefinition("servicesources.yaml", "orders"),
+            }.ToDefinition("servicesources.yaml", "orders", TestHelpers.EmptyRepositories),
             DevConfig());
 
         // Nothing has been prepared yet, and the project file the resource was registered against
@@ -631,7 +631,7 @@ public class PrepareDeferredTests
             {
                 Repository = "https://example.com/orders.git",
                 Project = "Generated.csproj",
-            }.ToDefinition("servicesources.yaml", "orders"),
+            }.ToDefinition("servicesources.yaml", "orders", TestHelpers.EmptyRepositories),
             DevConfig());
 
         var services = builder.Services.BuildServiceProvider();

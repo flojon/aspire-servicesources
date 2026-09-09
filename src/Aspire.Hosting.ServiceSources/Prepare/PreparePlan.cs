@@ -82,8 +82,24 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
     /// Either block names a mode that is not one of the four, or a command that names something
     /// outside the checkout — or, on a <c>path</c> service, a mode with no command to attach it to.
     /// </exception>
+    /// <param name="serviceName">
+    /// The service's own name, used only where a message has to embed it literally rather than
+    /// through <paramref name="label"/> — the <c>local.path</c> notice's JSON snippet, which a
+    /// developer pastes into a file keyed by service name regardless of grouping. A <c>path</c>
+    /// checkout is never grouped (design finding 4), so this and <paramref name="label"/> always name
+    /// the same service there; a managed checkout never reaches the branch that uses it.
+    /// </param>
+    /// <param name="label">
+    /// How every message below names the entity the block belongs to — <c>"service 'orders'"</c> for
+    /// an ungrouped service (<see cref="ServiceLabel"/>), or <c>"repository 'monorepo'"</c> for a
+    /// service whose <c>prepare</c> block now lives on the repository it is grouped into
+    /// (<see cref="RepositoryLabel"/>). The caller decides which: this method has no way to tell them
+    /// apart on its own, since both a lone service and a repository's shared entry carry the same
+    /// <see cref="PrepareMetadata"/> shape.
+    /// </param>
     public static PreparePlan For(
         string serviceName,
+        string label,
         PrepareMetadata? catalog,
         PrepareDeveloperConfig? developer,
         bool managedCheckout,
@@ -93,16 +109,26 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
         // turns out to be absent, a catalog mode a `path` service ignores — because a value that
         // cannot be a mode is a mistake in a file whichever way resolution goes, and a developer who
         // typed it should hear about it rather than have it silently mean the default.
-        var catalogMode = catalog is null ? null : ParseOptional(serviceName, catalog.Mode, CatalogBlock);
-        var developerMode = developer is null ? null : ParseOptional(serviceName, developer.Mode, DeveloperBlock);
+        var catalogMode = catalog is null ? null : ParseOptional(label, catalog.Mode, CatalogBlock);
+        var developerMode = developer is null ? null : ParseOptional(label, developer.Mode, DeveloperBlock);
 
         return managedCheckout
-            ? ForManagedCheckout(serviceName, catalog, developer, catalogMode, developerMode, windows)
-            : ForPathCheckout(serviceName, catalog, developer, catalogMode, developerMode, windows);
+            ? ForManagedCheckout(label, catalog, developer, catalogMode, developerMode, windows)
+            : ForPathCheckout(serviceName, label, catalog, developer, catalogMode, developerMode, windows);
     }
 
+    /// <summary>How a message names an ungrouped service — the common case, unchanged from before #291.</summary>
+    public static string ServiceLabel(string serviceName) => $"Service '{serviceName}'";
+
+    /// <summary>
+    /// How a message names the repository a grouped service's <c>prepare</c> block now lives on,
+    /// keyed by <see cref="Config.Catalog.RepositoryDefinition.CheckoutName"/> — the repository's own
+    /// name, not any one member service's.
+    /// </summary>
+    public static string RepositoryLabel(string checkoutName) => $"Repository '{checkoutName}'";
+
     private static PreparePlan ForManagedCheckout(
-        string serviceName,
+        string label,
         PrepareMetadata? catalog,
         PrepareDeveloperConfig? developer,
         PrepareMode? catalogMode,
@@ -134,12 +160,13 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
             ? Nothing
             : new PreparePlan(
                 PrepareStep.Create(
-                    serviceName, selected, mode, writtenAt, WindowsWithoutVariant(windowsCommand, windows)),
+                    label, selected, mode, writtenAt, WindowsWithoutVariant(windowsCommand, windows)),
                 null);
     }
 
     private static PreparePlan ForPathCheckout(
         string serviceName,
+        string label,
         PrepareMetadata? catalog,
         PrepareDeveloperConfig? developer,
         PrepareMode? catalogMode,
@@ -180,7 +207,7 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
             // The result is discarded: what is wanted is the judgement, not the step. Nothing runs
             // for a `path` service that has not declared its own.
             _ = PrepareStep.Create(
-                serviceName,
+                label,
                 inherited,
                 catalogMode ?? PrepareModes.Default,
                 CatalogBlock,
@@ -212,7 +239,7 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
         if (developer!.Command is null && developer.WindowsCommand is null)
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': {DeveloperBlock}.mode is set to "
+                $"{label}: {DeveloperBlock}.mode is set to "
                 + $"'{PrepareModes.Written(mode)}' but {DeveloperBlock}.command is not, and this service resolves "
                 + "through 'local.path' — a checkout you manage yourself, which never inherits the catalog's "
                 + $"'{CatalogBlock}' block, so there is no command for the mode to apply to. Add "
@@ -228,7 +255,7 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
             ? Nothing
             : new PreparePlan(
                 PrepareStep.Create(
-                    serviceName, command, mode, DeveloperBlock,
+                    label, command, mode, DeveloperBlock,
                     WindowsWithoutVariant(developer.WindowsCommand, windows)),
                 null);
     }
@@ -249,8 +276,8 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
     private static bool WindowsWithoutVariant(string[]? windowsCommand, bool windows) =>
         windows && windowsCommand is null;
 
-    private static PrepareMode? ParseOptional(string serviceName, string? written, string block) =>
-        written is null ? null : PrepareModes.Parse(serviceName, written, $"{block}.mode");
+    private static PrepareMode? ParseOptional(string label, string? written, string block) =>
+        written is null ? null : PrepareModes.Parse(label, written, $"{block}.mode");
 
     /// <remarks>
     /// <para>

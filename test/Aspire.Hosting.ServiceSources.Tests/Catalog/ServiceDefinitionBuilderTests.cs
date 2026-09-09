@@ -6,16 +6,31 @@ namespace Aspire.Hosting.ServiceSources.Tests.Catalog;
 public class ServiceDefinitionBuilderTests
 {
     [Fact]
-    public void WithRepository_SetsRepositoryProjectAndDefaultRef()
+    public void WithRepository_SetsRepositoryAndDefaultRef()
     {
         var builder = new ServiceCatalogBuilder();
         var definition = builder.AddService("orders")
-            .WithRepository("https://github.com/example/repo", project: "src/Api.csproj", defaultRef: "main")
+            .WithRepository("https://github.com/example/repo", defaultRef: "main")
+            .WithProject("src/Api.csproj")
             .Build();
 
         Assert.Equal("https://github.com/example/repo", definition.Repository.Url);
         Assert.Equal("src/Api.csproj", definition.Project);
         Assert.Equal("main", definition.Repository.DefaultRef);
+    }
+
+    [Fact]
+    public void WithProject_CalledTwice_ThrowsNamingServiceAndBlock()
+    {
+        var chain = new ServiceCatalogBuilder().AddService("orders")
+            .WithRepository("https://github.com/example/repo")
+            .WithProject("src/Api.csproj");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => chain.WithProject("src/Other.csproj"));
+
+        Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("WithProject", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -295,7 +310,8 @@ public class ServiceDefinitionBuilderTests
             .Build();
 
         var plan = PreparePlan.For(
-            "catalog", definition.Repository.Prepare, developer: null, managedCheckout: true, windows: false);
+            "catalog", PreparePlan.ServiceLabel("catalog"), definition.Repository.Prepare, developer: null,
+            managedCheckout: true, windows: false);
 
         Assert.NotNull(plan.Step);
         Assert.Equal<string[]>(["./prepare.sh", "--full"], [.. plan.Step!.Command]);

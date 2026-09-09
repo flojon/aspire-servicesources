@@ -1,6 +1,8 @@
 using System.Reflection;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
+using Aspire.Hosting.ServiceSources.Git;
 
 namespace Aspire.Hosting.ServiceSources.Config;
 
@@ -11,10 +13,12 @@ internal static class ServiceCatalogLoader
         .IgnoreUnmatchedProperties()
         .Build();
 
-    // Both sets are derived from the metadata types rather than hand-listed, so a property added to
-    // ServiceMetadata (or to one of its nested blocks) can never be accepted by the typed pass while
-    // being rejected as "unknown" by the checks in Load below.
+    // All three sets are derived from the metadata types rather than hand-listed, so a property
+    // added to ServiceMetadata/RepositoryMetadata (or to one of their nested blocks) can never be
+    // accepted by the typed pass while being rejected as "unknown" by the checks in Load below.
     private static readonly HashSet<string> KnownTopLevelProperties = YamlPropertyNames(typeof(ServiceMetadata));
+
+    private static readonly HashSet<string> KnownRepositoryProperties = YamlPropertyNames(typeof(RepositoryMetadata));
 
     private static readonly HashSet<string> KnownRootProperties = YamlPropertyNames(typeof(ServiceCatalog));
 
@@ -26,6 +30,15 @@ internal static class ServiceCatalogLoader
     /// </summary>
     internal static bool IsReservedKindName(string kind) => KnownTopLevelProperties.Contains(kind);
 
+    /// <summary>
+    /// Nested-block name (e.g. <c>prepare</c>) to the keys valid inside it — derived from
+    /// <see cref="ServiceMetadata"/>'s own nested blocks, and reused unchanged for a repository
+    /// entry's blocks too: <see cref="RepositoryMetadata.Prepare"/> is the identical
+    /// <see cref="PrepareMetadata"/> type <see cref="ServiceMetadata.Prepare"/> is, so there is
+    /// nothing a second, repository-specific derivation would say differently. If a repository ever
+    /// grows a nested block <see cref="ServiceMetadata"/> does not have, this needs widening to merge
+    /// in <see cref="RepositoryMetadata"/>'s own nested blocks too.
+    /// </summary>
     private static readonly Dictionary<string, HashSet<string>> KnownNestedProperties =
         YamlProperties(typeof(ServiceMetadata))
             .Where(p => IsNestedBlock(p.PropertyType))
@@ -48,7 +61,7 @@ internal static class ServiceCatalogLoader
     private static bool IsNestedBlock(Type type) =>
         type.IsClass && type != typeof(string) && type.Namespace == typeof(ServiceMetadata).Namespace;
 
-    public static ServiceCatalog Load(string path)
+    public static (ServiceCatalog Catalog, IReadOnlyDictionary<string, RepositoryDefinition> Repositories) Load(string path)
     {
         if (!File.Exists(path))
         {
@@ -72,6 +85,72 @@ internal static class ServiceCatalogLoader
                     $"Unknown top-level property '{rootKey}' in '{path}'. Expected one of: " +
                     string.Join(", ", KnownRootProperties) + ".");
             }
+        }
+
+        // Built before any service is converted, so a service's own repositoryRef can be validated
+        // against the finished map, and so two services naming the same ref get the same instance —
+        // see ServiceMetadata.ToDefinition.
+        var repositories = new Dictionary<string, RepositoryDefinition>(StringComparer.Ordinal);
+        foreach (var (name, metadata) in catalog.Repositories)
+        {
+            // A repository key with nothing under it deserializes to a null entry, same as a service.
+            if (metadata is null)
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Repository '{name}': entry is empty. Expected at least a 'repository' property.");
+            }
+
+            // Every name that becomes a checkout directory goes through this check (design "The
+            // grouped name"), whether it arrives derived, explicit through AddRepository, or — here
+            // — as a yaml repositories: key: a URL ending in '/..' and a repositories: key of
+            // '../evil' are both developer input, and ServiceCatalogBuilder.AddRepository already
+            // refuses the former's equivalent at composition time. Checked here for the same reason:
+            // LocalGitCheckout.ManagedRepoRoot still refuses an unsafe name at resolution time either
+            // way, but only a check this early reports it as a catalog error rather than as a failure
+            // deep inside whichever service happens to resolve first.
+            if (!LocalGitCheckout.IsContainedCheckoutDirectoryName(name))
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Repository '{name}': cannot be used as this repository's checkout directory name — "
+                    + LocalGitCheckout.ContainedNameRule
+                    + " Rename the 'repositories:' entry in servicesources.yaml.");
+            }
+
+            if (raw.Repositories.TryGetValue(name, out var rawRepository))
+            {
+                foreach (var key in rawRepository.Keys)
+                {
+                    if (!KnownRepositoryProperties.Contains(key))
+                    {
+                        throw new ServiceSourcesConfigurationException(
+                            $"Repository '{name}': unknown property '{key}'. Expected one of: " +
+                            string.Join(", ", KnownRepositoryProperties) + ".");
+                    }
+
+                    if (KnownNestedProperties.TryGetValue(key, out var knownNested) &&
+                        rawRepository[key] is System.Collections.IDictionary nestedBlock)
+                    {
+                        foreach (var nestedKeyObj in nestedBlock.Keys)
+                        {
+                            var nestedKey = nestedKeyObj?.ToString() ?? "";
+                            if (!knownNested.Contains(nestedKey))
+                            {
+                                throw new ServiceSourcesConfigurationException(
+                                    $"Repository '{name}': unknown property '{nestedKey}' inside '{key}'. Expected one of: " +
+                                    string.Join(", ", knownNested) + ".");
+                            }
+                        }
+                    }
+                }
+            }
+
+            repositories[name] = new RepositoryDefinition
+            {
+                Url = metadata.Repository,
+                DefaultRef = metadata.DefaultRef,
+                Prepare = metadata.Prepare,
+                CheckoutName = name,
+            };
         }
 
         foreach (var (name, metadata) in catalog.Services)
@@ -148,8 +227,37 @@ internal static class ServiceCatalogLoader
             {
                 metadata.KindConfig = kindBlock;
             }
+
+            // repositoryRef joins a repositories: entry, so the fields that entry now owns can't
+            // also be set here — repository/defaultRef would be ambiguous with the entry's own, and
+            // prepare has moved to the repository entirely (design "prepare moves to the repository").
+            if (metadata.RepositoryRef is { } repositoryRef)
+            {
+                if (!repositories.ContainsKey(repositoryRef))
+                {
+                    throw new ServiceSourcesConfigurationException(
+                        $"Service '{name}': repositoryRef '{repositoryRef}' does not name a repositories entry. " +
+                        (repositories.Count == 0
+                            ? "This catalog declares no 'repositories:' section at all."
+                            : "Expected one of: " + string.Join(", ", repositories.Keys) + "."));
+                }
+
+                if (rawService.ContainsKey("repository") || rawService.ContainsKey("defaultRef"))
+                {
+                    throw new ServiceSourcesConfigurationException(
+                        $"Service '{name}': repositoryRef cannot be combined with 'repository' or 'defaultRef' — " +
+                        $"those belong on the repositories entry '{repositoryRef}' instead.");
+                }
+
+                if (rawService.ContainsKey("prepare"))
+                {
+                    throw new ServiceSourcesConfigurationException(
+                        $"Service '{name}': repositoryRef cannot be combined with 'prepare' — " +
+                        $"move it to the repositories entry '{repositoryRef}' instead.");
+                }
+            }
         }
 
-        return catalog;
+        return (catalog, repositories);
     }
 }

@@ -8,7 +8,8 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceSource
 {
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
-        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
+        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
+        ServiceDeveloperConfig config, RepositoryDeveloperConfig? repositoryConfig = null)
     {
         // The block is checked first so a missing one is reported as that rather than as a scheme
         // problem, and the scheme ahead of BuildPortForwardArgs, whose last act is to allocate a
