@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Aspire.Hosting.ServiceSources;
 
 namespace Aspire.Hosting.ServiceSources.Tests;
@@ -14,11 +15,76 @@ public sealed class OtherOptions
 
 public class LocalKindConfigTests
 {
+    private sealed class JarOptions
+    {
+        public string? JarPath { get; set; }
+
+        public string[]? Args { get; set; }
+
+        public int? Port { get; set; }
+    }
+
     private sealed class Options
     {
         public string? AppDirectory { get; set; }
 
         public string? RunScript { get; set; }
+    }
+
+    // What a guest language's withKind(kind, { options: … }) actually delivers: a JsonObject, which
+    // the yaml path's non-generic IDictionary test misses and its IEnumerable test then rejects as
+    // "a list". Measured against a running TypeScript AppHost.
+    [Fact]
+    public void Parse_JsonObjectFromGuestLanguage_MapsCamelCaseKeysToProperties()
+    {
+        var raw = JsonNode.Parse("""{"appDirectory":"apps/plan","runScript":"start"}""");
+
+        var options = LocalKindConfig.Parse<Options>(raw, "planning-frontend");
+
+        Assert.NotNull(options);
+        Assert.Equal("apps/plan", options.AppDirectory);
+        Assert.Equal("start", options.RunScript);
+    }
+
+    [Fact]
+    public void Parse_JsonObjectWithSequenceAndNumber_MapsBothThroughUnchanged()
+    {
+        // The java kind's jarPath block: where a JSON-to-yaml round-trip would break if flow
+        // sequences or numeric scalars did not read.
+        var raw = JsonNode.Parse(
+            """{"jarPath":"graphhopper-web-11.0.jar","args":["server","gh-config-local.yml"],"port":8989}""");
+
+        var options = LocalKindConfig.Parse<JarOptions>(raw, "planning-routing");
+
+        Assert.NotNull(options);
+        Assert.Equal("graphhopper-web-11.0.jar", options.JarPath);
+        Assert.Equal(["server", "gh-config-local.yml"], Assert.IsType<string[]>(options.Args));
+        Assert.Equal(8989, options.Port);
+    }
+
+    [Fact]
+    public void Parse_JsonObjectWithUnknownProperty_ThrowsNamingPropertyAndService()
+    {
+        // A code-authored block is as typo-prone as a yaml one, and nothing else validates it.
+        var raw = JsonNode.Parse("""{"runScrip":"start"}""");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => LocalKindConfig.Parse<Options>(raw, "frontend"));
+
+        Assert.Contains("frontend", ex.Message);
+        Assert.Contains("runScrip", ex.Message);
+    }
+
+    [Fact]
+    public void Parse_JsonArrayFromGuestLanguage_StillReportsListShape()
+    {
+        // The wrong shape keeps the shape message instead of reaching the new branch.
+        var raw = JsonNode.Parse("""["appDirectory"]""");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => LocalKindConfig.Parse<Options>(raw, "frontend"));
+
+        Assert.Contains("a list", ex.Message);
     }
 
     [Fact]

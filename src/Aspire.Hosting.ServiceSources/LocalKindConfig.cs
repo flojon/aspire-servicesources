@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using YamlDotNet.Core;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
@@ -62,6 +63,16 @@ public static class LocalKindConfig
             return alreadyTyped;
         }
 
+        // Branch 1b: a guest language's WithKind block, which Aspire's Type System marshals across as
+        // a JsonObject — not the non-generic IDictionary the yaml path tests for, so without this it
+        // is rejected as "a list". Yaml is a superset of JSON, so the same strict deserializer reads
+        // it, keeping the unknown-property check. JsonArray/JsonValue fall through to the shape
+        // messages.
+        if (rawConfig is JsonObject jsonObject)
+        {
+            return Deserialize<T>(jsonObject.ToJsonString(), serviceName);
+        }
+
         // Branch 2: came from code, but for a *different* options type — a WithKind(kind, options) call
         // passed the wrong kind's options object. CameFromCode must mirror the branch below exactly:
         // anything YamlDotNet's dynamic deserialization can produce (string, boxed primitive, IList,
@@ -88,8 +99,15 @@ public static class LocalKindConfig
                 $"but found {found}. Check the indentation under the kind's key.");
         }
 
-        var yaml = Serializer.Serialize(rawConfig);
+        return Deserialize<T>(Serializer.Serialize(rawConfig), serviceName);
+    }
 
+    /// <summary>
+    /// Reads a block already in yaml text: yaml's own untyped shape re-serialized, or a guest
+    /// language's JSON, which is valid yaml.
+    /// </summary>
+    private static T? Deserialize<T>(string yaml, string? serviceName) where T : class
+    {
         try
         {
             return Deserializer.Deserialize<T>(yaml);
