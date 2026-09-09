@@ -283,7 +283,7 @@ public class PreparePlanTests
     {
         var ex = Rejects(Catalog([program]));
 
-        Assert.Contains("points outside the service's checkout", ex.Message);
+        Assert.Contains("points outside its checkout", ex.Message);
     }
 
     [Theory]
@@ -434,7 +434,7 @@ public class PreparePlanTests
     {
         var ex = Rejects(Catalog(["../../escape.sh"]), managedCheckout: false);
 
-        Assert.Contains("points outside the service's checkout", ex.Message);
+        Assert.Contains("points outside its checkout", ex.Message);
     }
 
     [Fact]

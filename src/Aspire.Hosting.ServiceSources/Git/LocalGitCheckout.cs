@@ -1,5 +1,6 @@
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
+using Aspire.Hosting.ServiceSources.Prepare;
 
 namespace Aspire.Hosting.ServiceSources.Git;
 
@@ -60,19 +61,26 @@ internal static class LocalGitCheckout
     }
 
     /// <summary>
-    /// The half of a refusal that is the same wherever a name is turned away for not being a path
-    /// segment of its own: what the rule is, and where to change the name.
+    /// The rule half of a refusal, with no remedy attached — shared verbatim by every place a name is
+    /// turned away for not being a path segment of its own, so they cannot drift into describing
+    /// different rules, which has happened once already: the rule grew to cover Windows
+    /// normalization and every message went on naming only <c>.</c> and <c>..</c>, so a developer
+    /// refused for <c>'.. '</c> was handed a list of two forbidden values, neither of them theirs.
     /// </summary>
-    /// <remarks>
-    /// Shared by the two places that refuse so they cannot drift into describing different rules,
-    /// which has happened once already — the rule grew to cover Windows normalization and both
-    /// messages went on naming only <c>.</c> and <c>..</c>, so a developer refused for <c>'.. '</c>
-    /// was handed a list of two forbidden values, neither of them theirs.
-    /// </remarks>
-    public static string ContainedNameRuleAndRemedy =>
+    public static string ContainedNameRule =>
         "no '/' or '\\' separator, no ':', and not a name made only of dots and spaces — Windows "
         + "strips those from the end of a path component, so such a name is not a directory of its "
-        + "own there. Rename the service in its catalog declaration and "
+        + "own there.";
+
+    /// <summary>
+    /// <see cref="ContainedNameRule"/> with the remedy for a service name refused this way — the
+    /// overwhelming common case, and the only one this text fits: a repository name refused by
+    /// <see cref="Catalog.ServiceCatalogBuilder.AddRepository"/> has neither a service nor a
+    /// <c>servicesources.local.json</c> entry to rename, so that call site builds its own remedy
+    /// around <see cref="ContainedNameRule"/> instead.
+    /// </summary>
+    public static string ContainedNameRuleAndRemedy =>
+        ContainedNameRule + " Rename the service in its catalog declaration and "
         + $"'{Config.DeveloperConfiguration.FileName}'.";
 
     /// <summary>
@@ -266,11 +274,21 @@ internal static class LocalGitCheckout
         // acted on, not about a value to resolve.
         var grouped = definition.Repository.CheckoutName != serviceName;
 
+        // Names whichever entity the clone/fetch phase below is actually about. For a grouped
+        // repository that phase can run on the shared background task started by any one member
+        // (LocalCheckoutPrefetch.StartCheckoutTask) and its failure can surface through a
+        // completely different member's AddService() call — so a message from here must name the
+        // repository, not whichever member's serviceName happened to be in scope when the task was
+        // created. The reconciliation phase below (UseExistingCheckout) is unaffected: it always
+        // runs on the actual resolving member's own call, so its own messages keep naming that
+        // service directly.
+        var label = grouped ? PreparePlan.RepositoryLabel(definition.Repository.CheckoutName) : PreparePlan.ServiceLabel(serviceName);
+
         if (grouped && config.Local.Ref is not null)
         {
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}': 'local.ref' cannot be set — this service is grouped into the shared " +
-                $"repository '{definition.Repository.CheckoutName}' (#291), whose ref applies to every member " +
+                $"repository '{definition.Repository.CheckoutName}', whose ref applies to every member " +
                 $"alike rather than to any one of them. Set " +
                 $"'{DeveloperConfiguration.RepositoriesKey}:{definition.Repository.CheckoutName}:ref' instead.");
         }
@@ -330,7 +348,7 @@ internal static class LocalGitCheckout
         // checkout, not one we just made, so it gets the same treatment as a checkout found
         // there on a later run: theirs may be a clone of another repository, and may hold
         // work in flight that a checkout would discard.
-        if (CloneIntoPlace(serviceName, definition, checkoutsRoot, repoRoot, gitClient, progress))
+        if (CloneIntoPlace(label, definition, checkoutsRoot, repoRoot, gitClient, progress))
         {
             return new PreparedCheckout(repoRoot, NeedsReconciliation: true);
         }
@@ -339,7 +357,7 @@ internal static class LocalGitCheckout
         // configured ref right here — inside the parallel phase — rather than deferred.
         if (ConfiguredReference(definition, config, repositoryConfig) is { } reference)
         {
-            CheckoutWithFetchRetry(serviceName, definition, repoRoot, reference, gitClient);
+            CheckoutWithFetchRetry(label, definition, repoRoot, reference, gitClient);
         }
 
         return new PreparedCheckout(repoRoot, NeedsReconciliation: false);
@@ -420,7 +438,10 @@ internal static class LocalGitCheckout
         }
         else if (!gitClient.IsRefCheckedOut(repoRoot, reference))
         {
-            CheckoutWithFetchRetry(serviceName, definition, repoRoot, reference, gitClient);
+            // Always the true resolving member here, unlike PrepareRepoRoot's own call: this method
+            // runs on the actual AddService() call reconciling the checkout, never on the shared
+            // background clone task a different grouped member might have started.
+            CheckoutWithFetchRetry(PreparePlan.ServiceLabel(serviceName), definition, repoRoot, reference, gitClient);
         }
     }
 
@@ -449,7 +470,7 @@ internal static class LocalGitCheckout
     /// </para>
     /// </remarks>
     private static bool CloneIntoPlace(
-        string serviceName,
+        string label,
         ServiceDefinition definition,
         string checkoutsRoot,
         string repoRoot,
@@ -472,15 +493,16 @@ internal static class LocalGitCheckout
         if (File.Exists(Path.Combine(repoRoot, ".git")))
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': the checkout at '{repoRoot}' has a '.git' file rather than a '.git' " +
+                $"{label}: the checkout at '{repoRoot}' has a '.git' file rather than a '.git' " +
                 "directory, so it is a linked worktree or a clone made with --separate-git-dir rather than a " +
                 "checkout this tool cloned. Move it aside and re-run to have it cloned fresh, or point the " +
                 "service at it with the 'local.path' override in servicesources.local.json.");
         }
 
-        // Unique per attempt: two builders resolving the same service concurrently (xUnit does
+        // Unique per attempt: two builders resolving the same checkout concurrently (xUnit does
         // exactly that) must not clone into a shared scratch directory.
-        var scratch = Path.Combine(checkoutsRoot, $".incoming-{serviceName}-{Guid.NewGuid():N}");
+        var scratch = Path.Combine(
+            checkoutsRoot, $".incoming-{definition.Repository.CheckoutName}-{Guid.NewGuid():N}");
 
         try
         {
@@ -492,7 +514,7 @@ internal static class LocalGitCheckout
             {
                 throw new ServiceSourcesConfigurationException(
                     AuthFailureMessage(
-                        $"Service '{serviceName}': failed to clone repository '{displayRepository}' " +
+                        $"{label}: failed to clone repository '{displayRepository}' " +
                         $"into '{repoRoot}'",
                         ex.NoCredentialsResolved),
                     ex);
@@ -500,7 +522,7 @@ internal static class LocalGitCheckout
             catch (Exception ex)
             {
                 throw new ServiceSourcesConfigurationException(
-                    $"Service '{serviceName}': failed to clone repository '{displayRepository}' into '{repoRoot}'.", ex);
+                    $"{label}: failed to clone repository '{displayRepository}' into '{repoRoot}'.", ex);
             }
 
             // What happens to the destination is decided here, after the clone, rather than
@@ -537,7 +559,7 @@ internal static class LocalGitCheckout
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
                     throw new ServiceSourcesConfigurationException(
-                        $"Service '{serviceName}': the checkout at '{repoRoot}' is not a git repository — it is left over " +
+                        $"{label}: the checkout at '{repoRoot}' is not a git repository — it is left over " +
                         "from an interrupted clone — and could not be removed automatically. Delete it and re-run.", ex);
                 }
             }
@@ -560,7 +582,7 @@ internal static class LocalGitCheckout
                 // configuration failure because the raw rename error — "Cannot create a file when
                 // that file already exists" — says neither which service failed nor what to do.
                 throw new ServiceSourcesConfigurationException(
-                    $"Service '{serviceName}': the freshly cloned checkout could not be moved into '{repoRoot}' — " +
+                    $"{label}: the freshly cloned checkout could not be moved into '{repoRoot}' — " +
                     "something else created that path while the clone was running. Re-run; if it persists, delete " +
                     "the directory and re-run.", ex);
             }
@@ -640,7 +662,7 @@ internal static class LocalGitCheckout
     }
 
     private static void CheckoutWithFetchRetry(
-        string serviceName, ServiceDefinition definition, string repoRoot, string reference, IGitClient gitClient)
+        string label, ServiceDefinition definition, string repoRoot, string reference, IGitClient gitClient)
     {
         // See PrepareRepoRoot: the real URL goes to git, the redacted one goes into messages.
         var displayRepository = GitUrl.Redact(definition.Repository.Url);
@@ -657,7 +679,7 @@ internal static class LocalGitCheckout
         catch (Exception ex)
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': failed to checkout ref '{reference}' of repository '{displayRepository}' at '{repoRoot}'.", ex);
+                $"{label}: failed to checkout ref '{reference}' of repository '{displayRepository}' at '{repoRoot}'.", ex);
         }
 
         try
@@ -668,7 +690,7 @@ internal static class LocalGitCheckout
         {
             throw new ServiceSourcesConfigurationException(
                 AuthFailureMessage(
-                    $"Service '{serviceName}': failed to fetch repository '{displayRepository}' at " +
+                    $"{label}: failed to fetch repository '{displayRepository}' at " +
                     $"'{repoRoot}' while resolving ref '{reference}'",
                     ex.NoCredentialsResolved),
                 ex);
@@ -676,7 +698,7 @@ internal static class LocalGitCheckout
         catch (Exception ex)
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': failed to fetch repository '{displayRepository}' at '{repoRoot}' " +
+                $"{label}: failed to fetch repository '{displayRepository}' at '{repoRoot}' " +
                 $"while resolving ref '{reference}'.", ex);
         }
 
@@ -687,7 +709,7 @@ internal static class LocalGitCheckout
         catch (Exception ex)
         {
             throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': failed to checkout ref '{reference}' of repository '{displayRepository}' at '{repoRoot}'.", ex);
+                $"{label}: failed to checkout ref '{reference}' of repository '{displayRepository}' at '{repoRoot}'.", ex);
         }
     }
 

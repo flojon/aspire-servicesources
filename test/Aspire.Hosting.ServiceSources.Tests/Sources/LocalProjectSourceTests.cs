@@ -273,6 +273,28 @@ public class LocalProjectSourceTests
         Assert.Contains("local.path", ex.Message);
     }
 
+    /// <summary>
+    /// The clone/fetch phase of <c>PrepareRepoRoot</c> can run on a background task started under
+    /// any one grouped member's name (<c>LocalCheckoutPrefetch.StartCheckoutTask</c>), and its
+    /// failure can then surface through a completely different member's <c>AddService()</c> call —
+    /// so a clone failure for a grouped repository must name the repository, never whichever
+    /// member's name happened to be passed into this call.
+    /// </summary>
+    [Fact]
+    public void PrepareRepoRoot_CloneFailureOnGroupedService_NamesTheRepositoryNotTheService()
+    {
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
+        var gitClient = new FakeGitClient { CloneException = new InvalidOperationException("no such repo") };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            LocalGitCheckout.PrepareRepoRoot(
+                ServiceName, GroupedDefinition(), DevConfig(), repositoryConfig: null,
+                appHostDirectory, gitClient));
+
+        Assert.Contains("Repository 'monorepo'", ex.Message);
+        Assert.DoesNotContain($"Service '{ServiceName}'", ex.Message);
+    }
+
     [Fact]
     public void PrepareRepoRoot_RepositoryRef_ResolvesAheadOfDefaultRef()
     {

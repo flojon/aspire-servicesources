@@ -129,10 +129,8 @@ catalog builder and covers all four sources:
 builder.AddServiceCatalog(catalog =>
 {
     catalog.AddService("orders")
-        .WithRepository(
-            "https://github.com/example/orders",
-            project: "src/Orders.Api/Orders.Api.csproj",
-            defaultRef: "main");
+        .WithRepository("https://github.com/example/orders", defaultRef: "main")
+        .WithProject("src/Orders.Api/Orders.Api.csproj");
 
     catalog.AddService("inventory")
         .WithUrl("https://httpbin.org");
@@ -156,10 +154,8 @@ const builder = await createBuilder();
 
 await builder.addServiceCatalog(async (catalog) => {
   const orders = await catalog.addServiceToCatalog('orders');
-  await orders.withRepository('https://github.com/example/orders', {
-    project: 'src/Orders.Api/Orders.Api.csproj',
-    defaultRef: 'main',
-  });
+  await orders.withRepository('https://github.com/example/orders', { defaultRef: 'main' });
+  await orders.withProject('src/Orders.Api/Orders.Api.csproj');
 
   const inventory = await catalog.addServiceToCatalog('inventory');
   await inventory.withUrl('https://httpbin.org');
@@ -178,7 +174,7 @@ values you type into `servicesources.local.json`:
 
 | Builder method | yaml it replaces | `"source"` it enables |
 | --- | --- | --- |
-| `WithRepository` + `WithKind` | `repository:`, `project:`, `defaultRef:`, `kind:` | `"local"` |
+| `WithRepository` + `WithProject` + `WithKind` | `repository:`, `project:`, `defaultRef:`, `kind:` | `"local"` |
 | `WithUrl` | `url:` | `"url"` |
 | `WithContainer` | `container:` | `"container"` |
 | `WithKubernetes` | `kubernetes:` | `"kubernetes"` |

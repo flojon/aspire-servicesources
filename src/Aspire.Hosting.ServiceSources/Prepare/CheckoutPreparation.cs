@@ -364,7 +364,7 @@ internal static class CheckoutPreparation
     /// </remarks>
     private static string LaunchFailedMessage(string label, PrepareStep step, PrepareLaunchException ex) =>
         $"{label}: its prepare step could not be started. {ex.Message} The command is "
-        + $"'{RedactedDescribe(step)}', run with the service's checkout as its working directory; its first element has "
+        + $"'{RedactedDescribe(step)}', run with its checkout as its working directory; its first element has "
         + "to be a path to something executable inside the checkout, or the name of a program on PATH."
         + (step.WindowsWithoutVariant
             ? " This AppHost is running on Windows and the block declares no 'windowsCommand', so the command "

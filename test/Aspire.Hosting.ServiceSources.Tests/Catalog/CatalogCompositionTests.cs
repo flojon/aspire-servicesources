@@ -72,6 +72,75 @@ public class CatalogCompositionTests
         Assert.Equal("https://payments.example", codeDef.Url!.Url);
     }
 
+    /// <summary>
+    /// The ungrouped-collision warning (design question 5) fires when two ungrouped services really
+    /// do share a repository URL and both actually resolve through the "local" source — the case its
+    /// own text describes ("are all 'local' ... each gets its own checkout").
+    /// </summary>
+    [Fact]
+    public async Task TwoUngroupedServicesShareUrlAndBothResolveLocally_WarnsToGroupThem()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://example.com/monorepo.git
+                project: src/Orders.Api/Orders.Api.csproj
+              billing:
+                repository: https://example.com/monorepo.git
+                project: src/Billing.Api/Billing.Api.csproj
+            """);
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "local" }, "billing": { "source": "local" } } }
+            """);
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        ServiceSourcesConfigCache.ResolveService(builder, "billing");
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.Contains(warnings, w => w.Contains("are all 'local'", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Two services can share a repository URL in the catalog while neither of them is ever actually
+    /// cloned — README "Combining sources on one catalog entry" lets one entry carry a
+    /// <c>repository:</c> block alongside a <c>kubernetes:</c>/<c>url:</c>/<c>container:</c> one, with
+    /// <c>servicesources.local.json</c> picking which applies. The ungrouped-collision warning must
+    /// not fire for that shape: its advice ("share one checkout ... AddRepository/WithSharedRepository")
+    /// describes work that never happens when nothing resolves through "local" at all.
+    /// </summary>
+    [Fact]
+    public async Task TwoServicesShareUrlButResolveThroughKubernetes_NoUngroupedCollisionWarning()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://example.com/monorepo.git
+                project: src/Orders.Api/Orders.Api.csproj
+                kubernetes:
+                  service: orders-svc
+                  port: 8080
+              billing:
+                repository: https://example.com/monorepo.git
+                project: src/Billing.Api/Billing.Api.csproj
+                kubernetes:
+                  service: billing-svc
+                  port: 8080
+            """);
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "kubernetes" }, "billing": { "source": "kubernetes" } } }
+            """);
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        ServiceSourcesConfigCache.ResolveService(builder, "billing");
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.DoesNotContain(warnings, w => w.Contains("are all 'local'", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void SameNameInBothCatalogs_ThrowsNamingBothSources()
     {
@@ -206,6 +275,36 @@ public class CatalogCompositionTests
         Assert.Contains("repository", ex.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Case-only, unlike <see cref="RepositoryName_CollidesWithUngroupedServiceName_ThrowsNamingBoth"/>:
+    /// the default filesystem on Windows and macOS does not distinguish 'checkouts/Orders' from
+    /// 'checkouts/orders', so the two would still fight over the same directory there even though
+    /// the names are not byte-identical.
+    /// </summary>
+    [Fact]
+    public void RepositoryName_DiffersOnlyByCaseFromUngroupedServiceName_ThrowsNamingBoth()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"),
+            """
+            repositories:
+              Orders:
+                repository: https://example.com/orders-group.git
+            services:
+              orders:
+                repository: https://example.com/orders-solo.git
+                project: Orders.csproj
+            """);
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.Contains("'orders'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("'Orders'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("case", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public void RepositoryName_DeclaredInBothCatalogs_ThrowsDuplicateError()
     {
@@ -234,6 +333,42 @@ public class CatalogCompositionTests
         Assert.Contains("'shared'", ex.Message, StringComparison.Ordinal);
         Assert.Contains("twice", ex.Message, StringComparison.Ordinal);
         Assert.Contains(yamlPath, ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Case-only, across the two catalogs — the same rule
+    /// <see cref="RepositoryName_DeclaredInBothCatalogs_ThrowsDuplicateError"/> checks for a
+    /// byte-identical name, extended to a name that only differs by case on a filesystem that does
+    /// not distinguish the two directories.
+    /// </summary>
+    [Fact]
+    public void RepositoryName_DiffersOnlyByCaseAcrossCatalogs_ThrowsNamingBoth()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        var yamlPath = Path.Combine(dir, "servicesources.yaml");
+        File.WriteAllText(yamlPath,
+            """
+            repositories:
+              Shared:
+                repository: https://example.com/yaml-repo.git
+            services:
+              billing:
+                repositoryRef: Shared
+                project: Billing.csproj
+            """);
+        var builder = CreateBuilder(dir);
+        builder.AddServiceCatalog(c =>
+        {
+            var repository = c.AddRepository("https://example.com/code-repo.git", name: "shared");
+            c.AddService("orders").WithSharedRepository(repository).WithProject("Orders.csproj");
+        });
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.Contains("'shared'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("'Shared'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("case", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

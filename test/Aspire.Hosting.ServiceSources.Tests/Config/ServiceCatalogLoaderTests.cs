@@ -759,6 +759,65 @@ public class ServiceCatalogLoaderTests
         }
     }
 
+    [Fact]
+    public void Load_RepositoryRefNamingNoRepositoriesSectionAtAll_ThrowsWithoutADanglingList()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repositoryRef: nonexistent
+                project: src/Orders.Api/Orders.Api.csproj
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("orders", ex.Message);
+            Assert.Contains("nonexistent", ex.Message);
+            // "Expected one of: ." (no repositories: section, so nothing to list) reads as broken
+            // output rather than as "there are none" — the message must say that in words instead.
+            Assert.DoesNotContain("Expected one of:", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// Design "The grouped name": every checkout-directory name goes through
+    /// <c>LocalGitCheckout.IsContainedCheckoutDirectoryName</c>, the #224 traversal guard, whether it
+    /// arrives derived, explicit through <c>AddRepository</c>, or — here — as a yaml
+    /// <c>repositories:</c> key. <c>ServiceCatalogBuilder.AddRepository</c> already refuses the
+    /// equivalent unsafe name at composition time; this is the same check for the yaml authoring
+    /// surface, so the two report the same class of mistake the same way rather than one of them
+    /// falling through to a resolution-time failure deep inside whichever service resolves first.
+    /// </summary>
+    [Fact]
+    public void Load_RepositoriesKeyIsNotAContainedDirectoryName_ThrowsAtLoadTime()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            repositories:
+              ../evil:
+                repository: https://github.com/company/monorepo
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("../evil", ex.Message);
+            Assert.Contains("checkout directory name", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     [Theory]
     [InlineData("repository: https://github.com/company/orders\n")]
     [InlineData("defaultRef: main\n")]

@@ -141,7 +141,7 @@ internal sealed class PrepareStep
         {
             throw new ServiceSourcesConfigurationException(
                 $"{label}: {writtenAt}.command runs '{program}', which is an absolute path. The "
-                + "command has to be a path relative to the service's checkout — it names a script the repository "
+                + "command has to be a path relative to its checkout — it names a script the repository "
                 + "commits, not one sitting elsewhere on a developer's machine — or a bare program name resolved "
                 + "through PATH.");
         }
@@ -156,8 +156,8 @@ internal sealed class PrepareStep
         if (CheckoutRelativePath.EscapesRoot(program))
         {
             throw new ServiceSourcesConfigurationException(
-                $"{label}: {writtenAt}.command runs '{program}', which points outside the "
-                + "service's checkout. It must stay within the repository.");
+                $"{label}: {writtenAt}.command runs '{program}', which points outside "
+                + "its checkout. It must stay within the repository.");
         }
 
         return CheckoutRelativePath.NormalizeSeparators(program);

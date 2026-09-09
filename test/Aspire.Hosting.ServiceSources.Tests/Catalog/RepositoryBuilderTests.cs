@@ -38,6 +38,48 @@ public class RepositoryBuilderTests
         Assert.Contains("example/monorepo", ex.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A credential embedded in a repository URL (userinfo, <c>https://user:token@host/...</c>) must
+    /// never reach an exception message or any other sink — see the redaction convention every other
+    /// URL-in-message site in this package follows (<c>GitCommand</c>'s stderr scrubbing,
+    /// <c>LocalGitCheckout</c>'s own messages, and the ungrouped-collision warning). This is the same
+    /// requirement applied to <c>AddRepository</c>'s two composition-time messages.
+    /// </summary>
+    [Fact]
+    public void AddRepository_NameCollidesWithAnotherRepository_RedactsBothUrls()
+    {
+        var catalog = new ServiceCatalogBuilder();
+        catalog.AddRepository("https://user:secret-token@github.com/example/monorepo");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => catalog.AddRepository("https://other-user:other-secret@github.com/other/monorepo"));
+
+        Assert.DoesNotContain("secret-token", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("other-secret", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("example/monorepo", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("other/monorepo", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Two code-declared repository names differing only by case must be rejected the same way
+    /// <c>AddService</c> already rejects two case-differing service names: the default filesystem on
+    /// Windows and macOS is case-insensitive, so two unrelated repositories would clone into (and
+    /// fight over) the identical checkout directory there.
+    /// </summary>
+    [Fact]
+    public void AddRepository_NameDiffersOnlyByCaseFromAnotherRepository_Throws()
+    {
+        var catalog = new ServiceCatalogBuilder();
+        catalog.AddRepository("https://github.com/example/monorepo", name: "Monorepo");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => catalog.AddRepository("https://github.com/other/monorepo", name: "monorepo"));
+
+        Assert.Contains("monorepo", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Monorepo", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("case", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public void AddRepository_BlankUrl_Throws() =>
         Assert.Throws<ServiceSourcesConfigurationException>(

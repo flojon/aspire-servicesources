@@ -2,6 +2,7 @@ using System.Reflection;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
+using Aspire.Hosting.ServiceSources.Git;
 
 namespace Aspire.Hosting.ServiceSources.Config;
 
@@ -97,6 +98,22 @@ internal static class ServiceCatalogLoader
             {
                 throw new ServiceSourcesConfigurationException(
                     $"Repository '{name}': entry is empty. Expected at least a 'repository' property.");
+            }
+
+            // Every name that becomes a checkout directory goes through this check (design "The
+            // grouped name"), whether it arrives derived, explicit through AddRepository, or — here
+            // — as a yaml repositories: key: a URL ending in '/..' and a repositories: key of
+            // '../evil' are both developer input, and ServiceCatalogBuilder.AddRepository already
+            // refuses the former's equivalent at composition time. Checked here for the same reason:
+            // LocalGitCheckout.ManagedRepoRoot still refuses an unsafe name at resolution time either
+            // way, but only a check this early reports it as a catalog error rather than as a failure
+            // deep inside whichever service happens to resolve first.
+            if (!LocalGitCheckout.IsContainedCheckoutDirectoryName(name))
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Repository '{name}': cannot be used as this repository's checkout directory name — "
+                    + LocalGitCheckout.ContainedNameRule
+                    + " Rename the 'repositories:' entry in servicesources.yaml.");
             }
 
             if (raw.Repositories.TryGetValue(name, out var rawRepository))
@@ -219,8 +236,10 @@ internal static class ServiceCatalogLoader
                 if (!repositories.ContainsKey(repositoryRef))
                 {
                     throw new ServiceSourcesConfigurationException(
-                        $"Service '{name}': repositoryRef '{repositoryRef}' does not name a repositories entry. Expected one of: " +
-                        string.Join(", ", repositories.Keys) + ".");
+                        $"Service '{name}': repositoryRef '{repositoryRef}' does not name a repositories entry. " +
+                        (repositories.Count == 0
+                            ? "This catalog declares no 'repositories:' section at all."
+                            : "Expected one of: " + string.Join(", ", repositories.Keys) + "."));
                 }
 
                 if (rawService.ContainsKey("repository") || rawService.ContainsKey("defaultRef"))

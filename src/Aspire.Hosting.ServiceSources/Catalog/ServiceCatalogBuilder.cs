@@ -99,16 +99,36 @@ public sealed class ServiceCatalogBuilder
         {
             throw new ServiceSourcesConfigurationException(
                 $"AddRepository: '{resolvedName}' cannot be used as this repository's checkout directory name — "
-                + LocalGitCheckout.ContainedNameRuleAndRemedy
-                + (name is null ? $" (derived from '{url}' — pass an explicit name: to override it.)" : ""));
+                + LocalGitCheckout.ContainedNameRule
+                + (name is null
+                    ? $" (derived from '{GitUrl.Redact(url)}' — pass an explicit name: to AddRepository to "
+                        + "override it.)"
+                    : " Pass a different name: to AddRepository."));
         }
 
         if (_repositories.TryGetValue(resolvedName, out var existing))
         {
             throw new ServiceSourcesConfigurationException(
-                $"AddRepository: '{resolvedName}' is already declared, naming '{existing.Url}'. Two repositories "
-                + $"cannot share one checkout directory name — pass a distinct name: to '{url}' or to the "
-                + "other declaration.");
+                $"AddRepository: '{resolvedName}' is already declared, naming '{GitUrl.Redact(existing.Url)}'. Two "
+                + "repositories cannot share one checkout directory name — pass an explicit name: to this "
+                + $"AddRepository call for '{GitUrl.Redact(url)}', or to the other one already declared.");
+        }
+
+        // Case-only, the same rule AddService already applies to two code-declared service names
+        // (design "Names"): the default filesystem on Windows and macOS, the two platforms this
+        // inner dev loop tool primarily targets, is case-insensitive, so 'checkouts/Monorepo' and
+        // 'checkouts/monorepo' are the same directory — two unrelated repositories would clone into
+        // (and fight over) one, surfacing later as a confusing checkout-mismatch error instead of
+        // this composition-time one.
+        var caseCollision = _repositories.Keys.FirstOrDefault(
+            existingName => string.Equals(existingName, resolvedName, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(existingName, resolvedName, StringComparison.Ordinal));
+
+        if (caseCollision is not null)
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"AddRepository: '{resolvedName}' differs only by case from already-declared "
+                + $"'{caseCollision}'. Two repositories must differ by more than case.");
         }
 
         var repository = new RepositoryBuilder(url, resolvedName, defaultRef);

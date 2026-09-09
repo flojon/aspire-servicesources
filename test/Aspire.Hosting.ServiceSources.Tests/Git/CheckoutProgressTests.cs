@@ -91,4 +91,57 @@ public class CheckoutProgressTests
 
         Assert.Empty(await DrainAsync(progress));
     }
+
+    /// <summary>
+    /// Two grouped services (#291) can both watch the identical checkout at once — each calls
+    /// <see cref="CheckoutProgress.ReadAllAsync"/> on the same instance concurrently, rather than one
+    /// of them owning the only reader a bounded single-reader channel supports. Every reader must see
+    /// every line, not some fraction of the stream split between the two.
+    /// </summary>
+    [Fact]
+    public async Task TwoReadersAttachedConcurrently_BothSeeEveryLine()
+    {
+        var progress = new CheckoutProgress();
+
+        progress.Report("Cloning into 'monorepo'...");
+
+        // Attach both readers while the stream is still live, then keep writing — the scenario a
+        // single shared bounded channel could not survive: two concurrent ReadAllAsync callers on
+        // one SingleReader channel.
+        var first = DrainAsync(progress);
+        var second = DrainAsync(progress);
+
+        progress.Report("Receiving objects: 50% (1/2)");
+        progress.Report("Receiving objects: 100% (2/2), done.");
+        progress.Complete();
+
+        var expected = new[]
+        {
+            "Cloning into 'monorepo'...",
+            "Receiving objects: 50% (1/2)",
+            "Receiving objects: 100% (2/2), done.",
+        };
+
+        Assert.Equal(expected, await first);
+        Assert.Equal(expected, await second);
+    }
+
+    /// <summary>
+    /// A reader that attaches after the stream has already ended still gets everything retained,
+    /// exactly like the single-reader case — attaching late must not mean seeing less.
+    /// </summary>
+    [Fact]
+    public async Task AReaderAttachingAfterAnotherAlreadyDrainedIt_StillSeesEveryLine()
+    {
+        var progress = new CheckoutProgress();
+
+        progress.Report("Cloning into 'monorepo'...");
+        progress.Report("Receiving objects: 100% (2/2), done.");
+        progress.Complete();
+
+        var first = await DrainAsync(progress);
+        var second = await DrainAsync(progress);
+
+        Assert.Equal(first, second);
+    }
 }
