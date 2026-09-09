@@ -703,7 +703,7 @@ internal sealed class DeferredCheckout
 
             logger.LogInformation(
                 "Resolving checkout of {Repository} into {RepoRoot} before starting.",
-                GitUrl.Redact(deferred.Definition.Repository),
+                GitUrl.Redact(deferred.Definition.Repository.Url),
                 deferred.RepoRoot);
 
             // Claimed here, on this thread, rather than inside the reporting task: the checkout

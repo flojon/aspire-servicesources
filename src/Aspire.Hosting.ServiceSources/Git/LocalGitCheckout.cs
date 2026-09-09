@@ -322,7 +322,7 @@ internal static class LocalGitCheckout
     /// the catalog named one — in which case whatever the clone already has checked out stands.
     /// </summary>
     private static string? ConfiguredReference(ServiceDefinition definition, ServiceDeveloperConfig config) =>
-        config.Local.Ref ?? definition.DefaultRef;
+        config.Local.Ref ?? definition.Repository.DefaultRef;
 
     /// <summary>
     /// Adopts a checkout this call did not create — one left by an earlier run, or one a concurrent
@@ -334,12 +334,12 @@ internal static class LocalGitCheckout
         string serviceName, ServiceDefinition definition, string repoRoot, string? reference, IGitClient gitClient)
     {
         var existingOrigin = gitClient.GetOriginUrl(repoRoot);
-        if (existingOrigin is not null && !RepositoryUrlsMatch(existingOrigin, definition.Repository))
+        if (existingOrigin is not null && !RepositoryUrlsMatch(existingOrigin, definition.Repository.Url))
         {
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}': checkout at '{repoRoot}' already contains a clone of " +
                 $"'{GitUrl.Redact(existingOrigin)}', which does not match the configured repository " +
-                $"'{GitUrl.Redact(definition.Repository)}'. " +
+                $"'{GitUrl.Redact(definition.Repository.Url)}'. " +
                 "Remove the checkout directory or fix the configured repository URL.");
         }
 
@@ -396,7 +396,7 @@ internal static class LocalGitCheckout
         IGitProgressSink? progress)
     {
         // See PrepareRepoRoot: the real URL goes to git, the redacted one goes into messages.
-        var displayRepository = GitUrl.Redact(definition.Repository);
+        var displayRepository = GitUrl.Redact(definition.Repository.Url);
 
         Directory.CreateDirectory(checkoutsRoot);
         SweepAbandonedScratchDirectories(checkoutsRoot);
@@ -425,7 +425,7 @@ internal static class LocalGitCheckout
         {
             try
             {
-                gitClient.Clone(definition.Repository, scratch, progress);
+                gitClient.Clone(definition.Repository.Url, scratch, progress);
             }
             catch (GitAuthenticationFailedException ex)
             {
@@ -582,7 +582,7 @@ internal static class LocalGitCheckout
         string serviceName, ServiceDefinition definition, string repoRoot, string reference, IGitClient gitClient)
     {
         // See PrepareRepoRoot: the real URL goes to git, the redacted one goes into messages.
-        var displayRepository = GitUrl.Redact(definition.Repository);
+        var displayRepository = GitUrl.Redact(definition.Repository.Url);
 
         try
         {

@@ -163,7 +163,7 @@ public class LocalKindValidationTests
     {
         Repository = "https://example.com/frontend.git",
         Kind = KindName,
-    }.ToDefinition("servicesources.yaml");
+    }.ToDefinition("servicesources.yaml", ServiceName);
 
     private static ServiceDeveloperConfig DevConfig(string path) =>
         new() { Source = "local", Local = new() { Path = path } };

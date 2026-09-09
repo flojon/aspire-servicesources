@@ -15,7 +15,7 @@ public class UrlSourceTests
             Repository = "https://github.com/company/orders",
             Project = "Orders.csproj",
             Url = url is null ? null : new UrlMetadata { Url = url },
-        }.ToDefinition("servicesources.yaml");
+        }.ToDefinition("servicesources.yaml", ServiceName);
 
     private static ServiceDeveloperConfig DevConfig(string? urlOverride = null) =>
         new() { Source = "url", Url = new() { Url = urlOverride } };

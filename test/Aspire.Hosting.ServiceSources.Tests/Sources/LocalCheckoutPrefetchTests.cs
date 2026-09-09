@@ -197,7 +197,7 @@ public class LocalCheckoutPrefetchTests
         new ServiceMetadata
         {
             Repository = $"https://example.com/{name}.git", Project = "Service.csproj", DefaultRef = defaultRef,
-        }.ToDefinition("servicesources.yaml");
+        }.ToDefinition("servicesources.yaml", name);
 
     private static ServiceDeveloperConfig DevConfig() => new() { Source = "local" };
 
@@ -254,7 +254,7 @@ public class LocalCheckoutPrefetchTests
 
         source.Resolve(
             builder, "orders",
-            new ServiceMetadata { Repository = Repository, Project = "Service.csproj" }.ToDefinition("servicesources.yaml"),
+            new ServiceMetadata { Repository = Repository, Project = "Service.csproj" }.ToDefinition("servicesources.yaml", "orders"),
             DevConfig());
 
         // Checkouts are keyed by service, not by repository, so a monorepo is fetched once per
@@ -467,7 +467,7 @@ public class LocalCheckoutPrefetchTests
         var definition = new ServiceMetadata
         {
             Repository = "https://example.com/frontend.git", Kind = "javascript",
-        }.ToDefinition("servicesources.yaml");
+        }.ToDefinition("servicesources.yaml", "frontend");
 
         var service = new LocalProjectSource(new FakeGitClient()).Resolve(builder, "frontend", definition, DevConfig());
 
@@ -483,7 +483,7 @@ public class LocalCheckoutPrefetchTests
         var definition = new ServiceMetadata
         {
             Repository = "https://example.com/frontend.git", Kind = "javascript",
-        }.ToDefinition("servicesources.yaml");
+        }.ToDefinition("servicesources.yaml", "frontend");
         var git = new FakeGitClient();
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(

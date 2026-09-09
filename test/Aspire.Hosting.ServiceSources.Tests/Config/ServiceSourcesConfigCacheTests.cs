@@ -38,7 +38,7 @@ public class ServiceSourcesConfigCacheTests
 
         var (metadata, developerConfig) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
 
-        Assert.Equal("https://github.com/company/orders", metadata.Repository);
+        Assert.Equal("https://github.com/company/orders", metadata.Repository.Url);
         Assert.Equal("local", developerConfig.Source);
     }
 

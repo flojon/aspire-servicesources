@@ -13,9 +13,19 @@ public class ServiceDefinitionBuilderTests
             .WithRepository("https://github.com/example/repo", project: "src/Api.csproj", defaultRef: "main")
             .Build();
 
-        Assert.Equal("https://github.com/example/repo", definition.Repository);
+        Assert.Equal("https://github.com/example/repo", definition.Repository.Url);
         Assert.Equal("src/Api.csproj", definition.Project);
-        Assert.Equal("main", definition.DefaultRef);
+        Assert.Equal("main", definition.Repository.DefaultRef);
+    }
+
+    [Fact]
+    public void Build_CheckoutNameIsTheServiceName()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("orders")
+            .WithRepository("https://github.com/example/repo")
+            .Build();
+
+        Assert.Equal("orders", definition.Repository.CheckoutName);
     }
 
     [Fact]
@@ -158,10 +168,10 @@ public class ServiceDefinitionBuilderTests
             .WithPrepare(["./prepare.sh"], windowsCommand: ["prepare.cmd"], mode: PrepareMode.Once)
             .Build();
 
-        Assert.NotNull(definition.Prepare);
-        Assert.Equal(["./prepare.sh"], definition.Prepare.Command!);
-        Assert.Equal(["prepare.cmd"], definition.Prepare.WindowsCommand!);
-        Assert.Equal("once", definition.Prepare.Mode);
+        Assert.NotNull(definition.Repository.Prepare);
+        Assert.Equal(["./prepare.sh"], definition.Repository.Prepare.Command!);
+        Assert.Equal(["prepare.cmd"], definition.Repository.Prepare.WindowsCommand!);
+        Assert.Equal("once", definition.Repository.Prepare.Mode);
     }
 
     /// <summary>
@@ -176,8 +186,8 @@ public class ServiceDefinitionBuilderTests
             .WithPrepare(["./prepare.sh"])
             .Build();
 
-        Assert.Null(definition.Prepare!.WindowsCommand);
-        Assert.Equal("oncePerCommit", definition.Prepare.Mode);
+        Assert.Null(definition.Repository.Prepare!.WindowsCommand);
+        Assert.Equal("oncePerCommit", definition.Repository.Prepare.Mode);
     }
 
     [Fact]
@@ -197,7 +207,7 @@ public class ServiceDefinitionBuilderTests
     }
 
     /// <summary>
-    /// The one place <see cref="ServiceDefinition.Prepare"/> is consumed, reached with what
+    /// The one place <see cref="RepositoryDefinition.Prepare"/> is consumed, reached with what
     /// <see cref="ServiceDefinitionBuilder.WithPrepare"/> produced: the block a code catalog declares
     /// resolves into a step exactly as the yaml block it replaces does.
     /// </summary>
@@ -210,7 +220,7 @@ public class ServiceDefinitionBuilderTests
             .Build();
 
         var plan = PreparePlan.For(
-            "catalog", definition.Prepare, developer: null, managedCheckout: true, windows: false);
+            "catalog", definition.Repository.Prepare, developer: null, managedCheckout: true, windows: false);
 
         Assert.NotNull(plan.Step);
         Assert.Equal<string[]>(["./prepare.sh", "--full"], [.. plan.Step!.Command]);
@@ -238,6 +248,6 @@ public class ServiceDefinitionBuilderTests
             .WithRepository("https://github.com/example/orders")
             .Build();
 
-        Assert.Null(definition.Prepare);
+        Assert.Null(definition.Repository.Prepare);
     }
 }

@@ -194,7 +194,7 @@ public class DeferredKindCheckoutTests
 
     private static ServiceDefinition Definition(string name) =>
         new ServiceMetadata { Repository = $"https://example.com/{name}.git", Kind = KindName }
-            .ToDefinition("servicesources.yaml");
+            .ToDefinition("servicesources.yaml", name);
 
     private static ServiceDeveloperConfig DevConfig(string? path = null) => new() { Source = "local", Local = new() { Path = path } };
 
