@@ -147,6 +147,17 @@ positions the design needs it (`WithPrepare(…, mode:)` and a bare `WithKind`-a
 
 ## 5 — The generated name `addService` on two receivers — the one that failed
 
+> **Correction (#309):** the probe below declares `AddService` as an **extension** method
+> (`this Stage0ProbeCatalogBuilder catalog`), which is exported as a free function keyed
+> `{AssemblyName}/{camelCaseMethodName}` — flat, with no receiver qualification, so it genuinely
+> collides with `ServiceSourcesBuilderExtensions.AddService`. Stage 1 then applied this finding's
+> conclusion (give it an explicit capability `id`) to `ServiceCatalogBuilder.AddService`, which is
+> an **instance** method exposed via `ServiceCatalogBuilder`'s own `[AspireExport(ExposeMethods =
+> true)]` — those are always receiver-qualified as `{TypeName}.{camelCaseMethodName}`, explicit
+> attribute or not, so the collision this finding describes cannot occur for it. Do not re-apply
+> this finding to an instance method; see #309 and
+> `docs/superpowers/specs/2026-09-08-repository-handle-q3-ats-probe-findings.md`.
+
 Probed, first attempt, matching the design's stated shape exactly (`ServiceCatalogBuilder.AddService`
 alongside the shipped `ServiceSourcesBuilderExtensions.AddService`,
 `src/Aspire.Hosting.ServiceSources/ServiceSourcesBuilderExtensions.cs:84`):

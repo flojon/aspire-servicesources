@@ -143,9 +143,11 @@ builder.AddServiceCatalog(catalog =>
 var orders = builder.AddService("orders");
 ```
 
-The same idea from a TypeScript AppHost, through Aspire's Type System (the exported
-method is `addServiceToCatalog`, not `addService` — a capability-id collision the two
-would otherwise have; the C# method itself is still `AddService`):
+The same idea from a TypeScript AppHost, through Aspire's Type System (the C# method
+itself is still `AddService`, and the generated TypeScript name is `addService` too —
+the catalog builder's `addService` and the AppHost builder's own `addService` (from the
+separate `AddService` extension method) are distinct capabilities, so the two never
+collide):
 
 ```typescript
 import { createBuilder } from './.aspire/modules/aspire.mjs';
@@ -153,11 +155,11 @@ import { createBuilder } from './.aspire/modules/aspire.mjs';
 const builder = await createBuilder();
 
 await builder.addServiceCatalog(async (catalog) => {
-  const orders = await catalog.addServiceToCatalog('orders');
+  const orders = await catalog.addService('orders');
   await orders.withRepository('https://github.com/example/orders', { defaultRef: 'main' });
   await orders.withProject('src/Orders.Api/Orders.Api.csproj');
 
-  const inventory = await catalog.addServiceToCatalog('inventory');
+  const inventory = await catalog.addService('inventory');
   await inventory.withUrl('https://httpbin.org');
 });
 ```

@@ -62,15 +62,18 @@ public class CatalogExportsTests
     public void NoTwoExportedMethodsInTheAssembly_ShareAGeneratedCapabilityId()
     {
         // Widened from a hardcoded { ServiceCatalogBuilder, ServiceDefinitionBuilder } pair to the
-        // whole assembly: Stage 0's actual measured collision was cross-type —
-        // ServiceCatalogBuilder.AddService vs. ServiceSourcesBuilderExtensions.AddService — which a
-        // two-type list cannot catch if the explicit [AspireExport("addServiceToCatalog")] id were
-        // ever accidentally removed. This reflects over every exported method in the assembly the
-        // same way the ATS generator itself would discover them, rather than over a hand-picked
-        // subset. Belt-and-suspenders against the Stage 0 regression (docs/superpowers/specs/
-        // 2026-09-07-code-catalog-stage0-ats-probe-findings.md): build already fails with
-        // ASPIREEXPORT013 on a real collision, but this asserts the intent directly rather than
-        // relying on the analyzer alone catching a future one.
+        // whole assembly: the collision that matters here is cross-type — an id colliding with
+        // ServiceSourcesBuilderExtensions.AddService's flat "addService" — which a two-type list
+        // cannot catch. This reflects over every exported method in the assembly the same way the
+        // ATS generator itself would discover them, rather than over a hand-picked subset.
+        // Belt-and-suspenders: the build already fails with ASPIREEXPORT013 on a real collision
+        // (#309 verified this by temporarily reintroducing one and watching both this guard and a
+        // real build fail), but this asserts the intent directly rather than relying on the
+        // analyzer alone catching a future one. ServiceCatalogBuilder.AddService itself no longer
+        // needs an explicit id to avoid that collision — it's an instance method projected via
+        // ExposeMethods, so it's already receiver-qualified as "ServiceCatalogBuilder.addService"
+        // (see CapabilityId below, and docs/superpowers/specs/
+        // 2026-09-07-code-catalog-stage0-ats-probe-findings.md's note on finding 5).
         var ids = ExportedMethods().Select(m => CapabilityId(m.DeclaringType!, m)).ToList();
 
         Assert.Equal(ids.Count, ids.Distinct(StringComparer.Ordinal).Count());
@@ -90,7 +93,7 @@ public class CatalogExportsTests
         string[] expected =
         [
             "addService", "addBackingService", "asJava", "asJavaScript", "getServiceEndpoint", "useJava", "useJavaScript",
-            "addServiceCatalog", "addServiceToCatalog",
+            "addServiceCatalog",
             CamelCase(nameof(ServiceConfigurationExports.WithServiceEnvironment)),
             CamelCase(nameof(ServiceConfigurationExports.WithServiceEnvironmentFromParameter)),
             CamelCase(nameof(ServiceConfigurationExports.WithServiceEnvironmentFromEndpoint)),
@@ -101,6 +104,7 @@ public class CatalogExportsTests
             CamelCase(nameof(ServiceConfigurationExports.WithServiceArg)),
             CamelCase(nameof(ServiceConfigurationExports.WithServiceHttpsEndpoint)),
             CamelCase(nameof(ServiceConfigurationExports.WithServiceHttpEndpoint)),
+            $"{nameof(ServiceCatalogBuilder)}.{CamelCase(nameof(ServiceCatalogBuilder.AddService))}",
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithRepository))}",
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithProject))}",
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithSharedRepository))}",
@@ -179,20 +183,32 @@ public class CatalogExportsTests
 
     /// <summary>
     /// The capability id a method resolves to, per <c>AspireExportAttribute</c>'s own XML doc
-    /// (`Aspire.Hosting.xml`, 13.5.2): an explicit <c>id</c> wins outright; a bare
-    /// <c>[AspireExport]</c> with no id derives the camelCase method name; a method exposed only
-    /// via its declaring type's <c>ExposeMethods = true</c> (no attribute of its own — the case for
-    /// every <see cref="ServiceDefinitionBuilder"/> method today) derives
-    /// <c>{TypeName}.{camelCaseMethodName}</c> instead of the bare name. <c>MethodName</c> plays no
-    /// part — Stage 0 measured that it renames the generated SDK method without changing the
-    /// colliding capability id.
+    /// (`Aspire.Hosting.xml`, 13.5.2) and measured directly (#309): an explicit <c>id</c> wins
+    /// outright and is namespace-scoped and flat, whether the method is static or an instance
+    /// method. Absent an explicit id, a <b>static</b> method — a plain export or an extension
+    /// method — is flat, deriving just the camelCase method name. An <b>instance</b> method
+    /// projected via its declaring type's <c>ExposeMethods = true</c> is always receiver-qualified
+    /// as <c>{TypeName}.{camelCaseMethodName}</c> — whether or not it carries its own bare
+    /// <c>[AspireExport]</c> (the case for <see cref="ServiceCatalogBuilder.AddService"/>) or is
+    /// exposed only implicitly with no attribute of its own (every
+    /// <see cref="ServiceDefinitionBuilder"/> method today). Stage 0's finding 5 (`ASPIREEXPORT013`
+    /// on a collision) was measured against an <b>extension</b> method and does not generalize to
+    /// an instance method — see
+    /// `docs/superpowers/specs/2026-09-07-code-catalog-stage0-ats-probe-findings.md`. <c>MethodName</c>
+    /// plays no part either way — Stage 0 also measured that it renames the generated SDK method
+    /// without changing the colliding capability id.
     /// </summary>
     private static string CapabilityId(Type type, MethodInfo method)
     {
         var export = method.GetCustomAttribute<AspireExportAttribute>();
-        if (export is not null)
+        if (export?.Id is not null)
         {
-            return export.Id ?? CamelCase(method.Name);
+            return export.Id;
+        }
+
+        if (method.IsStatic)
+        {
+            return CamelCase(method.Name);
         }
 
         return $"{type.Name}.{CamelCase(method.Name)}";

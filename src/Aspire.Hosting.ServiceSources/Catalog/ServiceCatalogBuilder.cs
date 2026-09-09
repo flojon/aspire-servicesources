@@ -24,7 +24,7 @@ public sealed class ServiceCatalogBuilder
     /// Declares a service, returning a chain to configure its source(s). Two code-declared names
     /// differing only by case are rejected here, naming both — see design "Names."
     /// </summary>
-    [AspireExport("addServiceToCatalog")]
+    [AspireExport]
     public ServiceDefinitionBuilder AddService(string name)
     {
         if (_frozen)
