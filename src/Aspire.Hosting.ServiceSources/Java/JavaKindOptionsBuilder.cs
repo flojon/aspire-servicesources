@@ -65,6 +65,13 @@ public sealed class JavaKindOptionsBuilder
         return this;
     }
 
+    /// <summary>The scheme the app serves on <see cref="Port(int)"/> — "http" or "https". Defaults to "http".</summary>
+    public JavaKindOptionsBuilder Scheme(string scheme)
+    {
+        _options.Scheme = scheme;
+        return this;
+    }
+
     /// <summary>
     /// The <see cref="JavaKindOptions"/> this handle has been writing into. Validated the same way
     /// a yaml <c>java:</c> block is — by <see cref="JavaKindOptions.Parse"/>, at

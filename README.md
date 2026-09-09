@@ -1056,7 +1056,8 @@ The checkout is cloned exactly as for any other `"local"` service (`path`, `ref`
 | `mavenGoal` | one of these three | Run via the Maven wrapper, e.g. `spring-boot:run`. |
 | `gradleTask` | one of these three | Run via the Gradle wrapper, e.g. `bootRun`. |
 | `jarPath` | one of these three | Run a pre-built jar with `java -jar`, relative to `workingDirectory`. May climb out of it — a monorepo's shared build output directory — but must stay inside the checkout. |
-| `port` | yes | The port the app listens on. Becomes the service's HTTP endpoint, so consumers can `WithReference(...)` or `GetServiceEndpoint()` it. |
+| `port` | yes | The port the app listens on. Becomes the service's endpoint (see `scheme` below), so consumers can `WithReference(...)` or `GetServiceEndpoint()` it. |
+| `scheme` | no (defaults to `http`) | The scheme the app serves on `port` — `http` or `https`. |
 | `workingDirectory` | no (defaults to the repository root) | Where in the checkout the project lives — the directory holding `pom.xml` / `build.gradle`, and by default the `mvnw`/`gradlew` wrapper too. Must stay inside the checkout. |
 | `wrapperPath` | no (defaults to the wrapper in `workingDirectory`) | Where the `mvnw`/`gradlew` wrapper script lives, relative to the **repository root** — for the monorepo that commits a single wrapper at its root while the service itself sits further down. Name it without an extension (`gradlew`, not `gradlew.bat`) and it works for the whole team: on Windows the `.cmd`/`.bat` wrapper beside it is the one run. Only meaningful with `mavenGoal` or `gradleTask`. |
 | `args` | no | Extra arguments for whichever run mode is configured — passed to the Maven wrapper, the Gradle wrapper, or the jar. |
@@ -1088,14 +1089,38 @@ reported as such, rather than left to surface as a failure to start the app. On 
 run is `mvnw.cmd`/`gradlew.bat`, whether it was found by default or named by `wrapperPath`: the
 extensionless scripts beside them are POSIX shell scripts that Windows cannot exec.
 
-Every problem with the block — unknown properties, a missing or out-of-range `port`, no run
-mode or more than one, a `workingDirectory`, `wrapperPath` or `jarPath` escaping the repository,
-a `wrapperPath` set alongside `jarPath`, a `workingDirectory` that isn't in the checkout, a
-wrapper script that isn't there — is reported by the `AddService("catalog")` call itself, before
-the service has added anything to the app model. The last two are read against the checkout, so
-under [`UseDeferredCheckout()`](#first-run-usedeferredcheckout), where there isn't one yet, they
-are reported after the clone lands as this service's resource state instead — the same two checks
+Every problem with the block — unknown properties, a missing or out-of-range `port`, an
+unsupported `scheme`, no run mode or more than one, a `workingDirectory`, `wrapperPath` or
+`jarPath` escaping the repository, a `wrapperPath` set alongside `jarPath`, a `workingDirectory`
+that isn't in the checkout, a wrapper script that isn't there — is reported by the
+`AddService("catalog")` call itself, before the service has added anything to the app model. The
+last two are read against the checkout, so under
+[`UseDeferredCheckout()`](#first-run-usedeferredcheckout), where there isn't one yet, they are
+reported after the clone lands as this service's resource state instead — the same two checks
 saying the same two things.
+
+Add `scheme: https` if the app serves TLS on `port`:
+
+```yaml
+services:
+  catalog:
+    repository: https://github.com/example/catalog
+    kind: java
+    java:
+      mavenGoal: quarkus:run
+      port: 8443
+      scheme: https
+```
+
+Like `port`, it's catalog-only — the app decides what it serves, so there's nothing
+per-developer to override — and it defaults to `http`. With `scheme: https` the service exposes
+an endpoint named `https` instead of `http`, so `catalog.GetServiceEndpoint()` resolves to it and
+`catalog.GetEndpoint("https")` works directly; see
+[naming a service's endpoint](#naming-a-services-endpoint). Getting the app itself to actually
+serve TLS is a framework concern the `java:` block deliberately stays out of — reach it from the
+AppHost with `As<JavaAppExecutableResource>()`, most often paired with Aspire's own
+`WithHttpsCertificateConfiguration` to hand the service the developer certificate without
+hardcoding a path.
 
 **Reaching the rest of the Java integration.** The `java:` block covers how to start the app; it
 deliberately doesn't mirror every modifier the Community Toolkit offers. Anything else is reachable
@@ -2165,7 +2190,8 @@ exposes is decided by whichever source resolved it:
 | Source | Endpoint name |
 |---|---|
 | `"local"`, `kind: dotnet` | whatever the launch profile's `applicationUrl` declares (`http`, `https`, or both) |
-| `"local"`, non-dotnet kinds (`javascript`, `java`) | `http` |
+| `"local"`, `kind: javascript` | `http` |
+| `"local"`, `kind: java` | the configured `java.scheme`, `http` unless set |
 | `"url"` | the configured URL's scheme |
 | `"kubernetes"`, `"container"` | the configured `scheme`, `http` unless set |
 

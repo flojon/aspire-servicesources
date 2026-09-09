@@ -1,3 +1,5 @@
+using Aspire.Hosting.ServiceSources.Sources;
+
 namespace Aspire.Hosting.ServiceSources.Java;
 
 /// <summary>
@@ -45,6 +47,13 @@ internal sealed class JavaKindOptions
     public int? Port { get; set; }
 
     /// <summary>
+    /// The scheme the app serves on <see cref="Port"/> — <c>http</c> or <c>https</c>. Catalog-only,
+    /// like <see cref="Port"/> itself: the app decides what it serves, so there is nothing
+    /// per-developer to override. Defaults to <c>http</c>.
+    /// </summary>
+    public string? Scheme { get; set; }
+
+    /// <summary>
     /// Parses and fully validates a service's <c>java:</c> block. Reached from every entry point the
     /// handler has — <see cref="JavaLocalResourceKind.Validate"/> (so a bad block is reported before
     /// this service has put anything in the app model), <see cref="JavaLocalResourceKind.Resolve"/>
@@ -53,9 +62,10 @@ internal sealed class JavaKindOptions
     /// </summary>
     /// <exception cref="ServiceSourcesConfigurationException">
     /// The block is missing, malformed, contains an unknown property, names no run mode or more
-    /// than one, omits <see cref="Port"/> or gives an out-of-range one, points
-    /// <see cref="WorkingDirectory"/>, <see cref="WrapperPath"/> or <see cref="JarPath"/> outside the
-    /// checkout, or sets <see cref="WrapperPath"/> alongside <see cref="JarPath"/>.
+    /// than one, omits <see cref="Port"/> or gives an out-of-range one, sets <see cref="Scheme"/>
+    /// to anything but <c>http</c>/<c>https</c>, points <see cref="WorkingDirectory"/>,
+    /// <see cref="WrapperPath"/> or <see cref="JarPath"/> outside the checkout, or sets
+    /// <see cref="WrapperPath"/> alongside <see cref="JarPath"/>.
     /// </exception>
     public static ValidatedJavaKindOptions Parse(string serviceName, object? rawConfig)
     {
@@ -68,6 +78,7 @@ internal sealed class JavaKindOptions
                 "must name how to run the service, e.g. 'mavenGoal: spring-boot:run' and 'port: 8080'.");
 
         var port = ValidatePort(serviceName, options.Port);
+        var scheme = ValidateScheme(serviceName, options.Scheme);
         var workingDirectory = ValidateWorkingDirectory(serviceName, options.WorkingDirectory);
 
         // The jar's path is checked against the working directory it is read relative to, so it has
@@ -76,7 +87,7 @@ internal sealed class JavaKindOptions
         var runMode = ValidateJarPath(serviceName, ResolveRunMode(serviceName, options), workingDirectory);
         var wrapperPath = ValidateWrapperPath(serviceName, options.WrapperPath, runMode);
 
-        return new ValidatedJavaKindOptions(workingDirectory, runMode, options.Args ?? [], port, wrapperPath);
+        return new ValidatedJavaKindOptions(workingDirectory, runMode, options.Args ?? [], port, scheme, wrapperPath);
     }
 
     private static JavaRunMode ResolveRunMode(string serviceName, JavaKindOptions options)
@@ -129,6 +140,25 @@ internal sealed class JavaKindOptions
         }
 
         return port.Value;
+    }
+
+    private static string ValidateScheme(string serviceName, string? scheme)
+    {
+        var trimmed = scheme?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return EndpointScheme.Http;
+        }
+
+        var normalized = trimmed.ToLowerInvariant();
+        if (normalized is EndpointScheme.Http or EndpointScheme.Https)
+        {
+            return normalized;
+        }
+
+        throw new ServiceSourcesConfigurationException(
+            $"Service '{serviceName}': java.scheme value '{scheme}' is not supported — use " +
+            $"'{EndpointScheme.Http}' or '{EndpointScheme.Https}'.");
     }
 
     private static string ValidateWorkingDirectory(string serviceName, string? workingDirectory)
@@ -291,4 +321,5 @@ internal sealed record ValidatedJavaKindOptions(
     JavaRunMode RunMode,
     string[] Args,
     int Port,
+    string Scheme,
     string? WrapperPath);

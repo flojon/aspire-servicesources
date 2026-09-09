@@ -34,6 +34,14 @@ never existed. Check the tag of the last release before adding one.
   `JavaScriptKindOptionsBuilder`) instead of a raw `Dictionary<string, object>`. The two shipped
   kinds' options classes (`JavaKindOptions`/`JavaScriptKindOptions`) stay `internal` — only the
   handles are public.
+- **`java.scheme`, so a `kind: java` service can declare an HTTPS endpoint** ([#247]). Previously
+  the endpoint was always named and served as `http`, so an AppHost whose Java service actually
+  speaks TLS had to compensate with a second, redundant `WithHttpsEndpoint` from outside the kind.
+  `scheme: https` (catalog-only, like `port`; defaults to `http`) names the endpoint `https`
+  instead, matching `container.scheme`/`kubernetes.scheme`. Getting the app to actually serve TLS
+  stays a framework concern reached from the AppHost — `As<JavaAppExecutableResource>()` paired
+  with Aspire's `WithHttpsCertificateConfiguration` — rather than something the kind wires up
+  itself.
 
 ### Changed
 
@@ -1519,6 +1527,7 @@ Targets `net10.0`.
 [#235]: https://github.com/flojon/aspire-servicesources/issues/235
 [#236]: https://github.com/flojon/aspire-servicesources/issues/236
 [#241]: https://github.com/flojon/aspire-servicesources/issues/241
+[#247]: https://github.com/flojon/aspire-servicesources/issues/247
 [#258]: https://github.com/flojon/aspire-servicesources/issues/258
 [#279]: https://github.com/flojon/aspire-servicesources/issues/279
 

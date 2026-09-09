@@ -98,6 +98,7 @@ public class CatalogExportsTests
             "JavaKindOptionsBuilder.wrapperPath",
             "JavaKindOptionsBuilder.args",
             "JavaKindOptionsBuilder.port",
+            "JavaKindOptionsBuilder.scheme",
             "JavaScriptKindOptionsBuilder.appDirectory",
             "JavaScriptKindOptionsBuilder.appType",
             "JavaScriptKindOptionsBuilder.packageManager",
