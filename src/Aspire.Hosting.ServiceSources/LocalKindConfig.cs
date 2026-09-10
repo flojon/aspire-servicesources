@@ -96,11 +96,42 @@ public static class LocalKindConfig
 
             throw new ServiceSourcesConfigurationException(
                 $"{Prefix(serviceName)}the per-kind config block must be a block of key/value pairs, " +
-                $"but found {found}. Check the indentation under the kind's key.");
+                $"but found {found}. {IndentationAdvice}");
         }
 
         return Deserialize<T>(Serializer.Serialize(rawConfig), serviceName);
     }
+
+    /// <summary>
+    /// The trailing sentence of the shape-rejection branch's message above (list and scalar alike):
+    /// sound advice for a yaml-sourced block, meaningless for a code-declared one where nothing was
+    /// ever indented. <see cref="Parse{T}"/> has no <see cref="Config.Catalog.CatalogOrigin"/> to
+    /// consult before choosing wording — its signature stays
+    /// <c>Parse&lt;T&gt;(rawConfig, serviceName)</c> — so this constant exists for core to find and
+    /// replace once it knows the origin, at the handler-invoking call sites in
+    /// <c>LocalProjectSource</c> (#302).
+    /// </summary>
+    internal const string IndentationAdvice = "Check the indentation under the kind's key.";
+
+    /// <summary>
+    /// Re-renders a <see cref="ServiceSourcesConfigurationException"/> thrown by the shape-rejection
+    /// branch of <see cref="Parse{T}"/> above, for a service <see cref="Config.Catalog.CatalogOrigin"/>
+    /// says was declared in code: <see cref="IndentationAdvice"/> sends the reader looking at
+    /// indentation under a yaml key that, for this service, does not exist. Called only from
+    /// <c>LocalProjectSource</c>, which is where core learns the origin — never from
+    /// <see cref="Parse{T}"/> itself, so the yaml-sourced path keeps today's wording unchanged. Any
+    /// other <see cref="ServiceSourcesConfigurationException"/> (an unknown property, a wrong options
+    /// type, a missing block) is untouched — this only ever matches the one sentence it looks for.
+    /// </summary>
+    internal static ServiceSourcesConfigurationException RewriteIndentationAdviceForCodeOrigin(
+        ServiceSourcesConfigurationException ex) =>
+        new(
+            ex.Message.Replace(
+                IndentationAdvice,
+                "This block was passed to WithKind in code, not read from a file — pass the options object " +
+                "this kind's registration method documents, not a list or a raw value.",
+                StringComparison.Ordinal),
+            ex);
 
     /// <summary>
     /// Reads a block already in yaml text: yaml's own untyped shape re-serialized, or a guest

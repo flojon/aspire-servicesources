@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources;
@@ -1440,5 +1441,245 @@ public class LocalProjectSourceTests
         Assert.Contains("../escapee", ex.Message);
         Assert.Empty(gitClient.ClonedRepos);
         Assert.False(Directory.Exists(Path.Combine(appHostDirectory, ".servicesources", "escapee")));
+    }
+
+    // #302: the two origin-blind shape-rejection messages in LocalKindConfig.Parse<T> ("found a
+    // list"/"found the scalar 'x' ... Check the indentation under the kind's key") assume every
+    // per-kind block came from yaml. A code-declared service's block came from a WithKind(kind,
+    // options) call instead, so nothing was ever indented — the message has to be re-rendered once
+    // core knows the service's CatalogOrigin, which LocalKindConfig.Parse<T> itself never learns
+    // (design "Option 2": its public signature stays Parse<T>(rawConfig, serviceName), so the
+    // rewrite happens in LocalProjectSource's handler-invoking wrappers instead, where
+    // ServiceDefinition.Origin is already in hand).
+    //
+    // ThrowingKindHandler mirrors exactly how a real kind package — including a third-party one —
+    // calls LocalKindConfig.Parse<T> from Validate/Resolve/ResolveDeferred, the same way
+    // Java/JavaKindOptions.cs and JavaScript/JavaScriptLocalKind.cs do. These tests exercise the
+    // real dispatch path in LocalProjectSource rather than a shortcut that could drift from it.
+    private sealed class ThrowingKindOptions
+    {
+        public string? Value { get; set; }
+    }
+
+    private sealed class ThrowingKindHandler : ILocalResourceKind
+    {
+        public const string KindName = "throwing-test-kind";
+
+        public void Validate(string serviceName, string repoRoot, object? rawConfig) =>
+            LocalKindConfig.Parse<ThrowingKindOptions>(rawConfig, serviceName);
+
+        public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+            IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig)
+        {
+            LocalKindConfig.Parse<ThrowingKindOptions>(rawConfig, serviceName);
+            throw new InvalidOperationException($"{nameof(Validate)} should have thrown first for a malformed block.");
+        }
+
+        public bool SupportsDeferredCheckout(object? rawConfig) => true;
+
+        public DeferredLocalResource? ResolveDeferred(
+            IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig)
+        {
+            LocalKindConfig.Parse<ThrowingKindOptions>(rawConfig, serviceName);
+            throw new InvalidOperationException(
+                $"{nameof(ResolveDeferred)} should have thrown first for a malformed block.");
+        }
+    }
+
+    /// <summary>
+    /// Unlike <see cref="ThrowingKindHandler"/>, <see cref="Validate"/> here is a no-op — reaching
+    /// core's other handler-invoking wrapper, <c>InvokeKindHandler</c>, which wraps
+    /// <see cref="ILocalResourceKind.Resolve"/> rather than <see cref="ILocalResourceKind.Validate"/>
+    /// and needs the identical origin-aware rewrite applied at its own call site.
+    /// </summary>
+    private sealed class ThrowingOnlyFromResolveKindHandler : ILocalResourceKind
+    {
+        public const string KindName = "throwing-from-resolve-test-kind";
+
+        public void Validate(string serviceName, string repoRoot, object? rawConfig)
+        {
+        }
+
+        public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+            IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig)
+        {
+            LocalKindConfig.Parse<ThrowingKindOptions>(rawConfig, serviceName);
+            throw new InvalidOperationException("Parse should have thrown before this line.");
+        }
+    }
+
+    private static ServiceDefinition ThrowingKindDefinition(
+        CatalogOrigin origin, object? kindOptions, string kind = ThrowingKindHandler.KindName, string serviceName = ServiceName) =>
+        new()
+        {
+            Repository = new RepositoryDefinition
+            {
+                Url = "https://github.com/company/orders",
+                CheckoutName = serviceName,
+            },
+            Project = "",
+            Kind = kind,
+            KindOptions = kindOptions,
+            Origin = origin,
+        };
+
+    private static IDistributedApplicationBuilder BuilderWithThrowingKind(string appHostDirectory)
+    {
+        var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            ProjectDirectory = appHostDirectory,
+            Args = [TestBuilderDefaults.DisableConfigReloadArg],
+        });
+        builder.AddLocalKind(ThrowingKindHandler.KindName, new ThrowingKindHandler());
+        builder.AddLocalKind(ThrowingOnlyFromResolveKindHandler.KindName, new ThrowingOnlyFromResolveKindHandler());
+        return builder;
+    }
+
+    [Fact]
+    public void Resolve_CodeDeclaredServiceWithJsonArrayBlock_DoesNotAdviseCheckingYamlIndentation()
+    {
+        // What a guest language's WithKind(kind, [ ... ]) marshals across as: a JsonArray. Wrong
+        // shape either way, but reached from code rather than a servicesources.yaml file.
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        var builder = BuilderWithThrowingKind(appHostDir);
+        var raw = JsonNode.Parse("""["not", "an", "object"]""");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new FakeGitClient()).Resolve(
+                builder, ServiceName, ThrowingKindDefinition(CatalogOrigin.Code, raw), DevConfig()));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("a list", ex.Message);
+        Assert.DoesNotContain("indentation", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("yaml", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("WithKind", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Resolve_CodeDeclaredServiceThrowingFromResolveRatherThanValidate_DoesNotAdviseCheckingYamlIndentation()
+    {
+        // The other handler-invoking wrapper core has — InvokeKindHandler, wrapping
+        // ILocalResourceKind.Resolve rather than Validate — needs the identical rewrite at its own
+        // call site; ThrowingKindHandler alone would never exercise it, since its Validate always
+        // throws first.
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        var builder = BuilderWithThrowingKind(appHostDir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new FakeGitClient()).Resolve(
+                builder, ServiceName,
+                ThrowingKindDefinition(
+                    CatalogOrigin.Code, new List<string> { "a", "b" }, kind: ThrowingOnlyFromResolveKindHandler.KindName),
+                DevConfig()));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("a list", ex.Message);
+        Assert.DoesNotContain("indentation", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("yaml", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("WithKind", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Resolve_CodeDeclaredServiceWithIEnumerableBlock_DoesNotAdviseCheckingYamlIndentation()
+    {
+        // WithKind("java", new List<string>()) from a C# AppHost — the wrong CLR shape for a real
+        // options object, but this one never touched a yaml file either.
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        var builder = BuilderWithThrowingKind(appHostDir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new FakeGitClient()).Resolve(
+                builder, ServiceName,
+                ThrowingKindDefinition(CatalogOrigin.Code, new List<string> { "a", "b" }),
+                DevConfig()));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("a list", ex.Message);
+        Assert.DoesNotContain("indentation", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("yaml", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("WithKind", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Resolve_CodeDeclaredServiceWithRawScalarBlock_DoesNotAdviseCheckingYamlIndentation()
+    {
+        // WithKind("java", "oops") — a plain CLR scalar passed where an options object belongs.
+        // Unlike the JsonArray/IEnumerable cases above, this reaches LocalKindConfig.Parse<T>'s
+        // *scalar* branch (found "the scalar 'x'") rather than its list branch, so it is the shape
+        // that actually exercises the checklist's other origin-blind message.
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        var builder = BuilderWithThrowingKind(appHostDir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new FakeGitClient()).Resolve(
+                builder, ServiceName, ThrowingKindDefinition(CatalogOrigin.Code, "oops"), DevConfig()));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("the scalar 'oops'", ex.Message);
+        Assert.DoesNotContain("indentation", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("yaml", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("WithKind", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Resolve_CodeDeclaredServiceWithJsonValueBlock_AlreadyDoesNotMentionYamlIndentation()
+    {
+        // A guest language's WithKind(kind, "just-a-string") marshals across as a JsonValue. Unlike
+        // JsonArray, this shape never reaches LocalKindConfig.Parse<T>'s shape-rejection branch at
+        // all post-#301 — CameFromCode classifies a JsonValue as "the wrong options type" instead
+        // (it is none of the shapes YamlDotNet's dynamic deserialization produces), a message that
+        // already names no yaml file. Pinned here as a characterization test: #302's checklist
+        // names this shape among the ones to cover, and this confirms it needs no rewrite rather
+        // than leaving that unverified.
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        var builder = BuilderWithThrowingKind(appHostDir);
+        var raw = JsonNode.Parse("\"just-a-string\"");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new FakeGitClient()).Resolve(
+                builder, ServiceName, ThrowingKindDefinition(CatalogOrigin.Code, raw), DevConfig()));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.DoesNotContain("indentation", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("yaml", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Resolve_YamlDeclaredServiceWithSequenceBlock_StillAdvisesCheckingIndentation()
+    {
+        // The control: a yaml-declared service hitting the exact same LocalKindConfig.Parse<T>
+        // list-shape branch must keep today's wording verbatim — #302 is about varying the message
+        // by origin, not softening it for yaml.
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        var builder = BuilderWithThrowingKind(appHostDir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new FakeGitClient()).Resolve(
+                builder, ServiceName,
+                ThrowingKindDefinition(CatalogOrigin.FromYaml("servicesources.yaml"), new List<string> { "a", "b" }),
+                DevConfig()));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("a list", ex.Message);
+        Assert.Contains("Check the indentation under the kind's key.", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Resolve_YamlDeclaredServiceWithScalarBlock_StillAdvisesCheckingIndentation()
+    {
+        // The same control against the scalar branch, so the rewrite mechanism (a message-content
+        // match, not a shape match) is confirmed not to touch the yaml scalar case either.
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        var builder = BuilderWithThrowingKind(appHostDir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new FakeGitClient()).Resolve(
+                builder, ServiceName,
+                ThrowingKindDefinition(CatalogOrigin.FromYaml("servicesources.yaml"), "oops"),
+                DevConfig()));
+
+        Assert.Contains(ServiceName, ex.Message);
+        Assert.Contains("the scalar 'oops'", ex.Message);
+        Assert.Contains("Check the indentation under the kind's key.", ex.Message, StringComparison.Ordinal);
     }
 }
