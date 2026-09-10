@@ -277,6 +277,11 @@ public class PrepareDeferredTests
     {
         using var deadline = new CancellationTokenSource(timeout);
 
+        // Reference identity, not resource id: ResourceNotificationService's first publish for a
+        // given id fixes which IResource instance owns it (PublishUpdateAsync throws
+        // InvalidOperationException if a later call for the same id names a different one), so
+        // watching for the same reference the seed and the production pipeline both publish through
+        // is required, not merely sufficient.
         await foreach (var @event in services.GetRequiredService<ResourceNotificationService>()
                            .WatchAsync(deadline.Token))
         {
@@ -436,13 +441,20 @@ public class PrepareDeferredTests
         var journal = new Journal();
         builder.AddLocalKind(KindName, new StandInKind(journal, "app.jar"));
 
-        var routing = new LocalProjectSource(new FakeGitClient(), new FakeRunner(journal) { ExitCode = 9 })
+        new LocalProjectSource(new FakeGitClient(), new FakeRunner(journal) { ExitCode = 9 })
             .Resolve(builder, "routing", Definition("routing", Prepare()), DevConfig());
+
+        // The real, registered resource — not the ServiceResource facade Resolve returns — is what
+        // the prepare-step failure pipeline publishes state updates against.
+        // ResourceNotificationService.PublishUpdateAsync throws if a later call for the same
+        // resource id names a different IResource instance than the one that first claimed it, so
+        // the seed below has to use the same object the production code will.
+        var routing = Assert.Single(builder.Resources, r => r.Name == "routing");
 
         var services = builder.Services.BuildServiceProvider();
         await builder.Eventing.PublishAsync(
             new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
-        await PublishNotStartedAsync(services, routing.Resource);
+        await PublishNotStartedAsync(services, routing);
 
         // Nothing throws out of the background task, which would take the host down and undo the
         // isolation deferral exists for.
@@ -452,7 +464,7 @@ public class PrepareDeferredTests
         // watch replays only the current one, which is what made the #189 tests flake.
         Assert.Equal(
             KnownResourceStates.FailedToStart,
-            await StateOfAsync(services, routing.Resource, TimeSpan.FromSeconds(30)));
+            await StateOfAsync(services, routing, TimeSpan.FromSeconds(30)));
 
         // The kind never got to judge a checkout the step left incomplete.
         Assert.Equal(["prepare:routing"], journal.Entries);
@@ -634,10 +646,16 @@ public class PrepareDeferredTests
             }.ToDefinition("servicesources.yaml", "orders", TestHelpers.EmptyRepositories),
             DevConfig());
 
+        // The real, registered project — not the ServiceResource facade Resolve returns — is what
+        // the prepare-step failure pipeline publishes state updates against;
+        // ResourceNotificationService.PublishUpdateAsync throws if the seed below used a different
+        // instance for the same resource id.
+        var realOrders = Assert.Single(builder.Resources, r => r.Name == "orders");
+
         var services = builder.Services.BuildServiceProvider();
         await builder.Eventing.PublishAsync(
             new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
-        await PublishNotStartedAsync(services, orders.Resource);
+        await PublishNotStartedAsync(services, realOrders);
 
         await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
 
@@ -647,7 +665,7 @@ public class PrepareDeferredTests
         Assert.Null(await RestoredProfileVariableAsync(orders.Resource, "DEMO_FROM_PROFILE"));
         Assert.Equal(
             KnownResourceStates.FailedToStart,
-            await StateOfAsync(services, orders.Resource, TimeSpan.FromSeconds(30)));
+            await StateOfAsync(services, realOrders, TimeSpan.FromSeconds(30)));
     }
 
     /// <summary>

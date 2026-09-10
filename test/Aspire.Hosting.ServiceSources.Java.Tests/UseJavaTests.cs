@@ -74,9 +74,11 @@ public class UseJavaTests
         builder.UseJava();
         var javaApi = builder.AddService("java-api");
 
-        // AddService hands back the very resource the handler created, so the endpoint a consumer
-        // resolves through WithReference(...) is the one declared from the java block's `port`.
-        Assert.IsType<JavaAppExecutableResource>(javaApi.Resource);
+        // javaApi.Resource is the ServiceResource facade; the real, registered JavaAppExecutableResource
+        // carries the same name. Its endpoint annotation is copied forward onto the facade too, so
+        // the endpoint a consumer resolves through WithReference(...) is the one declared from the
+        // java block's `port` either way.
+        Assert.IsType<JavaAppExecutableResource>(Assert.Single(builder.Resources, r => r.Name == "java-api"));
         var endpoint = Assert.Single(javaApi.Resource.Annotations.OfType<EndpointAnnotation>());
         Assert.Equal(8080, endpoint.TargetPort);
     }

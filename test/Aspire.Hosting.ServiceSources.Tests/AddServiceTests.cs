@@ -39,8 +39,10 @@ public class AddServiceTests
 
         var service = builder.AddService("orders");
 
-        Assert.Contains(builder.Resources, r => r.Name == "orders");
-        Assert.Contains(builder.Resources, r => ReferenceEquals(r, service.Resource));
+        // service.Resource is the ServiceResource facade; the real, registered ProjectResource
+        // carries the same name and is what DCP actually runs.
+        Assert.IsType<ServiceResource>(service.Resource);
+        Assert.IsAssignableFrom<ProjectResource>(Assert.Single(builder.Resources, r => r.Name == "orders"));
     }
 
     [Fact]
@@ -111,7 +113,8 @@ public class AddServiceTests
 
         var service = builder.AddService("orders");
 
-        Assert.Contains(builder.Resources, r => ReferenceEquals(r, service.Resource));
+        Assert.IsType<ServiceResource>(service.Resource);
+        Assert.IsAssignableFrom<ProjectResource>(Assert.Single(builder.Resources, r => r.Name == "orders"));
     }
 
     /// <summary>
@@ -226,9 +229,11 @@ public class AddServiceTests
         // and break a consumer resolving "orders".
         Assert.Equal("orders", service.Resource.Name);
         Assert.DoesNotContain(builder.Resources, r => r.Name.Contains("portforward", StringComparison.Ordinal));
-        // No facade any more: the returned builder wraps the registered port-forward executable
-        // itself, so DCP creates a Service for it and a container consumer can reference it (#58).
-        Assert.Contains(builder.Resources, r => ReferenceEquals(r, service.Resource));
+        // service.Resource is the ServiceResource facade, not itself registered; the real,
+        // registered port-forward executable carries the same name, so DCP creates a Service for it
+        // and a container consumer can reference it (#58).
+        Assert.IsType<ServiceResource>(service.Resource);
+        Assert.Contains(builder.Resources, r => r.Name == "orders");
 
         var endpoint = service.GetEndpoint("http");
         Assert.Equal("http", endpoint.EndpointName);
@@ -379,8 +384,10 @@ public class AddServiceTests
 
         var service = builder.AddService("orders");
 
+        // service.Resource is the ServiceResource facade — never the object DCP registers and runs
+        // — so it is not itself in builder.Resources; the real container carries the same name.
+        Assert.IsType<ServiceResource>(service.Resource);
         Assert.Contains(builder.Resources, r => r.Name == "orders");
-        Assert.Contains(builder.Resources, r => ReferenceEquals(r, service.Resource));
 
         var container = Assert.IsAssignableFrom<ContainerResource>(
             Assert.Single(builder.Resources, r => r.Name == "orders"));

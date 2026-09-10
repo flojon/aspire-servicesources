@@ -208,8 +208,9 @@ public class DeferredCheckoutTests
         var repoRoot = ExpectedRepoRoot(dir, "orders");
 
         Assert.True(IsDeferred(service.Resource));
-        Assert.IsAssignableFrom<ProjectResource>(service.Resource);
-        Assert.Contains(builder.Resources, r => ReferenceEquals(r, service.Resource));
+        // service.Resource is the ServiceResource facade; the real, registered project carries the
+        // same name and the deferred-registration annotations copied forward onto the facade.
+        Assert.IsAssignableFrom<ProjectResource>(Assert.Single(builder.Resources, r => r.Name == "orders"));
         Assert.False(Directory.Exists(repoRoot), "the checkout should not exist yet");
 
         // The path DCP will freeze into the executable spec at startup, named before the clone that
