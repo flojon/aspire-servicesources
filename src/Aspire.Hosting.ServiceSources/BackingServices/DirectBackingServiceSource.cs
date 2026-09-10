@@ -26,7 +26,8 @@ namespace Aspire.Hosting.ServiceSources.BackingServices;
 /// Both halves of that are measured rather than inferred, because the type's interfaces imply
 /// neither. It carries <c>IResourceWithConnectionString</c> and <c>IResourceWithWaitSupport</c> and
 /// <i>no</i> <c>IResourceWithoutLifetime</c>, read off the loaded assembly on Aspire 13.5.2 — so
-/// unlike <see cref="Sources.ServiceUrlResource"/>, which declares that marker deliberately (#170),
+/// unlike a <c>"url"</c>-sourced <see cref="ServiceResource"/>, whose wait is dropped by
+/// <see cref="Sources.UrlSource"/> rather than by a shared lifetime marker (#170),
 /// the wait here is honoured rather than dropped, and <c>BackingServiceWaitTests</c> pins that.
 /// Honoured says nothing about how long it then takes: on a live host the consumer leaves
 /// <c>Waiting</c> in about a second, because the value references nothing that has to start first.

@@ -52,6 +52,11 @@ public class UrlConsumerWaitTests
         var inventory = builder.AddService("inventory");
         var worker = Consumer(builder, "worker").WaitFor(inventory);
 
+        // BeforeStartEvent is what strips the WaitAnnotation now (DropWaitsOnUrlServices) — in a real
+        // run it always fires before DCP starts anything and before WaitForDependenciesAsync is ever
+        // called; this test publishes it explicitly to reproduce that ordering.
+        await TestHelpers.PublishBeforeStartEventAsync(builder);
+
         var notifications = builder.Services.BuildServiceProvider()
             .GetRequiredService<ResourceNotificationService>();
 
@@ -74,6 +79,8 @@ public class UrlConsumerWaitTests
         var inventory = builder.AddService("inventory");
         var worker = Consumer(builder, "worker").WaitForCompletion(inventory);
 
+        await TestHelpers.PublishBeforeStartEventAsync(builder);
+
         var notifications = builder.Services.BuildServiceProvider()
             .GetRequiredService<ResourceNotificationService>();
 
@@ -83,29 +90,17 @@ public class UrlConsumerWaitTests
     }
 
     /// <summary>
-    /// The mechanism, pinned separately from the behaviour it produces. Aspire's wait machinery
-    /// drops a <see cref="WaitAnnotation"/> whose target is an
-    /// <see cref="IResourceWithoutLifetime"/>, so declaring the interface is the whole fix — no
-    /// state is published and no annotation is rewritten.
+    /// ServiceResource is shared by every source, so it cannot carry IResourceWithoutLifetime
+    /// unconditionally — doing so would also suppress WaitFor on container/kubernetes/local services,
+    /// which must keep working. The "url" source's no-lifetime behaviour instead comes from
+    /// DropWaitsOnUrlServices stripping the WaitAnnotation at BeforeStartEvent, before Aspire's wait
+    /// machinery ever evaluates one — see the three tests below, all of which now publish
+    /// BeforeStartEvent before waiting.
     /// </summary>
     [Fact]
-    public void UrlSourcedService_HasNoLifetime()
+    public void UrlSourcedService_DoesNotDeclareIResourceWithoutLifetime()
     {
         var builder = TestHelpers.CreateBuilderThatCanStart(AppHostDirectory("url"));
-
-        var inventory = builder.AddService("inventory");
-
-        Assert.IsAssignableFrom<IResourceWithoutLifetime>(inventory.Resource);
-    }
-
-    /// <summary>
-    /// The contrast that keeps the fix narrow. Every other source resolves to a resource Aspire
-    /// actually runs, so a wait on one has to keep meaning what it says.
-    /// </summary>
-    [Fact]
-    public void ContainerSourcedService_StillHasALifetime()
-    {
-        var builder = TestHelpers.CreateBuilderThatCanStart(AppHostDirectory("container"));
 
         var inventory = builder.AddService("inventory");
 
@@ -223,6 +218,8 @@ public class UrlConsumerWaitTests
         var inventory = builder.AddService("inventory");
         var connectionString = builder.AddConnectionString(
             "inventory-cs", ReferenceExpression.Create($"{inventory.GetEndpoint("https")}"));
+
+        await TestHelpers.PublishBeforeStartEventAsync(builder);
 
         var notifications = builder.Services.BuildServiceProvider()
             .GetRequiredService<ResourceNotificationService>();

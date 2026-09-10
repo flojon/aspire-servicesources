@@ -29,26 +29,28 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// Registering the resource (#58's option 1) clears that DCP failure but replaces it with a worse
 /// one: the consuming container is never created and nothing says why. Delegating to
 /// <c>ExternalServiceResource</c> (option 2) is the route that would work, and is what the upstream
-/// issue blocks. See <see cref="ServiceUrlResource"/> for both.
+/// issue blocks.
 /// </para>
 /// <para>
 /// The other consequence of leaving the resource unregistered is that nothing ever publishes a
-/// state for it, so a consumer's <c>WaitFor</c> on one waited for the life of the run (#170). That
-/// one is fixed rather than pre-flighted, in two halves: <see cref="ServiceUrlResource"/> declares
-/// <see cref="IResourceWithoutLifetime"/>, which Aspire's wait machinery filters on, and
-/// <see cref="DropWaitsOnUrlServices"/> removes the now-inert annotation before start, because
+/// state for it, so a consumer's <c>WaitFor</c> on one waited for the life of the run (#170).
+/// <see cref="ServiceResource"/> is shared by every source, so it cannot declare
+/// <see cref="IResourceWithoutLifetime"/> unconditionally the way this resource once did — that
+/// would also suppress <c>WaitFor</c> on <c>container</c>/<c>kubernetes</c>/<c>local</c>-sourced
+/// services, which must keep working. Instead <see cref="DropWaitsOnUrlServices"/> removes a
+/// consumer's <see cref="WaitAnnotation"/> on a <c>"url"</c>-sourced service before start, because
 /// Aspire also reads it as a dependency and a container consumer fails on that.
 /// </para>
 /// </remarks>
 internal sealed class UrlSource : IServiceSource
 {
-    public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+    public IResourceBuilder<ServiceResource> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
         ServiceDeveloperConfig config, RepositoryDeveloperConfig? repositoryConfig = null)
     {
         var uri = ResolveUrl(serviceName, definition, config);
 
-        var resource = new ServiceUrlResource(serviceName);
+        var facade = new ServiceResource(serviceName);
         var endpoint = new EndpointAnnotation(
             ProtocolType.Tcp, uriScheme: uri.Scheme, name: uri.Scheme, transport: "http", port: uri.Port, targetPort: uri.Port)
         {
@@ -57,11 +59,11 @@ internal sealed class UrlSource : IServiceSource
         };
         endpoint.AllocatedEndpoint = new AllocatedEndpoint(
             endpoint, uri.Host, uri.Port, EndpointBindingMode.SingleAddress, targetPortExpression: null);
-        resource.Annotations.Add(endpoint);
+        facade.Annotations.Add(endpoint);
 
         RegisterContainerConsumerCheck(builder);
 
-        return ResolvedService.Tag(builder.CreateResourceBuilder(resource), serviceName, "url");
+        return ResolvedService.BridgeUnregistered(builder, facade, serviceName, "url");
     }
 
     /// <summary>
@@ -146,10 +148,13 @@ internal sealed class UrlSource : IServiceSource
     /// after the check above has had its say about references.
     /// </summary>
     /// <remarks>
-    /// <see cref="ServiceUrlResource"/> declaring <see cref="IResourceWithoutLifetime"/> is what
-    /// makes such a wait resolve instead of hanging (#170), and for a project or executable consumer
-    /// that is the whole of it — Aspire's wait machinery filters the annotation out and the resource
-    /// starts. The annotation is still <i>there</i>, though, and Aspire reads it in a second place
+    /// This method — not a shared <c>IResourceWithoutLifetime</c> marker — is what makes such a wait
+    /// resolve instead of hanging (#170): <see cref="ServiceResource"/> is shared by every source, so
+    /// it cannot declare that marker unconditionally without also suppressing <c>WaitFor</c> on
+    /// <c>container</c>/<c>kubernetes</c>/<c>local</c>-sourced services. Removing the annotation here,
+    /// before Aspire's wait machinery ever evaluates one, is what a project or executable consumer
+    /// needs. The annotation is still <i>there</i> until this runs, though, and Aspire reads it in a
+    /// second place
     /// that has nothing to do with waiting: <c>GetResourceDependenciesAsync</c> counts a wait target
     /// as a dependency of the waiter. For a <b>container</b> consumer that puts the url service back
     /// into the set DCP plumbs container-to-host networking for, and it fails to start for the same
@@ -179,7 +184,7 @@ internal sealed class UrlSource : IServiceSource
             // Materialised before removing: Annotations is the live collection being mutated.
             var waitsOnUrlServices = resource.Annotations
                 .OfType<WaitAnnotation>()
-                .Where(wait => wait.Resource is ServiceUrlResource)
+                .Where(wait => IsUrlSourcedService(wait.Resource))
                 .ToArray();
 
             foreach (var wait in waitsOnUrlServices)
@@ -250,13 +255,13 @@ internal sealed class UrlSource : IServiceSource
     /// not at the service, so nothing here matches. Measured: the url service is still in the set
     /// <c>GetResourceDependenciesAsync</c> returns for that container, and it still fails the way
     /// #58 describes. Closing it means walking the connection string's expression for an endpoint on
-    /// a <see cref="ServiceUrlResource"/>, which widens what this pre-flight refuses and belongs
-    /// with #72 rather than here. Note that the wait side of the same shape <i>is</i> handled — see
+    /// a url-sourced <see cref="ServiceResource"/>, which widens what this pre-flight refuses and
+    /// belongs with #72 rather than here. Note that the wait side of the same shape <i>is</i> handled — see
     /// <see cref="DropWaitsOnUrlServices"/> — so a connection string that a container does not
     /// reference is fine.
     /// </para>
     /// </remarks>
-    private static ServiceUrlResource? ConsumedUrlService(ContainerResource consumer)
+    private static ServiceResource? ConsumedUrlService(ContainerResource consumer)
     {
         foreach (var annotation in consumer.Annotations)
         {
@@ -269,14 +274,22 @@ internal sealed class UrlSource : IServiceSource
                 _ => null,
             };
 
-            if (consumed is ServiceUrlResource urlService)
+            if (consumed is ServiceResource candidate && IsUrlSourcedService(candidate))
             {
-                return urlService;
+                return candidate;
             }
         }
 
         return null;
     }
+
+    /// <summary>
+    /// Whether <paramref name="resource"/> is the "url"-sourced facade — the type check alone no
+    /// longer distinguishes it, since every source now shares <see cref="ServiceResource"/>.
+    /// </summary>
+    private static bool IsUrlSourcedService(IResource resource) =>
+        resource is ServiceResource
+        && resource.Annotations.OfType<ServiceSourceAnnotation>().Any(a => a.Source == "url");
 
     /// <summary>
     /// <paramref name="url"/> with any credentials in it replaced, for the messages that quote it

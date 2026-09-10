@@ -10,8 +10,14 @@ namespace Aspire.Hosting.ServiceSources.Tests.BackingServices;
 /// Aspire drops a wait whose target is an <see cref="IResourceWithoutLifetime"/> and honours every
 /// other one, leaving it to resolve when the target publishes a state. A <c>"direct"</c>-sourced
 /// backing service is Aspire's <c>ConnectionStringResource</c>, which does not carry that marker, so
-/// its wait is honoured — unlike <see cref="Sources.ServiceUrlResource"/>, which declares the marker
-/// deliberately (#170) and is the contrast that gives these their meaning.
+/// its wait is honoured — unlike a <c>"url"</c>-sourced service, whose real resource keeps no
+/// lifetime for Aspire to watch. That contrast no longer comes from a shared type declaring the
+/// marker, the way it once did: <c>ServiceResource</c> is shared by every source, so it cannot carry
+/// <see cref="IResourceWithoutLifetime"/> unconditionally without also suppressing <c>WaitFor</c> on
+/// <c>container</c>/<c>kubernetes</c>/<c>local</c>-sourced services. Instead
+/// <c>Sources.UrlSource.DropWaitsOnUrlServices</c> strips a consumer's wait on a <c>"url"</c>-sourced
+/// service at <c>BeforeStartEvent</c>, before Aspire's wait machinery ever evaluates one — and is the
+/// contrast that gives these their meaning.
 /// <para>
 /// <b>These assert the marker and never a timing.</b> They run against a provider built from the
 /// builder's services, with no orchestrator publishing states for anything, so an honoured wait
@@ -91,16 +97,13 @@ public class BackingServiceWaitTests
     }
 
     /// <summary>
-    /// A <c>"url"</c>-sourced service does carry the marker, and its wait resolves with nothing
-    /// running at all.
+    /// A "url"-sourced service's wait resolves with nothing running at all — not because the facade
+    /// carries IResourceWithoutLifetime (it doesn't; ServiceResource is shared by every source), but
+    /// because UrlSource.DropWaitsOnUrlServices strips the WaitAnnotation at BeforeStartEvent, before
+    /// Aspire's wait machinery ever evaluates one.
     /// </summary>
-    /// <remarks>
-    /// The contrast, and the only wait here that demonstrates resolving rather than merely being
-    /// honoured: Aspire drops the annotation outright, so this returns in a harness where an
-    /// honoured wait blocks.
-    /// </remarks>
     [Fact]
-    public async Task UrlSourcedService_CarriesTheMarkerAndItsWaitResolves()
+    public async Task UrlSourcedService_WaitResolvesOnceBeforeStartEventHasRun()
     {
         var dir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
@@ -120,7 +123,9 @@ public class BackingServiceWaitTests
             .AddExecutable("worker", "dotnet", TempDirectories.CreateSubdirectory().FullName)
             .WaitFor(inventory);
 
-        Assert.IsAssignableFrom<IResourceWithoutLifetime>(inventory.Resource);
+        Assert.IsNotAssignableFrom<IResourceWithoutLifetime>(inventory.Resource);
+
+        await TestHelpers.PublishBeforeStartEventAsync(builder);
 
         var notifications = builder.Services.BuildServiceProvider()
             .GetRequiredService<ResourceNotificationService>();
