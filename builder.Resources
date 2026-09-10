@@ -1,0 +1,19 @@
+// In UrlSourceExtensions.cs / ServiceSourceBuilderExtensions.cs
+// Implementing safe pre-flight validation and injection for Url-sourced resources referenced by containers.
+
+public static IResourceBuilder<TDestination> WithReference<TDestination>(
+    this IResourceBuilder<TDestination> builder,
+    IResourceBuilder<UrlResource> sourceResource,
+    string? connectionName = null) where TDestination : IResourceWithEnvironment
+{
+    // Pre-flight check for container consumers referencing URL-sourced services (Blocked by microsoft/aspire#9965)
+    if (builder.Resource is ContainerResource)
+    {
+        throw new InvalidOperationException(
+            $"Container resource '{builder.Resource.Name}' cannot reference URL-sourced service '{sourceResource.Resource.Name}' " +
+            $"because URL-sourced services are currently unregistered in Aspire builder resources (blocked on microsoft/aspire#9965). " +
+            $"Consider using a container or local service source, or configure the URL directly via environment variables.");
+    }
+
+    return builder.WithReference(sourceResource);
+}
