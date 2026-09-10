@@ -72,9 +72,9 @@ const inventory = await builder.addService('inventory');
 
 const payments = await builder
   .addService('payments')
-  .withServiceEnvironment('DEMO_INJECTED_BY_APPHOST', 'true')
-  .withServiceReference(inventory)
-  .withServiceHttpsEndpoint();
+  .withEnvironment('DEMO_INJECTED_BY_APPHOST', 'true')
+  .withReference(inventory)
+  .withHttpsEndpoint();
 
 const probeScript =
   'console.log("INVENTORY_URL=" + process.env.INVENTORY_URL);' +
