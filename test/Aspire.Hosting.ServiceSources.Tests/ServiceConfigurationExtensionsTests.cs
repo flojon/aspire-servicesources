@@ -7,7 +7,8 @@ using IPortAllocator = Aspire.Hosting.ServiceSources.PortAllocation.IPortAllocat
 namespace Aspire.Hosting.ServiceSources.Tests;
 
 /// <summary>
-/// Covers issue #53: the AppHost applying its own configuration to a resolved service. Each test
+/// Covers issue #53: the AppHost applying its own configuration to a resolved service, now through
+/// native vocabulary on ServiceResource's own interfaces rather than Configure&lt;T&gt;. Each test
 /// drives a real source so the resource under test is the one an AppHost would actually get.
 /// </summary>
 public class ServiceConfigurationExtensionsTests
@@ -43,92 +44,90 @@ public class ServiceConfigurationExtensionsTests
     private static IDistributedApplicationBuilder Builder() =>
         TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
-    private static IResourceBuilder<IResourceWithServiceDiscovery> AddContainerService(
-        IDistributedApplicationBuilder builder) =>
+    private static IResourceBuilder<ServiceResource> AddContainerService(IDistributedApplicationBuilder builder) =>
         new ContainerSource().Resolve(builder, "payments", ContainerDefinition, new ServiceDeveloperConfig { Source = "container" });
 
-    private static IResourceBuilder<IResourceWithServiceDiscovery> AddUrlService(IDistributedApplicationBuilder builder) =>
+    private static IResourceBuilder<ServiceResource> AddUrlService(IDistributedApplicationBuilder builder) =>
         new UrlSource().Resolve(builder, "inventory", UrlDefinition, new ServiceDeveloperConfig { Source = "url" });
 
     [Fact]
-    public void Configure_OnContainerSource_AppliesEnvironmentToTheRealResource()
+    public void WithEnvironment_AppliesToTheRealResource()
     {
         var builder = Builder();
 
-        var service = AddContainerService(builder)
-            .Configure<IResourceWithEnvironment>(r => r.WithEnvironment("DBUSERNAME", "postgres"));
+        var service = AddContainerService(builder).WithEnvironment("DBUSERNAME", "postgres");
 
         Assert.NotEmpty(service.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>());
     }
 
     [Fact]
-    public void Configure_ReturnsTheSameBuilder_SoCapabilitiesCanBeChained()
+    public void NativeCalls_ReturnTheSameBuilder_SoCapabilitiesCanBeChained()
     {
         var builder = Builder();
         var service = AddContainerService(builder);
 
-        var returned = service
-            .Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B"))
-            .Configure<IResourceWithArgs>(r => r.WithArgs("--verbose"));
+        var returned = service.WithEnvironment("A", "B").WithArgs("--verbose");
 
         Assert.Same(service.Resource, returned.Resource);
     }
 
     [Fact]
-    public void Configure_WaitFor_AppliesToTheRealResource()
+    public void WaitFor_AppliesToTheRealResource()
     {
         var builder = Builder();
         var dependency = builder.AddResource(new ServiceContainerResource("redis")).WithImage("redis");
 
-        var service = AddContainerService(builder)
-            .Configure<IResourceWithWaitSupport>(r => r.WaitFor(dependency));
+        var service = AddContainerService(builder).WaitFor(dependency);
 
         Assert.NotEmpty(service.Resource.Annotations.OfType<WaitAnnotation>());
     }
 
     [Fact]
-    public void As_ReturnsATypedBuilderForTheUnderlyingResource()
+    public void Unwrap_ReturnsATypedBuilderForTheUnderlyingResource()
     {
         var builder = Builder();
 
-        var typed = AddContainerService(builder).As<ContainerResource>();
+        var typed = AddContainerService(builder).Unwrap<ContainerResource>();
 
         Assert.Equal("payments", typed.Resource.Name);
     }
 
     [Fact]
-    public void As_MismatchedType_ThrowsNamingTheService()
+    public void Unwrap_MismatchedType_ThrowsNamingTheService()
     {
         var builder = Builder();
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => AddContainerService(builder).As<ProjectResource>());
+            () => AddContainerService(builder).Unwrap<ProjectResource>());
 
         Assert.Contains("payments", ex.Message);
         Assert.Contains("container", ex.Message);
     }
 
     [Fact]
-    public void Configure_OnUrlSource_SkipsWithoutThrowing_SoSourceSwitchingKeepsWorking()
+    public void WithEnvironment_OnUrlSource_SkipsWithoutThrowing_SoSourceSwitchingKeepsWorking()
     {
         var builder = Builder();
         var callbackRan = false;
 
         // A developer switching this service to "url" in their own servicesources.local.json must
         // not break a Program.cs they don't own.
-        var service = AddUrlService(builder)
-            .Configure<IResourceWithEnvironment>(_ => callbackRan = true);
+        var service = AddUrlService(builder).WithEnvironment("A", () =>
+        {
+            callbackRan = true;
+            return "B";
+        });
 
         Assert.False(callbackRan);
         Assert.NotNull(service);
     }
 
     [Fact]
-    public void Configure_OnUrlSource_ReportsTheSkip()
+    public void WithEnvironment_OnUrlSource_ReportsTheSkip()
     {
         var builder = Builder();
 
-        AddUrlService(builder).Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B"));
+        AddUrlService(builder).WithEnvironment("A", "B");
 
         var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
         Assert.Contains("inventory", message);
@@ -137,7 +136,7 @@ public class ServiceConfigurationExtensionsTests
     }
 
     [Fact]
-    public void Configure_ManyCallsOnOneService_ReportOneAggregatedSkip()
+    public void ManyCallsOnOneUrlService_ReportOneAggregatedSkip()
     {
         var builder = Builder();
         var service = AddUrlService(builder);
@@ -147,35 +146,35 @@ public class ServiceConfigurationExtensionsTests
         // warning per call.
         for (var i = 0; i < 25; i++)
         {
-            service.Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B"));
+            service.WithEnvironment("A", "B");
         }
 
-        service.Configure<IResourceWithWaitSupport>(_ => { });
+        service.WaitFor(builder.AddResource(new ServiceContainerResource("migrations")).WithImage("migrate"));
 
         var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
-        // "calls" rather than "Configure calls": the same message also stands for a consumer's
+        // "calls" rather than "WithEnvironment calls": the same message also stands for a consumer's
         // dropped WaitFor, so the tally names each call and the summary only counts them.
         Assert.Contains("26 calls", message);
-        Assert.Contains("Configure<IResourceWithEnvironment> ×25", message);
-        Assert.Contains("Configure<IResourceWithWaitSupport>", message);
+        Assert.Contains("WithEnvironment ×25", message);
+        Assert.Contains("WaitFor/WaitForCompletion", message);
     }
 
     [Fact]
-    public void Configure_OnTwoDifferentServices_ReportsThemSeparately()
+    public void TwoDifferentUrlServices_ReportSkipsSeparately()
     {
         var builder = Builder();
 
-        AddUrlService(builder).Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B"));
+        AddUrlService(builder).WithEnvironment("A", "B");
         new UrlSource()
             .Resolve(builder, "billing", UrlDefinition, new ServiceDeveloperConfig { Source = "url" })
-            .Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B"));
+            .WithEnvironment("A", "B");
 
         // Grouping is per service, not global — each service names itself and its own remedy.
         Assert.Equal(2, ServiceSourcesWarnings.For(builder).Messages.Count);
     }
 
     [Fact]
-    public void Configure_OnKubernetesSource_SkipsRatherThanConfiguringThePortForward()
+    public void WithEnvironment_OnKubernetesSource_SkipsRatherThanConfiguringThePortForward()
     {
         var builder = Builder();
         var service = new KubernetesSource(new FixedPortAllocator()).Resolve(
@@ -184,14 +183,14 @@ public class ServiceConfigurationExtensionsTests
 
         // The port-forward executable would accept environment variables happily, so skipping has to
         // be driven by the source rather than by a capability check.
-        service.Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B"));
+        service.WithEnvironment("A", "B");
 
         Assert.Empty(service.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>());
         Assert.Contains("port-forward", Assert.Single(ServiceSourcesWarnings.For(builder).Messages));
     }
 
     [Fact]
-    public void Configure_WaitOnKubernetesSource_StillApplies_BecauseOrderingThePortForwardIsCorrect()
+    public void WaitFor_OnKubernetesSource_StillApplies_BecauseOrderingThePortForwardIsCorrect()
     {
         var builder = Builder();
         var migrations = builder.AddResource(new ServiceContainerResource("migrations")).WithImage("migrate");
@@ -203,20 +202,19 @@ public class ServiceConfigurationExtensionsTests
         // port-forward is a real registered executable, and holding it back until migrations finish is
         // exactly what the AppHost asked for. Skipping it lost the ordering silently the moment
         // someone switched a service to "kubernetes".
-        service.Configure<IResourceWithWaitSupport>(r => r.WaitForCompletion(migrations));
+        service.WaitForCompletion(migrations);
 
         Assert.NotEmpty(service.Resource.Annotations.OfType<WaitAnnotation>());
         Assert.Empty(ServiceSourcesWarnings.For(builder).Messages);
     }
 
     [Fact]
-    public void Configure_WaitOnUrlSource_StillSkips_BecauseNothingIsRegisteredToOrder()
+    public void WaitFor_OnUrlSource_StillSkips_BecauseNothingIsRegisteredToOrder()
     {
         var builder = Builder();
         var migrations = builder.AddResource(new ServiceContainerResource("migrations")).WithImage("migrate");
 
-        var service = AddUrlService(builder)
-            .Configure<IResourceWithWaitSupport>(r => r.WaitForCompletion(migrations));
+        var service = AddUrlService(builder).WaitForCompletion(migrations);
 
         // A "url" service's resource is never registered, so there is no process to hold back.
         Assert.Empty(service.Resource.Annotations.OfType<WaitAnnotation>());
@@ -238,7 +236,7 @@ public class ServiceConfigurationExtensionsTests
             """{ "services": { "inventory": { "source": "url" } } }""");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
 
-        builder.AddService("inventory").Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B"));
+        builder.AddService("inventory").WithEnvironment("A", "B");
 
         // Buffered during composition — there is no logger yet — and flushed here.
         var ex = await Record.ExceptionAsync(() => TestHelpers.PublishBeforeStartEventAsync(builder));
@@ -248,12 +246,12 @@ public class ServiceConfigurationExtensionsTests
     }
 
     [Fact]
-    public void As_OnUrlSource_StillThrows_BecauseItMustReturnABuilder()
+    public void Unwrap_OnUrlSource_StillThrows_BecauseItMustReturnABuilder()
     {
         var builder = Builder();
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => AddUrlService(builder).As<IResourceWithEnvironment>());
+            () => AddUrlService(builder).Unwrap<IResourceWithEnvironment>());
 
         Assert.Contains("inventory", ex.Message);
         Assert.Contains("'url'", ex.Message);

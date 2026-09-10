@@ -14,15 +14,38 @@ internal static class Reachability
     private static readonly HashSet<string> OutOfBandSources = new(StringComparer.Ordinal) { "url", "kubernetes" };
 
     /// <summary>
+    /// The annotation types a native vocabulary method adds as the capability itself — as opposed to
+    /// bookkeeping Aspire attaches alongside it, such as <c>ResourceRelationshipAnnotation</c> (the
+    /// dashboard link <c>WaitFor</c> also records) or an <c>EndpointReferenceAnnotation</c>. Found by
+    /// tracing what <c>WaitFor</c> actually adds: it calls both <c>WithAnnotation(waitAnnotation)</c>
+    /// <em>and</em> <c>WithRelationship(...)</c> (itself <c>WithAnnotation(new
+    /// ResourceRelationshipAnnotation(...))</c>) for a single AppHost call, and only the first of the
+    /// two is what <see cref="ServiceConfigurationExtensions"/>'s old <c>Configure&lt;T&gt;</c> table
+    /// ever gated — the second is decoration this reachability check must not independently skip and
+    /// warn about, or a single reachable <c>WaitFor</c> call reports two skips instead of zero.
+    /// </summary>
+    private static readonly HashSet<string> CapabilityAnnotationTypeNames = new(StringComparer.Ordinal)
+    {
+        // "EnvironmentAnnotation" is internal to Aspire.Hosting.dll — see CapabilityLabel's remarks.
+        "EnvironmentAnnotation",
+        nameof(EnvironmentCallbackAnnotation),
+        nameof(CommandLineArgsCallbackAnnotation),
+        nameof(EndpointAnnotation),
+        nameof(WaitAnnotation),
+    };
+
+    /// <summary>
     /// Whether an annotation of <paramref name="annotationType"/> cannot reach the service behind
     /// <paramref name="source"/> — an exact re-expression of
-    /// <c>ServiceConfigurationExtensions.IsUnreachable&lt;T&gt;</c> (design §5): everything is
-    /// unreachable for <c>"url"</c>; only <see cref="WaitAnnotation"/> survives for
+    /// <c>ServiceConfigurationExtensions.IsUnreachable&lt;T&gt;</c> (design §5): every capability
+    /// annotation is unreachable for <c>"url"</c>; only <see cref="WaitAnnotation"/> survives for
     /// <c>"kubernetes"</c>, whose real resource is a genuine <c>kubectl port-forward</c> process
-    /// worth ordering against.
+    /// worth ordering against. Anything outside <see cref="CapabilityAnnotationTypeNames"/> is
+    /// always reachable — it is bookkeeping, not configuration a developer wrote.
     /// </summary>
     public static bool IsUnreachable(Type annotationType, string source) =>
         OutOfBandSources.Contains(source)
+        && CapabilityAnnotationTypeNames.Contains(annotationType.Name)
         && !(string.Equals(source, "kubernetes", StringComparison.Ordinal) && annotationType == typeof(WaitAnnotation));
 
     /// <summary>
