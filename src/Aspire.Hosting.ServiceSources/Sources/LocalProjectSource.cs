@@ -363,12 +363,9 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
 
     /// <summary>
     /// Whether <paramref name="ex"/> is the shape-rejection message from
-    /// <see cref="LocalKindConfig.Parse{T}"/> reaching a code-declared service (#302) — the one case
-    /// where core, not <see cref="LocalKindConfig"/> itself, has to re-render the advice, because
-    /// only core knows <see cref="ServiceDefinition.Origin"/>. Every other
-    /// <see cref="ServiceSourcesConfigurationException"/> — an unknown property, a wrong options
-    /// type, a missing block, anything a kind's own <c>Validate</c>/<c>Resolve</c> throws — is left
-    /// exactly as thrown.
+    /// <see cref="LocalKindConfig.Parse{T}"/> reaching a code-declared service — the one case where
+    /// core, not <see cref="LocalKindConfig"/> itself, has to re-render the advice, since only core
+    /// knows <see cref="ServiceDefinition.Origin"/>. Every other exception is left as thrown.
     /// </summary>
     private static bool IsCodeOriginIndentationAdvice(ServiceDefinition definition, ServiceSourcesConfigurationException ex) =>
         definition.Origin.Kind == CatalogOriginKind.Code

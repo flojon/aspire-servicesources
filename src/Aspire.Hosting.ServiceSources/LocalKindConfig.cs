@@ -103,34 +103,20 @@ public static class LocalKindConfig
     }
 
     /// <summary>
-    /// The trailing sentence of the shape-rejection branch's message above (list and scalar alike):
-    /// sound advice for a yaml-sourced block, meaningless for a code-declared one where nothing was
-    /// ever indented. <see cref="Parse{T}"/> has no <see cref="Config.Catalog.CatalogOrigin"/> to
-    /// consult before choosing wording — its signature stays
-    /// <c>Parse&lt;T&gt;(rawConfig, serviceName)</c> — so this constant exists for core to find and
-    /// replace once it knows the origin, at the handler-invoking call sites in
-    /// <c>LocalProjectSource</c> (#302).
+    /// The trailing sentence of the shape-rejection message above: sound advice for a yaml-sourced
+    /// block, meaningless for a code-declared one. Exposed so <c>LocalProjectSource</c> can find and
+    /// replace it once it knows the service's origin, since <see cref="Parse{T}"/> itself has no
+    /// <see cref="Config.Catalog.CatalogOrigin"/> to consult.
     /// </summary>
     internal const string IndentationAdvice = "Check the indentation under the kind's key.";
 
     /// <summary>
-    /// Re-renders a <see cref="ServiceSourcesConfigurationException"/> thrown by the shape-rejection
-    /// branch of <see cref="Parse{T}"/> above, for a service <see cref="Config.Catalog.CatalogOrigin"/>
-    /// says was declared in code: <see cref="IndentationAdvice"/> sends the reader looking at
-    /// indentation under a yaml key that, for this service, does not exist. Called only from
-    /// <c>LocalProjectSource</c>, which is where core learns the origin — never from
-    /// <see cref="Parse{T}"/> itself, so the yaml-sourced path keeps today's wording unchanged. Any
-    /// other <see cref="ServiceSourcesConfigurationException"/> (an unknown property, a wrong options
-    /// type, a missing block) is untouched — this only ever matches the one sentence it looks for.
-    ///
-    /// Deliberately does <em>not</em> chain <paramref name="ex"/> as the returned exception's
+    /// Re-renders a shape-rejection <see cref="ServiceSourcesConfigurationException"/> for a
+    /// code-declared service, replacing <see cref="IndentationAdvice"/> with wording that doesn't
+    /// point at a yaml file. Deliberately does not chain <paramref name="ex"/> as an
     /// <see cref="Exception.InnerException"/>: <see cref="ServiceSourcesConfigurationException.Describe"/>
-    /// prints every distinct message in the inner-exception chain as a "caused by" line, and
-    /// <paramref name="ex"/>'s own message is exactly the superseded sentence this method exists to
-    /// replace — chaining it would print the discarded yaml-indentation advice right back into the
-    /// developer-visible output it was rewritten to avoid. There is no other diagnostic content in
-    /// <paramref name="ex"/> worth preserving; it is the same shape-rejection message, word for word,
-    /// with one sentence swapped.
+    /// prints inner-exception messages as "caused by" lines, which would print the discarded
+    /// yaml advice right back into the output this method exists to remove.
     /// </summary>
     internal static ServiceSourcesConfigurationException RewriteIndentationAdviceForCodeOrigin(
         ServiceSourcesConfigurationException ex) =>
