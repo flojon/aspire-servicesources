@@ -44,9 +44,11 @@ public static IResourceBuilder<IResourceWithServiceDiscovery> AddService(
 `IResourceBuilder<IResourceWithServiceDiscovery>` — one of Aspire's own capability interfaces — is
 also offered on every other resource builder in the AppHost that happens to satisfy it
 (`AddProject`, `AddContainer`, `AddExecutable` results included). That forced three permanent
-workarounds: `Configure<T>`/`As<T>` (`ServiceConfigurationExtensions.cs`), the ten
-`WithService*`/`WaitForService*` shims (`ServiceConfigurationExports.cs`), all three now retired by
-this design (§4). PR #319 settled that a **public concrete class** does not hit the TypeScript
+workarounds: `Configure<T>`/`As<T>` (`ServiceConfigurationExtensions.cs`) and the ten
+`WithService*`/`WaitForService*` shims (`ServiceConfigurationExports.cs`). `Configure<T>` and the ten
+shims are retired by this design (§4); `As<T>` is renamed to `Unwrap<T>`, not retired — the
+capability it provides has no native replacement (§4). PR #319 settled that a **public concrete
+class** does not hit the TypeScript
 codegen wall the current interface return was chosen to avoid; PR #320 settled that **no single
 concrete class can be the literal DCP-registered object** for all four sources, because container
 dispatch is annotation-based while executable/project dispatch is nominal-type-based, and
@@ -385,20 +387,34 @@ WaitBehavior = waitBehavior })`. Two directions matter, and they are not symmetr
    more likely place a subtle failure would hide, precisely because it needs no dual-write to
    *look* like it works.
 
-### `Configure<T>`/`As<T>` themselves
+### `Configure<T>` itself; `As<T>()` renamed to `Unwrap<T>()`
 
-Retired (§4) — nothing reaches them once native vocabulary is in place.
+`Configure<T>` is retired (§4) — nothing reaches it once native vocabulary is in place. `As<T>()` is
+not retired; it is renamed to `Unwrap<T>()` and kept as the escape hatch to a kind-specific resource
+type native vocabulary cannot reach (§4).
 
 ---
 
-## 4. Retiring `Configure<T>`, the `WithService*`/`WaitForService*` shims, and `As<T>()`
+## 4. Retiring `Configure<T>` and the `WithService*`/`WaitForService*` shims; renaming `As<T>()` to `Unwrap<T>()`
 
-- **`Configure<T>`/`As<T>` (`ServiceConfigurationExtensions.cs`)** are deleted. Every capability
-  they existed to reach — `IResourceWithEnvironment`, `IResourceWithArgs`, `IResourceWithEndpoints`,
+- **`Configure<T>` (`ServiceConfigurationExtensions.cs`)** is deleted. Every capability it existed to
+  reach — `IResourceWithEnvironment`, `IResourceWithArgs`, `IResourceWithEndpoints`,
   `IResourceWithWaitSupport` — is now a real interface `ServiceResource` implements, so Aspire's own
-  extension methods bind directly. The out-of-band skip-with-warning behaviour `Configure<T>` and
-  `As<T>` implemented moves into `ServiceResourceBuilder.WithAnnotation` (§5) — it does not
-  disappear, it changes which type it is keyed on (annotation type instead of a generic `T`).
+  extension methods bind directly. The out-of-band skip-with-warning behaviour `Configure<T>`
+  implemented moves into `ServiceResourceBuilder.WithAnnotation` (§5) — it does not disappear, it
+  changes which type it is keyed on (annotation type instead of a generic `T`).
+- **`As<T>` (`ServiceConfigurationExtensions.cs`) is renamed to `Unwrap<T>`, not deleted.** `As*` is
+  Aspire's own naming convention for a resource-builder method that reinterprets the *same* resource
+  for publish and always returns the *same* builder type (`AsHttp2Service`, and similar — never a
+  downcast to a different type) — `As<T>()` as a genuine type-downcast is a false friend against that
+  convention, which is its own justification for retirement in the ticket. The capability it
+  provides is not retired, because it cannot be: kind-specific vocabulary on non-`dotnet` local kinds
+  (today JavaScript and Java; more per #46-#50) is open-ended and package-external, so
+  `ServiceResource`'s five interfaces can never fully replace it. Only the name moves.
+  `Unwrap<T>()`'s signature, receiver type, and throw-vs-skip behaviour are unchanged — see this
+  section's further discussion below and the amended [Open Question 1](#open-questions). Per-kind
+  convenience methods (e.g. a hypothetical `GetJavaScriptApp()`/`GetJavaApp()`) were proposed
+  separately and declined by the human; only this single generic rename is in scope.
 - **The ten `WithService*`/`WaitForService*` shims (`ServiceConfigurationExports.cs`)** are deleted.
   They existed solely as the guest-language (TypeScript/polyglot) face of `Configure<T>`, each
   carrying `[AspireExport]` because a generic method cannot itself project (ATS erases `T` to its
@@ -449,13 +465,24 @@ should be adjusted so the message still names a capability an AppHost author rec
 `EnvironmentAnnotation`/`EnvironmentCallbackAnnotation` to a shared "environment" label) rather than
 a raw annotation type name — see [Open Question 2](#open-questions).
 
-`As<T>()`'s throwing behaviour (rather than `Configure<T>`'s skip) has no equivalent need under
-this design: there is no longer a generic escape hatch returning `IResourceBuilder<T>` for an
-out-of-band source to throw from, because the native methods this design buys back are the only
-public surface, and they degrade to skip-with-warning uniformly. The one place `As<T>`'s
-throw-not-skip behaviour mattered — reaching a **kind-specific** resource type
-(`service.As<JavaScriptAppResource>().WithRunScript("dev")`) — is not replaced by anything native
-and is called out as [Open Question 1](#open-questions).
+`Unwrap<T>()`'s throwing behaviour (rather than `Configure<T>`'s skip) stays exactly because native
+vocabulary does not cover everything it reaches: the native methods this design buys back
+(`WithEnvironment`, `WithReference`, `WithArgs`, `WithHttpEndpoint`/`WithHttpsEndpoint`, `WaitFor`,
+`WaitForCompletion`) degrade to skip-with-warning uniformly, but a **kind-specific** resource type's
+own vocabulary — `service.Unwrap<JavaScriptAppResource>().WithRunScript("dev")` — is not replaced by
+anything native and never will be, since non-`dotnet` local kinds are open-ended and
+package-external (see this section's `Unwrap<T>` bullet above and the amended
+[Open Question 1](#open-questions)). `Unwrap<T>()` is the only way to reach it, so it keeps the
+throw: an out-of-band source has nothing for `T` to reach, and returning `null` or the wrong
+process's builder would be a worse failure mode than throwing immediately, naming the service and
+its source.
+
+**Implementation note carried into the plan:** because `service.Resource` under this design is
+always the `ServiceResource` facade (§1) — never the real, source-specific object — `Unwrap<T>()`'s
+body must reach through the `ServiceResourceBuilder` wrapper's own reference to the real resource
+(§2) rather than testing `service.Resource is T` the way today's `As<T>()` does. See the
+implementation plan's Task 2/Task 8 for the exact mechanism (a small internal accessor on
+`ServiceResourceBuilder`).
 
 ## 6. TypeScript codegen compatibility
 
@@ -521,15 +548,23 @@ source string), not new exposure.
 
 ## Open Questions
 
-1. **RESOLVED (human decision, 2026-09-10): keep `As<T>()` as an escape hatch; it is excluded from
-   "retired."** Only `Configure<T>` and the ten `WithService*`/`WaitForService*` shims are retired —
-   native vocabulary on `ServiceResource`'s five interfaces replaces those. `As<T>()` stays available
-   for kind-specific vocabulary on non-`dotnet` local kinds that the five interfaces don't cover
-   (e.g. `service.As<JavaScriptAppResource>().WithRunScript("dev")`), which is exactly the gap this
-   question originally raised. This closes acceptance-checklist item 7 with `As<T>()` explicitly
-   excluded from "retired." No further design work is needed for this question: `As<T>()`'s existing
-   signature, throw-on-unreachable-source behaviour, and receiver type are all unchanged by this
-   document — see the implementation plan
+1. **RESOLVED (human decision, 2026-09-10, superseding an earlier resolution of this same
+   question): rename `As<T>()` to `Unwrap<T>()`; do not merely keep it as-is.** `As<T>()`'s own
+   justification for retirement in the ticket is a naming collision: in Aspire, `As*` means
+   "reinterpret this resource for publish" and returns the *same* builder type (e.g.
+   `AsHttp2Service`), never a downcast to a different type. `As<T>()` as a genuine type-downcast is a
+   false friend against that convention. The capability itself stays — kind-specific vocabulary on
+   non-`dotnet` local kinds (JS/Java today, more per #46-#50) can never be fully replaced by
+   `ServiceResource`'s five interfaces, since those kinds are open-ended and package-external — but
+   the method moves off the `As*` prefix onto `Unwrap<T>()`. Signature, receiver type, and
+   throw-on-unreachable-source behaviour are unchanged; only the name changes (the implementation
+   also needs a small internal accessor so `Unwrap<T>()` can reach the real resource through the
+   `ServiceResourceBuilder` facade rather than `service.Resource` itself — see the implementation
+   plan's Task 2/Task 8). This closes acceptance-checklist item 7 with the capability explicitly
+   retained and renamed, not retired. Per-kind convenience methods (e.g. a hypothetical
+   `GetJavaScriptApp()`/`GetJavaApp()`) were proposed separately and declined by the human — only
+   this single generic rename is in scope; noted here as a possible follow-up idea, not built. See
+   the implementation plan
    (`docs/superpowers/plans/2026-09-10-313-service-resource-dualwrite-bridge-plan.md`) for the exact
    file-level treatment.
 2. **RESOLVED (implementation-time judgment call, folded into the plan): warning message wording once

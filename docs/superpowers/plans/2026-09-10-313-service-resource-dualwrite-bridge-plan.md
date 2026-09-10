@@ -7,7 +7,8 @@
 **Goal:** `AddService()` returns `IResourceBuilder<ServiceResource>` for all four sources
 (`container`, `kubernetes`, `local`, `url`), replacing `IResourceBuilder<IResourceWithServiceDiscovery>`,
 via a dual-write bridge that never registers `ServiceResource` itself with DCP. `Configure<T>` and the
-ten `WithService*`/`WaitForService*` shims are retired; `As<T>()` is kept.
+ten `WithService*`/`WaitForService*` shims are retired; `As<T>()` is renamed to `Unwrap<T>()`, not
+retired — same capability, same throw-not-skip semantics (see Task 8).
 
 **Architecture:** A new sealed `ServiceResource : Resource` implements exactly five capability
 interfaces (`IResourceWithServiceDiscovery`, `IResourceWithEnvironment`, `IResourceWithArgs`,
@@ -49,9 +50,10 @@ plan's self-review found and fixed in the design before implementing it).
 
 ## Deviations from the spec's literal text (found and fixed during this plan's self-review)
 
-The spec is otherwise sound and this plan implements it as written, **except** for two bugs found
-while turning its `WithAnnotation` code sample and its `Bridge` description into a task an engineer
-can execute without re-discovering them:
+The spec is otherwise sound and this plan implements it as written, **except** for three bugs found
+while turning its `WithAnnotation` code sample, its `Bridge` description, and (after the human's
+superseding rename decision) its `Unwrap<T>()` treatment into a task an engineer can execute without
+re-discovering them:
 
 1. **The spec's `WithAnnotation` sample gates the reachability check on `real is not null`, which
    silently breaks the `"url"` skip-with-warning behaviour.** `if (real is not null &&
@@ -87,7 +89,31 @@ Both are called out again at their task below with the corrected code, and Task 
 fix directly (`GetServiceEndpoint` finding a container's endpoint through the facade; a `"url"`
 service still warning on every `WithEnvironment` call).
 
-There is a third, smaller finding not from the spec's code but from reading `UrlConsumerWaitTests.cs`
+A third bug, found while working out how the human's superseding rename decision (see the amended
+spec's Open Question 1) actually has to be implemented, not from the spec's own code:
+
+3. **`Unwrap<T>()` (the rename of today's `As<T>()`) cannot keep checking `service.Resource is T` —
+   `service.Resource` is always the `ServiceResource` facade under this design, never the real,
+   source-specific object.** Before this ticket, `AddService`'s caller held a builder over the real
+   resource directly, so `As<T>()`'s body (`if (service.Resource is T typed) return
+   service.ApplicationBuilder.CreateResourceBuilder(typed);`) worked because `service.Resource` *was*
+   e.g. the `ContainerResource`/`JavaScriptAppResource` in question. After Tasks 1–7, every source
+   returns a facade wrapping the real object (§2); `service.Resource` is unconditionally the
+   `ServiceResource` facade, which is sealed and implements only the five capability interfaces —
+   `service.Resource is ContainerResource` is now `false` for every source, always. Left as a pure
+   rename, `Unwrap<T>()` would throw for every call, including the `container`/`local` cases the
+   human decision's own justification for keeping this capability depends on — silently defeating the
+   entire point of renaming rather than retiring it. The fix (Task 2 gains one property; Task 8's
+   `Unwrap<T>()` is reimplemented, not just renamed): `ServiceResourceBuilder` exposes its private
+   `real` field as `internal IResourceBuilder<IResource>? Real => real;`, and `Unwrap<T>()` checks
+   `wrapper.Real?.Resource is T` after casting `service` to `Sources.ServiceResourceBuilder` (same
+   assembly, so the `internal` member is reachable) — reaching through the wrapper to the object it
+   dual-writes to, rather than the facade the wrapper itself exposes as `.Resource`. `"url"`'s `real`
+   is always `null`, but that path is unaffected: `IsUnreachable<T>` is already unconditionally `true`
+   for `"url"`, so the existing throw fires before this check is ever reached, exactly as it does
+   today.
+
+There is a fourth, smaller finding not from the spec's code but from reading `UrlConsumerWaitTests.cs`
 directly: it has an existing test, `UrlSourcedService_HasNoLifetime`, asserting
 `Assert.IsAssignableFrom<IResourceWithoutLifetime>(inventory.Resource)` — and three other tests that
 call `ResourceNotificationService.WaitForDependenciesAsync` **without** first publishing
@@ -234,8 +260,9 @@ git commit -m "Add the ServiceResource facade class (#313)"
 - Produces: `internal static class Reachability` with `IsUnreachable(Type, string)` and
   `CapabilityLabel(Type)`; `internal sealed class ServiceResourceBuilder(IDistributedApplicationBuilder
   applicationBuilder, ServiceResource facade, IResourceBuilder<IResource>? real, string source) :
-  IResourceBuilder<ServiceResource>` — Task 3's `ResolvedService.Bridge`/`BridgeUnregistered`
-  construct this directly.
+  IResourceBuilder<ServiceResource>`, including an internal `Real` property exposing `real` — Task
+  3's `ResolvedService.Bridge`/`BridgeUnregistered` construct this directly, and Task 8's
+  `Unwrap<T>()` reads `Real` to reach the underlying resource behind the facade.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -256,6 +283,17 @@ public class ServiceResourceBuilderTests
         var real = builder.AddResource(new ServiceSources.ServiceContainerResource("orders")).WithImage("nginx");
         var wrapper = new ServiceSources.ServiceResourceBuilder(builder, facade, real, "container");
         return (facade, real, wrapper);
+    }
+
+    [Fact]
+    public void Real_ExposesTheRealBuilderPassedToTheConstructor()
+    {
+        var builder = Builder();
+        var (_, real, wrapper) = ContainerCase(builder);
+
+        // Task 8's Unwrap<T> depends on this — it is the only way to reach the real, source-specific
+        // resource, since Resource above is always the facade.
+        Assert.Same(real, wrapper.Real);
     }
 
     [Fact]
@@ -388,6 +426,11 @@ internal sealed class ServiceResourceBuilder(
 
     public ServiceResource Resource { get; } = facade;
 
+    // Exposed so ServiceConfigurationExtensions.Unwrap<T> (Task 8) can reach the real,
+    // source-specific resource behind the facade — `Resource` above is always the facade itself,
+    // never `real`, so Unwrap<T> cannot recover a kind-specific type through `Resource` alone.
+    internal IResourceBuilder<IResource>? Real => real;
+
     public IResourceBuilder<ServiceResource> WithAnnotation<TAnnotation>(
         TAnnotation annotation, ResourceAnnotationMutationBehavior behavior = ResourceAnnotationMutationBehavior.Append)
         where TAnnotation : IResourceAnnotation
@@ -430,7 +473,7 @@ internal sealed class ServiceResourceBuilder(
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `dotnet test test/Aspire.Hosting.ServiceSources.Tests --filter "FullyQualifiedName~ServiceResourceBuilderTests"`
-Expected: PASS (4 tests).
+Expected: PASS (5 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -1210,7 +1253,7 @@ git commit -m "AddService returns IResourceBuilder<ServiceResource> (#313)"
 
 ---
 
-## Task 8: Retire `Configure<T>`; keep `As<T>()`
+## Task 8: Retire `Configure<T>`; rename `As<T>()` to `Unwrap<T>()`
 
 **Files:**
 - Modify: `src/Aspire.Hosting.ServiceSources/ServiceConfigurationExtensions.cs`
@@ -1218,24 +1261,92 @@ git commit -m "AddService returns IResourceBuilder<ServiceResource> (#313)"
 - Modify: `test/Aspire.Hosting.ServiceSources.Tests/BackingServices/BackingServiceConsumerTests.cs`
 - Modify: `samples/DemoAppHost/Program.cs`
 - Modify: `samples/DemoAppHostCodeCatalog/Program.cs`
+- Modify: `README.md` — the only other place in this repo with live `.As<T>()` call sites (found by
+  grepping the whole repo, `grep -rn '\.As<' --include='*.cs' --include='*.ts' --include='*.mts' .`;
+  no TypeScript-side call site exists anywhere, confirming §6/§9 of the spec: ATS does not project a
+  generic method — `Configure<T>`/`As<T>`/`Unwrap<T>` all carry `[AspireExportIgnore]` — so this
+  rename is purely C#-side, no guest-language sample or generated handle is affected). Step 5 below
+  is scoped narrowly to the three literal `.As<T>()`/`As<T>()` mentions — a mechanical rename to
+  `Unwrap<T>()`. **Not fixed here, and flagged as a separate, pre-existing gap this plan does not
+  otherwise track anywhere:** those three mentions sit inside two much larger README sections
+  (the "Configuring the resolved resource" walkthrough and its "From a guest-language AppHost"
+  continuation) that document `Configure<T>` and the ten `WithService*`/`WaitForService*` shims in
+  depth — both retired by this ticket (Tasks 8, 9) — and neither is updated by any task in this plan.
+  Those sections need a real rewrite once Tasks 8–9 land; it is out of scope for this task's narrow
+  rename and is called out again in this plan's self-review below rather than attempted here.
+  (`CHANGELOG.md` also mentions `As<T>()`, in entries recording *past* releases — a historical record,
+  deliberately left untouched; only Task 11's new `[Unreleased]` entry describes the current change,
+  and it already needs the identical wording fix — see Task 11.)
 
 **Interfaces:**
 - Consumes: native vocabulary now available directly on `IResourceBuilder<ServiceResource>` via
   Aspire's own extension methods (`WithEnvironment`, `WithReference`, `WithArgs`, `WaitFor`,
-  `WaitForCompletion`), routed through `ServiceResourceBuilder.WithAnnotation` (Task 2).
-- Produces: `ServiceConfigurationExtensions` retains only `As<T>()` (unchanged signature, receiver
-  type, and behaviour — its `IResourceBuilder<IResourceWithServiceDiscovery>` receiver still binds to
-  `IResourceBuilder<ServiceResource>` via covariance, so no signature edit is needed there at all).
+  `WaitForCompletion`), routed through `ServiceResourceBuilder.WithAnnotation` (Task 2);
+  `ServiceResourceBuilder.Real` (Task 2) so the renamed method can reach the real resource.
+- Produces: `ServiceConfigurationExtensions` retains the capability under a new name, `Unwrap<T>()`
+  — same receiver type (`IResourceBuilder<IResourceWithServiceDiscovery>`, still binds to
+  `IResourceBuilder<ServiceResource>` via covariance) and the same throw-not-skip semantics as
+  today's `As<T>()`, but reimplemented (not just renamed — see Step 1) to reach through the
+  `ServiceResourceBuilder` wrapper to the real, source-specific resource, since `service.Resource` is
+  always the `ServiceResource` facade now.
 
-- [ ] **Step 1: Delete `Configure<T>` from `ServiceConfigurationExtensions.cs`**
+- [ ] **Step 1: Delete `Configure<T>`; rename `As<T>()` to `Unwrap<T>()` and fix it to reach the real
+  resource through the facade, not `service.Resource`**
 
 Remove the entire `Configure<T>` method (including its `<example>`/`<exception>` doc comment and its
-`[AspireExportIgnore]` attribute). Leave `As<T>()`, `OutOfBandSources`, `IsUnreachable<T>`, and
-`Explain<T>` exactly as they are — `IsUnreachable<T>`/`Explain<T>` are still used by `As<T>()`, whose
-signature, receiver type, and throw-vs-skip behaviour are unchanged by this ticket (the human
-decision resolving Open Question 1 keeps `As<T>()` as an escape hatch — see the spec's amended
-"Open Questions" §1). Update the class-level doc comment, which currently describes "Both methods,"
-to describe only `As<T>()`.
+`[AspireExportIgnore]` attribute). Rename `As<T>()` to `Unwrap<T>()` — same receiver type,
+`[AspireExportIgnore]` reason, and throw-vs-skip semantics (the human decision superseding the
+earlier resolution of Open Question 1 keeps the capability but moves it off Aspire's own `As*`
+prefix, which means "reinterpret this resource for publish, same builder type" — never a downcast to
+a different type — see the spec's amended "Open Questions" §1). Leave `OutOfBandSources`,
+`IsUnreachable<T>`, and `Explain<T>` exactly as they are, only updating their doc comments'
+cross-references from `<see cref="As{T}"/>` to `<see cref="Unwrap{T}"/>`.
+
+**`Unwrap<T>()`'s body must change, not just its name** (the third deviation from the spec's literal
+text, found in this plan's self-review — see "Deviations from the spec's literal text" above).
+`As<T>()`'s old body checked `service.Resource is T typed` — correct only because, before this
+ticket, `service.Resource` *was* the real, source-specific object (`ContainerResource`,
+`ProjectResource`, a kind's own resource type). After Tasks 1–7, `service.Resource` is always the
+`ServiceResource` facade (sealed, implementing only the five capability interfaces) —
+`service.Resource is ContainerResource` is now unconditionally `false`, for every source, because the
+facade is never a `ContainerResource`/`ProjectResource`/kind type. Left as a pure rename,
+`Unwrap<T>()` would throw for every call, including the very `container`/`local` cases the human
+decision's justification for keeping this capability depends on. The fix reaches through the wrapper
+instead:
+
+```csharp
+public static IResourceBuilder<T> Unwrap<T>(this IResourceBuilder<IResourceWithServiceDiscovery> service)
+    where T : IResource
+{
+    var annotation = service.Resource.Annotations.OfType<ServiceSourceAnnotation>().FirstOrDefault();
+
+    // Checked before the cast, not after — unchanged from As<T>(): a kubernetes-sourced service is a
+    // real ExecutableResource wrapping `kubectl port-forward`, so it accepts configuration that
+    // would silently reach kubectl, never the service behind it.
+    if (annotation is not null && IsUnreachable<T>(annotation.Source))
+    {
+        throw new ServiceSourcesConfigurationException(Explain<T>(service.Resource, annotation));
+    }
+
+    // service.Resource is always the ServiceResource facade now, never the real, source-specific
+    // object real.Resource is — so the cast goes through the ServiceResourceBuilder wrapper's own
+    // Real property (Task 2), not through service.Resource itself.
+    if (service is Sources.ServiceResourceBuilder wrapper && wrapper.Real?.Resource is T typed)
+    {
+        return service.ApplicationBuilder.CreateResourceBuilder(typed);
+    }
+
+    throw new ServiceSourcesConfigurationException(Explain<T>(service.Resource, annotation));
+}
+```
+
+`"url"`'s `real` is always `null`, but that path never reaches the `wrapper.Real?.Resource is T`
+check: `IsUnreachable<T>` is already unconditionally `true` for `"url"`, so the first throw fires
+before it, unchanged from today's behaviour.
+
+Update the class-level doc comment, which currently describes "Both methods," to describe only
+`Unwrap<T>()`. Every other doc-comment cross-reference to `As<T>`/`As{T}` in this file (the class
+summary, `IsUnreachable<T>`'s remarks, `OutOfBandSources`' summary) becomes `Unwrap<T>`/`Unwrap{T}`.
 
 - [ ] **Step 2: Rewrite `ServiceConfigurationExtensionsTests.cs`**
 
@@ -1323,22 +1434,22 @@ public class ServiceConfigurationExtensionsTests
     }
 
     [Fact]
-    public void As_ReturnsATypedBuilderForTheUnderlyingResource()
+    public void Unwrap_ReturnsATypedBuilderForTheUnderlyingResource()
     {
         var builder = Builder();
 
-        var typed = AddContainerService(builder).As<ContainerResource>();
+        var typed = AddContainerService(builder).Unwrap<ContainerResource>();
 
         Assert.Equal("payments", typed.Resource.Name);
     }
 
     [Fact]
-    public void As_MismatchedType_ThrowsNamingTheService()
+    public void Unwrap_MismatchedType_ThrowsNamingTheService()
     {
         var builder = Builder();
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => AddContainerService(builder).As<ProjectResource>());
+            () => AddContainerService(builder).Unwrap<ProjectResource>());
 
         Assert.Contains("payments", ex.Message);
         Assert.Contains("container", ex.Message);
@@ -1470,12 +1581,12 @@ public class ServiceConfigurationExtensionsTests
     }
 
     [Fact]
-    public void As_OnUrlSource_StillThrows_BecauseItMustReturnABuilder()
+    public void Unwrap_OnUrlSource_StillThrows_BecauseItMustReturnABuilder()
     {
         var builder = Builder();
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => AddUrlService(builder).As<IResourceWithEnvironment>());
+            () => AddUrlService(builder).Unwrap<IResourceWithEnvironment>());
 
         Assert.Contains("inventory", ex.Message);
         Assert.Contains("'url'", ex.Message);
@@ -1520,11 +1631,39 @@ Run: `dotnet build samples/DemoAppHost -c Release --no-restore -warnaserror` and
 `samples/DemoAppHostCodeCatalog`
 Expected: PASS (both sample AppHosts compile with native vocabulary in place of `Configure<T>`).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Rename the three `.As<T>()` mentions in `README.md`**
+
+Mechanical only — do not touch the surrounding `Configure<T>`/shim prose (see this task's file-list
+note above):
+
+```csharp
+// line ~1132: "reach it from the AppHost with `As<JavaAppExecutableResource>()`" → "... with
+// `Unwrap<JavaAppExecutableResource>()`"
+// line ~1138: "reachable from the AppHost with `As<JavaAppExecutableResource>()`" → "... with
+// `Unwrap<JavaAppExecutableResource>()`"
+```
+```csharp
+builder.AddService("catalog")
+    .Unwrap<JavaAppExecutableResource>()          // was .As<JavaAppExecutableResource>()
+    .WithMavenBuild()
+    .WithJvmArgs(["-Xmx512m"])
+    .WithOtelAgent("/path/to/opentelemetry-javaagent.jar");
+```
+and, further down:
+```csharp
+backend.Unwrap<JavaScriptAppResource>().WithRunScript("dev");   // was backend.As<...>()
+```
+
+Leave line ~1148's `Use Configure<T>(...) instead for anything that should survive...` and the whole
+"Configure is skipped for..."/"As<T>() throws for those sources..." paragraphs (lines ~1749-1790)
+untouched here — they document `Configure<T>`'s retired behaviour too and need the larger rewrite
+this task's file-list note already flags as separate, out-of-scope work.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/Aspire.Hosting.ServiceSources/ServiceConfigurationExtensions.cs test/Aspire.Hosting.ServiceSources.Tests/ServiceConfigurationExtensionsTests.cs test/Aspire.Hosting.ServiceSources.Tests/BackingServices/BackingServiceConsumerTests.cs samples/DemoAppHost/Program.cs samples/DemoAppHostCodeCatalog/Program.cs
-git commit -m "Retire Configure<T>; native vocabulary reaches ServiceResource directly (#313)"
+git add src/Aspire.Hosting.ServiceSources/ServiceConfigurationExtensions.cs test/Aspire.Hosting.ServiceSources.Tests/ServiceConfigurationExtensionsTests.cs test/Aspire.Hosting.ServiceSources.Tests/BackingServices/BackingServiceConsumerTests.cs samples/DemoAppHost/Program.cs samples/DemoAppHostCodeCatalog/Program.cs README.md
+git commit -m "Retire Configure<T>; rename As<T> to Unwrap<T> (#313)"
 ```
 
 ---
@@ -1812,16 +1951,20 @@ file before assuming), matching the register of the existing `[#134]`/`[#291]`-s
       .WaitForCompletion(migrations);
   ```
 
-  `As<T>()` is **not** removed: it stays the escape hatch for kind-specific vocabulary the five
-  interfaces don't cover, on a non-`dotnet` `local` kind's own resource type —
-  `service.As<JavaScriptAppResource>().WithRunScript("dev")` keeps working exactly as before.
-  `GetServiceEndpoint()` and `GetEndpoint(...)` are unaffected either way.
+  `As<T>()` is **renamed** to `Unwrap<T>()`, not removed: `As*` is Aspire's own convention for
+  reinterpreting a resource for publish while returning the *same* builder type (`AsHttp2Service`,
+  and similar) — never a downcast to a different type, which is exactly what this method does, so it
+  moves off that prefix. The capability is unchanged: it stays the escape hatch for kind-specific
+  vocabulary the five interfaces don't cover, on a non-`dotnet` `local` kind's own resource type —
+  `service.Unwrap<JavaScriptAppResource>().WithRunScript("dev")` keeps working exactly as
+  `service.As<JavaScriptAppResource>().WithRunScript("dev")` did. `GetServiceEndpoint()` and
+  `GetEndpoint(...)` are unaffected either way.
 
   `ServiceResource` is never the object DCP registers or runs — it dual-writes configuration to the
   real, source-specific resource behind it (Aspire's own `ProjectResource` for `local`; an internal
   container/executable resource for `container`/`kubernetes`; nothing at all for `url`, which has no
   process to configure). An assembly compiled against an earlier version that names
-  `IResourceWithServiceDiscovery` as `AddService`'s return type, or calls `Configure<T>`/any
+  `IResourceWithServiceDiscovery` as `AddService`'s return type, or calls `Configure<T>`/`As<T>`/any
   `WithService*` method, no longer compiles against this version.
 ```
 
@@ -1844,7 +1987,8 @@ git commit -m "Add the Breaking CHANGELOG entry for the ServiceResource dual-wri
 task keeps green, plus Task 3's new copy-forward tests), §4 (Tasks 8, 9), §5 (Task 2's `Reachability`
 + Task 2's tests), §6 (Task 9 Step 4), §7 (Tasks 8, 9, 10 — corrected against the spec's own
 under-scoped claim about `CatalogExportsTests.cs`, see Task 10 Step 1), §8 (Task 11). The amended
-Open Questions section's four resolutions are folded in: #1 (As\<T\>() kept) throughout Task 8; #2
+Open Questions section's four resolutions are folded in: #1 (As\<T\>() renamed to Unwrap\<T\>(), not
+retired) throughout Task 8; #2
 (warning wording) in Task 2's `Reachability.CapabilityLabel`; #3 (no action) needed no task; #4
 (direction-2 WaitFor verification) is Task 11 Step 1 item 2.
 
@@ -1870,12 +2014,15 @@ tests can only be updated once the surface they check has actually changed) befo
 task's Step 1 either runs the prior baseline or explicitly says why the expected result is red at that
 point in the sequence — never a task claiming green on code a later task hasn't written yet.
 
-**Two design bugs found and fixed in this same pass** (documented at the top, under "Deviations from
-the spec's literal text"): the `real is not null` guard that would have silently dropped the `"url"`
-skip-with-warning behaviour, and the missing annotation copy-forward in `Bridge` that would have
+**Three design bugs found and fixed in this same pass** (documented at the top, under "Deviations
+from the spec's literal text"): the `real is not null` guard that would have silently dropped the
+`"url"` skip-with-warning behaviour; the missing annotation copy-forward in `Bridge` that would have
 broken `GetServiceEndpoint`/`GetEndpoint` and the endpoint mutation-in-place invariant for every
-source. Both are now load-bearing parts of Task 2 and Task 3 respectively, with tests that fail
-without the fix.
+source; and `Unwrap<T>()` (the rename of `As<T>()`, per the human's superseding decision) checking
+`service.Resource is T` — always the facade, never the real object, once the bridge is in place —
+which would have made the renamed method throw for every call, defeating the entire reason it was
+kept rather than retired. All three are now load-bearing parts of Task 2 and Task 3, and Task 2 and
+Task 8 respectively, with tests that fail without each fix.
 
 **One gap not fully closed by this plan, named rather than hidden:** Task 11 Step 1 item 2 (direction-2
 `WaitFor` name-keyed verification) may surface a real design gap that needs code beyond what this plan
