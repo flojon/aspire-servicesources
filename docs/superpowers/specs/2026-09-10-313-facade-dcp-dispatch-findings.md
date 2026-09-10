@@ -32,11 +32,13 @@ ways, and the two ways cannot be satisfied by the same concrete type at once:
 
 A single concrete class cannot be assignable to both `ExecutableResource` and `ProjectResource` —
 C# has one base class per type, and neither Aspire type derives from the other. So `ServiceResource`
-can be `Resource`-derived and still work for `container`, `kubernetes`, and `url`. It cannot also be
-the resource registered for `local` without giving up genuine `ProjectResource` semantics — launch
-profiles, debugger attach, hot reload, project metadata — which is exactly the machinery
-`ExecutableCreator` gates behind `is ProjectResource` (`LaunchConfigurationType == "project"`,
-`SupportsDebuggingAnnotation`, `TryGetProjectMetadata`).
+declared as `: ExecutableResource` (not merely `: Resource` — `kubernetes` specifically needs the
+`ExecutableResource` ancestry, container's own requirement is looser) can be the literal registered
+resource for `container`, `kubernetes`, and `url`. It cannot also be the resource registered for
+`local` without giving up genuine `ProjectResource` semantics — launch profiles, debugger attach, hot
+reload, project metadata — which is exactly the machinery `ExecutableCreator` gates behind
+`is ProjectResource` (`LaunchConfigurationType == "project"`, `SupportsDebuggingAnnotation`,
+`TryGetProjectMetadata`).
 
 This is a harder wall than #319 could see, because #319 measured `tsc` only. The conflict is a plain
 C#-language fact once you know what DCP actually keys on, and it holds regardless of what the
@@ -185,15 +187,27 @@ own risks (see below). Before writing an implementation plan for #313, decide be
    read path without warning. microsoft/aspire#19836 documents this exact risk class for its own,
    different projection mechanism ("two objects now exist per logical resource... identity
    canonicalization must be complete") — worth reading before committing to hand-rolling it here.
-3. **Split return type by source-compatibility, not by source name**: `ServiceResource` unifies
-   `container` + `kubernetes` + `url` (three internal types collapse into subtypes of one public
-   class); `local` keeps returning `IResourceBuilder<ProjectResource>`. This is a real API split
-   (`AddService` cannot have one static return type doing this — it would need to be two methods, or
-   accept that the declared return type stays the covariant common ground, which is back to needing a
-   shared base "wide enough" for `ProjectResource` too, i.e. `Resource` itself, at which point ATS
-   codegen sees only the `Resource`-level vocabulary for `local` again). Ships something now, ahead of
-   #18052, without foreclosing full unification once it lands, and without the two-objects risk of
-   option 2.
+3. **Correction — "split the return type, `local` keeps `Configure<T>`/`As<T>`, the others don't"
+   does not work as a single `AddService` method.** The source is picked at runtime from developer
+   config, so one call site must handle whichever of the four sources gets selected — the declared
+   return type is one fixed type, and by `IResourceBuilder<out T>` covariance every source's actual
+   object must be assignable to it. `local`'s real object is Aspire's own `ProjectResource`, which
+   cannot be made to inherit from anything this package declares. So either the declared type is rich
+   (`ServiceResource : ExecutableResource`, unlocking `container`/`kubernetes`/`url`) and a real
+   `ProjectResource` is never assignable to it — a compile error for a method that might resolve to
+   `local` — or the declared type is forced down to whatever `ProjectResource` already satisfies,
+   which (interfaces breaking TS codegen, per #319) means plain `Resource`, and *no* source gains
+   anything through the return type; every source is back to `Configure<T>`/`As<T>`. **The only way to
+   give the three sources the rich type while one `AddService` still covers `local` is option 2's
+   wrapper** — at which point `local` also stops needing `Configure<T>`/`As<T>`, so this isn't a
+   cheaper alternative to the bridge, it's the bridge with the container/kubernetes/url path spelled
+   out. A genuinely different shape exists — **two separate methods**, e.g. `AddService` unchanged
+   plus something like `AddContainerBackedService` with the rich return type, that an AppHost author
+   opts into *per call site*, asserting that particular service will never resolve to `local` (and
+   throwing at runtime if it does) — but that moves the decision from the developer's local config to
+   the AppHost author's method choice, breaking the "any service transparently switches source without
+   touching Program.cs" property for whichever services use it. Not equivalent to what "split" was
+   gesturing at, and its own trade-off needs weighing separately if pursued.
 4. **Confirm whether `ServiceResource : Resource` can be the registered object for `local` too**,
    abandoning `ProjectResource`'s launch-profile/debugging integration for `local` services. This is a
    real feature regression for what is likely the most-used source, and should be a deliberate,
