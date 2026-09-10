@@ -72,16 +72,33 @@ an in-repo checkout run with full dotnet tooling fidelity.
 
 **Still open, not ruled out by this finding:**
 
-- **A facade that does not need to be the registered DCP resource for `local`.** For instance:
-  `AddService` keeps returning `IResourceBuilder<ServiceResource>` for `container`/`kubernetes`/`url`
-  (three sources where `ServiceResource : Resource` is the literal registered object), while `local`
-  is special-cased — either a distinct return path, or `ServiceResource` for `local` is a thin
-  `ServiceResource`-shaped view that is **not** what DCP executes, with `local`'s real `ProjectResource`
-  registered separately. The second option reopens the wiring question #319 also left open
-  ("whether `WithReference` still resolves at runtime") in a harder form: Aspire's own `WithEnvironment`
-  / `WithReference` extensions mutate `IResourceBuilder<T>.Resource.Annotations` directly, so unless
-  the facade object *is* the registered resource, configuration applied through it would never reach
-  DCP. That was not probed here and would need its own `aspire run` spike before being trusted.
+- **A facade that does not need to be the registered DCP resource for `local` — measured, partially
+  positive.** A follow-up probe (throwaway xUnit test, reverted after running, same convention as the
+  #319 spike) built a hand-rolled `IResourceBuilder<FacadeResource>` wrapping a real
+  `IResourceBuilder<ContainerResource>`, where `WithAnnotation` dual-writes: the *same* annotation
+  instance goes into both the facade's and the real resource's `Annotations` collections, rather than
+  copying values. Two things were confirmed this way, without needing a live `aspire run`:
+  - **Read path**: a third resource's `.WithReference(facadeBuilder)` — Aspire's own extension,
+    unlocked purely by `FacadeResource : IResourceWithServiceDiscovery` — produced a
+    `services__orders__http__0` environment-variable *key* on the consumer, meaning
+    `ApplyEndpoints`'s endpoint lookup (`endpointReferenceAnnotation.Resource.GetEndpoints(...)`) found
+    the endpoint through the facade object, because the same `EndpointAnnotation` instance also lives
+    in `real.Resource.Annotations`.
+  - **Write path**: `facadeBuilder.WithEnvironment("FOO", "bar")` — again Aspire's own extension —
+    landed the resulting `EnvironmentCallbackAnnotation` on `real.Resource.Annotations` too (the *only*
+    object DCP ever sees, since the facade is never added via `builder.AddResource`), and invoking that
+    real resource's callback directly produced `FOO=bar`.
+
+  **Not covered by this probe, still open:** resolving an `EndpointReference`'s actual *value* (the URL
+  string, via `IValueProvider.GetValueAsync`) hangs against a bare test builder with no live app —
+  `EndpointReferenceAnnotation`'s deferred callback populates the environment-variable *key*
+  synchronously (confirmed above) but the *value* needs a real `AllocatedEndpoint`, which only DCP sets
+  during an actual run. So "the key resolves" is verified; "the URL is correct end-to-end" is not.
+  Neither is `WaitFor`/wait-ordering — whether Aspire's wait machinery, which tracks state through
+  `ResourceNotificationService`, correctly follows a wait recorded against the facade object through to
+  the real resource's published state. Both would need an actual `aspire run` (with a container runtime
+  or a real `kubectl`) rather than a bare `DistributedApplicationBuilder`, which is a materially heavier
+  probe than this one.
 - **Accepting `local` keeps returning `IResourceBuilder<ProjectResource>` directly**, rather than
   `ServiceResource`. `ProjectResource` already carries every capability interface `ServiceResource`
   would declare (`IResourceWithEnvironment`, `IResourceWithArgs`, `IResourceWithEndpoints`,
@@ -131,27 +148,44 @@ classification, complementary rather than competing. Not a substitute for #18052
 
 ## Recommendation
 
-Do not implement a single-class facade across all four sources today — it cannot preserve `local`'s
-current DCP-native behaviour, and won't be able to until microsoft/aspire#18052 (or equivalent) lands.
-Before writing an implementation plan for #313, decide between:
+Do not implement a single-class facade across all four sources *without deciding one of the paths
+below first*. The wrapper/dual-write mechanism now has a positive, if partial, empirical result —
+it is no longer purely hypothetical — but it is a second real object per logical service, with its
+own risks (see below), and the upstream fix removes the need for it entirely. Before writing an
+implementation plan for #313, decide between:
 
 1. **Track microsoft/aspire#18052 and defer #313's full unification until it lands.** No local code
    change; #313 stays open, blocked on the upstream PR, same pattern as #72 ↔ microsoft/aspire#9965.
-   Lowest cost, but ties #313's real fix to someone else's schedule, and #18052 is still WIP with open
-   API-shape questions of its own.
-2. **Split return type by source-compatibility, not by source name**: `ServiceResource` unifies
+   Lowest cost and lowest risk — the annotation-based dispatch #18052 brings makes the facade a real
+   `Resource`-derived object with no wrapper needed at all, for every source including `local`. Ties
+   #313's real fix to someone else's schedule, and #18052 is still WIP with open API-shape questions
+   of its own.
+2. **Build the dual-write wrapper now, as a bridge until #18052 lands.** The read and write paths
+   both checked out in this doc's probe (endpoint discovery through `WithReference`, environment
+   configuration through `WithEnvironment`, both reaching the real registered resource). What is
+   *not* yet checked — full endpoint URL resolution end-to-end, and `WaitFor`/wait-ordering through
+   `ResourceNotificationService` — needs an `aspire run`-grade probe (a real container runtime or
+   `kubectl`) before this path can be trusted for `local`. Two objects per logical service is also a
+   standing risk independent of what's tested: anything in Aspire's own code that reads
+   `.Resource.Annotations` directly (not through an overridable `WithAnnotation`) has to be
+   individually verified to see the shared instances, and a future Aspire release could add such a
+   read path without warning. microsoft/aspire#19836 documents this exact risk class for its own,
+   different projection mechanism ("two objects now exist per logical resource... identity
+   canonicalization must be complete") — worth reading before committing to hand-rolling it here.
+3. **Split return type by source-compatibility, not by source name**: `ServiceResource` unifies
    `container` + `kubernetes` + `url` (three internal types collapse into subtypes of one public
    class); `local` keeps returning `IResourceBuilder<ProjectResource>`. This is a real API split
    (`AddService` cannot have one static return type doing this — it would need to be two methods, or
    accept that the declared return type stays the covariant common ground, which is back to needing a
    shared base "wide enough" for `ProjectResource` too, i.e. `Resource` itself, at which point ATS
    codegen sees only the `Resource`-level vocabulary for `local` again). Ships something now, ahead of
-   #18052, without foreclosing full unification once it lands.
-3. **Confirm whether `ServiceResource : Resource` can be the registered object for `local` too**,
+   #18052, without foreclosing full unification once it lands, and without the two-objects risk of
+   option 2.
+4. **Confirm whether `ServiceResource : Resource` can be the registered object for `local` too**,
    abandoning `ProjectResource`'s launch-profile/debugging integration for `local` services. This is a
    real feature regression for what is likely the most-used source, and should be a deliberate,
    named trade-off if chosen — not a side effect.
-4. **Keep today's architecture** (bare capability-interface return, `Configure<T>`/`As<T>`/shims) as
+5. **Keep today's architecture** (bare capability-interface return, `Configure<T>`/`As<T>`/shims) as
    the documented, permanent design, closing #313 on the grounds that the "yes" from PR #319 answered
    the codegen question but not the DCP-dispatch question, and the latter is where the real cost
    lives.
@@ -170,3 +204,13 @@ ilspycmd -t Aspire.Hosting.ApplicationModel.ProjectResource "$DLL" | head -30   
 ilspycmd -t Aspire.Hosting.ApplicationModel.ExecutableResource "$DLL" | head -30   # class declaration
 ilspycmd -t Aspire.Hosting.Dcp.ExecutableCreator "$DLL" | grep -n "is ProjectResource"
 ```
+
+The dual-write wrapper probe was a throwaway xUnit test (`Spike313FacadeWrapperProbe.cs`, reverted after
+running, same convention as #319): a `FacadeResource : Resource` plus a hand-rolled
+`IResourceBuilder<FacadeResource>` whose `WithAnnotation` adds the same annotation instance to both the
+facade's and a real `IResourceBuilder<ContainerResource>`'s `Annotations`. Two `[Fact]`s, both green:
+`.WithReference(facadeBuilder)` from a third resource produces a `services__orders__http__0`
+environment-variable key (checked by invoking `EnvironmentCallbackAnnotation.Callback` directly, since
+`GetEnvironmentVariableValuesAsync` and resolving an `EndpointReference`'s value both hang without a
+live app); `facadeBuilder.WithEnvironment("FOO", "bar")` lands an `EnvironmentCallbackAnnotation` on the
+*real* resource, resolving to `FOO=bar` when that resource's own callback runs.
