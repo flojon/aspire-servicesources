@@ -491,6 +491,8 @@ public class AddServiceTests
         var exportAttribute = method.GetCustomAttributes(typeof(AspireExportAttribute), inherit: false);
         Assert.Single(exportAttribute);
 
+        Assert.Equal(typeof(IResourceBuilder<ServiceResource>), method.ReturnType);
+
         var nameParameter = method.GetParameters().Single(p => p.Name == "name");
         var resourceNameAttribute = nameParameter.GetCustomAttributes(typeof(ResourceNameAttribute), inherit: false);
         Assert.Single(resourceNameAttribute);

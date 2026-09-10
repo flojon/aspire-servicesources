@@ -303,14 +303,14 @@ public class UrlConsumerWaitTests
         var builder = TestHelpers.CreateBuilderThatCanStart(AppHostDirectory("url"));
 
         var inventory = builder.AddService("inventory")
-            .Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B"));
+            .WithEnvironment("A", "B");
         Consumer(builder, "worker").WaitFor(inventory);
 
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 
         var warning = Assert.Single(warnings);
         Assert.Contains("2 calls", warning);
-        Assert.Contains("Configure<IResourceWithEnvironment>", warning);
+        Assert.Contains("WithEnvironment", warning);
         Assert.Contains("WaitFor from 'worker'", warning);
     }
 
@@ -334,7 +334,7 @@ public class UrlConsumerWaitTests
         builder.AddBackingService("orders-db", () => builder.AddConnectionString("orders-db"));
 
         var inventory = builder.AddService("inventory")
-            .Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B"));
+            .WithEnvironment("A", "B");
         Consumer(builder, "worker").WaitFor(inventory);
 
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
@@ -377,7 +377,7 @@ public class UrlConsumerWaitTests
 
         // Before any "url" service, so this skip is what first creates the warnings and subscribes
         // their flush — ahead of the pre-flight that drops the wait below.
-        builder.AddService("orders").Configure<IResourceWithEnvironment>(r => r.WithEnvironment("A", "B"));
+        builder.AddService("orders").WithEnvironment("A", "B");
 
         var inventory = builder.AddService("inventory");
         Consumer(builder, "worker").WaitFor(inventory);

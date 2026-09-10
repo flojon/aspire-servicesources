@@ -98,7 +98,7 @@ public class ServiceEndpointTests
         // own service discovery resolves "https+http://" in the same order, so preferring https
         // here hands a consumer the same endpoint it would have picked itself.
         var service = ContainerService(Builder());
-        service.Configure<IResourceWithEndpoints>(r => r.WithHttpsEndpoint(targetPort: 8443));
+        service.WithHttpsEndpoint(targetPort: 8443);
 
         Assert.Equal("https", service.GetServiceEndpoint().EndpointName);
     }
@@ -124,7 +124,7 @@ public class ServiceEndpointTests
     {
         var service = ContainerService(Builder());
         ClearEndpoints(service.Resource);
-        service.Configure<IResourceWithEndpoints>(r => r.WithEndpoint(targetPort: 9000, scheme: "http", name: "grpc"));
+        service.WithEndpoint(targetPort: 9000, scheme: "http", name: "grpc");
 
         Assert.Equal("grpc", service.GetServiceEndpoint().EndpointName);
     }
@@ -146,9 +146,9 @@ public class ServiceEndpointTests
     {
         var service = ContainerService(Builder());
         ClearEndpoints(service.Resource);
-        service.Configure<IResourceWithEndpoints>(r => r
+        service
             .WithEndpoint(targetPort: 9000, scheme: "http", name: "grpc")
-            .WithEndpoint(targetPort: 9001, scheme: "http", name: "metrics"));
+            .WithEndpoint(targetPort: 9001, scheme: "http", name: "metrics");
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => service.GetServiceEndpoint());
 
