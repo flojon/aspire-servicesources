@@ -270,6 +270,10 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         {
             registration = handler.ResolveDeferred(builder, serviceName, repoRoot, definition.KindOptions);
         }
+        catch (ServiceSourcesConfigurationException ex) when (IsCodeOriginIndentationAdvice(definition, ex))
+        {
+            throw LocalKindConfig.RewriteIndentationAdviceForCodeOrigin(ex);
+        }
         catch (Exception ex) when (ex is not ServiceSourcesConfigurationException)
         {
             throw new ServiceSourcesConfigurationException(
@@ -344,6 +348,10 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         {
             handler.Validate(serviceName, repoRoot, definition.KindOptions);
         }
+        catch (ServiceSourcesConfigurationException ex) when (IsCodeOriginIndentationAdvice(definition, ex))
+        {
+            throw LocalKindConfig.RewriteIndentationAdviceForCodeOrigin(ex);
+        }
         catch (Exception ex) when (ex is not ServiceSourcesConfigurationException)
         {
             throw new ServiceSourcesConfigurationException(
@@ -352,6 +360,19 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
                 ex);
         }
     }
+
+    /// <summary>
+    /// Whether <paramref name="ex"/> is the shape-rejection message from
+    /// <see cref="LocalKindConfig.Parse{T}"/> reaching a code-declared service (#302) — the one case
+    /// where core, not <see cref="LocalKindConfig"/> itself, has to re-render the advice, because
+    /// only core knows <see cref="ServiceDefinition.Origin"/>. Every other
+    /// <see cref="ServiceSourcesConfigurationException"/> — an unknown property, a wrong options
+    /// type, a missing block, anything a kind's own <c>Validate</c>/<c>Resolve</c> throws — is left
+    /// exactly as thrown.
+    /// </summary>
+    private static bool IsCodeOriginIndentationAdvice(ServiceDefinition definition, ServiceSourcesConfigurationException ex) =>
+        definition.Origin.Kind == CatalogOriginKind.Code
+        && ex.Message.Contains(LocalKindConfig.IndentationAdvice, StringComparison.Ordinal);
 
     /// <summary>
     /// For a handler that faulted in <see cref="ILocalResourceKind.Validate"/> rather than reporting
@@ -373,6 +394,10 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         try
         {
             resourceBuilder = handler.Resolve(builder, serviceName, repoRoot, definition.KindOptions);
+        }
+        catch (ServiceSourcesConfigurationException ex) when (IsCodeOriginIndentationAdvice(definition, ex))
+        {
+            throw LocalKindConfig.RewriteIndentationAdviceForCodeOrigin(ex);
         }
         catch (Exception ex) when (ex is not ServiceSourcesConfigurationException)
         {
