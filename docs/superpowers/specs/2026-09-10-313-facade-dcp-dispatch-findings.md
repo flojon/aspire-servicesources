@@ -98,23 +98,60 @@ an in-repo checkout run with full dotnet tooling fidelity.
   annotation fallback (unlike containers), this looks like a hard requirement, not a soft one — but it
   was not exhaustively probed against every DCP code path that touches executables.
 
+## The upstream fix already has a draft PR
+
+The wall in this doc is specifically that container dispatch is annotation-based while executable and
+project dispatch are nominal-type-based. Both `ExecutableAnnotation` (Command, WorkingDirectory) and
+`IProjectMetadata` (: `IResourceAnnotation`; ProjectPath, LaunchSettings, ...) already carry the data
+DCP would need to dispatch the same way containers do — the annotations exist, only the dispatch check
+(`OfType<ExecutableResource>()` / `OfType<ProjectResource>()`) still reads the concrete type instead.
+
+That exact change is in flight upstream: **microsoft/aspire#18052**, *"WIP: Use annotations to
+determine project & executable resources"* — an open draft PR (filed 2026-06-09, still active as of
+2026-09-06), whose description states the intent plainly: *"This brings the executable and project
+behaviour in line with containers which are already annotation based."* It updates
+`ResourceSnapshotBuilder`, `ApplicationOrchestrator`, `ManifestPublishingContext`, and
+`ExecutableResourceExtensions` to check annotations rather than type, and includes a playground project
+demonstrating a `ProjectResource` ↔ `ContainerResource` "bait and switch" using exactly this mechanism.
+Its own description names the residual awkwardness: `GetProjectResources()`/`GetExecutableResources()`
+still return "all resources of *type* X", which may no longer match what DCP actually executes as X
+once annotations can diverge from type — a naming/documentation gap, not a blocker for #313's use.
+
+If #18052 lands, the wall in this doc goes away: a `ServiceResource : Resource` facade carrying the
+right annotation (`ContainerImageAnnotation`, `ExecutableAnnotation`, or an `IProjectMetadata`) would
+get real DCP execution for every source, including `local`, with no feature regression and no wrapper
+object. This is a pure upstream dependency — nothing in this package can substitute for it, and nothing
+here needs to wait idle for it either (see Recommendation).
+
+Related, narrower proposal seen while searching: **microsoft/aspire#19836**, *"Resource projections:
+typed, target-scoped container views instead of implicit shape conversion"* (filed 2026-09-09). It
+solves a different problem — typed `RunAsContainer`/`PublishAsContainer`-style shape changes without
+losing resource identity — and its own text calls out #18052 as "the direction of" annotation-based
+classification, complementary rather than competing. Not a substitute for #18052 here.
+
 ## Recommendation
 
-Do not implement a single-class facade across all four sources — it cannot preserve `local`'s
-current DCP-native behaviour. Before writing an implementation plan for #313, decide between:
+Do not implement a single-class facade across all four sources today — it cannot preserve `local`'s
+current DCP-native behaviour, and won't be able to until microsoft/aspire#18052 (or equivalent) lands.
+Before writing an implementation plan for #313, decide between:
 
-1. **Split return type by source-compatibility, not by source name**: `ServiceResource` unifies
+1. **Track microsoft/aspire#18052 and defer #313's full unification until it lands.** No local code
+   change; #313 stays open, blocked on the upstream PR, same pattern as #72 ↔ microsoft/aspire#9965.
+   Lowest cost, but ties #313's real fix to someone else's schedule, and #18052 is still WIP with open
+   API-shape questions of its own.
+2. **Split return type by source-compatibility, not by source name**: `ServiceResource` unifies
    `container` + `kubernetes` + `url` (three internal types collapse into subtypes of one public
    class); `local` keeps returning `IResourceBuilder<ProjectResource>`. This is a real API split
    (`AddService` cannot have one static return type doing this — it would need to be two methods, or
    accept that the declared return type stays the covariant common ground, which is back to needing a
    shared base "wide enough" for `ProjectResource` too, i.e. `Resource` itself, at which point ATS
-   codegen sees only the `Resource`-level vocabulary for `local` again).
-2. **Confirm whether `ServiceResource : Resource` can be the registered object for `local` too**,
+   codegen sees only the `Resource`-level vocabulary for `local` again). Ships something now, ahead of
+   #18052, without foreclosing full unification once it lands.
+3. **Confirm whether `ServiceResource : Resource` can be the registered object for `local` too**,
    abandoning `ProjectResource`'s launch-profile/debugging integration for `local` services. This is a
    real feature regression for what is likely the most-used source, and should be a deliberate,
    named trade-off if chosen — not a side effect.
-3. **Keep today's architecture** (bare capability-interface return, `Configure<T>`/`As<T>`/shims) as
+4. **Keep today's architecture** (bare capability-interface return, `Configure<T>`/`As<T>`/shims) as
    the documented, permanent design, closing #313 on the grounds that the "yes" from PR #319 answered
    the codegen question but not the DCP-dispatch question, and the latter is where the real cost
    lives.
