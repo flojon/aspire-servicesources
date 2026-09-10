@@ -521,36 +521,32 @@ source string), not new exposure.
 
 ## Open Questions
 
-1. **Kind-specific vocabulary for non-`dotnet` `local` kinds has no native replacement.**
-   `As<T>()` today lets an AppHost author write `service.As<JavaScriptAppResource>().WithRunScript("dev")`
-   for a resource type this package has never heard of, returned by a kind's own
-   `ILocalResourceKind.Resolve`. None of the five interfaces `ServiceResource` declares cover
-   kind-specific methods, and this design does not propose a replacement — retiring `As<T>()`
-   entirely (as acceptance item 7 reads literally) would remove this escape hatch with nothing put
-   in its place. Options: keep a narrow, renamed escape hatch for this one case only (defeats part
-   of "retire `As<T>()`"); require kind authors to expose kind-specific configuration through
-   `ServiceCatalogBuilder`/`ServiceDefinitionBuilder` instead (a bigger, separate design); or accept
-   this as a documented, deliberate scope gap for this stage and file a follow-up issue. Needs a
-   human decision before the plan is written.
-2. **Warning message wording once the skip is keyed by annotation type.** §5's table re-keys
-   `IsUnreachable` by `Type` instead of a generic capability parameter. `ServiceSourcesWarnings.AddSkip`'s
-   existing call sites pass a human-readable capability name (e.g. `$"Configure<{typeof(T).Name}>"`);
-   this design needs a mapping from annotation type to a name an AppHost author recognizes (probably
-   the native method name they called — `WithEnvironment`, `WaitFor`, …) rather than surfacing
-   `EnvironmentCallbackAnnotation` in a warning message. Not designed here; small, but needs settling
-   before implementation.
-3. **Whether `ServiceResourceBuilder` needs to intercept anything beyond `WithAnnotation`.**
-   `IResourceBuilder<T>` declares only `ApplicationBuilder`, `Resource`, and the two `WithAnnotation`
-   overloads (one defaulted-constructor convenience calling the other) — decompiled, confirmed
-   complete. No other interface member exists to intercept, so this is not expected to be a gap,
-   but the implementation should confirm no Aspire release between `13.5.2` and whatever floor ships
-   has added one.
-4. **Direction-2 `WaitFor` (§3) rests on name-keyed lookup found only as far as
-   `WaitForDependenciesAsync`.** Whether every downstream path it dispatches to
-   (`WaitUntilHealthyAsync`/`WaitUntilCompletionAsync`/`WaitUntilStartedAsync`, and any health-check
-   annotation lookup they perform) is also purely name-keyed, rather than assuming object identity
-   at some point, was not traced fully. Item 2 of §8 is exactly this verification; if it fails, the
-   design would need direction-2 waits to also dual-write somehow, which is not obviously possible
-   since the annotation lands on a resource this bridge does not control (the waiter, not the
-   service). Flagging now so the implementation plan budgets time for this specifically rather than
-   discovering it mid-implementation.
+1. **RESOLVED (human decision, 2026-09-10): keep `As<T>()` as an escape hatch; it is excluded from
+   "retired."** Only `Configure<T>` and the ten `WithService*`/`WaitForService*` shims are retired —
+   native vocabulary on `ServiceResource`'s five interfaces replaces those. `As<T>()` stays available
+   for kind-specific vocabulary on non-`dotnet` local kinds that the five interfaces don't cover
+   (e.g. `service.As<JavaScriptAppResource>().WithRunScript("dev")`), which is exactly the gap this
+   question originally raised. This closes acceptance-checklist item 7 with `As<T>()` explicitly
+   excluded from "retired." No further design work is needed for this question: `As<T>()`'s existing
+   signature, throw-on-unreachable-source behaviour, and receiver type are all unchanged by this
+   document — see the implementation plan
+   (`docs/superpowers/plans/2026-09-10-313-service-resource-dualwrite-bridge-plan.md`) for the exact
+   file-level treatment.
+2. **RESOLVED (implementation-time judgment call, folded into the plan): warning message wording once
+   the skip is keyed by annotation type.** The plan maps each annotation type to the native method
+   name an AppHost author actually called (`EnvironmentAnnotation`/`EnvironmentCallbackAnnotation` →
+   "WithEnvironment", `CommandLineArgsCallbackAnnotation` → "WithArgs", `EndpointAnnotation` →
+   "WithHttpEndpoint/WithHttpsEndpoint", `WaitAnnotation` → "WaitFor/WaitForCompletion") via a small
+   `Reachability.CapabilityLabel` helper. Reasonable, not escalated further.
+3. **RESOLVED (confirmed complete, no action needed): whether `IResourceBuilder<T>` gains members
+   beyond `WithAnnotation` in a later Aspire release.** Confirmed complete at this repo's pinned floor
+   (`13.5.2`) at plan-writing time. Not re-verified against a later floor as part of this stage; a
+   heads-up for whoever next moves the pinned floor, not a blocking gap here.
+4. **RESOLVED as a plan task, not further design here: direction-2 `WaitFor` (§3) rests on name-keyed
+   lookup found only as far as `WaitForDependenciesAsync`.** The implementation plan makes this an
+   explicit verification step — the `aspire run`-grade probe the ticket's acceptance item 5 already
+   requires must exercise `otherResource.WaitFor(serviceBuilder)` for at least `container` and `local`
+   and confirm it releases correctly. Any finding of object-identity reliance (rather than pure
+   name-keying) surfaced by that probe is a plan-time bug to design around — most likely, wiring a
+   second, redundant `WaitAnnotation` onto the real resource for this direction too — not a reason to
+   stop and ask again.
