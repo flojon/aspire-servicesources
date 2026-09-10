@@ -257,7 +257,7 @@ internal static class ServiceSourcesConfigCache
             // "A ServiceCatalogBuilder captured and mutated after this point contributes nothing").
             var (codeEntries, codeRepositories) = CodeCatalogFor(builder).Freeze();
 
-            var yamlPath = Path.Combine(builder.AppHostDirectory, "servicesources.yaml");
+            var yamlPath = Path.Combine(builder.AppHostDirectory, ServiceCatalogLoader.FileName);
             var yamlExists = File.Exists(yamlPath);
 
             if (codeEntries.Count == 0 && !yamlExists)

@@ -88,17 +88,44 @@ public class LocalKindRegistryTests
     [InlineData("repository")]
     [InlineData("kind")]
     [InlineData("prepare")]
-    public void Register_KindNameCollidingWithAWellKnownServiceProperty_Throws(string reserved)
+    [InlineData("project")]
+    [InlineData("defaultRef")]
+    public void Register_KindNameCollidingWithAWellKnownServiceProperty_YamlCatalogInPlay_Throws(string reserved)
     {
-        var builder = CreateBuilder();
+        var directory = TempDirectories.CreateSubdirectory();
+        File.WriteAllText(Path.Combine(directory.FullName, "servicesources.yaml"), "services: {}\n");
+        var builder = TestHelpers.CreateBuilder(directory.FullName);
 
         // A block named after a typed ServiceMetadata property is bound as that property, so a kind
-        // by that name could never receive its own options — reject it at registration instead.
+        // by that name could never receive its own options — reject it at registration instead, but
+        // only when this AppHost actually has a yaml catalog for the collision to occur in.
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => LocalKindRegistry.For(builder).Register(reserved, new FakeKind()));
 
         Assert.Contains(reserved, ex.Message);
         Assert.False(LocalKindRegistry.For(builder).TryGet(reserved, out _));
+    }
+
+    [Theory]
+    [InlineData("container")]
+    [InlineData("url")]
+    [InlineData("kubernetes")]
+    [InlineData("repository")]
+    [InlineData("kind")]
+    [InlineData("prepare")]
+    [InlineData("project")]
+    [InlineData("defaultRef")]
+    public void Register_KindNameCollidingWithAWellKnownServiceProperty_NoYamlCatalog_Succeeds(string reserved)
+    {
+        // No 'servicesources.yaml' exists in this AppHost directory at all, so there is no yaml
+        // document for the name to collide with — a code-only catalog's WithKind(...) takes the
+        // options as a plain method parameter, with nothing else in the same document to bind
+        // instead (#317).
+        var builder = CreateBuilder();
+
+        LocalKindRegistry.For(builder).Register(reserved, new FakeKind());
+
+        Assert.True(LocalKindRegistry.For(builder).TryGet(reserved, out _));
     }
 
     [Fact]
