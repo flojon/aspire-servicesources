@@ -20,7 +20,7 @@ internal interface IServiceSource
     /// it, the same way every one already takes the whole of <paramref name="config"/> whether or not
     /// its own source block is the one populated.
     /// </param>
-    IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+    IResourceBuilder<ServiceResource> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
         ServiceDeveloperConfig config, RepositoryDeveloperConfig? repositoryConfig = null);
 }

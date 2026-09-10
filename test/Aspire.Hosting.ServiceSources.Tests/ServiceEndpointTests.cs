@@ -31,7 +31,7 @@ public class ServiceEndpointTests
         public IReadOnlyList<int> AllocatePorts(int count) => throw new NotSupportedException();
     }
 
-    private static IResourceBuilder<IResourceWithServiceDiscovery> ContainerService(
+    private static IResourceBuilder<ServiceResource> ContainerService(
         IDistributedApplicationBuilder builder, string? scheme = null) =>
         new ContainerSource().Resolve(
             builder,
@@ -40,7 +40,7 @@ public class ServiceEndpointTests
                 .ToDefinition("servicesources.yaml", "orders", TestHelpers.EmptyRepositories),
             new ServiceDeveloperConfig { Source = "container" });
 
-    private static IResourceBuilder<IResourceWithServiceDiscovery> KubernetesService(
+    private static IResourceBuilder<ServiceResource> KubernetesService(
         IDistributedApplicationBuilder builder, string? scheme = null) =>
         new KubernetesSource(new FakePortAllocator()).Resolve(
             builder,

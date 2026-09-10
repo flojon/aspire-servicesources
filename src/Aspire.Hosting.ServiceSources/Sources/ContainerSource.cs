@@ -6,7 +6,7 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 
 internal sealed class ContainerSource : IServiceSource
 {
-    public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+    public IResourceBuilder<ServiceResource> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
         ServiceDeveloperConfig config, RepositoryDeveloperConfig? repositoryConfig = null)
     {
@@ -29,7 +29,7 @@ internal sealed class ContainerSource : IServiceSource
             containerBuilder.WithImageTag(tag);
         }
 
-        return ResolvedService.Tag(containerBuilder, serviceName, "container");
+        return ResolvedService.Bridge(containerBuilder, serviceName, "container");
     }
 
     internal static (string Image, string? Tag, int Port) ResolveContainerConfig(
