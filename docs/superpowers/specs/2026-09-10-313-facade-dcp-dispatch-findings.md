@@ -134,11 +134,23 @@ Its own description names the residual awkwardness: `GetProjectResources()`/`Get
 still return "all resources of *type* X", which may no longer match what DCP actually executes as X
 once annotations can diverge from type — a naming/documentation gap, not a blocker for #313's use.
 
-If #18052 lands, the wall in this doc goes away: a `ServiceResource : Resource` facade carrying the
-right annotation (`ContainerImageAnnotation`, `ExecutableAnnotation`, or an `IProjectMetadata`) would
-get real DCP execution for every source, including `local`, with no feature regression and no wrapper
-object. This is a pure upstream dependency — nothing in this package can substitute for it, and nothing
-here needs to wait idle for it either (see Recommendation).
+If #18052 landed, the wall in this doc would go away: a `ServiceResource : Resource` facade carrying
+the right annotation (`ContainerImageAnnotation`, `ExecutableAnnotation`, or an `IProjectMetadata`)
+would get real DCP execution for every source, including `local`, with no feature regression and no
+wrapper object.
+
+**Correction — #18052 is not expected to merge as-is.** The PR's own thread has one substantive,
+non-CI-retry comment, from `davidfowl` (an Aspire maintainer), in reply to a request to mark it
+draft: *"Thats OK I dont think we would merge this anyways. This is a big enough change that it
+should just be in the drafts."* Everything after that (a "hitting a few quirks" note from the author,
+and several rounds of `github-actions` CI-retry messages) is the PR author continuing to poke at it
+for their own understanding, not sustained movement toward merge. So this is not a reliable "wait for
+it to land" dependency — it is evidence the *mechanism* is technically sound (annotation-based
+dispatch works, per its own playground project demonstrating a `ProjectResource`↔`ContainerResource`
+bait-and-switch) with no committed path for *this* PR to ship it. A differently-scoped, more formal
+follow-on (plausibly through the #19836 proposal process, which is exactly the kind of "big enough
+change" process davidfowl's comment gestures at) might still get there, but there is nothing to defer
+to today.
 
 Related, narrower proposal seen while searching: **microsoft/aspire#19836**, *"Resource projections:
 typed, target-scoped container views instead of implicit shape conversion"* (filed 2026-09-09). It
@@ -151,16 +163,17 @@ classification, complementary rather than competing. Not a substitute for #18052
 Do not implement a single-class facade across all four sources *without deciding one of the paths
 below first*. The wrapper/dual-write mechanism now has a positive, if partial, empirical result —
 it is no longer purely hypothetical — but it is a second real object per logical service, with its
-own risks (see below), and the upstream fix removes the need for it entirely. Before writing an
-implementation plan for #313, decide between:
+own risks (see below). Before writing an implementation plan for #313, decide between:
 
-1. **Track microsoft/aspire#18052 and defer #313's full unification until it lands.** No local code
-   change; #313 stays open, blocked on the upstream PR, same pattern as #72 ↔ microsoft/aspire#9965.
-   Lowest cost and lowest risk — the annotation-based dispatch #18052 brings makes the facade a real
-   `Resource`-derived object with no wrapper needed at all, for every source including `local`. Ties
-   #313's real fix to someone else's schedule, and #18052 is still WIP with open API-shape questions
-   of its own.
-2. **Build the dual-write wrapper now, as a bridge until #18052 lands.** The read and write paths
+1. **Track microsoft/aspire#18052 and defer #313's full unification — downgraded, not recommended
+   as the primary path.** A maintainer (`davidfowl`) said directly on the PR thread that it isn't
+   expected to merge as-is ("I dont think we would merge this anyways. This is a big enough change
+   that it should just be in the drafts"). Unlike #72 ↔ microsoft/aspire#9965 — an accepted issue with
+   ordinary review left to do — there is no committed path for *this* PR to land. Treat it as evidence
+   the mechanism works, not as a dependency to wait on. Revisit if a differently-scoped follow-on
+   appears (possibly through #19836's formal proposal process).
+2. **Build the dual-write wrapper now, as the practical way to get #313's benefit without an upstream
+   dependency that may never resolve.** The read and write paths
    both checked out in this doc's probe (endpoint discovery through `WithReference`, environment
    configuration through `WithEnvironment`, both reaching the real registered resource). What is
    *not* yet checked — full endpoint URL resolution end-to-end, and `WaitFor`/wait-ordering through
