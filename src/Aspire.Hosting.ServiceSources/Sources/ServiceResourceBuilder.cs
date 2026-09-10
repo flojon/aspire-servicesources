@@ -11,27 +11,42 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// </summary>
 internal static class Reachability
 {
-    private static readonly HashSet<string> OutOfBandSources = new(StringComparer.Ordinal) { "url", "kubernetes" };
+    /// <summary>
+    /// Sources that resolve to something already running elsewhere, so what the AppHost configures
+    /// here is not the service itself — shared with
+    /// <see cref="ServiceConfigurationExtensions.Unwrap{T}"/>'s own out-of-band check, since both are
+    /// the same policy re-expressed at a different key (annotation type here, capability type there).
+    /// </summary>
+    internal static readonly HashSet<string> OutOfBandSources = new(StringComparer.Ordinal) { "url", "kubernetes" };
 
     /// <summary>
-    /// The annotation types a native vocabulary method adds as the capability itself — as opposed to
-    /// bookkeeping Aspire attaches alongside it, such as <c>ResourceRelationshipAnnotation</c> (the
-    /// dashboard link <c>WaitFor</c> also records) or an <c>EndpointReferenceAnnotation</c>. Found by
-    /// tracing what <c>WaitFor</c> actually adds: it calls both <c>WithAnnotation(waitAnnotation)</c>
-    /// <em>and</em> <c>WithRelationship(...)</c> (itself <c>WithAnnotation(new
-    /// ResourceRelationshipAnnotation(...))</c>) for a single AppHost call, and only the first of the
-    /// two is what <see cref="ServiceConfigurationExtensions"/>'s old <c>Configure&lt;T&gt;</c> table
-    /// ever gated — the second is decoration this reachability check must not independently skip and
-    /// warn about, or a single reachable <c>WaitFor</c> call reports two skips instead of zero.
+    /// Annotation types Aspire attaches as decoration alongside a capability call — never something
+    /// an AppHost author asked to configure — so they must dual-write silently rather than gate.
+    /// <c>WaitFor</c> is the case that surfaced this: it calls both
+    /// <c>WithAnnotation(waitAnnotation)</c> <em>and</em> <c>WithRelationship(...)</c> (itself
+    /// <c>WithAnnotation(new ResourceRelationshipAnnotation(...))</c>, the dashboard link) for a
+    /// single AppHost call, and gating both would report a single reachable <c>WaitFor</c> as two
+    /// skips instead of zero. <c>EndpointReferenceAnnotation</c> is the same shape for a reference
+    /// read from an endpoint.
     /// </summary>
-    private static readonly HashSet<string> CapabilityAnnotationTypeNames = new(StringComparer.Ordinal)
+    /// <remarks>
+    /// Deliberately a denylist of known decoration, not an allowlist of known capabilities: an
+    /// earlier revision of this table listed the five annotation types this ticket's own vocabulary
+    /// adds and treated everything else as reachable by default. That missed every other Aspire
+    /// extension method already bound to <see cref="IResourceWithEndpoints"/>/
+    /// <see cref="IResourceWithArgs"/> (<c>AsHttp2Service</c>, <c>WithMcpServer</c>,
+    /// <c>WithHttpHealthCheck</c>, <c>WithEndpointProxySupport</c>, <c>WithLaunchToolArgs</c>, and any
+    /// future one) — those add capability annotations too, just ones this table never named, so they
+    /// dual-write onto a <c>"kubernetes"</c> service's real <c>kubectl port-forward</c> process (the
+    /// exact wrong-process failure mode <see cref="ServiceConfigurationExtensions.Unwrap{T}"/>'s own
+    /// remarks describe) or vanish onto a <c>"url"</c> facade with no real resource and no warning.
+    /// Failing closed on anything unrecognized is what <c>Configure&lt;T&gt;</c>'s skip-with-warning
+    /// existed to guarantee in the first place.
+    /// </remarks>
+    private static readonly HashSet<string> DecorationAnnotationTypeNames = new(StringComparer.Ordinal)
     {
-        // "EnvironmentAnnotation" is internal to Aspire.Hosting.dll — see CapabilityLabel's remarks.
-        "EnvironmentAnnotation",
-        nameof(EnvironmentCallbackAnnotation),
-        nameof(CommandLineArgsCallbackAnnotation),
-        nameof(EndpointAnnotation),
-        nameof(WaitAnnotation),
+        nameof(ResourceRelationshipAnnotation),
+        nameof(EndpointReferenceAnnotation),
     };
 
     /// <summary>
@@ -40,12 +55,13 @@ internal static class Reachability
     /// <c>ServiceConfigurationExtensions.IsUnreachable&lt;T&gt;</c> (design §5): every capability
     /// annotation is unreachable for <c>"url"</c>; only <see cref="WaitAnnotation"/> survives for
     /// <c>"kubernetes"</c>, whose real resource is a genuine <c>kubectl port-forward</c> process
-    /// worth ordering against. Anything outside <see cref="CapabilityAnnotationTypeNames"/> is
-    /// always reachable — it is bookkeeping, not configuration a developer wrote.
+    /// worth ordering against. Only <see cref="DecorationAnnotationTypeNames"/> is always
+    /// reachable — everything else gates, on the assumption that an annotation type this table does
+    /// not recognize is configuration, not bookkeeping.
     /// </summary>
     public static bool IsUnreachable(Type annotationType, string source) =>
         OutOfBandSources.Contains(source)
-        && CapabilityAnnotationTypeNames.Contains(annotationType.Name)
+        && !DecorationAnnotationTypeNames.Contains(annotationType.Name)
         && !(string.Equals(source, "kubernetes", StringComparison.Ordinal) && annotationType == typeof(WaitAnnotation));
 
     /// <summary>

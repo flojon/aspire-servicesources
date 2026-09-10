@@ -32,6 +32,11 @@ public class ServiceResourceTests
 #pragma warning disable ASPIREPROBES001 // IResourceWithProbes is [Experimental]; only referenced here to assert ServiceResource doesn't implement it.
         Assert.DoesNotContain(typeof(IResourceWithProbes), interfaces);
 #pragma warning restore ASPIREPROBES001
+
+        // The five Contains assertions above plus IResource itself, and nothing else — pins the total
+        // so a sixth capability interface added later fails here even if it isn't one of the ones this
+        // test already knows to check for by name.
+        Assert.Equal(6, interfaces.Length);
     }
 
     [Fact]
