@@ -43,11 +43,11 @@ internal static class Reachability
     /// Failing closed on anything unrecognized is what <c>Configure&lt;T&gt;</c>'s skip-with-warning
     /// existed to guarantee in the first place.
     /// </remarks>
-    private static readonly HashSet<string> DecorationAnnotationTypeNames = new(StringComparer.Ordinal)
-    {
-        nameof(ResourceRelationshipAnnotation),
-        nameof(EndpointReferenceAnnotation),
-    };
+    private static readonly HashSet<Type> DecorationAnnotationTypes =
+    [
+        typeof(ResourceRelationshipAnnotation),
+        typeof(EndpointReferenceAnnotation),
+    ];
 
     /// <summary>
     /// Whether an annotation of <paramref name="annotationType"/> cannot reach the service behind
@@ -55,13 +55,16 @@ internal static class Reachability
     /// <c>ServiceConfigurationExtensions.IsUnreachable&lt;T&gt;</c> (design §5): every capability
     /// annotation is unreachable for <c>"url"</c>; only <see cref="WaitAnnotation"/> survives for
     /// <c>"kubernetes"</c>, whose real resource is a genuine <c>kubectl port-forward</c> process
-    /// worth ordering against. Only <see cref="DecorationAnnotationTypeNames"/> is always
+    /// worth ordering against. Only <see cref="DecorationAnnotationTypes"/> is always
     /// reachable — everything else gates, on the assumption that an annotation type this table does
-    /// not recognize is configuration, not bookkeeping.
+    /// not recognize is configuration, not bookkeeping. Keyed by <see cref="Type"/> identity, not
+    /// <c>Type.Name</c>: both entries are public, so there is no accessibility reason (unlike
+    /// <see cref="CapabilityLabel"/>'s documented internal-type workaround) to risk a same-named type
+    /// from another namespace silently bypassing this fail-closed gate.
     /// </summary>
     public static bool IsUnreachable(Type annotationType, string source) =>
         OutOfBandSources.Contains(source)
-        && !DecorationAnnotationTypeNames.Contains(annotationType.Name)
+        && !DecorationAnnotationTypes.Contains(annotationType)
         && !(string.Equals(source, "kubernetes", StringComparison.Ordinal) && annotationType == typeof(WaitAnnotation));
 
     /// <summary>
