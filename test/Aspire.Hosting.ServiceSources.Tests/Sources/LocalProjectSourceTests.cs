@@ -1553,6 +1553,13 @@ public class LocalProjectSourceTests
         Assert.DoesNotContain("indentation", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("yaml", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("WithKind", ex.Message, StringComparison.Ordinal);
+
+        // ex.Message alone isn't what a developer sees for an unhandled exception — ToString() is
+        // (see ServiceSourcesConfigurationException's own doc comment on that override). The rewrite
+        // must not chain the pre-rewrite exception as InnerException, or the superseded advice
+        // reappears via Describe()'s "caused by" line even though Message itself is clean.
+        Assert.DoesNotContain("indentation", ex.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("caused by", ex.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1577,6 +1584,12 @@ public class LocalProjectSourceTests
         Assert.DoesNotContain("indentation", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("yaml", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("WithKind", ex.Message, StringComparison.Ordinal);
+
+        // See the JsonArray test above: ToString() (not Message) is what an unhandled exception
+        // actually renders, and InvokeKindHandler's copy of the rewrite must not leak the
+        // pre-rewrite advice back in via InnerException/Describe()'s "caused by" line either.
+        Assert.DoesNotContain("indentation", ex.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("caused by", ex.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1598,6 +1611,11 @@ public class LocalProjectSourceTests
         Assert.DoesNotContain("indentation", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("yaml", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("WithKind", ex.Message, StringComparison.Ordinal);
+
+        // See the JsonArray test above: assert against the actual developer-visible rendering,
+        // not just Message.
+        Assert.DoesNotContain("indentation", ex.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("caused by", ex.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1619,6 +1637,11 @@ public class LocalProjectSourceTests
         Assert.DoesNotContain("indentation", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("yaml", ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("WithKind", ex.Message, StringComparison.Ordinal);
+
+        // See the JsonArray test above: assert against the actual developer-visible rendering,
+        // not just Message.
+        Assert.DoesNotContain("indentation", ex.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("caused by", ex.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

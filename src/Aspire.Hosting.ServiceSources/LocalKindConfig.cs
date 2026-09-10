@@ -122,6 +122,15 @@ public static class LocalKindConfig
     /// <see cref="Parse{T}"/> itself, so the yaml-sourced path keeps today's wording unchanged. Any
     /// other <see cref="ServiceSourcesConfigurationException"/> (an unknown property, a wrong options
     /// type, a missing block) is untouched — this only ever matches the one sentence it looks for.
+    ///
+    /// Deliberately does <em>not</em> chain <paramref name="ex"/> as the returned exception's
+    /// <see cref="Exception.InnerException"/>: <see cref="ServiceSourcesConfigurationException.Describe"/>
+    /// prints every distinct message in the inner-exception chain as a "caused by" line, and
+    /// <paramref name="ex"/>'s own message is exactly the superseded sentence this method exists to
+    /// replace — chaining it would print the discarded yaml-indentation advice right back into the
+    /// developer-visible output it was rewritten to avoid. There is no other diagnostic content in
+    /// <paramref name="ex"/> worth preserving; it is the same shape-rejection message, word for word,
+    /// with one sentence swapped.
     /// </summary>
     internal static ServiceSourcesConfigurationException RewriteIndentationAdviceForCodeOrigin(
         ServiceSourcesConfigurationException ex) =>
@@ -130,8 +139,7 @@ public static class LocalKindConfig
                 IndentationAdvice,
                 "This block was passed to WithKind in code, not read from a file — pass the options object " +
                 "this kind's registration method documents, not a list or a raw value.",
-                StringComparison.Ordinal),
-            ex);
+                StringComparison.Ordinal));
 
     /// <summary>
     /// Reads a block already in yaml text: yaml's own untyped shape re-serialized, or a guest
