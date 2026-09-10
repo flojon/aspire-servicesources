@@ -82,6 +82,17 @@ never existed. Check the tag of the last release before adding one.
   types if the options object doesn't match what the kind expects. A dictionary (the shape yaml
   itself produces) still round-trips exactly as before.
 
+### Fixed
+
+- **`AddLocalKind` no longer rejects a reserved-looking name when no yaml catalog is in play**
+  ([#317]). `LocalKindRegistry.Register`'s reserved-name check — `url`, `container`, `kubernetes`,
+  `repository`, `project`, `defaultRef` and `kind` collide with a well-known `ServiceMetadata` yaml
+  property — ran unconditionally, even for an AppHost with no `servicesources.yaml` at all. A
+  service declared entirely in code (`WithKind(kind, options)`, [#134]) has no yaml document for
+  the name to collide with, so the check now applies only when this AppHost's
+  `servicesources.yaml` actually exists; an AppHost that does load one keeps today's rejection
+  unchanged.
+
 ### Documentation
 
 - **The code-catalog design's ATS probe, measured** ([#134]). The accepted design for authoring the
@@ -1566,6 +1577,7 @@ Targets `net10.0`.
 [#279]: https://github.com/flojon/aspire-servicesources/issues/279
 [#291]: https://github.com/flojon/aspire-servicesources/issues/291
 [#309]: https://github.com/flojon/aspire-servicesources/issues/309
+[#317]: https://github.com/flojon/aspire-servicesources/issues/317
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

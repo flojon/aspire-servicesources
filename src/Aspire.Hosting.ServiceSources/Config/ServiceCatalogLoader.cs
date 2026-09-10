@@ -8,6 +8,13 @@ namespace Aspire.Hosting.ServiceSources.Config;
 
 internal static class ServiceCatalogLoader
 {
+    /// <summary>
+    /// The catalog file's fixed name inside an AppHost's project directory. Shared with
+    /// <see cref="Sources.LocalKindRegistry"/>, which needs to know whether this file exists without
+    /// loading it, and with <see cref="ServiceSourcesConfigCache"/>, which loads it.
+    /// </summary>
+    internal const string FileName = "servicesources.yaml";
+
     private static readonly IDeserializer Deserializer = new DeserializerBuilder()
         .WithNamingConvention(CamelCaseNamingConvention.Instance)
         .IgnoreUnmatchedProperties()

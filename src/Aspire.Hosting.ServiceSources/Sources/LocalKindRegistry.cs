@@ -13,9 +13,15 @@ internal sealed class LocalKindRegistry
     private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, LocalKindRegistry> Cache = new();
 
     private readonly Dictionary<string, ILocalResourceKind> _handlers = new();
+    private readonly string _appHostDirectory;
+
+    private LocalKindRegistry(string appHostDirectory)
+    {
+        _appHostDirectory = appHostDirectory;
+    }
 
     public static LocalKindRegistry For(IDistributedApplicationBuilder builder) =>
-        Cache.GetValue(builder, static _ => new LocalKindRegistry());
+        Cache.GetValue(builder, static b => new LocalKindRegistry(b.AppHostDirectory));
 
     public void Register(string kind, ILocalResourceKind handler)
     {
@@ -25,7 +31,14 @@ internal sealed class LocalKindRegistry
                 "Local kind 'dotnet' is reserved for the built-in project resolution and cannot be registered via AddLocalKind.");
         }
 
-        if (Config.ServiceCatalogLoader.IsReservedKindName(kind))
+        // The reserved-name collision is a yaml document-shape constraint (#73): a kind's options
+        // block sits at the same nesting level as a service's other yaml properties, so a name
+        // matching one of those is ambiguous. That constraint doesn't exist for a service declared
+        // entirely in code — WithKind(kind, options) takes options as a plain method parameter, with
+        // no shared document for it to collide with. So the check only applies when this AppHost
+        // actually has a yaml catalog for the collision to occur in (#317).
+        var yamlPath = Path.Combine(_appHostDirectory, Config.ServiceCatalogLoader.FileName);
+        if (File.Exists(yamlPath) && Config.ServiceCatalogLoader.IsReservedKindName(kind))
         {
             throw new ServiceSourcesConfigurationException(
                 $"Local kind '{kind}' is reserved: it collides with a well-known property of a service's " +
