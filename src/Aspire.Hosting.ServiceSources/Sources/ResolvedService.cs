@@ -36,6 +36,10 @@ internal static class ResolvedService
         // resources a source produced, and no others.
         ServiceStartupFailureNotices.For(real.ApplicationBuilder);
 
+        // A WaitFor/WaitForCompletion naming the facade this method returns would otherwise target a
+        // resource nothing ever publishes a state for (#328).
+        ServiceWaitRetargeting.EnsureSubscribed(real.ApplicationBuilder);
+
         return new ServiceResourceBuilder(real.ApplicationBuilder, facade, real, source);
     }
 
