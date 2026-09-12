@@ -33,8 +33,8 @@ public sealed class ServiceDefinitionBuilder
     private object? _kindOptions;
 
     // The ContainerMetadata or KubernetesMetadata most recently created by WithContainer/
-    // WithKubernetes — where WithHttpEndpoint/WithHttpsEndpoint stamp a scheme, matching Aspire's
-    // own "call it right after the thing it names a scheme for" idiom.
+    // WithKubernetes — where EnableHttps/DisableHttps stamp a scheme, following the idiom of
+    // calling right after the thing it names a scheme for.
     private object? _schemeOwner;
 
     internal ServiceDefinitionBuilder(string serviceName)
@@ -128,30 +128,29 @@ public sealed class ServiceDefinitionBuilder
 
     /// <summary>
     /// Names the scheme of the source declared immediately before this call — <see cref="WithContainer"/>
-    /// or <see cref="WithKubernetes"/> — as <c>"http"</c>. Mirrors Aspire's own
-    /// <c>WithHttpEndpoint()</c>/<c>WithHttpsEndpoint()</c> pair; see <see cref="EndpointScheme"/> for
-    /// what a scheme actually changes at resolution time.
+    /// or <see cref="WithKubernetes"/> — as <c>"http"</c>, the same value it defaults to when left
+    /// unset. See <see cref="EndpointScheme"/> for what a scheme actually changes at resolution time.
     /// </summary>
-    public ServiceDefinitionBuilder WithHttpEndpoint() => WithScheme(EndpointScheme.Http);
+    public ServiceDefinitionBuilder DisableHttps() => WithScheme(EndpointScheme.Http);
 
-    /// <summary>Names the scheme of the most recently declared source as <c>"https"</c>. See <see cref="WithHttpEndpoint"/>.</summary>
-    public ServiceDefinitionBuilder WithHttpsEndpoint() => WithScheme(EndpointScheme.Https);
+    /// <summary>Names the scheme of the most recently declared source as <c>"https"</c>. See <see cref="DisableHttps"/>.</summary>
+    public ServiceDefinitionBuilder EnableHttps() => WithScheme(EndpointScheme.Https);
 
     private ServiceDefinitionBuilder WithScheme(string scheme)
     {
         switch (_schemeOwner)
         {
             case ContainerMetadata container:
-                RequireUnset(container.Scheme, $"{nameof(WithHttpEndpoint)}/{nameof(WithHttpsEndpoint)} for this {nameof(WithContainer)}");
+                RequireUnset(container.Scheme, $"{nameof(EnableHttps)}/{nameof(DisableHttps)} for this {nameof(WithContainer)}");
                 container.Scheme = scheme;
                 break;
             case KubernetesMetadata kubernetes:
-                RequireUnset(kubernetes.Scheme, $"{nameof(WithHttpEndpoint)}/{nameof(WithHttpsEndpoint)} for this {nameof(WithKubernetes)}");
+                RequireUnset(kubernetes.Scheme, $"{nameof(EnableHttps)}/{nameof(DisableHttps)} for this {nameof(WithKubernetes)}");
                 kubernetes.Scheme = scheme;
                 break;
             default:
                 throw new ServiceSourcesConfigurationException(
-                    $"Service '{_serviceName}': {nameof(WithHttpEndpoint)}/{nameof(WithHttpsEndpoint)} must " +
+                    $"Service '{_serviceName}': {nameof(EnableHttps)}/{nameof(DisableHttps)} must " +
                     $"immediately follow {nameof(WithContainer)} or {nameof(WithKubernetes)} — there is no " +
                     "endpoint-bearing source to name a scheme for yet.");
         }
