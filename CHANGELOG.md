@@ -18,6 +18,12 @@ never existed. Check the tag of the last release before adding one.
 
 ### Added
 
+- **`java`/`javascript` local services export OpenTelemetry to the dashboard.** `kind: dotnet`
+  already gets this for free from Aspire's own `AddProject`; `AddJavaApp`/`AddNodeApp`/
+  `AddViteApp` and friends do not, so the `java` and `javascript` kind handlers now call
+  `WithOtlpExporter()` themselves — the same call any Aspire apphost adds by hand for an
+  executable resource. `container`/`kubernetes`/`url` sources are unaffected: they point at a
+  pre-built image or an already-running endpoint the AppHost has no process to inject into.
 - **The service catalog can be authored in code** ([#134]). `builder.AddServiceCatalog(catalog => …)`
   declares services in the AppHost's own language — C# directly, TypeScript (and other guest
   languages) through Aspire's Type System — instead of, or alongside, `servicesources.yaml`. All
