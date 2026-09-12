@@ -140,45 +140,45 @@ public class ServiceDefinitionBuilderTests
     }
 
     [Fact]
-    public void WithHttpEndpoint_AfterWithContainer_SetsContainerScheme()
+    public void DisableHttps_AfterWithContainer_SetsContainerScheme()
     {
         var definition = new ServiceCatalogBuilder().AddService("payments")
             .WithContainer("nginxdemos/hello", port: 80)
-            .WithHttpEndpoint()
+            .DisableHttps()
             .Build();
 
         Assert.Equal("http", definition.Container!.Scheme);
     }
 
     [Fact]
-    public void WithHttpsEndpoint_AfterWithContainer_SetsContainerScheme()
+    public void EnableHttps_AfterWithContainer_SetsContainerScheme()
     {
         var definition = new ServiceCatalogBuilder().AddService("payments")
             .WithContainer("nginxdemos/hello", port: 80)
-            .WithHttpsEndpoint()
+            .EnableHttps()
             .Build();
 
         Assert.Equal("https", definition.Container!.Scheme);
     }
 
     [Fact]
-    public void WithHttpsEndpoint_AfterWithKubernetes_SetsKubernetesScheme()
+    public void EnableHttps_AfterWithKubernetes_SetsKubernetesScheme()
     {
         var definition = new ServiceCatalogBuilder().AddService("payments")
             .WithKubernetes("payments", port: 8080)
-            .WithHttpsEndpoint()
+            .EnableHttps()
             .Build();
 
         Assert.Equal("https", definition.Kubernetes!.Scheme);
     }
 
     [Fact]
-    public void WithHttpsEndpoint_TargetsOnlyTheMostRecentlyDeclaredSource()
+    public void EnableHttps_TargetsOnlyTheMostRecentlyDeclaredSource()
     {
         var definition = new ServiceCatalogBuilder().AddService("payments")
             .WithContainer("nginxdemos/hello", port: 80)
             .WithKubernetes("payments", port: 8080)
-            .WithHttpsEndpoint()
+            .EnableHttps()
             .Build();
 
         Assert.Null(definition.Container!.Scheme);
@@ -186,32 +186,32 @@ public class ServiceDefinitionBuilderTests
     }
 
     [Fact]
-    public void WithHttpEndpoint_NoSourceDeclaredYet_Throws()
+    public void DisableHttps_NoSourceDeclaredYet_Throws()
     {
         var chain = new ServiceCatalogBuilder().AddService("payments");
 
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => chain.WithHttpEndpoint());
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => chain.DisableHttps());
 
         Assert.Contains("payments", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void WithHttpEndpoint_AfterWithUrlOnly_Throws()
+    public void DisableHttps_AfterWithUrlOnly_Throws()
     {
         // WithUrl doesn't carry a Scheme, so it isn't a valid target either.
         var chain = new ServiceCatalogBuilder().AddService("payments").WithUrl("https://a.example");
 
-        Assert.Throws<ServiceSourcesConfigurationException>(() => chain.WithHttpEndpoint());
+        Assert.Throws<ServiceSourcesConfigurationException>(() => chain.DisableHttps());
     }
 
     [Fact]
-    public void WithHttpsEndpoint_CalledTwiceForSameBlock_Throws()
+    public void EnableHttps_CalledTwiceForSameBlock_Throws()
     {
         var chain = new ServiceCatalogBuilder().AddService("payments")
             .WithContainer("nginxdemos/hello", port: 80)
-            .WithHttpsEndpoint();
+            .EnableHttps();
 
-        Assert.Throws<ServiceSourcesConfigurationException>(() => chain.WithHttpEndpoint());
+        Assert.Throws<ServiceSourcesConfigurationException>(() => chain.DisableHttps());
     }
 
     [Fact]

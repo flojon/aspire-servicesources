@@ -137,7 +137,7 @@ builder.AddServiceCatalog(catalog =>
 
     catalog.AddService("payments")
         .WithContainer("nginxdemos/hello", port: 80, defaultTag: "latest")
-        .WithKubernetes("payments", port: 8080).WithHttpsEndpoint();
+        .WithKubernetes("payments", port: 8080).EnableHttps();
 });
 
 var orders = builder.AddService("orders");
@@ -181,17 +181,16 @@ values you type into `servicesources.local.json`:
 | `WithContainer` | `container:` | `"container"` |
 | `WithKubernetes` | `kubernetes:` | `"kubernetes"` |
 
-`WithHttpEndpoint()`/`WithHttpsEndpoint()`, chained immediately after `WithContainer` or
+`EnableHttps()`/`DisableHttps()`, chained immediately after `WithContainer` or
 `WithKubernetes`, are the code-authoring equivalent of yaml's `container.scheme`/
 `kubernetes.scheme` (documented under the `"container"` and `"kubernetes"` source sections
-below) — mirroring Aspire's own `WithHttpEndpoint`/`WithHttpsEndpoint` pair. Each names the
-scheme of whichever source block precedes it, so a service declaring both sources sets them
-independently:
+below). Each names the scheme of whichever source block precedes it, so a service declaring
+both sources sets them independently:
 
 ```csharp
 catalog.AddService("payments")
-    .WithContainer("nginxdemos/hello", port: 80).WithHttpEndpoint()
-    .WithKubernetes("payments", port: 8080).WithHttpsEndpoint();
+    .WithContainer("nginxdemos/hello", port: 80).DisableHttps()
+    .WithKubernetes("payments", port: 8080).EnableHttps();
 ```
 
 Calling either with no `WithContainer`/`WithKubernetes` immediately before it, or calling it
