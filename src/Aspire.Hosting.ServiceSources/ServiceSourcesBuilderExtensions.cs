@@ -54,34 +54,27 @@ public static class ServiceSourcesBuilderExtensions
     /// integration (the <c>"container"</c> source).
     /// </summary>
     /// <returns>
-    /// An <see cref="IResourceBuilder{T}"/> over the <b>real</b> resource Aspire runs. Pass it to a
-    /// consumer's <c>WithReference(...)</c>, name its endpoint with
-    /// <see cref="ServiceEndpointExtensions.GetServiceEndpoint"/> (or <c>GetEndpoint(...)</c>, which
-    /// ties the consumer to one source's endpoint naming), or apply this AppHost's own configuration
-    /// with <see cref="ServiceConfigurationExtensions.Configure{T}"/> and
-    /// <see cref="ServiceConfigurationExtensions.As{T}"/>.
+    /// An <see cref="IResourceBuilder{T}"/> over a <see cref="ServiceResource"/> facade — never the
+    /// resource DCP actually runs, which is a <see cref="ProjectResource"/> for <c>"local"</c>, a
+    /// container or executable resource for <c>"container"</c> and <c>"kubernetes"</c>, or whatever
+    /// an <see cref="ILocalResourceKind"/> returns. Configuration applied through the returned
+    /// builder — <c>WithEnvironment</c>, <c>WithReference</c>, <c>WithArgs</c>,
+    /// <c>WithHttpEndpoint</c>/<c>WithHttpsEndpoint</c>, <c>WaitFor</c>/<c>WaitForCompletion</c> —
+    /// dual-writes to the real resource behind the facade; see
+    /// docs/superpowers/specs/2026-09-10-313-service-resource-dualwrite-bridge-design.md.
     /// </returns>
     /// <remarks>
     /// <para>
-    /// The resource is registered in Aspire's model, so configuration applied through the returned
-    /// builder reaches the process that actually runs, and a container consumer's
-    /// <c>WithReference(...)</c> resolves. Which configuration applies depends on the resolved
-    /// source: the <c>"url"</c> and <c>"kubernetes"</c> sources run out of band — one is a fixed
-    /// remote URL, the other a <c>kubectl port-forward</c> in front of something already running —
-    /// so <see cref="ServiceConfigurationExtensions.Configure{T}"/> skips with a warning rather than
-    /// applying it. Wait ordering survives for <c>"kubernetes"</c>, whose port-forward is a real
-    /// local process to order against; <c>"url"</c> registers no resource at all, so nothing
-    /// applies to it.
-    /// </para>
-    /// <para>
-    /// The bare <c>IResourceBuilder&lt;IResourceWithServiceDiscovery&gt;</c> return type is load
-    /// bearing — Aspire's TypeScript code generator emits nothing for an exported method returning a
-    /// custom interface, so narrowing it would drop <c>addService</c> from the generated SDK
-    /// entirely and break the TypeScript AppHost.
+    /// Which configuration applies depends on the resolved source: <c>"url"</c> and
+    /// <c>"kubernetes"</c> run out of band — one is a fixed remote URL, the other a
+    /// <c>kubectl port-forward</c> in front of something already running — so most configuration is
+    /// skipped with a warning rather than applied. Wait ordering survives for <c>"kubernetes"</c>,
+    /// whose port-forward is a real local process to order against; <c>"url"</c> registers no
+    /// resource at all, so nothing applies to it.
     /// </para>
     /// </remarks>
     [AspireExport]
-    public static IResourceBuilder<IResourceWithServiceDiscovery> AddService(
+    public static IResourceBuilder<ServiceResource> AddService(
         this IDistributedApplicationBuilder builder, [ResourceName] string name)
     {
         // Before the resolution below, and before anything that can fail: this is the layer the

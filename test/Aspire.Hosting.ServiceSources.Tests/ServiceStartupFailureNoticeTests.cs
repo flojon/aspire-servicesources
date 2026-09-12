@@ -473,7 +473,7 @@ public class ServiceStartupFailureNoticeTests
         var notices = TestHelpers.StreamServiceSourcesWarnings(builder);
 
         var orders = builder.AddResource(new FakeServiceResource("orders"));
-        ResolvedService.Tag(orders, "orders", "local");
+        ResolvedService.Bridge(orders, "orders", "local");
 
         var services = builder.Services.BuildServiceProvider();
         await builder.Eventing.PublishAsync(
@@ -503,7 +503,7 @@ public class ServiceStartupFailureNoticeTests
         var builder = TestHelpers.CreatePublishingBuilder(TempDirectories.CreateSubdirectory().FullName);
 
         var orders = builder.AddResource(new FakeServiceResource("orders"));
-        ResolvedService.Tag(orders, "orders", "local");
+        ResolvedService.Bridge(orders, "orders", "local");
 
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 

@@ -38,9 +38,10 @@ public class ContainerConsumerTests
         builder.AddContainer("storefront", "nginx:alpine").WithReference(inventory);
 
         // The registration is the fix: without it DCP throws "Host endpoint 'http' on resource
-        // 'inventory' should have an associated DCP Service resource already set up".
-        Assert.Contains(builder.Resources, r => ReferenceEquals(r, inventory.Resource));
-        Assert.IsAssignableFrom<ContainerResource>(inventory.Resource);
+        // 'inventory' should have an associated DCP Service resource already set up". inventory.Resource
+        // is the ServiceResource facade, never itself registered; the real container carries the
+        // same name.
+        Assert.IsAssignableFrom<ContainerResource>(Assert.Single(builder.Resources, r => r.Name == "inventory"));
     }
 
     /// <summary>
@@ -69,8 +70,9 @@ public class ContainerConsumerTests
         var inventory = builder.AddService("inventory");
         builder.AddContainer("storefront", "nginx:alpine").WithReference(inventory);
 
-        Assert.Contains(builder.Resources, r => ReferenceEquals(r, inventory.Resource));
-        Assert.IsAssignableFrom<ExecutableResource>(inventory.Resource);
+        // inventory.Resource is the ServiceResource facade; the real, registered executable carries
+        // the same name and endpoint annotations are copied forward onto the facade too.
+        Assert.IsAssignableFrom<ExecutableResource>(Assert.Single(builder.Resources, r => r.Name == "inventory"));
 
         var endpoint = Assert.Single(inventory.Resource.Annotations.OfType<EndpointAnnotation>());
         Assert.False(endpoint.IsProxied);
@@ -112,8 +114,9 @@ public class ContainerConsumerTests
         var inventory = builder.AddService("inventory");
         builder.AddContainer("storefront", "nginx:alpine").WithReference(inventory);
 
-        Assert.Contains(builder.Resources, r => ReferenceEquals(r, inventory.Resource));
-        Assert.IsAssignableFrom<ProjectResource>(inventory.Resource);
+        // inventory.Resource is the ServiceResource facade; the real, registered project carries the
+        // same name.
+        Assert.IsAssignableFrom<ProjectResource>(Assert.Single(builder.Resources, r => r.Name == "inventory"));
         Assert.Null(await Record.ExceptionAsync(() => TestHelpers.PublishBeforeStartEventAsync(builder)));
     }
 

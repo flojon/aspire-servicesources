@@ -16,6 +16,45 @@ never existed. Check the tag of the last release before adding one.
 
 ## [Unreleased]
 
+### Breaking
+
+- **`AddService` returns `IResourceBuilder<ServiceResource>`** ([#313]). `ServiceResource` is a
+  concrete, sealed class implementing `IResourceWithServiceDiscovery`, `IResourceWithEnvironment`,
+  `IResourceWithArgs`, `IResourceWithEndpoints` and `IResourceWithWaitSupport` — so
+  `WithEnvironment`, `WithReference`, `WithArgs`, `WithHttpEndpoint`/`WithHttpsEndpoint`, `WaitFor`
+  and `WaitForCompletion` now bind directly on the result of `AddService(...)`, for every source
+  (`local`, `container`, `kubernetes`, `url`). `Configure<T>` and the ten
+  `WithService*`/`WaitForService*` guest-language shims are removed — there is nothing left for
+  them to reach that native vocabulary doesn't already cover:
+
+  ```csharp
+  // before
+  builder.AddService("orders")
+      .Configure<IResourceWithEnvironment>(r => r.WithReference(ordersDb))
+      .Configure<IResourceWithWaitSupport>(r => r.WaitForCompletion(migrations));
+
+  // after
+  builder.AddService("orders")
+      .WithReference(ordersDb)
+      .WaitForCompletion(migrations);
+  ```
+
+  `As<T>()` is **renamed** to `Unwrap<T>()`, not removed: `As*` is Aspire's own convention for
+  reinterpreting a resource for publish while returning the *same* builder type (`AsHttp2Service`,
+  and similar) — never a downcast to a different type, which is exactly what this method does, so
+  it moves off that prefix. The capability is unchanged: it stays the escape hatch for
+  kind-specific vocabulary the five interfaces don't cover, on a non-`dotnet` `local` kind's own
+  resource type — `service.Unwrap<JavaScriptAppResource>().WithRunScript("dev")` keeps working
+  exactly as `service.As<JavaScriptAppResource>().WithRunScript("dev")` did. `GetServiceEndpoint()`
+  and `GetEndpoint(...)` are unaffected either way.
+
+  `ServiceResource` is never the object DCP registers or runs — it dual-writes configuration to
+  the real, source-specific resource behind it (Aspire's own `ProjectResource` for `local`; an
+  internal container/executable resource for `container`/`kubernetes`; nothing at all for `url`,
+  which has no process to configure). An assembly compiled against an earlier version that names
+  `IResourceWithServiceDiscovery` as `AddService`'s return type, or calls
+  `Configure<T>`/`As<T>`/any `WithService*` method, no longer compiles against this version.
+
 ### Added
 
 - **The service catalog can be authored in code** ([#134]). `builder.AddServiceCatalog(catalog => …)`
@@ -1576,6 +1615,7 @@ Targets `net10.0`.
 [#279]: https://github.com/flojon/aspire-servicesources/issues/279
 [#291]: https://github.com/flojon/aspire-servicesources/issues/291
 [#309]: https://github.com/flojon/aspire-servicesources/issues/309
+[#313]: https://github.com/flojon/aspire-servicesources/issues/313
 [#317]: https://github.com/flojon/aspire-servicesources/issues/317
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507

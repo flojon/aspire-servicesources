@@ -41,10 +41,10 @@ public class UseJavaScriptTests
         builder.UseJavaScript();
         var service = builder.AddService("frontend");
 
-        // AddService hands back the resource Aspire actually runs, already in the app model — the
-        // handler's own return value, carried straight through.
-        var resource = Assert.IsType<JavaScriptAppResource>(service.Resource);
-        Assert.Contains(builder.Resources, r => ReferenceEquals(r, service.Resource));
+        // service.Resource is the ServiceResource facade; the real, registered JavaScriptAppResource
+        // carries the same name and is what DCP actually runs.
+        var resource = Assert.IsType<JavaScriptAppResource>(
+            Assert.Single(builder.Resources, r => r.Name == "frontend"));
         Assert.Equal("frontend", resource.Name);
         Assert.Equal(repoRoot, resource.WorkingDirectory);
 

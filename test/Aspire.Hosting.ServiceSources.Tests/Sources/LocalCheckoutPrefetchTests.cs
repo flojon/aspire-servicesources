@@ -357,10 +357,10 @@ public class LocalCheckoutPrefetchTests
 
         var service = source.Resolve(builder, "orders", Definition("orders"), DevConfig());
 
-        // The heart of #58: the thing AddService returns is in the app model, so DCP gives it a
-        // Service object and a container consumer can reference it.
-        Assert.Contains(builder.Resources, r => ReferenceEquals(r, service.Resource));
-        Assert.IsAssignableFrom<ProjectResource>(service.Resource);
+        // The heart of #58: the real, registered resource (not the ServiceResource facade
+        // service.Resource is) is in the app model, so DCP gives it a Service object and a
+        // container consumer can reference it.
+        Assert.IsAssignableFrom<ProjectResource>(Assert.Single(builder.Resources, r => r.Name == "orders"));
     }
 
     [Fact]
@@ -541,7 +541,9 @@ public class LocalCheckoutPrefetchTests
         var service = new LocalProjectSource(new FakeGitClient()).Resolve(builder, "frontend", definition, DevConfig());
 
         Assert.Equal("frontend", Assert.Single(handler.Calls).ServiceName);
-        Assert.Contains(builder.Resources, r => ReferenceEquals(r, service.Resource));
+        // service.Resource is the ServiceResource facade; the kind handler's own resource is what
+        // gets registered, under the same name.
+        Assert.Contains(builder.Resources, r => r.Name == "frontend");
     }
 
     [Fact]

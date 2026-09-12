@@ -1128,25 +1128,28 @@ an endpoint named `https` instead of `http`, so `catalog.GetServiceEndpoint()` r
 `catalog.GetEndpoint("https")` works directly; see
 [naming a service's endpoint](#naming-a-services-endpoint). Getting the app itself to actually
 serve TLS is a framework concern the `java:` block deliberately stays out of — reach it from the
-AppHost with `As<JavaAppExecutableResource>()`, most often paired with Aspire's own
+AppHost with `Unwrap<JavaAppExecutableResource>()`, most often paired with Aspire's own
 `WithHttpsCertificateConfiguration` to hand the service the developer certificate without
 hardcoding a path.
 
 **Reaching the rest of the Java integration.** The `java:` block covers how to start the app; it
 deliberately doesn't mirror every modifier the Community Toolkit offers. Anything else is reachable
-from the AppHost with `As<JavaAppExecutableResource>()`, which hands back the real resource builder:
+from the AppHost with `Unwrap<JavaAppExecutableResource>()`, which hands back the real resource
+builder:
 
 ```csharp
 builder.AddService("catalog")
-    .As<JavaAppExecutableResource>()
+    .Unwrap<JavaAppExecutableResource>()
     .WithMavenBuild()                      // compile before starting
     .WithJvmArgs(["-Xmx512m"])
     .WithOtelAgent("/path/to/opentelemetry-javaagent.jar");
 ```
 
-Use `Configure<T>(...)` instead for anything that should survive a developer switching that service
-to a non-`local` source — `As<T>()` throws if the service no longer resolves to a Java resource,
-which is the point when the AppHost genuinely requires one.
+Prefer the native vocabulary `ServiceResource` already exposes (`WithEnvironment`, `WithReference`,
+`WithArgs`, `WithHttpEndpoint`/`WithHttpsEndpoint`, `WaitFor`/`WaitForCompletion`) for anything that
+should survive a developer switching that service to a non-`local` source — `Unwrap<T>()` throws if
+the service no longer resolves to a Java resource, which is the point when the AppHost genuinely
+requires one.
 
 `UseJava()` is exported to Aspire's Type System, so a TypeScript AppHost can call `useJava()`
 before `addService(...)` the same way.
@@ -1613,7 +1616,8 @@ identically — but every provider above it can override an entry without the fi
 >
 > Reading these keys from an AppHost should be rare. Scoping a declaration to one source is what
 > sends an AppHost looking for them, and
-> [`Configure<T>`](#configuring-a-resolved-service) already does that scoping for you.
+> [`ServiceResource`'s native vocabulary](#configuring-a-resolved-service) already does that
+> scoping for you.
 
 The immediate payoff is a **single run** with a different source and no edit to a file you'd have to
 remember to change back. `source` itself isn't nested under a block, so this still works verbatim:
@@ -1727,97 +1731,88 @@ empty section rather than an error:
 
 ## Configuring a resolved service
 
-`AddService()` returns a builder over the **real** resource Aspire runs, so the AppHost can inject
-its own configuration — connection strings, generated secrets, a sibling's endpoint, wait ordering.
-Values like these come from the AppHost's own graph and can't be written into
-`servicesources.yaml`/`servicesources.local.json`.
+`AddService()` returns an `IResourceBuilder<ServiceResource>` — a facade that dual-writes
+configuration to the real resource Aspire runs — so the AppHost can inject its own configuration
+directly, with Aspire's own extension methods: connection strings, generated secrets, a sibling's
+endpoint, wait ordering. Values like these come from the AppHost's own graph and can't be written
+into `servicesources.yaml`/`servicesources.local.json`.
 
-The resolved resource's type depends on the source, which each developer chooses, so name the
-capability you need and it is checked at composition time:
+`ServiceResource` implements `IResourceWithServiceDiscovery`, `IResourceWithEnvironment`,
+`IResourceWithArgs`, `IResourceWithEndpoints` and `IResourceWithWaitSupport`, so
+`WithEnvironment`, `WithReference`, `WithArgs`, `WithHttpEndpoint`/`WithHttpsEndpoint` and
+`WaitFor`/`WaitForCompletion` all bind directly — no capability-naming wrapper needed:
 
 ```csharp
 var backend = builder.AddService("backend")
-    .Configure<IResourceWithEnvironment>(r => r
-        .WithReference(ordersDb)
-        .WithEnvironment("DBPASSWORD", postgres.Resource.PasswordParameter)
-        .WithEnvironment("ENCRYPTIONKEY", builder.AddParameter("EncryptionKey", new GenerateParameterDefault(), secret: true))
-        .WithEnvironment("Services__CommonAuth", commonAuth.GetServiceEndpoint()))
-    .Configure<IResourceWithWaitSupport>(r => r.WaitForCompletion(migrationService));
+    .WithReference(ordersDb)
+    .WithEnvironment("DBPASSWORD", postgres.Resource.PasswordParameter)
+    .WithEnvironment("ENCRYPTIONKEY", builder.AddParameter("EncryptionKey", new GenerateParameterDefault(), secret: true))
+    .WithEnvironment("Services__CommonAuth", commonAuth.GetServiceEndpoint())
+    .WaitForCompletion(migrationService);
 ```
 
-`As<T>()` is the same cast without the callback, and reaches anything `Configure` would — including
-a non-dotnet kind's own extension methods:
+`Unwrap<T>()` reaches past the facade to the real, source-specific resource, for anything native
+vocabulary doesn't cover — a non-`dotnet` local kind's own extension methods, for example:
 
 ```csharp
-backend.As<JavaScriptAppResource>().WithRunScript("dev");
+backend.Unwrap<JavaScriptAppResource>().WithRunScript("dev");
 ```
 
-**`Configure` is skipped for the `"url"` and `"kubernetes"` sources**, and the skip is logged at
+**Native calls are skipped for the `"url"` and `"kubernetes"` sources**, and the skip is logged at
 startup. Both resolve to something already running elsewhere — a `"url"` service has no local
 process at all, and a `"kubernetes"` service is a `kubectl port-forward` in front of a remote one,
 so environment variables applied here would configure `kubectl` rather than the service. Those
 services are expected to be configured wherever they actually run.
 
 The one exception is **wait ordering on a `"kubernetes"` service**, which still applies:
-`Configure<IResourceWithWaitSupport>` (and `WaitForService` / `WaitForServiceCompletion`) reach a
-real, registered `kubectl port-forward` executable, and holding *that* back until a migration
-finishes is exactly what the AppHost asked for. Only configuration that would land on the wrong
-process is dropped. A `"url"` service skips wait ordering too, since it has no registered resource
-for Aspire to hold back.
+`WaitFor`/`WaitForCompletion` reach a real, registered `kubectl port-forward` executable, and
+holding *that* back until a migration finishes is exactly what the AppHost asked for. Only
+configuration that would land on the wrong process is dropped. A `"url"` service skips wait
+ordering too, since it has no registered resource for Aspire to hold back.
 
 That is this service waiting for something else. The other direction — something else waiting for
-*this* service, `consumer.WaitFor(service)`, which is ordinary Aspire rather than a `Configure`
-call — is dropped for `"url"` and honoured for every other source, including `"kubernetes"`. That
-drop is reported in the same message as the service's skipped `Configure` calls. See
-[the `"url"` source](#url-source).
+*this* service, `consumer.WaitFor(service)` — is dropped for `"url"` and honoured for every other
+source, including `"kubernetes"`. That drop is reported in the same message as the service's
+skipped calls. See [the `"url"` source](#url-source).
 
 Skipping rather than failing is deliberate: a developer switching a service to a remote source in
 their own `servicesources.local.json` must not break a `Program.cs` they don't own. You'll see:
 
 ```
 warn: Aspire.Hosting.ServiceSources
-      Service 'backend': skipped Configure<IResourceWithEnvironment> because its source is
-      'kubernetes' — it resolves to a 'kubectl port-forward' in front of an already-running
-      service, so the configuration would reach kubectl rather than the service. ...
+      Service 'backend': skipped WithEnvironment because its source is 'kubernetes' — it resolves
+      to a 'kubectl port-forward' in front of an already-running service, so the configuration
+      would reach kubectl rather than the service. ...
 ```
 
-`As<T>()` **throws** for those sources instead of skipping — it has to return a builder, and handing
-back the `kubectl` executable would silently configure the wrong process. Prefer `Configure` for
-anything that should survive a source switch. It follows the same wait-ordering exception:
-`As<IResourceWithWaitSupport>()` on a `"kubernetes"` service returns the port-forward's builder
-rather than throwing.
+`Unwrap<T>()` **throws** for those sources instead of skipping — it has to return a builder, and
+handing back the `kubectl` executable would silently configure the wrong process. Prefer the native
+calls above for anything that should survive a source switch. `Unwrap<T>()` follows the same
+wait-ordering exception: `Unwrap<IResourceWithWaitSupport>()` on a `"kubernetes"` service returns
+the port-forward's builder rather than throwing.
 
 ### From a guest-language AppHost
 
-`Configure<T>` is generic, and Aspire's Type System erases a generic method's type parameter to its
-constraint — which for `Configure<T>` erases the capability being requested, since that is all `T`
-says. So guest languages get a set of non-generic equivalents instead, one per shape, each with its
-own name (two exports that project to the same generated name collide, and only one survives):
+`ServiceResource`'s declared shape is what Aspire's Type System reads to generate a handle, so its
+own native methods — `withEnvironment`, `withReference`, `withArgs`,
+`withHttpEndpoint`/`withHttpsEndpoint`, `waitFor`, `waitForCompletion` — project onto the generated
+`addService(...)` handle exactly as they do in C#, with no package-authored shim standing in front
+of them:
 
 ```typescript
 const payments = await builder
   .addService('payments')
-  .withServiceEnvironment('DEMO_INJECTED_BY_APPHOST', 'true')
-  .withServiceReference(inventory);
+  .withEnvironment('DEMO_INJECTED_BY_APPHOST', 'true')
+  .withReference(inventory);
 ```
 
-| TypeScript | C# equivalent |
-|---|---|
-| `withServiceEnvironment(name, value)` | `.Configure<IResourceWithEnvironment>(r => r.WithEnvironment(name, value))` |
-| `withServiceEnvironmentFromParameter(name, parameter)` | `…WithEnvironment(name, parameter)` |
-| `withServiceEnvironmentFromEndpoint(name, endpoint)` | `…WithEnvironment(name, endpoint)` |
-| `withServiceReference(other)` | `…WithReference(other)` |
-| `withServiceConnectionString(source)` | `…WithReference(source)` |
-| `waitForService(dependency)` | `.Configure<IResourceWithWaitSupport>(r => r.WaitFor(dependency))` |
-| `waitForServiceCompletion(dependency, { exitCode })` | `…WaitForCompletion(dependency, exitCode)` |
-| `withServiceArg(arg)` | `.Configure<IResourceWithArgs>(r => r.WithArgs(arg))` |
-| `withServiceHttpsEndpoint()` | `.Configure<IResourceWithEndpoints>(r => r.WithHttpsEndpoint())` |
-| `withServiceHttpEndpoint()` | `…WithHttpEndpoint()` |
-
-They delegate to `Configure<T>`, so out-of-band sources are skipped and logged exactly as above —
-including the wait-ordering exception, which `waitForService` and `waitForServiceCompletion` inherit.
-In C# they're hidden from IntelliSense — use `Configure<T>`, which reaches every Aspire extension
-method rather than just these.
+Out-of-band sources (`"url"`, `"kubernetes"`) are skipped and logged exactly as on the C# side,
+including the wait-ordering exception for `waitFor`/`waitForCompletion` against a `"kubernetes"`
+service. `Unwrap<T>()` itself has no TypeScript equivalent — it is a generic method, and Aspire's
+Type System erases a generic method's type parameter to its constraint, which here is exactly the
+resource type being requested — so reaching a non-`dotnet` kind's own vocabulary from a guest
+language needs a native Aspire integration for that kind, the same as it would without this
+package.
 
 ## Backing services: databases, brokers and caches
 
@@ -1830,8 +1825,8 @@ var ordersDb = builder.AddBackingService("orders-db",
     local: () => builder.AddPostgres("orders-pg").AddDatabase("orders-db", "orders"));
 
 builder.AddService("orders")
-    .Configure<IResourceWithEnvironment>(r => r.WithReference(ordersDb))
-    .Configure<IResourceWithWaitSupport>(r => r.WaitFor(ordersDb));
+    .WithReference(ordersDb)
+    .WaitFor(ordersDb);
 ```
 
 > **`WaitFor` stops meaning anything under `"direct"`.** The `WaitFor` above waits properly under
@@ -2022,18 +2017,18 @@ C# a consumer can pin the key from its own side:
 
 ```csharp
 builder.AddService("orders")
-    .Configure<IResourceWithEnvironment>(r => r.WithReference(ordersDb, "OrdersDb"));
+    .WithReference(ordersDb, "OrdersDb");
 // → ConnectionStrings__OrdersDb, under every source
 ```
 
 `WithReference`'s second argument overrides the source resource's name for the connection string.
-Reach for it when the app already reads a particular name — but note it is C#-only today, because
-the generated shim takes the source alone
-([#209](https://github.com/flojon/aspire-servicesources/issues/209)). That is this package's gap
-rather than a limit of guest languages: a project's own `withReference` already accepts
-`{ connectionName }` from TypeScript. Until the shim offers the same, naming the factory's resource
-after the backing service is the one answer every AppHost can give, which is why it is the one
-enforced.
+Reach for it when the app already reads a particular name. This used to be C#-only
+([#209](https://github.com/flojon/aspire-servicesources/issues/209)), because the package's own
+guest-language shim took the source alone; now that `ServiceResource.withReference` is Aspire's own
+generated method rather than a package-authored one, a TypeScript AppHost gets the same
+`{ connectionName }` second argument any other resource's `withReference` does. Naming the
+factory's resource after the backing service is still the one answer every AppHost can give
+regardless of language, which is why it is the one enforced.
 
 **If the resource is not yours to rename** — a shared helper, or one handed to you — return a
 connection string of your own that forwards it:
@@ -2251,9 +2246,9 @@ itself. It throws at composition time, naming the service and its source, if the
 endpoint at all or exposes several with none named `http` or `https`; in that last case there's no
 single endpoint to mean, so name the one you want with `GetEndpoint("<name>")`.
 
-The endpoint is chosen when you call it, so call it after any `Configure` that adds one. The
-`EndpointReference` it returns is lazy in the usual way — the URL resolves once Aspire has allocated
-the port.
+The endpoint is chosen when you call it, so call it after any `WithHttpEndpoint`/`WithHttpsEndpoint`
+call that adds one. The `EndpointReference` it returns is lazy in the usual way — the URL resolves
+once Aspire has allocated the port.
 
 `WithReference(service)` plus service discovery is portable too, and is the better fit when the
 consumer speaks service discovery: it injects every endpoint the service has under
@@ -2262,8 +2257,8 @@ whichever is there. `GetServiceEndpoint()` is for the case a plain URL in a plai
 variable is what the consumer reads.
 
 `GetEndpoint("<scheme>")` still has its place — a service you know will never move off `"local"`,
-or an endpoint you added yourself through `Configure<IResourceWithEndpoints>`. Just don't reach for
-it across a service whose source a developer chooses.
+or an endpoint you added yourself through `WithHttpEndpoint`/`WithHttpsEndpoint`. Just don't reach
+for it across a service whose source a developer chooses.
 
 From a guest-language AppHost it's `getServiceEndpoint()`, and the value flows into Aspire's own
 `withEnvironment`:
@@ -2303,7 +2298,7 @@ A TypeScript AppHost equivalent — proving `AddService()` is correctly exported
 Aspire's Type System from a guest language, and that a resolved service can be
 [configured from TypeScript](#from-a-guest-language-apphost) — lives in
 `samples/DemoAppHostTypeScript`. Both of its services use the `"container"` source so that
-`payments` can `withServiceReference(inventory)`: a `"url"` service runs out of band, and a
+`payments` can `withReference(inventory)`: a `"url"` service runs out of band, and a
 container consumer of one is [rejected up front](#url-source). A third resource, the `probe`
 executable, hands the same `inventory` handle to Aspire's *own* `withReference()` and to
 `getServiceEndpoint()`, and prints what each injected — so it shows as *Exited*, not Running, and
@@ -2328,19 +2323,22 @@ the resolved service's discovery variables into the consuming resource, e.g.
 `services__inventory__http__0=http://inventory.dev.internal:80` pointing at the running `inventory`
 container.
 
-This sample used to require an unreleased 13.6.0, and that requirement is gone. Aspire's TypeScript
-codegen does not emit a `*Promise`/`*PromiseImpl` wrapper pair for a bare Aspire interface
-(`IResourceBuilder<IResourceWithServiceDiscovery>`, which is what `AddService` returns), so the
-generated SDK referenced an undeclared `ResourceWithServiceDiscoveryPromise` and failed with six
-`TS2552` errors — reported as
+This sample used to require an unreleased 13.6.0, and that requirement is gone — first because the
+ten configuration shims' bare-interface receiver stopped being what carried the codegen wrapper
+pair (see the history below), and now because `AddService()` returns `ServiceResource`, a concrete,
+sealed class, which was never affected by the bare-interface issue in the first place.
+
+Historically: Aspire's TypeScript codegen did not emit a `*Promise`/`*PromiseImpl` wrapper pair for
+a bare Aspire interface (`IResourceBuilder<IResourceWithServiceDiscovery>`, which is what
+`AddService` used to return), so the generated SDK referenced an undeclared
+`ResourceWithServiceDiscoveryPromise` and failed with six `TS2552` errors — reported as
 [microsoft/aspire#19507](https://github.com/microsoft/aspire/issues/19507) and fixed upstream by
 [microsoft/aspire#19577](https://github.com/microsoft/aspire/pull/19577) under the 13.6 milestone.
-
-That upstream fix is no longer what makes this work. The generator emits the wrapper pair when the
-bare interface appears as an extension-method **receiver** rather than only as a return type, and
-the ten `[AspireExport]` configuration shims above declare exactly that receiver — so they carry
-the wrapper pair for `addService` too. Removing `[AspireExport]` from those shims brings all
-six errors back on a current CLI, which is how the cause was isolated; the measurement is in
+That upstream fix was not what made this work even before `ServiceResource` existed: the generator
+emits the wrapper pair when the bare interface appears as an extension-method **receiver** rather
+than only as a return type, and the ten (now-retired) `[AspireExport]` configuration shims declared
+exactly that receiver — so they carried the wrapper pair for `addService` too. The measurement is
+in
 [`docs/superpowers/specs/2026-08-30-19507-already-fixed-findings.md`](docs/superpowers/specs/2026-08-30-19507-already-fixed-findings.md).
 
 Switching between CLI builds can leave a stale code generator under `.aspire/`, so remove that

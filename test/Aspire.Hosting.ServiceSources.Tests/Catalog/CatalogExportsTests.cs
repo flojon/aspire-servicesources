@@ -9,12 +9,9 @@ namespace Aspire.Hosting.ServiceSources.Tests.Catalog;
 /// catalog authoring surface (<see cref="ServiceCatalogBuilder"/>, <see cref="ServiceDefinitionBuilder"/>)
 /// just grew by roughly half with nothing automated watching for an accidental breaking mistake — a
 /// generic method that can't project to guest languages, two exports sharing a generated capability
-/// id, or a builder method that returns the wrong type and breaks fluent chaining. Mirrors
-/// <c>ServiceConfigurationExportsTests</c>'s reflection shape, adapted to these two types: both are
-/// marked <c>[AspireExport(ExposeMethods = true)]</c> at the class level, so — unlike
-/// <c>ServiceConfigurationExports</c>'s individually-<c>[AspireExport]</c>-attributed static
-/// methods — every public instance method here is an export whether or not it individually carries
-/// the attribute.
+/// id, or a builder method that returns the wrong type and breaks fluent chaining. Both types are
+/// marked <c>[AspireExport(ExposeMethods = true)]</c> at the class level, so every public instance
+/// method here is an export whether or not it individually carries the attribute.
 /// </summary>
 public class CatalogExportsTests
 {
@@ -94,16 +91,6 @@ public class CatalogExportsTests
         [
             "addService", "addBackingService", "asJava", "asJavaScript", "getServiceEndpoint", "useJava", "useJavaScript",
             "addServiceCatalog",
-            CamelCase(nameof(ServiceConfigurationExports.WithServiceEnvironment)),
-            CamelCase(nameof(ServiceConfigurationExports.WithServiceEnvironmentFromParameter)),
-            CamelCase(nameof(ServiceConfigurationExports.WithServiceEnvironmentFromEndpoint)),
-            CamelCase(nameof(ServiceConfigurationExports.WithServiceReference)),
-            CamelCase(nameof(ServiceConfigurationExports.WithServiceConnectionString)),
-            CamelCase(nameof(ServiceConfigurationExports.WaitForService)),
-            CamelCase(nameof(ServiceConfigurationExports.WaitForServiceCompletion)),
-            CamelCase(nameof(ServiceConfigurationExports.WithServiceArg)),
-            CamelCase(nameof(ServiceConfigurationExports.WithServiceHttpsEndpoint)),
-            CamelCase(nameof(ServiceConfigurationExports.WithServiceHttpEndpoint)),
             $"{nameof(ServiceCatalogBuilder)}.{CamelCase(nameof(ServiceCatalogBuilder.AddService))}",
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithRepository))}",
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithProject))}",

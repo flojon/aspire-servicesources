@@ -5,8 +5,11 @@ import { createBuilder } from './.aspire/modules/aspire.mjs';
 const builder = await createBuilder();
 
 // Both services resolve through the "container" source: a published image run locally. Because
-// they actually run here, the AppHost can configure them — the guest-language equivalent of C#'s
-// Configure<T>().
+// they actually run here, the AppHost can configure them directly — addService() returns
+// ServiceResource, a concrete class implementing IResourceWithEnvironment/IResourceWithArgs/
+// IResourceWithEndpoints/IResourceWithWaitSupport alongside IResourceWithServiceDiscovery, so
+// Aspire's own native methods (withEnvironment, withReference, withHttpsEndpoint, and similar)
+// bind directly — no package-authored shim in front of them.
 //
 // servicesources.yaml also describes a "url" source for inventory, and flipping it there is a
 // one-line config edit that this file doesn't see. Don't do it for this sample, though: a
@@ -15,26 +18,15 @@ const builder = await createBuilder();
 // executable consumer can.
 const inventory = await builder.addService('inventory');
 
-// Each configuration shape has its own method name: ATS drops overloads, and a generic method
-// loses its type parameter.
 const payments = await builder
   .addService('payments')
-  .withServiceEnvironment('DEMO_INJECTED_BY_APPHOST', 'true')
-  .withServiceReference(inventory)
+  .withEnvironment('DEMO_INJECTED_BY_APPHOST', 'true')
+  .withReference(inventory)
   // Load-bearing for a deferred checkout (#208), not for this sample — both services here
   // resolve through "container", which is already on disk, so declaring the endpoint changes
   // nothing about how payments runs. Present so the typecheck-typescript CI job compiles a real
   // call to it, the same way getServiceEndpoint() below is exercised rather than merely generated.
-  .withServiceHttpsEndpoint();
-
-// addService()'s declared return type is a bare Aspire interface, IResourceBuilder<
-// IResourceWithServiceDiscovery>, rather than a concrete resource class — a shape the TypeScript
-// generator emits no *Promise/*PromiseImpl wrapper pair for on its own (microsoft/aspire#19507).
-// What supplies the pair here is the ten [AspireExport] configuration shims behind the
-// withService* calls above: the generator emits it when the bare interface appears as an
-// extension-method receiver, which those shims declare, so they carry it for addService too. With
-// the wrapper types emitted, the resolved handle also flows into Aspire's *own* withReference(),
-// distinct from payments' withServiceReference() above, which is this package's ATS export.
+  .withHttpsEndpoint();
 //
 // probe prints what the AppHost injected for inventory and then exits, so it shows as Exited (not
 // Running) next to the two containers — those two log lines are the whole point. node is the

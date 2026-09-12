@@ -89,7 +89,7 @@ public class BackingServiceConsumerTests
         var orders = builder.AddService("orders");
         var beforeTheReference = EnvironmentCallbackCount(orders.Resource);
 
-        orders.Configure<IResourceWithEnvironment>(service => service.WithReference(db));
+        orders.WithReference(db);
 
         var environment = await MaterializeEnvironmentAsync(orders.Resource, beforeTheReference);
 
@@ -122,7 +122,7 @@ public class BackingServiceConsumerTests
         var orders = builder.AddService("orders");
         var beforeTheReference = EnvironmentCallbackCount(orders.Resource);
 
-        orders.Configure<IResourceWithEnvironment>(service => service.WithReference(db));
+        orders.WithReference(db);
 
         var environment = await MaterializeEnvironmentAsync(orders.Resource, beforeTheReference);
 
@@ -162,7 +162,7 @@ public class BackingServiceConsumerTests
         var orders = builder.AddService("orders");
         var beforeTheReference = EnvironmentCallbackCount(orders.Resource);
 
-        orders.Configure<IResourceWithEnvironment>(service => service.WithReference(db));
+        orders.WithReference(db);
 
         var environment = await MaterializeEnvironmentAsync(orders.Resource, beforeTheReference);
         var tunnel = builder.Resources.OfType<ExecutableResource>().Single(r => r.Name == "orders-db-tunnel");
@@ -292,7 +292,7 @@ public class BackingServiceConsumerTests
         var orders = builder.AddService("orders");
         var beforeTheReference = EnvironmentCallbackCount(orders.Resource);
 
-        orders.Configure<IResourceWithEnvironment>(service => service.WithReference(db));
+        orders.WithReference(db);
 
         var environment = await MaterializeEnvironmentAsync(orders.Resource, beforeTheReference);
 
