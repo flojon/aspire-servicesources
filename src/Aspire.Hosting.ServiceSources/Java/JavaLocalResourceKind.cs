@@ -189,6 +189,10 @@ internal sealed class JavaLocalResourceKind : ILocalResourceKind
             // so a https-scheme service is the one GetServiceEndpoint() and GetEndpoint("https") find.
             javaApp.WithEndpoint(targetPort: Options.Port, scheme: Options.Scheme, name: Options.Scheme);
 
+            // AddProject wires this in for free; an executable resource like AddJavaApp does not, so
+            // it needs the same call any Aspire apphost would add by hand.
+            javaApp.WithOtlpExporter();
+
             return javaApp;
         }
     }

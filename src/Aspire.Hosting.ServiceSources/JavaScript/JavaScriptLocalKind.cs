@@ -193,9 +193,13 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
             // place with whatever was configured (a null argument leaves the existing value alone); for
             // the other app types nothing added one, and without an endpoint the facade AddService
             // hands back would carry nothing for a consumer's WithReference to resolve.
-            return JavaScriptAppTypes.BindsItsOwnPort(Options.AppType)
+            var endpointed = JavaScriptAppTypes.BindsItsOwnPort(Options.AppType)
                 ? app.WithHttpEndpoint(port: Options.Port, targetPort: Options.TargetPort)
                 : app.WithHttpEndpoint(port: Options.Port, targetPort: Options.TargetPort, env: Options.PortEnv);
+
+            // AddProject wires this in for free; an executable resource like AddNodeApp/AddViteApp
+            // does not, so it needs the same call any Aspire apphost would add by hand.
+            return endpointed.WithOtlpExporter();
         }
     }
 
