@@ -108,7 +108,7 @@ internal static class ServiceCatalogLoader
             }
 
             // Every name that becomes a checkout directory goes through this check (design "The
-            // grouped name"), whether it arrives derived, explicit through AddRepository, or — here
+            // grouped name"), whether it arrives explicit through AddRepository, or — here
             // — as a yaml repositories: key: a URL ending in '/..' and a repositories: key of
             // '../evil' are both developer input, and ServiceCatalogBuilder.AddRepository already
             // refuses the former's equivalent at composition time. Checked here for the same reason:
