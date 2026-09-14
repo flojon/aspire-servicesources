@@ -19,10 +19,8 @@ await builder.addServiceCatalog(async (catalog) => {
   // builder.addService() below, the same choice made for "orders" not being run twice: adding
   // them would clone aspire-samples a second time for a demo with nothing more to show once the
   // two are added the same way "orders" already is.
-  const webSamples = await catalog.addRepository('https://github.com/dotnet/aspire-samples', {
-    name: 'aspire-samples-web',
-    defaultRef: 'main',
-  });
+  const webSamples = await catalog.addRepository(
+    'aspire-samples-web', 'https://github.com/dotnet/aspire-samples', { defaultRef: 'main' });
 
   const web = await catalog.addService('web');
   await web.withSharedRepository(webSamples);
