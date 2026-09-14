@@ -23,6 +23,14 @@ internal static class ResolvedService
         // WithHttpEndpoint() call see them on the facade exactly as they sat on `real` before the
         // facade existed. Sharing the instance rather than its value is what keeps a later
         // mutation-in-place (WithEndpoint's update branch) visible on both collections.
+        //
+        // That same update branch is also why WithHttpEndpoint/WithHttpsEndpoint are shadowed
+        // (ServiceSourcesBuilderExtensions) rather than gated solely through WithAnnotation: naming
+        // an endpoint that already exists here — the default name on a "url"/"kubernetes" service,
+        // which is exactly the name this method pre-registers — takes Aspire's in-place-update
+        // branch, which never calls WithAnnotation at all (#334). The shadow is a second
+        // interception point reading the identical Reachability table, not a workaround duplicating
+        // its logic.
         foreach (var annotation in real.Resource.Annotations)
         {
             facade.Annotations.Add(annotation);
