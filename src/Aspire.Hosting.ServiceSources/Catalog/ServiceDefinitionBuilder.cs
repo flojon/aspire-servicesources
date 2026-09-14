@@ -32,11 +32,6 @@ public sealed class ServiceDefinitionBuilder
     private string? _kind;
     private object? _kindOptions;
 
-    // The ContainerMetadata or KubernetesMetadata most recently created by WithContainer/
-    // WithKubernetes — where EnableHttps/DisableHttps stamp a scheme, following the idiom of
-    // calling right after the thing it names a scheme for.
-    private object? _schemeOwner;
-
     internal ServiceDefinitionBuilder(string serviceName)
     {
         _serviceName = serviceName;
@@ -106,11 +101,15 @@ public sealed class ServiceDefinitionBuilder
     }
 
     /// <summary>Declares this service's container image — the "container" source. See design "The authoring API".</summary>
-    public ServiceDefinitionBuilder WithContainer(string image, int port, string? defaultTag = null)
+    /// <param name="scheme">
+    /// The endpoint's scheme, <c>"http"</c> or <c>"https"</c> — the code-authoring equivalent of
+    /// yaml's <c>container.scheme</c>. Left unset, it defaults to <c>"http"</c>; an unsupported
+    /// value is rejected at resolution time. See <see cref="EndpointScheme"/> for what it changes.
+    /// </param>
+    public ServiceDefinitionBuilder WithContainer(string image, int port, string? defaultTag = null, string? scheme = null)
     {
         RequireUnset(_container, nameof(WithContainer));
-        _container = new ContainerMetadata { Image = image, Port = port, DefaultTag = defaultTag };
-        _schemeOwner = _container;
+        _container = new ContainerMetadata { Image = image, Port = port, DefaultTag = defaultTag, Scheme = scheme };
         return this;
     }
 
@@ -118,43 +117,15 @@ public sealed class ServiceDefinitionBuilder
     /// Declares this service's Kubernetes forward target — the "kubernetes" source. See design "The
     /// authoring API".
     /// </summary>
-    public ServiceDefinitionBuilder WithKubernetes(string service, int? port = null)
+    /// <param name="scheme">
+    /// The endpoint's scheme, <c>"http"</c> or <c>"https"</c> — the code-authoring equivalent of
+    /// yaml's <c>kubernetes.scheme</c>. Left unset, it defaults to <c>"http"</c>; an unsupported
+    /// value is rejected at resolution time. See <see cref="EndpointScheme"/> for what it changes.
+    /// </param>
+    public ServiceDefinitionBuilder WithKubernetes(string service, int? port = null, string? scheme = null)
     {
         RequireUnset(_kubernetes, nameof(WithKubernetes));
-        _kubernetes = new KubernetesMetadata { Service = service, Port = port };
-        _schemeOwner = _kubernetes;
-        return this;
-    }
-
-    /// <summary>
-    /// Names the scheme of the source declared immediately before this call — <see cref="WithContainer"/>
-    /// or <see cref="WithKubernetes"/> — as <c>"http"</c>, the same value it defaults to when left
-    /// unset. See <see cref="EndpointScheme"/> for what a scheme actually changes at resolution time.
-    /// </summary>
-    public ServiceDefinitionBuilder DisableHttps() => WithScheme(EndpointScheme.Http);
-
-    /// <summary>Names the scheme of the most recently declared source as <c>"https"</c>. See <see cref="DisableHttps"/>.</summary>
-    public ServiceDefinitionBuilder EnableHttps() => WithScheme(EndpointScheme.Https);
-
-    private ServiceDefinitionBuilder WithScheme(string scheme)
-    {
-        switch (_schemeOwner)
-        {
-            case ContainerMetadata container:
-                RequireUnset(container.Scheme, $"{nameof(EnableHttps)}/{nameof(DisableHttps)} for this {nameof(WithContainer)}");
-                container.Scheme = scheme;
-                break;
-            case KubernetesMetadata kubernetes:
-                RequireUnset(kubernetes.Scheme, $"{nameof(EnableHttps)}/{nameof(DisableHttps)} for this {nameof(WithKubernetes)}");
-                kubernetes.Scheme = scheme;
-                break;
-            default:
-                throw new ServiceSourcesConfigurationException(
-                    $"Service '{_serviceName}': {nameof(EnableHttps)}/{nameof(DisableHttps)} must " +
-                    $"immediately follow {nameof(WithContainer)} or {nameof(WithKubernetes)} — there is no " +
-                    "endpoint-bearing source to name a scheme for yet.");
-        }
-
+        _kubernetes = new KubernetesMetadata { Service = service, Port = port, Scheme = scheme };
         return this;
     }
 

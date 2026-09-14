@@ -137,7 +137,7 @@ builder.AddServiceCatalog(catalog =>
 
     catalog.AddService("payments")
         .WithContainer("nginxdemos/hello", port: 80, defaultTag: "latest")
-        .WithKubernetes("payments", port: 8080).EnableHttps();
+        .WithKubernetes("payments", port: 8080, scheme: "https");
 });
 
 var orders = builder.AddService("orders");
@@ -181,21 +181,18 @@ values you type into `servicesources.local.json`:
 | `WithContainer` | `container:` | `"container"` |
 | `WithKubernetes` | `kubernetes:` | `"kubernetes"` |
 
-`EnableHttps()`/`DisableHttps()`, chained immediately after `WithContainer` or
-`WithKubernetes`, are the code-authoring equivalent of yaml's `container.scheme`/
-`kubernetes.scheme` (documented under the `"container"` and `"kubernetes"` source sections
-below). Each names the scheme of whichever source block precedes it, so a service declaring
-both sources sets them independently:
+`WithContainer`/`WithKubernetes` both take a `scheme` parameter — the code-authoring
+equivalent of yaml's `container.scheme`/`kubernetes.scheme` (documented under the
+`"container"` and `"kubernetes"` source sections below). A service declaring both sources
+sets them independently:
 
 ```csharp
 catalog.AddService("payments")
-    .WithContainer("nginxdemos/hello", port: 80).DisableHttps()
-    .WithKubernetes("payments", port: 8080).EnableHttps();
+    .WithContainer("nginxdemos/hello", port: 80, scheme: "http")
+    .WithKubernetes("payments", port: 8080, scheme: "https");
 ```
 
-Calling either with no `WithContainer`/`WithKubernetes` immediately before it, or calling it
-twice for the same block, is a configuration error naming the service. Left uncalled, a
-block's scheme defaults to `http`, same as yaml.
+Left unset, a source's scheme defaults to `http`, same as yaml.
 
 A `"local"` service can also declare a `prepare:`-equivalent bootstrap command:
 
