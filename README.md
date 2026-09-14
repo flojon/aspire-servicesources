@@ -892,7 +892,7 @@ services:
 In code, the equivalent is `AddRepository` and `WithSharedRepository`:
 
 ```csharp
-var monorepo = catalog.AddRepository("https://github.com/example/monorepo", defaultRef: "main");
+var monorepo = catalog.AddRepository("monorepo", "https://github.com/example/monorepo", defaultRef: "main");
 
 catalog.AddService("orders")
     .WithSharedRepository(monorepo)
