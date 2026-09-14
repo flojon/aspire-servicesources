@@ -87,9 +87,9 @@ never existed. Check the tag of the last release before adding one.
   stays a framework concern reached from the AppHost — `As<JavaAppExecutableResource>()` paired
   with Aspire's `WithHttpsCertificateConfiguration` — rather than something the kind wires up
   itself.
-- **`EnableHttps`/`DisableHttps` on the code-authored catalog** ([#134]). Chain either right after
-  `WithContainer` or `WithKubernetes` to name that source's endpoint scheme — the code-authoring
-  surface for what was previously reachable only through yaml's `scheme` field.
+- **`scheme` on `WithContainer`/`WithKubernetes` in the code-authored catalog** ([#134]). Names
+  that source's endpoint scheme — the code-authoring surface for what was previously reachable
+  only through yaml's `scheme` field.
 - **Repositories as a first-class handle, and grouping several services onto one checkout**
   ([#291], fixes [#66]). `AddRepository`/`WithSharedRepository` in code, and `repositories:`/
   `repositoryRef:` in yaml, let several services share one repository: cloned once and reconciled

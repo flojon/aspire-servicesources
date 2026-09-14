@@ -140,78 +140,45 @@ public class ServiceDefinitionBuilderTests
     }
 
     [Fact]
-    public void DisableHttps_AfterWithContainer_SetsContainerScheme()
+    public void WithContainer_SchemeOmitted_SchemeIsNull()
     {
         var definition = new ServiceCatalogBuilder().AddService("payments")
             .WithContainer("nginxdemos/hello", port: 80)
-            .DisableHttps()
             .Build();
 
-        Assert.Equal("http", definition.Container!.Scheme);
+        Assert.Null(definition.Container!.Scheme);
     }
 
     [Fact]
-    public void EnableHttps_AfterWithContainer_SetsContainerScheme()
+    public void WithContainer_SchemeGiven_SetsContainerScheme()
     {
         var definition = new ServiceCatalogBuilder().AddService("payments")
-            .WithContainer("nginxdemos/hello", port: 80)
-            .EnableHttps()
+            .WithContainer("nginxdemos/hello", port: 80, scheme: "https")
             .Build();
 
         Assert.Equal("https", definition.Container!.Scheme);
     }
 
     [Fact]
-    public void EnableHttps_AfterWithKubernetes_SetsKubernetesScheme()
+    public void WithKubernetes_SchemeGiven_SetsKubernetesScheme()
     {
         var definition = new ServiceCatalogBuilder().AddService("payments")
-            .WithKubernetes("payments", port: 8080)
-            .EnableHttps()
+            .WithKubernetes("payments", port: 8080, scheme: "https")
             .Build();
 
         Assert.Equal("https", definition.Kubernetes!.Scheme);
     }
 
     [Fact]
-    public void EnableHttps_TargetsOnlyTheMostRecentlyDeclaredSource()
+    public void WithContainerAndWithKubernetes_SchemesAreIndependent()
     {
         var definition = new ServiceCatalogBuilder().AddService("payments")
             .WithContainer("nginxdemos/hello", port: 80)
-            .WithKubernetes("payments", port: 8080)
-            .EnableHttps()
+            .WithKubernetes("payments", port: 8080, scheme: "https")
             .Build();
 
         Assert.Null(definition.Container!.Scheme);
         Assert.Equal("https", definition.Kubernetes!.Scheme);
-    }
-
-    [Fact]
-    public void DisableHttps_NoSourceDeclaredYet_Throws()
-    {
-        var chain = new ServiceCatalogBuilder().AddService("payments");
-
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => chain.DisableHttps());
-
-        Assert.Contains("payments", ex.Message, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void DisableHttps_AfterWithUrlOnly_Throws()
-    {
-        // WithUrl doesn't carry a Scheme, so it isn't a valid target either.
-        var chain = new ServiceCatalogBuilder().AddService("payments").WithUrl("https://a.example");
-
-        Assert.Throws<ServiceSourcesConfigurationException>(() => chain.DisableHttps());
-    }
-
-    [Fact]
-    public void EnableHttps_CalledTwiceForSameBlock_Throws()
-    {
-        var chain = new ServiceCatalogBuilder().AddService("payments")
-            .WithContainer("nginxdemos/hello", port: 80)
-            .EnableHttps();
-
-        Assert.Throws<ServiceSourcesConfigurationException>(() => chain.DisableHttps());
     }
 
     [Fact]
