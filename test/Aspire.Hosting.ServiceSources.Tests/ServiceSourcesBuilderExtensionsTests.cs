@@ -57,8 +57,8 @@ public class ServiceSourcesBuilderExtensionsTests
 
         var result = service.WithHttpsEndpoint(port: 9999, name: "probe");
 
-        var endpoint = Assert.Single(result.Resource.Annotations.OfType<EndpointAnnotation>()
-            .Where(e => e.Name == "probe"));
+        var endpoint = Assert.Single(
+            result.Resource.Annotations.OfType<EndpointAnnotation>(), e => e.Name == "probe");
         Assert.Equal(9999, endpoint.Port);
         Assert.Empty(ServiceSourcesWarnings.For(builder).Messages);
     }
