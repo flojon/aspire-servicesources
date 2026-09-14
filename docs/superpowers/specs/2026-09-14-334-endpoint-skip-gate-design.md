@@ -171,8 +171,10 @@ Concretely:
 The repro test in the ticket asserts `DefaultNamedEndpoint_OnUrlSource_IsSkippedAndReported` should
 pass (i.e. the call *is* reported) — that assertion is the reporting gap this document is choosing
 not to close. If the Plan phase commits `EndpointSkipGapRepro.cs` as written in the issue, that one
-case must be **inverted**, not left red: assert and pin the *actual, now-documented* behavior (no
-warning, endpoint mutated/no-op in place as Aspire's update branch already does), with a comment
+case must be **inverted**, not left red: assert and pin the *actual, now-documented* behavior — no
+warning is recorded, and the pre-existing endpoint annotation is mutated in place exactly as
+Aspire's own update branch already does (a no-op for the no-arg repro call, since every mutation is
+gated on the corresponding argument being non-null) — with a comment
 pointing at the README section and this spec, so a future change to Aspire's own `WithEndpoint`
 branch logic — which would silently start reporting, or silently stop skip-gating the property
 mutations — is caught by a test failure rather than discovered again the way this ticket was.
