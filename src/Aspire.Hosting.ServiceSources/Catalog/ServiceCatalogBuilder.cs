@@ -1,3 +1,4 @@
+using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 
@@ -68,16 +69,14 @@ public sealed class ServiceCatalogBuilder
     /// monorepo shape under "Motivation".
     /// </summary>
     /// <param name="name">
-    /// This repository's <see cref="RepositoryDefinition.CheckoutName"/> — derived from
-    /// <paramref name="url"/>'s last path segment with a trailing <c>.git</c> stripped when left
-    /// unset, overridable here. Every name, derived or explicit, is validated the same way a service
-    /// name is before it becomes a directory (#224).
+    /// This repository's <see cref="RepositoryDefinition.CheckoutName"/>, validated the same way a
+    /// service name is before it becomes a directory (#224).
     /// </param>
     /// <exception cref="ServiceSourcesConfigurationException">
-    /// <paramref name="url"/> is blank; the resolved name cannot be a checkout directory of its own
-    /// (#224); or the resolved name collides with an already-declared repository.
+    /// <paramref name="url"/> is blank; <paramref name="name"/> cannot be a checkout directory of its
+    /// own (#224); or <paramref name="name"/> collides with an already-declared repository.
     /// </exception>
-    public RepositoryBuilder AddRepository(string url, string? name = null, string? defaultRef = null)
+    public RepositoryBuilder AddRepository([ResourceName] string name, string url, string? defaultRef = null)
     {
         if (_frozen)
         {
@@ -87,30 +86,30 @@ public sealed class ServiceCatalogBuilder
                 "and repository before the first AddService(…)/AddRepository(…) call instead.");
         }
 
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new ServiceSourcesConfigurationException(
+                "AddRepository: a repository name is required and cannot be empty or whitespace.");
+        }
+
         if (string.IsNullOrWhiteSpace(url))
         {
             throw new ServiceSourcesConfigurationException(
                 "AddRepository: a repository url is required and cannot be empty or whitespace.");
         }
 
-        var resolvedName = string.IsNullOrWhiteSpace(name) ? DeriveName(url) : name;
-
-        if (!LocalGitCheckout.IsContainedCheckoutDirectoryName(resolvedName))
+        if (!LocalGitCheckout.IsContainedCheckoutDirectoryName(name))
         {
             throw new ServiceSourcesConfigurationException(
-                $"AddRepository: '{resolvedName}' cannot be used as this repository's checkout directory name — "
-                + LocalGitCheckout.ContainedNameRule
-                + (name is null
-                    ? $" (derived from '{GitUrl.Redact(url)}' — pass an explicit name: to AddRepository to "
-                        + "override it.)"
-                    : " Pass a different name: to AddRepository."));
+                $"AddRepository: '{name}' cannot be used as this repository's checkout directory name — "
+                + LocalGitCheckout.ContainedNameRule);
         }
 
-        if (_repositories.TryGetValue(resolvedName, out var existing))
+        if (_repositories.TryGetValue(name, out var existing))
         {
             throw new ServiceSourcesConfigurationException(
-                $"AddRepository: '{resolvedName}' is already declared, naming '{GitUrl.Redact(existing.Url)}'. Two "
-                + "repositories cannot share one checkout directory name — pass an explicit name: to this "
+                $"AddRepository: '{name}' is already declared, naming '{GitUrl.Redact(existing.Url)}'. Two "
+                + "repositories cannot share one checkout directory name — pass a different name to this "
                 + $"AddRepository call for '{GitUrl.Redact(url)}', or to the other one already declared.");
         }
 
@@ -121,40 +120,19 @@ public sealed class ServiceCatalogBuilder
         // (and fight over) one, surfacing later as a confusing checkout-mismatch error instead of
         // this composition-time one.
         var caseCollision = _repositories.Keys.FirstOrDefault(
-            existingName => string.Equals(existingName, resolvedName, StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(existingName, resolvedName, StringComparison.Ordinal));
+            existingName => string.Equals(existingName, name, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(existingName, name, StringComparison.Ordinal));
 
         if (caseCollision is not null)
         {
             throw new ServiceSourcesConfigurationException(
-                $"AddRepository: '{resolvedName}' differs only by case from already-declared "
+                $"AddRepository: '{name}' differs only by case from already-declared "
                 + $"'{caseCollision}'. Two repositories must differ by more than case.");
         }
 
-        var repository = new RepositoryBuilder(url, resolvedName, defaultRef);
-        _repositories.Add(resolvedName, repository);
+        var repository = new RepositoryBuilder(url, name, defaultRef);
+        _repositories.Add(name, repository);
         return repository;
-    }
-
-    /// <summary>
-    /// The name a repository is derived to when <see cref="AddRepository"/> is given no explicit
-    /// <c>name:</c> — the URL's last path segment, with any trailing <c>.git</c> already stripped by
-    /// <see cref="GitUrl.Parse"/>'s own normalization.
-    /// </summary>
-    private static string DeriveName(string url)
-    {
-        var path = GitUrl.Parse(url).Path;
-        var lastSlash = path.LastIndexOf('/');
-        var derived = lastSlash >= 0 ? path[(lastSlash + 1)..] : path;
-
-        if (string.IsNullOrWhiteSpace(derived))
-        {
-            throw new ServiceSourcesConfigurationException(
-                $"AddRepository: no name could be derived from '{GitUrl.Redact(url)}' — it has no final path " +
-                "segment to name a repository after. Pass an explicit name: AddRepository(url, name: \"...\").");
-        }
-
-        return derived;
     }
 
     /// <summary>

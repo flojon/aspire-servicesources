@@ -358,7 +358,7 @@ public class CatalogCompositionTests
         var builder = CreateBuilder(dir);
         builder.AddServiceCatalog(c =>
         {
-            var repository = c.AddRepository("https://example.com/code-repo.git", name: "shared");
+            var repository = c.AddRepository("shared", "https://example.com/code-repo.git");
             c.AddService("orders").WithSharedRepository(repository).WithProject("Orders.csproj");
         });
 
@@ -394,7 +394,7 @@ public class CatalogCompositionTests
         var builder = CreateBuilder(dir);
         builder.AddServiceCatalog(c =>
         {
-            var repository = c.AddRepository("https://example.com/code-repo.git", name: "shared");
+            var repository = c.AddRepository("shared", "https://example.com/code-repo.git");
             c.AddService("orders").WithSharedRepository(repository).WithProject("Orders.csproj");
         });
 
@@ -439,7 +439,7 @@ public class CatalogCompositionTests
         var builder = CreateBuilder(dir);
         builder.AddServiceCatalog(c =>
         {
-            var repository = c.AddRepository("https://example.com/code-repo.git", name: "code-shared");
+            var repository = c.AddRepository("code-shared", "https://example.com/code-repo.git");
             c.AddService("orders").WithSharedRepository(repository).WithProject("Orders.csproj");
             c.AddService("payments").WithSharedRepository(repository).WithProject("Payments.csproj");
         });

@@ -23,7 +23,7 @@ builder.AddServiceCatalog(catalog =>
     // aspire-samples checkout "orders" above uses too, on their own (unshared) clone; that pairing
     // is deliberate, so this file shows both shapes side by side.
     var webSamples = catalog.AddRepository(
-        "https://github.com/dotnet/aspire-samples", name: "aspire-samples-web", defaultRef: "main");
+        "aspire-samples-web", "https://github.com/dotnet/aspire-samples", defaultRef: "main");
 
     catalog.AddService("web")
         .WithSharedRepository(webSamples)

@@ -789,7 +789,7 @@ public class ServiceCatalogLoaderTests
     /// <summary>
     /// Design "The grouped name": every checkout-directory name goes through
     /// <c>LocalGitCheckout.IsContainedCheckoutDirectoryName</c>, the #224 traversal guard, whether it
-    /// arrives derived, explicit through <c>AddRepository</c>, or — here — as a yaml
+    /// arrives explicit through <c>AddRepository</c>, or — here — as a yaml
     /// <c>repositories:</c> key. <c>ServiceCatalogBuilder.AddRepository</c> already refuses the
     /// equivalent unsafe name at composition time; this is the same check for the yaml authoring
     /// surface, so the two report the same class of mistake the same way rather than one of them

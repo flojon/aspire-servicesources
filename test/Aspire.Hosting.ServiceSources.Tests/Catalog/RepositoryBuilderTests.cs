@@ -6,20 +6,10 @@ namespace Aspire.Hosting.ServiceSources.Tests.Catalog;
 public class RepositoryBuilderTests
 {
     [Fact]
-    public void AddRepository_DerivesNameFromUrl_StrippingDotGit()
+    public void AddRepository_SetsCheckoutName()
     {
         var catalog = new ServiceCatalogBuilder();
-        var repository = catalog.AddRepository("https://github.com/example/monorepo.git");
-        var definition = catalog.AddService("orders").WithSharedRepository(repository).Build();
-
-        Assert.Equal("monorepo", definition.Repository.CheckoutName);
-    }
-
-    [Fact]
-    public void AddRepository_ExplicitNameWins()
-    {
-        var catalog = new ServiceCatalogBuilder();
-        var repository = catalog.AddRepository("https://github.com/example/monorepo", name: "mono");
+        var repository = catalog.AddRepository("mono", "https://github.com/example/monorepo");
         var definition = catalog.AddService("orders").WithSharedRepository(repository).Build();
 
         Assert.Equal("mono", definition.Repository.CheckoutName);
@@ -29,10 +19,10 @@ public class RepositoryBuilderTests
     public void AddRepository_NameCollidesWithAnotherRepository_ThrowsNamingBothUrls()
     {
         var catalog = new ServiceCatalogBuilder();
-        catalog.AddRepository("https://github.com/example/monorepo");
+        catalog.AddRepository("monorepo", "https://github.com/example/monorepo");
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => catalog.AddRepository("https://github.com/other/monorepo"));
+            () => catalog.AddRepository("monorepo", "https://github.com/other/monorepo"));
 
         Assert.Contains("monorepo", ex.Message, StringComparison.Ordinal);
         Assert.Contains("example/monorepo", ex.Message, StringComparison.Ordinal);
@@ -43,16 +33,16 @@ public class RepositoryBuilderTests
     /// never reach an exception message or any other sink — see the redaction convention every other
     /// URL-in-message site in this package follows (<c>GitCommand</c>'s stderr scrubbing,
     /// <c>LocalGitCheckout</c>'s own messages, and the ungrouped-collision warning). This is the same
-    /// requirement applied to <c>AddRepository</c>'s two composition-time messages.
+    /// requirement applied to <c>AddRepository</c>'s composition-time collision message.
     /// </summary>
     [Fact]
     public void AddRepository_NameCollidesWithAnotherRepository_RedactsBothUrls()
     {
         var catalog = new ServiceCatalogBuilder();
-        catalog.AddRepository("https://user:secret-token@github.com/example/monorepo");
+        catalog.AddRepository("monorepo", "https://user:secret-token@github.com/example/monorepo");
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => catalog.AddRepository("https://other-user:other-secret@github.com/other/monorepo"));
+            () => catalog.AddRepository("monorepo", "https://other-user:other-secret@github.com/other/monorepo"));
 
         Assert.DoesNotContain("secret-token", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("other-secret", ex.Message, StringComparison.Ordinal);
@@ -70,44 +60,31 @@ public class RepositoryBuilderTests
     public void AddRepository_NameDiffersOnlyByCaseFromAnotherRepository_Throws()
     {
         var catalog = new ServiceCatalogBuilder();
-        catalog.AddRepository("https://github.com/example/monorepo", name: "Monorepo");
+        catalog.AddRepository("Monorepo", "https://github.com/example/monorepo");
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => catalog.AddRepository("https://github.com/other/monorepo", name: "monorepo"));
+            () => catalog.AddRepository("monorepo", "https://github.com/other/monorepo"));
 
         Assert.Contains("monorepo", ex.Message, StringComparison.Ordinal);
         Assert.Contains("Monorepo", ex.Message, StringComparison.Ordinal);
         Assert.Contains("case", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>
-    /// The same redaction requirement as <see cref="AddRepository_NameCollidesWithAnotherRepository_RedactsBothUrls"/>,
-    /// reached through a different failure path: a credentialed URL with no final path segment for
-    /// <c>DeriveName</c> to name a repository after. This branch runs before either of
-    /// <c>AddRepository</c>'s own two checks, and had its own separate (unredacted) message.
-    /// </summary>
     [Fact]
-    public void AddRepository_NoNameCanBeDerived_RedactsTheUrl()
-    {
-        var catalog = new ServiceCatalogBuilder();
-
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => catalog.AddRepository("https://x-access-token:ghp_SUPERSECRETTOKEN@github.com/"));
-
-        Assert.DoesNotContain("ghp_SUPERSECRETTOKEN", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("github.com", ex.Message, StringComparison.Ordinal);
-    }
+    public void AddRepository_BlankName_Throws() =>
+        Assert.Throws<ServiceSourcesConfigurationException>(
+            () => new ServiceCatalogBuilder().AddRepository("   ", "https://github.com/example/monorepo"));
 
     [Fact]
     public void AddRepository_BlankUrl_Throws() =>
         Assert.Throws<ServiceSourcesConfigurationException>(
-            () => new ServiceCatalogBuilder().AddRepository("   "));
+            () => new ServiceCatalogBuilder().AddRepository("monorepo", "   "));
 
     [Fact]
     public void WithSharedRepository_TwoServices_ProduceTheSameRepositoryDefinitionInstance()
     {
         var catalog = new ServiceCatalogBuilder();
-        var monorepo = catalog.AddRepository("https://github.com/example/monorepo");
+        var monorepo = catalog.AddRepository("monorepo", "https://github.com/example/monorepo");
 
         var orders = catalog.AddService("orders").WithSharedRepository(monorepo).Build();
         var payments = catalog.AddService("payments").WithSharedRepository(monorepo).Build();
@@ -119,7 +96,7 @@ public class RepositoryBuilderTests
     public void WithSharedRepository_SetsUrlAndDefaultRef()
     {
         var catalog = new ServiceCatalogBuilder();
-        var monorepo = catalog.AddRepository("https://github.com/example/monorepo", defaultRef: "main");
+        var monorepo = catalog.AddRepository("monorepo", "https://github.com/example/monorepo", defaultRef: "main");
 
         var definition = catalog.AddService("orders").WithSharedRepository(monorepo).Build();
 
@@ -131,7 +108,7 @@ public class RepositoryBuilderTests
     public void WithSharedRepository_ThenWithRepository_ThrowsAdditiveError()
     {
         var catalog = new ServiceCatalogBuilder();
-        var monorepo = catalog.AddRepository("https://github.com/example/monorepo");
+        var monorepo = catalog.AddRepository("monorepo", "https://github.com/example/monorepo");
 
         var chain = catalog.AddService("orders").WithSharedRepository(monorepo);
 
@@ -146,7 +123,7 @@ public class RepositoryBuilderTests
     public void WithRepository_ThenWithSharedRepository_ThrowsAdditiveError()
     {
         var catalog = new ServiceCatalogBuilder();
-        var monorepo = catalog.AddRepository("https://github.com/example/monorepo");
+        var monorepo = catalog.AddRepository("monorepo", "https://github.com/example/monorepo");
 
         var chain = catalog.AddService("orders").WithRepository("https://github.com/example/other");
 
@@ -161,7 +138,7 @@ public class RepositoryBuilderTests
     public void WithPrepare_OnServiceWithSharedRepository_ThrowsNamingTheRepository()
     {
         var catalog = new ServiceCatalogBuilder();
-        var monorepo = catalog.AddRepository("https://github.com/example/monorepo");
+        var monorepo = catalog.AddRepository("monorepo", "https://github.com/example/monorepo");
 
         var chain = catalog.AddService("orders").WithSharedRepository(monorepo);
 
@@ -176,7 +153,7 @@ public class RepositoryBuilderTests
     public void WithSharedRepository_OnServiceWithPrepareAlready_ThrowsNamingTheRepository()
     {
         var catalog = new ServiceCatalogBuilder();
-        var monorepo = catalog.AddRepository("https://github.com/example/monorepo");
+        var monorepo = catalog.AddRepository("monorepo", "https://github.com/example/monorepo");
 
         var chain = catalog.AddService("orders").WithPrepare(["./prepare.sh"]);
 
@@ -191,7 +168,7 @@ public class RepositoryBuilderTests
     public void RepositoryBuilder_WithPrepare_SetsPrepareOnTheSharedDefinition()
     {
         var catalog = new ServiceCatalogBuilder();
-        var monorepo = catalog.AddRepository("https://github.com/example/monorepo")
+        var monorepo = catalog.AddRepository("monorepo", "https://github.com/example/monorepo")
             .WithPrepare(["./prepare.sh"], mode: PrepareMode.Once);
 
         var definition = catalog.AddService("orders").WithSharedRepository(monorepo).Build();
@@ -205,7 +182,7 @@ public class RepositoryBuilderTests
     public void RepositoryBuilder_WithPrepare_CalledTwice_Throws()
     {
         var chain = new ServiceCatalogBuilder()
-            .AddRepository("https://github.com/example/monorepo")
+            .AddRepository("monorepo", "https://github.com/example/monorepo")
             .WithPrepare(["a.sh"]);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => chain.WithPrepare(["b.sh"]));
@@ -217,7 +194,7 @@ public class RepositoryBuilderTests
     [Fact]
     public void RepositoryBuilder_WithPrepare_UndefinedMode_ThrowsNamingTheFourSpellings()
     {
-        var chain = new ServiceCatalogBuilder().AddRepository("https://github.com/example/monorepo");
+        var chain = new ServiceCatalogBuilder().AddRepository("monorepo", "https://github.com/example/monorepo");
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => chain.WithPrepare(["./prepare.sh"], mode: (PrepareMode)99));
@@ -231,7 +208,7 @@ public class RepositoryBuilderTests
     {
         // Design question 2: a repository with no services is left unreported.
         var catalog = new ServiceCatalogBuilder();
-        catalog.AddRepository("https://github.com/example/unused");
+        catalog.AddRepository("unused", "https://github.com/example/unused");
 
         var (_, _) = catalog.Freeze();
     }

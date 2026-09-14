@@ -31,10 +31,9 @@ public sealed class RepositoryBuilder
     }
 
     /// <summary>
-    /// This repository's resolved name — derived from <paramref name="url"/> or the explicit
-    /// <c>name:</c> <see cref="ServiceCatalogBuilder.AddRepository"/> was given — used as this
-    /// repository's <see cref="RepositoryDefinition.CheckoutName"/> and in error messages that need
-    /// to name the handle rather than any one service on it.
+    /// This repository's name, as given to <see cref="ServiceCatalogBuilder.AddRepository"/> — used
+    /// as this repository's <see cref="RepositoryDefinition.CheckoutName"/> and in error messages
+    /// that need to name the handle rather than any one service on it.
     /// </summary>
     internal string Name => _name;
 
