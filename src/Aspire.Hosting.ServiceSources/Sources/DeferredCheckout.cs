@@ -207,7 +207,7 @@ internal sealed class DeferredCheckout
     /// Registers the project resource for a service whose checkout has not happened yet, and
     /// arranges for the checkout — and the start — to run after the host is up.
     /// </summary>
-    public IResourceBuilder<IResourceWithServiceDiscovery> Register(
+    public IResourceBuilder<ServiceResource> Register(
         IDistributedApplicationBuilder builder,
         string serviceName,
         ServiceDefinition definition,
@@ -240,13 +240,19 @@ internal sealed class DeferredCheckout
             .WithExplicitStart();
 #pragma warning restore ASPIREPROJECTS001
 
+        // Bridged before Add: the facade has to exist before the checkout lands, because
+        // RestoreLaunchProfile writes an annotation directly to `resource` well after this method has
+        // returned — bypassing ServiceResourceBuilder.WithAnnotation entirely — and closing over the
+        // facade here is what lets that late write reach it too.
+        var bridged = ResolvedService.Bridge(resourceBuilder, serviceName, "local");
+
         Add(
             builder, serviceName, resource, [], repoRoot, definition, config, repositoryConfig, prefetch, gitClient,
             prepareStep, prepareRunner,
             (deferredResource, checkoutRoot, logger) =>
-                RestoreLaunchProfile(deferredResource, definition.Project, checkoutRoot, logger));
+                RestoreLaunchProfile(deferredResource, bridged.Resource, definition.Project, checkoutRoot, logger));
 
-        return ResolvedService.Tag(resourceBuilder, serviceName, "local");
+        return bridged;
     }
 
     /// <summary>
@@ -264,7 +270,7 @@ internal sealed class DeferredCheckout
     /// started by DCP against a directory that does not exist yet. Making that core's job also keeps
     /// it off the list of things a handler author can get wrong.
     /// </remarks>
-    public IResourceBuilder<IResourceWithServiceDiscovery>? RegisterKind(
+    public IResourceBuilder<ServiceResource>? RegisterKind(
         IDistributedApplicationBuilder builder,
         string serviceName,
         ServiceDefinition definition,
@@ -356,7 +362,7 @@ internal sealed class DeferredCheckout
             (_, checkoutRoot, logger) =>
                 RunCheckoutValidation(registration, serviceName, definition.Kind, checkoutRoot, logger));
 
-        return ResolvedService.Tag(registration.Service, serviceName, "local");
+        return ResolvedService.Bridge(registration.Service, serviceName, "local");
     }
 
     /// <summary>
@@ -413,7 +419,7 @@ internal sealed class DeferredCheckout
 
     /// <summary>The dotnet kind's post-clone work: everything the missing launch profile cost it.</summary>
     private static void RestoreLaunchProfile(
-        IResource resource, string relativeProject, string repoRoot, ILogger logger)
+        IResource resource, ServiceResource facade, string relativeProject, string repoRoot, ILogger logger)
     {
         // The repository is on disk now, so everything Aspire read from the launch profile while
         // composing — and got nothing for — is finally readable. ResolveProjectFile is the same
@@ -422,7 +428,7 @@ internal sealed class DeferredCheckout
 
         var profile = LandedLaunchProfile.Read(projectFile, resource);
 
-        RestoreLaunchProfileEnvironment(resource, profile, logger);
+        RestoreLaunchProfileEnvironment(resource, facade, profile, logger);
 
         // Endpoints are the one part that cannot be put back, so the shortfall is reported
         // rather than enforced: refusing to start a service that would have run fine is worse
@@ -572,7 +578,7 @@ internal sealed class DeferredCheckout
     /// </para>
     /// </remarks>
     private static void RestoreLaunchProfileEnvironment(
-        IResource resource, LandedLaunchProfile profile, ILogger logger)
+        IResource resource, ServiceResource facade, LandedLaunchProfile profile, ILogger logger)
     {
         // Keyed off the profile rather than off its variable count: a profile with no
         // environmentVariables still names itself in DOTNET_LAUNCH_PROFILE on the warm path.
@@ -581,7 +587,7 @@ internal sealed class DeferredCheckout
             return;
         }
 
-        resource.Annotations.Add(new EnvironmentCallbackAnnotation(context =>
+        var restore = new EnvironmentCallbackAnnotation(context =>
         {
             // Written before the profile's own variables, which is the order Aspire writes them
             // in: the selected profile's name wins over a DOTNET_LAUNCH_PROFILE the profile
@@ -598,7 +604,14 @@ internal sealed class DeferredCheckout
                     context.EnvironmentVariables[variable.Key] = Environment.ExpandEnvironmentVariables(variable.Value);
                 }
             }
-        }));
+        });
+
+        // The real resource is registered before this runs, so it is what DCP reads when it
+        // materializes the process — but this runs long after Bridge already copied whatever
+        // annotations existed at registration time, so the facade needs the same instance added
+        // directly too, or an AppHost reading it through AddService()'s return value never sees it.
+        resource.Annotations.Add(restore);
+        facade.Annotations.Add(restore);
 
         // Counted from what the callback above sets, DOTNET_LAUNCH_PROFILE included — a profile
         // with no environmentVariables of its own still restores that one, and a log saying

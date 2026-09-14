@@ -42,13 +42,13 @@ public class AddServiceIntegrationTests
 
         var service = builder.AddService("orders");
 
-        // Eager resolution: AddService hands back the real, registered resource, so the checkout
-        // has already happened by the time it returns. Checkouts still run in parallel across
-        // services — see LocalCheckoutPrefetchTests.
+        // Eager resolution: the checkout has already happened by the time AddService returns.
+        // Checkouts still run in parallel across services — see LocalCheckoutPrefetchTests.
+        // service.Resource is the ServiceResource facade; the real, registered project carries the
+        // same name.
         var clonedProjectPath = Path.Combine(appHostDir, ".servicesources", "checkouts", "orders", "SampleProj", "SampleProj.csproj");
         Assert.True(File.Exists(clonedProjectPath));
-        Assert.Contains(builder.Resources, r => ReferenceEquals(r, service.Resource));
-        Assert.IsAssignableFrom<ProjectResource>(service.Resource);
+        Assert.IsAssignableFrom<ProjectResource>(Assert.Single(builder.Resources, r => r.Name == "orders"));
 
         var endpoint = service.GetEndpoint("http");
         Assert.Equal("http", endpoint.EndpointName);

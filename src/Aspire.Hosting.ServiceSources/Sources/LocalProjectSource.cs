@@ -18,7 +18,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
 {
     private readonly IPrepareCommandRunner _prepareRunner = prepareRunner ?? ProcessPrepareCommandRunner.Instance;
 
-    public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+    public IResourceBuilder<ServiceResource> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
         ServiceDeveloperConfig config, RepositoryDeveloperConfig? repositoryConfig = null)
     {
@@ -220,7 +220,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
             // directory and its "--project" argument while preparing the model, which happens
             // before the dashboard is up. Mutating ProjectPath afterwards changes nothing, so the
             // absolute path has to be settled before Build() whatever the launch profile does.
-            return ResolvedService.Tag(builder.AddProject(serviceName, projectPath), serviceName, "local");
+            return ResolvedService.Bridge(builder.AddProject(serviceName, projectPath), serviceName, "local");
         }
 
         // The handler's verdict on the service's configuration, now that there is a checkout to
@@ -383,7 +383,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         $"{nameof(ServiceSourcesConfigurationException)} naming the service; anything else out of that " +
         "call is a fault in the handler.";
 
-    private static IResourceBuilder<IResourceWithServiceDiscovery> InvokeKindHandler(
+    private static IResourceBuilder<ServiceResource> InvokeKindHandler(
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition, string repoRoot,
         ILocalResourceKind handler)
     {
@@ -411,7 +411,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
                 $"{nameof(ILocalResourceKind)}.{nameof(ILocalResourceKind.Resolve)} must return the resource it created.");
         }
 
-        return ResolvedService.Tag(resourceBuilder, serviceName, "local");
+        return ResolvedService.Bridge(resourceBuilder, serviceName, "local");
     }
 
     /// <summary>

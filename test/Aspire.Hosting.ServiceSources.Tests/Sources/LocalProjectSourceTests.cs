@@ -1417,8 +1417,9 @@ public class LocalProjectSourceTests
         var service = source.Resolve(builder, ServiceName, Definition(), DevConfig());
 
         Assert.NotEmpty(gitClient.ClonedRepos);
-        Assert.Contains(builder.Resources, r => ReferenceEquals(r, service.Resource));
-        Assert.IsAssignableFrom<ProjectResource>(service.Resource);
+        // service.Resource is the ServiceResource facade; the real, registered project carries the
+        // same name.
+        Assert.IsAssignableFrom<ProjectResource>(Assert.Single(builder.Resources, r => r.Name == ServiceName));
     }
 
     /// <summary>

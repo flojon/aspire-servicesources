@@ -683,15 +683,20 @@ public class DeferredKindCheckoutTests
         var git = new FakeGitClient();
         var gate = git.BlockFor("https://example.com/frontend.git");
         git.FailFor("https://example.com/frontend.git", new InvalidOperationException("no such repo"));
-        var service = new LocalProjectSource(git).Resolve(builder, "frontend", Definition("frontend"), DevConfig());
+        new LocalProjectSource(git).Resolve(builder, "frontend", Definition("frontend"), DevConfig());
         var helper = Named(builder, "frontend-helper");
+        // The real, registered resource — not the ServiceResource facade Resolve returns — is what
+        // the deferred-checkout failure pipeline publishes state updates against;
+        // ResourceNotificationService.PublishUpdateAsync throws if the seed below used a different
+        // instance for the same resource id.
+        var realService = Named(builder, "frontend");
 
         var services = builder.Services.BuildServiceProvider();
         await builder.Eventing.PublishAsync(
             new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
 
         await PublishNotStartedAsync(services, helper);
-        await PublishNotStartedAsync(services, service.Resource);
+        await PublishNotStartedAsync(services, realService);
 
         gate.Set();
 
@@ -701,7 +706,7 @@ public class DeferredKindCheckoutTests
         // NotStarted reads as "still waiting" rather than as a resource nothing is coming for. The
         // service is painted too, even though this package moved it to "Checking out" itself —
         // which is why the skip below is keyed on what started, not on the state text.
-        Assert.Equal(KnownResourceStates.FailedToStart, await StateOfAsync(services, service.Resource));
+        Assert.Equal(KnownResourceStates.FailedToStart, await StateOfAsync(services, realService));
         Assert.Equal(KnownResourceStates.FailedToStart, await StateOfAsync(services, helper));
     }
 

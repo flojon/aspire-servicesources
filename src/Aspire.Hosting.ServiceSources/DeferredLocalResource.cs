@@ -22,9 +22,10 @@ public sealed class DeferredLocalResource
 {
     /// <summary>
     /// The service's resource, built exactly as <see cref="ILocalResourceKind.Resolve"/> would have
-    /// built it against a warm checkout. This is what <c>AddService()</c> returns to the AppHost, so
-    /// everything a consumer needs from it — above all its endpoints — has to be on it now: nothing
-    /// re-runs composition once the clone lands.
+    /// built it against a warm checkout. This is what <c>Bridge</c> wraps into the
+    /// <c>ServiceResource</c> facade <c>AddService()</c> returns, so everything a consumer needs from
+    /// it — above all its endpoints — has to be on it now: nothing re-runs composition once the clone
+    /// lands.
     /// </summary>
     public required IResourceBuilder<IResourceWithServiceDiscovery> Service { get; init; }
 

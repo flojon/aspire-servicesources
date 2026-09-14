@@ -7,7 +7,7 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 
 internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceSource
 {
-    public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+    public IResourceBuilder<ServiceResource> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
         ServiceDeveloperConfig config, RepositoryDeveloperConfig? repositoryConfig = null)
     {
@@ -36,7 +36,7 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
             // able to ask for it under that name (#160). See EndpointScheme.
             .WithEndpoint(port: localPort, targetPort: localPort, scheme: scheme, name: scheme, isProxied: false);
 
-        return ResolvedService.Tag(executableBuilder, serviceName, "kubernetes");
+        return ResolvedService.Bridge(executableBuilder, serviceName, "kubernetes");
     }
 
     internal static string[] BuildPortForwardArgs(
