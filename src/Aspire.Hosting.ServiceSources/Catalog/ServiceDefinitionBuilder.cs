@@ -118,9 +118,8 @@ public sealed class ServiceDefinitionBuilder
     /// authoring API".
     /// </summary>
     /// <param name="scheme">
-    /// The endpoint's scheme, <c>"http"</c> or <c>"https"</c> — the code-authoring equivalent of
-    /// yaml's <c>kubernetes.scheme</c>. Left unset, it defaults to <c>"http"</c>; an unsupported
-    /// value is rejected at resolution time. See <see cref="EndpointScheme"/> for what it changes.
+    /// The endpoint's scheme — same values and defaulting as <see cref="WithContainer"/>'s
+    /// <c>scheme</c>, for yaml's <c>kubernetes.scheme</c> instead of <c>container.scheme</c>.
     /// </param>
     public ServiceDefinitionBuilder WithKubernetes(string service, int? port = null, string? scheme = null)
     {

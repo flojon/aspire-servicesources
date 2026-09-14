@@ -192,7 +192,7 @@ catalog.AddService("payments")
     .WithKubernetes("payments", port: 8080, scheme: "https");
 ```
 
-Left unset, a source's scheme defaults to `http`, same as yaml.
+Left unset on either call, `scheme` defaults to `http`, same as yaml.
 
 A `"local"` service can also declare a `prepare:`-equivalent bootstrap command:
 
