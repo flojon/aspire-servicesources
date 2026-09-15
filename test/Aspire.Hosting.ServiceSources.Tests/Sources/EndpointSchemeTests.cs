@@ -6,6 +6,10 @@ namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 
 public class EndpointSchemeTests
 {
+    [Fact]
+    public void EndpointScheme_IsPublic() =>
+        Assert.True(typeof(EndpointScheme).IsPublic);
+
     private const string ServiceName = "orders";
 
     private static readonly CatalogOrigin YamlOrigin = CatalogOrigin.FromYaml("servicesources.yaml");
