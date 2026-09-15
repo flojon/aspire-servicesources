@@ -7,9 +7,11 @@ using IPortAllocator = Aspire.Hosting.ServiceSources.PortAllocation.IPortAllocat
 namespace Aspire.Hosting.ServiceSources.Tests;
 
 /// <summary>
-/// The repro from issue #334, committed as the issue described it. All three cases are expected to
-/// pass once the skip-and-warn gate closes the update-branch gap (design doc
-/// docs/superpowers/specs/2026-09-14-334-endpoint-skip-gate-design.md) — before that fix,
+/// Regression repro for the endpoint skip-gate bug, covering both the original #334 report and the
+/// additional call surfaces and edge cases #335 added on top of it. All cases are expected to pass
+/// once the skip-and-warn gate closes the update-branch gap (design docs
+/// docs/superpowers/specs/2026-09-14-334-endpoint-skip-gate-design.md and
+/// docs/superpowers/specs/2026-09-15-335-raw-withendpoint-gate-design.md) — before the #334 fix,
 /// <see cref="DefaultNamedEndpoint_OnUrlSource_IsSkippedAndReported"/> is the one that fails.
 /// </summary>
 public class EndpointSkipGapRepro

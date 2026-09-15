@@ -1,6 +1,7 @@
 using System.Net.Sockets;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Sources;
+using ServiceSourcesOverloadProbe;
 
 namespace Aspire.Hosting.ServiceSources.Tests;
 
@@ -104,8 +105,11 @@ public class ServiceSourcesBuilderExtensionsTests
         // `protocol:` excludes the two no-protocol shims outright (they have no such parameter); of
         // the two candidates left, a plain bool literal is an exact match for this shim's non-nullable
         // isProxied and only an implicit conversion for the nullable primary's -- exact match wins.
-        service.WithEndpoint(
-            port: 9999, targetPort: 9999, scheme: "https", name: "https", env: null,
+        // Routed through OverloadProbe, whose namespace has no ancestor relationship to
+        // Aspire.Hosting.ServiceSources or Aspire.Hosting, so this reasoning is checked against the
+        // real full candidate set rather than stopping at the first namespace level with any match.
+        OverloadProbe.CallWithEndpointCompatShimWithProtocol(
+            service, port: 9999, targetPort: 9999, scheme: "https", name: "https", env: null,
             isProxied: true, isExternal: null, protocol: ProtocolType.Tcp);
 
         Assert.Equal(443, service.Resource.Annotations.OfType<EndpointAnnotation>().Single().Port);
@@ -122,10 +126,11 @@ public class ServiceSourcesBuilderExtensionsTests
         // Every argument but `protocol` supplied, with isProxied typed bool? explicitly -- the shape
         // that reaches this shim rather than its bool-isProxied sibling (not applicable to a bool?
         // argument without an explicit, non-implicit conversion) or the primary overload (which needs
-        // its `protocol` default, so loses to any shim applicable without one).
+        // its `protocol` default, so loses to any shim applicable without one). Routed through
+        // OverloadProbe for the same out-of-namespace reason as the test above.
         bool? isProxied = null;
-        service.WithEndpoint(
-            port: 9999, targetPort: 9999, scheme: "https", name: "https", env: null,
+        OverloadProbe.CallWithEndpointCompatShimNullableIsProxiedNoProtocol(
+            service, port: 9999, targetPort: 9999, scheme: "https", name: "https", env: null,
             isProxied: isProxied, isExternal: null);
 
         Assert.Equal(443, service.Resource.Annotations.OfType<EndpointAnnotation>().Single().Port);
@@ -141,9 +146,10 @@ public class ServiceSourcesBuilderExtensionsTests
 
         // Every argument but `protocol` supplied, with a plain bool literal for isProxied -- an exact
         // type match beats the bool?-typed sibling shim's implicit-conversion match, so this is the
-        // shape that reaches this specific overload.
-        service.WithEndpoint(
-            port: 9999, targetPort: 9999, scheme: "https", name: "https", env: null,
+        // shape that reaches this specific overload. Routed through OverloadProbe for the same
+        // out-of-namespace reason as the two tests above.
+        OverloadProbe.CallWithEndpointCompatShimBoolIsProxiedNoProtocol(
+            service, port: 9999, targetPort: 9999, scheme: "https", name: "https", env: null,
             isProxied: true, isExternal: null);
 
         Assert.Equal(443, service.Resource.Annotations.OfType<EndpointAnnotation>().Single().Port);
@@ -204,7 +210,11 @@ public class ServiceSourcesBuilderExtensionsTests
         // Every argument supplied, with a plain bool isProxied literal -- an exact match for this
         // shim's non-nullable isProxied, and only an implicit conversion for the nullable primary's,
         // so this is the shape that binds here rather than to the overload already shadowed above.
-        service.WithHttpEndpoint(port: 9999, targetPort: 9999, name: "http", env: null, isProxied: true);
+        // Routed through OverloadProbe, whose namespace has no ancestor relationship to
+        // Aspire.Hosting.ServiceSources or Aspire.Hosting, so this reasoning is checked against the
+        // real full candidate set.
+        OverloadProbe.CallWithHttpEndpointCompatShim(
+            service, port: 9999, targetPort: 9999, name: "http", env: null, isProxied: true);
 
         Assert.Equal(443, service.Resource.Annotations.OfType<EndpointAnnotation>().Single().Port);
         var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
@@ -217,7 +227,10 @@ public class ServiceSourcesBuilderExtensionsTests
         var builder = Builder();
         var service = UrlFacadeWithEndpoint(builder, "inventory", "https");
 
-        service.WithHttpsEndpoint(port: 9999, targetPort: 9999, name: "https", env: null, isProxied: true);
+        // The https counterpart of the WithHttpEndpoint compat-shim test above -- same exact-match
+        // reasoning, same OverloadProbe routing for the same out-of-namespace reason.
+        OverloadProbe.CallWithHttpsEndpointCompatShim(
+            service, port: 9999, targetPort: 9999, name: "https", env: null, isProxied: true);
 
         Assert.Equal(443, service.Resource.Annotations.OfType<EndpointAnnotation>().Single().Port);
         var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);

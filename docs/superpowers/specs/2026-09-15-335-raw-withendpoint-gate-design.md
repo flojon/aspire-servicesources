@@ -28,7 +28,7 @@ Probe 2 proved this closes #335's exact scenario (`WithHttpsEndpoint(port: 9999)
 `preexisting.Port` unchanged) — but **only** for that one overload on those two methods.
 
 Decompiling `Aspire.Hosting.dll` 13.5.2's `ResourceBuilderExtensions` in full (`ilspycmd
-11.0.0.9375`, same pinned floor `Directory.Build.props:74` names) turns up six more call surfaces
+11.0.0.9375`, same pinned floor `Directory.Build.props:74` names) turns up seven more call surfaces
 sharing the identical root cause — none shadowed today, so a call through any of them still hits
 Aspire's ungated update branch (or, for the callback overload, an update branch with no gate on
 *either* branch):
