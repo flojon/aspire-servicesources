@@ -1,10 +1,10 @@
 namespace Aspire.Hosting.ServiceSources;
 
 /// <summary>
-/// The values <see cref="JavaScriptKindOptions.AppType"/> accepts, one per
+/// The values <see cref="JavaScriptKindOptionsBuilder.WithAppType"/> accepts, one per
 /// <c>Aspire.Hosting.JavaScript</c> entry point.
 /// </summary>
-internal static class JavaScriptAppTypes
+public static class JavaScriptAppTypes
 {
     /// <summary>Runs a <c>package.json</c> script via <c>AddJavaScriptApp</c>. The default.</summary>
     public const string JavaScript = "javascript";

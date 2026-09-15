@@ -1,10 +1,10 @@
 namespace Aspire.Hosting.ServiceSources;
 
 /// <summary>
-/// The values <see cref="JavaScriptKindOptions.PackageManager"/> accepts, one per
+/// The values <see cref="JavaScriptKindOptionsBuilder.WithPackageManager"/> accepts, one per
 /// <c>Aspire.Hosting.JavaScript</c> package-manager modifier.
 /// </summary>
-internal static class JavaScriptPackageManagers
+public static class JavaScriptPackageManagers
 {
     public const string Npm = "npm";
 

@@ -22,7 +22,7 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// something a scheme can misrepresent.)
 /// </para>
 /// </remarks>
-internal static class EndpointScheme
+public static class EndpointScheme
 {
     public const string Http = "http";
 
@@ -36,7 +36,7 @@ internal static class EndpointScheme
     /// <exception cref="ServiceSourcesConfigurationException">
     /// The configured scheme is neither <c>http</c> nor <c>https</c>.
     /// </exception>
-    public static string Resolve(
+    internal static string Resolve(
         string serviceName, string source, string? developerScheme, string? catalogScheme, CatalogOrigin catalogOrigin)
     {
         var fromDeveloperConfig = !string.IsNullOrWhiteSpace(developerScheme);
