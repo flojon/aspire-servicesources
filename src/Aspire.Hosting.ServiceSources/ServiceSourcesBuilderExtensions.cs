@@ -293,14 +293,20 @@ public static class ServiceSourcesBuilderExtensions
     /// Whether an endpoint call against <paramref name="builder"/> should be skipped — and, if so,
     /// records the skip warning as a side effect, exactly as
     /// <see cref="ServiceResourceBuilder.WithAnnotation{TAnnotation}"/> already does for every other
-    /// native vocabulary method. Reads the facade's own <see cref="ServiceSourceAnnotation"/> rather
-    /// than requiring a <see cref="ServiceResourceBuilder"/> receiver, so it works uniformly whether
-    /// <paramref name="builder"/> is the internal wrapper type or (in principle) any other
-    /// <see cref="IResourceBuilder{ServiceResource}"/>.
+    /// native vocabulary method. Prefers <see cref="ServiceResourceBuilder.Source"/> — a closure-captured
+    /// constructor value — over the facade's own <see cref="ServiceSourceAnnotation"/>, whose containing
+    /// <c>Resource.Annotations</c> collection is public and mutable: deriving the gate's answer from it
+    /// let anything that strips that one annotation (a reset/clone helper, defensive cleanup) silently
+    /// re-open #334 for that resource, with the mutation applied for real and no warning. The annotation
+    /// scan survives only as a fallback for a hypothetical non-<see cref="ServiceResourceBuilder"/>
+    /// <see cref="IResourceBuilder{ServiceResource}"/> — no such builder reaches <see cref="AddService"/>
+    /// today.
     /// </summary>
     private static bool GateEndpointCall(IResourceBuilder<ServiceResource> builder)
     {
-        var source = builder.Resource.Annotations.OfType<ServiceSourceAnnotation>().FirstOrDefault()?.Source;
+        var source = builder is ServiceResourceBuilder serviceBuilder
+            ? serviceBuilder.Source
+            : builder.Resource.Annotations.OfType<ServiceSourceAnnotation>().FirstOrDefault()?.Source;
         if (source is null || !Reachability.IsUnreachable(typeof(EndpointAnnotation), source))
         {
             return false;

@@ -106,4 +106,34 @@ public class EndpointSkipGapRepro
         Assert.Equal(beforeTargetPort, after.TargetPort);
         Assert.Equal(beforeScheme, after.UriScheme);
     }
+
+    // Round-1 security-review regression: GateEndpointCall must read `source` from
+    // ServiceResourceBuilder's own closure-captured field, not by re-scanning `Resource.Annotations`
+    // for ServiceSourceAnnotation — that collection is public and mutable, so stripping just that one
+    // bookkeeping annotation (e.g. a reset/clone helper) must not silently re-open #334's exact bug:
+    // the update-branch mutation applying for real, with zero warning, on a url-sourced facade.
+    [Fact]
+    public void DefaultNamedEndpoint_OnUrlSource_StaysGated_EvenIfServiceSourceAnnotationIsStripped()
+    {
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
+        var service = Url(builder);
+
+        var stripped = Assert.Single(service.Resource.Annotations.OfType<ServiceSourceAnnotation>());
+        service.Resource.Annotations.Remove(stripped);
+
+        var before = Assert.Single(service.Resource.Annotations.OfType<EndpointAnnotation>());
+        var beforePort = before.Port;
+
+        service.WithHttpsEndpoint(port: 9999);
+
+        var after = Assert.Single(service.Resource.Annotations.OfType<EndpointAnnotation>());
+        var warnings = ServiceSourcesWarnings.For(builder).Messages;
+
+        Assert.Same(before, after);
+        Assert.Equal(beforePort, after.Port);
+        Assert.True(
+            warnings.Count == 1 && warnings[0].Contains("WithHttpEndpoint/WithHttpsEndpoint"),
+            $"endpoint port after={after.Port}; warnings={warnings.Count}; "
+            + $"text={(warnings.Count > 0 ? warnings[0] : "<none>")}");
+    }
 }
