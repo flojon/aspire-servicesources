@@ -118,7 +118,9 @@ public class MissingHostingPackageTests
     /// An unregistered kind is a different failure from a missing package, and takes different
     /// advice: it is fixed by calling the registration method, not by installing anything. Nothing
     /// is missing from the AppHost's references, so the message must not send the reader looking
-    /// for a package to add.
+    /// for a package to add. "javascript"/"java" can no longer exercise this path — they resolve
+    /// via <see cref="LocalKindRegistry"/>'s own built-in fallback — so this uses a third-party
+    /// kind name nobody registered instead.
     /// </summary>
     [Fact]
     public void UnregisteredKind_TellsTheReaderToCallTheRegistrationMethod()
@@ -128,10 +130,10 @@ public class MissingHostingPackageTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             new LocalProjectSource(new UnusedGitClient())
-                .Resolve(builder, ServiceName, Definition("javascript"), DevConfig(repoRoot)));
+                .Resolve(builder, ServiceName, Definition("rust"), DevConfig(repoRoot)));
 
         Assert.Contains("is not registered", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("UseJavaScript()", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("AddLocalKind", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("satellite", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 

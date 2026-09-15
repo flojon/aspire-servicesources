@@ -549,11 +549,13 @@ public class LocalCheckoutPrefetchTests
     [Fact]
     public void UnregisteredKind_ThrowsNamingTheServiceAndTheRegistrationOrder()
     {
+        // "javascript" no longer works as the stand-in here — it resolves via LocalKindRegistry's
+        // own built-in fallback now — so this uses a third-party kind name nobody registered.
         var dir = CreateAppHostDirectory("frontend");
         var builder = TestHelpers.CreateBuilder(dir);
         var definition = new ServiceMetadata
         {
-            Repository = "https://example.com/frontend.git", Kind = "javascript",
+            Repository = "https://example.com/frontend.git", Kind = "rust",
         }.ToDefinition("servicesources.yaml", "frontend", TestHelpers.EmptyRepositories);
         var git = new FakeGitClient();
 
@@ -566,8 +568,8 @@ public class LocalCheckoutPrefetchTests
         Assert.Empty(git.Cloned);
 
         Assert.Contains("frontend", ex.Message);
-        Assert.Contains("javascript", ex.Message);
-        Assert.Contains("before the first AddService call", ex.Message);
+        Assert.Contains("rust", ex.Message);
+        Assert.Contains("AddLocalKind", ex.Message);
     }
 
     [Fact]

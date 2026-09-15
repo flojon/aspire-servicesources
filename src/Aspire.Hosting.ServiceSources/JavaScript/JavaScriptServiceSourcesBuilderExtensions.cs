@@ -12,22 +12,20 @@ public static class JavaScriptServiceSourcesBuilderExtensions
     /// <c>Aspire.Hosting.JavaScript</c> according to the entry's <c>javascript:</c> options block.
     /// </summary>
     /// <remarks>
-    /// Call this once, before the first <c>AddService()</c> call. An unregistered kind is reported
-    /// by that service's own <c>AddService()</c>, and registering up front is what lets the very
-    /// first one report it before any checkout has begun — the first <c>AddService()</c> starts
-    /// prefetching every <c>"local"</c> service's checkout at once. The options block accepts
-    /// <c>appType</c> (<c>javascript</c> — the default — <c>vite</c>, <c>nextjs</c>, <c>node</c>,
-    /// or <c>bun</c>), <c>appDirectory</c>, <c>runScript</c>, <c>scriptPath</c>,
-    /// <c>packageManager</c>, <c>port</c>, <c>targetPort</c>, and <c>portEnv</c>; see this
-    /// package's README for what each one means.
+    /// <c>javascript</c> is a built-in kind — <c>AddService()</c> resolves it whether or not this is
+    /// ever called, the same way it always has for <c>dotnet</c>. Call this only to substitute a
+    /// different <see cref="ILocalResourceKind"/> for the name (e.g. a test double); calling it after
+    /// a <c>javascript</c>-kind service has already resolved with the built-in handler has no effect
+    /// on that service. The options block accepts <c>appType</c> (<c>javascript</c> — the default —
+    /// <c>vite</c>, <c>nextjs</c>, <c>node</c>, or <c>bun</c>), <c>appDirectory</c>, <c>runScript</c>,
+    /// <c>scriptPath</c>, <c>packageManager</c>, <c>port</c>, <c>targetPort</c>, and <c>portEnv</c>;
+    /// see this package's README for what each one means.
     /// </remarks>
     /// <example>
     /// <code>
     /// var builder = DistributedApplication.CreateBuilder(args);
     ///
-    /// builder.UseJavaScript();
-    ///
-    /// var frontend = builder.AddService("frontend");
+    /// var frontend = builder.AddService("frontend"); // kind: javascript needs no registration call
     /// </code>
     /// </example>
     [AspireExport]

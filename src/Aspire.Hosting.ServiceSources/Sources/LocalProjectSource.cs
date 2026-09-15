@@ -244,12 +244,13 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
 
         if (!registry.TryGet(definition.Kind, out var handler) || handler is null)
         {
+            // "java"/"javascript" always resolve via LocalKindRegistry's own built-in fallback, so
+            // reaching here means an unregistered third-party kind — there is no Use*() call to
+            // suggest for one core doesn't know about.
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}': kind '{definition.Kind}' is not registered. " +
                 registry.DescribeNearMatch(definition.Kind) +
-                "Call the kind's registration method before the first AddService call " +
-                "(builder.UseJavaScript() or builder.UseJava() for the built-in kinds), or " +
-                "register your own with builder.AddLocalKind(name, handler).");
+                "Register it with builder.AddLocalKind(name, handler) before the first AddService call.");
         }
 
         return handler;

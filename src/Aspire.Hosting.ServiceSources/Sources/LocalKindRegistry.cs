@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Aspire.Hosting.ServiceSources.Java;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
 
@@ -8,9 +9,23 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// <see cref="ServiceSourcesBuilderExtensions.AddLocalKind"/>, consulted by the <c>"local"</c>
 /// source for any kind other than the built-in <c>"dotnet"</c>.
 /// </summary>
+/// <remarks>
+/// <c>"java"</c> and <c>"javascript"</c> are built in too, the same way <c>"dotnet"</c> is: unlike
+/// <c>dotnet</c> they still go through <see cref="ILocalResourceKind"/> (they need no service-level
+/// metadata the interface doesn't expose), so <see cref="TryGet"/> falls back to a default instance
+/// for either name when nothing was registered for it — <c>UseJava()</c>/<c>UseJavaScript()</c> are
+/// no longer required before the first <c>AddService()</c> call. Both handler types live
+/// unconditionally in this assembly (see <c>MissingHostingPackageTests</c>'s own framing of this
+/// post-#187), so constructing a default costs nothing until a service of that kind actually
+/// resolves. Calling <c>AddLocalKind</c> explicitly for either name still works — e.g. to substitute
+/// a test double — and takes priority over the fallback, since it is checked first.
+/// </remarks>
 internal sealed class LocalKindRegistry
 {
     private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, LocalKindRegistry> Cache = new();
+
+    private static readonly Lazy<ILocalResourceKind> DefaultJava = new(() => new JavaLocalResourceKind());
+    private static readonly Lazy<ILocalResourceKind> DefaultJavaScript = new(() => new JavaScriptLocalKind());
 
     private readonly Dictionary<string, ILocalResourceKind> _handlers = new();
     private readonly string _appHostDirectory;
@@ -53,19 +68,35 @@ internal sealed class LocalKindRegistry
         }
     }
 
-    public bool TryGet(string kind, out ILocalResourceKind? handler) =>
-        _handlers.TryGetValue(kind, out handler);
+    public bool TryGet(string kind, out ILocalResourceKind? handler)
+    {
+        if (_handlers.TryGetValue(kind, out handler))
+        {
+            return true;
+        }
+
+        handler = kind switch
+        {
+            JavaLocalResourceKind.KindName => DefaultJava.Value,
+            JavaScriptLocalKind.KindName => DefaultJavaScript.Value,
+            _ => null,
+        };
+        return handler is not null;
+    }
 
     /// <summary>
-    /// Returns a trailing-space-terminated sentence naming the registered kind (or the built-in
-    /// <c>"dotnet"</c>) that <paramref name="kind"/> differs from only by case, or an empty string
-    /// when there is no such near match. Kind names are matched exactly — a casing slip would
-    /// otherwise report only that the kind "is not registered", which sends the reader looking for
-    /// a missing package instead of a typo.
+    /// Returns a trailing-space-terminated sentence naming the registered kind (or one of the
+    /// built-in <c>"dotnet"</c>/<c>"java"</c>/<c>"javascript"</c> kinds) that <paramref name="kind"/>
+    /// differs from only by case, or an empty string when there is no such near match. Kind names
+    /// are matched exactly — a casing slip would otherwise report only that the kind "is not
+    /// registered", which sends the reader looking for a missing package instead of a typo.
     /// </summary>
     public string DescribeNearMatch(string kind)
     {
-        var candidates = _handlers.Keys.Append(LocalKinds.Dotnet);
+        var candidates = _handlers.Keys
+            .Append(LocalKinds.Dotnet)
+            .Append(JavaLocalResourceKind.KindName)
+            .Append(JavaScriptLocalKind.KindName);
         var match = candidates.FirstOrDefault(k => string.Equals(k, kind, StringComparison.OrdinalIgnoreCase));
         return match is null ? "" : $"Kind names are case-sensitive — did you mean '{match}'? ";
     }

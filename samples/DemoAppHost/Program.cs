@@ -3,11 +3,8 @@ using Aspire.Hosting.ServiceSources;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
-// Registers the "java" local kind, so a service whose catalog entry says `kind: java` can be
-// cloned and run via the Aspire Community Toolkit's Java integration. Must come before the first
-// AddService call, which resolves eagerly; inert until a service actually resolves to it, so it
-// costs nothing to leave in.
-builder.UseJava();
+// "java" is a built-in local kind — a service whose catalog entry says `kind: java` clones and
+// runs via the Aspire Community Toolkit's Java integration with no registration call needed.
 
 // "local" source: clones (or uses an existing checkout of) a real project and runs it via
 // Aspire's own project orchestration. See servicesources.local.json.example.

@@ -94,16 +94,23 @@ public class UseJavaScriptTests
         Assert.DoesNotContain(builder.Resources, r => r is JavaScriptAppResource);
     }
 
+    /// <summary>
+    /// <c>javascript</c> is a built-in kind — <c>AddService</c> resolves it via
+    /// <c>LocalKindRegistry</c>'s own fallback whether or not <c>UseJavaScript()</c> was ever called,
+    /// the same way <c>dotnet</c> always has been.
+    /// </summary>
     [Fact]
-    public void WithoutUseJavaScriptTheKindIsUnregistered()
+    public void WithoutUseJavaScriptTheKindStillResolves()
     {
         var repoRoot = TestHelpers.CreateRepo();
         var builder = TestHelpers.CreateBuilder(CreateAppHost(repoRoot));
 
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("frontend"));
+        var service = builder.AddService("frontend");
 
-        Assert.Contains("javascript", ex.Message);
-        Assert.Contains("not registered", ex.Message);
+        var resource = Assert.IsType<JavaScriptAppResource>(
+            Assert.Single(builder.Resources, r => r.Name == "frontend"));
+        Assert.Equal(repoRoot, resource.WorkingDirectory);
+        Assert.Equal("http", service.GetEndpoint("http").EndpointName);
     }
 
     [Fact]
