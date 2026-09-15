@@ -24,7 +24,7 @@ public static class JavaScriptAppTypes
     public static readonly string[] All = [JavaScript, Vite, NextJs, Node, Bun];
 
     /// <summary>
-    /// The app types whose integration takes a file to execute (<see cref="JavaScriptKindOptions.ScriptPath"/>)
+    /// The app types whose integration takes a file to execute (<see cref="JavaScriptKindOptionsBuilder.WithScriptPath"/>)
     /// rather than the name of a <c>package.json</c> script.
     /// </summary>
     public static bool RunsAScriptFile(string appType) => appType is Node or Bun;
