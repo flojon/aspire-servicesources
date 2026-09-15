@@ -95,6 +95,62 @@ public class ServiceSourcesBuilderExtensionsTests
         Assert.Empty(ServiceSourcesWarnings.For(builder).Messages);
     }
 
+    [Fact]
+    public void WithEndpoint_CompatShimWithProtocol_DefaultNameOnUrlSource_IsSkippedAndReported()
+    {
+        var builder = Builder();
+        var service = UrlFacadeWithEndpoint(builder, "inventory", "https");
+
+        // `protocol:` excludes the two no-protocol shims outright (they have no such parameter); of
+        // the two candidates left, a plain bool literal is an exact match for this shim's non-nullable
+        // isProxied and only an implicit conversion for the nullable primary's -- exact match wins.
+        service.WithEndpoint(
+            port: 9999, targetPort: 9999, scheme: "https", name: "https", env: null,
+            isProxied: true, isExternal: null, protocol: ProtocolType.Tcp);
+
+        Assert.Equal(443, service.Resource.Annotations.OfType<EndpointAnnotation>().Single().Port);
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+        Assert.Contains("WithEndpoint/WithHttpEndpoint/WithHttpsEndpoint", message);
+    }
+
+    [Fact]
+    public void WithEndpoint_CompatShimNullableIsProxiedNoProtocol_DefaultNameOnUrlSource_IsSkippedAndReported()
+    {
+        var builder = Builder();
+        var service = UrlFacadeWithEndpoint(builder, "inventory", "https");
+
+        // Every argument but `protocol` supplied, with isProxied typed bool? explicitly -- the shape
+        // that reaches this shim rather than its bool-isProxied sibling (not applicable to a bool?
+        // argument without an explicit, non-implicit conversion) or the primary overload (which needs
+        // its `protocol` default, so loses to any shim applicable without one).
+        bool? isProxied = null;
+        service.WithEndpoint(
+            port: 9999, targetPort: 9999, scheme: "https", name: "https", env: null,
+            isProxied: isProxied, isExternal: null);
+
+        Assert.Equal(443, service.Resource.Annotations.OfType<EndpointAnnotation>().Single().Port);
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+        Assert.Contains("WithEndpoint/WithHttpEndpoint/WithHttpsEndpoint", message);
+    }
+
+    [Fact]
+    public void WithEndpoint_CompatShimBoolIsProxiedNoProtocol_DefaultNameOnUrlSource_IsSkippedAndReported()
+    {
+        var builder = Builder();
+        var service = UrlFacadeWithEndpoint(builder, "inventory", "https");
+
+        // Every argument but `protocol` supplied, with a plain bool literal for isProxied -- an exact
+        // type match beats the bool?-typed sibling shim's implicit-conversion match, so this is the
+        // shape that reaches this specific overload.
+        service.WithEndpoint(
+            port: 9999, targetPort: 9999, scheme: "https", name: "https", env: null,
+            isProxied: true, isExternal: null);
+
+        Assert.Equal(443, service.Resource.Annotations.OfType<EndpointAnnotation>().Single().Port);
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+        Assert.Contains("WithEndpoint/WithHttpEndpoint/WithHttpsEndpoint", message);
+    }
+
     // GateEndpointCall's fallback: a hypothetical IResourceBuilder<ServiceResource> that is not a
     // ServiceResourceBuilder has no closure-captured Source, so the gate re-derives it from the
     // facade's own ServiceSourceAnnotation instead. No such builder reaches AddService today (see

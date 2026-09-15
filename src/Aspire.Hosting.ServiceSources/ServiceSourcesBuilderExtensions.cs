@@ -311,6 +311,67 @@ public static class ServiceSourcesBuilderExtensions
     }
 
     /// <summary>
+    /// Binary-compatibility shim for <see cref="WithEndpoint"/>'s primary overload — same shape
+    /// Aspire itself keeps for callers compiled against the pre-nullable-<c>isProxied</c> signature.
+    /// Same gate, same reason (#335): this is real, currently-shipping Aspire API surface, not
+    /// speculative scaffolding, and an AppHost author who writes a literal <c>isProxied: true</c>
+    /// alongside an explicit <c>protocol</c> reaches this overload, not the nullable one.
+    /// </summary>
+    [AspireExportIgnore(Reason = "Binary compatibility shim for the nullable isProxied overload.")]
+    public static IResourceBuilder<ServiceResource> WithEndpoint(
+        this IResourceBuilder<ServiceResource> builder,
+        int? port, int? targetPort, string? scheme, [EndpointName] string? name, string? env,
+        bool isProxied, bool? isExternal, ProtocolType? protocol)
+    {
+        if (GateEndpointCall(builder))
+        {
+            return builder;
+        }
+
+        return Aspire.Hosting.ResourceBuilderExtensions.WithEndpoint(
+            builder, port, targetPort, scheme, name, env, (bool?)isProxied, isExternal, protocol);
+    }
+
+    /// <summary>
+    /// Subset overload of <see cref="WithEndpoint"/>'s primary signature, omitting <c>protocol</c> --
+    /// Aspire's own pre-protocol-parameter shape, kept for source compatibility. Same gate, same
+    /// reason (#335) as every other shim in this file.
+    /// </summary>
+    [AspireExportIgnore(Reason = "Subset of the full WithEndpoint overload which is already exported.")]
+    public static IResourceBuilder<ServiceResource> WithEndpoint(
+        this IResourceBuilder<ServiceResource> builder,
+        int? port, int? targetPort, string? scheme, [EndpointName] string? name, string? env,
+        bool? isProxied, bool? isExternal)
+    {
+        if (GateEndpointCall(builder))
+        {
+            return builder;
+        }
+
+        return Aspire.Hosting.ResourceBuilderExtensions.WithEndpoint(
+            builder, port, targetPort, scheme, name, env, isProxied, isExternal, null);
+    }
+
+    /// <summary>
+    /// Binary-compatibility shim combining both of <see cref="WithEndpoint"/>'s other two shims'
+    /// omissions — no <c>protocol</c>, non-nullable <c>isProxied</c>. Same gate, same reason (#335).
+    /// </summary>
+    [AspireExportIgnore(Reason = "Binary compatibility shim for the nullable isProxied overload.")]
+    public static IResourceBuilder<ServiceResource> WithEndpoint(
+        this IResourceBuilder<ServiceResource> builder,
+        int? port, int? targetPort, string? scheme, [EndpointName] string? name, string? env,
+        bool isProxied, bool? isExternal)
+    {
+        if (GateEndpointCall(builder))
+        {
+            return builder;
+        }
+
+        return Aspire.Hosting.ResourceBuilderExtensions.WithEndpoint(
+            builder, port, targetPort, scheme, name, env, (bool?)isProxied, isExternal, (ProtocolType?)null);
+    }
+
+    /// <summary>
     /// Whether an endpoint call against <paramref name="builder"/> should be skipped — and, if so,
     /// records the skip warning as a side effect, exactly as
     /// <see cref="ServiceResourceBuilder.WithAnnotation{TAnnotation}"/> already does for every other
