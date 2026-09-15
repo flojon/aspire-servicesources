@@ -107,6 +107,10 @@ never existed. Check the tag of the last release before adding one.
   counterpart of a service's own `local` block: override a grouped repository's `ref` for every
   member at once, in `servicesources.local.json` or any layer above it, instead of a member's own
   `local.ref` — which a grouped service can no longer set (its ref belongs to the whole group).
+- **`LocalKinds`, `EndpointScheme`, `JavaScriptAppTypes` and `JavaScriptPackageManagers` are
+  public** ([#314]). Previously `internal` constant holders whose values callers could only find
+  in prose; now discoverable from the API, the way Aspire's own `KnownResourceStates` and
+  `KnownResourceCommands` are. The methods that accept these values still take `string`.
 
 ### Changed
 

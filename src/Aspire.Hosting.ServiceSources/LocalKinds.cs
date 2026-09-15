@@ -1,6 +1,6 @@
 namespace Aspire.Hosting.ServiceSources;
 
-internal static class LocalKinds
+public static class LocalKinds
 {
     /// <summary>
     /// The built-in local kind, resolved directly by the <c>"local"</c> source rather than through
