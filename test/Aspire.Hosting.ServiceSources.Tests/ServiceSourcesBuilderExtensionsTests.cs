@@ -195,6 +195,35 @@ public class ServiceSourcesBuilderExtensionsTests
         Assert.Empty(ServiceSourcesWarnings.For(builder).Messages);
     }
 
+    [Fact]
+    public void WithHttpEndpoint_CompatShim_DefaultNameOnUrlSource_IsSkippedAndReported()
+    {
+        var builder = Builder();
+        var service = UrlFacadeWithEndpoint(builder, "inventory", "http");
+
+        // Every argument supplied, with a plain bool isProxied literal -- an exact match for this
+        // shim's non-nullable isProxied, and only an implicit conversion for the nullable primary's,
+        // so this is the shape that binds here rather than to the overload already shadowed above.
+        service.WithHttpEndpoint(port: 9999, targetPort: 9999, name: "http", env: null, isProxied: true);
+
+        Assert.Equal(443, service.Resource.Annotations.OfType<EndpointAnnotation>().Single().Port);
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+        Assert.Contains("WithEndpoint/WithHttpEndpoint/WithHttpsEndpoint", message);
+    }
+
+    [Fact]
+    public void WithHttpsEndpoint_CompatShim_DefaultNameOnUrlSource_IsSkippedAndReported()
+    {
+        var builder = Builder();
+        var service = UrlFacadeWithEndpoint(builder, "inventory", "https");
+
+        service.WithHttpsEndpoint(port: 9999, targetPort: 9999, name: "https", env: null, isProxied: true);
+
+        Assert.Equal(443, service.Resource.Annotations.OfType<EndpointAnnotation>().Single().Port);
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+        Assert.Contains("WithEndpoint/WithHttpEndpoint/WithHttpsEndpoint", message);
+    }
+
     // GateEndpointCall's fallback: a hypothetical IResourceBuilder<ServiceResource> that is not a
     // ServiceResourceBuilder has no closure-captured Source, so the gate re-derives it from the
     // facade's own ServiceSourceAnnotation instead. No such builder reaches AddService today (see

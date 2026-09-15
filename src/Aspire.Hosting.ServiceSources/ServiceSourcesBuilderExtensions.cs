@@ -394,6 +394,41 @@ public static class ServiceSourcesBuilderExtensions
     }
 
     /// <summary>
+    /// Binary-compatibility shim for <see cref="WithHttpEndpoint"/> -- the leftover gap #339 (#334)
+    /// explicitly left open pending this ticket. An AppHost author who writes a literal
+    /// <c>isProxied: true</c>/<c>isProxied: false</c> binds here rather than to the nullable
+    /// overload already shadowed above.
+    /// </summary>
+    [AspireExportIgnore(Reason = "Binary compatibility shim for the nullable isProxied overload.")]
+    public static IResourceBuilder<ServiceResource> WithHttpEndpoint(
+        this IResourceBuilder<ServiceResource> builder,
+        int? port, int? targetPort, [EndpointName] string? name, string? env, bool isProxied)
+    {
+        if (GateEndpointCall(builder))
+        {
+            return builder;
+        }
+
+        return Aspire.Hosting.ResourceBuilderExtensions.WithHttpEndpoint(builder, port, targetPort, name, env, (bool?)isProxied);
+    }
+
+    /// <summary>
+    /// The <c>https</c> counterpart of the shim above -- same shadowing, same gate, same reason.
+    /// </summary>
+    [AspireExportIgnore(Reason = "Binary compatibility shim for the nullable isProxied overload.")]
+    public static IResourceBuilder<ServiceResource> WithHttpsEndpoint(
+        this IResourceBuilder<ServiceResource> builder,
+        int? port, int? targetPort, [EndpointName] string? name, string? env, bool isProxied)
+    {
+        if (GateEndpointCall(builder))
+        {
+            return builder;
+        }
+
+        return Aspire.Hosting.ResourceBuilderExtensions.WithHttpsEndpoint(builder, port, targetPort, name, env, (bool?)isProxied);
+    }
+
+    /// <summary>
     /// Whether an endpoint call against <paramref name="builder"/> should be skipped — and, if so,
     /// records the skip warning as a side effect, exactly as
     /// <see cref="ServiceResourceBuilder.WithAnnotation{TAnnotation}"/> already does for every other
