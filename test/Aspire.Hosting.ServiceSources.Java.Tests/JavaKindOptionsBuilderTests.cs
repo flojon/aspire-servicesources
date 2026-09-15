@@ -8,11 +8,11 @@ public class JavaKindOptionsBuilderTests
     public void Build_EveryFieldSet_ProducesMatchingJavaKindOptions()
     {
         var options = new JavaKindOptionsBuilder()
-            .WorkingDirectory("services/api")
-            .MavenGoal("spring-boot:run")
-            .WrapperPath("mvnw")
-            .Args(["-Dspring-boot.run.profiles=dev"])
-            .Port(8080)
+            .WithWorkingDirectory("services/api")
+            .WithMavenGoal("spring-boot:run")
+            .WithWrapperPath("mvnw")
+            .WithArgs(["-Dspring-boot.run.profiles=dev"])
+            .WithPort(8080)
             .Build();
 
         Assert.Equal("services/api", options.WorkingDirectory);
@@ -28,8 +28,8 @@ public class JavaKindOptionsBuilderTests
     public void Build_OnlyGradleTaskAndPortSet_LeavesOthersNull()
     {
         var options = new JavaKindOptionsBuilder()
-            .GradleTask("bootRun")
-            .Port(8081)
+            .WithGradleTask("bootRun")
+            .WithPort(8081)
             .Build();
 
         Assert.Equal("bootRun", options.GradleTask);
@@ -43,8 +43,8 @@ public class JavaKindOptionsBuilderTests
     public void Build_JarPathSet_ProducesMatchingJavaKindOptions()
     {
         var options = new JavaKindOptionsBuilder()
-            .JarPath("target/app.jar")
-            .Port(8082)
+            .WithJarPath("target/app.jar")
+            .WithPort(8082)
             .Build();
 
         Assert.Equal("target/app.jar", options.JarPath);
@@ -54,9 +54,9 @@ public class JavaKindOptionsBuilderTests
     public void Build_SchemeSet_ProducesMatchingJavaKindOptions()
     {
         var options = new JavaKindOptionsBuilder()
-            .MavenGoal("spring-boot:run")
-            .Port(8443)
-            .Scheme("https")
+            .WithMavenGoal("spring-boot:run")
+            .WithPort(8443)
+            .WithScheme("https")
             .Build();
 
         Assert.Equal("https", options.Scheme);
@@ -66,8 +66,8 @@ public class JavaKindOptionsBuilderTests
     public void Build_SchemeNotSet_LeavesItNull()
     {
         var options = new JavaKindOptionsBuilder()
-            .MavenGoal("spring-boot:run")
-            .Port(8080)
+            .WithMavenGoal("spring-boot:run")
+            .WithPort(8080)
             .Build();
 
         Assert.Null(options.Scheme);

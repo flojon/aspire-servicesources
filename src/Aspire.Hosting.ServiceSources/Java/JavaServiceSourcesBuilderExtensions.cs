@@ -50,7 +50,7 @@ public static class JavaServiceSourcesBuilderExtensions
     /// <code>
     /// catalog.AddService("catalog")
     ///     .WithRepository("https://github.com/spring-projects/spring-petclinic")
-    ///     .AsJava(o => o.MavenGoal("spring-boot:run").Port(8080));
+    ///     .AsJava(o => o.WithMavenGoal("spring-boot:run").WithPort(8080));
     /// </code>
     /// </example>
     [AspireExport]

@@ -9,7 +9,7 @@ public class JavaServiceSourcesBuilderExtensionsTests
     {
         var definition = new ServiceCatalogBuilder().AddService("catalog")
             .WithRepository("https://github.com/spring-projects/spring-petclinic")
-            .AsJava(o => o.MavenGoal("spring-boot:run").Port(8080))
+            .AsJava(o => o.WithMavenGoal("spring-boot:run").WithPort(8080))
             .Build();
 
         Assert.Equal(JavaLocalResourceKind.KindName, definition.Kind);
@@ -23,7 +23,7 @@ public class JavaServiceSourcesBuilderExtensionsTests
     {
         var definition = new ServiceCatalogBuilder().AddService("catalog")
             .WithRepository("https://github.com/spring-projects/spring-petclinic")
-            .AsJava(o => o.MavenGoal("spring-boot:run").Port(8080))
+            .AsJava(o => o.WithMavenGoal("spring-boot:run").WithPort(8080))
             .Build();
 
         var validated = JavaKindOptions.Parse("catalog", definition.KindOptions);
@@ -40,7 +40,7 @@ public class JavaServiceSourcesBuilderExtensionsTests
         var chain = catalogBuilder.AddService("catalog")
             .WithRepository("https://github.com/spring-projects/spring-petclinic");
 
-        var result = chain.AsJava(o => o.MavenGoal("spring-boot:run").Port(8080));
+        var result = chain.AsJava(o => o.WithMavenGoal("spring-boot:run").WithPort(8080));
 
         Assert.Same(chain, result);
     }
@@ -52,6 +52,6 @@ public class JavaServiceSourcesBuilderExtensionsTests
             .WithRepository("https://github.com/spring-projects/spring-petclinic")
             .WithKind("java", new Dictionary<string, object> { ["port"] = 8080 });
 
-        Assert.Throws<ServiceSourcesConfigurationException>(() => chain.AsJava(o => o.Port(8080)));
+        Assert.Throws<ServiceSourcesConfigurationException>(() => chain.AsJava(o => o.WithPort(8080)));
     }
 }

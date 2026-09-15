@@ -44,7 +44,7 @@ public static class JavaScriptServiceSourcesBuilderExtensions
     /// <code>
     /// catalog.AddService("frontend")
     ///     .WithRepository("https://github.com/example/frontend")
-    ///     .AsJavaScript(o => o.AppType(JavaScriptAppTypes.Vite).Port(3000));
+    ///     .AsJavaScript(o => o.WithAppType(JavaScriptAppTypes.Vite).WithPort(3000));
     /// </code>
     /// </example>
     [AspireExport]
