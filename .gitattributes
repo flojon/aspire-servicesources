@@ -1,0 +1,6 @@
+# The tests carry a real bare git repository as a fixture (test/Aspire.Hosting.ServiceSources.Tests/
+# Fixtures/sample-service.git). Its plumbing files (packed-refs, HEAD, config, ...) must reach the
+# checkout byte-for-byte: without this, a developer whose git is configured to convert line endings
+# (core.autocrlf=true, common on Windows) gets '\r\n' rewritten into files git itself parses one line
+# at a time, corrupting every ref name and breaking any test that shells out to real git against it.
+**/*.git/** -text

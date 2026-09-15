@@ -1,5 +1,6 @@
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Prepare;
+using Aspire.Hosting.ServiceSources;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Prepare;
 
@@ -308,10 +309,18 @@ public class PreparePlanTests
     public void ABareProgramName_IsLeftForPath(string program) =>
         Assert.Equal(program, Plan(Catalog([program, "bootstrap"])).Step!.Command[0]);
 
+    /// <remarks>
+    /// Asserted against the literal value rather than <c>Path.Combine("scripts", "bootstrap")</c>:
+    /// <see cref="CheckoutRelativePath.NormalizeSeparators"/> only rewrites <c>'\'</c>, since Windows
+    /// accepts <c>'/'</c> as a separator too, so a forward-slash value passes through unchanged on
+    /// every platform. <c>Path.Combine</c> would assert that instead by coincidence on Linux/macOS
+    /// (where it also joins with <c>'/'</c>), while asserting the rewritten <c>'\'</c> form on
+    /// Windows — a mismatch that only ever shows up running the suite there.
+    /// </remarks>
     [Fact]
     public void ARelativeProgram_StaysRelative() =>
         Assert.Equal(
-            Path.Combine("scripts", "bootstrap"),
+            "scripts/bootstrap",
             Plan(Catalog(["scripts/bootstrap"])).Step!.Command[0]);
 
     /// <remarks>
