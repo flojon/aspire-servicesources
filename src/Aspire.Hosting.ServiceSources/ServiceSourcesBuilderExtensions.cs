@@ -183,6 +183,11 @@ public static class ServiceSourcesBuilderExtensions
     /// started after it instead, which is visible to anything in the AppHost that assumed otherwise.
     /// </para>
     /// </remarks>
+    /// <exception cref="ServiceSourcesConfigurationException">
+    /// A service has already resolved through <see cref="AddService"/> on this builder — a late call
+    /// no longer has anything left to change, so it is refused rather than silently applying to none
+    /// of the services that were already added.
+    /// </exception>
     [AspireExportIgnore]
     public static IDistributedApplicationBuilder UseDeferredCheckout(this IDistributedApplicationBuilder builder)
     {

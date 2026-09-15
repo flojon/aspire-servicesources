@@ -18,6 +18,15 @@ never existed. Check the tag of the last release before adding one.
 
 ### Breaking
 
+- **A late `UseDeferredCheckout()` call now throws instead of silently no-opping** ([#345]).
+  `UseDeferredCheckout()` must be called before the first `AddService(...)` — that is where the
+  defer-or-not decision is made for each service, and it used to have no effect on any service
+  resolved before the call, with nothing said about it. It now throws
+  `ServiceSourcesConfigurationException` as soon as it detects a service already resolved on the
+  builder, the same way a too-late `AddServiceCatalog(...)` call already does. Move
+  `builder.UseDeferredCheckout()` above every `AddService(...)` call to migrate — it belongs near
+  the top of the AppHost, next to `AddServiceCatalog()` and `UseJava()`.
+
 - **`AddService` returns `IResourceBuilder<ServiceResource>`** ([#313]). `ServiceResource` is a
   concrete, sealed class implementing `IResourceWithServiceDiscovery`, `IResourceWithEnvironment`,
   `IResourceWithArgs`, `IResourceWithEndpoints` and `IResourceWithWaitSupport` — so
@@ -1636,6 +1645,7 @@ Targets `net10.0`.
 [#313]: https://github.com/flojon/aspire-servicesources/issues/313
 [#314]: https://github.com/flojon/aspire-servicesources/issues/314
 [#317]: https://github.com/flojon/aspire-servicesources/issues/317
+[#345]: https://github.com/flojon/aspire-servicesources/issues/345
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
