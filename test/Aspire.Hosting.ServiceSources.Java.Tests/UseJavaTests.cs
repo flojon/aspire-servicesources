@@ -167,21 +167,26 @@ public class UseJavaTests
         Assert.DoesNotContain(builder.Resources, r => r.Name == "java-api");
     }
 
+    /// <summary>
+    /// <c>java</c> is a built-in kind — <c>AddService</c> resolves it via <c>LocalKindRegistry</c>'s
+    /// own fallback whether or not <c>UseJava()</c> was ever called, the same way <c>dotnet</c>
+    /// always has been.
+    /// </summary>
     [Fact]
-    public void AddService_KindJavaWithoutUseJava_ThrowsNamingTheKind()
+    public void WithoutUseJavaTheKindStillResolves()
     {
-        var (appHostDirectory, _) = CreateAppHost("""
+        var (appHostDirectory, checkout) = CreateAppHost("""
                   mavenGoal: spring-boot:run
                   port: 8080
             """);
+        WriteWrapper(checkout, MavenWrapperName);
         var builder = CreateBuilder(appHostDirectory);
 
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => builder.AddService("java-api"));
+        builder.AddService("java-api");
 
-        Assert.Contains("java-api", ex.Message);
-        Assert.Contains("java", ex.Message);
-        Assert.DoesNotContain(builder.Resources, r => r.Name == "java-api");
+        var resource = Assert.IsType<JavaAppExecutableResource>(
+            Assert.Single(builder.Resources, r => r.Name == "java-api"));
+        Assert.Equal(Path.GetFullPath(checkout), Path.GetFullPath(resource.WorkingDirectory));
     }
 
     [Fact]

@@ -1,6 +1,7 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources;
+using Aspire.Hosting.ServiceSources.Java;
 using Aspire.Hosting.ServiceSources.Sources;
 using Aspire.Hosting.ServiceSources.Tests;
 
@@ -126,6 +127,31 @@ public class LocalKindRegistryTests
         LocalKindRegistry.For(builder).Register(reserved, new FakeKind());
 
         Assert.True(LocalKindRegistry.For(builder).TryGet(reserved, out _));
+    }
+
+    [Theory]
+    [InlineData(JavaLocalResourceKind.KindName, typeof(JavaLocalResourceKind))]
+    [InlineData(JavaScriptLocalKind.KindName, typeof(JavaScriptLocalKind))]
+    public void TryGet_BuiltInKindNeverRegistered_FallsBackToDefaultInstance(string kind, Type expectedType)
+    {
+        var builder = CreateBuilder();
+
+        Assert.True(LocalKindRegistry.For(builder).TryGet(kind, out var found));
+        Assert.IsType(expectedType, found);
+    }
+
+    [Theory]
+    [InlineData(JavaLocalResourceKind.KindName)]
+    [InlineData(JavaScriptLocalKind.KindName)]
+    public void TryGet_BuiltInKindExplicitlyRegistered_ReturnsTheRegisteredHandlerNotTheDefault(string kind)
+    {
+        var builder = CreateBuilder();
+        var handler = new FakeKind();
+
+        LocalKindRegistry.For(builder).Register(kind, handler);
+
+        Assert.True(LocalKindRegistry.For(builder).TryGet(kind, out var found));
+        Assert.Same(handler, found);
     }
 
     [Fact]
