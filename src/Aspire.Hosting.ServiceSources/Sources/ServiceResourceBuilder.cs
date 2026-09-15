@@ -79,7 +79,11 @@ internal static class Reachability
     /// public <c>WithEnvironment(builder, name, string value)</c> overload constructs one and passes
     /// it straight to <c>WithAnnotation&lt;EnvironmentAnnotation&gt;</c>, so <paramref
     /// name="annotationType"/> is genuinely this type at runtime for the AppHost's most common
-    /// <c>WithEnvironment</c> call, and the label must still recognize it.
+    /// <c>WithEnvironment</c> call, and the label must still recognize it. The
+    /// <see cref="EndpointAnnotation"/> label names three methods, not one: <c>WithEndpoint</c>,
+    /// <c>WithHttpEndpoint</c> and <c>WithHttpsEndpoint</c> (and each one's own binary-compat shims)
+    /// all resolve to a lookup against this same annotation type, so a skip triggered by any of them
+    /// is the identical capability, reported once under one label rather than three.
     /// </remarks>
     public static string CapabilityLabel(Type annotationType) => annotationType.Name switch
     {
