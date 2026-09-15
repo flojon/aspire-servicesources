@@ -144,8 +144,25 @@ change to `IsUnreachable`, no new dictionary key, no per-method dispatch — bec
 design decision (every method that resolves to a pre-existing `EndpointAnnotation`-named lookup is
 the same capability, gated the same way, keyed by annotation type not call site) is exactly right
 and #334 already established it; the label was just written before a second and third method existed
-to report through it. `EndpointSkipGapRepro.cs`'s existing assertions use `.Contains(...)`, not
-`.Equals(...)`, so this is backward compatible with every test written against #334's fix.
+to report through it. Both `EndpointSkipGapRepro.cs`'s and `ServiceSourcesBuilderExtensionsTests.cs`'s
+existing assertions on this label use `.Contains(...)`/`Assert.Contains`, never `.Equals(...)`, so
+this is backward compatible with every test written against #334's fix.
+
+### 3.1a Carrying forward #334's `ASPIREEXPORT008`/`typecheck-typescript` requirement
+
+This design adds a second `[AspireExport]` shadow — overload #1, the primary raw `WithEndpoint<T>` —
+alongside the two `WithHttpEndpoint`/`WithHttpsEndpoint` shadows #339 already shipped under the same
+attribute. #334's design doc §3.6 proved by a real compiled probe that an *unannotated* shadow of an
+exported method fails this repo's `-warnaserror` CI build with `ASPIREEXPORT008`, and that annotating
+it `[AspireExportIgnore]` instead (rather than `[AspireExport]`) would compile clean but silently drop
+the method from guest-language projection — a regression only the `typecheck-typescript` CI leg would
+catch, not any C#-side test. That requirement is not specific to `WithHttpEndpoint`/`WithHttpsEndpoint`;
+it applies to any new `[AspireExport]`-attributed shadow this package adds, including this one. The
+Plan phase must add `[AspireExport]` to the new primary `WithEndpoint` shadow (never
+`[AspireExportIgnore]`) and treat `typecheck-typescript` as load-bearing for this ticket the same way
+#334's plan did — not optional the way it is for most ATS-unrelated bug fixes. The six remaining
+shadows (#2-#7) all carry `[AspireExportIgnore]` already, matching Aspire's own attribute on each, so
+this risk applies to exactly one of the seven new overloads.
 
 ### 3.2 Compat shims: verified real, not hypothetical
 
@@ -156,6 +173,15 @@ compiled against an older Aspire minor version, or who explicitly writes a liter
 `isProxied: true`/`isProxied: false` (binding to the `bool` overload rather than the `bool?` one),
 reaches one of these today. Per this design's approval, all seven are shadowed — no overload in
 this family is left deliberately open the way #339 left #6/#7 open pending this ticket.
+
+The riskiest pair for overload resolution is #3 vs. #4: identical parameter lists except `bool?`
+vs. `bool` for `isProxied` — exactly the shape #334's own methodology insisted on a real compiled
+probe for, rather than reasoning from the C# spec alone (§3.4 there: "reasoning about C#
+overload-resolution rules is not enough on its own"). This design reuses that mechanism by
+assertion; the Plan phase should budget a quick compiled-and-run check (it does not need to
+reproduce #334's full two-probe exercise) confirming all seven new shadows bind to the call shapes
+an AppHost author would actually write, with no ambiguous-call error and no accidental match
+against the wrong shim, before treating this as a known-safe mechanical extension.
 
 ### 3.3 What stays out of scope
 
@@ -178,8 +204,9 @@ scope," which stops being true once this fix lands) with:
 
 - One url-source case per shadowed overload proving the raw call is skipped and reported with the
   widened label — at minimum the primary `WithEndpoint` overload and the callback overload (the two
-  an AppHost author would plausibly write by hand); the four remaining compat shims get at least one
-  direct-call test each so a future accidental de-shadowing regresses visibly, even though their
+  an AppHost author would plausibly write by hand); the **five** remaining compat shims (`WithEndpoint`
+  #2, #3, #4, and `WithHttpEndpoint`/`WithHttpsEndpoint` #6, #7 from §1's table) each get at least one
+  direct-call test too, so a future accidental de-shadowing regresses visibly, even though their
   production likelihood is low.
 - A kubernetes-source case mirroring
   `DefaultNamedEndpoint_OnKubernetesSource_WithArguments_DoesNotChangeThePortForwardsEndpoint` but
