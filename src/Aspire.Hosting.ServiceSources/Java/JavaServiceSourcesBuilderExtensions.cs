@@ -23,10 +23,12 @@ public static class JavaServiceSourcesBuilderExtensions
     ///       args: ["-Dspring-boot.run.profiles=dev"]   # optional
     ///       port: 8080
     /// </code>
-    /// Call this before the first <c>AddService(...)</c> call — that call resolves its service
-    /// eagerly, so a handler registered afterwards is too late — and at most once per builder
-    /// — a second call throws, since registering the same kind twice is a mistake rather than a
-    /// no-op.
+    /// <c>java</c> is a built-in kind — <c>AddService()</c> resolves it whether or not this is ever
+    /// called, the same way it always has for <c>dotnet</c>. Call this only to substitute a
+    /// different <see cref="ILocalResourceKind"/> for the name (e.g. a test double), before the
+    /// first <c>AddService(...)</c> call that would otherwise resolve one with the built-in handler
+    /// — and at most once per builder, since registering the same kind twice is a mistake rather
+    /// than a no-op.
     /// </summary>
     /// <remarks>
     /// Only the <c>"local"</c> source consults local kinds. A Java service reached over the

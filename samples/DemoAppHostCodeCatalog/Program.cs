@@ -4,9 +4,7 @@ using Aspire.Hosting.ServiceSources.Prepare;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
-// Registers the "java" local kind — same call as the yaml-based sample, needed before the first
-// AddService() either way. builder.UseJava() is unaffected by where the catalog comes from.
-builder.UseJava();
+// "java" is a built-in local kind — no registration call needed, same as the yaml-based sample.
 
 // The whole catalog, declared here instead of in servicesources.yaml. Must come before the first
 // AddService() call, which is where it's read.

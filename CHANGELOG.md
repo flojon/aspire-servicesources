@@ -126,6 +126,14 @@ never existed. Check the tag of the last release before adding one.
   types if the options object doesn't match what the kind expects. A dictionary (the shape yaml
   itself produces) still round-trips exactly as before.
 
+- **`java`/`javascript` are built-in local kinds, resolved the same way `dotnet` always has been**
+  ([#314]). `AddService()` now resolves a `kind: java`/`kind: javascript` service whether or not
+  `UseJava()`/`UseJavaScript()` was ever called — `LocalKindRegistry` falls back to the built-in
+  handler when nothing was explicitly registered for the name. `UseJava()`/`UseJavaScript()` still
+  exist and still work exactly as before, for the one case they remain useful: substituting a
+  different `ILocalResourceKind` for the name. The "call this before the first `AddService()`"
+  ordering contract no longer applies to either kind.
+
 ### Fixed
 
 - **`AddLocalKind` no longer rejects a reserved-looking name when no yaml catalog is in play**
@@ -1622,6 +1630,7 @@ Targets `net10.0`.
 [#291]: https://github.com/flojon/aspire-servicesources/issues/291
 [#309]: https://github.com/flojon/aspire-servicesources/issues/309
 [#313]: https://github.com/flojon/aspire-servicesources/issues/313
+[#314]: https://github.com/flojon/aspire-servicesources/issues/314
 [#317]: https://github.com/flojon/aspire-servicesources/issues/317
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507

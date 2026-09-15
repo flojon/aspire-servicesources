@@ -167,9 +167,8 @@ await builder.addServiceCatalog(async (catalog) => {
 `AddServiceCatalog` must be called before the first `AddService(...)` call anywhere in the
 AppHost — yaml-based `AddService` calls included — since a service is resolved as soon as
 it's added; calling it after throws, naming the ordering problem. Call it near the top of
-the AppHost, next to `UseDeferredCheckout()` and `UseJava()`/`UseJavaScript()`. It can be
-called more than once — a helper method can contribute its own entries — and calls append
-rather than replace.
+the AppHost, next to `UseDeferredCheckout()`. It can be called more than once — a helper
+method can contribute its own entries — and calls append rather than replace.
 
 **Which builder method enables which `source`**, since the method names are not the four
 values you type into `servicesources.local.json`:
@@ -955,15 +954,14 @@ at that service's `AddService()` call, before its checkout is used.
 
 Runs the checkout through
 [`Aspire.Hosting.JavaScript`](https://www.nuget.org/packages/Aspire.Hosting.JavaScript), which
-your AppHost references itself (13.5.2 or newer — see [Installation](#install)). Reference
-it, then call `UseJavaScript()` once, before the first `AddService()` call:
+your AppHost references itself (13.5.2 or newer — see [Installation](#install)). `javascript` is a
+built-in kind, resolved the same way `dotnet` always has been — reference the package and declare
+`kind: javascript`, no registration call needed:
 
 ```csharp
 using Aspire.Hosting.ServiceSources;
 
 var builder = DistributedApplication.CreateBuilder(args);
-
-builder.UseJavaScript();
 
 var frontend = builder.AddService("frontend");
 ```
@@ -1031,16 +1029,13 @@ that use them.
 Runs the checkout through the .NET Aspire Community Toolkit's
 [Java integration](https://github.com/CommunityToolkit/Aspire), which your AppHost references
 itself as `CommunityToolkit.Aspire.Hosting.Java` (13.3.0 or newer — see
-[Installation](#install)). Reference it, then call `UseJava()`
-once, before the first `AddService()` call — `AddService()` resolves eagerly, so a `kind: java`
-service registered after it has already run has nowhere to look up its handler:
+[Installation](#install)). `java` is a built-in kind, resolved the same way `dotnet` always has
+been — reference the package and declare `kind: java`, no registration call needed:
 
 ```csharp
 using Aspire.Hosting.ServiceSources;
 
 var builder = DistributedApplication.CreateBuilder(args);
-
-builder.UseJava();
 
 var catalog = builder.AddService("catalog");
 ```
@@ -1151,8 +1146,9 @@ should survive a developer switching that service to a non-`local` source — `U
 the service no longer resolves to a Java resource, which is the point when the AppHost genuinely
 requires one.
 
-`UseJava()` is exported to Aspire's Type System, so a TypeScript AppHost can call `useJava()`
-before `addService(...)` the same way.
+`UseJava()`/`useJava()` (also exported to Aspire's Type System for a TypeScript AppHost) is no
+longer required — `java` resolves without it — but still exists to substitute a different
+`ILocalResourceKind` for the name, e.g. a test double.
 
 #### Implementing a kind
 
@@ -2281,12 +2277,13 @@ and `kubectl`; see its section above.)
 
 It also carries a `catalog` service showing `kind: java` — a `"local"` checkout of
 [Spring PetClinic](https://github.com/spring-projects/spring-petclinic) run with its own Maven
-wrapper. `builder.UseJava()` is wired up, but `AddService("catalog")` is commented out and the
-service is left out of `servicesources.local.json.example`, since unlike the three above it needs a
-JDK. To run it, do both: uncomment the call and add `"catalog": { "source": "local" }` to your
-`servicesources.local.json`. Leaving it out of that file by default is what keeps the sample from
-cloning PetClinic on its first run: the sample does not call `UseDeferredCheckout()`, so the first
-`AddService` clones every `"local"` entry there that has no checkout yet, whether or not you add it.
+wrapper; `java` being a built-in kind, no `Program.cs` registration is needed. `AddService("catalog")`
+is commented out and the service is left out of `servicesources.local.json.example`, since unlike
+the three above it needs a JDK. To run it, do both: uncomment the call and add
+`"catalog": { "source": "local" }` to your `servicesources.local.json`. Leaving it out of that file
+by default is what keeps the sample from cloning PetClinic on its first run: the sample does not
+call `UseDeferredCheckout()`, so the first `AddService` clones every `"local"` entry there that has
+no checkout yet, whether or not you add it.
 
 ```bash
 cd samples/DemoAppHost

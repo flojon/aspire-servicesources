@@ -197,11 +197,13 @@ public static class ServiceSourcesBuilderExtensions
 
     /// <summary>
     /// Registers <paramref name="handler"/> as the resolver for local-sourced services whose
-    /// <c>servicesources.yaml</c> entry declares <c>kind: &lt;paramref name="kind"/&gt;</c>.
-    /// Called by a kind's own registration method — <see cref="JavaScriptServiceSourcesBuilderExtensions.UseJavaScript"/>
-    /// and <see cref="JavaServiceSourcesBuilderExtensions.UseJava"/> are the built-in two — rather
-    /// than directly by an AppHost author. Public because a kind implemented outside this package
-    /// has no other way to register itself.
+    /// <c>servicesources.yaml</c> entry declares <c>kind: &lt;paramref name="kind"/&gt;</c>. The two
+    /// built-in kinds — <c>"java"</c>/<c>"javascript"</c> — resolve without this ever being called
+    /// (see <see cref="Sources.LocalKindRegistry"/>'s own fallback); <see cref="JavaServiceSourcesBuilderExtensions.UseJava"/>
+    /// and <see cref="JavaScriptServiceSourcesBuilderExtensions.UseJavaScript"/> exist only to
+    /// substitute a different handler for one of those names. A kind implemented outside this
+    /// package has no other way to register itself, which is why this is public rather than
+    /// internal.
     /// </summary>
     [AspireExportIgnore]
     public static IDistributedApplicationBuilder AddLocalKind(
@@ -213,9 +215,6 @@ public static class ServiceSourcesBuilderExtensions
 
         RequireCurrentValidateSignature(kind, handler);
 
-        // UseJavaScript()/UseJava() land here, and an AppHost calls one of those
-        // before its first AddService() — so this is usually the call that completes the AppHost's
-        // configuration chain, ahead of any line of theirs that reads it.
         DeveloperConfigFileSource.EnsureRegistered(builder);
 
         LocalKindRegistry.For(builder).Register(kind, handler);

@@ -31,9 +31,9 @@ public class LocalKindRegistryTests
     {
         var builderA = CreateBuilder();
         var builderB = CreateBuilder();
-        LocalKindRegistry.For(builderA).Register("javascript", new FakeKind());
+        LocalKindRegistry.For(builderA).Register("widget", new FakeKind());
 
-        Assert.False(LocalKindRegistry.For(builderB).TryGet("javascript", out _));
+        Assert.False(LocalKindRegistry.For(builderB).TryGet("widget", out _));
     }
 
     [Fact]
@@ -42,9 +42,9 @@ public class LocalKindRegistryTests
         var builder = CreateBuilder();
         var handler = new FakeKind();
 
-        LocalKindRegistry.For(builder).Register("javascript", handler);
+        LocalKindRegistry.For(builder).Register("widget", handler);
 
-        Assert.True(LocalKindRegistry.For(builder).TryGet("javascript", out var found));
+        Assert.True(LocalKindRegistry.For(builder).TryGet("widget", out var found));
         Assert.Same(handler, found);
     }
 
@@ -53,7 +53,7 @@ public class LocalKindRegistryTests
     {
         var builder = CreateBuilder();
 
-        Assert.False(LocalKindRegistry.For(builder).TryGet("java", out var found));
+        Assert.False(LocalKindRegistry.For(builder).TryGet("widget", out var found));
         Assert.Null(found);
     }
 
@@ -61,12 +61,12 @@ public class LocalKindRegistryTests
     public void Register_SameKindTwice_ThrowsNamingKind()
     {
         var builder = CreateBuilder();
-        LocalKindRegistry.For(builder).Register("javascript", new FakeKind());
+        LocalKindRegistry.For(builder).Register("widget", new FakeKind());
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => LocalKindRegistry.For(builder).Register("javascript", new FakeKind()));
+            () => LocalKindRegistry.For(builder).Register("widget", new FakeKind()));
 
-        Assert.Contains("javascript", ex.Message);
+        Assert.Contains("widget", ex.Message);
     }
 
     [Fact]
@@ -134,9 +134,9 @@ public class LocalKindRegistryTests
         var builder = CreateBuilder();
         var handler = new FakeKind();
 
-        builder.AddLocalKind("javascript", handler);
+        builder.AddLocalKind("widget", handler);
 
-        Assert.True(LocalKindRegistry.For(builder).TryGet("javascript", out var found));
+        Assert.True(LocalKindRegistry.For(builder).TryGet("widget", out var found));
         Assert.Same(handler, found);
     }
 
@@ -252,9 +252,9 @@ public class LocalKindRegistryTests
         // in their place, so the kind's own rejections just stop happening.
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => builder.AddLocalKind(
-                "javascript", (ILocalResourceKind)Activator.CreateInstance(handlerType)!));
+                "widget", (ILocalResourceKind)Activator.CreateInstance(handlerType)!));
 
-        Assert.Contains("javascript", ex.Message);
+        Assert.Contains("widget", ex.Message);
         Assert.Contains(handlerType.Name, ex.Message);
         Assert.Contains("repoRoot", ex.Message);
 
@@ -262,7 +262,7 @@ public class LocalKindRegistryTests
         // parameter in the wrong place is told to add a parameter that is already there, and one who
         // got only the return type wrong is shown two signatures that read the same.
         Assert.Contains($"declares '{expectedSignature}'", ex.Message);
-        Assert.False(LocalKindRegistry.For(builder).TryGet("javascript", out _));
+        Assert.False(LocalKindRegistry.For(builder).TryGet("widget", out _));
     }
 
     [Fact]
@@ -271,7 +271,7 @@ public class LocalKindRegistryTests
         var builder = CreateBuilder();
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => builder.AddLocalKind("javascript", new KindWhoseValidateIsGeneric()));
+            () => builder.AddLocalKind("widget", new KindWhoseValidateIsGeneric()));
 
         // Nothing in the parameter list distinguishes them, so quoting both back would read as a
         // message that contradicts itself unless it says where the difference actually is.
@@ -286,7 +286,7 @@ public class LocalKindRegistryTests
         // NullReferenceException naming neither the argument nor the call it came out of.
         var builder = CreateBuilder();
 
-        var ex = Assert.Throws<ArgumentNullException>(() => builder.AddLocalKind("javascript", null!));
+        var ex = Assert.Throws<ArgumentNullException>(() => builder.AddLocalKind("widget", null!));
 
         Assert.Equal("handler", ex.ParamName);
     }
@@ -297,9 +297,9 @@ public class LocalKindRegistryTests
         // The defaulted member left alone is the ordinary case, and says nothing about migration.
         var builder = CreateBuilder();
 
-        builder.AddLocalKind("javascript", new FakeKind());
+        builder.AddLocalKind("widget", new FakeKind());
 
-        Assert.True(LocalKindRegistry.For(builder).TryGet("javascript", out _));
+        Assert.True(LocalKindRegistry.For(builder).TryGet("widget", out _));
     }
 
     /// <summary>
@@ -332,9 +332,9 @@ public class LocalKindRegistryTests
     {
         var builder = CreateBuilder();
 
-        builder.AddLocalKind("javascript", new KindWithItsOwnValidateHelpers());
+        builder.AddLocalKind("widget", new KindWithItsOwnValidateHelpers());
 
-        Assert.True(LocalKindRegistry.For(builder).TryGet("javascript", out _));
+        Assert.True(LocalKindRegistry.For(builder).TryGet("widget", out _));
     }
 
     /// <summary>
@@ -359,9 +359,9 @@ public class LocalKindRegistryTests
     {
         var builder = CreateBuilder();
 
-        builder.AddLocalKind("javascript", new KindWithAStringOnlyValidateHelper());
+        builder.AddLocalKind("widget", new KindWithAStringOnlyValidateHelper());
 
-        Assert.True(LocalKindRegistry.For(builder).TryGet("javascript", out _));
+        Assert.True(LocalKindRegistry.For(builder).TryGet("widget", out _));
     }
 
     [Theory]
@@ -371,8 +371,8 @@ public class LocalKindRegistryTests
     {
         var builder = CreateBuilder();
 
-        builder.AddLocalKind("javascript", (ILocalResourceKind)Activator.CreateInstance(handlerType)!);
+        builder.AddLocalKind("widget", (ILocalResourceKind)Activator.CreateInstance(handlerType)!);
 
-        Assert.True(LocalKindRegistry.For(builder).TryGet("javascript", out _));
+        Assert.True(LocalKindRegistry.For(builder).TryGet("widget", out _));
     }
 }
