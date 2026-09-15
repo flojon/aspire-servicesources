@@ -185,8 +185,8 @@ public static class ServiceSourcesBuilderExtensions
     /// </remarks>
     /// <exception cref="ServiceSourcesConfigurationException">
     /// A service has already resolved through <see cref="AddService"/> on this builder — a late call
-    /// no longer has anything left to change, so it is refused rather than silently applying to none
-    /// of the services that were already added.
+    /// can no longer change what already happened, so it is refused instead of silently leaving
+    /// those already-added services un-deferred.
     /// </exception>
     [AspireExportIgnore]
     public static IDistributedApplicationBuilder UseDeferredCheckout(this IDistributedApplicationBuilder builder)
