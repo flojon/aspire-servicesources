@@ -981,7 +981,9 @@ public class CheckoutPreparationTests
         var recorded = File.ReadAllText(fixture.MarkerPath);
         var observed = new List<string>();
 
-        // Read from another thread throughout a second write, which replaces the same file.
+        // Read from another thread throughout a second write, which replaces the same file — the
+        // same way PrepareMarker.Read does, since a plain File.ReadAllText holds no FileShare.Delete
+        // and would make this thread the obstacle to the rename it is here to observe.
         using var reading = new CancellationTokenSource();
         var reader = Task.Run(() =>
         {
@@ -989,7 +991,7 @@ public class CheckoutPreparationTests
             {
                 try
                 {
-                    observed.Add(File.ReadAllText(fixture.MarkerPath));
+                    observed.Add(PrepareMarker.ReadAllTextSharingRename(fixture.MarkerPath));
                 }
                 catch (IOException)
                 {

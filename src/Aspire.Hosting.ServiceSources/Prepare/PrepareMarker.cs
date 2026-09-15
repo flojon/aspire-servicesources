@@ -95,12 +95,7 @@ internal sealed record PrepareMarker(
     {
         try
         {
-            if (!File.Exists(markerPath))
-            {
-                return null;
-            }
-
-            var marker = JsonSerializer.Deserialize<PrepareMarker>(File.ReadAllText(markerPath), SerializerOptions);
+            var marker = JsonSerializer.Deserialize<PrepareMarker>(ReadAllTextSharingRename(markerPath), SerializerOptions);
 
             // A file holding "null", or one whose object carries no commandHash, records no
             // completion of anything — there is nothing for a comparison to be about.
@@ -110,6 +105,28 @@ internal sealed record PrepareMarker(
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Reads a file the way a marker must be read: without holding the rename in
+    /// <see cref="Write"/> hostage.
+    /// </summary>
+    /// <remarks>
+    /// <c>File.ReadAllText</c> opens with <c>FileShare.Read</c> only, which on Windows makes the
+    /// handle itself the obstacle — a concurrent <c>File.Move(overwrite: true)</c> from a second
+    /// <c>aspire run</c> over the same AppHost directory needs to unlink this name, and Windows
+    /// refuses that while any open handle lacks <see cref="FileShare.Delete"/>. Granting it here
+    /// costs this reader nothing: the rename is atomic, so this handle still reads whichever whole
+    /// generation it was already attached to, or throws if it raced the swap itself — which
+    /// <see cref="Read"/>'s own catch already treats as no marker, the same "cannot tell" fallback
+    /// as an absent or malformed file.
+    /// </remarks>
+    internal static string ReadAllTextSharingRename(string path)
+    {
+        using var stream = new FileStream(
+            path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
     }
 
     /// <summary>
@@ -154,7 +171,7 @@ internal sealed record PrepareMarker(
             Directory.CreateDirectory(directory);
 
             File.WriteAllText(scratch, JsonSerializer.Serialize(marker, SerializerOptions));
-            File.Move(scratch, markerPath, overwrite: true);
+            MoveOntoMarker(scratch, markerPath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -163,6 +180,40 @@ internal sealed record PrepareMarker(
             // What it costs is a step that runs again on the next start, which every mode's command
             // has to tolerate anyway.
             TryDelete(scratch);
+        }
+    }
+
+    /// <summary>
+    /// How many times a rename that lost a transient race for the destination is retried before
+    /// <see cref="Write"/> gives up on it as best-effort.
+    /// </summary>
+    private const int MaxRenameAttempts = 20;
+
+    /// <summary>
+    /// Renames the scratch file onto the marker, retrying past a momentary hold on the destination.
+    /// </summary>
+    /// <remarks>
+    /// On Windows, replacing an open file can fail with <see cref="IOException"/> or
+    /// <see cref="UnauthorizedAccessException"/> — a reader without <see cref="FileShare.Delete"/>
+    /// is one source (which <see cref="ReadAllTextSharingRename"/> already removes for this
+    /// project's own readers), but the same errors surface from a moment's hold by something
+    /// outside this process entirely, such as a virus scanner or indexer reacting to the file this
+    /// scratch write just created. Neither is a reason to drop a completed step's record: the hold
+    /// is measured in milliseconds, not the seconds a retry loop this short can burn through.
+    /// </remarks>
+    private static void MoveOntoMarker(string scratch, string markerPath)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                File.Move(scratch, markerPath, overwrite: true);
+                return;
+            }
+            catch (Exception ex) when (attempt < MaxRenameAttempts && ex is IOException or UnauthorizedAccessException)
+            {
+                Thread.Sleep(TimeSpan.FromMilliseconds(10));
+            }
         }
     }
 
