@@ -151,6 +151,50 @@ public class ServiceSourcesBuilderExtensionsTests
         Assert.Contains("WithEndpoint/WithHttpEndpoint/WithHttpsEndpoint", message);
     }
 
+    [Fact]
+    public void WithEndpoint_Callback_DefaultNameOnUrlSource_IsSkippedAndReported()
+    {
+        var builder = Builder();
+        var service = UrlFacadeWithEndpoint(builder, "inventory", "https");
+        var callbackInvoked = false;
+
+        var result = service.WithEndpoint("https", endpoint =>
+        {
+            callbackInvoked = true;
+            endpoint.Port = 9999;
+        });
+
+        Assert.Same(service, result);
+        Assert.False(callbackInvoked, "the callback must never run when the source is unreachable");
+        Assert.Equal(443, service.Resource.Annotations.OfType<EndpointAnnotation>().Single().Port);
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+        Assert.Contains("WithEndpoint/WithHttpEndpoint/WithHttpsEndpoint", message);
+    }
+
+    [Fact]
+    public void WithEndpoint_Callback_OnReachableSource_InvokesCallbackAndAppliesThroughToTheRealEndpoint()
+    {
+        var builder = Builder();
+        var real = builder.AddResource(new ServiceContainerResource("orders")).WithImage("nginx");
+        var service = ResolvedService.Bridge(real, "orders", "container");
+        // Pre-registered through the already-correct WithHttpsEndpoint add branch, so this test
+        // exercises the callback overload's update branch against a real shared instance -- not its
+        // separate, pre-existing add-branch dual-write gap (#352, out of this task's scope).
+        service.WithHttpsEndpoint(port: 443, name: "probe");
+        var callbackInvoked = false;
+
+        service.WithEndpoint("probe", endpoint =>
+        {
+            callbackInvoked = true;
+            endpoint.Port = 9999;
+        });
+
+        Assert.True(callbackInvoked);
+        var endpoint = Assert.Single(service.Resource.Annotations.OfType<EndpointAnnotation>(), e => e.Name == "probe");
+        Assert.Equal(9999, endpoint.Port);
+        Assert.Empty(ServiceSourcesWarnings.For(builder).Messages);
+    }
+
     // GateEndpointCall's fallback: a hypothetical IResourceBuilder<ServiceResource> that is not a
     // ServiceResourceBuilder has no closure-captured Source, so the gate re-derives it from the
     // facade's own ServiceSourceAnnotation instead. No such builder reaches AddService today (see

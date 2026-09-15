@@ -168,6 +168,39 @@ public class EndpointSkipGapRepro
             + $"text={(warnings.Count > 0 ? warnings[0] : "<none>")}");
     }
 
+    // #335's most severe scenario: an arbitrary-mutation callback against the real kubectl
+    // port-forward's endpoint must never run at all when unreachable -- not run-then-reverted, since
+    // this overload can mutate fields (scheme, protocol, target) no numeric overload exposes, so
+    // "gated before it ran" and "ran but its effect was reverted" are not equivalent guarantees here.
+    [Fact]
+    public void DefaultNamedEndpoint_OnKubernetesSource_ViaCallback_DoesNotChangeThePortForwardsEndpoint()
+    {
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
+        var service = new KubernetesSource(new FakePortAllocator(54321))
+            .Resolve(builder, "orders", KubernetesDefinition(), KubernetesDevConfig());
+
+        var before = Assert.Single(service.Resource.Annotations.OfType<EndpointAnnotation>());
+        var beforePort = before.Port;
+        var callbackInvoked = false;
+
+        service.WithEndpoint("https", endpoint =>
+        {
+            callbackInvoked = true;
+            endpoint.Port = 9999;
+        });
+
+        var after = Assert.Single(service.Resource.Annotations.OfType<EndpointAnnotation>());
+        var warnings = ServiceSourcesWarnings.For(builder).Messages;
+
+        Assert.False(callbackInvoked);
+        Assert.Same(before, after);
+        Assert.Equal(beforePort, after.Port);
+        Assert.True(
+            warnings.Count == 1 && warnings[0].Contains("WithEndpoint/WithHttpEndpoint/WithHttpsEndpoint"),
+            $"endpoint port after={after.Port}; warnings={warnings.Count}; "
+            + $"text={(warnings.Count > 0 ? warnings[0] : "<none>")}");
+    }
+
     // Round-1 security-review regression: GateEndpointCall must read `source` from
     // ServiceResourceBuilder's own closure-captured field, not by re-scanning `Resource.Annotations`
     // for ServiceSourceAnnotation — that collection is public and mutable, so stripping just that one

@@ -372,6 +372,28 @@ public static class ServiceSourcesBuilderExtensions
     }
 
     /// <summary>
+    /// Shadows Aspire's own callback-based <c>WithEndpoint&lt;T&gt;</c>. Unlike every numeric
+    /// overload above, this one hands the AppHost author the live <see cref="EndpointAnnotation"/>
+    /// itself with no constraint on what it mutates, and Aspire's own implementation gates neither
+    /// its update branch nor its add branch. When unreachable, the callback is never invoked at all
+    /// -- there is no partial-mutation state to reason about the way there is for a property that
+    /// simply keeps its old value. Mirrors Aspire's own <c>[AspireExportIgnore]</c> exactly: this
+    /// overload was never projected to guest languages in the first place.
+    /// </summary>
+    [AspireExportIgnore(Reason = "Polyglot app hosts use the internal withEndpointCallback export, which exposes EndpointUpdateContext instead of EndpointAnnotation.")]
+    public static IResourceBuilder<ServiceResource> WithEndpoint(
+        this IResourceBuilder<ServiceResource> builder,
+        [EndpointName] string endpointName, Action<EndpointAnnotation> callback, bool createIfNotExists = true)
+    {
+        if (GateEndpointCall(builder))
+        {
+            return builder;
+        }
+
+        return Aspire.Hosting.ResourceBuilderExtensions.WithEndpoint(builder, endpointName, callback, createIfNotExists);
+    }
+
+    /// <summary>
     /// Whether an endpoint call against <paramref name="builder"/> should be skipped — and, if so,
     /// records the skip warning as a side effect, exactly as
     /// <see cref="ServiceResourceBuilder.WithAnnotation{TAnnotation}"/> already does for every other
