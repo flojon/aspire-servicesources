@@ -307,6 +307,12 @@ same rigor rather than left implicit:
   the compat overload — cheap to add if the Plan phase chooses to, not required by the ticket's
   acceptance criteria, which name `WithHttpEndpoint`/`WithHttpsEndpoint` without specifying which
   overload. Flagged rather than silently left.
+  This is one instance of a broader, inherent limitation, not a standalone gap: shadowing works only
+  through C#'s compile-time extension-method binding, so a fully-qualified static call
+  (`Aspire.Hosting.ResourceBuilderExtensions.WithHttpsEndpoint(service, ...)`) or a reference held
+  through a less-derived static type (e.g. `IResourceBuilder<IResourceWithEndpoints>`) reaches
+  Aspire's original method the same way the compat overload does — none of these are closable by
+  adding more shadow overloads, since none involve a runtime type Aspire's method cannot already see.
 - **The raw `WithEndpoint`/`WithEndpoint` callback overloads are not in this ticket's scope, and are
   at least as broken (verified, out of scope):** decompiling
   `WithEndpoint<T>(builder, endpointName, Action<EndpointAnnotation> callback, createIfNotExists)`
