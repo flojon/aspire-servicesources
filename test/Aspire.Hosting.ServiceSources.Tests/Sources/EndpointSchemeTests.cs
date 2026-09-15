@@ -1,3 +1,4 @@
+using System.Reflection;
 using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Sources;
@@ -9,6 +10,18 @@ public class EndpointSchemeTests
     [Fact]
     public void EndpointScheme_IsPublic() =>
         Assert.True(typeof(EndpointScheme).IsPublic);
+
+    [Fact]
+    public void Resolve_IsNotPublic()
+    {
+        // CatalogOrigin, one of Resolve's parameters, is internal — making Resolve public
+        // alongside its now-public declaring class would be a compile error (CS0051).
+        var method = typeof(EndpointScheme).GetMethod(
+            nameof(EndpointScheme.Resolve), BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+        Assert.False(method!.IsPublic);
+    }
 
     private const string ServiceName = "orders";
 
