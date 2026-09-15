@@ -240,6 +240,83 @@ public static class ServiceSourcesBuilderExtensions
     }
 
     /// <summary>
+    /// Shadows Aspire's own <c>WithHttpEndpoint&lt;T&gt;</c>. Aspire's generic method, called with a
+    /// name that already resolves to an existing <see cref="EndpointAnnotation"/> on the facade —
+    /// exactly what happens for the default name (<c>"http"</c>) on a <c>url</c>- or
+    /// <c>kubernetes</c>-sourced service, which pre-registers an endpoint under that name — takes an
+    /// in-place update branch that never calls
+    /// <see cref="ServiceResourceBuilder.WithAnnotation{TAnnotation}"/>, so it is neither gated by
+    /// <see cref="Reachability"/> nor reported in the skip-warning tally (#334). This non-generic
+    /// overload on the concrete <see cref="ServiceResource"/> receiver type is what C# overload
+    /// resolution prefers over Aspire's generic one, so every AppHost call already reaching
+    /// <see cref="AddService"/> binds here automatically. Mirrors Aspire's current public signature
+    /// exactly — no AppHost-visible signature change.
+    /// </summary>
+    [AspireExport]
+    public static IResourceBuilder<ServiceResource> WithHttpEndpoint(
+        this IResourceBuilder<ServiceResource> builder,
+        int? port = null, int? targetPort = null, [EndpointName] string? name = null, string? env = null,
+        bool? isProxied = null)
+    {
+        if (GateEndpointCall(builder))
+        {
+            return builder;
+        }
+
+        // Fully-qualified static call, never `builder.WithHttpEndpoint(...)` — extension-method
+        // syntax on `builder` would resolve back to this very shadow and recurse.
+        return Aspire.Hosting.ResourceBuilderExtensions.WithHttpEndpoint(builder, port, targetPort, name, env, isProxied);
+    }
+
+    /// <summary>
+    /// The <c>https</c> counterpart of <see cref="WithHttpEndpoint"/> — same shadowing, same gate,
+    /// same reason (#334). This is the call an AppHost actually writes for the common case: the
+    /// default name it resolves to, <c>"https"</c>, is exactly the name <c>UrlSource</c> and
+    /// <c>KubernetesSource</c> pre-register.
+    /// </summary>
+    [AspireExport]
+    public static IResourceBuilder<ServiceResource> WithHttpsEndpoint(
+        this IResourceBuilder<ServiceResource> builder,
+        int? port = null, int? targetPort = null, [EndpointName] string? name = null, string? env = null,
+        bool? isProxied = null)
+    {
+        if (GateEndpointCall(builder))
+        {
+            return builder;
+        }
+
+        return Aspire.Hosting.ResourceBuilderExtensions.WithHttpsEndpoint(builder, port, targetPort, name, env, isProxied);
+    }
+
+    /// <summary>
+    /// Whether an endpoint call against <paramref name="builder"/> should be skipped — and, if so,
+    /// records the skip warning as a side effect, exactly as
+    /// <see cref="ServiceResourceBuilder.WithAnnotation{TAnnotation}"/> already does for every other
+    /// native vocabulary method. Prefers <see cref="ServiceResourceBuilder.Source"/> — a closure-captured
+    /// constructor value — over the facade's own <see cref="ServiceSourceAnnotation"/>, whose containing
+    /// <c>Resource.Annotations</c> collection is public and mutable: deriving the gate's answer from it
+    /// let anything that strips that one annotation (a reset/clone helper, defensive cleanup) silently
+    /// re-open #334 for that resource, with the mutation applied for real and no warning. The annotation
+    /// scan survives only as a fallback for a hypothetical non-<see cref="ServiceResourceBuilder"/>
+    /// <see cref="IResourceBuilder{ServiceResource}"/> — no such builder reaches <see cref="AddService"/>
+    /// today.
+    /// </summary>
+    private static bool GateEndpointCall(IResourceBuilder<ServiceResource> builder)
+    {
+        var source = builder is ServiceResourceBuilder serviceBuilder
+            ? serviceBuilder.Source
+            : builder.Resource.Annotations.OfType<ServiceSourceAnnotation>().FirstOrDefault()?.Source;
+        if (source is null || !Reachability.IsUnreachable(typeof(EndpointAnnotation), source))
+        {
+            return false;
+        }
+
+        ServiceSourcesWarnings.For(builder.ApplicationBuilder)
+            .AddSkip(builder.Resource.Name, source, Reachability.CapabilityLabel(typeof(EndpointAnnotation)));
+        return true;
+    }
+
+    /// <summary>
     /// Refuses a handler whose <c>Validate</c> does not match
     /// <see cref="ILocalResourceKind.Validate"/>, which nothing else would catch.
     /// </summary>

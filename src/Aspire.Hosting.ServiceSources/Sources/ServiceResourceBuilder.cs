@@ -115,6 +115,12 @@ internal sealed class ServiceResourceBuilder(
     // never `real`, so Unwrap<T> cannot recover a kind-specific type through `Resource` alone.
     internal IResourceBuilder<IResource>? Real => real;
 
+    // The closure-captured constructor parameter, not `Resource.Annotations.OfType<ServiceSourceAnnotation>()`:
+    // that collection is public and mutable (Clear()/Remove()), so re-deriving source from it — as
+    // ServiceSourcesBuilderExtensions.GateEndpointCall once did — lets any code that strips the
+    // resource's own bookkeeping annotation silently un-gate every later endpoint call (#334 reopened).
+    internal string Source => source;
+
     public IResourceBuilder<ServiceResource> WithAnnotation<TAnnotation>(
         TAnnotation annotation, ResourceAnnotationMutationBehavior behavior = ResourceAnnotationMutationBehavior.Append)
         where TAnnotation : IResourceAnnotation
