@@ -51,7 +51,7 @@ builder.AddServiceCatalog(catalog =>
     // (spring-petclinic) doesn't need a prepare step, so this exists purely to show the call.
     catalog.AddService("catalog")
         .WithRepository("https://github.com/spring-projects/spring-petclinic", defaultRef: "main")
-        .AsJava(o => o.MavenGoal("spring-boot:run").Port(8080))
+        .AsJava(o => o.WithMavenGoal("spring-boot:run").WithPort(8080))
         .WithPrepare(["./mvnw", "-q", "dependency:go-offline"], mode: PrepareMode.Once);
 });
 

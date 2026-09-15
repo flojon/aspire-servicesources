@@ -8,13 +8,13 @@ public class JavaScriptKindOptionsBuilderTests
     public void Build_EveryFieldSet_ProducesMatchingJavaScriptKindOptions()
     {
         var options = new JavaScriptKindOptionsBuilder()
-            .AppType(JavaScriptAppTypes.Vite)
-            .AppDirectory("apps/web")
-            .RunScript("dev")
-            .PackageManager(JavaScriptPackageManagers.Pnpm)
-            .Port(3000)
-            .TargetPort(5173)
-            .PortEnv("VITE_PORT")
+            .WithAppType(JavaScriptAppTypes.Vite)
+            .WithAppDirectory("apps/web")
+            .WithRunScript("dev")
+            .WithPackageManager(JavaScriptPackageManagers.Pnpm)
+            .WithPort(3000)
+            .WithTargetPort(5173)
+            .WithPortEnv("VITE_PORT")
             .Build();
 
         Assert.Equal(JavaScriptAppTypes.Vite, options.AppType);
@@ -31,8 +31,8 @@ public class JavaScriptKindOptionsBuilderTests
     public void Build_NodeAppWithScriptPath_ProducesMatchingJavaScriptKindOptions()
     {
         var options = new JavaScriptKindOptionsBuilder()
-            .AppType(JavaScriptAppTypes.Node)
-            .ScriptPath("server.js")
+            .WithAppType(JavaScriptAppTypes.Node)
+            .WithScriptPath("server.js")
             .Build();
 
         Assert.Equal(JavaScriptAppTypes.Node, options.AppType);

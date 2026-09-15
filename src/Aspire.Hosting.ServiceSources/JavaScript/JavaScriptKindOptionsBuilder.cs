@@ -21,31 +21,31 @@ public sealed class JavaScriptKindOptionsBuilder
     /// <see cref="JavaScriptAppTypes"/> for the accepted values (<c>javascript</c>, <c>vite</c>,
     /// <c>nextjs</c>, <c>node</c>, <c>bun</c>).
     /// </summary>
-    public JavaScriptKindOptionsBuilder AppType(string appType)
+    public JavaScriptKindOptionsBuilder WithAppType(string appType)
     {
         _options.AppType = appType;
         return this;
     }
 
     /// <summary>The directory holding the app's <c>package.json</c>, relative to the repository root.</summary>
-    public JavaScriptKindOptionsBuilder AppDirectory(string appDirectory)
+    public JavaScriptKindOptionsBuilder WithAppDirectory(string appDirectory)
     {
         _options.AppDirectory = appDirectory;
         return this;
     }
 
     /// <summary>The <c>package.json</c> script to run.</summary>
-    public JavaScriptKindOptionsBuilder RunScript(string runScript)
+    public JavaScriptKindOptionsBuilder WithRunScript(string runScript)
     {
         _options.RunScript = runScript;
         return this;
     }
 
     /// <summary>
-    /// The entry-point file to run directly, relative to <see cref="AppDirectory"/> — for the
+    /// The entry-point file to run directly, relative to <see cref="WithAppDirectory"/> — for the
     /// <c>node</c>/<c>bun</c> app types.
     /// </summary>
-    public JavaScriptKindOptionsBuilder ScriptPath(string scriptPath)
+    public JavaScriptKindOptionsBuilder WithScriptPath(string scriptPath)
     {
         _options.ScriptPath = scriptPath;
         return this;
@@ -55,28 +55,28 @@ public sealed class JavaScriptKindOptionsBuilder
     /// The package manager used to install dependencies — see
     /// <see cref="JavaScriptPackageManagers"/> for the accepted values.
     /// </summary>
-    public JavaScriptKindOptionsBuilder PackageManager(string packageManager)
+    public JavaScriptKindOptionsBuilder WithPackageManager(string packageManager)
     {
         _options.PackageManager = packageManager;
         return this;
     }
 
     /// <summary>The port consumers reach the service on.</summary>
-    public JavaScriptKindOptionsBuilder Port(int port)
+    public JavaScriptKindOptionsBuilder WithPort(int port)
     {
         _options.Port = port;
         return this;
     }
 
-    /// <summary>The port the app itself listens on, when fixed rather than read from <see cref="PortEnv"/>.</summary>
-    public JavaScriptKindOptionsBuilder TargetPort(int targetPort)
+    /// <summary>The port the app itself listens on, when fixed rather than read from <see cref="WithPortEnv"/>.</summary>
+    public JavaScriptKindOptionsBuilder WithTargetPort(int targetPort)
     {
         _options.TargetPort = targetPort;
         return this;
     }
 
     /// <summary>The environment variable the app reads its listen port from.</summary>
-    public JavaScriptKindOptionsBuilder PortEnv(string portEnv)
+    public JavaScriptKindOptionsBuilder WithPortEnv(string portEnv)
     {
         _options.PortEnv = portEnv;
         return this;

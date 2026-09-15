@@ -17,56 +17,56 @@ public sealed class JavaKindOptionsBuilder
     }
 
     /// <summary>Where in the checkout the Java project lives, relative to the repository root.</summary>
-    public JavaKindOptionsBuilder WorkingDirectory(string workingDirectory)
+    public JavaKindOptionsBuilder WithWorkingDirectory(string workingDirectory)
     {
         _options.WorkingDirectory = workingDirectory;
         return this;
     }
 
     /// <summary>The Maven goal to run the app with, e.g. <c>spring-boot:run</c>.</summary>
-    public JavaKindOptionsBuilder MavenGoal(string goal)
+    public JavaKindOptionsBuilder WithMavenGoal(string goal)
     {
         _options.MavenGoal = goal;
         return this;
     }
 
     /// <summary>The Gradle task to run the app with, e.g. <c>bootRun</c>.</summary>
-    public JavaKindOptionsBuilder GradleTask(string task)
+    public JavaKindOptionsBuilder WithGradleTask(string task)
     {
         _options.GradleTask = task;
         return this;
     }
 
-    /// <summary>A pre-built jar to run with <c>java -jar</c>, relative to <see cref="WorkingDirectory"/>.</summary>
-    public JavaKindOptionsBuilder JarPath(string jarPath)
+    /// <summary>A pre-built jar to run with <c>java -jar</c>, relative to <see cref="WithWorkingDirectory"/>.</summary>
+    public JavaKindOptionsBuilder WithJarPath(string jarPath)
     {
         _options.JarPath = jarPath;
         return this;
     }
 
     /// <summary>Where the <c>mvnw</c>/<c>gradlew</c> wrapper script lives, relative to the repository root.</summary>
-    public JavaKindOptionsBuilder WrapperPath(string wrapperPath)
+    public JavaKindOptionsBuilder WithWrapperPath(string wrapperPath)
     {
         _options.WrapperPath = wrapperPath;
         return this;
     }
 
     /// <summary>Extra arguments for whichever run mode is configured.</summary>
-    public JavaKindOptionsBuilder Args(string[] args)
+    public JavaKindOptionsBuilder WithArgs(string[] args)
     {
         _options.Args = args;
         return this;
     }
 
     /// <summary>The port the Java app listens on.</summary>
-    public JavaKindOptionsBuilder Port(int port)
+    public JavaKindOptionsBuilder WithPort(int port)
     {
         _options.Port = port;
         return this;
     }
 
-    /// <summary>The scheme the app serves on <see cref="Port(int)"/> — "http" or "https". Defaults to "http".</summary>
-    public JavaKindOptionsBuilder Scheme(string scheme)
+    /// <summary>The scheme the app serves on <see cref="WithPort(int)"/> — "http" or "https". Defaults to "http".</summary>
+    public JavaKindOptionsBuilder WithScheme(string scheme)
     {
         _options.Scheme = scheme;
         return this;

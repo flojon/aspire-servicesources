@@ -10,7 +10,7 @@ public class JavaScriptServiceSourcesBuilderExtensionsTests
     {
         var definition = new ServiceCatalogBuilder().AddService("frontend")
             .WithRepository("https://github.com/example/frontend")
-            .AsJavaScript(o => o.AppType(JavaScriptAppTypes.Vite).Port(3000))
+            .AsJavaScript(o => o.WithAppType(JavaScriptAppTypes.Vite).WithPort(3000))
             .Build();
 
         Assert.Equal(JavaScriptLocalKind.KindName, definition.Kind);
@@ -31,7 +31,7 @@ public class JavaScriptServiceSourcesBuilderExtensionsTests
     {
         var definition = new ServiceCatalogBuilder().AddService("frontend")
             .WithRepository("https://github.com/example/frontend")
-            .AsJavaScript(o => o.AppType(JavaScriptAppTypes.Vite).Port(3000))
+            .AsJavaScript(o => o.WithAppType(JavaScriptAppTypes.Vite).WithPort(3000))
             .Build();
 
         // Throws on failure; a Vite app type with no appDirectory override validates against the
@@ -45,7 +45,7 @@ public class JavaScriptServiceSourcesBuilderExtensionsTests
         var chain = new ServiceCatalogBuilder().AddService("frontend")
             .WithRepository("https://github.com/example/frontend");
 
-        var result = chain.AsJavaScript(o => o.AppType(JavaScriptAppTypes.Vite));
+        var result = chain.AsJavaScript(o => o.WithAppType(JavaScriptAppTypes.Vite));
 
         Assert.Same(chain, result);
     }
@@ -58,6 +58,6 @@ public class JavaScriptServiceSourcesBuilderExtensionsTests
             .WithKind("javascript", new Dictionary<string, object> { ["appType"] = "vite" });
 
         Assert.Throws<ServiceSourcesConfigurationException>(
-            () => chain.AsJavaScript(o => o.AppType(JavaScriptAppTypes.Vite)));
+            () => chain.AsJavaScript(o => o.WithAppType(JavaScriptAppTypes.Vite)));
     }
 }

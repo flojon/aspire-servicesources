@@ -58,8 +58,8 @@ await builder.addServiceCatalog(async (catalog) => {
   // the untyped bag because JavaKindOptions had no public handle yet. The lambda nested inside the
   // addServiceCatalog lambda is exactly the shape Stage 0 measured crossing ATS.
   await catalogService.asJava(async (o) => {
-    await o.mavenGoal('spring-boot:run');
-    await o.port(8080);
+    await o.withMavenGoal('spring-boot:run');
+    await o.withPort(8080);
   });
   await catalogService.withPrepare(['./mvnw', '-q', 'dependency:go-offline'], {
     mode: PrepareMode.Once,

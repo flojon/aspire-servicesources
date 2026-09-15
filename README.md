@@ -199,7 +199,7 @@ A `"local"` service can also declare a `prepare:`-equivalent bootstrap command:
 ```csharp
 catalog.AddService("catalog")
     .WithRepository("https://github.com/spring-projects/spring-petclinic")
-    .AsJava(o => o.MavenGoal("spring-boot:run").Port(8080))
+    .AsJava(o => o.WithMavenGoal("spring-boot:run").WithPort(8080))
     .WithPrepare(["./mvnw", "-q", "dependency:go-offline"], mode: PrepareMode.Once);
 ```
 
@@ -239,7 +239,7 @@ fluent options handle instead —
 ```csharp
 catalog.AddService("catalog")
     .WithRepository("https://github.com/spring-projects/spring-petclinic")
-    .AsJava(o => o.MavenGoal("spring-boot:run").Port(8080));
+    .AsJava(o => o.WithMavenGoal("spring-boot:run").WithPort(8080));
 ```
 
 — which is sugar over `WithKind("java", …)`: calling it twice, or calling it after a plain
