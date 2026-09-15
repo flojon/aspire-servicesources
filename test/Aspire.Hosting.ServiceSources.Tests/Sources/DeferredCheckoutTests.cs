@@ -309,6 +309,30 @@ public class DeferredCheckoutTests
         Assert.Empty(git.Cloned);
     }
 
+    /// <summary>
+    /// #345: a late <c>UseDeferredCheckout()</c> call used to silently no-op instead of erroring —
+    /// the service resolved above it never got deferred, and nothing said why. Mirrors
+    /// <c>AddServiceCatalog</c>'s own too-late freeze (<see cref="ServiceSourcesConfigCache"/>).
+    /// </summary>
+    [Fact]
+    public void UseDeferredCheckout_CalledAfterAServiceHasAlreadyResolved_Throws()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        PlantExistingCheckout(dir, "orders");
+        var builder = TestHelpers.CreateBuilder(dir);
+
+        // Resolved before UseDeferredCheckout() is ever called — the ordering mistake this test is
+        // about. Warm on purpose: the bug is about the decision being made too early, not about
+        // whether a clone was actually in play.
+        new LocalProjectSource(new FakeGitClient()).Resolve(builder, "orders", Definition("orders"), DevConfig());
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.UseDeferredCheckout());
+
+        Assert.Contains("UseDeferredCheckout", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("already resolved", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("before the first AddService", ex.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void OptedIn_PathOverride_ResolvesEagerly()
     {

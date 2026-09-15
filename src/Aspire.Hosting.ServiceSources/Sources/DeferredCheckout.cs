@@ -100,6 +100,15 @@ internal sealed class DeferredCheckout
 
     private bool _enabled;
 
+    /// <summary>
+    /// Whether <see cref="ShouldDefer"/> — the decision point the doc comment on
+    /// <c>UseDeferredCheckout</c> means by "before the first AddService" — has run for any service
+    /// yet. Guards <see cref="Enable"/> the way <c>ServiceSourcesConfigCache</c>'s <c>_frozen</c>
+    /// guards <c>AddServiceCatalog</c>: past this point, <see cref="Enable"/> would only ever change
+    /// the answer for services nobody has asked about yet.
+    /// </summary>
+    private bool _resolved;
+
     private bool _subscribed;
 
     /// <summary>
@@ -142,10 +151,24 @@ internal sealed class DeferredCheckout
     /// service that used to be running by the time <c>Build()</c> returned is now started
     /// afterwards — and the package already has consumers.
     /// </summary>
+    /// <exception cref="ServiceSourcesConfigurationException">
+    /// A service has already resolved on this builder — see <see cref="ShouldDefer"/> — so turning
+    /// deferral on now could only apply to services nobody has asked about yet.
+    /// </exception>
     public void Enable()
     {
         lock (_gate)
         {
+            if (_resolved)
+            {
+                throw new ServiceSourcesConfigurationException(
+                    "UseDeferredCheckout() was called after a service had already resolved through " +
+                    "AddService(…), so that service's checkout could not be deferred. Because the decision " +
+                    "is made as each service is added, UseDeferredCheckout() must be called before the " +
+                    "first AddService(…) — near the top of the AppHost, next to AddServiceCatalog() and " +
+                    "UseJava().");
+            }
+
             _enabled = true;
         }
     }
@@ -169,6 +192,11 @@ internal sealed class DeferredCheckout
     {
         lock (_gate)
         {
+            // Latched unconditionally, whether or not deferral is enabled: this is the decision point
+            // itself, and a later Enable() call must be refused even for an AppHost where every
+            // service so far happened to resolve warm.
+            _resolved = true;
+
             if (!_enabled)
             {
                 return false;
