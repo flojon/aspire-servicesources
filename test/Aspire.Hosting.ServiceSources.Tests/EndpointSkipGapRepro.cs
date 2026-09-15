@@ -140,6 +140,34 @@ public class EndpointSkipGapRepro
             + $"text={(warnings.Count > 0 ? warnings[0] : "<none>")}");
     }
 
+    // #335's scenario reached through the raw overload directly, rather than through
+    // WithHttpsEndpoint (already proven gated by #334's own fix) — the primary WithEndpoint<T>
+    // overload is what WithHttpsEndpoint forwards to internally, but an AppHost author can call it
+    // directly too, and #334's shadow never touched this call surface.
+    [Fact]
+    public void DefaultNamedEndpoint_OnKubernetesSource_ViaRawWithEndpoint_DoesNotChangeThePortForwardsEndpoint()
+    {
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
+        var service = new KubernetesSource(new FakePortAllocator(54321))
+            .Resolve(builder, "orders", KubernetesDefinition(), KubernetesDevConfig());
+
+        var before = Assert.Single(service.Resource.Annotations.OfType<EndpointAnnotation>());
+        var beforePort = before.Port;
+
+        service.WithEndpoint(port: 9999, scheme: "https");
+
+        var after = Assert.Single(service.Resource.Annotations.OfType<EndpointAnnotation>());
+        var warnings = ServiceSourcesWarnings.For(builder).Messages;
+
+        Assert.Same(before, after);
+        Assert.NotEqual(9999, beforePort);
+        Assert.Equal(beforePort, after.Port);
+        Assert.True(
+            warnings.Count == 1 && warnings[0].Contains("WithEndpoint/WithHttpEndpoint/WithHttpsEndpoint"),
+            $"endpoint port after={after.Port}; warnings={warnings.Count}; "
+            + $"text={(warnings.Count > 0 ? warnings[0] : "<none>")}");
+    }
+
     // Round-1 security-review regression: GateEndpointCall must read `source` from
     // ServiceResourceBuilder's own closure-captured field, not by re-scanning `Resource.Annotations`
     // for ServiceSourceAnnotation — that collection is public and mutable, so stripping just that one

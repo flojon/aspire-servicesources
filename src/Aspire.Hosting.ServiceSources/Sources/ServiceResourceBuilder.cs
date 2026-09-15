@@ -85,7 +85,7 @@ internal static class Reachability
     {
         "EnvironmentAnnotation" or nameof(EnvironmentCallbackAnnotation) => "WithEnvironment",
         nameof(CommandLineArgsCallbackAnnotation) => "WithArgs",
-        nameof(EndpointAnnotation) => "WithHttpEndpoint/WithHttpsEndpoint",
+        nameof(EndpointAnnotation) => "WithEndpoint/WithHttpEndpoint/WithHttpsEndpoint",
         nameof(WaitAnnotation) => "WaitFor/WaitForCompletion",
         _ => annotationType.Name,
     };

@@ -63,6 +63,38 @@ public class ServiceSourcesBuilderExtensionsTests
         Assert.Empty(ServiceSourcesWarnings.For(builder).Messages);
     }
 
+    [Fact]
+    public void WithEndpoint_DefaultNameOnUrlSource_IsSkippedAndReported()
+    {
+        var builder = Builder();
+        var service = UrlFacadeWithEndpoint(builder, "inventory", "https");
+
+        // A partial call omitting every optional argument but port/scheme — the shape that reaches
+        // the primary WithEndpoint<T> overload rather than any of its binary-compat shims, all of
+        // which require every parameter and so are inapplicable to a call this short.
+        var result = service.WithEndpoint(port: 9999, scheme: "https");
+
+        Assert.Same(service, result);
+        Assert.Equal(443, service.Resource.Annotations.OfType<EndpointAnnotation>().Single().Port);
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+        Assert.Contains("WithEndpoint/WithHttpEndpoint/WithHttpsEndpoint", message);
+    }
+
+    [Fact]
+    public void WithEndpoint_OnReachableSource_AppliesThroughToTheRealEndpoint()
+    {
+        var builder = Builder();
+        var real = builder.AddResource(new ServiceContainerResource("orders")).WithImage("nginx");
+        var service = ResolvedService.Bridge(real, "orders", "container");
+
+        var result = service.WithEndpoint(port: 9999, scheme: "https", name: "probe");
+
+        var endpoint = Assert.Single(
+            result.Resource.Annotations.OfType<EndpointAnnotation>(), e => e.Name == "probe");
+        Assert.Equal(9999, endpoint.Port);
+        Assert.Empty(ServiceSourcesWarnings.For(builder).Messages);
+    }
+
     // GateEndpointCall's fallback: a hypothetical IResourceBuilder<ServiceResource> that is not a
     // ServiceResourceBuilder has no closure-captured Source, so the gate re-derives it from the
     // facade's own ServiceSourceAnnotation instead. No such builder reaches AddService today (see

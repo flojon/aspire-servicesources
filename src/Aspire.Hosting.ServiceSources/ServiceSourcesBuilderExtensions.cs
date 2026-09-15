@@ -1,3 +1,4 @@
+using System.Net.Sockets;
 using System.Reflection;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
@@ -286,6 +287,27 @@ public static class ServiceSourcesBuilderExtensions
         }
 
         return Aspire.Hosting.ResourceBuilderExtensions.WithHttpsEndpoint(builder, port, targetPort, name, env, isProxied);
+    }
+
+    /// <summary>
+    /// Shadows Aspire's own generic <c>WithEndpoint&lt;T&gt;</c> — the overload
+    /// <see cref="WithHttpEndpoint"/>/<see cref="WithHttpsEndpoint"/> themselves forward to. Same
+    /// update-branch gap as those two (#334), same shadow-and-gate fix, for the call surface an
+    /// AppHost author reaches by calling <c>WithEndpoint</c> directly instead.
+    /// </summary>
+    [AspireExport]
+    public static IResourceBuilder<ServiceResource> WithEndpoint(
+        this IResourceBuilder<ServiceResource> builder,
+        int? port = null, int? targetPort = null, string? scheme = null, [EndpointName] string? name = null,
+        string? env = null, bool? isProxied = null, bool? isExternal = null, ProtocolType? protocol = null)
+    {
+        if (GateEndpointCall(builder))
+        {
+            return builder;
+        }
+
+        return Aspire.Hosting.ResourceBuilderExtensions.WithEndpoint(
+            builder, port, targetPort, scheme, name, env, isProxied, isExternal, protocol);
     }
 
     /// <summary>
