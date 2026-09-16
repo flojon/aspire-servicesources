@@ -6,18 +6,20 @@ namespace Aspire.Hosting.ServiceSources;
 public static class JavaScriptServiceSourcesBuilderExtensions
 {
     /// <summary>
-    /// Teaches <c>AddService()</c> to resolve <c>"local"</c>-sourced services whose
-    /// <c>servicesources.yaml</c> entry declares <c>kind: javascript</c>: the repository is cloned
-    /// and checked out exactly as for a .NET service, then run through
-    /// <c>Aspire.Hosting.JavaScript</c> according to the entry's <c>javascript:</c> options block.
+    /// Redundant today: <c>javascript</c> is a built-in local kind, and this registers an instance of
+    /// the same built-in <see cref="JavaScriptLocalKind"/> type <c>AddService()</c> already falls back
+    /// to when nothing was registered for the name (see <see cref="Sources.LocalKindRegistry"/>).
+    /// Calling it changes nothing about how a <c>kind: javascript</c> service resolves — delete the
+    /// call. To use a *different* <see cref="ILocalResourceKind"/> for <c>"javascript"</c> (e.g. a
+    /// test double), call <see cref="ServiceSourcesBuilderExtensions.AddLocalKind"/> directly with
+    /// your own handler instead of this method, which cannot take one. Note that this still occupies
+    /// the <c>"javascript"</c> registration slot exactly as any <c>AddLocalKind</c> call would — if
+    /// you don't delete it, a later <c>AddLocalKind("javascript", …)</c> throws "already registered"
+    /// rather than being a no-op.
     /// </summary>
     /// <remarks>
-    /// <c>javascript</c> is a built-in kind — <c>AddService()</c> resolves it whether or not this is
-    /// ever called, the same way it always has for <c>dotnet</c>. Call this only to substitute a
-    /// different <see cref="ILocalResourceKind"/> for the name (e.g. a test double); calling it after
-    /// a <c>javascript</c>-kind service has already resolved with the built-in handler has no effect
-    /// on that service. The options block accepts <c>appType</c> (<c>javascript</c> — the default —
-    /// <c>vite</c>, <c>nextjs</c>, <c>node</c>, or <c>bun</c>), <c>appDirectory</c>, <c>runScript</c>,
+    /// The options block accepts <c>appType</c> (<c>javascript</c> — the default — <c>vite</c>,
+    /// <c>nextjs</c>, <c>node</c>, or <c>bun</c>), <c>appDirectory</c>, <c>runScript</c>,
     /// <c>scriptPath</c>, <c>packageManager</c>, <c>port</c>, <c>targetPort</c>, and <c>portEnv</c>;
     /// see this package's README for what each one means.
     /// </remarks>
@@ -28,6 +30,11 @@ public static class JavaScriptServiceSourcesBuilderExtensions
     /// var frontend = builder.AddService("frontend"); // kind: javascript needs no registration call
     /// </code>
     /// </example>
+    [Obsolete("UseJavaScript() does not change how \"javascript\" resolves - it's a built-in local " +
+        "kind and resolves the same way with or without this call. Delete the call (do not just " +
+        "add another one next to it - a later AddLocalKind(\"javascript\", ...) would then throw " +
+        "\"already registered\"). To register a different ILocalResourceKind for \"javascript\" " +
+        "(e.g. a test double), call AddLocalKind(\"javascript\", yourKind) directly instead.")]
     [AspireExport]
     public static IDistributedApplicationBuilder UseJavaScript(this IDistributedApplicationBuilder builder) =>
         builder.AddLocalKind(JavaScriptLocalKind.KindName, new JavaScriptLocalKind());

@@ -9,26 +9,15 @@ namespace Aspire.Hosting.ServiceSources;
 public static class JavaServiceSourcesBuilderExtensions
 {
     /// <summary>
-    /// Registers the <c>java</c> local kind, so <c>AddService(name)</c> can clone and run a service
-    /// whose <c>servicesources.yaml</c> entry declares <c>kind: java</c>. The service's <c>java:</c>
-    /// block says how to run its checkout:
-    /// <code>
-    /// services:
-    ///   java-api:
-    ///     repository: https://github.com/example/java-api
-    ///     kind: java
-    ///     java:
-    ///       workingDirectory: .          # optional, defaults to the repository root
-    ///       mavenGoal: spring-boot:run   # or gradleTask: bootRun, or jarPath: target/app.jar
-    ///       args: ["-Dspring-boot.run.profiles=dev"]   # optional
-    ///       port: 8080
-    /// </code>
-    /// <c>java</c> is a built-in kind — <c>AddService()</c> resolves it whether or not this is ever
-    /// called, the same way it always has for <c>dotnet</c>. Call this only to substitute a
-    /// different <see cref="ILocalResourceKind"/> for the name (e.g. a test double), before the
-    /// first <c>AddService(...)</c> call that would otherwise resolve one with the built-in handler
-    /// — and at most once per builder, since registering the same kind twice is a mistake rather
-    /// than a no-op.
+    /// Redundant today: <c>java</c> is a built-in local kind, and this registers an instance of the
+    /// same built-in <see cref="JavaLocalResourceKind"/> type <c>AddService()</c> already falls back
+    /// to when nothing was registered for the name (see <see cref="Sources.LocalKindRegistry"/>).
+    /// Calling it changes nothing about how a <c>kind: java</c> service resolves — delete the call.
+    /// To use a *different* <see cref="ILocalResourceKind"/> for <c>"java"</c> (e.g. a test double),
+    /// call <see cref="ServiceSourcesBuilderExtensions.AddLocalKind"/> directly with your own handler
+    /// instead of this method, which cannot take one. Note that this still occupies the <c>"java"</c>
+    /// registration slot exactly as any <c>AddLocalKind</c> call would — if you don't delete it, a
+    /// later <c>AddLocalKind("java", …)</c> throws "already registered" rather than being a no-op.
     /// </summary>
     /// <remarks>
     /// Only the <c>"local"</c> source consults local kinds. A Java service reached over the
@@ -38,6 +27,11 @@ public static class JavaServiceSourcesBuilderExtensions
     /// <exception cref="ServiceSourcesConfigurationException">
     /// The <c>java</c> kind is already registered on this builder.
     /// </exception>
+    [Obsolete("UseJava() does not change how \"java\" resolves - it's a built-in local kind and " +
+        "resolves the same way with or without this call. Delete the call (do not just add another " +
+        "one next to it - a later AddLocalKind(\"java\", ...) would then throw \"already " +
+        "registered\"). To register a different ILocalResourceKind for \"java\" (e.g. a test " +
+        "double), call AddLocalKind(\"java\", yourKind) directly instead.")]
     [AspireExport]
     public static IDistributedApplicationBuilder UseJava(this IDistributedApplicationBuilder builder) =>
         builder.AddLocalKind(JavaLocalResourceKind.KindName, new JavaLocalResourceKind());
