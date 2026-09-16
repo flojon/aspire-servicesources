@@ -60,7 +60,8 @@ public static class ServiceSourcesBuilderExtensions
     /// container or executable resource for <c>"container"</c> and <c>"kubernetes"</c>, or whatever
     /// an <see cref="ILocalResourceKind"/> returns. Configuration applied through the returned
     /// builder — <c>WithEnvironment</c>, <c>WithReference</c>, <c>WithArgs</c>,
-    /// <c>WithHttpEndpoint</c>/<c>WithHttpsEndpoint</c>, <c>WaitFor</c>/<c>WaitForCompletion</c> —
+    /// <c>WithEndpoint</c>/<c>WithHttpEndpoint</c>/<c>WithHttpsEndpoint</c>,
+    /// <c>WaitFor</c>/<c>WaitForCompletion</c> —
     /// dual-writes to the real resource behind the facade; see
     /// docs/superpowers/specs/2026-09-10-313-service-resource-dualwrite-bridge-design.md.
     /// </returns>

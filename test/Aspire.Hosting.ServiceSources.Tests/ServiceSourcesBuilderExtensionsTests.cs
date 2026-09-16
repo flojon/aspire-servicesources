@@ -73,7 +73,8 @@ public class ServiceSourcesBuilderExtensionsTests
         // A partial call omitting every optional argument but port/scheme — the shape that reaches
         // the primary WithEndpoint<T> overload rather than any of its binary-compat shims, all of
         // which require every parameter and so are inapplicable to a call this short.
-        var result = service.WithEndpoint(port: 9999, scheme: "https");
+        // Routed through OverloadProbe — see OverloadResolutionProbe.cs for why.
+        var result = OverloadProbe.CallWithEndpointPrimary(service, port: 9999, scheme: "https");
 
         Assert.Same(service, result);
         Assert.Equal(443, service.Resource.Annotations.OfType<EndpointAnnotation>().Single().Port);
@@ -164,7 +165,8 @@ public class ServiceSourcesBuilderExtensionsTests
         var service = UrlFacadeWithEndpoint(builder, "inventory", "https");
         var callbackInvoked = false;
 
-        var result = service.WithEndpoint("https", endpoint =>
+        // Routed through OverloadProbe — see OverloadResolutionProbe.cs for why.
+        var result = OverloadProbe.CallWithEndpointCallback(service, "https", endpoint =>
         {
             callbackInvoked = true;
             endpoint.Port = 9999;

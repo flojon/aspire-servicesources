@@ -2,6 +2,7 @@ using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Sources;
+using ServiceSourcesOverloadProbe;
 using IPortAllocator = Aspire.Hosting.ServiceSources.PortAllocation.IPortAllocator;
 
 namespace Aspire.Hosting.ServiceSources.Tests;
@@ -156,7 +157,8 @@ public class EndpointSkipGapRepro
         var before = Assert.Single(service.Resource.Annotations.OfType<EndpointAnnotation>());
         var beforePort = before.Port;
 
-        service.WithEndpoint(port: 9999, scheme: "https");
+        // Routed through OverloadProbe — see OverloadResolutionProbe.cs for why.
+        OverloadProbe.CallWithEndpointPrimary(service, port: 9999, scheme: "https");
 
         var after = Assert.Single(service.Resource.Annotations.OfType<EndpointAnnotation>());
         var warnings = ServiceSourcesWarnings.For(builder).Messages;
@@ -185,7 +187,8 @@ public class EndpointSkipGapRepro
         var beforePort = before.Port;
         var callbackInvoked = false;
 
-        service.WithEndpoint("https", endpoint =>
+        // Routed through OverloadProbe — see OverloadResolutionProbe.cs for why.
+        OverloadProbe.CallWithEndpointCallback(service, "https", endpoint =>
         {
             callbackInvoked = true;
             endpoint.Port = 9999;

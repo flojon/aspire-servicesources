@@ -43,4 +43,12 @@ public static class OverloadProbe
         IResourceBuilder<ServiceResource> service, int? port, int? targetPort, string? name,
         string? env, bool isProxied) =>
         service.WithHttpsEndpoint(port: port, targetPort: targetPort, name: name, env: env, isProxied: isProxied);
+
+    public static IResourceBuilder<ServiceResource> CallWithEndpointPrimary(
+        IResourceBuilder<ServiceResource> service, int? port, string? scheme) =>
+        service.WithEndpoint(port: port, scheme: scheme);
+
+    public static IResourceBuilder<ServiceResource> CallWithEndpointCallback(
+        IResourceBuilder<ServiceResource> service, string endpointName, Action<EndpointAnnotation> callback) =>
+        service.WithEndpoint(endpointName, callback);
 }
