@@ -76,7 +76,14 @@ public class ConnectionStringRedactionFuzzTests
         }
     }
 
-    /// <summary>Oracle's slash-form credential, both the TNS and the host:port:sid spellings.</summary>
+    private static readonly string[] HostShapedKeys = ["Data Source", "Server", "Host"];
+
+    /// <summary>
+    /// Oracle's slash-form credential, both the TNS and the host:port:sid spellings, under a
+    /// host-shaped key — the exotic-value case <see cref="ConnectionStringRedaction"/>'s own remarks
+    /// name explicitly, so this exercises the host shape's rejection of it rather than the unrelated
+    /// bare-prefix fallback a scheme-less, colon-laden descriptor would otherwise fall through to.
+    /// </summary>
     [Fact]
     public void OracleSlashFormCredential_NeverLeaksTheMarker()
     {
@@ -86,16 +93,24 @@ public class ConnectionStringRedactionFuzzTests
         for (var i = 0; i < IterationsPerStyle; i++)
         {
             var user = Pick(rng, users);
+            var key = Pick(rng, HostShapedKeys);
 
-            var input = rng.Next(2) == 0
+            var descriptor = rng.Next(2) == 0
                 ? $"{user}/{Marker}@//host:1521/service"
                 : $"{user}/{Marker}@host:1521:sid";
 
-            AssertNoLeak(input);
+            AssertNoLeak($"{key}={descriptor}");
         }
     }
 
-    /// <summary>libpq's space-separated conninfo, pairs fuzzed in order, spacing and quoting.</summary>
+    /// <summary>
+    /// libpq's space-separated conninfo, pairs fuzzed in order, spacing and quoting. The secret sits
+    /// under <c>2fa</c> rather than <c>password</c>, and <c>host</c> is pinned first: a literal
+    /// <c>password=</c> is masked by the keyword backstop before this reaches the shape/nested-pair
+    /// engine at all, and a shuffle that put an unrecognised key first would do the same by masking
+    /// the whole value without descending into it — either way leaving the engine this style exists
+    /// to fuzz untested.
+    /// </summary>
     [Fact]
     public void LibpqConninfo_NeverLeaksTheMarker()
     {
@@ -103,17 +118,16 @@ public class ConnectionStringRedactionFuzzTests
 
         for (var i = 0; i < IterationsPerStyle; i++)
         {
-            var pairs = new List<string>
+            var tail = new List<string>
             {
-                "host=db.internal",
                 "port=5432",
-                $"password={Pick(rng, Quotings)(Marker)}",
+                $"2fa={Pick(rng, Quotings)(Marker)}",
                 "dbname=orders",
             };
 
-            Shuffle(rng, pairs);
+            Shuffle(rng, tail);
 
-            AssertNoLeak(string.Join(' ', pairs));
+            AssertNoLeak(string.Join(' ', new[] { "host=db.internal" }.Concat(tail)));
         }
     }
 
@@ -132,8 +146,12 @@ public class ConnectionStringRedactionFuzzTests
             var allowKey = Pick(rng, AllowlistedKeys);
             var nestedKey = Pick(rng, nestedKeys);
 
+            // Must match allowKey's own shape, or the head check fails before the nested pair is ever
+            // reached — Port is the one allowlisted key "db.internal" cannot stand in for.
+            var head = allowKey == "Port" ? "5432" : "db.internal";
+
             var input = rng.Next(2) == 0
-                ? $"{allowKey}=db.internal {nestedKey}={Marker}"
+                ? $"{allowKey}={head} {nestedKey}={Marker}"
                 : $"{allowKey}={Marker}";
 
             AssertNoLeak(input);
