@@ -83,12 +83,8 @@ public sealed class ServiceDefinitionBuilder
     {
         RequireUnset(_defaultSource, nameof(WithDefaultSource));
 
-        if (!DeveloperConfigShape.Service.SourceNames.Contains(source))
-        {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{_serviceName}': {nameof(WithDefaultSource)}('{source}') is not a valid " +
-                "source. Expected one of: " + string.Join(", ", DeveloperConfigShape.Service.SourceNames) + ".");
-        }
+        DeveloperConfigShape.Service.ValidateSourceName(
+            $"Service '{_serviceName}': {nameof(WithDefaultSource)}('{source}')", source);
 
         _defaultSource = source;
         return this;

@@ -1604,10 +1604,13 @@ because anything may register one and two registrations must not be able to coll
 The file is read through the AppHost's own `IConfiguration`, as the **lowest**-precedence source in
 the standard provider chain, under the key `ServiceSources:Services:<service>`. It is still the
 place a developer normally writes a source selection, and a `.NET` or TypeScript AppHost authors it
-identically — but every provider above it can override an entry without the file being touched:
+identically — but every provider above it can override an entry without the file being touched. A
+catalog's own `defaultSource` (see above, under [Getting started](#getting-started)) sits below
+even this file — see the row below the base:
 
 | Layer | Overrides the file? |
 | --- | --- |
+| A catalog's `defaultSource` | no — it sits *below* the file; used only when neither the file nor anything above it sets the service's `source` |
 | `servicesources.local.json` | — (the base) |
 | `appsettings.json` | yes |
 | `appsettings.{Environment}.json` | yes |

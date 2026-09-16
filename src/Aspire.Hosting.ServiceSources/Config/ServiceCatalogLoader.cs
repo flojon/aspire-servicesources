@@ -184,11 +184,10 @@ internal static class ServiceCatalogLoader
             {
                 metadata.DefaultSource = null;
             }
-            else if (!DeveloperConfigShape.Service.SourceNames.Contains(metadata.DefaultSource))
+            else
             {
-                throw new ServiceSourcesConfigurationException(
-                    $"Service '{name}': defaultSource value '{metadata.DefaultSource}' is not a valid " +
-                    "source. Expected one of: " + string.Join(", ", DeveloperConfigShape.Service.SourceNames) + ".");
+                DeveloperConfigShape.Service.ValidateSourceName(
+                    $"Service '{name}': defaultSource value '{metadata.DefaultSource}'", metadata.DefaultSource);
             }
 
             if (!raw.Services.TryGetValue(name, out var rawService))

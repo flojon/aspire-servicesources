@@ -461,52 +461,72 @@ internal static class ServiceSourcesConfigCache
                 defaultedServiceNames.Add(name);
             }
 
+            // Tracked so a failure below can undo the insert -- see the try/catch immediately after.
+            IConfigurationSource? insertedDefaultSource = null;
+
             if (defaultedSources.Count > 0)
             {
-                builder.Configuration.Sources.Insert(
-                    0, new MemoryConfigurationSource { InitialData = defaultedSources });
+                insertedDefaultSource = new MemoryConfigurationSource { InitialData = defaultedSources };
+                builder.Configuration.Sources.Insert(0, insertedDefaultSource);
             }
 
-            // Read ahead of the warning below rather than at the return statement (its usual place):
-            // the warning has to know which catalog shape each service's developer actually resolves
-            // through, which only this has — the catalog shape alone (a non-blank Repository.Url)
-            // says a service *could* resolve locally, not that it does.
-            var developerConfig = DeveloperConfiguration.ReadFrom(builder, catalog.Services.Keys, catalog.Repositories.Keys);
+            DeveloperConfiguration developerConfig;
 
-            // The warn-and-continue counterpart of the check above (design question 5, settled as
-            // "warn"): two ungrouped services naming the identical repository URL each get their own
-            // checkout, downloaded and reconciled separately, which is exactly what grouping them
-            // would avoid. Not an error — an existing catalog with this shape keeps working — but
-            // worth naming, since it usually means grouping was overlooked rather than intended.
-            foreach (var sharedUrl in merged
-                .Where(entry => entry.Value.Repository.CheckoutName == entry.Key)
-                // A blank Url is not a repository at all: every service gets a RepositoryDefinition
-                // regardless of source (design finding 2 mints an anonymous one unconditionally), so
-                // a kubernetes- or url-sourced service — which never sets 'repository:' — carries one
-                // whose Url defaults to "". Grouping those together would warn about services that
-                // were never candidates for sharing a checkout in the first place.
-                .Where(entry => !string.IsNullOrEmpty(entry.Value.Repository.Url))
-                // The catalog shape alone does not say which source is actually in effect: a service
-                // can declare both a 'repository:' block and, say, a 'kubernetes:' block (README
-                // "Combining sources on one catalog entry"), with servicesources.local.json resolving
-                // it through the other one — in which case nothing is ever cloned for it, and this
-                // warning's advice ("share one checkout") describes work that never happens. Matched
-                // the same way LocalCheckoutPrefetch.Run decides what it will actually clone —
-                // case-insensitively, since AddService resolves the source the same way.
-                .Where(entry =>
-                    developerConfig.Services.TryGetValue(entry.Key, out var devConfig)
-                    && string.Equals(devConfig.Source, "local", StringComparison.OrdinalIgnoreCase))
-                .GroupBy(entry => entry.Value.Repository.Url, StringComparer.Ordinal)
-                .Where(group => group.Count() > 1))
+            try
             {
-                var serviceNames = sharedUrl.Select(entry => entry.Key).Order(StringComparer.Ordinal).ToArray();
+                // Read ahead of the warning below rather than at the return statement (its usual
+                // place): the warning has to know which catalog shape each service's developer
+                // actually resolves through, which only this has — the catalog shape alone (a
+                // non-blank Repository.Url) says a service *could* resolve locally, not that it does.
+                developerConfig = DeveloperConfiguration.ReadFrom(builder, catalog.Services.Keys, catalog.Repositories.Keys);
 
-                ServiceSourcesWarnings.For(builder).AddNotice(
-                    $"Services {string.Join(", ", serviceNames.Select(name => $"'{name}'"))} are all 'local' and " +
-                    $"declare the same repository '{GitUrl.Redact(sharedUrl.Key)}', but none of them are grouped " +
-                    "— each gets its own checkout, cloned and reconciled separately. To share one checkout " +
-                    "instead, group them: AddRepository(...)/WithSharedRepository(...) in code, or a " +
-                    "repositories: entry every member's repositoryRef: names, in yaml.");
+                // The warn-and-continue counterpart of the check above (design question 5, settled as
+                // "warn"): two ungrouped services naming the identical repository URL each get their
+                // own checkout, downloaded and reconciled separately, which is exactly what grouping
+                // them would avoid. Not an error — an existing catalog with this shape keeps working
+                // — but worth naming, since it usually means grouping was overlooked rather than
+                // intended.
+                foreach (var sharedUrl in merged
+                    .Where(entry => entry.Value.Repository.CheckoutName == entry.Key)
+                    // A blank Url is not a repository at all: every service gets a RepositoryDefinition
+                    // regardless of source (design finding 2 mints an anonymous one unconditionally), so
+                    // a kubernetes- or url-sourced service — which never sets 'repository:' — carries one
+                    // whose Url defaults to "". Grouping those together would warn about services that
+                    // were never candidates for sharing a checkout in the first place.
+                    .Where(entry => !string.IsNullOrEmpty(entry.Value.Repository.Url))
+                    // The catalog shape alone does not say which source is actually in effect: a service
+                    // can declare both a 'repository:' block and, say, a 'kubernetes:' block (README
+                    // "Combining sources on one catalog entry"), with servicesources.local.json resolving
+                    // it through the other one — in which case nothing is ever cloned for it, and this
+                    // warning's advice ("share one checkout") describes work that never happens. Matched
+                    // the same way LocalCheckoutPrefetch.Run decides what it will actually clone —
+                    // case-insensitively, since AddService resolves the source the same way.
+                    .Where(entry =>
+                        developerConfig.Services.TryGetValue(entry.Key, out var devConfig)
+                        && string.Equals(devConfig.Source, "local", StringComparison.OrdinalIgnoreCase))
+                    .GroupBy(entry => entry.Value.Repository.Url, StringComparer.Ordinal)
+                    .Where(group => group.Count() > 1))
+                {
+                    var serviceNames = sharedUrl.Select(entry => entry.Key).Order(StringComparer.Ordinal).ToArray();
+
+                    ServiceSourcesWarnings.For(builder).AddNotice(
+                        $"Services {string.Join(", ", serviceNames.Select(name => $"'{name}'"))} are all 'local' and " +
+                        $"declare the same repository '{GitUrl.Redact(sharedUrl.Key)}', but none of them are grouped " +
+                        "— each gets its own checkout, cloned and reconciled separately. To share one checkout " +
+                        "instead, group them: AddRepository(...)/WithSharedRepository(...) in code, or a " +
+                        "repositories: entry every member's repositoryRef: names, in yaml.");
+                }
+            }
+            catch when (insertedDefaultSource is not null)
+            {
+                // ConfigLoader<T>.Load only latches (caches) a ServiceSourcesConfigurationException;
+                // anything else leaves this method retryable from scratch. Without this rollback, a
+                // retry's "already configured?" snapshot above would see *this* attempt's inserted
+                // default and wrongly treat the service as explicitly configured, silently defeating
+                // the #76 clone-storm exclusion for it. Undoing the insert keeps a retry's snapshot
+                // clean regardless of what throws here, now or in a future edit of this method.
+                builder.Configuration.Sources.Remove(insertedDefaultSource);
+                throw;
             }
 
             // The catalog first, and its names handed over: unchanged from before this task, and now
