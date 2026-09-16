@@ -1,7 +1,8 @@
 # Aspire.Hosting.ServiceSources — `defaultSource` on the Service Catalog
 
 **Date:** 2026-09-16
-**Status:** Draft
+**Status:** Accepted — reviewer decisions recorded 2026-09-16 (see
+[Reviewer decisions](#reviewer-decisions)); ready for an implementation plan.
 **Resolves:** GitHub issue #158 (a catalog entry should be able to declare which source a developer
 gets for free, so `git clone && aspire run` needs less per-developer setup).
 **Builds on:** [the code-catalog design](2026-09-05-servicesources-code-catalog-design.md) (#134,
@@ -429,8 +430,8 @@ resolves it as a **documentation requirement** (below), consistent with `default
 established precedent — a catalog can already silently pin a specific branch, and that is likewise
 handled by documentation rather than a runtime gate. Whether a runtime *notice* (visible without
 inspecting logs closely) is also warranted the first time a service resolves through a catalog
-default is a real, separate product trade-off — see
-[Open Questions](#open-questions).
+default was a real, separate product trade-off. **Decided: no notice; see
+[Reviewer decisions](#reviewer-decisions), question 1.**
 
 ---
 
@@ -499,7 +500,9 @@ matching the repo's `Method_Condition_ExpectedOutcome` convention:
 
 ---
 
-## Open Questions
+## Reviewer decisions
+
+Recorded 2026-09-16. Each original question is kept verbatim, with the decision beneath it.
 
 1. **Should resolving a service through a catalog default emit a visible, non-error notice** (the
    existing `ServiceSourcesWarnings.For(builder).AddNotice(...)` mechanism already used for the
@@ -508,12 +511,18 @@ matching the repo's `Method_Condition_ExpectedOutcome` convention:
    who never opens `servicesources.yaml` can still discover *why* a service is cloning without being
    told by an error? This is a genuine trade-off between the ticket's own stated goal (silent,
    zero-config first run) and the attack-surface note above (silent-by-design is also silent to a
-   developer who would want to know). It is not required by the acceptance checklist as written,
-   and adding it is scope this spec can propose but should not decide unilaterally — a human should
-   confirm whether it belongs in this change or a fast-follow.
+   developer who would want to know).
+
+   **Decided: no visible notice.** Stay silent — a defaulted service behaves exactly like an
+   explicit one, which preserves the ticket's actual zero-config goal rather than trading it away
+   for a discoverability nicety. Do not wire this into `ServiceSourcesWarnings` for this change.
+
 2. **Is `defaultSource`/`WithDefaultSource` the final name**, or should the ticket's own
    `defaultSource:` yaml spelling be kept but the code-side method named differently for
    readability (`.WithDefaultSource(...)` vs. something shorter)? This spec picked `WithDefaultSource`
    for consistency with the file's existing `With*` convention (`WithRepository`, `WithUrl`,
-   `WithContainer`, `WithKubernetes`, `WithKind`, `WithPrepare`); flagged here only because naming is
-   cheap to bikeshed and easy to settle in the plan review rather than here.
+   `WithContainer`, `WithKubernetes`, `WithKind`, `WithPrepare`).
+
+   **Decided: `WithDefaultSource` is final.** It is symmetric with the already-shipped
+   `WithDefaultRef`, and it matches the yaml field name `defaultSource` one-for-one, so an AppHost
+   author moving between the two surfaces sees the same word in both places.
