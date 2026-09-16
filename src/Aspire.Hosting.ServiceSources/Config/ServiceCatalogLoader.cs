@@ -32,8 +32,8 @@ internal static class ServiceCatalogLoader
     /// <summary>
     /// A kind whose name matches a well-known <see cref="ServiceMetadata"/> key can't be expressed
     /// in yaml: its options block would be bound as that typed property instead, and validated
-    /// against that property's schema. <see cref="Sources.LocalKindRegistry.Register"/> rejects such
-    /// names up front so the collision can never reach the loader.
+    /// against that property's schema. <see cref="Load"/> rejects such a name for the one service
+    /// whose own yaml entry actually uses it as a kind; registering the handler is unaffected.
     /// </summary>
     internal static bool IsReservedKindName(string kind) => KnownTopLevelProperties.Contains(kind);
 
