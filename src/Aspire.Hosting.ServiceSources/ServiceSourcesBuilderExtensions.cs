@@ -1,3 +1,4 @@
+using System.Net.Sockets;
 using System.Reflection;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
@@ -59,7 +60,8 @@ public static class ServiceSourcesBuilderExtensions
     /// container or executable resource for <c>"container"</c> and <c>"kubernetes"</c>, or whatever
     /// an <see cref="ILocalResourceKind"/> returns. Configuration applied through the returned
     /// builder — <c>WithEnvironment</c>, <c>WithReference</c>, <c>WithArgs</c>,
-    /// <c>WithHttpEndpoint</c>/<c>WithHttpsEndpoint</c>, <c>WaitFor</c>/<c>WaitForCompletion</c> —
+    /// <c>WithEndpoint</c>/<c>WithHttpEndpoint</c>/<c>WithHttpsEndpoint</c>,
+    /// <c>WaitFor</c>/<c>WaitForCompletion</c> —
     /// dual-writes to the real resource behind the facade; see
     /// docs/superpowers/specs/2026-09-10-313-service-resource-dualwrite-bridge-design.md.
     /// </returns>
@@ -291,6 +293,145 @@ public static class ServiceSourcesBuilderExtensions
         }
 
         return Aspire.Hosting.ResourceBuilderExtensions.WithHttpsEndpoint(builder, port, targetPort, name, env, isProxied);
+    }
+
+    /// <summary>
+    /// Shadows Aspire's own generic <c>WithEndpoint&lt;T&gt;</c> — the overload
+    /// <see cref="WithHttpEndpoint"/>/<see cref="WithHttpsEndpoint"/> themselves forward to. Same
+    /// update-branch gap as those two (#334), same shadow-and-gate fix, for the call surface an
+    /// AppHost author reaches by calling <c>WithEndpoint</c> directly instead.
+    /// </summary>
+    [AspireExport]
+    public static IResourceBuilder<ServiceResource> WithEndpoint(
+        this IResourceBuilder<ServiceResource> builder,
+        int? port = null, int? targetPort = null, string? scheme = null, [EndpointName] string? name = null,
+        string? env = null, bool? isProxied = null, bool? isExternal = null, ProtocolType? protocol = null)
+    {
+        if (GateEndpointCall(builder))
+        {
+            return builder;
+        }
+
+        return Aspire.Hosting.ResourceBuilderExtensions.WithEndpoint(
+            builder, port, targetPort, scheme, name, env, isProxied, isExternal, protocol);
+    }
+
+    /// <summary>
+    /// Binary-compatibility shim for <see cref="WithEndpoint"/>'s primary overload — same shape
+    /// Aspire itself keeps for callers compiled against the pre-nullable-<c>isProxied</c> signature.
+    /// Same gate, same reason (#335): this is real, currently-shipping Aspire API surface, not
+    /// speculative scaffolding, and an AppHost author who writes a literal <c>isProxied: true</c>
+    /// alongside an explicit <c>protocol</c> reaches this overload, not the nullable one.
+    /// </summary>
+    [AspireExportIgnore(Reason = "Binary compatibility shim for the nullable isProxied overload.")]
+    public static IResourceBuilder<ServiceResource> WithEndpoint(
+        this IResourceBuilder<ServiceResource> builder,
+        int? port, int? targetPort, string? scheme, [EndpointName] string? name, string? env,
+        bool isProxied, bool? isExternal, ProtocolType? protocol)
+    {
+        if (GateEndpointCall(builder))
+        {
+            return builder;
+        }
+
+        return Aspire.Hosting.ResourceBuilderExtensions.WithEndpoint(
+            builder, port, targetPort, scheme, name, env, (bool?)isProxied, isExternal, protocol);
+    }
+
+    /// <summary>
+    /// Subset overload of <see cref="WithEndpoint"/>'s primary signature, omitting <c>protocol</c> --
+    /// Aspire's own pre-protocol-parameter shape, kept for source compatibility. Same gate, same
+    /// reason (#335) as every other shim in this file.
+    /// </summary>
+    [AspireExportIgnore(Reason = "Subset of the full WithEndpoint overload which is already exported.")]
+    public static IResourceBuilder<ServiceResource> WithEndpoint(
+        this IResourceBuilder<ServiceResource> builder,
+        int? port, int? targetPort, string? scheme, [EndpointName] string? name, string? env,
+        bool? isProxied, bool? isExternal)
+    {
+        if (GateEndpointCall(builder))
+        {
+            return builder;
+        }
+
+        return Aspire.Hosting.ResourceBuilderExtensions.WithEndpoint(
+            builder, port, targetPort, scheme, name, env, isProxied, isExternal, null);
+    }
+
+    /// <summary>
+    /// Binary-compatibility shim combining both of <see cref="WithEndpoint"/>'s other two shims'
+    /// omissions — no <c>protocol</c>, non-nullable <c>isProxied</c>. Same gate, same reason (#335).
+    /// </summary>
+    [AspireExportIgnore(Reason = "Binary compatibility shim for the nullable isProxied overload.")]
+    public static IResourceBuilder<ServiceResource> WithEndpoint(
+        this IResourceBuilder<ServiceResource> builder,
+        int? port, int? targetPort, string? scheme, [EndpointName] string? name, string? env,
+        bool isProxied, bool? isExternal)
+    {
+        if (GateEndpointCall(builder))
+        {
+            return builder;
+        }
+
+        return Aspire.Hosting.ResourceBuilderExtensions.WithEndpoint(
+            builder, port, targetPort, scheme, name, env, (bool?)isProxied, isExternal, (ProtocolType?)null);
+    }
+
+    /// <summary>
+    /// Shadows Aspire's own callback-based <c>WithEndpoint&lt;T&gt;</c>. Unlike every numeric
+    /// overload above, this one hands the AppHost author the live <see cref="EndpointAnnotation"/>
+    /// itself with no constraint on what it mutates, and Aspire's own implementation gates neither
+    /// its update branch nor its add branch. When unreachable, the callback is never invoked at all
+    /// -- there is no partial-mutation state to reason about the way there is for a property that
+    /// simply keeps its old value. Mirrors Aspire's own <c>[AspireExportIgnore]</c> exactly: this
+    /// overload was never projected to guest languages in the first place.
+    /// </summary>
+    [AspireExportIgnore(Reason = "Polyglot app hosts use the internal withEndpointCallback export, which exposes EndpointUpdateContext instead of EndpointAnnotation.")]
+    public static IResourceBuilder<ServiceResource> WithEndpoint(
+        this IResourceBuilder<ServiceResource> builder,
+        [EndpointName] string endpointName, Action<EndpointAnnotation> callback, bool createIfNotExists = true)
+    {
+        if (GateEndpointCall(builder))
+        {
+            return builder;
+        }
+
+        return Aspire.Hosting.ResourceBuilderExtensions.WithEndpoint(builder, endpointName, callback, createIfNotExists);
+    }
+
+    /// <summary>
+    /// Binary-compatibility shim for <see cref="WithHttpEndpoint"/> -- the leftover gap #339 (#334)
+    /// explicitly left open pending this ticket. An AppHost author who writes a literal
+    /// <c>isProxied: true</c>/<c>isProxied: false</c> binds here rather than to the nullable
+    /// overload already shadowed above.
+    /// </summary>
+    [AspireExportIgnore(Reason = "Binary compatibility shim for the nullable isProxied overload.")]
+    public static IResourceBuilder<ServiceResource> WithHttpEndpoint(
+        this IResourceBuilder<ServiceResource> builder,
+        int? port, int? targetPort, [EndpointName] string? name, string? env, bool isProxied)
+    {
+        if (GateEndpointCall(builder))
+        {
+            return builder;
+        }
+
+        return Aspire.Hosting.ResourceBuilderExtensions.WithHttpEndpoint(builder, port, targetPort, name, env, (bool?)isProxied);
+    }
+
+    /// <summary>
+    /// The <c>https</c> counterpart of the shim above -- same shadowing, same gate, same reason.
+    /// </summary>
+    [AspireExportIgnore(Reason = "Binary compatibility shim for the nullable isProxied overload.")]
+    public static IResourceBuilder<ServiceResource> WithHttpsEndpoint(
+        this IResourceBuilder<ServiceResource> builder,
+        int? port, int? targetPort, [EndpointName] string? name, string? env, bool isProxied)
+    {
+        if (GateEndpointCall(builder))
+        {
+            return builder;
+        }
+
+        return Aspire.Hosting.ResourceBuilderExtensions.WithHttpsEndpoint(builder, port, targetPort, name, env, (bool?)isProxied);
     }
 
     /// <summary>

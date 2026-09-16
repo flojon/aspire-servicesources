@@ -1138,7 +1138,7 @@ builder.AddService("catalog")
 ```
 
 Prefer the native vocabulary `ServiceResource` already exposes (`WithEnvironment`, `WithReference`,
-`WithArgs`, `WithHttpEndpoint`/`WithHttpsEndpoint`, `WaitFor`/`WaitForCompletion`) for anything that
+`WithArgs`, `WithEndpoint`/`WithHttpEndpoint`/`WithHttpsEndpoint`, `WaitFor`/`WaitForCompletion`) for anything that
 should survive a developer switching that service to a non-`local` source — `Unwrap<T>()` throws if
 the service no longer resolves to a Java resource, which is the point when the AppHost genuinely
 requires one.
@@ -1732,7 +1732,7 @@ into `servicesources.yaml`/`servicesources.local.json`.
 
 `ServiceResource` implements `IResourceWithServiceDiscovery`, `IResourceWithEnvironment`,
 `IResourceWithArgs`, `IResourceWithEndpoints` and `IResourceWithWaitSupport`, so
-`WithEnvironment`, `WithReference`, `WithArgs`, `WithHttpEndpoint`/`WithHttpsEndpoint` and
+`WithEnvironment`, `WithReference`, `WithArgs`, `WithEndpoint`/`WithHttpEndpoint`/`WithHttpsEndpoint` and
 `WaitFor`/`WaitForCompletion` all bind directly — no capability-naming wrapper needed:
 
 ```csharp
@@ -1788,7 +1788,7 @@ the port-forward's builder rather than throwing.
 
 `ServiceResource`'s declared shape is what Aspire's Type System reads to generate a handle, so its
 own native methods — `withEnvironment`, `withReference`, `withArgs`,
-`withHttpEndpoint`/`withHttpsEndpoint`, `waitFor`, `waitForCompletion` — project onto the generated
+`withEndpoint`, `withHttpEndpoint`/`withHttpsEndpoint`, `waitFor`, `waitForCompletion` — project onto the generated
 `addService(...)` handle exactly as they do in C#, with no package-authored shim standing in front
 of them:
 
