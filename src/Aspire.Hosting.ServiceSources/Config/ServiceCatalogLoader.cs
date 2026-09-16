@@ -270,9 +270,11 @@ internal static class ServiceCatalogLoader
                 // here could ever resolve to a source, so this is caught now rather than reaching the
                 // git client with an empty url once "local" is selected (#318). A service that *does*
                 // declare url/container/kubernetes legitimately has no 'repository' — that combination
-                // is left alone here.
+                // is left alone here. Its own message, not the "entry is empty" one above: the entry
+                // can have real content (e.g. 'project:') and still lack any of these five properties.
                 throw new ServiceSourcesConfigurationException(
-                    $"Service '{name}': entry is empty. Expected at least a 'repository' property.");
+                    $"Service '{name}': no source is configured. Expected a non-empty 'repository', a "
+                    + "'repositoryRef', or a 'url'/'container'/'kubernetes' block.");
             }
         }
 
