@@ -67,6 +67,30 @@ public class ServiceDefinitionBuilderTests
     }
 
     [Fact]
+    public void WithRepository_EmptyUrl_ThrowsNamingService()
+    {
+        var chain = new ServiceCatalogBuilder().AddService("orders");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => chain.WithRepository(""));
+
+        Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("repository url is required", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithRepository_WhitespaceUrl_ThrowsNamingService()
+    {
+        var chain = new ServiceCatalogBuilder().AddService("orders");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => chain.WithRepository("   "));
+
+        Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("repository url is required", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void WithUrl_SetsUrlBlock()
     {
         var definition = new ServiceCatalogBuilder().AddService("inventory")
