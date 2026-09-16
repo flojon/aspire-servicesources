@@ -32,8 +32,8 @@ internal static class ServiceCatalogLoader
     /// <summary>
     /// A kind whose name matches a well-known <see cref="ServiceMetadata"/> key can't be expressed
     /// in yaml: its options block would be bound as that typed property instead, and validated
-    /// against that property's schema. <see cref="Sources.LocalKindRegistry.Register"/> rejects such
-    /// names up front so the collision can never reach the loader.
+    /// against that property's schema. <see cref="Load"/> rejects such a name for the one service
+    /// whose own yaml entry actually uses it as a kind; registering the handler is unaffected.
     /// </summary>
     internal static bool IsReservedKindName(string kind) => KnownTopLevelProperties.Contains(kind);
 
@@ -194,6 +194,21 @@ internal static class ServiceCatalogLoader
             // register "dotnet" at all — so a `dotnet:` block is always stray or misspelled.
             // Exempting it would have it silently accepted here and then silently ignored.
             var kindBlockKey = metadata.Kind == LocalKinds.Dotnet ? null : metadata.Kind;
+
+            // A kind named after a well-known ServiceMetadata property can never be expressed in
+            // this service's yaml entry: its options block would bind as that typed property instead
+            // of as kind config (see IsReservedKindName). That is a fact about *this service's* yaml
+            // document, not about the kind name globally — a kind used only via WithKind in C# shares
+            // no document with these properties and is unaffected (#133).
+            if (kindBlockKey is not null && IsReservedKindName(kindBlockKey))
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Service '{name}': kind '{kindBlockKey}' collides with a well-known property of a " +
+                    "service's yaml entry, so a block named after it would be read as that property " +
+                    "instead of as the kind's options. This restriction applies only to a kind referenced " +
+                    "from servicesources.yaml — a kind used only via WithKind in C# can use any name. " +
+                    "Choose a different kind name for this service.");
+            }
 
             foreach (var key in rawService.Keys)
             {
