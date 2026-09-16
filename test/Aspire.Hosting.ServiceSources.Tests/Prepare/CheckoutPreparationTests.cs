@@ -1027,6 +1027,14 @@ public class CheckoutPreparationTests
     [Fact]
     public async Task Write_ADestinationHeldOpenBriefly_StillLandsTheNewRecord()
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            // POSIX rename() replaces an open file regardless of who else has it open, so this hold
+            // does not contend with the write at all — what is under test is the retry, which exists
+            // only because Windows enforces sharing, not a platform this reproduction runs on.
+            return;
+        }
+
         var directory = TempDirectories.CreateSubdirectory().FullName;
         var markerPath = Path.Combine(directory, "marker.json");
         File.WriteAllText(markerPath, "stale");
@@ -1061,6 +1069,13 @@ public class CheckoutPreparationTests
     [Fact]
     public void Write_ADestinationHeldOpenPastTheRetryBudget_DropsSilently()
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            // Same reason as the test above: nothing here contends with the write on a platform
+            // whose rename() does not enforce sharing.
+            return;
+        }
+
         var directory = TempDirectories.CreateSubdirectory().FullName;
         var markerPath = Path.Combine(directory, "marker.json");
         File.WriteAllText(markerPath, "stale");
