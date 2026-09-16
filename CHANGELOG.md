@@ -173,14 +173,15 @@ never existed. Check the tag of the last release before adding one.
   rejects an entirely empty service entry. A service that legitimately has no local checkout —
   one sourced only from `url:`/`container:`/`kubernetes:` — is unaffected.
 
-- **`AddLocalKind` no longer rejects a reserved-looking name when no yaml catalog is in play**
-  ([#317]). `LocalKindRegistry.Register`'s reserved-name check — `url`, `container`, `kubernetes`,
-  `repository`, `project`, `defaultRef` and `kind` collide with a well-known `ServiceMetadata` yaml
-  property — ran unconditionally, even for an AppHost with no `servicesources.yaml` at all. A
-  service declared entirely in code (`WithKind(kind, options)`, [#134]) has no yaml document for
-  the name to collide with, so the check now applies only when this AppHost's
-  `servicesources.yaml` actually exists; an AppHost that does load one keeps today's rejection
-  unchanged.
+- **The reserved-kind-name check is scoped to the service that actually names the kind from yaml**
+  ([#133], [#317]). `url`, `container`, `kubernetes`, `repository`, `project`, `defaultRef` and
+  `kind` collide with a well-known `ServiceMetadata` yaml property, so a kind by one of those names
+  can't have its own options block in a service's yaml entry. That check now runs in
+  `ServiceCatalogLoader.Load`, per service, rather than in `LocalKindRegistry.Register` for the
+  whole AppHost — registering the handler (`AddLocalKind`) always succeeds regardless of the name; a
+  service declared entirely in code (`WithKind(kind, options)`, [#134]) shares no yaml document with
+  these properties and is unaffected either way. Only a service whose own `servicesources.yaml`
+  entry actually names the reserved kind is rejected, naming the service and the kind.
 
 ### Documentation
 
@@ -1632,6 +1633,7 @@ Targets `net10.0`.
 [#125]: https://github.com/flojon/aspire-servicesources/issues/125
 [#130]: https://github.com/flojon/aspire-servicesources/issues/130
 [#131]: https://github.com/flojon/aspire-servicesources/issues/131
+[#133]: https://github.com/flojon/aspire-servicesources/issues/133
 [#134]: https://github.com/flojon/aspire-servicesources/issues/134
 [#144]: https://github.com/flojon/aspire-servicesources/issues/144
 [#150]: https://github.com/flojon/aspire-servicesources/issues/150

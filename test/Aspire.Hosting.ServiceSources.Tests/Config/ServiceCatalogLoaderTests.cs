@@ -447,12 +447,51 @@ public class ServiceCatalogLoaderTests
         }
     }
 
-    [Fact]
-    public void Load_KindNamedAfterATypedBlock_DoesNotValidateItAgainstThatBlocksSchema()
+    [Theory]
+    [InlineData("container")]
+    [InlineData("url")]
+    [InlineData("kubernetes")]
+    [InlineData("repository")]
+    [InlineData("kind")]
+    [InlineData("prepare")]
+    [InlineData("project")]
+    [InlineData("defaultRef")]
+    public void Load_ServiceKindNamedAfterAWellKnownProperty_ThrowsStatingYamlCollision(string reserved)
     {
-        // LocalKindRegistry.Register makes this unreachable for a registered kind; the loader must
-        // still not reject the block's own keys against ContainerMetadata's schema, so that the
-        // failure the user sees is the accurate "kind 'container' is not registered".
+        // This service actually names 'reserved' as its kind from its own yaml entry, so the
+        // collision this restriction exists for can occur — unlike a kind only ever reached via
+        // WithKind in C#, which shares no document with these properties (#133).
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path,
+            "services:\n" +
+            "  frontend:\n" +
+            "    repository: https://github.com/company/frontend\n" +
+            $"    kind: {reserved}\n");
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("frontend", ex.Message);
+            Assert.Contains(reserved, ex.Message);
+            // States the restriction is about this service's yaml entry, not a blanket "reserved"
+            // claim about the kind name globally.
+            Assert.Contains("servicesources.yaml", ex.Message);
+            Assert.Contains("WithKind", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_ServiceKindNamedAfterATypedBlockWithMatchingBlockPresent_StillThrowsStatingYamlCollision()
+    {
+        // The block-schema question this test used to guard ("don't validate 'container:'s keys
+        // against ContainerMetadata") no longer arises: the reserved-name check now runs before the
+        // block is ever inspected, for the same reason — the block can never bind as kind options
+        // here regardless of what keys it contains.
         var path = Path.GetTempFileName();
         File.WriteAllText(path, """
             services:
@@ -465,11 +504,36 @@ public class ServiceCatalogLoaderTests
 
         try
         {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("frontend", ex.Message);
+            Assert.Contains("container", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_YamlPresentButNoServiceUsesAReservedKind_LoadsWithoutError()
+    {
+        // Merely having a yaml catalog, or another service in it using an unrelated kind, must never
+        // trigger the reserved-name check by itself — only a service that actually names the
+        // reserved kind does (#133; this used to be an AppHost-wide gate in LocalKindRegistry.Register).
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              frontend:
+                repository: https://github.com/company/frontend
+                kind: widget
+            """);
+
+        try
+        {
             var (catalog, _) = ServiceCatalogLoader.Load(path);
 
-            var frontend = catalog.Services["frontend"];
-            Assert.Equal("container", frontend.Kind);
-            Assert.NotNull(frontend.KindConfig);
+            Assert.Equal("widget", catalog.Services["frontend"].Kind);
         }
         finally
         {
