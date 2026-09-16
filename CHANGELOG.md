@@ -80,6 +80,16 @@ never existed. Check the tag of the last release before adding one.
 
 ### Added
 
+- **Catalog entries can declare a `defaultSource`, so a service resolves without a
+  `servicesources.local.json` entry at all** ([#158]). `defaultSource: local` in yaml, or
+  `.WithDefaultSource("local")` in a code-declared catalog, projects that value as the
+  lowest-precedence configuration layer — below `servicesources.local.json`, so any real layer
+  still overrides it. Only the bare source name is projected, never a per-source field, so
+  switching a defaulted service to a different source from a higher layer never leaves a stale
+  field behind. **A catalog declaring `defaultSource: local` means every developer, and CI, clones
+  that repository by default** — pin an explicit source in CI if that is not wanted. A
+  default-derived entry is excluded from the parallel checkout prefetch (#76); its first clone, if
+  the AppHost actually adds it, runs serialized rather than in parallel with the others.
 - **`java`/`javascript` local services export OpenTelemetry to the dashboard.** `kind: dotnet`
   already gets this for free from Aspire's own `AddProject`; `AddJavaApp`/`AddNodeApp`/
   `AddViteApp` and friends do not, so the `java` and `javascript` kind handlers now call
@@ -1637,6 +1647,7 @@ Targets `net10.0`.
 [#134]: https://github.com/flojon/aspire-servicesources/issues/134
 [#144]: https://github.com/flojon/aspire-servicesources/issues/144
 [#150]: https://github.com/flojon/aspire-servicesources/issues/150
+[#158]: https://github.com/flojon/aspire-servicesources/issues/158
 [#159]: https://github.com/flojon/aspire-servicesources/issues/159
 [#160]: https://github.com/flojon/aspire-servicesources/issues/160
 [#161]: https://github.com/flojon/aspire-servicesources/issues/161
