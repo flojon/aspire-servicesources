@@ -523,6 +523,10 @@ Recorded 2026-09-16. Each original question is kept verbatim, with the decision 
    for consistency with the file's existing `With*` convention (`WithRepository`, `WithUrl`,
    `WithContainer`, `WithKubernetes`, `WithKind`, `WithPrepare`).
 
-   **Decided: `WithDefaultSource` is final.** It is symmetric with the already-shipped
-   `WithDefaultRef`, and it matches the yaml field name `defaultSource` one-for-one, so an AppHost
-   author moving between the two surfaces sees the same word in both places.
+   **Decided: `WithDefaultSource` is final.** It matches the yaml field name `defaultSource`
+   one-for-one — an AppHost author moving between the two surfaces sees the same word in both
+   places — and it follows the naming pattern `defaultRef` already established: yaml's
+   `defaultRef`/`WithRepository(url, defaultRef:)` pairs a `default`-prefixed yaml field with a
+   same-named parameter rather than a dedicated method, but `defaultSource` has no natural home on
+   an existing `With*` call the way `defaultRef` has on `WithRepository`, so it earns its own
+   method instead — `WithDefaultSource`, not a parameter bolted onto an unrelated block.
