@@ -47,6 +47,13 @@ public sealed class ServiceDefinitionBuilder
     public ServiceDefinitionBuilder WithRepository(string url, string? defaultRef = null)
     {
         RequireUnset(_repositorySource, nameof(WithRepository));
+
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{_serviceName}': {nameof(WithRepository)} - a repository url is required and cannot be empty or whitespace.");
+        }
+
         _repositorySource = url;
         _repository = url;
         _defaultRef = defaultRef;

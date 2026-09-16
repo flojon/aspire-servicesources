@@ -149,6 +149,16 @@ never existed. Check the tag of the last release before adding one.
 
 ### Fixed
 
+- **An ungrouped service's repository url is now validated as required** ([#318]). A code-declared
+  service (`WithRepository(url)`) or a yaml service with neither `repository:` nor `repositoryRef:`
+  (and no `url:`/`container:`/`kubernetes:` block either) used to sail through with a blank
+  repository url, which only surfaced later as a confusing failure once the git client tried to
+  clone it. `WithRepository` now rejects an empty or whitespace url immediately, naming the
+  service, the same way `ServiceCatalogBuilder.AddRepository` already does; the yaml loader now
+  rejects the equivalent shape at catalog load, naming the service, the same way it already
+  rejects an entirely empty service entry. A service that legitimately has no local checkout —
+  one sourced only from `url:`/`container:`/`kubernetes:` — is unaffected.
+
 - **`AddLocalKind` no longer rejects a reserved-looking name when no yaml catalog is in play**
   ([#317]). `LocalKindRegistry.Register`'s reserved-name check — `url`, `container`, `kubernetes`,
   `repository`, `project`, `defaultRef` and `kind` collide with a well-known `ServiceMetadata` yaml
@@ -1645,6 +1655,7 @@ Targets `net10.0`.
 [#313]: https://github.com/flojon/aspire-servicesources/issues/313
 [#314]: https://github.com/flojon/aspire-servicesources/issues/314
 [#317]: https://github.com/flojon/aspire-servicesources/issues/317
+[#318]: https://github.com/flojon/aspire-servicesources/issues/318
 [#345]: https://github.com/flojon/aspire-servicesources/issues/345
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507

@@ -908,4 +908,53 @@ public class ServiceCatalogLoaderTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public void Load_ServiceHasNeitherRepositoryNorRepositoryRef_ThrowsNamingService()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                project: src/Orders.Api/Orders.Api.csproj
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+                () => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("repository", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_ServiceHasEmptyRepositoryAndNoRepositoryRef_ThrowsNamingService()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: "   "
+                project: src/Orders.Api/Orders.Api.csproj
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+                () => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("repository", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

@@ -263,6 +263,17 @@ internal static class ServiceCatalogLoader
                         $"move it to the repositories entry '{repositoryRef}' instead.");
                 }
             }
+            else if (string.IsNullOrWhiteSpace(metadata.Repository)
+                && metadata.Url is null && metadata.Container is null && metadata.Kubernetes is null)
+            {
+                // Ungrouped (no repositoryRef) and no url/container/kubernetes block either: nothing
+                // here could ever resolve to a source, so this is caught now rather than reaching the
+                // git client with an empty url once "local" is selected (#318). A service that *does*
+                // declare url/container/kubernetes legitimately has no 'repository' — that combination
+                // is left alone here.
+                throw new ServiceSourcesConfigurationException(
+                    $"Service '{name}': entry is empty. Expected at least a 'repository' property.");
+            }
         }
 
         return (catalog, repositories);
