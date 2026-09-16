@@ -177,6 +177,20 @@ internal static class ServiceCatalogLoader
                 metadata.Kind = LocalKinds.Dotnet;
             }
 
+            // A blank scalar means "no default" — a catalog author clearing a default they no
+            // longer want should not have to delete the line (matches
+            // DeveloperConfiguration.NormalizeBlankToAbsent's rule for a developer's own fields).
+            if (string.IsNullOrWhiteSpace(metadata.DefaultSource))
+            {
+                metadata.DefaultSource = null;
+            }
+            else if (!DeveloperConfigShape.Service.SourceNames.Contains(metadata.DefaultSource))
+            {
+                throw new ServiceSourcesConfigurationException(
+                    $"Service '{name}': defaultSource value '{metadata.DefaultSource}' is not a valid " +
+                    "source. Expected one of: " + string.Join(", ", DeveloperConfigShape.Service.SourceNames) + ".");
+            }
+
             if (!raw.Services.TryGetValue(name, out var rawService))
             {
                 continue;
