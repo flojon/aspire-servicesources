@@ -59,7 +59,7 @@ internal static class ServiceSourcesConfigCache
                         "AddServiceCatalog(…) was called after the service catalog had already been read, so " +
                         "its entries could not be seen. Because a service is resolved as it is added, the " +
                         "catalog must be declared before the first AddService(…) — near the top of the AppHost, " +
-                        "next to UseDeferredCheckout() and UseJava().");
+                        "next to UseDeferredCheckout() and AddLocalKind().");
                 }
 
                 configure(Builder);

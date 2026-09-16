@@ -7,6 +7,8 @@
     <IsPackable>false</IsPackable>
     <!-- A test assembly, not an integration; see Directory.Build.props. -->
     <IsAspirePolyglotCompatible>false</IsAspirePolyglotCompatible>
+    <!-- These tests exist to cover the obsolete UseJavaScript() itself. -->
+    <NoWarn>$(NoWarn);CS0618</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

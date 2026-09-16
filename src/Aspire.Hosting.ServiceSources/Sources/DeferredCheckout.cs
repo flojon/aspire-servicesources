@@ -166,7 +166,7 @@ internal sealed class DeferredCheckout
                     "AddService(…), so that service's checkout could not be deferred. Because the decision " +
                     "is made as each service is added, UseDeferredCheckout() must be called before the " +
                     "first AddService(…) — near the top of the AppHost, next to AddServiceCatalog() and " +
-                    "UseJava().");
+                    "AddLocalKind().");
             }
 
             _enabled = true;

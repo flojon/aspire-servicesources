@@ -1143,9 +1143,11 @@ should survive a developer switching that service to a non-`local` source — `U
 the service no longer resolves to a Java resource, which is the point when the AppHost genuinely
 requires one.
 
-`UseJava()`/`useJava()` (also exported to Aspire's Type System for a TypeScript AppHost) is no
-longer required — `java` resolves without it — but still exists to substitute a different
-`ILocalResourceKind` for the name, e.g. a test double.
+`UseJava()`/`useJava()` (also exported to Aspire's Type System for a TypeScript AppHost) is
+**obsolete** — `java` resolves without it, and calling it registers the exact same built-in handler
+the fallback already uses, so it changes nothing. Delete the call. To substitute a *different*
+`ILocalResourceKind` for `"java"` (e.g. a test double), call `AddLocalKind("java", yourKind)`
+directly — `UseJava()` cannot take a handler argument, so it was never able to do that.
 
 #### Implementing a kind
 

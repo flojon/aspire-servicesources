@@ -206,11 +206,13 @@ public static class ServiceSourcesBuilderExtensions
     /// Registers <paramref name="handler"/> as the resolver for local-sourced services whose
     /// <c>servicesources.yaml</c> entry declares <c>kind: &lt;paramref name="kind"/&gt;</c>. The two
     /// built-in kinds — <c>"java"</c>/<c>"javascript"</c> — resolve without this ever being called
-    /// (see <see cref="Sources.LocalKindRegistry"/>'s own fallback); <see cref="JavaServiceSourcesBuilderExtensions.UseJava"/>
-    /// and <see cref="JavaScriptServiceSourcesBuilderExtensions.UseJavaScript"/> exist only to
-    /// substitute a different handler for one of those names. A kind implemented outside this
-    /// package has no other way to register itself, which is why this is public rather than
-    /// internal.
+    /// (see <see cref="Sources.LocalKindRegistry"/>'s own fallback); call this directly with your own
+    /// handler to substitute a different one for either name (e.g. a test double) — the obsolete
+    /// <see cref="JavaServiceSourcesBuilderExtensions.UseJava"/> and
+    /// <see cref="JavaScriptServiceSourcesBuilderExtensions.UseJavaScript"/> cannot do that, since
+    /// they always register the same built-in handler the fallback would have used anyway. A kind
+    /// implemented outside this package has no other way to register itself, which is why this is
+    /// public rather than internal.
     /// </summary>
     [AspireExportIgnore]
     public static IDistributedApplicationBuilder AddLocalKind(

@@ -14,11 +14,11 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// <c>dotnet</c> they still go through <see cref="ILocalResourceKind"/> (they need no service-level
 /// metadata the interface doesn't expose), so <see cref="TryGet"/> falls back to a default instance
 /// for either name when nothing was registered for it — <c>UseJava()</c>/<c>UseJavaScript()</c> are
-/// no longer required before the first <c>AddService()</c> call. Both handler types live
-/// unconditionally in this assembly (see <c>MissingHostingPackageTests</c>'s own framing of this
-/// post-#187), so constructing a default costs nothing until a service of that kind actually
-/// resolves. Calling <c>AddLocalKind</c> explicitly for either name still works — e.g. to substitute
-/// a test double — and takes priority over the fallback, since it is checked first.
+/// obsolete no-ops that register this exact same default. Both handler types live unconditionally in
+/// this assembly (see <c>MissingHostingPackageTests</c>'s own framing of this post-#187), so
+/// constructing a default costs nothing until a service of that kind actually resolves. Calling
+/// <c>AddLocalKind</c> explicitly for either name still works — e.g. to substitute a test double —
+/// and takes priority over the fallback, since it is checked first.
 /// </remarks>
 internal sealed class LocalKindRegistry
 {

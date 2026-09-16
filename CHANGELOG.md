@@ -64,6 +64,17 @@ never existed. Check the tag of the last release before adding one.
   `IResourceWithServiceDiscovery` as `AddService`'s return type, or calls
   `Configure<T>`/`As<T>`/any `WithService*` method, no longer compiles against this version.
 
+### Deprecated
+
+- **`UseJava()`/`UseJavaScript()` are obsolete** ([#350]). Both were made unnecessary by #340 —
+  `java`/`javascript` are built-in local kinds that `LocalKindRegistry` falls back to when nothing
+  is registered — but kept existing without saying so. Neither ever let you substitute a different
+  handler either: each hardcodes the same built-in `JavaLocalResourceKind`/`JavaScriptLocalKind`
+  the fallback already constructs, so calling one changes nothing. Delete the call; to register a
+  *different* `ILocalResourceKind` for `"java"`/`"javascript"` (e.g. a test double), call
+  `AddLocalKind("java"/"javascript", yourKind)` directly instead — that is the only method of the
+  two that takes a handler.
+
 ### Added
 
 - **`java`/`javascript` local services export OpenTelemetry to the dashboard.** `kind: dotnet`
@@ -1646,6 +1657,7 @@ Targets `net10.0`.
 [#314]: https://github.com/flojon/aspire-servicesources/issues/314
 [#317]: https://github.com/flojon/aspire-servicesources/issues/317
 [#345]: https://github.com/flojon/aspire-servicesources/issues/345
+[#350]: https://github.com/flojon/aspire-servicesources/issues/350
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
