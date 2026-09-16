@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using Aspire.Hosting.ApplicationModel;
 
@@ -29,5 +30,29 @@ internal static class RealToFacadeRegistry
 
     public static void Register(IResource real, ServiceResource facade) => ByReal.AddOrUpdate(real, facade);
 
-    public static bool TryGetFacade(IResource real, out ServiceResource? facade) => ByReal.TryGetValue(real, out facade);
+    public static bool TryGetFacade(IResource real, [NotNullWhen(true)] out ServiceResource? facade) =>
+        ByReal.TryGetValue(real, out facade);
+
+    /// <summary>
+    /// Mirrors a wait's removal from <paramref name="real"/> onto its facade, if one is registered.
+    /// </summary>
+    public static void MirrorRemoval(IResource real, WaitAnnotation wait)
+    {
+        if (TryGetFacade(real, out var facade))
+        {
+            facade.Annotations.Remove(wait);
+        }
+    }
+
+    /// <summary>
+    /// Mirrors a wait's replacement on <paramref name="real"/> onto its facade, if one is registered.
+    /// </summary>
+    public static void MirrorReplacement(IResource real, WaitAnnotation oldWait, WaitAnnotation newWait)
+    {
+        if (TryGetFacade(real, out var facade))
+        {
+            facade.Annotations.Remove(oldWait);
+            facade.Annotations.Add(newWait);
+        }
+    }
 }

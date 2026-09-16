@@ -105,11 +105,7 @@ internal sealed class ServiceWaitRetargeting
                 // itself bridged is the real one behind a facade sharing the same pre-rewrite
                 // annotation instance (#327) — leaving it there would strand the old, unretargeted
                 // wait on the facade instead of the resource actually being waited on now.
-                if (RealToFacadeRegistry.TryGetFacade(resource, out var facade))
-                {
-                    facade!.Annotations.Remove(wait);
-                    facade.Annotations.Add(retargeted);
-                }
+                RealToFacadeRegistry.MirrorReplacement(resource, wait, retargeted);
             }
         }
     }
