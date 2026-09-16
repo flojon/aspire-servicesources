@@ -178,6 +178,51 @@ public class UrlConsumerWaitTests
     }
 
     /// <summary>
+    /// Covers issue #327: the consumer here is itself an <c>AddService()</c> result (a bridged
+    /// container-sourced facade), not a plain executable/container. <c>WaitFor</c> on a
+    /// <see cref="ServiceResourceBuilder"/> dual-writes the same <see cref="WaitAnnotation"/> instance
+    /// onto both the consumer's facade and its real, registered resource — so dropping it only from
+    /// the resource this pre-flight walks (the real one; the facade is never registered) used to leave
+    /// a stale copy sitting on the facade.
+    /// </summary>
+    [Fact]
+    public async Task UrlSourcedService_WaitedOnByABridgedConsumer_LosesTheWaitAnnotationFromBothFacadeAndReal()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              worker:
+                repository: https://github.com/company/worker
+                project: Worker.csproj
+                container:
+                  image: nginxdemos/hello
+                  port: 8080
+              inventory:
+                repository: https://github.com/company/inventory
+                project: Inventory.csproj
+                url:
+                  url: https://orders.example.com
+            """);
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), """
+            { "services": { "worker": { "source": "container" }, "inventory": { "source": "url" } } }
+            """);
+
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+
+        var inventory = builder.AddService("inventory");
+        var worker = builder.AddService("worker").WaitFor(inventory);
+        var workerReal = Assert.Single(builder.Resources, r => r.Name == "worker");
+
+        Assert.Single(worker.Resource.Annotations.OfType<WaitAnnotation>());
+        Assert.Single(workerReal.Annotations.OfType<WaitAnnotation>());
+
+        await TestHelpers.PublishBeforeStartEventAsync(builder);
+
+        Assert.Empty(worker.Resource.Annotations.OfType<WaitAnnotation>());
+        Assert.Empty(workerReal.Annotations.OfType<WaitAnnotation>());
+    }
+
+    /// <summary>
     /// The removal is keyed on the waited-on service, not on the consumer, so a wait on anything
     /// Aspire actually runs has to survive it.
     /// </summary>

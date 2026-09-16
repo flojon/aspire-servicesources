@@ -70,6 +70,38 @@ public class ServiceWaitRetargetingTests
     }
 
     /// <summary>
+    /// Covers issue #327's other instance: <c>WaitForCompletion</c> here dual-writes the same
+    /// <see cref="WaitAnnotation"/> instance onto both the waiter's facade and its real resource (see
+    /// the test above). Rewriting only <c>authReal</c>'s copy — the one this method's own walk of
+    /// <c>model.Resources</c> ever sees, since the facade is never registered — used to leave the
+    /// pre-rewrite annotation stranded on the facade instead of the retargeted one.
+    /// </summary>
+    [Fact]
+    public async Task ServiceWaitingOnAnotherServiceFacade_AlsoRetargetsTheWaitersOwnFacade()
+    {
+        var builder = Builder();
+
+        var initReal = builder.AddResource(new ServiceContainerResource("common-auth-init")).WithImage("nginx");
+        var init = ResolvedService.Bridge(initReal, "common-auth-init", "container");
+
+        var authReal = builder.AddResource(new ServiceContainerResource("common-auth")).WithImage("nginx");
+        var auth = ResolvedService.Bridge(authReal, "common-auth", "container");
+        auth.WaitForCompletion(init);
+
+        var before = Assert.Single(auth.Resource.Annotations.OfType<WaitAnnotation>());
+        Assert.Same(init.Resource, before.Resource);
+
+        await TestHelpers.PublishBeforeStartEventAsync(builder);
+
+        var after = Assert.Single(auth.Resource.Annotations.OfType<WaitAnnotation>());
+        Assert.Same(initReal.Resource, after.Resource);
+        Assert.Equal(WaitType.WaitForCompletion, after.WaitType);
+
+        // Same instance the real resource got, not a second independently-retargeted copy.
+        Assert.Same(Assert.Single(authReal.Resource.Annotations.OfType<WaitAnnotation>()), after);
+    }
+
+    /// <summary>
     /// The rewrite is keyed on the wait's target being a <see cref="ServiceResource"/> facade, not on
     /// the waiter — a wait on an ordinary resource this package never touched has to survive
     /// untouched, same instance included.

@@ -41,6 +41,10 @@ internal static class ResolvedService
         facade.Annotations.Add(sourceAnnotation);
         real.WithAnnotation(sourceAnnotation);
 
+        // Lets an annotation-removal path that only ever walks registered resources (so sees `real`,
+        // never `facade`) reach back to the facade instance sharing its annotations.
+        RealToFacadeRegistry.Register(real.Resource, facade);
+
         // Subscribed from here, exactly as Tag did: this is the set the report is about — the
         // resources a source produced, and no others.
         ServiceStartupFailureNotices.For(real.ApplicationBuilder);
