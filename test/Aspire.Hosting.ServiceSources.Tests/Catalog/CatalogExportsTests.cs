@@ -100,6 +100,7 @@ public class CatalogExportsTests
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithKubernetes))}",
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithPrepare))}",
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithKind))}",
+            $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithDefaultSource))}",
             $"{nameof(ServiceCatalogBuilder)}.{CamelCase(nameof(ServiceCatalogBuilder.AddRepository))}",
             $"{nameof(RepositoryBuilder)}.{CamelCase(nameof(RepositoryBuilder.WithPrepare))}",
             "JavaKindOptionsBuilder.withWorkingDirectory",

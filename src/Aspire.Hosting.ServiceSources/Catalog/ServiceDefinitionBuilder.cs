@@ -31,6 +31,7 @@ public sealed class ServiceDefinitionBuilder
     private PrepareMetadata? _prepare;
     private string? _kind;
     private object? _kindOptions;
+    private string? _defaultSource;
 
     internal ServiceDefinitionBuilder(string serviceName)
     {
@@ -69,6 +70,27 @@ public sealed class ServiceDefinitionBuilder
     {
         RequireUnset(_project, nameof(WithProject));
         _project = project;
+        return this;
+    }
+
+    /// <summary>
+    /// Declares which source (<c>"local"</c>/<c>"url"</c>/<c>"kubernetes"</c>/<c>"container"</c>) a
+    /// developer gets for this service when nothing configures it explicitly — the code-authoring
+    /// equivalent of yaml's <c>defaultSource:</c> field. See design "Projection: a config layer, not
+    /// a resolver branch".
+    /// </summary>
+    public ServiceDefinitionBuilder WithDefaultSource(string source)
+    {
+        RequireUnset(_defaultSource, nameof(WithDefaultSource));
+
+        if (!DeveloperConfigShape.Service.SourceNames.Contains(source))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"Service '{_serviceName}': {nameof(WithDefaultSource)}('{source}') is not a valid " +
+                "source. Expected one of: " + string.Join(", ", DeveloperConfigShape.Service.SourceNames) + ".");
+        }
+
+        _defaultSource = source;
         return this;
     }
 
@@ -233,5 +255,6 @@ public sealed class ServiceDefinitionBuilder
         Kind = _kind ?? LocalKinds.Dotnet,
         KindOptions = _kindOptions,
         Origin = CatalogOrigin.Code,
+        DefaultSource = _defaultSource,
     };
 }

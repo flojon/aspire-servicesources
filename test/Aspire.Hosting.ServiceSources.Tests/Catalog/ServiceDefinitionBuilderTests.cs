@@ -110,6 +110,58 @@ public class ServiceDefinitionBuilderTests
     }
 
     [Fact]
+    public void WithDefaultSource_SetsTheField()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("orders")
+            .WithRepository("https://github.com/example/repo")
+            .WithDefaultSource("local")
+            .Build();
+
+        Assert.Equal("local", definition.DefaultSource);
+    }
+
+    [Fact]
+    public void WithDefaultSource_CalledTwice_ThrowsNamingServiceAndBlock()
+    {
+        var chain = new ServiceCatalogBuilder().AddService("orders")
+            .WithRepository("https://github.com/example/repo")
+            .WithDefaultSource("local");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => chain.WithDefaultSource("url"));
+
+        Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("WithDefaultSource", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithDefaultSource_InvalidValue_ThrowsNamingTheFourValues()
+    {
+        var chain = new ServiceCatalogBuilder().AddService("orders")
+            .WithRepository("https://github.com/example/repo");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => chain.WithDefaultSource("bogus"));
+
+        Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("bogus", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("local", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("url", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("kubernetes", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("container", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithDefaultSource_NotCalled_DefaultSourceStaysNull()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("orders")
+            .WithRepository("https://github.com/example/repo")
+            .Build();
+
+        Assert.Null(definition.DefaultSource);
+    }
+
+    [Fact]
     public void WithContainer_SetsContainerBlock()
     {
         var definition = new ServiceCatalogBuilder().AddService("payments")
