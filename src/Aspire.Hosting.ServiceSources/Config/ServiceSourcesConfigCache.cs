@@ -462,18 +462,23 @@ internal static class ServiceSourcesConfigCache
             }
 
             // Tracked so a failure below can undo the insert -- see the try/catch immediately after.
+            // The insert itself is inside that same try (not just what follows it): Insert mutates
+            // the source list and then rebuilds every registered provider, so a fault from some
+            // unrelated provider's reload can surface here with ours already in the chain --
+            // the same hazard DeveloperConfigFileSource.Registration.Register documents for its own
+            // insert. Leaving the insert outside the try would let exactly that case skip the rollback.
             IConfigurationSource? insertedDefaultSource = null;
-
-            if (defaultedSources.Count > 0)
-            {
-                insertedDefaultSource = new MemoryConfigurationSource { InitialData = defaultedSources };
-                builder.Configuration.Sources.Insert(0, insertedDefaultSource);
-            }
 
             DeveloperConfiguration developerConfig;
 
             try
             {
+                if (defaultedSources.Count > 0)
+                {
+                    insertedDefaultSource = new MemoryConfigurationSource { InitialData = defaultedSources };
+                    builder.Configuration.Sources.Insert(0, insertedDefaultSource);
+                }
+
                 // Read ahead of the warning below rather than at the return statement (its usual
                 // place): the warning has to know which catalog shape each service's developer
                 // actually resolves through, which only this has — the catalog shape alone (a
@@ -524,7 +529,9 @@ internal static class ServiceSourcesConfigCache
                 // retry's "already configured?" snapshot above would see *this* attempt's inserted
                 // default and wrongly treat the service as explicitly configured, silently defeating
                 // the #76 clone-storm exclusion for it. Undoing the insert keeps a retry's snapshot
-                // clean regardless of what throws here, now or in a future edit of this method.
+                // clean regardless of what throws here -- including the insert's own provider
+                // rebuild, not just ReadFrom or the warnings loop below it, or a future edit of this
+                // method.
                 builder.Configuration.Sources.Remove(insertedDefaultSource);
                 throw;
             }

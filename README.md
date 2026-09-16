@@ -1606,7 +1606,7 @@ the standard provider chain, under the key `ServiceSources:Services:<service>`. 
 place a developer normally writes a source selection, and a `.NET` or TypeScript AppHost authors it
 identically — but every provider above it can override an entry without the file being touched. A
 catalog's own `defaultSource` (see above, under [Getting started](#getting-started)) sits below
-even this file — see the row below the base:
+even this file — see the row above the base:
 
 | Layer | Overrides the file? |
 | --- | --- |
