@@ -593,6 +593,61 @@ public class LocalCheckoutPrefetchTests
     }
 
     [Fact]
+    public void DefaultedToLocal_NeverAdded_IsExcludedFromThePrefetchAndReportsNothing()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://example.com/orders.git
+                project: Service.csproj
+              billing:
+                repository: https://example.com/billing.git
+                project: Service.csproj
+                defaultSource: local
+            """);
+        // "orders" is explicit; "billing" has no entry anywhere and resolves only through the
+        // catalog's own defaultSource.
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"),
+            """{ "services": { "orders": { "source": "local" } } }""");
+        var builder = TestHelpers.CreateBuilder(dir);
+        var git = new FakeGitClient();
+
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
+
+        // Unlike an explicit "local" entry for a service never added (which IS reported -- see
+        // ServiceMarkedLocalButNeverAdded_IsReportedRatherThanClonedSilently -- so the developer knows
+        // to remove it), a defaulted service was never anyone's decision to clone: nothing was cloned
+        // for it, and nothing is reported.
+        Assert.Equal(["https://example.com/orders.git"], git.Cloned);
+        Assert.Null(LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage);
+    }
+
+    [Fact]
+    public void DefaultedToLocal_ActuallyAdded_ResolvesViaTheDirectNonPrefetchedPath()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              billing:
+                repository: https://example.com/billing.git
+                project: Service.csproj
+                defaultSource: local
+            """);
+        // No servicesources.local.json at all.
+        var builder = TestHelpers.CreateBuilder(dir);
+        var git = new FakeGitClient();
+
+        var service = new LocalProjectSource(git).Resolve(builder, "billing", Definition("billing"), DevConfig());
+
+        Assert.NotNull(service);
+        // Excluded from the parallel prefetch (default-derived), but AddService still resolves it
+        // correctly -- a correct, serialized cold clone on its own thread, the same "not in the
+        // prefetch set" path an ordinary cold clone takes.
+        Assert.Equal(["https://example.com/billing.git"], git.Cloned);
+    }
+
+    [Fact]
     public void ExistingCheckoutForAServiceNeverAdded_IsLeftOnTheRefItWasFoundOn()
     {
         var dir = CreateAppHostDirectoryOnRef("main", "orders", "billing");
