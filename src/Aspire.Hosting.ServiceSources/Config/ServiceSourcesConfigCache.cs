@@ -1,5 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration.Memory;
 using Aspire.Hosting.ServiceSources.Catalog;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
@@ -250,6 +252,15 @@ internal static class ServiceSourcesConfigCache
         /// <summary>Whether this AppHost declared at least one service via <c>AddServiceCatalog</c>.</summary>
         public required bool HasCodeEntries { get; init; }
 
+        /// <summary>
+        /// Service names whose configured <c>source</c> exists only because
+        /// <see cref="Config.Catalog.ServiceDefinition.DefaultSource"/> projected it — never because a
+        /// developer, appsettings, an environment variable or the command line configured it.
+        /// <see cref="Sources.LocalCheckoutPrefetch"/>'s candidate filter excludes these so a catalog
+        /// default cannot re-create the #76 clone-storm for a service nobody actually asked for.
+        /// </summary>
+        public required IReadOnlySet<string> DefaultedServiceNames { get; init; }
+
         public static LoadedConfig Load(IDistributedApplicationBuilder builder)
         {
             // Freeze first, under the same lock CodeCatalogFor's Configure calls take — an
@@ -416,6 +427,46 @@ internal static class ServiceSourcesConfigCache
 
             var catalog = new Catalog.CodeServiceCatalog { Services = merged, Repositories = repositories };
 
+            // Lands the catalog's own defaultSource values as the lowest-precedence configuration
+            // layer -- strictly below servicesources.local.json -- so any real layer still wins.
+            // Must run before the snapshot below: EnsureRegistered is idempotent, but calling it
+            // here guarantees the local file already occupies index 0 before this step's own
+            // insert, so this layer lands at index 0 and the file is pushed to index 1 rather than
+            // the reverse (design finding 5 — Sources.Insert(0, ...) gives the *lowest* precedence
+            // to whichever call happens later in time).
+            DeveloperConfigFileSource.EnsureRegistered(builder);
+
+            var defaultedSources = new Dictionary<string, string?>(StringComparer.Ordinal);
+            var defaultedServiceNames = new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (var (name, definition) in catalog.Services)
+            {
+                if (definition.DefaultSource is not { } defaultSource)
+                {
+                    continue;
+                }
+
+                // Read before this layer exists, so a blank or absent result can only mean nothing
+                // has claimed this key yet -- comparing the final merged value instead could not
+                // tell a developer's own "local" from a default that merely happens to agree with
+                // it (design "Default-derived exclusion": value comparison cannot substitute for
+                // provenance).
+                var key = $"{DeveloperConfiguration.ServicesKey}:{name}:source";
+                if (!string.IsNullOrWhiteSpace(builder.Configuration[key]))
+                {
+                    continue;
+                }
+
+                defaultedSources[key] = defaultSource;
+                defaultedServiceNames.Add(name);
+            }
+
+            if (defaultedSources.Count > 0)
+            {
+                builder.Configuration.Sources.Insert(
+                    0, new MemoryConfigurationSource { InitialData = defaultedSources });
+            }
+
             // Read ahead of the warning below rather than at the return statement (its usual place):
             // the warning has to know which catalog shape each service's developer actually resolves
             // through, which only this has — the catalog shape alone (a non-blank Repository.Url)
@@ -467,6 +518,7 @@ internal static class ServiceSourcesConfigCache
                 DeveloperConfig = developerConfig,
                 YamlPath = yamlExists ? yamlPath : null,
                 HasCodeEntries = codeEntries.Count > 0,
+                DefaultedServiceNames = defaultedServiceNames,
             };
         }
     }

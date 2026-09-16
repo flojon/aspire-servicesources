@@ -30,6 +30,109 @@ public class CatalogCompositionTests
     }
 
     [Fact]
+    public void YamlCatalogDefaultSource_NoExplicitEntryAnywhere_ResolvesService()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              inventory:
+                url:
+                  url: https://example.com
+                defaultSource: url
+            """);
+        // No servicesources.local.json at all -- this is the whole point of #158.
+        var builder = CreateBuilder(dir);
+
+        var (definition, devConfig) = ServiceSourcesConfigCache.ResolveService(builder, "inventory");
+
+        Assert.Equal("https://example.com", definition.Url!.Url);
+        Assert.Equal("url", devConfig.Source);
+        Assert.Contains("inventory", ServiceSourcesConfigCache.LoadedFor(builder).DefaultedServiceNames);
+    }
+
+    [Fact]
+    public void ExplicitEntry_SameValueAsCatalogDefault_IsNotMarkedAsDefaultDerived()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              inventory:
+                url:
+                  url: https://example.com
+                defaultSource: url
+            """);
+        // A deliberate, reviewed opt-in that happens to match the default -- must stay eligible for
+        // the parallel prefetch exactly as an ordinary explicit entry would (design "Default-derived
+        // exclusion": value comparison alone cannot tell these apart, which is why the exclusion set
+        // is built from a pre-insert snapshot instead).
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"),
+            """{ "services": { "inventory": { "source": "url" } } }""");
+        var builder = CreateBuilder(dir);
+
+        var (_, devConfig) = ServiceSourcesConfigCache.ResolveService(builder, "inventory");
+
+        Assert.Equal("url", devConfig.Source);
+        Assert.DoesNotContain("inventory", ServiceSourcesConfigCache.LoadedFor(builder).DefaultedServiceNames);
+    }
+
+    [Fact]
+    public void HigherLayerExplicitBlank_OptsOutOfCatalogDefault_ReproducesNotConfiguredError()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              inventory:
+                url:
+                  url: https://example.com
+                defaultSource: url
+            """);
+        // The one gesture configuration offers for refusing a lower layer's value (design "Opting out
+        // of a default"): an explicit blank still shadows the projected default, because a higher
+        // layer's provider already has the key at all -- config resolution never falls through to a
+        // lower layer once a higher one has an entry, blank or not.
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"),
+            """{ "services": { "inventory": { "source": "" } } }""");
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "inventory"));
+
+        Assert.Contains("inventory", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("has no source configured", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Spec finding 3, made concrete: <see cref="DeveloperConfiguration.NotConfiguredError"/> needs no
+    /// code change because a projected default already makes <c>Services.Count &gt; 0</c>, which is
+    /// what re-bases its branch from "nothing configured anywhere" to "this one service, specifically".
+    /// </summary>
+    [Fact]
+    public void OneServiceDefaulted_AnotherServiceUnconfigured_GetsThePerServiceErrorNotTheFileWideOne()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              inventory:
+                url:
+                  url: https://example.com
+                defaultSource: url
+              payments:
+                url:
+                  url: https://payments.example
+            """);
+        // No servicesources.local.json at all: inventory resolves via defaultSource; payments has no
+        // entry anywhere and no default of its own.
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "payments"));
+
+        Assert.Contains("payments", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("has no source configured", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("No service sources are configured", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void YamlOnlyCatalog_Unchanged()
     {
         var dir = TempDirectories.CreateSubdirectory().FullName;
