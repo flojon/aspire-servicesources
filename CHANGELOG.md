@@ -25,7 +25,7 @@ never existed. Check the tag of the last release before adding one.
   `ServiceSourcesConfigurationException` as soon as it detects a service already resolved on the
   builder, the same way a too-late `AddServiceCatalog(...)` call already does. Move
   `builder.UseDeferredCheckout()` above every `AddService(...)` call to migrate — it belongs near
-  the top of the AppHost, next to `AddServiceCatalog()` and `UseJava()`.
+  the top of the AppHost, next to `AddServiceCatalog()` and `AddLocalKind()`.
 
 - **`AddService` returns `IResourceBuilder<ServiceResource>`** ([#313]). `ServiceResource` is a
   concrete, sealed class implementing `IResourceWithServiceDiscovery`, `IResourceWithEnvironment`,
@@ -70,8 +70,11 @@ never existed. Check the tag of the last release before adding one.
   `java`/`javascript` are built-in local kinds that `LocalKindRegistry` falls back to when nothing
   is registered — but kept existing without saying so. Neither ever let you substitute a different
   handler either: each hardcodes the same built-in `JavaLocalResourceKind`/`JavaScriptLocalKind`
-  the fallback already constructs, so calling one changes nothing. Delete the call; to register a
-  *different* `ILocalResourceKind` for `"java"`/`"javascript"` (e.g. a test double), call
+  the fallback already constructs, so calling one changes nothing about how the kind resolves.
+  Delete the call — and delete it rather than adding an `AddLocalKind` call alongside it, since
+  `UseJava()`/`UseJavaScript()` still occupy the registration slot the same way any `AddLocalKind`
+  call does, and a second registration for the same name throws. To register a *different*
+  `ILocalResourceKind` for `"java"`/`"javascript"` (e.g. a test double), call
   `AddLocalKind("java"/"javascript", yourKind)` directly instead — that is the only method of the
   two that takes a handler.
 

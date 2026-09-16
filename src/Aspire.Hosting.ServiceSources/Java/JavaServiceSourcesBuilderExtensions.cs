@@ -9,13 +9,15 @@ namespace Aspire.Hosting.ServiceSources;
 public static class JavaServiceSourcesBuilderExtensions
 {
     /// <summary>
-    /// No-op today: <c>java</c> is a built-in local kind, and this registers the exact same
-    /// <see cref="JavaLocalResourceKind"/> instance <c>AddService()</c> already falls back to when
-    /// nothing was registered for the name (see <see cref="Sources.LocalKindRegistry"/>). Calling it
-    /// changes nothing about how a <c>kind: java</c> service resolves — delete the call. To use a
-    /// *different* <see cref="ILocalResourceKind"/> for <c>"java"</c> (e.g. a test double), call
-    /// <see cref="ServiceSourcesBuilderExtensions.AddLocalKind"/> directly with your own handler
-    /// instead of this method, which cannot take one.
+    /// Redundant today: <c>java</c> is a built-in local kind, and this registers an instance of the
+    /// same built-in <see cref="JavaLocalResourceKind"/> type <c>AddService()</c> already falls back
+    /// to when nothing was registered for the name (see <see cref="Sources.LocalKindRegistry"/>).
+    /// Calling it changes nothing about how a <c>kind: java</c> service resolves — delete the call.
+    /// To use a *different* <see cref="ILocalResourceKind"/> for <c>"java"</c> (e.g. a test double),
+    /// call <see cref="ServiceSourcesBuilderExtensions.AddLocalKind"/> directly with your own handler
+    /// instead of this method, which cannot take one. Note that this still occupies the <c>"java"</c>
+    /// registration slot exactly as any <c>AddLocalKind</c> call would — if you don't delete it, a
+    /// later <c>AddLocalKind("java", …)</c> throws "already registered" rather than being a no-op.
     /// </summary>
     /// <remarks>
     /// Only the <c>"local"</c> source consults local kinds. A Java service reached over the
@@ -25,9 +27,11 @@ public static class JavaServiceSourcesBuilderExtensions
     /// <exception cref="ServiceSourcesConfigurationException">
     /// The <c>java</c> kind is already registered on this builder.
     /// </exception>
-    [Obsolete("UseJava() is a no-op: \"java\" is a built-in local kind and resolves without it. " +
-        "Delete the call. To register a different ILocalResourceKind for \"java\" (e.g. a test " +
-        "double), call AddLocalKind(\"java\", yourKind) directly.")]
+    [Obsolete("UseJava() does not change how \"java\" resolves - it's a built-in local kind and " +
+        "resolves the same way with or without this call. Delete the call (do not just add another " +
+        "one next to it - a later AddLocalKind(\"java\", ...) would then throw \"already " +
+        "registered\"). To register a different ILocalResourceKind for \"java\" (e.g. a test " +
+        "double), call AddLocalKind(\"java\", yourKind) directly instead.")]
     [AspireExport]
     public static IDistributedApplicationBuilder UseJava(this IDistributedApplicationBuilder builder) =>
         builder.AddLocalKind(JavaLocalResourceKind.KindName, new JavaLocalResourceKind());

@@ -1144,10 +1144,13 @@ the service no longer resolves to a Java resource, which is the point when the A
 requires one.
 
 `UseJava()`/`useJava()` (also exported to Aspire's Type System for a TypeScript AppHost) is
-**obsolete** — `java` resolves without it, and calling it registers the exact same built-in handler
-the fallback already uses, so it changes nothing. Delete the call. To substitute a *different*
-`ILocalResourceKind` for `"java"` (e.g. a test double), call `AddLocalKind("java", yourKind)`
-directly — `UseJava()` cannot take a handler argument, so it was never able to do that.
+**obsolete** — `java` resolves without it, and calling it registers an instance of the same
+built-in handler the fallback already uses, so it changes nothing about how `kind: java` resolves.
+Delete the call — don't just add an `AddLocalKind` call next to it, since `UseJava()` still occupies
+the `"java"` registration slot the same way any `AddLocalKind` call does, and a second registration
+for the same name throws. To substitute a *different* `ILocalResourceKind` for `"java"` (e.g. a test
+double), call `AddLocalKind("java", yourKind)` directly — `UseJava()` cannot take a handler
+argument, so it was never able to do that.
 
 #### Implementing a kind
 
@@ -1189,7 +1192,7 @@ public sealed class JavaScriptKind : ILocalResourceKind
     }
 }
 
-public static IDistributedApplicationBuilder UseJavaScript(this IDistributedApplicationBuilder builder) =>
+public static IDistributedApplicationBuilder UseCustomJavaScriptKind(this IDistributedApplicationBuilder builder) =>
     builder.AddLocalKind("javascript", new JavaScriptKind());
 ```
 
@@ -1594,16 +1597,16 @@ identically — but every provider above it can override an entry without the fi
 
 > **The `ServiceSources:*` keys reach the AppHost's own `IConfiguration` on its first ServiceSources
 > call, not before.** `servicesources.local.json` is a file of ours, read from the AppHost directory
-> and re-keyed into the chain by whichever ServiceSources method the AppHost calls first — a
-> `UseX()` registration, or the first `AddService()`. A read placed *above* all of them sees the
-> chain without that layer, so a selection written only in the file comes back `null`, silently,
-> since a missing key is not an error:
+> and re-keyed into the chain by whichever ServiceSources method the AppHost calls first — a call
+> like `UseDeferredCheckout()` or `AddLocalKind()`, or the first `AddService()`. A read placed
+> *above* all of them sees the chain without that layer, so a selection written only in the file
+> comes back `null`, silently, since a missing key is not an error:
 >
 > ```csharp
 > // null — nothing of ours has been called yet, so the file is not in the chain.
 > var source = builder.Configuration["ServiceSources:Services:orders:source"];
 >
-> builder.UseJavaScript();
+> builder.UseDeferredCheckout();
 >
 > // "local" — the file joined the chain on the line above.
 > source = builder.Configuration["ServiceSources:Services:orders:source"];

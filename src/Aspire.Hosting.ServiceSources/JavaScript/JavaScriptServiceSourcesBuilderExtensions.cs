@@ -6,13 +6,16 @@ namespace Aspire.Hosting.ServiceSources;
 public static class JavaScriptServiceSourcesBuilderExtensions
 {
     /// <summary>
-    /// No-op today: <c>javascript</c> is a built-in local kind, and this registers the exact same
-    /// <see cref="JavaScriptLocalKind"/> instance <c>AddService()</c> already falls back to when
-    /// nothing was registered for the name (see <see cref="Sources.LocalKindRegistry"/>). Calling it
-    /// changes nothing about how a <c>kind: javascript</c> service resolves — delete the call. To use
-    /// a *different* <see cref="ILocalResourceKind"/> for <c>"javascript"</c> (e.g. a test double),
-    /// call <see cref="ServiceSourcesBuilderExtensions.AddLocalKind"/> directly with your own handler
-    /// instead of this method, which cannot take one.
+    /// Redundant today: <c>javascript</c> is a built-in local kind, and this registers an instance of
+    /// the same built-in <see cref="JavaScriptLocalKind"/> type <c>AddService()</c> already falls back
+    /// to when nothing was registered for the name (see <see cref="Sources.LocalKindRegistry"/>).
+    /// Calling it changes nothing about how a <c>kind: javascript</c> service resolves — delete the
+    /// call. To use a *different* <see cref="ILocalResourceKind"/> for <c>"javascript"</c> (e.g. a
+    /// test double), call <see cref="ServiceSourcesBuilderExtensions.AddLocalKind"/> directly with
+    /// your own handler instead of this method, which cannot take one. Note that this still occupies
+    /// the <c>"javascript"</c> registration slot exactly as any <c>AddLocalKind</c> call would — if
+    /// you don't delete it, a later <c>AddLocalKind("javascript", …)</c> throws "already registered"
+    /// rather than being a no-op.
     /// </summary>
     /// <remarks>
     /// The options block accepts <c>appType</c> (<c>javascript</c> — the default — <c>vite</c>,
@@ -27,9 +30,11 @@ public static class JavaScriptServiceSourcesBuilderExtensions
     /// var frontend = builder.AddService("frontend"); // kind: javascript needs no registration call
     /// </code>
     /// </example>
-    [Obsolete("UseJavaScript() is a no-op: \"javascript\" is a built-in local kind and resolves " +
-        "without it. Delete the call. To register a different ILocalResourceKind for \"javascript\" " +
-        "(e.g. a test double), call AddLocalKind(\"javascript\", yourKind) directly.")]
+    [Obsolete("UseJavaScript() does not change how \"javascript\" resolves - it's a built-in local " +
+        "kind and resolves the same way with or without this call. Delete the call (do not just " +
+        "add another one next to it - a later AddLocalKind(\"javascript\", ...) would then throw " +
+        "\"already registered\"). To register a different ILocalResourceKind for \"javascript\" " +
+        "(e.g. a test double), call AddLocalKind(\"javascript\", yourKind) directly instead.")]
     [AspireExport]
     public static IDistributedApplicationBuilder UseJavaScript(this IDistributedApplicationBuilder builder) =>
         builder.AddLocalKind(JavaScriptLocalKind.KindName, new JavaScriptLocalKind());
