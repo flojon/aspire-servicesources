@@ -529,10 +529,20 @@ internal static class ServiceSourcesConfigCache
                 // retry's "already configured?" snapshot above would see *this* attempt's inserted
                 // default and wrongly treat the service as explicitly configured, silently defeating
                 // the #76 clone-storm exclusion for it. Undoing the insert keeps a retry's snapshot
-                // clean regardless of what throws here -- including the insert's own provider
-                // rebuild, not just ReadFrom or the warnings loop below it, or a future edit of this
-                // method.
-                builder.Configuration.Sources.Remove(insertedDefaultSource);
+                // clean regardless of what throws here (the insert included), now or in a future
+                // edit of this method.
+                try
+                {
+                    builder.Configuration.Sources.Remove(insertedDefaultSource);
+                }
+                catch
+                {
+                    // Remove rebuilds every remaining provider just like Insert did, so a still-faulting
+                    // one can make Remove itself throw -- after it has already dropped our entry from
+                    // the list. Swallow that second fault so the caller sees the original failure below,
+                    // not a substitute for it.
+                }
+
                 throw;
             }
 
