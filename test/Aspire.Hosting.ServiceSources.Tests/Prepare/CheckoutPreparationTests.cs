@@ -1013,6 +1013,67 @@ public class CheckoutPreparationTests
             seen == recorded || seen == after, $"a reader saw neither record whole: '{seen}'"));
     }
 
+    // ---- the marker's rename retries -----------------------------------------
+
+    /// <summary>
+    /// The mechanism that actually closes the race above: a hold on the destination that clears
+    /// before the retry budget runs out does not cost the write its result.
+    /// </summary>
+    /// <remarks>
+    /// <c>FileShare.Read</c> with no <c>Delete</c> is exactly what made <c>File.Move</c> fail in the
+    /// first place — reproduced here on demand rather than waiting for a real reader or an external
+    /// process (a virus scanner, an indexer) to land on the same instant.
+    /// </remarks>
+    [Fact]
+    public async Task Write_ADestinationHeldOpenBriefly_StillLandsTheNewRecord()
+    {
+        var directory = TempDirectories.CreateSubdirectory().FullName;
+        var markerPath = Path.Combine(directory, "marker.json");
+        File.WriteAllText(markerPath, "stale");
+
+        using var blockerOpen = new ManualResetEventSlim();
+        using var releaseBlocker = new ManualResetEventSlim();
+
+        var blocker = Task.Run(() =>
+        {
+            using var stream = new FileStream(markerPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            blockerOpen.Set();
+            releaseBlocker.Wait(TimeSpan.FromSeconds(10));
+        });
+
+        Assert.True(blockerOpen.Wait(TimeSpan.FromSeconds(10)), "the blocker never opened the file");
+
+        // Released well inside the 20 x 10ms retry budget, so Write must still be retrying rather
+        // than having already given up.
+        _ = Task.Delay(TimeSpan.FromMilliseconds(50)).ContinueWith(_ => releaseBlocker.Set());
+
+        var marker = new PrepareMarker("hash", "commit", "2024-01-01T00:00:00Z");
+        PrepareMarker.Write(markerPath, marker, directory, managedCheckout: true);
+
+        Assert.Equal(marker, PrepareMarker.Read(markerPath));
+        await blocker.WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    /// <summary>
+    /// The retry has a budget rather than looping forever, and a hold that outlasts it falls back
+    /// to the same silent drop as every other unwritable-marker case.
+    /// </summary>
+    [Fact]
+    public void Write_ADestinationHeldOpenPastTheRetryBudget_DropsSilently()
+    {
+        var directory = TempDirectories.CreateSubdirectory().FullName;
+        var markerPath = Path.Combine(directory, "marker.json");
+        File.WriteAllText(markerPath, "stale");
+
+        // Held for the whole call below — longer than the retry budget can wait out.
+        using var stream = new FileStream(markerPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+        var marker = new PrepareMarker("hash", "commit", "2024-01-01T00:00:00Z");
+        PrepareMarker.Write(markerPath, marker, directory, managedCheckout: true);
+
+        Assert.Equal("stale", File.ReadAllText(markerPath));
+    }
+
     /// <summary>
     /// The whole route, not just the function that builds the path. A name that would put the
     /// marker outside the tool directory is refused before the step runs, and nothing lands in the
