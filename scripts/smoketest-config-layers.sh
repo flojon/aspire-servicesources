@@ -25,6 +25,14 @@ PROFILE_SENTINEL="layer-appsettings-environment"
 ENVIRONMENT_SENTINEL="layer-environment"
 COMMANDLINE_SENTINEL="layer-commandline"
 
+# Unlike every other layer's "source", a catalog's defaultSource is validated against the closed
+# vocabulary the moment the yaml file loads (#158) — an arbitrary sentinel there fails before any
+# layer is even consulted, not after. "container" is used instead: 'orders' declares no
+# container.image entry, so ContainerSource fails immediately and offline with a distinct message,
+# which is what step 0 below matches on rather than the "unknown source" pattern.
+DEFAULT_SOURCE_NAME="container"
+DEFAULT_SOURCE_ERROR="no container.image entry"
+
 # The named profile these runs select. Anything but Development, which is what an AppHost falls
 # back to and so would not prove the profile was read.
 PROFILE="Smoke"
@@ -78,12 +86,13 @@ fi
 # no run here ever reaches a clone: every one of them is refused at AddService for naming a source
 # that does not exist.
 log "installing a catalog whose 'orders' entry is the subject"
-cat > "$apphost_dir/servicesources.yaml" <<'EOF'
+cat > "$apphost_dir/servicesources.yaml" <<EOF
 services:
   orders:
     repository: https://github.com/example/orders
     project: SampleService/SampleService.csproj
     defaultRef: main
+    defaultSource: $DEFAULT_SOURCE_NAME
   inventory:
     url:
       url: http://unused.invalid
@@ -167,6 +176,20 @@ output_dir="$(dirname "$target_path")"
   || fail "could not locate the built AppHost (TargetPath='$target_path')"
 [[ "$output_dir/DemoAppHost.dll" -nt "$apphost_dir/Program.cs" ]] \
   || fail "$output_dir looks stale relative to Program.cs - build it before running this"
+
+log "0. catalog defaultSource alone, no servicesources.local.json at all"
+rm -f "$apphost_dir/servicesources.local.json" "$apphost_dir/appsettings.json" "$apphost_dir/appsettings.$PROFILE.json"
+default_run_log="$cache_dir/config-layers-default.log"
+( cd "$apphost_dir" && dotnet run --project DemoAppHost.csproj --no-build ) \
+  > "$default_run_log" 2>&1 || true
+grep -qF "$DEFAULT_SOURCE_ERROR" "$default_run_log" \
+  || fail "the catalog's own defaultSource is the bottom layer, engaged when nothing else configures the service: expected '$DEFAULT_SOURCE_ERROR', got: $(tail -n1 "$default_run_log")"
+printf '    %s (the catalog default) won, as expected\n' "$DEFAULT_SOURCE_NAME"
+
+log "0b. appsettings.json overrides the catalog default, with still no servicesources.local.json"
+write_appsettings "$apphost_dir" appsettings.json "$APPSETTINGS_SENTINEL"
+expect_source "$APPSETTINGS_SENTINEL" "$(resolved_source default-appsettings project -)" \
+  "an appsettings.json layer outranks the catalog's defaultSource even with no servicesources.local.json entry at all"
 
 log "1. servicesources.local.json alone"
 write_local_json "$FILE_SENTINEL"
