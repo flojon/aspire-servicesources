@@ -314,6 +314,45 @@ public class CatalogCompositionTests
         Assert.Contains("declares more than once", ex.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Extends <see cref="YamlDeclaresTwoCaseVariants_StillAmbiguousCatalogSpellingError_NotArgumentException"/>
+    /// to the shape that check does not cover: nothing in <c>servicesources.local.json</c> ever names
+    /// either spelling, so <c>DeveloperConfiguration.CanonicalizeToCatalog</c> — which only walks a
+    /// developer's own bound entries — never visits "orders"/"Orders" at all and its
+    /// <c>AmbiguousCatalogSpellingError</c> never fires. If both case variants also declare a
+    /// <c>defaultSource</c>, <see cref="ServiceSourcesConfigCache.LoadedConfig.Load"/> builds a
+    /// <c>defaultedSources</c> projection with both
+    /// <c>ServiceSources:Services:orders:source</c> and <c>ServiceSources:Services:Orders:source</c> —
+    /// distinct under its own Ordinal comparer, but colliding once
+    /// <c>MemoryConfigurationProvider</c> rebuilds its data under <c>OrdinalIgnoreCase</c>. That must
+    /// surface as a clean <see cref="ServiceSourcesConfigurationException"/>, not a raw
+    /// <see cref="ArgumentException"/> out of the BCL.
+    /// </summary>
+    [Fact]
+    public void YamlDeclaresTwoCaseVariants_BothDefaultSourced_ThrowsCleanError_NotArgumentException()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              orders:
+                url:
+                  url: https://a.example
+                defaultSource: url
+              Orders:
+                url:
+                  url: https://b.example
+                defaultSource: url
+            """);
+        // No servicesources.local.json at all: neither spelling is ever named by developer config.
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.Contains("case", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("defaultSource", ex.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void AddServiceCatalog_LookupAgainstYamlOnly_StaysOrdinal()
     {

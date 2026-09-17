@@ -439,6 +439,16 @@ internal static class ServiceSourcesConfigCache
             var defaultedSources = new Dictionary<string, string?>(StringComparer.Ordinal);
             var defaultedServiceNames = new HashSet<string>(StringComparer.Ordinal);
 
+            // Keyed case-insensitively, unlike defaultedSources/defaultedServiceNames themselves:
+            // `catalog.Services` is Ordinal and deliberately tolerates two entries differing only by
+            // case (AmbiguousCatalogSpellingError only fires once a developer's own config names one
+            // of them, which this projection runs ahead of). If both of those entries also declare a
+            // defaultSource, the two keys below are distinct under Ordinal but collide once
+            // MemoryConfigurationProvider rebuilds its data under OrdinalIgnoreCase -- surfacing as a
+            // raw ArgumentException out of Sources.Insert instead of a catalog-authoring-time error.
+            // Caught here, before that insert, so it is this exception instead.
+            var defaultedSpellings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
             foreach (var (name, definition) in catalog.Services)
             {
                 if (definition.DefaultSource is not { } defaultSource)
@@ -457,6 +467,15 @@ internal static class ServiceSourcesConfigCache
                     continue;
                 }
 
+                if (defaultedSpellings.TryGetValue(name, out var existingSpelling))
+                {
+                    throw new ServiceSourcesConfigurationException(
+                        $"'{name}' and '{existingSpelling}' both declare a defaultSource, and differ only by " +
+                        "case. Configuration keys are case-insensitive, so there is no key that reaches one " +
+                        "default and not the other -- rename one of them so they differ by more than case.");
+                }
+
+                defaultedSpellings.Add(name, name);
                 defaultedSources[key] = defaultSource;
                 defaultedServiceNames.Add(name);
             }

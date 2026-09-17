@@ -151,6 +151,27 @@ public class ServiceDefinitionBuilderTests
         Assert.Contains("container", ex.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A null <c>source</c> can reach here without the compiler's help — the AspireExport interop
+    /// boundary from a guest language is not type-checked the way a direct C# call is. There is no
+    /// explicit null guard before <c>ValidateSourceName</c>'s <c>HashSet&lt;string&gt;.Contains</c>
+    /// call, but that is not a gap: <c>HashSet&lt;string&gt;.Contains(null)</c> returns <see
+    /// langword="false"/> rather than throwing, so a null value already falls through to the same
+    /// domain exception an invalid string gets, not a raw <see cref="ArgumentNullException"/>.
+    /// </summary>
+    [Fact]
+    public void WithDefaultSource_NullValue_ThrowsConfigurationExceptionNotArgumentNullException()
+    {
+        var chain = new ServiceCatalogBuilder().AddService("orders")
+            .WithRepository("https://github.com/example/repo");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => chain.WithDefaultSource(null!));
+
+        Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("not a valid source", ex.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void WithDefaultSource_NotCalled_DefaultSourceStaysNull()
     {
