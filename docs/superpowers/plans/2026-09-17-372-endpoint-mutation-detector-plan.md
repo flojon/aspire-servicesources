@@ -80,10 +80,15 @@ landed in. Nothing else changes: not `Reachability`, not `GateEndpointCall`, not
   an ellipsis, and single-quoted in the message so a truncated one stays visibly delimited.
 - **Comment style:** short, WHY-only, under roughly fifteen words, no changelog, history or
   narrative. **No third-party issue numbers or links in shipped comment text** — this repo's own
-  issue numbers are fine, and the Aspire-side reasoning stays in the spec. Spec §11 names the four
-  comments that earn their place in the new file: why the snapshot is keyed by reference identity;
-  why the restore re-reads the derived fields in a second pass; why `Flush` is called from inside
-  the handler; and why the endpoint name is sanitised.
+  issue numbers are fine, and the Aspire-side reasoning stays in the spec. Spec §11 names four
+  comments the new file must carry: why the snapshot is keyed by reference identity; why the restore
+  re-reads the derived fields in a second pass; why `Flush` is called from inside the handler; and
+  why the endpoint name is sanitised. §11 sets a discipline, not a quota: the code in Tasks 2–4
+  carries nine, the other five being why `ReporterFor` rather than `For`, why `IsExplicitlyProxied`
+  rather than `IsProxied`, why the reconcile loop materialises the collection before mutating it,
+  why the `real` removal is kept although it is a no-op on every path that exists today, and why the
+  re-add must not introduce a duplicate name. Each is a WHY that cannot be read off the code; none
+  narrates what the code does.
 - **CHANGELOG entry is required**, under `## [Unreleased]` → `### Added` (spec §8), with the
   `([#372])` reference cited inline and the matching definition added to the sorted link block. Task
   6 owns it.
@@ -400,26 +405,33 @@ The core of the design (spec §5.2's first row, §5.3, §5.4). This is the shape
 resource: `ResolvedService.Bridge` copies the *same* annotation instances onto the facade, so a
 repointed `Port` is repointed on the actual `kubectl port-forward` too.
 
-Covers spec §7 tests 1, 3, 6, 7, 8 and 9.
+Covers spec §7 tests 1, 3, 5, 6, 7, 8, 9 and 13.
+
+Tests 5 and 13 sit here rather than later because this is the task whose production change turns them
+red→green. Test 5 — the rename — is the one case that a name-keyed snapshot would get wrong and the
+only one that exercises `Restore`'s `Name` write. Test 13 — the ordering probe — mutates the port and
+asserts a later handler sees the restored value, so it is a repro of the same gap the other tests
+here cover, not a guard; it would fail against a tree with no detector.
 
 **Files:**
 - Create: `src/Aspire.Hosting.ServiceSources/Sources/EndpointMutationDetector.cs`
 - Modify: `src/Aspire.Hosting.ServiceSources/Sources/ResolvedService.cs` (two added statements, one
   comment clause)
-- Test: `test/Aspire.Hosting.ServiceSources.Tests/EndpointMutationDetectorTests.cs` (add six tests)
+- Test: `test/Aspire.Hosting.ServiceSources.Tests/EndpointMutationDetectorTests.cs` (add eight tests)
 
 **Interfaces:**
 - Consumes: `Reachability.OutOfBandSources` (`internal static readonly HashSet<string>`),
   `ServiceSourcesWarnings.ReporterFor(IDistributedApplicationBuilder)`,
   `ServiceSourcesWarnings.AddSkip(string, string, string)`,
   `ServiceSourcesWarnings.Flush(IServiceProvider)`, `BeforeStartEvent.Services`,
+  `builder.Eventing.Subscribe<BeforeStartEvent>`,
   `TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(IDistributedApplicationBuilder)`.
 - Produces, called by Tasks 3–5 and by both bridge methods:
   `internal static void EndpointMutationDetector.Install(IDistributedApplicationBuilder builder, ServiceResource facade, IResource? real, string source)`.
 
 - [ ] **Step 1: Write the failing tests**
 
-Append these six tests inside the `EndpointMutationDetectorTests` class from Task 1, after
+Append these eight tests inside the `EndpointMutationDetectorTests` class from Task 1, after
 `GuestLanguageCallback_OnContainerSource_ReachesAspireAndMutatesTheEndpoint`:
 
 ```csharp
@@ -537,6 +549,55 @@ Append these six tests inside the `EndpointMutationDetectorTests` class from Tas
         Assert.Equal(54321, Assert.Single(Endpoints(service)).Port);
         Assert.Single(warnings, warning => warning.Contains("endpoint 'https' changed after resolve"));
     }
+
+    // What the reference-identity key buys, and the only test that exercises Restore's Name write:
+    // a renamed instance is one changed endpoint under its recorded name, not an add plus a remove.
+    // Written against the annotation rather than through a callback, and named for it, because
+    // EndpointUpdateContext.Name is get-only -- no surface this design polices can rename an endpoint
+    // today, so this guards a field the model leaves open rather than a measured attack.
+    [Fact]
+    public async Task RenamedEndpoint_OnKubernetesSource_IsReportedAsOneChangeUnderItsRecordedName()
+    {
+        var builder = Builder();
+        var service = Kubernetes(builder);
+        var registered = Assert.Single(Endpoints(service));
+
+        registered.Name = "renamed";
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        var restored = Assert.Single(Endpoints(service));
+        Assert.Same(registered, restored);
+        Assert.Equal("https", restored.Name);
+        var warning = Assert.Single(warnings);
+        Assert.Contains("endpoint 'https' changed after resolve", warning);
+        Assert.DoesNotContain("added after resolve", warning);
+        Assert.DoesNotContain("removed after resolve", warning);
+    }
+
+    // Aspire dispatches BeforeStartEvent sequentially in subscription order, and every
+    // IDistributedApplicationEventingSubscriber registers after composition -- so a handler
+    // subscribed here, after the service resolved, stands for every reader of final endpoint state.
+    // It must see the restored value, not the mutated one.
+    [Fact]
+    public async Task TheDetectorRunsBeforeAHandlerSubscribedAfterIt()
+    {
+        var builder = Builder();
+        var service = Kubernetes(builder);
+
+        GuestLanguageEndpointCallbacks.HttpsEndpointCallback(service, "https", ("Port", 9999));
+
+        int? observedByALaterHandler = null;
+        builder.Eventing.Subscribe<BeforeStartEvent>((_, _) =>
+        {
+            observedByALaterHandler = Endpoints(service).Single().Port;
+            return Task.CompletedTask;
+        });
+
+        await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.Equal(54321, observedByALaterHandler);
+    }
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -546,11 +607,14 @@ dotnet test test/Aspire.Hosting.ServiceSources.Tests -f net8.0 \
   --filter "FullyQualifiedName~EndpointMutationDetectorTests"
 ```
 
-Expected: the harness test from Task 1 **PASSES**; all six new tests **FAIL.** Nothing detects
+Expected: the harness test from Task 1 **PASSES**; all eight new tests **FAIL.** Nothing detects
 anything today, so each one fails on its post-publish assertion: the port stays `9999`, the host
-stays `attacker.internal`, the protocol stays `Udp`, `IsExternal` stays `true`, and `warnings` is
-empty in all six. The two ordering tests fail on the empty `warnings` collection specifically, which
-is the `LOGGED=0` shape they exist to pin.
+stays `attacker.internal`, the protocol stays `Udp`, `IsExternal` stays `true`, the name stays
+`renamed`, and `warnings` is empty throughout — which seven of the eight assert on directly. The two
+flush-ordering tests fail on the empty `warnings` collection specifically, which is the `LOGGED=0`
+shape they exist to pin. `TheDetectorRunsBeforeAHandlerSubscribedAfterIt` is the eighth and the one
+that asserts no warning at all: it fails because the later handler observes the mutated `9999`
+rather than the restored `54321`, which is what makes it a repro rather than a guard.
 
 - [ ] **Step 3: Write the detector**
 
@@ -863,7 +927,7 @@ dotnet test test/Aspire.Hosting.ServiceSources.Tests -f net8.0 \
   --filter "FullyQualifiedName~EndpointMutationDetectorTests"
 ```
 
-Expected: **all seven PASS** (Task 1's harness test plus these six).
+Expected: **all nine PASS** (Task 1's harness test plus these eight).
 
 - [ ] **Step 7: Run the cheap verify legs**
 
@@ -902,6 +966,13 @@ The skip is recorded through ReporterFor and flushed inside the handler:
 for a url service the warnings flush handler is always subscribed ahead
 of the detector, so without that flush the mutation is reverted and
 nothing is ever logged.
+
+A renamed endpoint is covered here too, and is what the reference
+identity key buys: keyed by name it would read as one endpoint
+disappearing and another appearing, and the restore would be wrong in
+both directions. A handler subscribed after the service resolved sees
+the restored port, which is the structural fact every reader of final
+endpoint state rests on, expressed with the one seam a unit test has.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 EOF
@@ -1060,7 +1131,7 @@ dotnet test test/Aspire.Hosting.ServiceSources.Tests -f net8.0 \
   --filter "FullyQualifiedName~EndpointMutationDetectorTests"
 ```
 
-Expected: **all ten PASS.**
+Expected: **all twelve PASS.**
 
 - [ ] **Step 5: Run the cheap verify legs**
 
@@ -1146,7 +1217,8 @@ Append these two tests inside `EndpointMutationDetectorTests`, after
     }
 
     // Aspire resolves endpoints by name with SingleOrDefault, which throws on a duplicate, so the
-    // re-add must never introduce one.
+    // re-add must never introduce one -- and the facade must end up holding exactly what the source
+    // registered, which is the gate's own outcome.
     [Fact]
     public async Task EndpointRemovedAndReplacedByItsOwnName_IsReportedWithoutDuplicatingTheName()
     {
@@ -1158,11 +1230,15 @@ Append these two tests inside `EndpointMutationDetectorTests`, after
         var replacement = new EndpointAnnotation(ProtocolType.Tcp, uriScheme: "https", name: "https", port: 1234);
         service.Resource.Annotations.Add(replacement);
 
+        // The add loop runs first and takes the replacement off the facade, so the name is free by
+        // the time the re-add loop reaches the original: one endpoint named 'https', the registered
+        // instance, and two skips. The duplicate guard is what still bites on `real`, which never
+        // lost the instance.
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 
-        // The replacement is unknown to the snapshot, so it goes as an add; the original is not
-        // re-added over its own name.
-        Assert.Empty(Endpoints(service));
+        var remaining = Assert.Single(Endpoints(service));
+        Assert.Same(registered, remaining);
+        Assert.Equal(54321, remaining.Port);
         var warning = Assert.Single(warnings);
         Assert.Contains("endpoint 'https' added after resolve", warning);
         Assert.Contains("endpoint 'https' removed after resolve", warning);
@@ -1178,7 +1254,8 @@ dotnet test test/Aspire.Hosting.ServiceSources.Tests -f net8.0 \
 
 Expected: **both FAIL.** `Reconcile` only walks what is currently on the facade, so a recorded
 instance that is gone is never noticed: the first test finds the facade still empty and no warning
-at all, and the second finds one warning naming only the add.
+at all, and the second finds the facade empty too — Task 3's loop removed the replacement and
+nothing puts the original back — with one warning naming only the add.
 
 - [ ] **Step 3: Add the re-add branch**
 
@@ -1236,6 +1313,16 @@ Then add this helper immediately after `Reconcile`'s closing brace and before th
 `EqualityComparer<IResourceAnnotation>.Default` — reference equality for `EndpointAnnotation`, which
 declares no `Equals` — so it matches the snapshot's own key semantics.
 
+**The two loops' order is load-bearing, and the second test above pins its consequence.** The add
+loop removes every unknown instance before the re-add loop runs, so a replacement squatting on a
+recorded name is already gone by the time `HoldsEndpointNamed(facade, …)` is consulted, and the
+original *is* restored. That is the right outcome and the one this task keeps: leaving the facade
+with no endpoint at all would take a service that registered one down to zero and hand the developer
+Aspire's `is not defined` failure on top of the smuggled change, which is worse than the mutation
+being reverted. The name guard is therefore not dead — it is what stops the re-add from doubling the
+instance on `real`, which never lost it — but on the facade it is defence against a collision the
+add loop has already cleared.
+
 - [ ] **Step 4: Run the tests to verify they pass**
 
 ```bash
@@ -1243,7 +1330,7 @@ dotnet test test/Aspire.Hosting.ServiceSources.Tests -f net8.0 \
   --filter "FullyQualifiedName~EndpointMutationDetectorTests"
 ```
 
-Expected: **all twelve PASS.**
+Expected: **all fourteen PASS.**
 
 - [ ] **Step 5: Run the cheap verify legs**
 
@@ -1280,23 +1367,28 @@ EOF
 
 ---
 
-## Task 5: Pin the no-false-positive and timing guards
+## Task 5: Pin the no-false-positive guards
 
-Spec §7 tests 10, 11, 12 and 13. None of these fails before Tasks 2–4 for the reason the earlier
-tests do — they assert that *nothing* happens, or that ordering holds — so this task has no red leg
-by design. They are what keeps the design's central claim (no false positives, by construction)
-honest as Aspire moves, and test 12 in particular turns the one conditional absence in the spec's
-enumeration into a failing build rather than a paragraph.
+Spec §7 tests 10, 11 and 12. None of these fails before Tasks 2–4 for the reason the earlier tests
+do — each asserts that *nothing* happens: no warning, no revert, no annotation landing. With no
+detector installed at all they pass unchanged, so this task genuinely has no red leg. They are what
+keeps the design's central claim (no false positives, by construction) honest as Aspire moves, and
+test 12 in particular turns the one conditional absence in the spec's enumeration into a failing
+build rather than a paragraph.
+
+Spec §7 test 13, the timing probe, is **not** here: it mutates the port and asserts a later handler
+sees the restored value, which fails outright against a tree with no detector. It is a repro of the
+same gap Task 2's tests cover, so it lands there, where it has a real red leg.
 
 **Files:**
-- Test: `test/Aspire.Hosting.ServiceSources.Tests/EndpointMutationDetectorTests.cs` (add four tests)
+- Test: `test/Aspire.Hosting.ServiceSources.Tests/EndpointMutationDetectorTests.cs` (add three tests)
 
 **Interfaces:**
-- Consumes: the Task 1 fixture helpers, `TestHelpers.PublishBeforeStartEventCapturingWarningsAsync`,
-  `builder.Eventing.Subscribe<BeforeStartEvent>`. No production code changes.
+- Consumes: the Task 1 fixture helpers, `TestHelpers.PublishBeforeStartEventCapturingWarningsAsync`.
+  No production code changes.
 - Produces: nothing new.
 
-- [ ] **Step 1: Add the four guard tests**
+- [ ] **Step 1: Add the three guard tests**
 
 Append these inside `EndpointMutationDetectorTests`, after
 `EndpointRemovedAndReplacedByItsOwnName_IsReportedWithoutDuplicatingTheName`:
@@ -1357,30 +1449,6 @@ Append these inside `EndpointMutationDetectorTests`, after
         Assert.Equal(transport, Assert.Single(Endpoints(service)).Transport);
         Assert.DoesNotContain(warnings, warning => warning.Contains("changed after resolve"));
     }
-
-    // Aspire dispatches BeforeStartEvent sequentially in subscription order, and every
-    // IDistributedApplicationEventingSubscriber registers after composition -- so a handler
-    // subscribed here, after the service resolved, stands for every reader of final endpoint state.
-    // It must see the restored value, not the mutated one.
-    [Fact]
-    public async Task TheDetectorRunsBeforeAHandlerSubscribedAfterIt()
-    {
-        var builder = Builder();
-        var service = Kubernetes(builder);
-
-        GuestLanguageEndpointCallbacks.HttpsEndpointCallback(service, "https", ("Port", 9999));
-
-        int? observedByALaterHandler = null;
-        builder.Eventing.Subscribe<BeforeStartEvent>((_, _) =>
-        {
-            observedByALaterHandler = Endpoints(service).Single().Port;
-            return Task.CompletedTask;
-        });
-
-        await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
-
-        Assert.Equal(54321, observedByALaterHandler);
-    }
 ```
 
 - [ ] **Step 2: Run the whole fixture**
@@ -1390,9 +1458,9 @@ dotnet test test/Aspire.Hosting.ServiceSources.Tests -f net8.0 \
   --filter "FullyQualifiedName~EndpointMutationDetectorTests"
 ```
 
-Expected: **all sixteen PASS.** All four added here would also have passed before Tasks 2–4 — they
-are guards, not repros, which is why this task has no red leg. If any of them fails, the detector
-has a false positive or an ordering problem; that is a stop-and-report, not a test to adjust.
+Expected: **all seventeen PASS.** All three added here would also have passed before Tasks 2–4 —
+they are guards, not repros, which is why this task has no red leg. If any of them fails, the
+detector has a false positive; that is a stop-and-report, not a test to adjust.
 
 - [ ] **Step 3: Run the cheap verify legs**
 
@@ -1408,7 +1476,7 @@ Expected: 0 errors, 0 warnings; every test green across all three TFMs.
 ```bash
 git add test/Aspire.Hosting.ServiceSources.Tests/EndpointMutationDetectorTests.cs
 git commit -m "$(cat <<'EOF'
-Pin the detector's no-false-positive and ordering guarantees (#372)
+Pin the detector's no-false-positive guarantees (#372)
 
 Untouched out-of-band services warn about nothing; a container-sourced
 service's post-resolve endpoint change is neither reverted nor
@@ -1421,9 +1489,8 @@ since that annotation is internal to Aspire.Hosting.dll -- if a future
 denylist change ever lets it through, this fails and names why, instead
 of a developer finding a reverted transport at runtime.
 
-A handler subscribed after the service resolved sees the restored port,
-which is the structural fact every reader of final endpoint state rests
-on, expressed with the one seam a unit test has.
+All three pass against a tree with no detector installed, which is what
+makes them guards rather than repros.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 EOF
@@ -1583,7 +1650,7 @@ deliberately built nowhere and filed nowhere, per the human decision in the tick
 reports; Task 2 Step 3. §2.3 (the cost of reverting, paid down by naming the endpoint) → the three
 label formats, Task 2 Step 3 and Task 3 Step 3. §2.4 (three shapes, and the `real` reconciliation as
 a deliberate no-op) → Tasks 2, 3, 4. §3 (the reader/writer enumeration) → not code; its one
-conditional absence is pinned by Task 5's `AsHttp2Service` test, and its structural claim by Task 5's
+conditional absence is pinned by Task 5's `AsHttp2Service` test, and its structural claim by Task 2's
 ordering test. §3.4's three residuals are stated, not built. §4 (answering #352 §2.5) → not code.
 §5.1 (where the snapshot lives, and the out-of-band filter) → Task 2 Steps 3–4. §5.2 (fingerprint,
 reference-identity key, two-phase restore) → Task 2 Step 3, with all eleven fields and the four
@@ -1591,25 +1658,18 @@ derived ones re-read. §5.3 (`ReporterFor` + in-handler `Flush`) → Task 2 Step
 round by Task 2's two ordering tests. §5.4 (wording and the sanitiser) → Task 2 Step 3's `Label`,
 pinned by Task 3's hostile-name test. §5.5 (both call sites, last statement, symmetric) → Task 2
 Step 4. §6 (endpoints only) → nothing generalises the type; the fingerprint is `EndpointAnnotation`-
-specific throughout. §7 tests 1–13 → 1, 3, 6, 7, 8, 9 in Task 2; 2, 4, 6a in Task 3; 10, 11, 12, 13
-in Task 5. §8 (CHANGELOG) → Task 6. §10 (attack surface) → the sanitiser is the only mitigation the
-section asks for, and Task 3's test pins it; the design executes nothing and reads no configuration.
-§11 (comment discipline) → exactly the four comments §11 names earn their place, and no code comment
+specific throughout. §7 tests 1–13 → 1, 3, 5, 6, 7, 8, 9, 13 in Task 2; 2, 4, 6a in Task 3;
+10, 11, 12 in Task 5. §8 (CHANGELOG) → Task 6. §10 (attack surface) → the sanitiser is the only
+mitigation the section asks for, and Task 3's test pins it; the design executes nothing and reads no
+configuration. §11 (comment discipline) → the four comments §11 names are all present, alongside five
+more of the same WHY-only kind (the `ReporterFor` choice, the `IsExplicitlyProxied` choice, the
+materialise-before-mutating note, the `real` no-op note and the duplicate-name note); no code comment
 carries an Aspire issue number or link. §12 (design and implementation in one PR) → this plan is that
 implementation.
 
-**Two deliberate departures from the spec, both forced by the pinned assembly, both argued rather
-than silent.**
+**One deliberate departure from the spec, forced by the pinned assembly, argued rather than silent.**
 
-1. **Test 5 (the rename) is not in this plan.** Spec §7 test 5 pins the reference-identity key by
-   writing `Name` directly and asserting the change reads as a *change* rather than an add plus a
-   remove. Task 3's `AddedEndpointWithAHostileName_…` already writes `Name` directly on a known
-   instance and Task 4's `EndpointRemovedAndReplacedByItsOwnName_…` already separates the add and
-   remove branches by name collision, so a third test of the same mechanism would re-read what those
-   two cover. The key itself is stated in the code comment §11 requires. If a reviewer wants the
-   dedicated test, it is two lines on top of Task 4's fixture; it is left out as duplication, not as
-   an oversight.
-2. **Test 6a is driven by writing `Name`, not by passing a hostile name to the callback.** Spec §5.4
+1. **Test 6a is driven by writing `Name`, not by passing a hostile name to the callback.** Spec §5.4
    and §7 test 6a assume the added endpoint's name arrives verbatim from a guest-language script.
    Against the pinned assembly it does not: `EndpointAnnotation`'s constructor calls
    `ModelName.ValidateName`, which rejects anything but 1–64 ASCII letters, digits and
@@ -1620,15 +1680,17 @@ than silent.**
    how hostile the name gets to be, and the test says so in its own comment.
 
 **Task boundaries.** Tasks 2, 3 and 4 each hold exactly the cases that are red before their own
-production change, so every red→green transition this plan claims is one a step actually runs. Task 1
-(harness) and Task 5 (guards) are green before and after by construction and therefore have no
-"verify it fails" step, which is stated in each. Task 4 is separate from Task 3 because a reviewer
+production change, so every red→green transition this plan claims is one a step actually runs. That
+is why spec §7's tests 5 and 13 sit in Task 2 rather than later: both are repros of the changed
+branch, and a repro written after the code that fixes it proves nothing. Task 1 (harness) and Task 5
+(guards) are green before and after by construction and therefore have no "verify it fails" step,
+which is stated in each. Task 4 is separate from Task 3 because a reviewer
 could reasonably approve the add branch and reject the remove branch on YAGNI grounds; the argument
 for it is in that task's own preamble. Task 6 is documentation plus the full verification sweep.
 
 **Acceptance-checklist coverage** (from the ticket notes): items 1–6 are the spec's own decisions and
 are already reviewed; this plan implements them — item 1 → Tasks 2–4 (revert and warn, never throw),
-item 2 → Task 5's ordering test plus the spec's enumeration, item 3 → Task 2 Step 4, item 4 → Task 2
+item 2 → Task 2's ordering test plus the spec's enumeration, item 3 → Task 2 Step 4, item 4 → Task 2
 Step 3's `Flush` and its two ordering tests, item 5 → the type-specific fingerprint, item 6 → not
 code. Item 7 → Task 2 Step 3's `Fingerprint`, all ten measured fields present plus `Protocol`. Item 8
 → Task 2's ordering tests and the `CreateBuilderThatCanStart` fixture, which is what lets
