@@ -389,10 +389,8 @@ public static class ServiceSourcesBuilderExtensions
     /// overload was never projected to guest languages in the first place.
     /// </summary>
     /// <remarks>
-    /// It is also the only overload whose delegation needs wrapping: its add branch is the one place
-    /// in Aspire's whole extension class that adds an annotation by direct <c>Annotations.Add</c>
-    /// instead of <c>builder.WithAnnotation</c>, so the new endpoint would otherwise sit on the
-    /// facade alone and never reach the resource DCP runs.
+    /// It is also the only overload whose delegation needs wrapping — see
+    /// <see cref="ServiceResourceBuilder.ForwardingAnnotationsAddedBy"/>.
     /// </remarks>
     [AspireExportIgnore(Reason = "Polyglot app hosts use the internal withEndpointCallback export, which exposes EndpointUpdateContext instead of EndpointAnnotation.")]
     public static IResourceBuilder<ServiceResource> WithEndpoint(

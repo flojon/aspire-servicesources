@@ -238,6 +238,39 @@ public class EndpointSkipGapRepro
             + $"text={(warnings.Count > 0 ? warnings[0] : "<none>")}");
     }
 
+    // The add branch through the callback overload against a kubernetes source. Unlike the "url"
+    // case above, `Real` here is a live kubectl port-forward executable, so the forward's own null
+    // check offers no protection and GateEndpointCall is the only thing standing in front of it.
+    [Fact]
+    public void NewEndpoint_OnKubernetesSource_ViaCallback_IsSkippedAndReported()
+    {
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
+        var service = new KubernetesSource(new FakePortAllocator(54321))
+            .Resolve(builder, "orders", KubernetesDefinition(), KubernetesDevConfig());
+        var real = ((ServiceResourceBuilder)service).Real!.Resource.Annotations;
+
+        var beforeOnReal = real.OfType<EndpointAnnotation>().ToArray();
+        var callbackInvoked = false;
+
+        // Routed through OverloadProbe — see OverloadResolutionProbe.cs for why.
+        OverloadProbe.CallWithEndpointCallback(service, "admin", endpoint =>
+        {
+            callbackInvoked = true;
+            endpoint.Port = 9999;
+        });
+
+        var warnings = ServiceSourcesWarnings.For(builder).Messages;
+
+        Assert.False(callbackInvoked);
+        Assert.DoesNotContain(real.OfType<EndpointAnnotation>(), e => e.Name == "admin");
+        Assert.Equal(beforeOnReal, real.OfType<EndpointAnnotation>().ToArray());
+        Assert.DoesNotContain(service.Resource.Annotations.OfType<EndpointAnnotation>(), e => e.Name == "admin");
+        Assert.True(
+            warnings.Count == 1 && warnings[0].Contains("WithEndpoint/WithHttpEndpoint/WithHttpsEndpoint"),
+            $"endpoints on real={real.OfType<EndpointAnnotation>().Count()}; warnings={warnings.Count}; "
+            + $"text={(warnings.Count > 0 ? warnings[0] : "<none>")}");
+    }
+
     // Round-1 security-review regression: GateEndpointCall must read `source` from
     // ServiceResourceBuilder's own closure-captured field, not by re-scanning `Resource.Annotations`
     // for ServiceSourceAnnotation — that collection is public and mutable, so stripping just that one

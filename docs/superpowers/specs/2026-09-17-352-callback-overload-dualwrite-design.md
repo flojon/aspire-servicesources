@@ -314,11 +314,17 @@ If `real` ever carried an `EndpointAnnotation` with the same *name* as the forwa
 different instance, the forward would produce two same-named endpoints on `real`. This design does
 **not** guard against that, deliberately:
 
-- No current code path produces it. `Bridge` copies every real annotation onto the facade at bridge
-  time, and an audit of every `Annotations.Add` in `src/` finds no post-bridge real-only endpoint
-  write — `DeferredCheckout.RestoreLaunchProfile` (the one genuinely late write) adds its
-  `EnvironmentCallbackAnnotation` to both collections by hand, and `UrlSource`'s endpoint goes to a
-  facade with no real resource at all.
+- No code path *inside this package* produces it. `Bridge` copies every real annotation onto the
+  facade at bridge time, and an audit of every `Annotations.Add` in `src/` finds no post-bridge
+  real-only endpoint write — `DeferredCheckout.RestoreLaunchProfile` (the one genuinely late write)
+  adds its `EnvironmentCallbackAnnotation` to both collections by hand, and `UrlSource`'s endpoint
+  goes to a facade with no real resource at all.
+- An AppHost *can* reach the state from outside, through the public
+  `ServiceConfigurationExtensions.Unwrap<T>()`: endpoints written on the unwrapped real builder are
+  never mirrored back to the facade, so a later facade-side add of the same name lands on `real`
+  twice. This is not a new failure mode — the numeric overloads, the reference behaviour, produce
+  the identical result today, and Aspire itself does not reject a duplicate endpoint name at
+  builder time. The root cause is `Unwrap` bypassing the facade, not the forward.
 - Guarding it means name matching, which means copying `StringComparisons.EndpointAnnotationName`
   (§2.2) — reintroducing the exact dependency Option A was chosen to avoid, to defend a state that
   cannot currently occur.
