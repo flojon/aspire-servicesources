@@ -87,4 +87,40 @@ public class EndpointCallbackDualWriteTests
         Assert.Same(onFacade, onReal);
         Assert.Equal(9500, onReal.Port);
     }
+
+    [Fact]
+    public void CallbackWithCreateIfNotExistsFalse_OnContainerSource_AddsNothingAndNeverInvokesTheCallback()
+    {
+        var builder = Builder();
+        var service = ContainerService(builder, "orders");
+        var callbackInvoked = false;
+
+        service.WithEndpoint("nope", _ => callbackInvoked = true, createIfNotExists: false);
+
+        Assert.False(callbackInvoked);
+        Assert.Empty(service.Resource.Annotations.OfType<EndpointAnnotation>());
+        Assert.Empty(RealAnnotations(service).OfType<EndpointAnnotation>());
+        Assert.Empty(ServiceSourcesWarnings.For(builder).Messages);
+    }
+
+    // The drift detector for scoping the forward to one call site: the numeric overloads are left
+    // unwrapped because their add branch ends in builder.WithAnnotation and so dual-writes already.
+    // If this fails against a newer Aspire, that stopped being true and the numeric shadows need the
+    // same wrap -- which is safe, since the identity guard makes it a no-op when it is not needed.
+    [Fact]
+    public void NumericAddBranch_OnContainerSource_StillReachesTheRealResource()
+    {
+        var builder = Builder();
+        var service = ContainerService(builder, "orders");
+
+        service.WithEndpoint(port: 9400, name: "metrics", scheme: "http");
+
+        var onFacade = Assert.Single(
+            service.Resource.Annotations.OfType<EndpointAnnotation>(), e => e.Name == "metrics");
+        var onReal = Assert.Single(
+            RealAnnotations(service).OfType<EndpointAnnotation>(), e => e.Name == "metrics");
+
+        Assert.Same(onFacade, onReal);
+        Assert.Equal(9400, onReal.Port);
+    }
 }
