@@ -134,7 +134,11 @@ skipped and every call lands on the update branch — which hands the caller the
 
 `WithEndpointCallback` is worse still: its add branch is `builder.Resource.Annotations.Add(...)`
 directly, never `WithAnnotation`, so a brand-new endpoint name is ungated too. That is the same
-underlying defect #352 records for reachable sources, seen from the reachability side.
+underlying Aspire behaviour #352 reported from the reachable side, and #366 has since fixed #352 —
+but only for C#, by wrapping this package's own shadow in
+`ServiceResourceBuilder.ForwardingAnnotationsAddedBy`. The guest-language path invokes
+`Aspire.Hosting/withEndpointCallback` directly and never reaches that shadow, so every measurement
+above is unchanged by it; re-checked against the landed fix rather than assumed.
 
 `EndpointUpdateContext` exposes settable `Protocol`, `Port`, `TargetPort`, `UriScheme`, `TargetHost`,
 `Transport`, `IsExternal`, `IsProxied`, `ExcludeReferenceEndpoint`, `TlsEnabled`.
@@ -254,7 +258,30 @@ uniformly.
 (`WithEndpointProxySupport`, the other suspect on the handle, goes through `WithAnnotation` and is
 correctly gated today.)
 
-### 4.6 Open questions for the design pass
+### 4.6 Against #352's design, which rejected a `BeforeStartEvent` sweep
+
+[`2026-09-17-352-callback-overload-dualwrite-design.md`](2026-09-17-352-callback-overload-dualwrite-design.md)
+§2.5 considered and rejected "reconcile facade-only annotations onto `real` at `BeforeStartEvent`",
+noting it was the only option that would also cover #353. That rejection stands for what it was
+aimed at, and does not carry over wholesale to §4 — the two mechanisms point in opposite directions,
+so the reasons have to be taken one at a time rather than cited as a settled verdict either way.
+
+| §2.5's reason | Does it apply here? |
+|---|---|
+| "Converts a fail-closed design into a fail-open one" | **No — inverted.** Option E copies facade annotations *onto* `real`, carrying the mutation through. §4 restores the resolve-time values and reports a skip, which is the fail-closed direction §2.5 is defending. |
+| "Fights code that deliberately un-mirrors" (`DropWaitsOnUrlServices`, `ServiceWaitRetargeting`, `RealToFacadeRegistry`) | **Mostly no.** Those make the facade and `real` differ deliberately; §4 never compares the two. It compares the facade against its own resolve-time snapshot, and only for `EndpointAnnotation`. §4.3 records the check that nothing in `src/` writes an endpoint tuple in between. |
+| "Its timing is unproven" | **Partly yes, and it is the fair challenge.** §4.2 establishes that `BeforeStartEvent` precedes DCP and fires in both execution modes; it does not enumerate every reader of an endpoint. §2.5 could dismiss the question by reaching for AppHost-composition time, which is provably early enough. #353 has no such alternative — the call never reaches this package — so "is it early enough" has to be answered on its merits rather than sidestepped. A design pass owes that answer. |
+
+One line of §2.5 is simply overtaken: "#353 stays uncovered either way; it is `internal` API, and
+widening this ticket to chase it would buy coverage of an **unconfirmed** gap …". The gap is confirmed
+above, and the scoping decision it justified was right regardless — #366 was not the ticket to widen.
+
+Worth recording on the other side of the ledger: #366 shipped
+`ServiceResourceBuilder.ForwardingAnnotationsAddedBy`, a reference-identity diff of a resource's
+annotations across a call. That is the same technique §4.1 prototypes, now accepted in-tree — so the
+mechanism is not novel here, only its placement and its fail-closed direction are.
+
+### 4.7 Open questions for the design pass
 
 - **Revert, warn-only, or fail?** Reverting matches the gate's semantics, but it is undoing something
   the author wrote. A guest AppHost that called `withEndpointCallback('probe', …)` and then
