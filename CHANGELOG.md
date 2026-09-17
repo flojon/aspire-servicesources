@@ -144,6 +144,23 @@ never existed. Check the tag of the last release before adding one.
   public** ([#314]). Previously `internal` constant holders whose values callers could only find
   in prose; now discoverable from the API, the way Aspire's own `KnownResourceStates` and
   `KnownResourceCommands` are. The methods that accept these values still take `string`.
+- **Endpoint changes made after a `url` or `kubernetes` service resolves are now detected, reverted
+  and reported** ([#372]). Aspire's own `withEndpointCallback`, `withHttpEndpointCallback` and
+  `withHttpsEndpointCallback` are reachable from a guest-language AppHost — and are `internal` to
+  Aspire, so no C# shadow can intercept them. They mutated an out-of-band service's endpoint with no
+  warning at all, which for a `kubernetes` service repointed the real `kubectl port-forward`,
+  sending the configuration to a different process than the one the AppHost author meant. Each
+  service's endpoints are now fingerprinted as its source registers them, and anything changed,
+  added or removed before start is put back and reported as a skipped call naming the endpoint —
+  `Service 'orders': skipped endpoint 'https' changed after resolve because its source is
+  'kubernetes' …` — so the outcome matches what gating the equivalent C# call already does. This
+  measures the state rather than the call, so it also **covers**
+  `WithExternalHttpEndpoints` ([#359]), which sets `IsExternal` on existing endpoints directly from
+  C# and was likewise unreported; that issue stays open and separately owned. Nothing changes for a
+  `local` or `container` service, where configuring an endpoint after resolution is legitimate and
+  nothing is installed. The guest-language behaviour was measured in TypeScript, through
+  `samples/DemoAppHostTypeScript`; other guest languages share the same capability ids but were not
+  measured.
 
 ### Changed
 
@@ -1685,6 +1702,8 @@ Targets `net10.0`.
 [#318]: https://github.com/flojon/aspire-servicesources/issues/318
 [#345]: https://github.com/flojon/aspire-servicesources/issues/345
 [#350]: https://github.com/flojon/aspire-servicesources/issues/350
+[#359]: https://github.com/flojon/aspire-servicesources/issues/359
+[#372]: https://github.com/flojon/aspire-servicesources/issues/372
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
