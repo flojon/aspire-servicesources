@@ -1025,7 +1025,7 @@ public class CheckoutPreparationTests
     /// process (a virus scanner, an indexer) to land on the same instant.
     /// </remarks>
     [Fact]
-    public async Task Write_ADestinationHeldOpenBriefly_StillLandsTheNewRecord()
+    public void Write_ADestinationHeldOpenBriefly_StillLandsTheNewRecord()
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -1040,26 +1040,37 @@ public class CheckoutPreparationTests
         File.WriteAllText(markerPath, "stale");
 
         using var blockerOpen = new ManualResetEventSlim();
-        using var releaseBlocker = new ManualResetEventSlim();
+        using var writeStarting = new ManualResetEventSlim();
 
-        var blocker = Task.Run(() =>
+        // A thread of its own rather than pool work items, for both the hold and its release: test
+        // classes run in parallel here, and a pool whose threads are all busy hands out a delayed
+        // continuation whole seconds late — past a retry budget measured in hundreds of
+        // milliseconds, which drops the record and fails this test for a reason it is not about.
+        var blocker = new Thread(() =>
         {
             using var stream = new FileStream(markerPath, FileMode.Open, FileAccess.Read, FileShare.Read);
             blockerOpen.Set();
-            releaseBlocker.Wait(TimeSpan.FromSeconds(10));
-        });
 
+            // Timed from the write's own start rather than from the open: what has to fall inside
+            // the 20 x 10ms retry budget is the overlap with the write, and when that begins is
+            // not this thread's to know.
+            writeStarting.Wait(TimeSpan.FromSeconds(10));
+            Thread.Sleep(TimeSpan.FromMilliseconds(50));
+        })
+        {
+            IsBackground = true,
+        };
+
+        blocker.Start();
         Assert.True(blockerOpen.Wait(TimeSpan.FromSeconds(10)), "the blocker never opened the file");
 
-        // Released well inside the 20 x 10ms retry budget, so Write must still be retrying rather
-        // than having already given up.
-        _ = Task.Delay(TimeSpan.FromMilliseconds(50)).ContinueWith(_ => releaseBlocker.Set());
+        writeStarting.Set();
 
         var marker = new PrepareMarker("hash", "commit", "2024-01-01T00:00:00Z");
         PrepareMarker.Write(markerPath, marker, directory, managedCheckout: true);
 
         Assert.Equal(marker, PrepareMarker.Read(markerPath));
-        await blocker.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(blocker.Join(TimeSpan.FromSeconds(10)), "the blocker never let go of the file");
     }
 
     /// <summary>
