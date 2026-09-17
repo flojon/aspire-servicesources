@@ -28,9 +28,13 @@ the three `*Callback` names — which this package declares no member for — th
 | `withHttpEndpointCallback` | `Aspire.Hosting/withHttpEndpointCallback` | ❌ **ungated update branch** |
 | `withHttpsEndpointCallback` | `Aspire.Hosting/withHttpsEndpointCallback` | ❌ **ungated update branch** |
 
-Of the three fix candidates, only post-hoc detection survives contact with the constraints — §4
-prototypes it and finds it viable. It also turns up a fourth ungated call surface,
-`WithExternalHttpEndpoints`, which is unreported **from C# today** (§4.5).
+Of the three fix candidates, only post-hoc detection is one this package can ship on its own — §4
+prototypes it and finds it viable. It also reaches a fourth ungated call surface,
+`WithExternalHttpEndpoints`, unreported **from C# today** and already tracked as #359 (§4.5).
+
+Measured in TypeScript. ATS capability ids are language-independent, so this should hold for any
+guest language, but only `samples/DemoAppHostTypeScript`'s SDK was generated — Java and Python
+bindings were not produced, so read "every guest language" below as inferred, not measured.
 
 ## 1. Q1 — how a guest-language AppHost reaches these methods
 
@@ -213,10 +217,14 @@ every property `EndpointUpdateContext` can reach is settable from here too.
 
 Two independent reasons, both checked rather than assumed:
 
-- Nothing in this package mutates an endpoint tuple between resolve and `BeforeStartEvent`. The only
-  post-construction endpoint write anywhere in `src/` is `UrlSource` setting `AllocatedEndpoint` at
-  resolve time, before the snapshot is taken. `KubectlPortForward` allocates its port during
-  `Resolve`, not later.
+- Nothing in this package mutates an endpoint tuple between resolve and `BeforeStartEvent`.
+  `UrlSource` sets `AllocatedEndpoint` at resolve time, before the snapshot is taken, and
+  `KubectlPortForward` allocates its port during `Resolve`, not later. #366 has since added a second
+  post-resolve annotation write, `ServiceResourceBuilder.ForwardingAnnotationsAddedBy` — it cannot
+  fire here, being double-gated for out-of-band sources: the callback shadow's `GateEndpointCall`
+  returns before reaching it, and the helper re-checks `Reachability.IsUnreachable` before forwarding.
+  Re-verified against the landed fix; an earlier revision of this section claimed `UrlSource` was the
+  only such write in `src/`, which that commit made untrue.
 - More fundamentally: the detector is only installed for out-of-band sources, and for those
   `Reachability.IsUnreachable(typeof(EndpointAnnotation), source)` is unconditionally true. So *any*
   endpoint-tuple change after resolve is by definition one that should have been skipped. There is no
@@ -249,9 +257,16 @@ service.WithExternalHttpEndpoints();
 ```
 
 That is a live, unreported bug outside #334/#335's scope, in the language those fixes were written
-for — filed as #369. It is not a one-off: the shadow strategy has to name every Aspire method that mutates an
-existing `EndpointAnnotation` in place, in both the public and the ATS-projected surface, and re-name
-each new one Aspire ships. Post-hoc detection is keyed on the *state*, so its coverage does not scale
+for. It was **already known** — #359 reported it on 2026-09-16, from a code review of #357, a day
+before this investigation reached it independently; what is added here is the reproduction on `main`
+rather than the decompilation alone. (#369 was filed from this investigation before that was
+noticed, and is closed as a duplicate of #359.)
+
+How #359 was found is the point: a reviewer reading #357, not #335's own decompiled audit, which
+swept `ResourceBuilderExtensions` by method name and so could not see a differently-named method with
+the identical root cause. It is not a one-off: the shadow strategy has to name every Aspire method
+that mutates an existing `EndpointAnnotation` in place, in both the public and the ATS-projected
+surface, and re-name each new one Aspire ships. Post-hoc detection is keyed on the *state*, so its coverage does not scale
 with that list — it catches `withExternalHttpEndpoints`, the three callbacks, and whatever comes next,
 uniformly.
 
