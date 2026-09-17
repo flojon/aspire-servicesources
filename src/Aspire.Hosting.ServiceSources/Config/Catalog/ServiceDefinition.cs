@@ -25,6 +25,14 @@ internal sealed class ServiceDefinition
     public required string Kind { get; init; }
 
     /// <summary>
+    /// Fed from <see cref="ServiceMetadata.DefaultSource"/> (yaml) or
+    /// <see cref="Catalog.ServiceDefinitionBuilder.WithDefaultSource"/> (code) — see
+    /// <see cref="ServiceSourcesConfigCache.LoadedConfig.Load"/> for how this is projected into
+    /// configuration.
+    /// </summary>
+    public string? DefaultSource { get; init; }
+
+    /// <summary>
     /// The raw yaml block (round-tripped through <see cref="LocalKindConfig.Parse{T}"/>) for a
     /// yaml-declared kind, or an already-typed options object for a code-declared one — see design
     /// finding 6's three-branch <see cref="LocalKindConfig.Parse{T}"/> change (Task 7).

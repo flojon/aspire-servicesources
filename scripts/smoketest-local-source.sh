@@ -407,4 +407,37 @@ runs="$(prepare_runs)"
   || fail "always prepare: expected a second run, its log says $runs"
 printf '    ran again, ignoring the marker\n'
 
-log "PASS: the local source cloned, reconciled a ref, honoured a path override, bootstrapped a checkout with a prepare step, and ran the project in every case"
+# ---------------------------------------------------------------------------
+# 5. defaultSource: local resolves and clones with no servicesources.local.json entry at all
+# ---------------------------------------------------------------------------
+log "5. defaultSource: local, no servicesources.local.json entry for 'orders' at all"
+rm -rf "$checkout_dir"
+cat > "$apphost_dir/servicesources.yaml" <<EOF
+services:
+  orders:
+    repository: $origin_repo
+    project: SampleService/SampleService.csproj
+    defaultRef: main
+    defaultSource: local
+  inventory:
+    url:
+      url: http://unused.invalid
+  payments:
+    url:
+      url: http://unused.invalid
+EOF
+cat > "$apphost_dir/servicesources.local.json" <<'EOF'
+{
+  "services": {
+    "inventory": { "source": "url" },
+    "payments": { "source": "url" }
+  }
+}
+EOF
+
+marker="$(run_until_marker "defaultSource" "$checkout_dir")"
+[[ "$marker" == "$MAIN_MARKER" ]] \
+  || fail "defaultSource: expected the marker from defaultRef ('$MAIN_MARKER'), got '$marker'"
+printf '    resolved, cloned and ran orders with no servicesources.local.json entry for it at all\n'
+
+log "PASS: the local source cloned, reconciled a ref, honoured a path override, bootstrapped a checkout with a prepare step, resolved via a catalog defaultSource with no local.json entry at all, and ran the project in every case"

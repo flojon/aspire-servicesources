@@ -180,6 +180,20 @@ values you type into `servicesources.local.json`:
 | `WithContainer` | `container:` | `"container"` |
 | `WithKubernetes` | `kubernetes:` | `"kubernetes"` |
 
+`WithDefaultSource(source)` is a separate call, not a `source` value of its own — it names which of
+the four a developer gets when nothing configures this service explicitly, the code-authoring
+equivalent of yaml's `defaultSource:`:
+
+```csharp
+catalog.AddService("orders")
+    .WithRepository("https://github.com/example/orders", defaultRef: "main")
+    .WithProject("src/Orders.Api/Orders.Api.csproj")
+    .WithDefaultSource("local");
+```
+
+The same caveat as the yaml field applies: `WithDefaultSource("local")` means every developer, and
+CI, clones by default unless CI pins its own source.
+
 `WithContainer`/`WithKubernetes` both take a `scheme` parameter — the code-authoring
 equivalent of yaml's `container.scheme`/`kubernetes.scheme` (documented under the
 `"container"` and `"kubernetes"` source sections below). A service declaring both sources
@@ -289,6 +303,23 @@ services:
 
 (A service that isn't a .NET project also takes a `kind` — see
 [Non-.NET local services](#non-net-local-services-kind).)
+
+A catalog entry may also declare `defaultSource`, so a service resolves without a
+`servicesources.local.json` entry at all:
+
+```yaml
+services:
+  orders:
+    repository: https://github.com/example/orders
+    project: src/Orders.Api/Orders.Api.csproj
+    defaultRef: main
+    defaultSource: local     # optional; the source a developer gets with no entry of their own
+```
+
+**`defaultSource: local` means every developer, and CI, clones and builds that repository by
+default** — including on a machine or pipeline that never explicitly asked for it. If CI should not
+clone, CI must pin its own source (an environment variable, or its own configuration layer) rather
+than relying on the absence of a file.
 
 **3. Add your own `servicesources.local.json` next to it (gitignore this file — it's
 per-developer):**
@@ -1573,10 +1604,13 @@ because anything may register one and two registrations must not be able to coll
 The file is read through the AppHost's own `IConfiguration`, as the **lowest**-precedence source in
 the standard provider chain, under the key `ServiceSources:Services:<service>`. It is still the
 place a developer normally writes a source selection, and a `.NET` or TypeScript AppHost authors it
-identically — but every provider above it can override an entry without the file being touched:
+identically — but every provider above it can override an entry without the file being touched. A
+catalog's own `defaultSource` (see above, under [Getting started](#getting-started)) sits below
+even this file — see the row above the base:
 
 | Layer | Overrides the file? |
 | --- | --- |
+| A catalog's `defaultSource` | no — it sits *below* the file; used only when neither the file nor anything above it sets the service's `source` |
 | `servicesources.local.json` | — (the base) |
 | `appsettings.json` | yes |
 | `appsettings.{Environment}.json` | yes |

@@ -182,6 +182,29 @@ internal sealed class DeveloperConfigShape
             .ThenBy(candidate => candidate.Block, StringComparer.Ordinal)
             .ToArray();
 
+    /// <summary>
+    /// Throws unless <paramref name="value"/> is one of <see cref="SourceNames"/> — the one check
+    /// both a yaml <c>defaultSource:</c> entry (<see cref="ServiceCatalogLoader"/>) and its code
+    /// twin (<see cref="Catalog.ServiceDefinitionBuilder.WithDefaultSource"/>) run, so the message
+    /// naming the valid values can't drift between the two authoring paths.
+    /// </summary>
+    /// <param name="label">
+    /// Already formatted to name what's wrong — <c>"Service 'orders': defaultSource value 'foo'"</c>
+    /// or <c>"Service 'orders': WithDefaultSource('foo')"</c> — so this stays agnostic to which
+    /// caller it's validating for.
+    /// </param>
+    /// <exception cref="ServiceSourcesConfigurationException">
+    /// <paramref name="value"/> is not one of <see cref="SourceNames"/>.
+    /// </exception>
+    public void ValidateSourceName(string label, string value)
+    {
+        if (!SourceNames.Contains(value))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"{label} is not a valid source. Expected one of: " + string.Join(", ", SourceNames) + ".");
+        }
+    }
+
     private static DeveloperConfigShape Of<TEntry>(
         string kind, string noun, IEnumerable<string> sourceNames) =>
         new(typeof(TEntry), kind, noun, sourceNames);

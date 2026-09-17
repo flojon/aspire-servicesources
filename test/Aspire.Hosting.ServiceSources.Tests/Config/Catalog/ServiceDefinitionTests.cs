@@ -43,6 +43,7 @@ public class ServiceDefinitionTests
             Prepare = new PrepareMetadata { Command = ["./prepare.sh"], Mode = "once" },
             Kind = "java",
             KindConfig = new Dictionary<object, object> { ["mavenGoal"] = "spring-boot:run" },
+            DefaultSource = "url",
         };
 
         var definition = metadata.ToDefinition("/apphost/servicesources.yaml", "orders", TestHelpers.EmptyRepositories);
@@ -57,6 +58,7 @@ public class ServiceDefinitionTests
         Assert.Equal(metadata.Kind, definition.Kind);
         Assert.Same(metadata.KindConfig, definition.KindOptions);
         Assert.Equal(CatalogOrigin.FromYaml("/apphost/servicesources.yaml"), definition.Origin);
+        Assert.Equal(metadata.DefaultSource, definition.DefaultSource);
     }
 
     /// <summary>
@@ -163,6 +165,7 @@ public class ServiceDefinitionTests
             Prepare = new PrepareMetadata { Command = ["./prepare.sh"], Mode = "once" },
             Kind = "java",
             KindConfig = new Dictionary<object, object> { ["mavenGoal"] = "spring-boot:run" },
+            DefaultSource = "url",
         };
 
         var definition = metadata.ToDefinition("/apphost/servicesources.yaml", "orders", TestHelpers.EmptyRepositories);

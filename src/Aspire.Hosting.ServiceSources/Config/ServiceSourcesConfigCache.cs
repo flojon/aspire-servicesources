@@ -1,5 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration.Memory;
 using Aspire.Hosting.ServiceSources.Catalog;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
@@ -250,6 +252,15 @@ internal static class ServiceSourcesConfigCache
         /// <summary>Whether this AppHost declared at least one service via <c>AddServiceCatalog</c>.</summary>
         public required bool HasCodeEntries { get; init; }
 
+        /// <summary>
+        /// Service names whose configured <c>source</c> exists only because
+        /// <see cref="Config.Catalog.ServiceDefinition.DefaultSource"/> projected it — never because a
+        /// developer, appsettings, an environment variable or the command line configured it.
+        /// <see cref="Sources.LocalCheckoutPrefetch"/>'s candidate filter excludes these so a catalog
+        /// default cannot re-create the #76 clone-storm for a service nobody actually asked for.
+        /// </summary>
+        public required IReadOnlySet<string> DefaultedServiceNames { get; init; }
+
         public static LoadedConfig Load(IDistributedApplicationBuilder builder)
         {
             // Freeze first, under the same lock CodeCatalogFor's Configure calls take — an
@@ -416,46 +427,142 @@ internal static class ServiceSourcesConfigCache
 
             var catalog = new Catalog.CodeServiceCatalog { Services = merged, Repositories = repositories };
 
-            // Read ahead of the warning below rather than at the return statement (its usual place):
-            // the warning has to know which catalog shape each service's developer actually resolves
-            // through, which only this has — the catalog shape alone (a non-blank Repository.Url)
-            // says a service *could* resolve locally, not that it does.
-            var developerConfig = DeveloperConfiguration.ReadFrom(builder, catalog.Services.Keys, catalog.Repositories.Keys);
+            // Lands the catalog's own defaultSource values as the lowest-precedence configuration
+            // layer -- strictly below servicesources.local.json -- so any real layer still wins.
+            // Must run before the snapshot below: EnsureRegistered is idempotent, but calling it
+            // here guarantees the local file already occupies index 0 before this step's own
+            // insert, so this layer lands at index 0 and the file is pushed to index 1 rather than
+            // the reverse (design finding 5 — Sources.Insert(0, ...) gives the *lowest* precedence
+            // to whichever call happens later in time).
+            DeveloperConfigFileSource.EnsureRegistered(builder);
 
-            // The warn-and-continue counterpart of the check above (design question 5, settled as
-            // "warn"): two ungrouped services naming the identical repository URL each get their own
-            // checkout, downloaded and reconciled separately, which is exactly what grouping them
-            // would avoid. Not an error — an existing catalog with this shape keeps working — but
-            // worth naming, since it usually means grouping was overlooked rather than intended.
-            foreach (var sharedUrl in merged
-                .Where(entry => entry.Value.Repository.CheckoutName == entry.Key)
-                // A blank Url is not a repository at all: every service gets a RepositoryDefinition
-                // regardless of source (design finding 2 mints an anonymous one unconditionally), so
-                // a kubernetes- or url-sourced service — which never sets 'repository:' — carries one
-                // whose Url defaults to "". Grouping those together would warn about services that
-                // were never candidates for sharing a checkout in the first place.
-                .Where(entry => !string.IsNullOrEmpty(entry.Value.Repository.Url))
-                // The catalog shape alone does not say which source is actually in effect: a service
-                // can declare both a 'repository:' block and, say, a 'kubernetes:' block (README
-                // "Combining sources on one catalog entry"), with servicesources.local.json resolving
-                // it through the other one — in which case nothing is ever cloned for it, and this
-                // warning's advice ("share one checkout") describes work that never happens. Matched
-                // the same way LocalCheckoutPrefetch.Run decides what it will actually clone —
-                // case-insensitively, since AddService resolves the source the same way.
-                .Where(entry =>
-                    developerConfig.Services.TryGetValue(entry.Key, out var devConfig)
-                    && string.Equals(devConfig.Source, "local", StringComparison.OrdinalIgnoreCase))
-                .GroupBy(entry => entry.Value.Repository.Url, StringComparer.Ordinal)
-                .Where(group => group.Count() > 1))
+            var defaultedSources = new Dictionary<string, string?>(StringComparer.Ordinal);
+            var defaultedServiceNames = new HashSet<string>(StringComparer.Ordinal);
+
+            // Keyed case-insensitively, unlike defaultedSources/defaultedServiceNames themselves:
+            // `catalog.Services` is Ordinal and deliberately tolerates two entries differing only by
+            // case (AmbiguousCatalogSpellingError only fires once a developer's own config names one
+            // of them, which this projection runs ahead of). If both of those entries also declare a
+            // defaultSource, the two keys below are distinct under Ordinal but collide once
+            // MemoryConfigurationProvider rebuilds its data under OrdinalIgnoreCase -- surfacing as a
+            // raw ArgumentException out of Sources.Insert instead of a catalog-authoring-time error.
+            // Caught here, before that insert, so it is this exception instead.
+            var defaultedSpellings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var (name, definition) in catalog.Services)
             {
-                var serviceNames = sharedUrl.Select(entry => entry.Key).Order(StringComparer.Ordinal).ToArray();
+                if (definition.DefaultSource is not { } defaultSource)
+                {
+                    continue;
+                }
 
-                ServiceSourcesWarnings.For(builder).AddNotice(
-                    $"Services {string.Join(", ", serviceNames.Select(name => $"'{name}'"))} are all 'local' and " +
-                    $"declare the same repository '{GitUrl.Redact(sharedUrl.Key)}', but none of them are grouped " +
-                    "— each gets its own checkout, cloned and reconciled separately. To share one checkout " +
-                    "instead, group them: AddRepository(...)/WithSharedRepository(...) in code, or a " +
-                    "repositories: entry every member's repositoryRef: names, in yaml.");
+                // Read before this layer exists, so a blank or absent result can only mean nothing
+                // has claimed this key yet -- comparing the final merged value instead could not
+                // tell a developer's own "local" from a default that merely happens to agree with
+                // it (design "Default-derived exclusion": value comparison cannot substitute for
+                // provenance).
+                var key = $"{DeveloperConfiguration.ServicesKey}:{name}:source";
+                if (!string.IsNullOrWhiteSpace(builder.Configuration[key]))
+                {
+                    continue;
+                }
+
+                if (defaultedSpellings.TryGetValue(name, out var existingSpelling))
+                {
+                    throw new ServiceSourcesConfigurationException(
+                        $"'{name}' and '{existingSpelling}' both declare a defaultSource, and differ only by " +
+                        "case. Configuration keys are case-insensitive, so there is no key that reaches one " +
+                        "default and not the other — rename one of them so they differ by more than case.");
+                }
+
+                defaultedSpellings.Add(name);
+                defaultedSources[key] = defaultSource;
+                defaultedServiceNames.Add(name);
+            }
+
+            // Tracked so a failure below can undo the insert -- see the try/catch immediately after.
+            // The insert itself is inside that same try (not just what follows it): Insert mutates
+            // the source list and then rebuilds every registered provider, so a fault from some
+            // unrelated provider's reload can surface here with ours already in the chain --
+            // the same hazard DeveloperConfigFileSource.Registration.Register documents for its own
+            // insert. Leaving the insert outside the try would let exactly that case skip the rollback.
+            IConfigurationSource? insertedDefaultSource = null;
+
+            DeveloperConfiguration developerConfig;
+
+            try
+            {
+                if (defaultedSources.Count > 0)
+                {
+                    insertedDefaultSource = new MemoryConfigurationSource { InitialData = defaultedSources };
+                    builder.Configuration.Sources.Insert(0, insertedDefaultSource);
+                }
+
+                // Read ahead of the warning below rather than at the return statement (its usual
+                // place): the warning has to know which catalog shape each service's developer
+                // actually resolves through, which only this has — the catalog shape alone (a
+                // non-blank Repository.Url) says a service *could* resolve locally, not that it does.
+                developerConfig = DeveloperConfiguration.ReadFrom(builder, catalog.Services.Keys, catalog.Repositories.Keys);
+
+                // The warn-and-continue counterpart of the check above (design question 5, settled as
+                // "warn"): two ungrouped services naming the identical repository URL each get their
+                // own checkout, downloaded and reconciled separately, which is exactly what grouping
+                // them would avoid. Not an error — an existing catalog with this shape keeps working
+                // — but worth naming, since it usually means grouping was overlooked rather than
+                // intended.
+                foreach (var sharedUrl in merged
+                    .Where(entry => entry.Value.Repository.CheckoutName == entry.Key)
+                    // A blank Url is not a repository at all: every service gets a RepositoryDefinition
+                    // regardless of source (design finding 2 mints an anonymous one unconditionally), so
+                    // a kubernetes- or url-sourced service — which never sets 'repository:' — carries one
+                    // whose Url defaults to "". Grouping those together would warn about services that
+                    // were never candidates for sharing a checkout in the first place.
+                    .Where(entry => !string.IsNullOrEmpty(entry.Value.Repository.Url))
+                    // The catalog shape alone does not say which source is actually in effect: a service
+                    // can declare both a 'repository:' block and, say, a 'kubernetes:' block (README
+                    // "Combining sources on one catalog entry"), with servicesources.local.json resolving
+                    // it through the other one — in which case nothing is ever cloned for it, and this
+                    // warning's advice ("share one checkout") describes work that never happens. Matched
+                    // the same way LocalCheckoutPrefetch.Run decides what it will actually clone —
+                    // case-insensitively, since AddService resolves the source the same way.
+                    .Where(entry =>
+                        developerConfig.Services.TryGetValue(entry.Key, out var devConfig)
+                        && string.Equals(devConfig.Source, "local", StringComparison.OrdinalIgnoreCase))
+                    .GroupBy(entry => entry.Value.Repository.Url, StringComparer.Ordinal)
+                    .Where(group => group.Count() > 1))
+                {
+                    var serviceNames = sharedUrl.Select(entry => entry.Key).Order(StringComparer.Ordinal).ToArray();
+
+                    ServiceSourcesWarnings.For(builder).AddNotice(
+                        $"Services {string.Join(", ", serviceNames.Select(name => $"'{name}'"))} are all 'local' and " +
+                        $"declare the same repository '{GitUrl.Redact(sharedUrl.Key)}', but none of them are grouped " +
+                        "— each gets its own checkout, cloned and reconciled separately. To share one checkout " +
+                        "instead, group them: AddRepository(...)/WithSharedRepository(...) in code, or a " +
+                        "repositories: entry every member's repositoryRef: names, in yaml.");
+                }
+            }
+            catch when (insertedDefaultSource is not null)
+            {
+                // ConfigLoader<T>.Load only latches (caches) a ServiceSourcesConfigurationException;
+                // anything else leaves this method retryable from scratch. Without this rollback, a
+                // retry's "already configured?" snapshot above would see *this* attempt's inserted
+                // default and wrongly treat the service as explicitly configured, silently defeating
+                // the #76 clone-storm exclusion for it. Undoing the insert keeps a retry's snapshot
+                // clean regardless of what throws here (the insert included), now or in a future
+                // edit of this method.
+                try
+                {
+                    builder.Configuration.Sources.Remove(insertedDefaultSource);
+                }
+                catch
+                {
+                    // Remove rebuilds every remaining provider just like Insert did, so a still-faulting
+                    // one can make Remove itself throw -- after it has already dropped our entry from
+                    // the list. Swallow that second fault so the caller sees the original failure below,
+                    // not a substitute for it.
+                }
+
+                throw;
             }
 
             // The catalog first, and its names handed over: unchanged from before this task, and now
@@ -467,6 +574,7 @@ internal static class ServiceSourcesConfigCache
                 DeveloperConfig = developerConfig,
                 YamlPath = yamlExists ? yamlPath : null,
                 HasCodeEntries = codeEntries.Count > 0,
+                DefaultedServiceNames = defaultedServiceNames,
             };
         }
     }

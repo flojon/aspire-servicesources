@@ -634,6 +634,13 @@ internal sealed class LocalCheckoutPrefetch
             // others — no error, just a slower first start. The same reasoning as the re-keying in
             // DeveloperConfiguration.CanonicalizeToCatalog, applied to the value instead of the key.
             .Where(entry => string.Equals(entry.Value.Source, "local", StringComparison.OrdinalIgnoreCase))
+            // A catalog defaultSource projects into the identical configuration key an explicit
+            // "local" entry would use (design "Default-derived exclusion"), so without this a
+            // defaulted service would re-create the #76 clone-storm this filter exists to prevent
+            // -- cloned in parallel whether or not AddService() is ever called for it. Excluded
+            // here rather than by comparing values, because an explicit entry naming the identical
+            // value is a deliberate opt-in and must stay eligible (see DefaultedServiceNames).
+            .Where(entry => !config.DefaultedServiceNames.Contains(entry.Key))
             // A service the developer marked "local" but that the catalog doesn't describe can't be
             // checked out and isn't this phase's problem to report — AddService still rejects it
             // properly if the AppHost actually asks for it.

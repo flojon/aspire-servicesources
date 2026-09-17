@@ -26,6 +26,7 @@ services:
     # DemoAppHost.csproj. No Program.cs registration call: "java" is a built-in kind.
     repository: https://github.com/spring-projects/spring-petclinic
     defaultRef: main
+    defaultSource: local
     kind: java
     java:
       mavenGoal: spring-boot:run

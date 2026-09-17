@@ -12,6 +12,17 @@ internal sealed class ServiceMetadata
     public string? DefaultRef { get; set; }
 
     /// <summary>
+    /// The source (<c>"local"</c>/<c>"url"</c>/<c>"kubernetes"</c>/<c>"container"</c>) a developer
+    /// gets when nothing configures this service's source explicitly, projected as the
+    /// lowest-precedence configuration layer by
+    /// <see cref="ServiceSourcesConfigCache.LoadedConfig.Load"/>. Validated against the same closed
+    /// vocabulary a developer's own <c>source:</c> value is, in <see cref="ServiceCatalogLoader.Load"/>.
+    /// A blank scalar is normalized to absent there, the same way an empty developer-config field
+    /// means "unset" elsewhere in this codebase.
+    /// </summary>
+    public string? DefaultSource { get; set; }
+
+    /// <summary>
     /// The key of a <c>repositories:</c> entry this service joins, sharing its checkout with every
     /// other service naming the same one — the yaml counterpart of
     /// <see cref="Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder.WithSharedRepository"/>.
@@ -83,5 +94,6 @@ internal sealed class ServiceMetadata
         Kind = Kind,
         KindOptions = KindConfig,
         Origin = CatalogOrigin.FromYaml(yamlPath),
+        DefaultSource = DefaultSource,
     };
 }

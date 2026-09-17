@@ -30,6 +30,109 @@ public class CatalogCompositionTests
     }
 
     [Fact]
+    public void YamlCatalogDefaultSource_NoExplicitEntryAnywhere_ResolvesService()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              inventory:
+                url:
+                  url: https://example.com
+                defaultSource: url
+            """);
+        // No servicesources.local.json at all -- this is the whole point of #158.
+        var builder = CreateBuilder(dir);
+
+        var (definition, devConfig) = ServiceSourcesConfigCache.ResolveService(builder, "inventory");
+
+        Assert.Equal("https://example.com", definition.Url!.Url);
+        Assert.Equal("url", devConfig.Source);
+        Assert.Contains("inventory", ServiceSourcesConfigCache.LoadedFor(builder).DefaultedServiceNames);
+    }
+
+    [Fact]
+    public void ExplicitEntry_SameValueAsCatalogDefault_IsNotMarkedAsDefaultDerived()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              inventory:
+                url:
+                  url: https://example.com
+                defaultSource: url
+            """);
+        // A deliberate, reviewed opt-in that happens to match the default -- must stay eligible for
+        // the parallel prefetch exactly as an ordinary explicit entry would (design "Default-derived
+        // exclusion": value comparison alone cannot tell these apart, which is why the exclusion set
+        // is built from a pre-insert snapshot instead).
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"),
+            """{ "services": { "inventory": { "source": "url" } } }""");
+        var builder = CreateBuilder(dir);
+
+        var (_, devConfig) = ServiceSourcesConfigCache.ResolveService(builder, "inventory");
+
+        Assert.Equal("url", devConfig.Source);
+        Assert.DoesNotContain("inventory", ServiceSourcesConfigCache.LoadedFor(builder).DefaultedServiceNames);
+    }
+
+    [Fact]
+    public void HigherLayerExplicitBlank_OptsOutOfCatalogDefault_ReproducesNotConfiguredError()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              inventory:
+                url:
+                  url: https://example.com
+                defaultSource: url
+            """);
+        // The one gesture configuration offers for refusing a lower layer's value (design "Opting out
+        // of a default"): an explicit blank still shadows the projected default, because a higher
+        // layer's provider already has the key at all -- config resolution never falls through to a
+        // lower layer once a higher one has an entry, blank or not.
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"),
+            """{ "services": { "inventory": { "source": "" } } }""");
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "inventory"));
+
+        Assert.Contains("inventory", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("has no source configured", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Spec finding 3, made concrete: <see cref="DeveloperConfiguration.NotConfiguredError"/> needs no
+    /// code change because a projected default already makes <c>Services.Count &gt; 0</c>, which is
+    /// what re-bases its branch from "nothing configured anywhere" to "this one service, specifically".
+    /// </summary>
+    [Fact]
+    public void OneServiceDefaulted_AnotherServiceUnconfigured_GetsThePerServiceErrorNotTheFileWideOne()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              inventory:
+                url:
+                  url: https://example.com
+                defaultSource: url
+              payments:
+                url:
+                  url: https://payments.example
+            """);
+        // No servicesources.local.json at all: inventory resolves via defaultSource; payments has no
+        // entry anywhere and no default of its own.
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "payments"));
+
+        Assert.Contains("payments", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("has no source configured", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("No service sources are configured", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void YamlOnlyCatalog_Unchanged()
     {
         var dir = TempDirectories.CreateSubdirectory().FullName;
@@ -200,6 +303,85 @@ public class CatalogCompositionTests
               Orders:
                 url:
                   url: https://b.example
+            """);
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"),
+            """{ "services": { "orders": { "source": "url" } } }""");
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.Contains("declares more than once", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Extends <see cref="YamlDeclaresTwoCaseVariants_StillAmbiguousCatalogSpellingError_NotArgumentException"/>
+    /// to the shape that check does not cover: nothing in <c>servicesources.local.json</c> ever names
+    /// either spelling, so <c>DeveloperConfiguration.CanonicalizeToCatalog</c> — which only walks a
+    /// developer's own bound entries — never visits "orders"/"Orders" at all and its
+    /// <c>AmbiguousCatalogSpellingError</c> never fires. If both case variants also declare a
+    /// <c>defaultSource</c>, <see cref="ServiceSourcesConfigCache.LoadedConfig.Load"/> builds a
+    /// <c>defaultedSources</c> projection with both
+    /// <c>ServiceSources:Services:orders:source</c> and <c>ServiceSources:Services:Orders:source</c> —
+    /// distinct under its own Ordinal comparer, but colliding once
+    /// <c>MemoryConfigurationProvider</c> rebuilds its data under <c>OrdinalIgnoreCase</c>. That must
+    /// surface as a clean <see cref="ServiceSourcesConfigurationException"/>, not a raw
+    /// <see cref="ArgumentException"/> out of the BCL.
+    /// </summary>
+    [Fact]
+    public void YamlDeclaresTwoCaseVariants_BothDefaultSourced_ThrowsCleanError_NotArgumentException()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              orders:
+                url:
+                  url: https://a.example
+                defaultSource: url
+              Orders:
+                url:
+                  url: https://b.example
+                defaultSource: url
+            """);
+        // No servicesources.local.json at all: neither spelling is ever named by developer config.
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.Contains("case", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("defaultSource", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The combined shape neither <see cref="YamlDeclaresTwoCaseVariants_StillAmbiguousCatalogSpellingError_NotArgumentException"/>
+    /// nor <see cref="YamlDeclaresTwoCaseVariants_BothDefaultSourced_ThrowsCleanError_NotArgumentException"/>
+    /// covers on its own: both case variants declare a <c>defaultSource</c>, <em>and</em> a developer's
+    /// <c>servicesources.local.json</c> names one of the two spellings explicitly. <c>IConfiguration</c>
+    /// indexers compare keys case-insensitively, so setting <c>orders:source</c> makes
+    /// <c>builder.Configuration["...:orders:source"]</c> <em>and</em> <c>builder.Configuration["...:Orders:source"]</c>
+    /// both resolve non-blank — the <c>LoadedConfig.Load</c> loop's "already configured" check (which reads
+    /// ahead of the <c>defaultedSources</c> layer) skips both spellings before the new case-collision
+    /// check ever runs. No entry lands in <c>defaultedSources</c>, so it stays empty and
+    /// <c>Sources.Insert</c> is skipped entirely; the ambiguity is then caught downstream by
+    /// <c>DeveloperConfiguration.CanonicalizeToCatalog</c> instead. Whichever mechanism fires, exactly
+    /// one clean <see cref="ServiceSourcesConfigurationException"/> reaches the caller — never both,
+    /// and never the raw BCL <see cref="ArgumentException"/>.
+    /// </summary>
+    [Fact]
+    public void YamlDeclaresTwoCaseVariants_BothDefaultSourced_LocalConfigNamesOneSpelling_StillAmbiguousCatalogSpellingError()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              orders:
+                url:
+                  url: https://a.example
+                defaultSource: url
+              Orders:
+                url:
+                  url: https://b.example
+                defaultSource: url
             """);
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"),
             """{ "services": { "orders": { "source": "url" } } }""");
