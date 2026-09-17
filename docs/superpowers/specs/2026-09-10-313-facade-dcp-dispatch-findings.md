@@ -170,10 +170,9 @@ own risks (see below). Before writing an implementation plan for #313, decide be
 1. **Track microsoft/aspire#18052 and defer #313's full unification — downgraded, not recommended
    as the primary path.** A maintainer (`davidfowl`) said directly on the PR thread that it isn't
    expected to merge as-is ("I dont think we would merge this anyways. This is a big enough change
-   that it should just be in the drafts"). Unlike #72 ↔ microsoft/aspire#9965 — an accepted issue with
-   ordinary review left to do — there is no committed path for *this* PR to land. Treat it as evidence
-   the mechanism works, not as a dependency to wait on. Revisit if a differently-scoped follow-on
-   appears (possibly through #19836's formal proposal process).
+   that it should just be in the drafts"). There is no committed path for *this* PR to land.
+   Treat it as evidence the mechanism works, not as a dependency to wait on. Revisit if a
+   differently-scoped follow-on appears (possibly through #19836's formal proposal process).
 2. **Build the dual-write wrapper now, as the practical way to get #313's benefit without an upstream
    dependency that may never resolve.** The read and write paths
    both checked out in this doc's probe (endpoint discovery through `WithReference`, environment
