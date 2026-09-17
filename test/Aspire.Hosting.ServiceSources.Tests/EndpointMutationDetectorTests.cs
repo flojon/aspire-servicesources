@@ -195,6 +195,70 @@ public class EndpointMutationDetectorTests
         Assert.Single(warnings, warning => warning.Contains("endpoint 'https' changed after resolve"));
     }
 
+    [Fact]
+    public async Task AddedEndpoint_OnKubernetesSource_IsRemovedAndReported()
+    {
+        var builder = Builder();
+        var service = Kubernetes(builder);
+
+        GuestLanguageEndpointCallbacks.EndpointCallback(service, "probe", ("Port", 4242));
+
+        Assert.Equal(2, Endpoints(service).Length);
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        // The endpoints the source registered, and only those.
+        var remaining = Assert.Single(Endpoints(service));
+        Assert.Equal("https", remaining.Name);
+        Assert.Equal(54321, remaining.Port);
+        Assert.Contains("endpoint 'probe' added after resolve", Assert.Single(warnings));
+    }
+
+    [Fact]
+    public async Task ChangedAndAddedOnOneService_AreReportedInOneGroupedMessage()
+    {
+        var builder = Builder();
+        var service = Kubernetes(builder);
+
+        GuestLanguageEndpointCallbacks.HttpsEndpointCallback(service, "https", ("Port", 9999));
+        GuestLanguageEndpointCallbacks.EndpointCallback(service, "probe", ("Port", 4242));
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        var remaining = Assert.Single(Endpoints(service));
+        Assert.Equal("https", remaining.Name);
+        Assert.Equal(54321, remaining.Port);
+
+        var warning = Assert.Single(warnings);
+        Assert.Contains("skipped 2 calls", warning);
+        Assert.Contains("endpoint 'https' changed after resolve", warning);
+        Assert.Contains("endpoint 'probe' added after resolve", warning);
+    }
+
+    // The endpoint name is the only caller-controlled value this package interpolates into a
+    // warning. Written onto the annotation directly, not through a callback: Aspire's create branch
+    // runs ModelName.ValidateName, so a name this hostile cannot arrive that way today --
+    // EndpointAnnotation.Name has no such validation on its setter, and the detector reads it at
+    // BeforeStartEvent, long after any composition-time code could have rewritten it.
+    [Fact]
+    public async Task AddedEndpointWithAHostileName_IsSanitisedBeforeItReachesTheLog()
+    {
+        var builder = Builder();
+        var service = Kubernetes(builder);
+
+        GuestLanguageEndpointCallbacks.EndpointCallback(service, "probe", ("Port", 4242));
+        var added = Assert.Single(Endpoints(service), endpoint => endpoint.Name == "probe");
+        added.Name = "evil\r\nService 'forged': " + new string('x', 300);
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        var warning = Assert.Single(warnings);
+        Assert.DoesNotContain("\n", warning);
+        Assert.DoesNotContain("\r", warning);
+        Assert.Contains("endpoint 'evil??Service ", warning);
+        Assert.Contains("…' added after resolve", warning);
+    }
+
     // What the reference-identity key buys, and the only test that exercises Restore's Name write:
     // a renamed instance is one changed endpoint under its recorded name, not an add plus a remove.
     // Written against the annotation rather than through a callback, and named for it, because

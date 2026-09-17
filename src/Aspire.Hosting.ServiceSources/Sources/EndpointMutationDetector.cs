@@ -65,12 +65,26 @@ internal static class EndpointMutationDetector
     {
         var capabilities = new List<string>();
 
+        // Materialised first: Annotations is the live collection this loop removes from.
         foreach (var endpoint in facade.Annotations.OfType<EndpointAnnotation>().ToArray())
         {
-            if (snapshot.TryGetValue(endpoint, out var recorded) && Restore(endpoint, recorded))
+            if (snapshot.TryGetValue(endpoint, out var recorded))
             {
-                capabilities.Add($"endpoint '{Label(recorded.Name)}' changed after resolve");
+                if (Restore(endpoint, recorded))
+                {
+                    capabilities.Add($"endpoint '{Label(recorded.Name)}' changed after resolve");
+                }
+
+                continue;
             }
+
+            facade.Annotations.Remove(endpoint);
+
+            // A no-op for every path that exists today; kept so the two collections cannot diverge
+            // if a future Aspire routes its create branch through WithAnnotation.
+            real?.Annotations.Remove(endpoint);
+
+            capabilities.Add($"endpoint '{Label(endpoint.Name)}' added after resolve");
         }
 
         if (capabilities.Count == 0)
