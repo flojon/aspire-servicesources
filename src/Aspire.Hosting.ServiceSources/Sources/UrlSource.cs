@@ -191,6 +191,11 @@ internal sealed class UrlSource : IServiceSource
             {
                 resource.Annotations.Remove(wait);
 
+                // `resource` is what this loop ever sees — the registered resource, which for a
+                // bridged consumer is the real one behind a facade that shares this same annotation
+                // instance in its own collection (#327).
+                RealToFacadeRegistry.MirrorRemoval(resource, wait);
+
                 // Aspire writes these itself, one per resource a connection-string expression
                 // references, so there is no call in Program.cs for a warning to send anyone to.
                 // Reporting them would mean warning a developer about something they did not write

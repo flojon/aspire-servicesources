@@ -93,11 +93,19 @@ internal sealed class ServiceWaitRetargeting
                     continue;
                 }
 
-                resource.Annotations.Remove(wait);
-                resource.Annotations.Add(new WaitAnnotation(real, wait.WaitType, wait.ExitCode)
+                var retargeted = new WaitAnnotation(real, wait.WaitType, wait.ExitCode)
                 {
                     WaitBehavior = wait.WaitBehavior,
-                });
+                };
+
+                resource.Annotations.Remove(wait);
+                resource.Annotations.Add(retargeted);
+
+                // `resource` is the registered resource this loop walks, which for a waiter that is
+                // itself bridged is the real one behind a facade sharing the same pre-rewrite
+                // annotation instance (#327) — leaving it there would strand the old, unretargeted
+                // wait on the facade instead of the resource actually being waited on now.
+                RealToFacadeRegistry.MirrorReplacement(resource, wait, retargeted);
             }
         }
     }
