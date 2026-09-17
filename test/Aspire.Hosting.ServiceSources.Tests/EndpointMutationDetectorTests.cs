@@ -259,6 +259,53 @@ public class EndpointMutationDetectorTests
         Assert.Contains("…' added after resolve", warning);
     }
 
+    // Written against the collection rather than through a callback, and named for it: no surface
+    // this design polices can remove an endpoint today. The branch exists so the detector is keyed
+    // on the complete set of differences between two collections rather than on two known shapes.
+    [Fact]
+    public async Task EndpointRemovedFromTheFacadeDirectly_IsRestoredAndReported()
+    {
+        var builder = Builder();
+        var service = Kubernetes(builder);
+        var registered = Assert.Single(Endpoints(service));
+
+        service.Resource.Annotations.Remove(registered);
+        Assert.Empty(Endpoints(service));
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.Same(registered, Assert.Single(Endpoints(service)));
+        Assert.Contains("endpoint 'https' removed after resolve", Assert.Single(warnings));
+    }
+
+    // Aspire resolves endpoints by name with SingleOrDefault, which throws on a duplicate, so the
+    // re-add must never introduce one -- and the facade must end up holding exactly what the source
+    // registered, which is the gate's own outcome.
+    [Fact]
+    public async Task EndpointRemovedAndReplacedByItsOwnName_IsReportedWithoutDuplicatingTheName()
+    {
+        var builder = Builder();
+        var service = Kubernetes(builder);
+        var registered = Assert.Single(Endpoints(service));
+
+        service.Resource.Annotations.Remove(registered);
+        var replacement = new EndpointAnnotation(ProtocolType.Tcp, uriScheme: "https", name: "https", port: 1234);
+        service.Resource.Annotations.Add(replacement);
+
+        // The add loop runs first and takes the replacement off the facade, so the name is free by
+        // the time the re-add loop reaches the original: one endpoint named 'https', the registered
+        // instance, and two skips. The duplicate guard is what still bites on `real`, which never
+        // lost the instance.
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        var remaining = Assert.Single(Endpoints(service));
+        Assert.Same(registered, remaining);
+        Assert.Equal(54321, remaining.Port);
+        var warning = Assert.Single(warnings);
+        Assert.Contains("endpoint 'https' added after resolve", warning);
+        Assert.Contains("endpoint 'https' removed after resolve", warning);
+    }
+
     // What the reference-identity key buys, and the only test that exercises Restore's Name write:
     // a renamed instance is one changed endpoint under its recorded name, not an add plus a remove.
     // Written against the annotation rather than through a callback, and named for it, because

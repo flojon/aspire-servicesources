@@ -87,6 +87,27 @@ internal static class EndpointMutationDetector
             capabilities.Add($"endpoint '{Label(endpoint.Name)}' added after resolve");
         }
 
+        foreach (var (endpoint, recorded) in snapshot)
+        {
+            if (facade.Annotations.Contains(endpoint))
+            {
+                continue;
+            }
+
+            // Aspire resolves an endpoint by name with SingleOrDefault, which throws on a duplicate.
+            if (!HoldsEndpointNamed(facade, recorded.Name))
+            {
+                facade.Annotations.Add(endpoint);
+            }
+
+            if (real is not null && !HoldsEndpointNamed(real, recorded.Name))
+            {
+                real.Annotations.Add(endpoint);
+            }
+
+            capabilities.Add($"endpoint '{Label(recorded.Name)}' removed after resolve");
+        }
+
         if (capabilities.Count == 0)
         {
             return;
@@ -103,6 +124,10 @@ internal static class EndpointMutationDetector
         // Flushed here because a flush handler subscribed ahead of this one has already run.
         warnings.Flush(services);
     }
+
+    private static bool HoldsEndpointNamed(IResource resource, string name) =>
+        resource.Annotations.OfType<EndpointAnnotation>()
+            .Any(endpoint => string.Equals(endpoint.Name, name, StringComparison.Ordinal));
 
     /// <summary>
     /// Restores <paramref name="recorded"/> onto <paramref name="endpoint"/>, and reports whether
