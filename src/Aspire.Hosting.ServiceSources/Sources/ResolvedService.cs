@@ -35,6 +35,10 @@ internal static class ResolvedService
         //
         // The callback overload's add branch bypasses WithAnnotation too, so its shadow forwards the
         // new instance to `real` — which keeps the claim above true for endpoints created later.
+        //
+        // Shadowing reaches only calls compiled against this package. For an out-of-band source,
+        // EndpointMutationDetector watches the endpoint state instead, and so also covers the
+        // capabilities a guest-language AppHost invokes on Aspire directly.
         foreach (var annotation in real.Resource.Annotations)
         {
             facade.Annotations.Add(annotation);
@@ -56,6 +60,10 @@ internal static class ResolvedService
         // resource nothing ever publishes a state for (#328).
         ServiceWaitRetargeting.EnsureSubscribed(real.ApplicationBuilder);
 
+        // Last, so its handler is dispatched behind every other one subscribed per service here --
+        // symmetric with BridgeUnregistered, whose ordering it has to match.
+        EndpointMutationDetector.Install(real.ApplicationBuilder, facade, real.Resource, source);
+
         return new ServiceResourceBuilder(real.ApplicationBuilder, facade, real, source);
     }
 
@@ -71,6 +79,8 @@ internal static class ResolvedService
         facade.Annotations.Add(new ServiceSourceAnnotation(serviceName, source));
 
         ServiceStartupFailureNotices.For(builder);
+
+        EndpointMutationDetector.Install(builder, facade, real: null, source);
 
         return new ServiceResourceBuilder(builder, facade, real: null, source);
     }

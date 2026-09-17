@@ -79,4 +79,168 @@ public class EndpointMutationDetectorTests
         Assert.Equal(9999, endpoint.Port);
         Assert.Empty(ServiceSourcesWarnings.For(builder).Messages);
     }
+
+    [Fact]
+    public async Task ChangedPort_OnKubernetesSource_IsRevertedAndReported()
+    {
+        var builder = Builder();
+        var service = Kubernetes(builder);
+
+        GuestLanguageEndpointCallbacks.HttpsEndpointCallback(
+            service, "https", ("Port", 9999), ("TargetPort", 9999));
+
+        var mutated = Assert.Single(Endpoints(service));
+        Assert.Equal(9999, mutated.Port);
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        var restored = Assert.Single(Endpoints(service));
+        Assert.Same(mutated, restored);
+        Assert.Equal(54321, restored.Port);
+        Assert.Equal(54321, restored.TargetPort);
+        var warning = Assert.Single(warnings);
+        Assert.Contains("Service 'orders'", warning);
+        Assert.Contains("endpoint 'https' changed after resolve", warning);
+    }
+
+    [Fact]
+    public async Task ChangedTargetHost_OnUrlSource_IsRevertedAndReported()
+    {
+        var builder = Builder();
+        var service = Url(builder);
+
+        GuestLanguageEndpointCallbacks.HttpsEndpointCallback(
+            service, "https", ("TargetHost", "attacker.internal"));
+
+        Assert.Equal("attacker.internal", Assert.Single(Endpoints(service)).TargetHost);
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.Equal("orders.example.com", Assert.Single(Endpoints(service)).TargetHost);
+        Assert.Contains(warnings, warning =>
+            warning.Contains("Service 'inventory'")
+            && warning.Contains("endpoint 'https' changed after resolve"));
+    }
+
+    [Fact]
+    public async Task ChangedProtocol_OnKubernetesSource_IsRevertedAndReported()
+    {
+        var builder = Builder();
+        var service = Kubernetes(builder);
+
+        GuestLanguageEndpointCallbacks.EndpointCallback(service, "https", ("Protocol", ProtocolType.Udp));
+
+        Assert.Equal(ProtocolType.Udp, Assert.Single(Endpoints(service)).Protocol);
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.Equal(ProtocolType.Tcp, Assert.Single(Endpoints(service)).Protocol);
+        Assert.Contains("endpoint 'https' changed after resolve", Assert.Single(warnings));
+    }
+
+    // The argument for a state-keyed detector over another per-method shadow: WithExternalHttpEndpoints
+    // is a public Aspire method that sets IsExternal directly on existing annotations, so no gate
+    // ever sees it. Caught here with no WithExternalHttpEndpoints-specific code at all.
+    [Fact]
+    public async Task ExternalHttpEndpoints_OnKubernetesSource_IsRevertedAndReported()
+    {
+        var builder = Builder();
+        var service = Kubernetes(builder);
+
+        service.WithExternalHttpEndpoints();
+
+        Assert.True(Assert.Single(Endpoints(service)).IsExternal);
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.False(Assert.Single(Endpoints(service)).IsExternal);
+        Assert.Contains("endpoint 'https' changed after resolve", Assert.Single(warnings));
+    }
+
+    // Subscription order, the way round the prototype measured as LOGGED=0: an earlier, unrelated
+    // service's skip has already put the warnings flush handler ahead of the detector, so without
+    // the detector's own Flush the mutation is reverted and nothing is ever logged -- strictly worse
+    // than not detecting it.
+    [Fact]
+    public async Task ChangedPort_WithTheFlushHandlerSubscribedFirst_StillReachesTheLog()
+    {
+        var builder = Builder();
+        var earlier = Url(builder);
+        earlier.WithHttpsEndpoint(port: 7777, name: "probe");
+        var service = Kubernetes(builder);
+
+        GuestLanguageEndpointCallbacks.HttpsEndpointCallback(service, "https", ("Port", 9999));
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.Equal(54321, Assert.Single(Endpoints(service)).Port);
+        Assert.Single(warnings, warning =>
+            warning.Contains("Service 'orders'")
+            && warning.Contains("endpoint 'https' changed after resolve"));
+    }
+
+    // The other way round: a kubernetes service alone subscribes no flush handler at all, so the
+    // detector's own Flush is the only thing that can write the line -- and must write it once.
+    [Fact]
+    public async Task ChangedPort_WithNoEarlierSkip_ReachesTheLogExactlyOnce()
+    {
+        var builder = Builder();
+        var service = Kubernetes(builder);
+
+        GuestLanguageEndpointCallbacks.HttpsEndpointCallback(service, "https", ("Port", 9999));
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.Equal(54321, Assert.Single(Endpoints(service)).Port);
+        Assert.Single(warnings, warning => warning.Contains("endpoint 'https' changed after resolve"));
+    }
+
+    // What the reference-identity key buys, and the only test that exercises Restore's Name write:
+    // a renamed instance is one changed endpoint under its recorded name, not an add plus a remove.
+    // Written against the annotation rather than through a callback, and named for it, because
+    // EndpointUpdateContext.Name is get-only -- no surface this design polices can rename an endpoint
+    // today, so this guards a field the model leaves open rather than a measured attack.
+    [Fact]
+    public async Task RenamedEndpoint_OnKubernetesSource_IsReportedAsOneChangeUnderItsRecordedName()
+    {
+        var builder = Builder();
+        var service = Kubernetes(builder);
+        var registered = Assert.Single(Endpoints(service));
+
+        registered.Name = "renamed";
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        var restored = Assert.Single(Endpoints(service));
+        Assert.Same(registered, restored);
+        Assert.Equal("https", restored.Name);
+        var warning = Assert.Single(warnings);
+        Assert.Contains("endpoint 'https' changed after resolve", warning);
+        Assert.DoesNotContain("added after resolve", warning);
+        Assert.DoesNotContain("removed after resolve", warning);
+    }
+
+    // Aspire dispatches BeforeStartEvent sequentially in subscription order, and every
+    // IDistributedApplicationEventingSubscriber registers after composition -- so a handler
+    // subscribed here, after the service resolved, stands for every reader of final endpoint state.
+    // It must see the restored value, not the mutated one.
+    [Fact]
+    public async Task TheDetectorRunsBeforeAHandlerSubscribedAfterIt()
+    {
+        var builder = Builder();
+        var service = Kubernetes(builder);
+
+        GuestLanguageEndpointCallbacks.HttpsEndpointCallback(service, "https", ("Port", 9999));
+
+        int? observedByALaterHandler = null;
+        builder.Eventing.Subscribe<BeforeStartEvent>((_, _) =>
+        {
+            observedByALaterHandler = Endpoints(service).Single().Port;
+            return Task.CompletedTask;
+        });
+
+        await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.Equal(54321, observedByALaterHandler);
+    }
 }
