@@ -141,6 +141,24 @@ public class ServiceEndpointTests
         Assert.Contains("container", ex.Message);
     }
 
+    /// <summary>
+    /// The remedy this message names has to be vocabulary that still exists — the
+    /// <c>withService*</c> shims and <c>Configure&lt;T&gt;</c> it used to name are both gone.
+    /// </summary>
+    [Fact]
+    public void GetServiceEndpoint_NoEndpoints_NamesEndpointVocabularyThatStillExists()
+    {
+        var service = ContainerService(Builder());
+        ClearEndpoints(service.Resource);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => service.GetServiceEndpoint());
+
+        Assert.Contains("withHttpEndpoint()/withHttpsEndpoint() in TypeScript", ex.Message);
+        Assert.Contains("WithHttpEndpoint()/WithHttpsEndpoint() in C#", ex.Message);
+        Assert.DoesNotContain("withService", ex.Message);
+        Assert.DoesNotContain("Configure<", ex.Message);
+    }
+
     [Fact]
     public void GetServiceEndpoint_SeveralEndpointsAndNoneHttpOrHttps_ThrowsListingThemAndNamingGetEndpoint()
     {
