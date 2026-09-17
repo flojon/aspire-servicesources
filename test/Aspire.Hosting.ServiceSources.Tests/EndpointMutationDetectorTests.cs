@@ -354,4 +354,60 @@ public class EndpointMutationDetectorTests
 
         Assert.Equal(54321, observedByALaterHandler);
     }
+
+    [Fact]
+    public async Task OutOfBandServicesWithNoMutation_ProduceNoWarnings()
+    {
+        var builder = Builder();
+        var url = Url(builder);
+        var kubernetes = Kubernetes(builder);
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.Empty(warnings);
+        Assert.Equal("orders.example.com", Assert.Single(Endpoints(url)).TargetHost);
+        Assert.Equal(54321, Assert.Single(Endpoints(kubernetes)).Port);
+    }
+
+    // Nothing is installed for a reachable source, where a post-resolve endpoint change is
+    // legitimate -- the filter that makes the no-false-positives argument true.
+    [Fact]
+    public async Task ChangedEndpoint_OnContainerSource_IsNeitherRevertedNorReported()
+    {
+        var builder = Builder();
+        var service = Container(builder);
+        service.WithHttpsEndpoint(port: 443, name: "https");
+
+        GuestLanguageEndpointCallbacks.HttpsEndpointCallback(service, "https", ("Port", 9999));
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.Empty(warnings);
+        Assert.Equal(9999, Assert.Single(Endpoints(service)).Port);
+    }
+
+    // The one Aspire handler that writes a fingerprinted field before the detector runs:
+    // MutateHttp2TransportAsync sets Transport when the resource carries Http2ServiceAnnotation.
+    // AsHttp2Service adds that through WithAnnotation, so Reachability skips it and the write stays
+    // a self-assignment. Asserted by type NAME because the annotation is internal to
+    // Aspire.Hosting.dll -- the same constraint Reachability.CapabilityLabel already documents.
+    // If a future Reachability change lets it through, this fails and names the reason.
+    [Fact]
+    public async Task AsHttp2Service_OnKubernetesSource_NeitherLandsNorRevertsTheTransport()
+    {
+        var builder = Builder();
+        var service = Kubernetes(builder);
+        var transport = Assert.Single(Endpoints(service)).Transport;
+
+        service.AsHttp2Service();
+
+        Assert.DoesNotContain(
+            service.Resource.Annotations,
+            annotation => annotation.GetType().Name == "Http2ServiceAnnotation");
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.Equal(transport, Assert.Single(Endpoints(service)).Transport);
+        Assert.DoesNotContain(warnings, warning => warning.Contains("changed after resolve"));
+    }
 }
