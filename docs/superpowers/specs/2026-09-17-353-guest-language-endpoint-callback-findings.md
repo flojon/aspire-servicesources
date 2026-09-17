@@ -28,9 +28,9 @@ the three `*Callback` names — which this package declares no member for — th
 | `withHttpEndpointCallback` | `Aspire.Hosting/withHttpEndpointCallback` | ❌ **ungated update branch** |
 | `withHttpsEndpointCallback` | `Aspire.Hosting/withHttpsEndpointCallback` | ❌ **ungated update branch** |
 
-Of the three fix candidates, only post-hoc detection survives contact with the constraints — §6
+Of the three fix candidates, only post-hoc detection survives contact with the constraints — §4
 prototypes it and finds it viable. It also turns up a fourth ungated call surface,
-`WithExternalHttpEndpoints`, which is unreported **from C# today** (§6.5).
+`WithExternalHttpEndpoints`, which is unreported **from C# today** (§4.5).
 
 ## 1. Q1 — how a guest-language AppHost reaches these methods
 
@@ -161,19 +161,19 @@ intercept at all.
 That leaves three candidates:
 
 1. **Detect after the fact** — snapshot at resolve, compare at `BeforeStartEvent`. Investigated in
-   full in §6 below: **viable, prototyped, and it covers strictly more than the three callbacks.**
+   full in §4 below: **viable, prototyped, and it covers strictly more than the three callbacks.**
 2. **Document the limitation** for guest-language AppHost authors — cheap, honest, closes nothing.
 3. **Ask upstream.** Routing the callback path's update branch through `WithAnnotation`, or making
    `EndpointUpdateContext` public, would each make this closable here. Worth filing against
    `microsoft/aspire` regardless of which of the above ships.
 
-## 6. Post-hoc detection, investigated
+## 4. Post-hoc detection, investigated
 
 **Verdict: viable.** A working prototype caught both mutation shapes, reverted them, and reported
 them in the package's existing skip-warning wording — order-independently. What follows was measured,
 not designed on paper; the prototype was a throwaway xUnit probe, run on `net10.0`, then deleted.
 
-### 6.1 The prototype and what it did
+### 4.1 The prototype and what it did
 
 Fingerprint every `EndpointAnnotation` the source registers at resolve time (`Name`, `Port`,
 `TargetPort`, `UriScheme`, `TargetHost`, `Transport`, `IsExternal`, `IsExplicitlyProxied`,
@@ -193,7 +193,7 @@ reached the log is the one this package already emits for a gated C# call. **The
 matches gating at the call site**, which is the bar — revert is possible, not just detection, because
 every property `EndpointUpdateContext` can reach is settable from here too.
 
-### 6.2 Both seams it needs already exist
+### 4.2 Both seams it needs already exist
 
 - **Timing.** `BeforeStartEvent` runs before DCP starts anything (`ExecuteBeforeStartHooksAsync` is
   awaited before `_host.StartAsync`), and — checked, because the opposite is easy to assume from
@@ -205,7 +205,7 @@ every property `EndpointUpdateContext` can reach is settable from here too.
   inert-subscription trap, and `Flush` is documented report-once for exactly this. Nothing new is
   needed to report a late skip.
 
-### 6.3 False positives: none by construction
+### 4.3 False positives: none by construction
 
 Two independent reasons, both checked rather than assumed:
 
@@ -218,7 +218,7 @@ Two independent reasons, both checked rather than assumed:
   endpoint-tuple change after resolve is by definition one that should have been skipped. There is no
   legitimate change for it to confuse itself with.
 
-### 6.4 The one real trap, and its remedy
+### 4.4 The one real trap, and its remedy
 
 Subscription order. `ServiceSourcesWarnings`' flush handler subscribes on the first
 `ServiceSourcesWarnings.For(builder)` call — which an *earlier, unrelated* service's skip may already
@@ -233,7 +233,7 @@ author's call vanishes with no explanation. Calling `Flush(@event.Services)` imm
 `AddSkip` fixes it: re-measured in both subscription orders, `LOGGED=1` either way. Any design must
 treat this as a requirement, not a detail.
 
-### 6.5 Why this beats more shadows: it closes a bug shadowing never will
+### 4.5 Why this beats more shadows: it closes a bug shadowing never will
 
 `WithExternalHttpEndpoints` is a **public** Aspire method that walks existing annotations and sets
 `item.IsExternal = true` directly — no `WithAnnotation`, so no gate. Measured on current `main`
@@ -254,7 +254,7 @@ uniformly.
 (`WithEndpointProxySupport`, the other suspect on the handle, goes through `WithAnnotation` and is
 correctly gated today.)
 
-### 6.6 Open questions for the design pass
+### 4.6 Open questions for the design pass
 
 - **Revert, warn-only, or fail?** Reverting matches the gate's semantics, but it is undoing something
   the author wrote. A guest AppHost that called `withEndpointCallback('probe', …)` and then
@@ -269,7 +269,7 @@ correctly gated today.)
   may exist for other annotation types on the handle's other 60-odd `Aspire.Hosting/*` capabilities.
   Only the endpoint ones were enumerated here.
 
-## 4. Reproducing this
+## 5. Reproducing this
 
 ```bash
 cd samples/DemoAppHostTypeScript && rm -rf .aspire
@@ -283,9 +283,9 @@ The runtime probes were throwaway xUnit facts in
 `typeof(DistributedApplication).Assembly.GetType("Aspire.Hosting.ResourceBuilderExtensions")`
 + `MakeGenericMethod(typeof(ServiceResource))`.
 
-## 5. Unrelated defect noticed while reading
+## 6. Unrelated defect noticed while reading
 
-`ServiceEndpointExtensions.cs:102` still tells guest-language authors to call
-`withServiceHttpEndpoint()`/`withServiceHttpsEndpoint()`. Those shims went away with #313 — the
-generated surface is `withHttpEndpoint()`/`withHttpsEndpoint()`. The message is reachable (it is the
-"service exposes no endpoint" exception) and names an API that no longer exists.
+`ServiceEndpointExtensions.cs` told guest-language authors to call
+`withServiceHttpEndpoint()`/`withServiceHttpsEndpoint()` in its "service exposes no endpoint"
+exception. Those shims went away with #313, so the message named an API that no longer existed.
+Fixed on `main` since this was measured — it now names `withHttpEndpoint()`/`withHttpsEndpoint()`.
