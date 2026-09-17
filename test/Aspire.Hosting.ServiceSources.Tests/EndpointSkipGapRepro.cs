@@ -65,6 +65,38 @@ public class EndpointSkipGapRepro
             $"'probe' added to facade={added}; warnings={warnings.Count}");
     }
 
+    // The callback overload against a "url" facade, which is the one source whose ServiceResourceBuilder
+    // has no real resource at all. That makes it the case that distinguishes the gate from the
+    // annotation-diff forward's own null check: the null check would still have let the delegated
+    // call run, invoke the callback, and add "admin" to the facade. Nothing is added and the callback
+    // never runs, so the gate is what stopped it.
+    [Fact]
+    public void NewEndpoint_OnUrlSource_ViaCallback_IsSkippedAndReported()
+    {
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
+        var service = Url(builder);
+        var before = service.Resource.Annotations.OfType<EndpointAnnotation>().Count();
+        var callbackInvoked = false;
+
+        // Routed through OverloadProbe — see OverloadResolutionProbe.cs for why.
+        OverloadProbe.CallWithEndpointCallback(service, "admin", endpoint =>
+        {
+            callbackInvoked = true;
+            endpoint.Port = 9999;
+        });
+
+        var after = service.Resource.Annotations.OfType<EndpointAnnotation>().Count();
+        var warnings = ServiceSourcesWarnings.For(builder).Messages;
+
+        Assert.False(callbackInvoked);
+        Assert.Equal(before, after);
+        Assert.DoesNotContain(service.Resource.Annotations.OfType<EndpointAnnotation>(), e => e.Name == "admin");
+        Assert.True(
+            warnings.Count == 1 && warnings[0].Contains("WithEndpoint/WithHttpEndpoint/WithHttpsEndpoint"),
+            $"endpoints before={before}, after={after}; warnings={warnings.Count}; "
+            + $"text={(warnings.Count > 0 ? warnings[0] : "<none>")}");
+    }
+
     // PASSES before and after — the update branch mutates nothing for a no-argument call, so the
     // kubernetes-sourced port-forward's real endpoint tuple was never at risk here (the *with*-
     // arguments mutation risk is #335, out of this file's scope). Written from the issue's own prose
