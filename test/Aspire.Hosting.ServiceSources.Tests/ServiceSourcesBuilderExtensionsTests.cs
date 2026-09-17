@@ -186,8 +186,8 @@ public class ServiceSourcesBuilderExtensionsTests
         var real = builder.AddResource(new ServiceContainerResource("orders")).WithImage("nginx");
         var service = ResolvedService.Bridge(real, "orders", "container");
         // Pre-registered through the already-correct WithHttpsEndpoint add branch, so this test
-        // exercises the callback overload's update branch against a real shared instance -- not its
-        // separate, pre-existing add-branch dual-write gap (#352, out of this task's scope).
+        // exercises the callback overload's update branch against an instance both collections
+        // already share, rather than its add branch.
         service.WithHttpsEndpoint(port: 443, name: "probe");
         var callbackInvoked = false;
 
@@ -200,6 +200,12 @@ public class ServiceSourcesBuilderExtensionsTests
         Assert.True(callbackInvoked);
         var endpoint = Assert.Single(service.Resource.Annotations.OfType<EndpointAnnotation>(), e => e.Name == "probe");
         Assert.Equal(9999, endpoint.Port);
+        // The update branch mutates the shared instance in place, so `real` sees the new port with
+        // no forwarding at all -- the through-to-the-real-endpoint half this test's name has always
+        // claimed and never actually checked.
+        Assert.Same(
+            endpoint,
+            Assert.Single(real.Resource.Annotations.OfType<EndpointAnnotation>(), e => e.Name == "probe"));
         Assert.Empty(ServiceSourcesWarnings.For(builder).Messages);
     }
 

@@ -32,6 +32,9 @@ internal static class ResolvedService
         // branch, which never calls WithAnnotation at all (#334, #335). Nine shadow overloads across
         // three method names are all second interception points reading the identical Reachability
         // table, not workarounds duplicating its logic.
+        //
+        // The callback overload's add branch bypasses WithAnnotation too, so its shadow forwards the
+        // new instance to `real` — which keeps the claim above true for endpoints created later.
         foreach (var annotation in real.Resource.Annotations)
         {
             facade.Annotations.Add(annotation);

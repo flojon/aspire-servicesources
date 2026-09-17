@@ -161,4 +161,72 @@ internal sealed class ServiceResourceBuilder(
 
         return this;
     }
+
+    /// <summary>
+    /// Runs <paramref name="call"/> and forwards to <c>real</c> every annotation the call left on the
+    /// facade alone. Aspire's callback <c>WithEndpoint</c> overload adds its brand-new
+    /// <see cref="EndpointAnnotation"/> straight to <c>Resource.Annotations</c> rather than through
+    /// <see cref="WithAnnotation{TAnnotation}"/> — the one method in its whole extension class that
+    /// does — so diffing the collection across the call is the only way this bridge can learn about it.
+    /// </summary>
+    /// <remarks>
+    /// The <c>real</c>-side read is deliberately taken <em>after</em> <paramref name="call"/> returns,
+    /// never as a second pre-call snapshot: every numeric overload dual-writes through
+    /// <see cref="WithAnnotation{TAnnotation}"/> <em>during</em> the call, and a pre-call read would
+    /// miss that write, so the instance would look new on the facade, absent from <c>real</c>, and be
+    /// added a second time. Reading after is also what makes this a silent no-op if a future Aspire
+    /// routes this add branch through <c>WithAnnotation</c> itself.
+    /// <para>
+    /// The forward goes to <c>real</c> directly rather than back through
+    /// <see cref="WithAnnotation{TAnnotation}"/>, because the facade already holds the instance.
+    /// </para>
+    /// <para>
+    /// Deliberately not filtered to <see cref="EndpointAnnotation"/>: the diff observes instances, so
+    /// a type filter could only drop something the delegated call added that nobody anticipated —
+    /// silently, which is what <see cref="Reachability"/>'s fail-closed denylist exists to avoid.
+    /// The reachability re-check below cannot fire today by construction, whatever type the diff
+    /// yields: an unreachable source never gets past the caller's gate, and on a reachable one
+    /// <see cref="Reachability.IsUnreachable"/> is false for every annotation type. It keeps the
+    /// invariant "nothing reaches <c>real</c> without consulting <see cref="Reachability"/>" true of
+    /// this path too. A fired re-check warns and leaves the annotation on the facade rather than
+    /// removing an object this package did not add, so the divergence is named rather than silent.
+    /// </para>
+    /// </remarks>
+    internal static IResourceBuilder<ServiceResource> ForwardingAnnotationsAddedBy(
+        IResourceBuilder<ServiceResource> builder, Func<IResourceBuilder<ServiceResource>> call)
+    {
+        if (builder is not ServiceResourceBuilder serviceBuilder || serviceBuilder.Real is not { } realBuilder)
+        {
+            return call();
+        }
+
+        var beforeOnFacade = new HashSet<IResourceAnnotation>(
+            serviceBuilder.Resource.Annotations, ReferenceEqualityComparer.Instance);
+
+        var result = call();
+
+        var nowOnReal = new HashSet<IResourceAnnotation>(
+            realBuilder.Resource.Annotations, ReferenceEqualityComparer.Instance);
+
+        foreach (var annotation in serviceBuilder.Resource.Annotations.ToArray())
+        {
+            if (beforeOnFacade.Contains(annotation) || nowOnReal.Contains(annotation))
+            {
+                continue;
+            }
+
+            if (Reachability.IsUnreachable(annotation.GetType(), serviceBuilder.Source))
+            {
+                ServiceSourcesWarnings.For(serviceBuilder.ApplicationBuilder).AddSkip(
+                    serviceBuilder.Resource.Name,
+                    serviceBuilder.Source,
+                    Reachability.CapabilityLabel(annotation.GetType()));
+                continue;
+            }
+
+            realBuilder.WithAnnotation(annotation);
+        }
+
+        return result;
+    }
 }
