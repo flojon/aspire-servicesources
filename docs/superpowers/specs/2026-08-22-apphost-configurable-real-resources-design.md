@@ -43,9 +43,9 @@ Established empirically against Aspire.Hosting 13.4.6 and Aspire CLI 13.5.1 / 13
    is the route that *would* fix #58 for `url` — no endpoint means DCP never plumbs
    container-to-host networking and injects the URL directly, which a container consumer handles
    fine (verified against plain Aspire 13.4.6). It is blocked twice over: no `EndpointAnnotation`
-   means it cannot satisfy `IResourceWithServiceDiscovery` (microsoft/aspire#9965, #15961, #15993),
-   and `sealed` means this package cannot add that interface itself. Hence its own
-   `ServiceUrlResource`, and hence the genuine dependency on the upstream issue.
+   means it cannot satisfy `IResourceWithServiceDiscovery`, and `sealed` means this package cannot
+   add that interface itself. Hence its own `ServiceUrlResource`, and hence the genuine dependency
+   on Aspire changing that type (tracked here as #72).
 5. **`AddProject` validates the project path at add time**, so a project resource cannot be
    registered eagerly with a placeholder path. Registering a `ProjectResource` with a *custom*
    `IProjectMetadata` does not throw, but skips `WithProjectDefaults` — `internal`, reads
