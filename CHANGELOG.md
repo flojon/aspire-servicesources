@@ -146,14 +146,17 @@ never existed. Check the tag of the last release before adding one.
   `KnownResourceCommands` are. The methods that accept these values still take `string`.
 - **Endpoint changes made after a `url` or `kubernetes` service resolves are now detected, reverted
   and reported** ([#372]). Aspire's own `withEndpointCallback`, `withHttpEndpointCallback` and
-  `withHttpsEndpointCallback` are reachable from a guest-language AppHost — and are `internal` to
-  Aspire, so no C# shadow can intercept them. They mutated an out-of-band service's endpoint with no
-  warning at all, which for a `kubernetes` service repointed the real `kubectl port-forward`,
-  sending the configuration to a different process than the one the AppHost author meant. Each
-  service's endpoints are now fingerprinted as its source registers them, and anything changed,
-  added or removed before start is put back and reported as a skipped call naming the endpoint —
-  `Service 'orders': skipped endpoint 'https' changed after resolve because its source is
-  'kubernetes' …` — so the outcome matches what gating the equivalent C# call already does. This
+  `withHttpsEndpointCallback` are reachable from a guest-language AppHost — and the shape they take,
+  `EndpointUpdateContext`, is `internal` to Aspire, so no C# shadow can project them. They mutated an
+  out-of-band service's endpoint with no warning at all, which for a `kubernetes` service repointed
+  the real `kubectl port-forward`, sending the configuration to a different process than the one the
+  AppHost author meant. Each service's endpoints are now fingerprinted as its source registers them,
+  and anything changed, added or removed between resolve and start is put back, in one warning naming
+  the endpoint and the fields that changed — `Service 'orders': endpoint 'https' was changed after
+  this service resolved (IsExternal) and has been put back. Its source is 'kubernetes' — …` — so the
+  outcome matches what gating the equivalent C# call already does. An endpoint *added* this way is
+  removed again, so a reference taken to it before start will not resolve, and the warning says so.
+  This
   measures the state rather than the call, so it also **covers**
   `WithExternalHttpEndpoints` ([#359]), which sets `IsExternal` on existing endpoints directly from
   C# and was likewise unreported; that issue stays open and separately owned. Nothing changes for a

@@ -1,6 +1,6 @@
 using System.Net.Sockets;
-using System.Text;
 using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.ServiceSources.Config;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
 
@@ -63,16 +63,20 @@ internal static class EndpointMutationDetector
         string source,
         Dictionary<EndpointAnnotation, Fingerprint> snapshot)
     {
-        var capabilities = new List<string>();
+        var reverts = new List<string>();
 
         // Materialised first: Annotations is the live collection this loop removes from.
         foreach (var endpoint in facade.Annotations.OfType<EndpointAnnotation>().ToArray())
         {
             if (snapshot.TryGetValue(endpoint, out var recorded))
             {
-                if (Restore(endpoint, recorded))
+                var changed = Restore(endpoint, recorded);
+
+                if (changed.Count > 0)
                 {
-                    capabilities.Add($"endpoint '{Label(recorded.Name)}' changed after resolve");
+                    reverts.Add(
+                        $"endpoint '{Label(recorded.Name)}' was changed after this service resolved " +
+                        $"({string.Join(", ", changed)}) and has been put back");
                 }
 
                 continue;
@@ -84,7 +88,9 @@ internal static class EndpointMutationDetector
             // if a future Aspire routes its create branch through WithAnnotation.
             real?.Annotations.Remove(endpoint);
 
-            capabilities.Add($"endpoint '{Label(endpoint.Name)}' added after resolve");
+            reverts.Add(
+                $"endpoint '{Label(endpoint.Name)}' was added after this service resolved and has been " +
+                "removed, so a reference taken to it will not resolve");
         }
 
         foreach (var (endpoint, recorded) in snapshot)
@@ -93,6 +99,10 @@ internal static class EndpointMutationDetector
             {
                 continue;
             }
+
+            // Before the guards below: one removed after being changed would otherwise come back
+            // carrying the change, and be looked for under a name it no longer has.
+            var changed = Restore(endpoint, recorded);
 
             // Aspire resolves an endpoint by name with SingleOrDefault, which throws on a duplicate.
             if (!HoldsEndpointNamed(facade, recorded.Name))
@@ -105,82 +115,122 @@ internal static class EndpointMutationDetector
                 real.Annotations.Add(endpoint);
             }
 
-            capabilities.Add($"endpoint '{Label(recorded.Name)}' removed after resolve");
-        }
-
-        if (capabilities.Count == 0)
-        {
-            return;
+            reverts.Add(changed.Count == 0
+                ? $"endpoint '{Label(recorded.Name)}' was removed after this service resolved and has " +
+                  "been put back"
+                : $"endpoint '{Label(recorded.Name)}' was removed after this service resolved and has " +
+                  $"been put back, along with the fields changed with it ({string.Join(", ", changed)})");
         }
 
         // ReporterFor, not For: subscribing during this event's own dispatch is inert.
-        var warnings = ServiceSourcesWarnings.ReporterFor(builder);
-
-        foreach (var capability in capabilities)
-        {
-            warnings.AddSkip(facade.Name, source, capability);
-        }
-
-        // Flushed here because a flush handler subscribed ahead of this one has already run.
-        warnings.Flush(services);
+        ServiceSourcesWarnings.ReporterFor(builder).ReportRevertsNow(services, facade.Name, source, reverts);
     }
 
+    // Aspire matches an endpoint name case-insensitively, so a guard that matched any other way
+    // would miss the duplicate it exists to stop.
     private static bool HoldsEndpointNamed(IResource resource, string name) =>
         resource.Annotations.OfType<EndpointAnnotation>()
-            .Any(endpoint => string.Equals(endpoint.Name, name, StringComparison.Ordinal));
+            .Any(endpoint => string.Equals(endpoint.Name, name, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
-    /// Restores <paramref name="recorded"/> onto <paramref name="endpoint"/>, and reports whether
-    /// anything differed.
+    /// Restores <paramref name="recorded"/> onto <paramref name="endpoint"/>, and names the fields
+    /// that had differed.
     /// </summary>
-    private static bool Restore(EndpointAnnotation endpoint, Fingerprint recorded)
+    /// <remarks>
+    /// The names are the warning's whole diagnostic value: the developer is told an endpoint changed
+    /// by a package they did not call, and the fingerprint carries eleven fields to bisect by hand
+    /// otherwise.
+    /// </remarks>
+    private static IReadOnlyList<string> Restore(EndpointAnnotation endpoint, Fingerprint recorded)
     {
         var current = Capture(endpoint);
 
         if (current == recorded)
         {
-            return false;
+            return [];
         }
+
+        var changed = new List<string>();
 
         if (current.Name != recorded.Name)
         {
+            changed.Add(nameof(recorded.Name));
             endpoint.Name = recorded.Name;
         }
 
-        if (current.Protocol != recorded.Protocol)
+        if (current.Port != recorded.Port)
         {
-            endpoint.Protocol = recorded.Protocol;
+            changed.Add(nameof(recorded.Port));
+        }
+
+        if (current.TargetPort != recorded.TargetPort)
+        {
+            changed.Add(nameof(recorded.TargetPort));
         }
 
         if (current.UriScheme != recorded.UriScheme)
         {
+            changed.Add(nameof(recorded.UriScheme));
             endpoint.UriScheme = recorded.UriScheme;
         }
 
         if (current.TargetHost != recorded.TargetHost)
         {
+            changed.Add(nameof(recorded.TargetHost));
             endpoint.TargetHost = recorded.TargetHost;
+        }
+
+        if (current.Transport != recorded.Transport)
+        {
+            changed.Add(nameof(recorded.Transport));
         }
 
         if (current.IsExternal != recorded.IsExternal)
         {
+            changed.Add(nameof(recorded.IsExternal));
             endpoint.IsExternal = recorded.IsExternal;
         }
 
         // IsExplicitlyProxied, never IsProxied: its setter keeps both backing fields in lockstep,
-        // and null reconstructs the untouched state exactly.
+        // and null reconstructs the untouched state exactly. Named for the caller's spelling, which
+        // is the IsProxied on Aspire's callback context.
         if (current.IsExplicitlyProxied != recorded.IsExplicitlyProxied)
         {
+            changed.Add("IsProxied");
             endpoint.IsExplicitlyProxied = recorded.IsExplicitlyProxied;
         }
 
         if (current.ExcludeReferenceEndpoint != recorded.ExcludeReferenceEndpoint)
         {
+            changed.Add(nameof(recorded.ExcludeReferenceEndpoint));
             endpoint.ExcludeReferenceEndpoint = recorded.ExcludeReferenceEndpoint;
         }
 
-        // Re-read rather than reuse `current`: these four derive from the fields above, so one may
-        // already be back in line, and writing anyway would materialise a value left unset.
+        if (current.TlsEnabled != recorded.TlsEnabled)
+        {
+            changed.Add(nameof(recorded.TlsEnabled));
+        }
+
+        if (current.Protocol != recorded.Protocol)
+        {
+            changed.Add(nameof(recorded.Protocol));
+            endpoint.Protocol = recorded.Protocol;
+        }
+
+        RestoreDerived(endpoint, recorded);
+
+        return changed;
+    }
+
+    /// <summary>
+    /// The four fields that fall back to the ones <see cref="Restore"/> has just written.
+    /// </summary>
+    /// <remarks>
+    /// Written last and compared against a re-read rather than against the capture: one may already
+    /// be back in line, and writing anyway would materialise a value the endpoint had left unset.
+    /// </remarks>
+    private static void RestoreDerived(EndpointAnnotation endpoint, Fingerprint recorded)
+    {
         if (endpoint.Transport != recorded.Transport)
         {
             endpoint.Transport = recorded.Transport;
@@ -200,8 +250,6 @@ internal static class EndpointMutationDetector
         {
             endpoint.TargetPort = recorded.TargetPort;
         }
-
-        return true;
     }
 
     private static Fingerprint Capture(EndpointAnnotation endpoint) => new(
@@ -218,25 +266,28 @@ internal static class EndpointMutationDetector
         endpoint.Protocol);
 
     /// <summary>
-    /// <paramref name="name"/> made safe to interpolate into a log line.
+    /// <paramref name="name"/> made safe to interpolate into a log line, and bounded.
     /// </summary>
+    /// <remarks>
+    /// <see cref="ConfiguredValue"/> rather than a second spelling of it: an endpoint name is
+    /// developer-written text echoed back, which is the case that helper already states the rule for,
+    /// and it catches the invisibles a control-character test misses. The quote and the cap are what
+    /// it does not cover, and both are this message's own.
+    /// </remarks>
     private static string Label(string name)
     {
-        // The only caller-controlled string this package logs: a newline in it forges log lines.
-        var label = new StringBuilder(Math.Min(name.Length, MaxNameLength) + 1);
+        // The name is delimited with quotes in the message, so one inside it forges a second entry.
+        var escaped = ConfiguredValue.Bare(name).Replace("'", "\\'", StringComparison.Ordinal);
 
-        foreach (var character in name)
+        if (escaped.Length <= MaxNameLength)
         {
-            if (label.Length == MaxNameLength)
-            {
-                label.Append('…');
-                break;
-            }
-
-            label.Append(char.IsControl(character) ? '?' : character);
+            return escaped;
         }
 
-        return label.ToString();
+        // Never cut a surrogate pair in half: the half left behind is not text.
+        var cut = char.IsHighSurrogate(escaped[MaxNameLength - 1]) ? MaxNameLength - 1 : MaxNameLength;
+
+        return escaped[..cut] + '…';
     }
 
     /// <summary>

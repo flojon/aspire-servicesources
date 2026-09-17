@@ -100,7 +100,9 @@ public class EndpointMutationDetectorTests
         Assert.Equal(54321, restored.TargetPort);
         var warning = Assert.Single(warnings);
         Assert.Contains("Service 'orders'", warning);
-        Assert.Contains("endpoint 'https' changed after resolve", warning);
+        Assert.Contains(
+            "endpoint 'https' was changed after this service resolved (Port, TargetPort) and has been put back",
+            warning);
     }
 
     [Fact]
@@ -119,7 +121,8 @@ public class EndpointMutationDetectorTests
         Assert.Equal("orders.example.com", Assert.Single(Endpoints(service)).TargetHost);
         Assert.Contains(warnings, warning =>
             warning.Contains("Service 'inventory'")
-            && warning.Contains("endpoint 'https' changed after resolve"));
+            && warning.Contains(
+                "endpoint 'https' was changed after this service resolved (TargetHost) and has been put back"));
     }
 
     [Fact]
@@ -135,7 +138,7 @@ public class EndpointMutationDetectorTests
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 
         Assert.Equal(ProtocolType.Tcp, Assert.Single(Endpoints(service)).Protocol);
-        Assert.Contains("endpoint 'https' changed after resolve", Assert.Single(warnings));
+        Assert.Contains("(Protocol) and has been put back", Assert.Single(warnings));
     }
 
     // The argument for a state-keyed detector over another per-method shadow: WithExternalHttpEndpoints
@@ -154,13 +157,17 @@ public class EndpointMutationDetectorTests
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 
         Assert.False(Assert.Single(Endpoints(service)).IsExternal);
-        Assert.Contains("endpoint 'https' changed after resolve", Assert.Single(warnings));
+
+        // The field the developer's call actually wrote, named in the line they have to act on.
+        Assert.Contains(
+            "endpoint 'https' was changed after this service resolved (IsExternal) and has been put back",
+            Assert.Single(warnings));
     }
 
     // Subscription order, the way round the prototype measured as LOGGED=0: an earlier, unrelated
-    // service's skip has already put the warnings flush handler ahead of the detector, so without
-    // the detector's own Flush the mutation is reverted and nothing is ever logged -- strictly worse
-    // than not detecting it.
+    // service's skip has already put the warnings flush handler ahead of the detector, so without an
+    // immediate report the mutation is reverted and nothing is ever logged -- strictly worse than not
+    // detecting it.
     [Fact]
     public async Task ChangedPort_WithTheFlushHandlerSubscribedFirst_StillReachesTheLog()
     {
@@ -176,11 +183,11 @@ public class EndpointMutationDetectorTests
         Assert.Equal(54321, Assert.Single(Endpoints(service)).Port);
         Assert.Single(warnings, warning =>
             warning.Contains("Service 'orders'")
-            && warning.Contains("endpoint 'https' changed after resolve"));
+            && warning.Contains("endpoint 'https' was changed after this service resolved"));
     }
 
     // The other way round: a kubernetes service alone subscribes no flush handler at all, so the
-    // detector's own Flush is the only thing that can write the line -- and must write it once.
+    // detector's own report is the only thing that can write the line -- and must write it once.
     [Fact]
     public async Task ChangedPort_WithNoEarlierSkip_ReachesTheLogExactlyOnce()
     {
@@ -192,7 +199,7 @@ public class EndpointMutationDetectorTests
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 
         Assert.Equal(54321, Assert.Single(Endpoints(service)).Port);
-        Assert.Single(warnings, warning => warning.Contains("endpoint 'https' changed after resolve"));
+        Assert.Single(warnings, warning => warning.Contains("endpoint 'https' was changed after this service resolved"));
     }
 
     [Fact]
@@ -211,7 +218,10 @@ public class EndpointMutationDetectorTests
         var remaining = Assert.Single(Endpoints(service));
         Assert.Equal("https", remaining.Name);
         Assert.Equal(54321, remaining.Port);
-        Assert.Contains("endpoint 'probe' added after resolve", Assert.Single(warnings));
+        Assert.Contains(
+            "endpoint 'probe' was added after this service resolved and has been removed, so a reference " +
+            "taken to it will not resolve",
+            Assert.Single(warnings));
     }
 
     [Fact]
@@ -230,9 +240,11 @@ public class EndpointMutationDetectorTests
         Assert.Equal(54321, remaining.Port);
 
         var warning = Assert.Single(warnings);
-        Assert.Contains("skipped 2 calls", warning);
-        Assert.Contains("endpoint 'https' changed after resolve", warning);
-        Assert.Contains("endpoint 'probe' added after resolve", warning);
+        Assert.Contains("endpoint 'https' was changed after this service resolved (Port)", warning);
+        Assert.Contains("endpoint 'probe' was added after this service resolved", warning);
+
+        // Two endpoints, one call: a count of "calls" would state a number the developer never wrote.
+        Assert.DoesNotContain("2 calls", warning);
     }
 
     // The endpoint name is the only caller-controlled value this package interpolates into a
@@ -246,17 +258,51 @@ public class EndpointMutationDetectorTests
         var builder = Builder();
         var service = Kubernetes(builder);
 
+        // Neither is a control character, and both are hostile: one splits the line for a reader that
+        // treats it as a terminator, the other reverses everything printed after it.
+        var lineSeparator = ((char)0x2028).ToString();
+        var bidiOverride = ((char)0x202E).ToString();
+
         GuestLanguageEndpointCallbacks.EndpointCallback(service, "probe", ("Port", 4242));
         var added = Assert.Single(Endpoints(service), endpoint => endpoint.Name == "probe");
-        added.Name = "evil\r\nService 'forged': " + new string('x', 300);
+        added.Name = "evil\r\n" + lineSeparator + bidiOverride + "Service 'forged': " + new string('x', 300);
 
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 
         var warning = Assert.Single(warnings);
         Assert.DoesNotContain("\n", warning);
         Assert.DoesNotContain("\r", warning);
-        Assert.Contains("endpoint 'evil??Service ", warning);
-        Assert.Contains("…' added after resolve", warning);
+        // Ordinal: a format character has no collation weight, so a culture-sensitive search finds
+        // one in any string at all and would pass whatever the sanitiser did.
+        Assert.DoesNotContain(lineSeparator, warning, StringComparison.Ordinal);
+        Assert.DoesNotContain(bidiOverride, warning, StringComparison.Ordinal);
+        Assert.Contains("u2028", warning, StringComparison.Ordinal);
+        Assert.Contains("u202e", warning, StringComparison.Ordinal);
+
+        // The quote is the delimiter the message reads the name back inside, so it cannot survive
+        // unescaped either.
+        Assert.DoesNotContain("Service 'forged'", warning);
+        Assert.Contains("endpoint 'evil", warning);
+        Assert.Contains("…' was added after this service resolved", warning);
+    }
+
+    // The forging the quoting has to survive: a name can spell the separator the message puts between
+    // two entries, so one endpoint reads as two things the developer did not do.
+    [Fact]
+    public async Task AddedEndpointNamedLikeASecondEntry_DoesNotForgeOne()
+    {
+        var builder = Builder();
+        var service = Kubernetes(builder);
+
+        GuestLanguageEndpointCallbacks.EndpointCallback(service, "probe", ("Port", 4242));
+        var added = Assert.Single(Endpoints(service), endpoint => endpoint.Name == "probe");
+        added.Name = "a' was removed after this service resolved; endpoint 'b";
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        // The forged entry would end here, and does not: the quote that would close the real name is
+        // escaped, so the whole thing stays inside one pair of delimiters.
+        Assert.DoesNotContain("endpoint 'b'", Assert.Single(warnings));
     }
 
     // Written against the collection rather than through a callback, and named for it: no surface
@@ -275,7 +321,54 @@ public class EndpointMutationDetectorTests
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 
         Assert.Same(registered, Assert.Single(Endpoints(service)));
-        Assert.Contains("endpoint 'https' removed after resolve", Assert.Single(warnings));
+        Assert.Contains(
+            "endpoint 'https' was removed after this service resolved and has been put back",
+            Assert.Single(warnings));
+    }
+
+    // Removed is not a shape of its own: an endpoint can be changed and then taken off, and putting
+    // the instance back without putting its fields back leaves the mutation live under a line that
+    // says only that something was removed.
+    [Fact]
+    public async Task EndpointChangedAndThenRemoved_IsPutBackWithTheChangeUndone()
+    {
+        var builder = Builder();
+        var service = Kubernetes(builder);
+
+        GuestLanguageEndpointCallbacks.HttpsEndpointCallback(
+            service, "https", ("Port", 9999), ("TargetHost", "attacker.internal"));
+        var registered = Assert.Single(Endpoints(service));
+        service.Resource.Annotations.Remove(registered);
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        var restored = Assert.Single(Endpoints(service));
+        Assert.Same(registered, restored);
+        Assert.Equal(54321, restored.Port);
+        Assert.NotEqual("attacker.internal", restored.TargetHost);
+
+        var warning = Assert.Single(warnings);
+        Assert.Contains("endpoint 'https' was removed after this service resolved and has been put back", warning);
+        Assert.Contains("along with the fields changed with it (Port, TargetHost)", warning);
+    }
+
+    // The same, renamed first: the guard has to ask about the name the endpoint is being put back
+    // under, not the one it was carrying when it left.
+    [Fact]
+    public async Task EndpointRenamedAndThenRemoved_IsNotDuplicatedOnTheRealResource()
+    {
+        var builder = Builder();
+        var service = Kubernetes(builder);
+        var registered = Assert.Single(Endpoints(service));
+        var real = Assert.Single(builder.Resources.OfType<ServiceExecutableResource>());
+
+        registered.Name = "renamed";
+        service.Resource.Annotations.Remove(registered);
+
+        await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.Equal("https", Assert.Single(Endpoints(service)).Name);
+        Assert.Same(registered, Assert.Single(real.Annotations.OfType<EndpointAnnotation>()));
     }
 
     // Aspire resolves endpoints by name with SingleOrDefault, which throws on a duplicate, so the
@@ -292,18 +385,42 @@ public class EndpointMutationDetectorTests
         var replacement = new EndpointAnnotation(ProtocolType.Tcp, uriScheme: "https", name: "https", port: 1234);
         service.Resource.Annotations.Add(replacement);
 
+        var real = Assert.Single(builder.Resources.OfType<ServiceExecutableResource>());
+
         // The add loop runs first and takes the replacement off the facade, so the name is free by
         // the time the re-add loop reaches the original: one endpoint named 'https', the registered
-        // instance, and two skips. The duplicate guard is what still bites on `real`, which never
+        // instance, and two entries. The duplicate guard is what still bites on `real`, which never
         // lost the instance.
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 
         var remaining = Assert.Single(Endpoints(service));
         Assert.Same(registered, remaining);
         Assert.Equal(54321, remaining.Port);
+        Assert.Same(registered, Assert.Single(real.Annotations.OfType<EndpointAnnotation>()));
         var warning = Assert.Single(warnings);
-        Assert.Contains("endpoint 'https' added after resolve", warning);
-        Assert.Contains("endpoint 'https' removed after resolve", warning);
+        Assert.Contains("endpoint 'https' was added after this service resolved", warning);
+        Assert.Contains("endpoint 'https' was removed after this service resolved", warning);
+    }
+
+    // The guard has to match names the way Aspire's own lookup does, which is case-insensitively --
+    // a guard that agreed with it only on casing would wave through the duplicate it exists to stop.
+    [Fact]
+    public async Task EndpointReplacedByACaseVariantOfItsName_IsNotDuplicatedOnTheRealResource()
+    {
+        var builder = Builder();
+        var service = Kubernetes(builder);
+        var registered = Assert.Single(Endpoints(service));
+        var real = Assert.Single(builder.Resources.OfType<ServiceExecutableResource>());
+
+        registered.Name = "HTTPS";
+        service.Resource.Annotations.Remove(registered);
+        real.Annotations.Remove(registered);
+        var replacement = new EndpointAnnotation(ProtocolType.Tcp, uriScheme: "https", name: "https", port: 1234);
+        real.Annotations.Add(replacement);
+
+        await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.Single(real.Annotations.OfType<EndpointAnnotation>());
     }
 
     // What the reference-identity key buys, and the only test that exercises Restore's Name write:
@@ -326,9 +443,34 @@ public class EndpointMutationDetectorTests
         Assert.Same(registered, restored);
         Assert.Equal("https", restored.Name);
         var warning = Assert.Single(warnings);
-        Assert.Contains("endpoint 'https' changed after resolve", warning);
-        Assert.DoesNotContain("added after resolve", warning);
-        Assert.DoesNotContain("removed after resolve", warning);
+        Assert.Contains("endpoint 'https' was changed after this service resolved (Name)", warning);
+        Assert.DoesNotContain("was added after", warning);
+        Assert.DoesNotContain("was removed after", warning);
+    }
+
+    // The detector reports from inside BeforeStartEvent, where another service's skips can still be
+    // buffered and waiting to be grouped -- and one of them is not recorded until DropWaitsOnUrlServices
+    // runs, later in the same event. Reporting everything outstanding would cut that group in two.
+    [Fact]
+    public async Task AReportedRevert_DoesNotSplitAnotherServicesGroupedMessage()
+    {
+        var builder = Builder();
+
+        // Resolved first, so the detector's handler is subscribed ahead of the url service's.
+        var service = Kubernetes(builder);
+        GuestLanguageEndpointCallbacks.HttpsEndpointCallback(service, "https", ("Port", 9999));
+
+        var url = Url(builder);
+        url.WithEnvironment("FIRST", "1");
+        builder.AddExecutable("worker", "dotnet", TempDirectories.CreateSubdirectory().FullName)
+            .WaitFor(url);
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.Single(warnings, warning => warning.Contains("Service 'orders'"));
+        var inventory = Assert.Single(warnings, warning => warning.Contains("Service 'inventory'"));
+        Assert.Contains("WithEnvironment", inventory);
+        Assert.Contains("WaitFor", inventory);
     }
 
     // Aspire dispatches BeforeStartEvent sequentially in subscription order, and every
@@ -408,6 +550,6 @@ public class EndpointMutationDetectorTests
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 
         Assert.Equal(transport, Assert.Single(Endpoints(service)).Transport);
-        Assert.DoesNotContain(warnings, warning => warning.Contains("changed after resolve"));
+        Assert.DoesNotContain(warnings, warning => warning.Contains("was changed after this service resolved"));
     }
 }

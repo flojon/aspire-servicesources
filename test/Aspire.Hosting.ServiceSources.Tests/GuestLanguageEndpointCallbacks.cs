@@ -5,8 +5,10 @@ namespace Aspire.Hosting.ServiceSources.Tests;
 
 /// <summary>
 /// Drives Aspire's <c>withEndpointCallback</c> / <c>withHttpsEndpointCallback</c> capabilities the
-/// way a guest-language AppHost's generated SDK does — by invoking the <c>internal</c> generic on
+/// way the generated TypeScript SDK does — by invoking the <c>internal</c> generic on
 /// <c>Aspire.Hosting.ResourceBuilderExtensions</c> closed over <see cref="ServiceResource"/>.
+/// TypeScript is the one guest language this was measured in; the others share the capability ids and
+/// are inferred.
 /// </summary>
 /// <remarks>
 /// Reflective because neither half can be named from C#: the methods are <c>internal</c> to

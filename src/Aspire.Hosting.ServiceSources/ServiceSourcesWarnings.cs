@@ -251,6 +251,27 @@ internal sealed class ServiceSourcesWarnings
         Write(services, messages);
     }
 
+    /// <summary>
+    /// Reports state restored for <paramref name="serviceName"/>, immediately, as one message.
+    /// </summary>
+    /// <remarks>
+    /// Through <see cref="ReportNow"/> rather than <see cref="AddSkip"/> plus <see cref="Flush"/>, for
+    /// both of that method's reasons. The line has to reach the log whichever order the
+    /// <c>BeforeStartEvent</c> handlers were subscribed in — a revert that is silent is worse than no
+    /// detection, because the developer's change is gone and nothing says so — and a flush from here
+    /// would report every skip outstanding, splitting another service's grouped message in two.
+    /// </remarks>
+    public void ReportRevertsNow(
+        IServiceProvider services, string serviceName, string source, IReadOnlyList<string> reverts)
+    {
+        if (reverts.Count == 0)
+        {
+            return;
+        }
+
+        ReportNow(services, [RevertReason(serviceName, source, reverts)]);
+    }
+
     private static void Write(IServiceProvider services, IReadOnlyList<string> messages)
     {
         if (messages.Count == 0)
@@ -270,23 +291,43 @@ internal sealed class ServiceSourcesWarnings
     /// Explains a skip in terms of what the reader can act on: which service, which source, what was
     /// dropped, and where the source is chosen.
     /// </summary>
-    private static string SkipReason(string serviceName, string source, IReadOnlyList<string> capabilities)
-    {
-        var detail = source switch
-        {
-            "url" =>
-                "it resolves to a fixed, already-running URL with no local process to configure",
-            "kubernetes" =>
-                "it resolves to a 'kubectl port-forward' in front of an already-running service, so the " +
-                "configuration would reach kubectl rather than the service",
-            _ => "it runs out of band",
-        };
+    private static string SkipReason(string serviceName, string source, IReadOnlyList<string> capabilities) =>
+        $"Service '{serviceName}': skipped {DescribeCalls(capabilities)} because its source is " +
+        $"'{source}' — {SourceDetail(source)}. The service is expected to be configured wherever it actually " +
+        "runs. Set its source to 'local' or 'container' in servicesources.local.json for this AppHost's " +
+        "configuration and start ordering to apply.";
 
-        return $"Service '{serviceName}': skipped {DescribeCalls(capabilities)} because its source is " +
-               $"'{source}' — {detail}. The service is expected to be configured wherever it actually " +
-               "runs. Set its source to 'local' or 'container' in servicesources.local.json for this AppHost's " +
-               "configuration and start ordering to apply.";
-    }
+    /// <summary>
+    /// Why a source runs out of band, in the clause both <see cref="SkipReason"/> and
+    /// <see cref="RevertReason"/> build a sentence around.
+    /// </summary>
+    private static string SourceDetail(string source) => source switch
+    {
+        "url" =>
+            "it resolves to a fixed, already-running URL with no local process to configure",
+        "kubernetes" =>
+            "it resolves to a 'kubectl port-forward' in front of an already-running service, so the " +
+            "configuration would reach kubectl rather than the service",
+        _ => "it runs out of band",
+    };
+
+    /// <summary>
+    /// Explains state that was put back: what changed, that it was undone, and what to do instead.
+    /// </summary>
+    /// <remarks>
+    /// Its own sentence rather than <see cref="SkipReason"/>'s, because a revert is not a skip. The
+    /// call landed and was undone, so "skipped" misdescribes it; and the entries count endpoints, not
+    /// calls, so <see cref="DescribeCalls"/>'s "<c>N</c> calls" would state a number the developer
+    /// never wrote. The remedy differs too: switching source only works where the catalog entry
+    /// already carries the matching <c>project</c> or <c>container.image</c>, so saying so is the
+    /// difference between advice that can be followed and advice that throws.
+    /// </remarks>
+    private static string RevertReason(string serviceName, string source, IReadOnlyList<string> reverts) =>
+        $"Service '{serviceName}': {string.Join("; ", reverts)}. Its source is '{source}' — " +
+        $"{SourceDetail(source)}. An out-of-band service's endpoints are fixed by its source, so " +
+        "configure the service where it actually runs. To configure it from this AppHost instead, give " +
+        "it a 'local' or 'container' source in servicesources.local.json — its 'servicesources.yaml' " +
+        "entry needs the matching 'project' or 'container.image'.";
 
     /// <summary>
     /// A single call reads as itself; several read as a count plus a per-capability tally, so the

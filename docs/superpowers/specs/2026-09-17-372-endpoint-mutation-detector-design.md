@@ -92,7 +92,7 @@ arise for the *added-endpoint* shape, never for the in-place-change shape, where
 its identity and its place in both collections and no reference can dangle.
 
 The design pays that cost down rather than avoiding it: **the warning names the endpoint**, so the
-log carries `endpoint 'probe' added after resolve` before Aspire's own unexplained failure. See §5.3.
+log carries `endpoint 'probe' was added after this service resolved` before Aspire's own unexplained failure. See §5.3.
 
 ### 2.4 The two shapes get different treatment, and why that is not two decisions
 
@@ -402,14 +402,25 @@ the detector.
 **Handler.** Subscribed to `BeforeStartEvent` at install time. It walks
 `facade.Annotations.OfType<EndpointAnnotation>()` and the snapshot:
 
-| Case | Action | Skip recorded |
+| Case | Action | Entry recorded |
 |---|---|---|
-| Known instance, fingerprint differs | restore per the two-phase rule above | `endpoint '<recorded name>' changed after resolve` |
-| Unknown instance | remove from the facade; also from `real.Annotations` if present there (§2.4 — it is not, today) | `endpoint '<name>' added after resolve` |
-| Known instance no longer on the facade | re-add it, unless an endpoint of that name is already present; likewise on `real` if it is absent there too | `endpoint '<recorded name>' removed after resolve` |
+| Known instance, fingerprint differs | restore per the two-phase rule above | `endpoint '<recorded name>' was changed after this service resolved (<fields>) and has been put back` |
+| Unknown instance | remove from the facade; also from `real.Annotations` if present there (§2.4 — it is not, today) | `endpoint '<name>' was added after this service resolved and has been removed, …` |
+| Known instance no longer on the facade | **restore it first**, then re-add, unless an endpoint of that name is already present; likewise on `real` if it is absent there too | `endpoint '<recorded name>' was removed after this service resolved and has been put back` |
 
-Materialise both collections before mutating them; `Annotations` is the live collection. The skip's
+Materialise both collections before mutating them; `Annotations` is the live collection. The entry's
 endpoint name is emitted through the sanitiser §5.4 specifies, never interpolated raw.
+
+**The third case restores before it re-adds, and the two cases are not disjoint.** An endpoint can be
+changed *and then* removed, and re-adding the instance without restoring it puts the mutation back on
+both collections under a line that reports only a removal — the revert this design exists for would
+not have happened. Restoring first also settles the name the duplicate guard then asks about: a
+renamed-and-removed endpoint is otherwise looked for under a name it no longer carries, and `real`,
+which never lost the instance, ends up holding it twice. The entry names the fields in that case too.
+
+**The guard matches names case-insensitively**, because that is how Aspire's own lookup matches them
+(`StringComparisons.EndpointAnnotationName`). A guard that agreed with that lookup only on casing
+would wave through the duplicate it exists to stop.
 
 ### 5.3 Decision 4 — subscription order is a requirement
 
@@ -420,9 +431,8 @@ reverted the mutation and logged **nothing**, which is strictly worse than not d
 
 Two measures, both required:
 
-1. **`Flush(@event.Services)` immediately after the `AddSkip` calls, inside the detector's own
-   handler**, and only when at least one skip was recorded. `Flush` is report-once, so this cannot
-   double-log whichever way the order falls.
+1. **The detector reports from inside its own handler**, and only when it actually detected
+   something. Reporting is report-once, so this cannot double-log whichever way the order falls.
 2. **`ServiceSourcesWarnings.ReporterFor(builder)`, not `For(builder)`, inside the handler.** `For`
    subscribes during the event's own dispatch, which that class's remarks document as *inert* —
    Aspire snapshots the subscription list before dispatching (`DistributedApplicationEventing.cs:64`).
@@ -438,27 +448,52 @@ subscribed ahead of it. It is commonly ahead for `kubernetes` too —
 therefore the normal order, not the unlucky one, which makes the in-handler `Flush` a requirement
 rather than a belt-and-braces measure. Do not substitute a subscription-ordering trick for it.
 
-**The cost, named rather than hidden.** `ServiceSourcesWarnings.ReportNow`'s remarks warn that
-flushing everything early in `BeforeStartEvent` can split a later skip off into a second message.
-`ReportNow` was considered for that reason and rejected: it takes ready-made sentences and so cannot
-join the service's existing skip group, which is the grouping #53 and #206 exist to preserve. The
-conditional flush keeps the cost to the case where something was actually detected — and in that case
-losing the message entirely is the measured alternative. The split also does not arise for the one
-path that would suffer it, for the same ordering fact measure 1 turns on: `UrlSource` subscribes its
-handler at `:63`, before the detector is installed at `:65`, so `DropWaitsOnUrlServices` and its own
-flush have already run by the time the detector's flush fires.
+**Reported through `ReportNow`, not through `Flush`.** `ServiceSourcesWarnings.ReportNow`'s remarks
+warn that flushing everything early in `BeforeStartEvent` splits a later skip off into a second
+message, and an earlier draft of this section argued the split could not arise here, because
+`UrlSource` subscribes its handler at `:63` before the detector is installed at `:65`. That reasoning
+holds only when the `url` service resolves first. It is wrong whenever an out-of-band service resolves
+*ahead* of a `url` one — an ordinary AppHost ordering — and the split is then real and reproducible: a
+`url` service's `WithEnvironment` skip and the `WaitFor` that `DropWaitsOnUrlServices` drops later in
+the same event come out as two messages instead of one. Measured, and pinned by a test.
+
+`ReportNow` takes a ready-made sentence, which the same draft counted against it: the detection cannot
+join the service's existing skip group. That is the right trade rather than a cost to absorb — per
+§5.4 a revert is not a skipped call, so it does not belong in that group in the first place, and the
+grouping #53 and #206 exist to preserve is the one that was being broken. Both measures the failing
+order demands are kept: the line is written from inside the handler, so it reaches the log whichever
+way the subscription order falls, and nobody else's pending entries are drained to write it.
 
 ### 5.4 Wording of the warning
 
-The detector records through the existing `AddSkip(serviceName, source, capability)` path, so the
-whole `SkipReason`/`DescribeCalls` machinery is reused unchanged and the detection groups with the
-same service's other skips:
+The detector reports through a sibling of `SkipReason` rather than through `AddSkip`, because a
+revert is not a skip:
 
 ```
-Service 'orders': skipped 2 calls (endpoint 'https' changed after resolve, endpoint 'probe' added
-after resolve) because its source is 'kubernetes' — it resolves to a 'kubectl port-forward' in front
-of an already-running service, so the configuration would reach kubectl rather than the service. …
+Service 'orders': endpoint 'https' was changed after this service resolved (Port, TargetPort) and has
+been put back; endpoint 'probe' was added after this service resolved and has been removed, so a
+reference taken to it will not resolve. Its source is 'kubernetes' — it resolves to a 'kubectl
+port-forward' in front of an already-running service, so the configuration would reach kubectl rather
+than the service. An out-of-band service's endpoints are fixed by its source, so configure the service
+where it actually runs. To configure it from this AppHost instead, give it a 'local' or 'container'
+source in servicesources.local.json — its 'servicesources.yaml' entry needs the matching 'project' or
+'container.image'.
 ```
+
+**Three things the skip frame got wrong, each measured by reading the built output rather than the
+code.** *Skipped* says the call never landed; these calls landed and were undone, which is the one
+fact the reader most needs and the only one that explains why their endpoint is not what they set it
+to. *`N calls`* counts entries, and the entries here count endpoints: a single
+`WithExternalHttpEndpoints()` over a two-endpoint service reported "2 calls", a number the developer
+never wrote. And the skip remedy — "set its source to `local` or `container`" — throws for a service
+whose catalog entry has no matching `project` or `container.image`, which is the common case for a
+`url` service; following it literally on the very service that emitted it produced
+`ServiceSourcesConfigurationException`. The revert sentence says what the catalog entry needs.
+
+**The fields that changed are named.** The fingerprint carries eleven, and without naming them the
+reader is told an endpoint changed and left to bisect. `Restore` already compares field by field, so
+the names are free; `IsExplicitlyProxied` is reported as `IsProxied`, the spelling the callback
+context exposes.
 
 This is a **deliberate departure** from the prototype, which reused
 `Reachability.CapabilityLabel(typeof(EndpointAnnotation))` and so logged
@@ -471,11 +506,17 @@ property is preserved exactly. Only the capability label changes.
 **The endpoint name is caller-controlled, and this is the first warning in the package to carry one.**
 Existing skips interpolate `Reachability.CapabilityLabel(...)`, a value from a fixed table. For the
 *added* shape the name comes verbatim from a guest-language script — an arbitrary string that reaches
-a log line. A name containing a newline forges log lines; an unbounded one floods them. The label is
-therefore built through a small private helper that replaces every control character (including CR
-and LF) with `?` and truncates to 64 characters with an ellipsis, and the name is single-quoted in the
-message so a truncated one is still visibly delimited. Cheap, and it is the only untrusted string in
-the whole design (§10).
+a log line. A name containing a newline forges log lines; an unbounded one floods them.
+
+The label therefore goes through `ConfiguredValue.Bare`, which this package already uses for
+developer-written text echoed back into a message, plus two things that helper does not cover: the
+64-character cap with an ellipsis, and the single quote. Reusing it rather than testing for control
+characters is what catches the hostile characters that are not control characters — `U+2028`, which is
+a line terminator to anything that splits on Unicode line separators, and the bidi overrides, which
+reverse everything printed after them. The quote has to be escaped because the message *delimits* the
+name with it: a name spelling `a' was removed after this service resolved; endpoint 'b` otherwise
+reads as two entries for things the developer did not do. Cheap, and it is the only untrusted string
+in the whole design (§10).
 
 ### 5.5 Call sites
 
@@ -541,9 +582,9 @@ All in `test/Aspire.Hosting.ServiceSources.Tests/`, reusing `EndpointSkipGapRepr
 dispatch does (findings §5 records the technique):
 
 1. `kubernetes` + `withHttpsEndpointCallback` setting `Port`/`TargetPort` → both restored, one skip
-   naming `endpoint 'https' changed after resolve`, and the message reaches the log.
+   naming `endpoint 'https' was changed after this service resolved`, and the message reaches the log.
 2. `kubernetes` + `withEndpointCallback('probe', …)` → `probe` absent from the facade afterwards, one
-   skip naming `endpoint 'probe' added after resolve`. Assert on the facade only: per §2.4 the added
+   skip naming `endpoint 'probe' was added after this service resolved`. Assert on the facade only: per §2.4 the added
    instance never reaches `real`, so asserting its absence there would pass whether or not the
    detector ran. Assert instead that the facade's remaining endpoints are exactly the one the source
    registered.
@@ -662,11 +703,13 @@ its disposition.
 ## 11. Code-comment discipline
 
 Comments in the new file explain only the non-obvious WHY, under roughly fifteen words, and carry no
-changelog, history or narrative. Four earn their place: why the snapshot is keyed by reference
-identity rather than by name; why the restore re-reads the derived fields in a second pass; why
-`Flush` is called from inside the handler; and why the endpoint name is sanitised before it reaches a
-log line. **No third-party issue numbers or links appear in code** — this repo's own issue numbers
-are fine, and the Aspire-side reasoning stays in this document.
+changelog, history or narrative. The ones that earn their place are the reasons the code cannot state
+itself: why the snapshot is keyed by reference identity rather than by name; why the restore re-reads
+the derived fields in a second pass; why a removed endpoint is restored before it is put back; why the
+duplicate guard matches case-insensitively; why the report is written from inside the handler; and why
+the endpoint name is escaped and capped before it reaches a log line. **No third-party issue numbers
+or links appear in code** — this repo's own issue numbers are fine, and the Aspire-side reasoning
+stays in this document.
 
 ## 12. Disposition
 
