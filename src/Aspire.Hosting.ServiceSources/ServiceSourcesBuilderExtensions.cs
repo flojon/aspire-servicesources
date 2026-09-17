@@ -388,6 +388,12 @@ public static class ServiceSourcesBuilderExtensions
     /// simply keeps its old value. Mirrors Aspire's own <c>[AspireExportIgnore]</c> exactly: this
     /// overload was never projected to guest languages in the first place.
     /// </summary>
+    /// <remarks>
+    /// It is also the only overload whose delegation needs wrapping: its add branch is the one place
+    /// in Aspire's whole extension class that adds an annotation by direct <c>Annotations.Add</c>
+    /// instead of <c>builder.WithAnnotation</c>, so the new endpoint would otherwise sit on the
+    /// facade alone and never reach the resource DCP runs.
+    /// </remarks>
     [AspireExportIgnore(Reason = "Polyglot app hosts use the internal withEndpointCallback export, which exposes EndpointUpdateContext instead of EndpointAnnotation.")]
     public static IResourceBuilder<ServiceResource> WithEndpoint(
         this IResourceBuilder<ServiceResource> builder,
@@ -398,7 +404,9 @@ public static class ServiceSourcesBuilderExtensions
             return builder;
         }
 
-        return Aspire.Hosting.ResourceBuilderExtensions.WithEndpoint(builder, endpointName, callback, createIfNotExists);
+        return ServiceResourceBuilder.ForwardingAnnotationsAddedBy(
+            builder,
+            () => Aspire.Hosting.ResourceBuilderExtensions.WithEndpoint(builder, endpointName, callback, createIfNotExists));
     }
 
     /// <summary>
