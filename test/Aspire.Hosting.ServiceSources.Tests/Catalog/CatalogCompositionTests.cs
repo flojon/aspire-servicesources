@@ -353,6 +353,46 @@ public class CatalogCompositionTests
         Assert.Contains("defaultSource", ex.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The combined shape neither <see cref="YamlDeclaresTwoCaseVariants_StillAmbiguousCatalogSpellingError_NotArgumentException"/>
+    /// nor <see cref="YamlDeclaresTwoCaseVariants_BothDefaultSourced_ThrowsCleanError_NotArgumentException"/>
+    /// covers on its own: both case variants declare a <c>defaultSource</c>, <em>and</em> a developer's
+    /// <c>servicesources.local.json</c> names one of the two spellings explicitly. <c>IConfiguration</c>
+    /// indexers compare keys case-insensitively, so setting <c>orders:source</c> makes
+    /// <c>builder.Configuration["...:orders:source"]</c> <em>and</em> <c>builder.Configuration["...:Orders:source"]</c>
+    /// both resolve non-blank — the <c>LoadedConfig.Load</c> loop's "already configured" check (which reads
+    /// ahead of the <c>defaultedSources</c> layer) skips both spellings before the new case-collision
+    /// check ever runs. No entry lands in <c>defaultedSources</c>, so it stays empty and
+    /// <c>Sources.Insert</c> is skipped entirely; the ambiguity is then caught downstream by
+    /// <c>DeveloperConfiguration.CanonicalizeToCatalog</c> instead. Whichever mechanism fires, exactly
+    /// one clean <see cref="ServiceSourcesConfigurationException"/> reaches the caller — never both,
+    /// and never the raw BCL <see cref="ArgumentException"/>.
+    /// </summary>
+    [Fact]
+    public void YamlDeclaresTwoCaseVariants_BothDefaultSourced_LocalConfigNamesOneSpelling_StillAmbiguousCatalogSpellingError()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              orders:
+                url:
+                  url: https://a.example
+                defaultSource: url
+              Orders:
+                url:
+                  url: https://b.example
+                defaultSource: url
+            """);
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"),
+            """{ "services": { "orders": { "source": "url" } } }""");
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.Contains("declares more than once", ex.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void AddServiceCatalog_LookupAgainstYamlOnly_StaysOrdinal()
     {

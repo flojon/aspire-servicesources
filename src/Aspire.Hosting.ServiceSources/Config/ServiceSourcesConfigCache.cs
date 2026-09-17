@@ -447,7 +447,7 @@ internal static class ServiceSourcesConfigCache
             // MemoryConfigurationProvider rebuilds its data under OrdinalIgnoreCase -- surfacing as a
             // raw ArgumentException out of Sources.Insert instead of a catalog-authoring-time error.
             // Caught here, before that insert, so it is this exception instead.
-            var defaultedSpellings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var defaultedSpellings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var (name, definition) in catalog.Services)
             {
@@ -472,10 +472,10 @@ internal static class ServiceSourcesConfigCache
                     throw new ServiceSourcesConfigurationException(
                         $"'{name}' and '{existingSpelling}' both declare a defaultSource, and differ only by " +
                         "case. Configuration keys are case-insensitive, so there is no key that reaches one " +
-                        "default and not the other -- rename one of them so they differ by more than case.");
+                        "default and not the other — rename one of them so they differ by more than case.");
                 }
 
-                defaultedSpellings.Add(name, name);
+                defaultedSpellings.Add(name);
                 defaultedSources[key] = defaultSource;
                 defaultedServiceNames.Add(name);
             }
