@@ -241,26 +241,15 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// Refuses a <c>"local"</c> service whose catalog entry declares no repository to clone.
     /// </summary>
     /// <remarks>
-    /// The runtime half of #318's catalog-load check. That one exempts an entry declaring only
-    /// <c>url</c>/<c>container</c>/<c>kubernetes</c>, since those are legitimate shapes — but a
-    /// developer's own <c>source</c> is chosen independently of which blocks the entry populates, so
-    /// selecting <c>local</c> for one of them used to hand the git client an empty url. Reported
-    /// here rather than at config resolution because <c>"local"</c> is the only source the missing
-    /// <c>repository</c> makes impossible, which is also why the message names the source.
-    /// <para>
     /// A <c>local.path</c> override is exempt: it points at a checkout the developer already has, so
     /// nothing is ever cloned and the absent <c>repository</c> costs that configuration nothing.
-    /// </para>
     /// <para>
-    /// The message offers only remedies this guard itself can verify, and says nothing about the
-    /// other sources. Switching to <c>url</c>, <c>container</c> or <c>kubernetes</c> works only if
-    /// that source's own preconditions hold — a non-blank url, an image, a service plus a
-    /// developer-config-only context — none of which is readable from here, and each of which grows
-    /// with its own source. Offering one unchecked is how a reader ends up at a second, different
-    /// failure; declaring the block is not enough, since a <c>container:</c> with no <c>image:</c>
-    /// loads perfectly well. So the fault is stated, the key that chose the source is named in the
-    /// register any layer can be found from, and the only remedies offered are the two that need
-    /// nothing from another source: declaring a repository, and the exemption checked above.
+    /// The message offers only remedies this guard itself can verify. Switching to <c>url</c>,
+    /// <c>container</c> or <c>kubernetes</c> works only if that source's own preconditions hold —
+    /// none of which is readable from here — so it is not offered; a declared block is not proof
+    /// those preconditions hold either. The only remedies offered are declaring a repository and the
+    /// <c>local.path</c> exemption above, and the configuration key is named in every layer that can
+    /// set it.
     /// </para>
     /// </remarks>
     private static void RequireRepositoryToCheckOut(
@@ -281,7 +270,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
             + $"'{serviceKey}:local:path' to a checkout you already have on disk, which needs no "
             + $"repository. The key is '{sourceKey}', which any configuration layer can set: "
             + $"{DeveloperConfiguration.FileName}, appsettings, user secrets, the environment variable "
-            + $"{sourceKey.Replace(":", "__", StringComparison.Ordinal)}, or the command line.");
+            + $"{DeveloperConfiguration.EnvironmentVariableFor(serviceName)}, or the command line.");
     }
 
     /// <summary>
@@ -294,8 +283,8 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
 
         // A grouped service declares a repositoryRef and no repository of its own, so telling the
         // reader their entry declares neither is false and sends them to the wrong entry: what is
-        // missing is the url on the repository they named. Same test as the checkout label above.
-        if (definition.Repository.CheckoutName != serviceName)
+        // missing is the url on the repository they named.
+        if (LocalGitCheckout.IsGrouped(definition, serviceName))
         {
             return isCode
                 ? $"give the shared repository '{definition.Repository.CheckoutName}' a url where it is declared"

@@ -546,6 +546,6 @@ internal sealed class DeveloperConfiguration
                   + "Sources consulted: that file, appsettings.json, appsettings.{Environment}.json, user secrets, "
                   + "environment variables and command-line arguments."));
 
-    private static string EnvironmentVariableFor(string serviceName) =>
+    internal static string EnvironmentVariableFor(string serviceName) =>
         $"{ServicesKey.Replace(":", "__", StringComparison.Ordinal)}__{serviceName}__Source";
 }

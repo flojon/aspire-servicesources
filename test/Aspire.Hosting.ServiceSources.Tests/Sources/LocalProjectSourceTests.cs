@@ -1880,7 +1880,7 @@ public class LocalProjectSourceTests
         Assert.Contains("user secrets", ex.Message, StringComparison.Ordinal);
         Assert.Contains("the command line", ex.Message, StringComparison.Ordinal);
         Assert.Contains(
-            $"ServiceSources__Services__{ServiceName}__source", ex.Message, StringComparison.Ordinal);
+            $"ServiceSources__Services__{ServiceName}__Source", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

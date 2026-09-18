@@ -658,6 +658,13 @@ internal sealed class LocalCheckoutPrefetch
                 Config: entry.Value,
                 RepositoryConfig: config.DeveloperConfig.Repositories.GetValueOrDefault(
                     config.Catalog.Services[entry.Key].Repository.CheckoutName)))
+            // Only candidates with a repository to clone at all — checked first since it is a plain
+            // string test, ahead of the filter below that has to stat the disk. Without this,
+            // resolving one well-formed "local" service would sweep a repositoryless sibling into
+            // the set and hand the git client an empty url. Skipped rather than reported, like the
+            // filters around it: the service AddService() actually asks for is refused there, by
+            // name, on the thread that asked.
+            .Where(candidate => LocalGitCheckout.HasRepositoryToClone(candidate.Definition))
             // Only checkouts there is something to clone for. Everything else resolves to the same
             // answer in GetRepoRoot for a fraction of the code, and reaches nobody at all when the
             // service is never added — which is where speculating over one used to go wrong. Keyed
@@ -667,14 +674,6 @@ internal sealed class LocalCheckoutPrefetch
             // (PrepareRepoRoot no-ops against an existing '.git'), but wasted background work.
             .Where(candidate => LocalGitCheckout.IsColdManagedCheckout(
                 appHostDirectory, candidate.Definition.Repository.CheckoutName, candidate.Config))
-            // ...and only the ones whose catalog entry names a repository at all (#362). Without
-            // this, resolving any one well-formed "local" service sweeps a repositoryless sibling
-            // into the set and hands the git client an empty url — the symptom
-            // LocalProjectSource.RequireRepositoryToCheckOut refuses, arriving by a route that never
-            // passes through it. Skipped rather than reported, like the filters around it: the
-            // service AddService() actually asks for is refused there, by name, on the thread that
-            // asked.
-            .Where(candidate => LocalGitCheckout.HasRepositoryToClone(candidate.Definition))
             // ...minus the ones a deferred registration would clone for itself.
             .Where(candidate => !WouldBeDeferredIfAdded(
                 builder, deferred, kinds, candidate.Name, candidate.Definition, candidate.Config))
