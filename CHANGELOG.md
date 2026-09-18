@@ -192,13 +192,15 @@ never existed. Check the tag of the last release before adding one.
 
 ### Fixed
 
-- **A service name can no longer forge a second warning** ([#372]). Every warning this package
+- **A service name can no longer forge a second log entry** ([#372]). Every message this package
   reports about an out-of-band service opens with the service's own name, taken from the catalog and
   interpolated between quotes without escaping. A name carrying a newline, a Unicode line separator
   or an apostrophe therefore split the line, or closed the quote and wrote a sentence of its own,
   into a log a reader trusts. Both names these messages carry — the service and, since this release,
   the endpoint — now go through the same escaping this package already applies to developer-written
-  text echoed back, plus a length cap.
+  text echoed back, plus a length cap. That now covers the exceptions as well as the warnings:
+  `Unwrap<T>`'s refusal of an out-of-band source, and the refusal of a container's reference to a
+  `url` service, which is thrown from inside `BeforeStartEvent` and so lands in the host's own log.
 
 - **The remedy every out-of-band message offers no longer dead-ends** ([#372]). Four messages
   offered the same way back under this AppHost's control, each in its own words and all of them as
@@ -208,7 +210,9 @@ never existed. Check the tag of the last release before adding one.
   neither a repository nor a `container` block, which is the ordinary shape of a service that is
   only ever a url, got `ServiceSourcesConfigurationException` on both options offered. All four now
   share one sentence, which names what the catalog entry has to carry for each option, so a reader
-  either makes the switch or learns from the message why it is not theirs to make.
+  either makes the switch or learns from the message why it is not theirs to make. The follow-on
+  error for the `local` half now says where `project` belongs too — on the `servicesources.yaml`
+  entry beside `repository`, not in `servicesources.local.json`, which only chooses the source.
 
 - **An ungrouped service's repository url is now validated as required** ([#318]). A code-declared
   service (`WithRepository(url)`) or a yaml service with neither `repository:` nor `repositoryRef:`

@@ -355,7 +355,8 @@ internal sealed class ServiceSourcesWarnings
     private static string RevertReason(string serviceName, string source, IReadOnlyList<string> reverts) =>
         $"Service '{Label(serviceName)}': {string.Join("; ", reverts)}. Its source is '{source}' — " +
         $"{OutOfBandSourceAdvice.SourceDetail(source)}. An out-of-band service's endpoints are fixed by its source, so " +
-        $"configure the service where it actually runs. {SwitchSourceRemedy}";
+        $"configure the service where it actually runs. {OutOfBandSourceAdvice.RedirectTheEndpoint(source)} " +
+        $"{SwitchSourceRemedy}";
 
     /// <summary>
     /// A single call reads as itself; several read as a count plus a per-capability tally, so the

@@ -6,9 +6,7 @@ namespace Aspire.Hosting.ServiceSources;
 /// </summary>
 /// <remarks>
 /// Shared across warnings and exceptions alike, because the offer is conditional and a copy that
-/// drops the condition is a dead end rather than a paraphrase: four separate spellings existed, and
-/// the three that promised the switch outright sent a url-only service's reader into
-/// <see cref="ServiceSourcesConfigurationException"/> on both options they offered.
+/// drops the condition is a dead end rather than a paraphrase.
 /// </remarks>
 internal static class OutOfBandSourceAdvice
 {
@@ -49,5 +47,30 @@ internal static class OutOfBandSourceAdvice
             "it resolves to a 'kubectl port-forward' in front of an already-running service, so the " +
             "configuration would reach kubectl rather than the service",
         _ => "it runs out of band",
+    };
+
+    /// <summary>
+    /// Where the endpoint can still be redirected, for the reader whose endpoint write was undone.
+    /// </summary>
+    /// <remarks>
+    /// Its own sentence rather than part of <see cref="SwitchSource"/>: the switch is offered by
+    /// messages about configuration and start ordering, which this does not help, and this is the
+    /// only lever that works on a url-only catalog entry — the shape the switch's precondition rules
+    /// out.
+    /// <para>
+    /// "Points at" rather than "moves": for <c>kubernetes</c> these settings choose what
+    /// <c>kubectl port-forward</c> forwards to, while the local port stays allocated, so promising
+    /// the endpoint's own port would be the next dead end.
+    /// </para>
+    /// </remarks>
+    internal static string RedirectTheEndpoint(string source) => source switch
+    {
+        "url" =>
+            "To change what this endpoint points at, set 'url.url' for this service in " +
+            "servicesources.local.json.",
+        "kubernetes" =>
+            "To change what this endpoint points at, set 'kubernetes.port' or 'kubernetes.scheme' " +
+            "for this service in servicesources.local.json.",
+        _ => "To change what this endpoint points at, configure its source in servicesources.local.json.",
     };
 }

@@ -105,6 +105,48 @@ public class EndpointMutationDetectorTests
             warning);
     }
 
+    /// <remarks>
+    /// The reader of a revert wanted the endpoint somewhere else, and the source switch the same
+    /// sentence offers is exactly what a url-only catalog entry cannot take — so the lever that does
+    /// work has to be named, and has to be named per source because the two differ.
+    /// </remarks>
+    [Fact]
+    public async Task ARevert_NamesTheDeveloperConfigLeverThatRedirectsTheEndpoint()
+    {
+        var kubernetesBuilder = Builder();
+        GuestLanguageEndpointCallbacks.HttpsEndpointCallback(
+            Kubernetes(kubernetesBuilder), "https", ("Port", 9999));
+        var kubernetesWarning = Assert.Single(
+            await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(kubernetesBuilder));
+
+        var urlBuilder = Builder();
+        GuestLanguageEndpointCallbacks.HttpsEndpointCallback(
+            Url(urlBuilder), "https", ("TargetHost", "attacker.internal"));
+        var urlWarning = Assert.Single(
+            await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(urlBuilder));
+
+        Assert.Contains("'kubernetes.port' or 'kubernetes.scheme'", kubernetesWarning);
+        Assert.Contains("'url.url'", urlWarning);
+    }
+
+    /// <remarks>
+    /// Following the clause above, rather than trusting it: a url service's endpoint is entirely
+    /// derived from that one setting, which is why it is the lever named.
+    /// </remarks>
+    [Fact]
+    public void TheNamedUrlLever_ActuallyRedirectsTheEndpoint()
+    {
+        var builder = Builder();
+
+        var service = new UrlSource().Resolve(
+            builder, "inventory", UrlDefinition,
+            new ServiceDeveloperConfig { Source = "url", Url = new() { Url = "https://localhost:9999" } });
+
+        var endpoint = Assert.Single(Endpoints(service));
+        Assert.Equal("localhost", endpoint.TargetHost);
+        Assert.Equal(9999, endpoint.Port);
+    }
+
     [Fact]
     public async Task ChangedTargetHost_OnUrlSource_IsRevertedAndReported()
     {
@@ -396,10 +438,11 @@ public class EndpointMutationDetectorTests
         var registered = Assert.Single(Endpoints(service));
         var real = Assert.Single(builder.Resources.OfType<ServiceExecutableResource>());
 
-        registered.Name = "HTTPS";
         service.Resource.Annotations.Remove(registered);
         real.Annotations.Remove(registered);
-        var replacement = new EndpointAnnotation(ProtocolType.Tcp, uriScheme: "https", name: "https", port: 1234);
+        // The case variant goes on the replacement, not the recorded instance: Restore rewrites the
+        // recorded name back before the guard reads it, so renaming there leaves the two ordinal-equal.
+        var replacement = new EndpointAnnotation(ProtocolType.Tcp, uriScheme: "https", name: "HTTPS", port: 1234);
         real.Annotations.Add(replacement);
 
         await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);

@@ -251,7 +251,7 @@ remove `WaitAnnotation`s only.
 
 ### 3.4 What remains uncovered
 
-Five residuals, none a known gap, all bounded. The last two are reachable only by code that already
+Six residuals, none a known gap, all bounded. The last three are reachable only by code that already
 holds the annotation or the real resource — no surface this design polices reaches either — so both
 are named here rather than built against, and both were found by following the built output rather
 than by reading:
@@ -266,6 +266,14 @@ than by reading:
    AppHost that opts into it before `AddService()` would have its `UriScheme` change read as an
    author mutation and reverted. Out of reach by construction, and reachable only by explicit
    opt-in.
+
+   Aspire's four built-in `BeforeStartEvent` handlers are *always* ahead of the detector —
+   `InitializeDcpAnnotations`, `WarnPersistentContainersWithoutUserSecrets`, `MutateHttp2TransportAsync`
+   and `ExcludeDashboardFromManifestAsync`, measured in that order off the subscription list. Only the
+   third writes a fingerprinted field (`Transport`), and only for an `AsHttp2Service` annotation that
+   `Reachability` stops landing on an out-of-band service, which
+   `AsHttp2Service_OnKubernetesSource_NeitherLandsNorRevertsTheTransport` pins. A future Aspire adding
+   an endpoint-mutating built-in is therefore a known exposure rather than a surprise.
 3. **Endpoint readers and writers in packages other than `Aspire.Hosting.dll`.** §3.2's enumeration
    is of that assembly, which is what `Directory.Build.props` pins and what the callbacks live in.
    An integration package (`Aspire.Hosting.Azure`, community hosting packages) can subscribe
@@ -286,6 +294,12 @@ than by reading:
    half of the trade. Unreachable through the policed surfaces — the guest holds only the facade,
    Aspire's create branch adds to the facade, and the removal loop mirrors onto `real` — so it needs
    code that already has `real` in hand.
+6. **A mutation made on `real` alone.** Add-detection walks the facade's annotations, so an endpoint
+   added to or removed from the real resource without touching the facade is neither reverted nor
+   reported. Reaching `real` means resolving the registered resource out of the model by name and
+   editing it directly, which is an author who already has full control of what the AppHost composes —
+   outside the threat model of §2, where the mutating party is a guest-language script holding only
+   the facade. Named so that it is a stated residual rather than an unexamined one.
 
 ## 4. Decision 6 — answering #352's design §2.5 head-on
 
@@ -494,11 +508,15 @@ been put back; endpoint 'probe' was added after this service resolved and has be
 reference taken to it will not resolve. Its source is 'kubernetes' — it resolves to a 'kubectl
 port-forward' in front of an already-running service, so the configuration would reach kubectl rather
 than the service. An out-of-band service's endpoints are fixed by its source, so configure the service
-where it actually runs. To configure it from this AppHost instead, give it a 'local' or 'container'
-source in servicesources.local.json — which works only where its 'servicesources.yaml' entry already
-declares that source: a 'repository' or 'repositoryRef' for 'local', a 'container' block for
-'container'.
+where it actually runs. To change what this endpoint points at, set 'kubernetes.port' or
+'kubernetes.scheme' for this service in servicesources.local.json. To make this AppHost's
+configuration and start ordering apply instead, give it a 'local' or 'container' source in
+servicesources.local.json — which works only where its 'servicesources.yaml' entry already declares
+that source: a 'repository' or 'repositoryRef' for 'local', a 'container' block for 'container'.
 ```
+
+The sample above is the string the code emitted, read back rather than transcribed — a sample kept by
+hand is a fifth copy of a sentence that has already drifted twice.
 
 **Two things the skip frame got wrong, each measured by reading the built output rather than the
 code.** *Skipped* says the call never landed; these calls landed and were undone, which is the one
@@ -511,8 +529,29 @@ A third defect turned up the same way but did **not** distinguish the two senten
 the skip's own: its remedy — "set its source to `local` or `container`" — threw for a service whose
 catalog entry declares neither, which is the common case for a `url` service, so following it
 literally on the very service that emitted it produced `ServiceSourcesConfigurationException`. That
-sentence is pre-existing and reaches every skip this package reports, so it was fixed where it lives
-and both messages now end in the same corrected clause.
+sentence is pre-existing, and four messages offered it in four spellings, so it was hoisted out of all
+of them rather than corrected in one.
+
+**`OutOfBandSourceAdvice` is where it now lives** (`src/Aspire.Hosting.ServiceSources/`,
+`internal static`), holding the three clauses an out-of-band message is built from: `SourceDetail`
+(why the source runs out of band), `SwitchSource` (the conditional way back under this AppHost's
+control) and `RedirectTheEndpoint` (per source, for this message only). Four sites lead into
+`SwitchSource` in their own grammar: `SkipReason`, `RevertReason`,
+`ServiceConfigurationExtensions.Explain<T>`'s out-of-band arm, and `UrlSource`'s refusal of a
+container's reference to a `url` service. A clause rather than a whole sentence, because the lead-ins
+genuinely differ — two of the four embed it as the last item of an `or` list.
+
+**Why a revert names a lever the other three do not.** The reader of a revert wanted the endpoint
+somewhere else, and the switch `SwitchSource` offers is exactly what a url-only entry cannot take. The
+developer-config settings that *do* redirect it — `url.url`, or `kubernetes.port`/`kubernetes.scheme`
+— work on that shape, and live in the file the next sentence already names. They are phrased as
+"what this endpoint points at" rather than as moving the endpoint: on `kubernetes` they choose what
+`kubectl port-forward` forwards to while the local port stays allocated, and promising the endpoint's
+own port would be the next dead end. Measured both ways round before the sentence was written.
+
+**The service name is escaped and capped in all four**, not only in the two warnings. The name is a
+catalog key, so it is caller-controlled; escaping it in the warnings while interpolating it raw into
+the exceptions left the same forged log line one sentence away.
 
 **The fields that changed are named.** The fingerprint carries eleven, and without naming them the
 reader is told an endpoint changed and left to bisect. `Restore` already compares field by field, so
@@ -691,6 +730,12 @@ Cite `([#372])` inline and add the matching `[#372]: …/issues/372` definition 
 block. The entry should also say that `WithExternalHttpEndpoints` (#359) is **covered** as a
 consequence, citing `([#359])` — covered, not fixed or closed: #359 is open and separately owned, and
 this ticket does not close it.
+
+**Two `### Fixed` entries sit beside it**, and the reasoning above does not contradict them: they
+belong to the two pre-existing defects this PR absorbed by human decision rather than to the detector.
+The unescaped service name and all four unconditional switch remedies are present verbatim at `v0.5.1`,
+so both are bugs in released behaviour and `Fixed` is the section the repo's rule points at. The
+detector's own entry stays `### Added` for the reason given.
 
 ## 9. The upstream ask
 

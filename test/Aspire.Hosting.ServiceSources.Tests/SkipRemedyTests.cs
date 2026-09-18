@@ -149,6 +149,20 @@ public class SkipRemedyTests
         Assert.Contains("configuration and start ordering", SkipMessageFor("url", UrlOnlyService));
     }
 
+    private static readonly string LineSeparator = ((char)0x2028).ToString();
+
+    private static readonly string HostileName =
+        "inventory'\r\n" + LineSeparator + "Service 'forged': skipped everything";
+
+    private static void AssertNoForgedEntry(string message)
+    {
+        Assert.DoesNotContain("\n", message);
+        Assert.DoesNotContain("\r", message);
+        Assert.DoesNotContain(LineSeparator, message);
+        // The quote that would close the real name is escaped, so what follows stays inside it.
+        Assert.DoesNotContain("Service 'forged'", message);
+    }
+
     /// <remarks>
     /// The service name is a catalog key, so it is caller-controlled exactly as the endpoint name in
     /// the same sentence is — and it used to be the one of the two interpolated raw.
@@ -156,16 +170,42 @@ public class SkipRemedyTests
     [Fact]
     public void AServiceNameShapedLikeASecondEntry_DoesNotForgeOne()
     {
-        var lineSeparator = ((char)0x2028).ToString();
-        var hostile = "inventory'\r\n" + lineSeparator + "Service 'forged': skipped everything";
+        AssertNoForgedEntry(SkipMessageFor("url", HostileName));
+    }
 
-        var message = SkipMessageFor("url", hostile);
+    /// <remarks>
+    /// The exceptions reach the same log as the warning and carry the same catalog key, so escaping
+    /// one and interpolating the other raw would leave the forged line one sentence away.
+    /// </remarks>
+    [Fact]
+    public void AServiceNameShapedLikeASecondEntry_DoesNotForgeOneThroughUnwrap()
+    {
+        var builder = Builder();
+        var service = new UrlSource().Resolve(
+            builder, HostileName, UrlOnly, new ServiceDeveloperConfig { Source = "url" });
 
-        Assert.DoesNotContain("\n", message);
-        Assert.DoesNotContain("\r", message);
-        Assert.DoesNotContain(lineSeparator, message);
-        // The quote that would close the real name is escaped, so what follows stays inside it.
-        Assert.DoesNotContain("Service 'forged'", message);
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => service.Unwrap<IResourceWithEnvironment>());
+
+        AssertNoForgedEntry(ex.Message);
+    }
+
+    /// <remarks>
+    /// Thrown from inside <c>BeforeStartEvent</c>, so it lands in the host's log rather than only in
+    /// a developer's console.
+    /// </remarks>
+    [Fact]
+    public async Task AServiceNameShapedLikeASecondEntry_DoesNotForgeOneThroughAContainerReference()
+    {
+        var builder = TestHelpers.CreateBuilderThatCanStart(TempDirectories.CreateSubdirectory().FullName);
+        var service = new UrlSource().Resolve(
+            builder, HostileName, UrlOnly, new ServiceDeveloperConfig { Source = "url" });
+        builder.AddContainer("storefront", "nginx:alpine").WithReference(service);
+
+        var ex = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(
+            () => TestHelpers.PublishBeforeStartEventAsync(builder));
+
+        AssertNoForgedEntry(ex.Message);
     }
 
     [Fact]
@@ -175,5 +215,22 @@ public class SkipRemedyTests
 
         Assert.Contains("…", message);
         Assert.DoesNotContain(new string('x', 200), message);
+    }
+
+    /// <remarks>
+    /// The cap is the other half of what <c>Label</c> does, and the exception paths were missing both.
+    /// </remarks>
+    [Fact]
+    public void AnOverlongServiceName_IsCappedInTheUnwrapException()
+    {
+        var builder = Builder();
+        var service = new UrlSource().Resolve(
+            builder, new string('x', 300), UrlOnly, new ServiceDeveloperConfig { Source = "url" });
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => service.Unwrap<IResourceWithEnvironment>());
+
+        Assert.Contains("…", ex.Message);
+        Assert.DoesNotContain(new string('x', 200), ex.Message);
     }
 }

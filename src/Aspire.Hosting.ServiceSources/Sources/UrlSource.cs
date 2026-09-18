@@ -114,7 +114,10 @@ internal sealed class UrlSource : IServiceSource
                 }
 
                 throw new ServiceSourcesConfigurationException(
-                    $"Container '{consumer.Name}' references service '{urlService.Name}', whose source is 'url'. " +
+                    // The service name is a catalog key, so it is escaped and capped; consumer.Name is
+                    // an Aspire resource name, which Aspire's own validator already bounds.
+                    $"Container '{consumer.Name}' references service " +
+                    $"'{ServiceSourcesWarnings.Label(urlService.Name)}', whose source is 'url'. " +
                     "A 'url'-sourced service has no resource for Aspire to run, so DCP has no Service object to " +
                     "plumb container-to-host networking through, and the container would fail to start. " +
                     "Reference it from a project or executable instead, or " +

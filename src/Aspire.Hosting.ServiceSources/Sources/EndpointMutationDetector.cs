@@ -25,8 +25,6 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// </remarks>
 internal static class EndpointMutationDetector
 {
-    private const int MaxNameLength = 64;
-
     /// <summary>
     /// Snapshots <paramref name="facade"/>'s endpoints and subscribes the reconciliation, when
     /// <paramref name="source"/> is out of band.

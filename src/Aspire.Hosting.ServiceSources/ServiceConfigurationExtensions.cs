@@ -120,8 +120,11 @@ public static class ServiceConfigurationExtensions
     /// requested.
     /// </param>
     private static string Explain<T>(IResource resource, ServiceSourceAnnotation? annotation, IResource? real)
+        where T : IResource
     {
-        var name = annotation?.ServiceName ?? resource.Name;
+        // The catalog key is caller-controlled and reaches a log through this exception, exactly as it
+        // does through the warnings that share the sentence below.
+        var name = ServiceSourcesWarnings.Label(annotation?.ServiceName ?? resource.Name);
 
         if (annotation is null)
         {
@@ -132,8 +135,9 @@ public static class ServiceConfigurationExtensions
                       $"'{annotation.Source}'";
 
         // Shared with the warnings rather than re-spelled: the same offer with the precondition
-        // dropped is a dead end for a service whose catalog entry declares neither block.
-        if (Reachability.OutOfBandSources.Contains(annotation.Source))
+        // dropped is a dead end for a service whose catalog entry declares neither block. Keyed on
+        // the same predicate the throw above gates on, so the two cannot disagree about a source.
+        if (IsUnreachable<T>(annotation.Source))
         {
             return $"{opening} — {OutOfBandSourceAdvice.SourceDetail(annotation.Source)}. Configure the " +
                    $"service where it actually runs, drop the configuration, or " +
