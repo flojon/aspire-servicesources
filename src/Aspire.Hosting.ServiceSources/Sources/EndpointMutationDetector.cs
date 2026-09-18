@@ -128,19 +128,24 @@ internal static class EndpointMutationDetector
 
             // Each guard is reported on its own terms: a blocked facade restore is the failure a
             // consumer's GetEndpoint call will see, while a blocked `real` mirror is a quieter
-            // divergence the facade restore already masks from callers.
-            reverts.Add(!facadeHasIt
+            // divergence the facade restore already masks from callers. Both can trip independently,
+            // so neither branch below is allowed to hide the other's failure.
+            reverts.Add(!facadeHasIt && !realHasIt
                 ? $"endpoint '{Label(recorded.Name)}' was removed after this service resolved, but " +
-                  "could not be put back because another endpoint already uses that name"
-                : !realHasIt
-                    ? $"endpoint '{Label(recorded.Name)}' was removed after this service resolved and " +
-                      "has been put back, but could not be mirrored onto the underlying resource " +
-                      "because another endpoint there already uses that name"
-                    : changed.Count == 0
-                        ? $"endpoint '{Label(recorded.Name)}' was removed after this service resolved " +
-                          "and has been put back"
-                        : $"endpoint '{Label(recorded.Name)}' was removed after this service resolved " +
-                          $"and has been put back, along with the fields changed with it ({string.Join(", ", changed)})");
+                  "could not be put back onto either the facade or the underlying resource because " +
+                  "another endpoint already uses that name"
+                : !facadeHasIt
+                    ? $"endpoint '{Label(recorded.Name)}' was removed after this service resolved, but " +
+                      "could not be put back because another endpoint already uses that name"
+                    : !realHasIt
+                        ? $"endpoint '{Label(recorded.Name)}' was removed after this service resolved and " +
+                          "has been put back, but could not be mirrored onto the underlying resource " +
+                          "because another endpoint there already uses that name"
+                        : changed.Count == 0
+                            ? $"endpoint '{Label(recorded.Name)}' was removed after this service resolved " +
+                              "and has been put back"
+                            : $"endpoint '{Label(recorded.Name)}' was removed after this service resolved " +
+                              $"and has been put back, along with the fields changed with it ({string.Join(", ", changed)})");
         }
 
         // ReporterFor, not For: subscribing during this event's own dispatch is inert.
