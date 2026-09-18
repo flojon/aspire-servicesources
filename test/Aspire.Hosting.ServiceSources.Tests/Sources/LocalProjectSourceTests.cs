@@ -1762,18 +1762,55 @@ public class LocalProjectSourceTests
     public void Resolve_LocalOnNonDotnetEntryDeclaringOnlyUrl_ThrowsNamingServiceAndBothConfigFiles()
     {
         // The kind-gated ValidateProject never runs for a non-dotnet kind, so before #362 a java or
-        // javascript service had no guard at all in front of the clone.
+        // javascript service had no guard at all in front of the clone. The kind is registered
+        // deliberately: an unregistered one is refused by ResolveKindHandler, which also precedes
+        // the clone, and would leave this test unable to tell the new guard from that old one.
+        var builder = PlainBuilder();
+        builder.AddLocalKind(ResolvingKindHandler.KindName, new ResolvingKindHandler());
+
         var gitClient = new FakeGitClient();
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             new LocalProjectSource(gitClient).Resolve(
-                PlainBuilder(), ServiceName, RepositorylessDefinition(project: "", kind: "java"), DevConfig()));
+                builder, ServiceName,
+                RepositorylessDefinition(project: "", kind: ResolvingKindHandler.KindName), DevConfig()));
 
         Assert.Contains($"Service '{ServiceName}'", ex.Message);
         Assert.Contains("'repository'", ex.Message, StringComparison.Ordinal);
         Assert.Contains("servicesources.local.json", ex.Message, StringComparison.Ordinal);
         Assert.False(gitClient.EnsureAvailableCalled);
         Assert.Empty(gitClient.ClonedRepos);
+    }
+
+    [Fact]
+    public void Resolve_LocalOnEntryDeclaringOnlyUrl_OffersOnlyTheSourcesThatEntryDeclares()
+    {
+        // The remedy is only worth printing if taking it works. A url-only entry has no container
+        // and no kubernetes block, so naming those sends the reader to a second failure to discover
+        // which of the three was the real answer.
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new FakeGitClient()).Resolve(
+                PlainBuilder(), ServiceName, RepositorylessDefinition(), DevConfig()));
+
+        Assert.Contains("'url'", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("'container'", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("'kubernetes'", ex.Message, StringComparison.Ordinal);
+
+        // Named as a configuration key, not only as a file: the source can equally have arrived from
+        // appsettings, user secrets, the environment or a catalog defaultSource, and a developer
+        // sent to a file that holds nothing has nothing to act on.
+        Assert.Contains($"ServiceSources:Services:{ServiceName}:source", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Resolve_LocalOnContainerOnlyEntry_OffersContainerAndNotUrl()
+    {
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new FakeGitClient()).Resolve(
+                PlainBuilder(), ServiceName, RepositorylessDefinition(project: "", container: true), DevConfig()));
+
+        Assert.Contains("'container'", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("'url'", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1808,6 +1845,26 @@ public class LocalProjectSourceTests
         // Reached the dotnet kind's own project lookup inside that directory, which is as far as an
         // empty one gets — the point being that it got past the guard at all.
         Assert.Contains("project file 'Orders.csproj' was not found", ex.Message, StringComparison.Ordinal);
+
+        // The direct statement that execution got past the guard, rather than inferring it from the
+        // wording of a downstream failure: the other three tests assert this is false.
+        Assert.True(gitClient.EnsureAvailableCalled);
         Assert.Empty(gitClient.ClonedRepos);
+    }
+
+    private sealed class ResolvingKindResource(string name) : Resource(name), IResourceWithServiceDiscovery;
+
+    /// <summary>
+    /// A non-dotnet kind that resolves rather than throwing, so a test using it fails only if the
+    /// resolution really did reach the checkout.
+    /// </summary>
+    private sealed class ResolvingKindHandler : ILocalResourceKind
+    {
+        public const string KindName = "resolving-test-kind";
+
+        public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+            IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) =>
+            builder.AddResource(new ResolvingKindResource(serviceName))
+                .WithHttpEndpoint(port: 5555, name: "http");
     }
 }

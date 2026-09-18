@@ -254,10 +254,13 @@ never existed. Check the tag of the last release before adding one.
   symptom [#318] fixed, by another route. Every non-`dotnet` kind was exposed, and so was a
   `dotnet` service that declared `project:` alongside its `url:` block. The `local` source now
   fails with a `ServiceSourcesConfigurationException` naming the service, the catalog that declares
-  no repository for it, and the `servicesources.local.json` entry that chose the source — before
-  any clone or network work, so a cold checkout is never paid for to reach the verdict. A
-  `local.path` override is unaffected: it points at a checkout that already exists, so nothing is
-  cloned and the absent `repository` costs it nothing.
+  no repository for it, and the configuration key that chose the source — before any clone or
+  network work, so a cold checkout is never paid for to reach the verdict. The message offers only
+  the sources that entry actually declares, in the terms of the catalog that declared it. The
+  speculative prefetch skips such a service too, so resolving a well-formed sibling no longer starts
+  a background clone of a blank url for one the AppHost never added. A `local.path` override is
+  unaffected: it points at a checkout that already exists, so nothing is cloned and the absent
+  `repository` costs it nothing.
 
 - **The reserved-kind-name check is scoped to the service that actually names the kind from yaml**
   ([#133], [#317]). `url`, `container`, `kubernetes`, `repository`, `project`, `defaultRef` and

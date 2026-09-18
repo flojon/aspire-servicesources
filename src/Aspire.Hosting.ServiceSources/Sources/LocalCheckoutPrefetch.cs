@@ -667,6 +667,14 @@ internal sealed class LocalCheckoutPrefetch
             // (PrepareRepoRoot no-ops against an existing '.git'), but wasted background work.
             .Where(candidate => LocalGitCheckout.IsColdManagedCheckout(
                 appHostDirectory, candidate.Definition.Repository.CheckoutName, candidate.Config))
+            // ...and only the ones whose catalog entry names a repository at all (#362). Without
+            // this, resolving any one well-formed "local" service sweeps a repositoryless sibling
+            // into the set and hands the git client an empty url — the symptom
+            // LocalProjectSource.RequireRepositoryToCheckOut refuses, arriving by a route that never
+            // passes through it. Skipped rather than reported, like the filters around it: the
+            // service AddService() actually asks for is refused there, by name, on the thread that
+            // asked.
+            .Where(candidate => !string.IsNullOrWhiteSpace(candidate.Definition.Repository.Url))
             // ...minus the ones a deferred registration would clone for itself.
             .Where(candidate => !WouldBeDeferredIfAdded(
                 builder, deferred, kinds, candidate.Name, candidate.Definition, candidate.Config))

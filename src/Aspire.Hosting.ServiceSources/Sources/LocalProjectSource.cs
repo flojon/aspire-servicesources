@@ -251,6 +251,11 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// A <c>local.path</c> override is exempt: it points at a checkout the developer already has, so
     /// nothing is ever cloned and the absent <c>repository</c> costs that configuration nothing.
     /// </para>
+    /// <para>
+    /// Every remedy the message offers is built from what this entry actually has. Naming a source
+    /// it does not declare, or a key it did not set the source from, costs the reader a second
+    /// failure to discover which of the offered answers was the real one.
+    /// </para>
     /// </remarks>
     private static void RequireRepositoryToCheckOut(
         string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
@@ -261,14 +266,79 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
             return;
         }
 
+        var serviceKey = $"{DeveloperConfiguration.ServicesKey}:{serviceName}";
+
+        var remedies = new List<string> { DeclareRepositoryRemedy(serviceName, definition) };
+
+        if (DeclaredAlternativeSources(definition) is { Count: > 0 } alternatives)
+        {
+            remedies.Add($"set '{serviceKey}:source' to {JoinWithOr(alternatives)}, which it does declare");
+        }
+
+        remedies.Add(
+            $"set '{serviceKey}:local:path' to a checkout you already have on disk, which needs no repository");
+
         throw new ServiceSourcesConfigurationException(
-            $"Service '{serviceName}' source is 'local' but {definition.Origin.Describe()} declares no "
-            + "'repository' or 'repositoryRef' for it, so there is nothing to clone. Add one there, or choose "
-            + "a source that entry does declare — 'url', 'container' or 'kubernetes' — for "
-            + $"'{serviceName}' in {DeveloperConfiguration.FileName}. To run a checkout you already have on "
-            + $"disk, point this service's 'local.path' override in {DeveloperConfiguration.FileName} at it "
-            + "instead.");
+            $"Service '{serviceName}' source is 'local' but {definition.Origin.Describe()} gives it no "
+            + $"repository to clone. Either {string.Join(", or ", remedies)}. The "
+            + $"'{DeveloperConfiguration.ServicesKey}' keys usually live in "
+            + $"{DeveloperConfiguration.FileName}, but any configuration source sets them.");
     }
+
+    /// <summary>
+    /// How to give this service a repository, in the terms of the catalog that declared it — yaml
+    /// property names for a yaml entry, builder calls for a code-declared one.
+    /// </summary>
+    private static string DeclareRepositoryRemedy(string serviceName, ServiceDefinition definition)
+    {
+        var isCode = definition.Origin.Kind == CatalogOriginKind.Code;
+
+        // A grouped service declares a repositoryRef and no repository of its own, so telling the
+        // reader their entry declares neither is false and sends them to the wrong entry: what is
+        // missing is the url on the repository they named. Same test as the checkout label above.
+        if (!string.Equals(definition.Repository.CheckoutName, serviceName, StringComparison.Ordinal))
+        {
+            return isCode
+                ? $"give the shared repository '{definition.Repository.CheckoutName}' a url where it is declared"
+                : $"give the 'repositories' entry '{definition.Repository.CheckoutName}' a 'repository' url";
+        }
+
+        return isCode
+            ? "declare it with WithRepository(...) or WithSharedRepository(...)"
+            : "add a 'repository' or 'repositoryRef' to its catalog entry";
+    }
+
+    /// <summary>
+    /// The sources this entry could be switched to — the blocks it actually declares, which is
+    /// never all three and is frequently one. Empty is possible: a repositoryRef onto a url-less
+    /// repositories entry reaches here declaring nothing else, and is offered no switch at all.
+    /// </summary>
+    private static List<string> DeclaredAlternativeSources(ServiceDefinition definition)
+    {
+        var declared = new List<string>(3);
+
+        if (definition.Url is not null)
+        {
+            declared.Add("'url'");
+        }
+
+        if (definition.Container is not null)
+        {
+            declared.Add("'container'");
+        }
+
+        if (definition.Kubernetes is not null)
+        {
+            declared.Add("'kubernetes'");
+        }
+
+        return declared;
+    }
+
+    private static string JoinWithOr(List<string> values) =>
+        values.Count == 1
+            ? values[0]
+            : $"{string.Join(", ", values.GetRange(0, values.Count - 1))} or {values[^1]}";
 
     /// <summary>
     /// Looks up the handler for a non-dotnet kind, or throws naming the kind. Deliberately free of
