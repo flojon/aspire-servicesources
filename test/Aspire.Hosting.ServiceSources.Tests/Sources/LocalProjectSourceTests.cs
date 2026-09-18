@@ -114,6 +114,14 @@ public class LocalProjectSourceTests
         public string? OriginUrl { get; set; }
 
         public string? GetOriginUrl(string repositoryPath) => OriginUrl;
+
+        /// <summary>
+        /// Overrides the interface's no-op default so a test can assert a guard ran in front of
+        /// every git call, including the availability pre-flight that precedes the clone.
+        /// </summary>
+        public bool EnsureAvailableCalled { get; private set; }
+
+        public void EnsureAvailable() => EnsureAvailableCalled = true;
     }
 
     private const string ServiceName = "orders";
@@ -1705,5 +1713,101 @@ public class LocalProjectSourceTests
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("the scalar 'oops'", ex.Message);
         Assert.Contains("Check the indentation under the kind's key.", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The catalog shape #318's load-time check deliberately exempts: a service declaring a
+    /// <c>url</c>/<c>container</c>/<c>kubernetes</c> block and no <c>repository</c>. Legitimate at
+    /// load, and still selectable as <c>local</c> by a developer's own config — the gap #362 closes.
+    /// </summary>
+    private static ServiceDefinition RepositorylessDefinition(
+        string project = "Orders.csproj", string kind = LocalKinds.Dotnet, bool container = false) =>
+        new ServiceMetadata
+        {
+            Repository = "",
+            Project = project,
+            Kind = kind,
+            Url = container ? null : new UrlMetadata { Url = "https://orders.example.com" },
+            Container = container ? new ContainerMetadata { Image = "company/orders", Port = 8080 } : null,
+        }.ToDefinition("servicesources.yaml", ServiceName, TestHelpers.EmptyRepositories);
+
+    private static IDistributedApplicationBuilder PlainBuilder() =>
+        TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
+
+    [Fact]
+    public void Resolve_LocalOnEntryDeclaringOnlyUrl_ThrowsNamingServiceAndBothConfigFiles()
+    {
+        var gitClient = new FakeGitClient();
+
+        // 'project' is set, so the pre-existing "'project' is required" throw cannot mask the gap:
+        // this entry passes every check that existed before and still reached the clone with an
+        // empty url.
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(gitClient).Resolve(
+                PlainBuilder(), ServiceName, RepositorylessDefinition(), DevConfig()));
+
+        Assert.Contains($"Service '{ServiceName}'", ex.Message);
+        Assert.Contains("'repository'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("repositoryRef", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("servicesources.yaml", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("servicesources.local.json", ex.Message, StringComparison.Ordinal);
+
+        // Nothing was paid for: not a clone, and not even the availability pre-flight that precedes
+        // one. A cold clone costs minutes, and this verdict needs none of it.
+        Assert.False(gitClient.EnsureAvailableCalled);
+        Assert.Empty(gitClient.ClonedRepos);
+    }
+
+    [Fact]
+    public void Resolve_LocalOnNonDotnetEntryDeclaringOnlyUrl_ThrowsNamingServiceAndBothConfigFiles()
+    {
+        // The kind-gated ValidateProject never runs for a non-dotnet kind, so before #362 a java or
+        // javascript service had no guard at all in front of the clone.
+        var gitClient = new FakeGitClient();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(gitClient).Resolve(
+                PlainBuilder(), ServiceName, RepositorylessDefinition(project: "", kind: "java"), DevConfig()));
+
+        Assert.Contains($"Service '{ServiceName}'", ex.Message);
+        Assert.Contains("'repository'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("servicesources.local.json", ex.Message, StringComparison.Ordinal);
+        Assert.False(gitClient.EnsureAvailableCalled);
+        Assert.Empty(gitClient.ClonedRepos);
+    }
+
+    [Fact]
+    public void Resolve_LocalOnEntryDeclaringOnlyContainer_ReportsTheMissingRepositoryNotTheMissingProject()
+    {
+        // A container-only entry has no 'project' either, so this pins which of the two verdicts a
+        // developer gets: the one that names what is actually wrong with the source they chose.
+        var gitClient = new FakeGitClient();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(gitClient).Resolve(
+                PlainBuilder(), ServiceName, RepositorylessDefinition(project: "", container: true), DevConfig()));
+
+        Assert.Contains($"Service '{ServiceName}'", ex.Message);
+        Assert.Contains("'repository'", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("'project' is required", ex.Message, StringComparison.Ordinal);
+        Assert.False(gitClient.EnsureAvailableCalled);
+    }
+
+    [Fact]
+    public void Resolve_LocalOnEntryDeclaringOnlyUrlWithLocalPath_IsUnaffected()
+    {
+        // 'local.path' names a checkout the developer already has, so nothing is ever cloned and the
+        // absent 'repository' costs nothing — the guard must stay off this shipped configuration.
+        var checkout = TempDirectories.CreateSubdirectory().FullName;
+        var gitClient = new FakeGitClient();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(gitClient).Resolve(
+                PlainBuilder(), ServiceName, RepositorylessDefinition(), DevConfig(path: checkout)));
+
+        // Reached the dotnet kind's own project lookup inside that directory, which is as far as an
+        // empty one gets — the point being that it got past the guard at all.
+        Assert.Contains("project file 'Orders.csproj' was not found", ex.Message, StringComparison.Ordinal);
+        Assert.Empty(gitClient.ClonedRepos);
     }
 }

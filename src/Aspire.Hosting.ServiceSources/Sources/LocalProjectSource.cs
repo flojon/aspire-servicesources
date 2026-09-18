@@ -22,6 +22,10 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
         ServiceDeveloperConfig config, RepositoryDeveloperConfig? repositoryConfig = null)
     {
+        // Ahead of everything below, EnsureAvailable included, because it is the one check that can
+        // say this service has nothing to clone at all — and a cold clone is what the answer saves.
+        RequireRepositoryToCheckOut(serviceName, definition, config);
+
         // Before any network work: a machine without a usable git can't clone anything, and
         // finding that out once here beats finding it out as an identical clone failure on every
         // service the catalog holds. Cheap after the first call, which is why it sits on the hot
@@ -231,6 +235,39 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         ValidateWithKindHandler(serviceName, definition, repoRoot, handler!);
 
         return InvokeKindHandler(builder, serviceName, definition, repoRoot, handler!);
+    }
+
+    /// <summary>
+    /// Refuses a <c>"local"</c> service whose catalog entry declares no repository to clone.
+    /// </summary>
+    /// <remarks>
+    /// The runtime half of #318's catalog-load check. That one exempts an entry declaring only
+    /// <c>url</c>/<c>container</c>/<c>kubernetes</c>, since those are legitimate shapes — but a
+    /// developer's own <c>source</c> is chosen independently of which blocks the entry populates, so
+    /// selecting <c>local</c> for one of them used to hand the git client an empty url. Reported
+    /// here rather than at config resolution because <c>"local"</c> is the only source the missing
+    /// <c>repository</c> makes impossible, which is also why the message names the source.
+    /// <para>
+    /// A <c>local.path</c> override is exempt: it points at a checkout the developer already has, so
+    /// nothing is ever cloned and the absent <c>repository</c> costs that configuration nothing.
+    /// </para>
+    /// </remarks>
+    private static void RequireRepositoryToCheckOut(
+        string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
+    {
+        if (!LocalGitCheckout.IsManagedCheckout(config)
+            || !string.IsNullOrWhiteSpace(definition.Repository.Url))
+        {
+            return;
+        }
+
+        throw new ServiceSourcesConfigurationException(
+            $"Service '{serviceName}' source is 'local' but {definition.Origin.Describe()} declares no "
+            + "'repository' or 'repositoryRef' for it, so there is nothing to clone. Add one there, or choose "
+            + "a source that entry does declare — 'url', 'container' or 'kubernetes' — for "
+            + $"'{serviceName}' in {DeveloperConfiguration.FileName}. To run a checkout you already have on "
+            + $"disk, point this service's 'local.path' override in {DeveloperConfiguration.FileName} at it "
+            + "instead.");
     }
 
     /// <summary>

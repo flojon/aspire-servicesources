@@ -246,6 +246,19 @@ never existed. Check the tag of the last release before adding one.
   rejects an entirely empty service entry. A service that legitimately has no local checkout —
   one sourced only from `url:`/`container:`/`kubernetes:` — is unaffected.
 
+- **`source: local` on a service that declares no repository is now refused instead of cloning an
+  empty url** ([#362]). [#318]'s check runs at catalog load and deliberately exempts an entry
+  declaring only `url:`/`container:`/`kubernetes:`, because those are legitimate shapes. But a
+  developer's `source` is chosen independently of which blocks the entry populates, so picking
+  `local` for one of them reached the git client with a blank repository url anyway — the exact
+  symptom [#318] fixed, by another route. Every non-`dotnet` kind was exposed, and so was a
+  `dotnet` service that declared `project:` alongside its `url:` block. The `local` source now
+  fails with a `ServiceSourcesConfigurationException` naming the service, the catalog that declares
+  no repository for it, and the `servicesources.local.json` entry that chose the source — before
+  any clone or network work, so a cold checkout is never paid for to reach the verdict. A
+  `local.path` override is unaffected: it points at a checkout that already exists, so nothing is
+  cloned and the absent `repository` costs it nothing.
+
 - **The reserved-kind-name check is scoped to the service that actually names the kind from yaml**
   ([#133], [#317]). `url`, `container`, `kubernetes`, `repository`, `project`, `defaultRef` and
   `kind` collide with a well-known `ServiceMetadata` yaml property, so a kind by one of those names
@@ -1749,6 +1762,7 @@ Targets `net10.0`.
 [#345]: https://github.com/flojon/aspire-servicesources/issues/345
 [#350]: https://github.com/flojon/aspire-servicesources/issues/350
 [#359]: https://github.com/flojon/aspire-servicesources/issues/359
+[#362]: https://github.com/flojon/aspire-servicesources/issues/362
 [#372]: https://github.com/flojon/aspire-servicesources/issues/372
 [#375]: https://github.com/flojon/aspire-servicesources/issues/375
 
