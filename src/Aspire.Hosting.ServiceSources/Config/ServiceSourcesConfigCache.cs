@@ -512,12 +512,9 @@ internal static class ServiceSourcesConfigCache
                 // intended.
                 foreach (var sharedUrl in merged
                     .Where(entry => entry.Value.Repository.CheckoutName == entry.Key)
-                    // A blank Url is not a repository at all: every service gets a RepositoryDefinition
-                    // regardless of source (design finding 2 mints an anonymous one unconditionally), so
-                    // a kubernetes- or url-sourced service — which never sets 'repository:' — carries one
-                    // whose Url defaults to "". Grouping those together would warn about services that
-                    // were never candidates for sharing a checkout in the first place.
-                    .Where(entry => !string.IsNullOrEmpty(entry.Value.Repository.Url))
+                    // Grouping services with no repository would warn about ones that were never
+                    // candidates for sharing a checkout in the first place.
+                    .Where(entry => LocalGitCheckout.HasRepositoryToClone(entry.Value))
                     // The catalog shape alone does not say which source is actually in effect: a service
                     // can declare both a 'repository:' block and, say, a 'kubernetes:' block (README
                     // "Combining sources on one catalog entry"), with servicesources.local.json resolving

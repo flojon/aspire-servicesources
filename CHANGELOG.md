@@ -255,12 +255,18 @@ never existed. Check the tag of the last release before adding one.
   `dotnet` service that declared `project:` alongside its `url:` block. The `local` source now
   fails with a `ServiceSourcesConfigurationException` naming the service, the catalog that declares
   no repository for it, and the configuration key that chose the source — before any clone or
-  network work, so a cold checkout is never paid for to reach the verdict. The message offers only
-  the sources that entry actually declares, in the terms of the catalog that declared it. The
-  speculative prefetch skips such a service too, so resolving a well-formed sibling no longer starts
-  a background clone of a blank url for one the AppHost never added. A `local.path` override is
-  unaffected: it points at a checkout that already exists, so nothing is cloned and the absent
-  `repository` costs it nothing.
+  network work, so a cold checkout is never paid for to reach the verdict. It says how to give the
+  service a repository, in the terms of the catalog that declared it — yaml properties for a yaml
+  entry, builder calls for a code-declared one — and names the `source` key in the register this
+  package uses wherever a value can come from any configuration layer, so a `source` set by the
+  environment or by a catalog `defaultSource` does not send its reader to edit a file that holds
+  nothing. It deliberately does **not** suggest switching the source to `url`, `container` or
+  `kubernetes`: whether any of those would resolve depends on that source's own preconditions, which
+  this check does not read, so an entry merely declaring the block is not enough to make the advice
+  true. The speculative prefetch skips such a service too, so resolving a well-formed sibling no
+  longer starts a background clone of a blank url for one the AppHost never added. A `local.path`
+  override is unaffected: it points at a checkout that already exists, so nothing is cloned and the
+  absent `repository` costs it nothing.
 
 - **The reserved-kind-name check is scoped to the service that actually names the kind from yaml**
   ([#133], [#317]). `url`, `container`, `kubernetes`, `repository`, `project`, `defaultRef` and

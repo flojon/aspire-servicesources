@@ -674,7 +674,7 @@ internal sealed class LocalCheckoutPrefetch
             // passes through it. Skipped rather than reported, like the filters around it: the
             // service AddService() actually asks for is refused there, by name, on the thread that
             // asked.
-            .Where(candidate => !string.IsNullOrWhiteSpace(candidate.Definition.Repository.Url))
+            .Where(candidate => LocalGitCheckout.HasRepositoryToClone(candidate.Definition))
             // ...minus the ones a deferred registration would clone for itself.
             .Where(candidate => !WouldBeDeferredIfAdded(
                 builder, deferred, kinds, candidate.Name, candidate.Definition, candidate.Config))

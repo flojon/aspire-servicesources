@@ -1791,31 +1791,65 @@ public class LocalProjectSourceTests
         Assert.Empty(gitClient.ClonedRepos);
     }
 
-    [Fact]
-    public void Resolve_LocalOnEntryDeclaringOnlyUrl_OffersOnlyTheSourcesThatEntryDeclares()
+    /// <summary>
+    /// The fail-closed shape: a remedy this guard cannot verify is not offered at all.
+    /// </summary>
+    /// <remarks>
+    /// Switching the source to <c>url</c>, <c>container</c> or <c>kubernetes</c> works only if that
+    /// source's own preconditions hold — a non-blank url, an image, a service plus a
+    /// developer-config-only context — none of which this guard reads, and each of which grows with
+    /// its own source. A declared block is not enough: a <c>container:</c> with no <c>image:</c>
+    /// loads fine and then fails under its own source, so an entry-shape test printed a remedy that
+    /// did not work when followed. Both declared shapes are exercised here, because "declares the
+    /// block" was exactly the predicate that was not enough.
+    /// </remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Resolve_LocalOnRepositorylessEntry_OffersNoSourceSwitchItCannotVerify(bool container)
     {
-        // The remedy is only worth printing if taking it works. A url-only entry has no container
-        // and no kubernetes block, so naming those sends the reader to a second failure to discover
-        // which of the three was the real answer.
+        var definition = container ? RepositorylessContainerDefinition() : RepositorylessDefinition();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new FakeGitClient()).Resolve(
+                PlainBuilder(), ServiceName, definition, DevConfig()));
+
+        Assert.DoesNotContain("'url'", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("'container'", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("'kubernetes'", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("which it does declare", ex.Message, StringComparison.Ordinal);
+
+        // The one remedy that depends on nothing outside this guard: the exemption it checks itself.
+        Assert.Contains(
+            $"ServiceSources:Services:{ServiceName}:local:path", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The source key is named in the register this repo uses wherever a key can come from any
+    /// layer, so a reader whose <c>source</c> was set by the environment or a catalog
+    /// <c>defaultSource</c> is not sent to edit a file that holds nothing.
+    /// </summary>
+    [Fact]
+    public void Resolve_LocalOnRepositorylessEntry_NamesTheSourceKeyInEveryLayerThatCanSetIt()
+    {
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             new LocalProjectSource(new FakeGitClient()).Resolve(
                 PlainBuilder(), ServiceName, RepositorylessDefinition(), DevConfig()));
 
-        Assert.Contains("'url'", ex.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain("'container'", ex.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain("'kubernetes'", ex.Message, StringComparison.Ordinal);
-
-        // Named as a configuration key, not only as a file: the source can equally have arrived from
-        // appsettings, user secrets, the environment or a catalog defaultSource, and a developer
-        // sent to a file that holds nothing has nothing to act on.
         Assert.Contains($"ServiceSources:Services:{ServiceName}:source", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("which any configuration layer can set", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("appsettings", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("user secrets", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("the command line", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            $"ServiceSources__Services__{ServiceName}__source", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Resolve_LocalOnContainerOnlyEntry_ReportsTheMissingRepositoryAndOffersOnlyContainer()
+    public void Resolve_LocalOnContainerOnlyEntry_ReportsTheMissingRepositoryRatherThanTheMissingProject()
     {
-        // A container-only entry has no 'project' either, so this also pins which of the two verdicts
-        // a developer gets: the one that names what is actually wrong with the source they chose.
+        // A container-only entry has no 'project' either, so this pins which of the two verdicts a
+        // developer gets: the one that names what is actually wrong with the source they chose.
         var gitClient = new FakeGitClient();
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
@@ -1825,8 +1859,6 @@ public class LocalProjectSourceTests
         Assert.Contains($"Service '{ServiceName}'", ex.Message);
         Assert.Contains("'repository'", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("'project' is required", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("'container'", ex.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain("'url'", ex.Message, StringComparison.Ordinal);
         Assert.False(gitClient.EnsureAvailableCalled);
     }
 
@@ -1909,6 +1941,87 @@ public class LocalProjectSourceTests
         // wording of a downstream failure: the other three tests assert this is false.
         Assert.True(gitClient.EnsureAvailableCalled);
         Assert.Empty(gitClient.ClonedRepos);
+    }
+
+    /// <summary>
+    /// The single definition of "is there anything to clone for this service", pinned where it is
+    /// named rather than at each of its callers.
+    /// </summary>
+    /// <remarks>
+    /// The whitespace-only row is the encoding that had to be chosen: the rule was spelled three
+    /// times and one spelling used <c>IsNullOrEmpty</c>, which calls "   " a repository and hands it
+    /// to git.
+    /// </remarks>
+    [Theory]
+    [InlineData("https://github.com/company/orders", true)]
+    [InlineData("", false)]
+    [InlineData("   ", false)]
+    [InlineData("\t\n", false)]
+    public void HasRepositoryToClone_AnswersOnTheRepositoryUrlAloneAndTreatsBlankAsNothing(
+        string url, bool expected)
+    {
+        var definition = new ServiceDefinition
+        {
+            Repository = new RepositoryDefinition { Url = url, CheckoutName = ServiceName },
+            Project = "Orders.csproj",
+            Kind = LocalKinds.Dotnet,
+            Origin = CatalogOrigin.FromYaml("servicesources.yaml"),
+        };
+
+        Assert.Equal(expected, LocalGitCheckout.HasRepositoryToClone(definition));
+    }
+
+    /// <summary>
+    /// Defence in depth for the route <see cref="LocalCheckoutPrefetch"/> re-opened once: the
+    /// invariant sits where the clone is decided, so a call site that never passes through
+    /// <see cref="LocalProjectSource"/>'s guard still cannot hand git a blank url.
+    /// </summary>
+    [Fact]
+    public void PrepareRepoRoot_ColdManagedCheckoutWithNoRepositoryUrl_ThrowsRatherThanCloningABlankUrl()
+    {
+        var gitClient = new FakeGitClient();
+
+        var definition = new ServiceDefinition
+        {
+            Repository = new RepositoryDefinition { Url = "", CheckoutName = ServiceName },
+            Project = "Orders.csproj",
+            Kind = LocalKinds.Dotnet,
+            Origin = CatalogOrigin.FromYaml("servicesources.yaml"),
+        };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            LocalGitCheckout.PrepareRepoRoot(
+                ServiceName, definition, DevConfig(), repositoryConfig: null,
+                UnusedAppHostDirectory, gitClient));
+
+        Assert.Contains(ServiceName, ex.Message, StringComparison.Ordinal);
+        Assert.Empty(gitClient.ClonedRepos);
+    }
+
+    /// <summary>
+    /// The invariant guards the clone, not the whole method: a checkout already on disk is resolved
+    /// from its own directory and needs no url to be handed back.
+    /// </summary>
+    [Fact]
+    public void PrepareRepoRoot_WarmManagedCheckoutWithNoRepositoryUrl_IsLeftToReconciliation()
+    {
+        var appHost = TempDirectories.CreateSubdirectory().FullName;
+        var repoRoot = Path.Combine(appHost, ".servicesources", "checkouts", ServiceName);
+        Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
+
+        var definition = new ServiceDefinition
+        {
+            Repository = new RepositoryDefinition { Url = "", CheckoutName = ServiceName },
+            Project = "Orders.csproj",
+            Kind = LocalKinds.Dotnet,
+            Origin = CatalogOrigin.FromYaml("servicesources.yaml"),
+        };
+
+        var prepared = LocalGitCheckout.PrepareRepoRoot(
+            ServiceName, definition, DevConfig(), repositoryConfig: null, appHost, new FakeGitClient());
+
+        Assert.Equal(repoRoot, prepared.RepoRoot);
+        Assert.True(prepared.NeedsReconciliation);
     }
 
     private sealed class ResolvingKindResource(string name) : Resource(name), IResourceWithServiceDiscovery;

@@ -252,37 +252,36 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// nothing is ever cloned and the absent <c>repository</c> costs that configuration nothing.
     /// </para>
     /// <para>
-    /// Every remedy the message offers is built from what this entry actually has. Naming a source
-    /// it does not declare, or a key it did not set the source from, costs the reader a second
-    /// failure to discover which of the offered answers was the real one.
+    /// The message offers only remedies this guard itself can verify, and says nothing about the
+    /// other sources. Switching to <c>url</c>, <c>container</c> or <c>kubernetes</c> works only if
+    /// that source's own preconditions hold — a non-blank url, an image, a service plus a
+    /// developer-config-only context — none of which is readable from here, and each of which grows
+    /// with its own source. Offering one unchecked is how a reader ends up at a second, different
+    /// failure; declaring the block is not enough, since a <c>container:</c> with no <c>image:</c>
+    /// loads perfectly well. So the fault is stated, the key that chose the source is named in the
+    /// register any layer can be found from, and the only remedy offered is the exemption this
+    /// method checks on the line above.
     /// </para>
     /// </remarks>
     private static void RequireRepositoryToCheckOut(
         string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
     {
         if (!LocalGitCheckout.IsManagedCheckout(config)
-            || !string.IsNullOrWhiteSpace(definition.Repository.Url))
+            || LocalGitCheckout.HasRepositoryToClone(definition))
         {
             return;
         }
 
         var serviceKey = $"{DeveloperConfiguration.ServicesKey}:{serviceName}";
-
-        var remedies = new List<string> { DeclareRepositoryRemedy(serviceName, definition) };
-
-        if (DeclaredAlternativeSources(definition) is { Count: > 0 } alternatives)
-        {
-            remedies.Add($"set '{serviceKey}:source' to {JoinWithOr(alternatives)}, which it does declare");
-        }
-
-        remedies.Add(
-            $"set '{serviceKey}:local:path' to a checkout you already have on disk, which needs no repository");
+        var sourceKey = $"{serviceKey}:source";
 
         throw new ServiceSourcesConfigurationException(
             $"Service '{serviceName}' source is 'local' but {definition.Origin.Describe()} gives it no "
-            + $"repository to clone. Either {string.Join(", or ", remedies)}. The "
-            + $"'{DeveloperConfiguration.ServicesKey}' keys usually live in "
-            + $"{DeveloperConfiguration.FileName}, but any configuration source sets them.");
+            + $"repository to clone. Either {DeclareRepositoryRemedy(serviceName, definition)}, or set "
+            + $"'{serviceKey}:local:path' to a checkout you already have on disk, which needs no "
+            + $"repository. The key is '{sourceKey}', which any configuration layer can set: "
+            + $"{DeveloperConfiguration.FileName}, appsettings, user secrets, the environment variable "
+            + $"{sourceKey.Replace(":", "__", StringComparison.Ordinal)}, or the command line.");
     }
 
     /// <summary>
@@ -303,42 +302,13 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
                 : $"give the 'repositories' entry '{definition.Repository.CheckoutName}' a 'repository' url";
         }
 
+        // "give ... a url" rather than "add a 'repository'": the predicate above is
+        // IsNullOrWhiteSpace, so an entry that already carries a blank 'repository:' scalar reaches
+        // here, and telling its author to add the key they can see would be advice they cannot take.
         return isCode
             ? "declare it with WithRepository(...) or WithSharedRepository(...)"
-            : "add a 'repository' or 'repositoryRef' to its catalog entry";
+            : "give its catalog entry a 'repository' url or a 'repositoryRef' to one";
     }
-
-    /// <summary>
-    /// The sources this entry could be switched to — the blocks it actually declares. Empty is
-    /// possible: a repositoryRef onto a url-less repositories entry reaches here declaring nothing
-    /// else, and is offered no switch at all.
-    /// </summary>
-    private static List<string> DeclaredAlternativeSources(ServiceDefinition definition)
-    {
-        var declared = new List<string>(3);
-
-        if (definition.Url is not null)
-        {
-            declared.Add("'url'");
-        }
-
-        if (definition.Container is not null)
-        {
-            declared.Add("'container'");
-        }
-
-        if (definition.Kubernetes is not null)
-        {
-            declared.Add("'kubernetes'");
-        }
-
-        return declared;
-    }
-
-    private static string JoinWithOr(List<string> values) =>
-        values.Count == 1
-            ? values[0]
-            : $"{string.Join(", ", values.GetRange(0, values.Count - 1))} or {values[^1]}";
 
     /// <summary>
     /// Looks up the handler for a non-dotnet kind, or throws naming the kind. Deliberately free of
