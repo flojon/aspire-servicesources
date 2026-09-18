@@ -106,23 +106,35 @@ internal static class EndpointMutationDetector
             var changed = Restore(endpoint, recorded);
 
             // Aspire resolves an endpoint by name with SingleOrDefault, which throws on a duplicate.
-            if (!HoldsEndpointNamed(facade, recorded.Name))
+            // `real` starts out sharing this exact instance with `facade` (ResolvedService.Bridge), so
+            // Contains is checked before the name guard -- otherwise the guard would read the instance
+            // it is about to restore as the collision blocking it.
+            var facadeHasIt = facade.Annotations.Contains(endpoint);
+            if (!facadeHasIt && !HoldsEndpointNamed(facade, recorded.Name))
             {
                 facade.Annotations.Add(endpoint);
+                facadeHasIt = true;
             }
 
-            if (real is not null && !HoldsEndpointNamed(real, recorded.Name))
+            var realHasIt = real is null || real.Annotations.Contains(endpoint);
+            if (real is not null && !realHasIt && !HoldsEndpointNamed(real, recorded.Name))
             {
                 real.Annotations.Add(endpoint);
+                realHasIt = true;
             }
 
             everyRevertWasAnAddition = false;
 
-            reverts.Add(changed.Count == 0
-                ? $"endpoint '{Label(recorded.Name)}' was removed after this service resolved and has " +
-                  "been put back"
-                : $"endpoint '{Label(recorded.Name)}' was removed after this service resolved and has " +
-                  $"been put back, along with the fields changed with it ({string.Join(", ", changed)})");
+            // A skipped guard means the name is taken by a different endpoint, so restoring here
+            // would have thrown; report the miss instead of claiming a restore that did not happen.
+            reverts.Add(!facadeHasIt || !realHasIt
+                ? $"endpoint '{Label(recorded.Name)}' was removed after this service resolved, but " +
+                  "could not be put back because another endpoint already uses that name"
+                : changed.Count == 0
+                    ? $"endpoint '{Label(recorded.Name)}' was removed after this service resolved and " +
+                      "has been put back"
+                    : $"endpoint '{Label(recorded.Name)}' was removed after this service resolved and " +
+                      $"has been put back, along with the fields changed with it ({string.Join(", ", changed)})");
         }
 
         // ReporterFor, not For: subscribing during this event's own dispatch is inert.
