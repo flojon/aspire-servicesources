@@ -12,6 +12,7 @@ public class RawPathDoesNotCompileTests
 {
     private const string Preamble = """
         using System;
+        using System.Linq;
         using Aspire.Hosting.ServiceSources;
         using Aspire.Hosting.ServiceSources.Messages;
 
@@ -110,6 +111,19 @@ public class RawPathDoesNotCompileTests
     [Fact]
     public void RawJoin_RefusesStringFragments() =>
         AssertRefused("""ServiceSourcesConfigurationException.For($"a{Raw.Join(", ", new[] { s })}b")""", "CS1503");
+
+    // A method group has no call site for CA1857 to inspect, so both shapes below carried a runtime
+    // string past [ConstantExpected] until Literal and Join took a parameter no delegate supplies.
+    // The second is the one that mattered: it is Select(Raw.Escaped), already written in this
+    // package, with one identifier changed. Unlike CA1857, this compilation can see them.
+
+    [Fact]
+    public void RawLiteral_CannotBeMethodGroupConverted() =>
+        AssertRefused("""ServiceSourcesConfigurationException.For($"a{((Func<string, Raw>)Raw.Literal)(s)}b")""", "CS0123");
+
+    [Fact]
+    public void RawLiteral_CannotBeLinqProjected() =>
+        AssertRefused("""ServiceSourcesConfigurationException.For($"a{Raw.Join(", ", new[] { s }.Select(Raw.Literal))}b")""", "CS0411");
 
     // The two [ConstantExpected] parameters are NOT enforced by the compiler — measured, against the
     // prediction that they raise CS9244. Their only enforcement is analyzer CA1857, which this

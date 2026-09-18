@@ -217,8 +217,9 @@ never existed. Check the tag of the last release before adding one.
   profile's URL — were interpolated exactly as configured, so one carrying a newline or a closing
   quote could end the line and write a sentence of its own into output a reader trusts. Escaping was
   something each message site had to remember, and [#372] fixed four that had not. Fourteen more now
-  compose through a seam that escapes and caps every name by construction: the nine refusals raised
-  while a source resolves, and the five builders behind the startup-failure notice, the two
+  compose through a seam that escapes every name by construction, and caps all but the URLs and
+  paths a cut would rob of the diagnosis they carry: the nine refusals raised while a source
+  resolves, and the five builders behind the startup-failure notice, the two
   `configuration that nothing read` audits, the launch-profile endpoint warning and the failed
   prefetch notice. A name is capped on its own rather than over a joined list, so a message naming
   ten services still names all ten. The wording of a cause flattened into

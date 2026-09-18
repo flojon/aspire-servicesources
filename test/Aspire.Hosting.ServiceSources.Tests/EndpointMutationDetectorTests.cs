@@ -438,10 +438,9 @@ public class EndpointMutationDetectorTests
     }
 
     /// <remarks>
-    /// The escape character carried by the name itself, which escaping the quote alone leaves live:
-    /// a reader that honours the <c>\n</c> and <c>\uXXXX</c> this same message writes reads
-    /// <c>\\'</c> back as one backslash and a delimiter, and the entry the quote escape closes is
-    /// open again.
+    /// The escape character carried by the name itself. Doubling it is what keeps the escaping
+    /// injective: without it a name ending in <c>\</c> before the quote, and a name that spells
+    /// <c>\u0027</c> itself, render as the same text and the reader cannot tell which they wrote.
     /// </remarks>
     [Fact]
     public async Task AnEndpointNameCarryingTheEscapeCharacter_CannotReconstituteTheDelimiter()

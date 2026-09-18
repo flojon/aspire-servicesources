@@ -139,6 +139,10 @@ internal static class ConfiguredValue
                     ? $"\\u{(int)value[i]:x4}"
                     : $"\\u{(int)value[i]:x4}\\u{(int)value[i + 1]:x4}",
 
+                // An unpaired surrogate is category Surrogate, not Format, so IsInvisible says no and it
+                // reached the reader raw — where UTF-8 turns every one of them into the same U+FFFD.
+                _ when width == 1 && char.IsSurrogate(value[i]) => $"\\u{(int)value[i]:x4}",
+
                 _ => value.Substring(i, width),
             });
 

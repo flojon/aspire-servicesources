@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 
 namespace Aspire.Hosting.ServiceSources.Messages;
@@ -20,11 +21,12 @@ internal readonly struct Raw
     internal static Raw Compose(ServiceTextHandler text) => new(text.Text);
 
     /// <summary>A compile-time constant, which cannot carry a runtime value.</summary>
-    internal static Raw Literal([ConstantExpected] string text) => new(text);
+    internal static Raw Literal([ConstantExpected] string text, ConstantOnly _ = default) => new(text);
 
     /// <summary>
     /// Caller-controlled text escaped by the <see cref="Name"/> rule but deliberately not capped —
-    /// a URL, where truncating at 64 would remove the diagnosis the message exists to give.
+    /// a URL or a filesystem path, where truncating at 64 would remove the diagnosis the message
+    /// exists to give.
     /// </summary>
     /// <remarks>
     /// Safe by the same rule as a <see cref="Name"/> hole, not by being trusted: this escapes its
@@ -36,7 +38,10 @@ internal readonly struct Raw
     /// Already-safe fragments joined. Safe by construction: every part is a <see cref="Raw"/>
     /// already and the separator is a constant, so nothing unescaped enters through here.
     /// </summary>
-    internal static Raw Join([ConstantExpected] string separator, IEnumerable<Raw> parts) =>
+    internal static Raw Join(
+        [ConstantExpected] string separator,
+        IEnumerable<Raw> parts,
+        ConstantOnly _ = default) =>
         new(string.Join(separator, parts.Select(part => part.ToString())));
 
     /// <summary>
@@ -61,16 +66,26 @@ internal readonly struct Raw
     /// <remarks>
     /// Neither quoted nor capped: a cause is a diagnosis, not a name, and truncating it would
     /// discard the detail the line exists to carry.
+    /// <para>
+    /// <see cref="ConfiguredValue.Bare"/> rather than a set of line terminators to replace: an
+    /// enumerated set answers only the terminators someone thought of, and this one had already been
+    /// wrong twice. A cause carrying <c>ESC [ 2 K</c> erases the lines this package already printed,
+    /// which forges a log more completely than a newline does. Bare spells out every invisible,
+    /// so what it does not recognise cannot pass through.
+    /// </para>
     /// </remarks>
-    internal static Raw Cause(Exception exception) => new(SingleLine(exception.Message));
-
-    /// <remarks>
-    /// <see cref="string.ReplaceLineEndings(string)"/> rather than a hand-written set of three:
-    /// U+0085, U+2028, U+2029 and U+000C also start a line, and a rule written out here is a fourth
-    /// spelling of one this package already has. U+000B is not in that set — measured, not assumed.
-    /// </remarks>
-    private static string SingleLine(string message) => message.ReplaceLineEndings("\\n");
+    internal static Raw Cause(Exception exception) => new(ConfiguredValue.Bare(exception.Message));
 
     /// <summary>Empty rather than null: <c>default(Raw)</c> must render, not throw.</summary>
     public override string ToString() => text ?? string.Empty;
+
+    /// <summary>A parameter no delegate shape supplies.</summary>
+    /// <remarks>
+    /// <c>[ConstantExpected]</c> is checked by CA1857 at a call site, and a method group has no call
+    /// site to check: <c>names.Select(Raw.Literal)</c> laundered a runtime string straight through,
+    /// one token from the <c>Select(Raw.Escaped)</c> this package already writes. An optional
+    /// parameter of a type nothing else names makes that conversion a compile error instead — which
+    /// also holds in the two workflows that build without <c>-warnaserror</c>.
+    /// </remarks>
+    internal readonly struct ConstantOnly;
 }

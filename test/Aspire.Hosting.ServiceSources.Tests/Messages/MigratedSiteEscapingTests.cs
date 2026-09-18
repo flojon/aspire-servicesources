@@ -353,19 +353,24 @@ public class MigratedSiteEscapingTests
 
         Assert.DoesNotContain("\n", exception.Message, StringComparison.Ordinal);
         Assert.Contains("brien", exception.Message, StringComparison.Ordinal);
+        // The apostrophe is what the escaping is for: a directory named with one closes
+        // the quotes this message wraps the path in.
+        Assert.Contains("o\\u0027brien", exception.Message, StringComparison.Ordinal);
         // Escaped but never capped: it is a path, not a name.
         Assert.Contains("servicesources.yaml", exception.Message, StringComparison.Ordinal);
     }
 
-    // Raw.Cause hands the reader a third party's wording. .NET counts four more code points as
-    // line terminators than the three a hand-written rule covered, and a log viewer honours them.
-    // U+000B is deliberately absent: ReplaceLineEndings does not treat it as one, measured.
+    // Raw.Cause hands the reader a third party's wording. ConfiguredValue.Bare spells out every
+    // invisible rather than a set of terminators someone enumerated: U+000B and ESC are not line
+    // endings, but a terminal honouring ESC[2K erases the lines this package already printed.
     [Theory]
     [InlineData("\u0085")]
     [InlineData("\u2028")]
     [InlineData("\u2029")]
     [InlineData("\u000C")]
-    public void Describe_CannotForgeALineWithAnyLineTerminator(string terminator)
+    [InlineData("\u000B")]
+    [InlineData("\u001B[2K")]
+    public void Describe_CannotForgeALineWithAnyInvisible(string terminator)
     {
         var forged = $"authentication failed{terminator}  caused by: nothing is wrong, carry on";
         var exception = ServiceSourcesConfigurationException.For(
