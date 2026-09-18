@@ -120,30 +120,31 @@ public static class ServiceConfigurationExtensions
     /// requested.
     /// </param>
     private static string Explain<T>(IResource resource, ServiceSourceAnnotation? annotation, IResource? real)
+        where T : IResource
     {
-        var name = annotation?.ServiceName ?? resource.Name;
+        // The catalog key is caller-controlled and reaches a log through this exception, exactly as it
+        // does through the warnings that share the sentence below.
+        var name = ServiceSourcesWarnings.Label(annotation?.ServiceName ?? resource.Name);
 
         if (annotation is null)
         {
             return $"Resource '{name}' ({resource.GetType().Name}) is not a {typeof(T).Name}.";
         }
 
-        var detail = annotation.Source switch
-        {
-            "url" =>
-                "Source 'url' resolves to a fixed, already-running URL — there is no local process for " +
-                "this AppHost to configure. Configure it wherever it actually runs, or give the service a " +
-                "source that runs locally ('local' or 'container') in servicesources.local.json.",
-            "kubernetes" =>
-                "Source 'kubernetes' resolves to a 'kubectl port-forward' process in front of an " +
-                "already-running service, so configuration applied here would reach the port-forward rather " +
-                "than the service itself. Give the service a source that runs locally ('local' or " +
-                "'container') in servicesources.local.json, or drop the configuration.",
-            _ =>
-                $"The resolved resource is a {(real ?? resource).GetType().Name}, which does not provide it.",
-        };
+        var opening = $"Service '{name}' cannot be configured as {typeof(T).Name}: its source is " +
+                      $"'{annotation.Source}'";
 
-        return $"Service '{name}' cannot be configured as {typeof(T).Name}: " +
-               $"its source is '{annotation.Source}'. {detail}";
+        // Shared with the warnings rather than re-spelled: the same offer with the precondition
+        // dropped is a dead end for a service whose catalog entry declares neither block. Keyed on
+        // the same predicate the throw above gates on, so the two cannot disagree about a source.
+        if (IsUnreachable<T>(annotation.Source))
+        {
+            return $"{opening} — {OutOfBandSourceAdvice.SourceDetail(annotation.Source)}. Configure the " +
+                   $"service where it actually runs, drop the configuration, or " +
+                   $"{OutOfBandSourceAdvice.SwitchSource}.";
+        }
+
+        return $"{opening}. The resolved resource is a {(real ?? resource).GetType().Name}, which does " +
+               "not provide it.";
     }
 }

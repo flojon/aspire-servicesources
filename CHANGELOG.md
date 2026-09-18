@@ -144,6 +144,25 @@ never existed. Check the tag of the last release before adding one.
   public** ([#314]). Previously `internal` constant holders whose values callers could only find
   in prose; now discoverable from the API, the way Aspire's own `KnownResourceStates` and
   `KnownResourceCommands` are. The methods that accept these values still take `string`.
+- **Endpoint changes made after a `url` or `kubernetes` service resolves are now detected, reverted
+  and reported** ([#372]). Aspire's own `withEndpointCallback`, `withHttpEndpointCallback` and
+  `withHttpsEndpointCallback` are reachable from a guest-language AppHost — and the shape they take,
+  `EndpointUpdateContext`, is `internal` to Aspire, so no C# shadow can project them. They mutated an
+  out-of-band service's endpoint with no warning at all, which for a `kubernetes` service repointed
+  the real `kubectl port-forward`, sending the configuration to a different process than the one the
+  AppHost author meant. Each service's endpoints are now fingerprinted as its source registers them,
+  and anything changed, added or removed between resolve and start is put back, in one warning naming
+  the endpoint and the fields that changed — `Service 'orders': endpoint 'https' was changed after
+  this service resolved (IsExternal) and has been put back. Its source is 'kubernetes' — …` — so the
+  outcome matches what gating the equivalent C# call already does. An endpoint *added* this way is
+  removed again, so a reference taken to it before start will not resolve, and the warning says so.
+  This measures the state rather than the call, so it also **covers**
+  `WithExternalHttpEndpoints` ([#359]), which sets `IsExternal` on existing endpoints directly from
+  C# and was likewise unreported; that issue stays open and separately owned. Nothing changes for a
+  `local` or `container` service, where configuring an endpoint after resolution is legitimate and
+  nothing is installed. The guest-language behaviour was measured in TypeScript, through
+  `samples/DemoAppHostTypeScript`; other guest languages share the same capability ids but were not
+  measured.
 
 ### Changed
 
@@ -172,6 +191,31 @@ never existed. Check the tag of the last release before adding one.
   ordering contract no longer applies to either kind.
 
 ### Fixed
+
+- **A service name can no longer forge a second log entry in four out-of-band messages** ([#372]).
+  Each of them opens with the service's own name, taken from the catalog and interpolated between
+  quotes without escaping. A name carrying a newline, a Unicode line separator or an apostrophe
+  therefore split the line, or closed the quote and wrote a sentence of its own, into a log a reader
+  trusts. The four are the warning for configuration skipped on a `url` or `kubernetes` service, the
+  revert warning added in this release, `Unwrap<T>`'s refusal of an out-of-band source, and the
+  refusal of a container's reference to a `url` service — the last thrown from inside
+  `BeforeStartEvent`, so it lands in the host's own log. Both names these messages carry, the service
+  and the endpoint, now go through the same escaping this package already applies to
+  developer-written text echoed back, plus a length cap. Messages elsewhere in the package still
+  interpolate a service name directly; making that structural rather than per-site is tracked as
+  [#375].
+
+- **The remedy every out-of-band message offers no longer dead-ends** ([#372]). Four messages
+  offered the same way back under this AppHost's control, each in its own words and all of them as
+  an unconditional instruction: the warning for configuration skipped on a `url` or `kubernetes`
+  service, the `Unwrap<T>` exception for each of those two sources, and the exception refusing a
+  container's reference to a `url` service. But a service whose `servicesources.yaml` entry declares
+  neither a repository nor a `container` block, which is the ordinary shape of a service that is
+  only ever a url, got `ServiceSourcesConfigurationException` on both options offered. All four now
+  share one sentence, which names what the catalog entry has to carry for each option, so a reader
+  either makes the switch or learns from the message why it is not theirs to make. The follow-on
+  error for the `local` half now says where `project` belongs too — on the `servicesources.yaml`
+  entry beside `repository`, not in `servicesources.local.json`, which only chooses the source.
 
 - **An ungrouped service's repository url is now validated as required** ([#318]). A code-declared
   service (`WithRepository(url)`) or a yaml service with neither `repository:` nor `repositoryRef:`
@@ -1685,6 +1729,9 @@ Targets `net10.0`.
 [#318]: https://github.com/flojon/aspire-servicesources/issues/318
 [#345]: https://github.com/flojon/aspire-servicesources/issues/345
 [#350]: https://github.com/flojon/aspire-servicesources/issues/350
+[#359]: https://github.com/flojon/aspire-servicesources/issues/359
+[#372]: https://github.com/flojon/aspire-servicesources/issues/372
+[#375]: https://github.com/flojon/aspire-servicesources/issues/375
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

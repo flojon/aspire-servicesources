@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.ServiceSources.Config;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -251,6 +252,33 @@ internal sealed class ServiceSourcesWarnings
         Write(services, messages);
     }
 
+    /// <summary>
+    /// Reports state restored for <paramref name="serviceName"/>, immediately, as one message.
+    /// </summary>
+    /// <remarks>
+    /// Through <see cref="ReportNow"/> rather than <see cref="AddSkip"/> plus <see cref="Flush"/>, for
+    /// both of that method's reasons. The line has to reach the log whichever order the
+    /// <c>BeforeStartEvent</c> handlers were subscribed in — a revert that is silent is worse than no
+    /// detection, because the developer's change is gone and nothing says so — and a flush from here
+    /// would report every skip outstanding, splitting another service's grouped message in two.
+    /// </remarks>
+    public void ReportRevertsNow(
+        IServiceProvider services,
+        string serviceName,
+        string source,
+        IReadOnlyList<string> reverts,
+        bool everyRevertWasAnAddition,
+        IReadOnlyList<string> registeredEndpoints)
+    {
+        if (reverts.Count == 0)
+        {
+            return;
+        }
+
+        ReportNow(services, [
+            RevertReason(serviceName, source, reverts, everyRevertWasAnAddition, registeredEndpoints)]);
+    }
+
     private static void Write(IServiceProvider services, IReadOnlyList<string> messages)
     {
         if (messages.Count == 0)
@@ -270,22 +298,108 @@ internal sealed class ServiceSourcesWarnings
     /// Explains a skip in terms of what the reader can act on: which service, which source, what was
     /// dropped, and where the source is chosen.
     /// </summary>
-    private static string SkipReason(string serviceName, string source, IReadOnlyList<string> capabilities)
-    {
-        var detail = source switch
-        {
-            "url" =>
-                "it resolves to a fixed, already-running URL with no local process to configure",
-            "kubernetes" =>
-                "it resolves to a 'kubectl port-forward' in front of an already-running service, so the " +
-                "configuration would reach kubectl rather than the service",
-            _ => "it runs out of band",
-        };
+    private static string SkipReason(string serviceName, string source, IReadOnlyList<string> capabilities) =>
+        $"Service '{Label(serviceName)}': skipped {DescribeCalls(capabilities)} because its source is " +
+        $"'{source}' — {OutOfBandSourceAdvice.SourceDetail(source)}. The service is expected to be configured wherever it actually " +
+        $"runs. {SwitchSourceRemedy}";
 
-        return $"Service '{serviceName}': skipped {DescribeCalls(capabilities)} because its source is " +
-               $"'{source}' — {detail}. The service is expected to be configured wherever it actually " +
-               "runs. Set its source to 'local' or 'container' in servicesources.local.json for this AppHost's " +
-               "configuration and start ordering to apply.";
+    private const int MaxLabelLength = 64;
+
+    /// <summary>
+    /// A caller-controlled name made safe to sit inside the quotes a message delimits it with, and
+    /// bounded.
+    /// </summary>
+    /// <remarks>
+    /// Both names these messages carry are caller-controlled: the endpoint name arrives verbatim from
+    /// a guest-language script, and the service name is a catalog key. Either one can forge a second
+    /// entry — by ending the line, or by closing the quote and writing its own sentence — so both go
+    /// through the same helper rather than one being escaped and the other interpolated raw beside it.
+    /// <para>
+    /// <see cref="ConfiguredValue"/> rather than a second spelling of it: it is this package's rule for
+    /// developer-written text echoed back, and it catches the invisibles a control-character test
+    /// misses. The quote, its escape character and the cap are what it does not cover, and all three
+    /// are these messages' own.
+    /// </para>
+    /// </remarks>
+    internal static string Label(string? name)
+    {
+        // The escape character first, or a name's own '\' before a quote un-escapes back to a live one.
+        var literal = name?.Replace("\\", "\\\\", StringComparison.Ordinal);
+
+        // Bare must run between the two replaces above and below: its own \t/\n/\uXXXX escapes are
+        // synthesized after the doubling, so they are not themselves doubled, and are emitted before
+        // the quote-escape, which does not touch '\' and so leaves them alone.
+        var escaped = ConfiguredValue.Bare(literal).Replace("'", "\\'", StringComparison.Ordinal);
+
+        if (escaped.Length <= MaxLabelLength)
+        {
+            return escaped;
+        }
+
+        // Never cut a surrogate pair in half: the half left behind is not text.
+        var cut = char.IsHighSurrogate(escaped[MaxLabelLength - 1]) ? MaxLabelLength - 1 : MaxLabelLength;
+
+        return escaped[..cut] + '…';
+    }
+
+    /// <summary>
+    /// How to bring the service back under this AppHost's control, for every warning that offers it.
+    /// </summary>
+    /// <remarks>
+    /// Names start ordering as well as configuration because <see cref="Sources.UrlSource"/> records a
+    /// consumer's dropped <c>WaitFor</c> through <see cref="SkipReason"/> too, and ordering is the only
+    /// half of the offer that reader lost. The exceptions offering the same switch lead into it
+    /// differently, which is why only the clause itself is shared.
+    /// </remarks>
+    private const string SwitchSourceRemedy =
+        "To make this AppHost's configuration and start ordering apply instead, " +
+        OutOfBandSourceAdvice.SwitchSource + ".";
+
+    /// <summary>
+    /// Explains state that was put back: what changed, that it was undone, and what to do instead.
+    /// </summary>
+    /// <remarks>
+    /// Its own sentence rather than <see cref="SkipReason"/>'s, because a revert is not a skip. The
+    /// call landed and was undone, so "skipped" misdescribes it; and the entries count endpoints, not
+    /// calls, so <see cref="DescribeCalls"/>'s "<c>N</c> calls" would state a number the developer
+    /// never wrote. The remedy is shared with it, because the way back under this AppHost's control
+    /// does not depend on which of the two messages is reporting.
+    /// </remarks>
+    private static string RevertReason(
+        string serviceName,
+        string source,
+        IReadOnlyList<string> reverts,
+        bool everyRevertWasAnAddition,
+        IReadOnlyList<string> registeredEndpoints) =>
+        $"Service '{Label(serviceName)}': {string.Join("; ", reverts)}. Its source is '{source}' — " +
+        $"{OutOfBandSourceAdvice.SourceDetail(source)}. An out-of-band service's endpoints are fixed by its source, so " +
+        $"configure the service where it actually runs. {WhereToGoInstead(source, everyRevertWasAnAddition, registeredEndpoints)}" +
+        $"{SwitchSourceRemedy}";
+
+    /// <summary>
+    /// The clause for what the reader can still reach, chosen by what they were doing.
+    /// </summary>
+    /// <remarks>
+    /// A reader who was adding an endpoint cannot be sent to a redirect setting — none of them adds
+    /// one — so they are told the names that do exist. With no registered endpoint to name there is
+    /// nothing true left to offer, and the clause is dropped rather than guessed at.
+    /// </remarks>
+    private static string WhereToGoInstead(
+        string source, bool everyRevertWasAnAddition, IReadOnlyList<string> registeredEndpoints)
+    {
+        if (!everyRevertWasAnAddition)
+        {
+            return OutOfBandSourceAdvice.RedirectTheEndpoint(source) + " ";
+        }
+
+        if (registeredEndpoints.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var named = string.Join(", ", registeredEndpoints.Select(name => $"'{Label(name)}'"));
+
+        return OutOfBandSourceAdvice.TheEndpointsItHas(named) + " ";
     }
 
     /// <summary>
