@@ -1,5 +1,6 @@
 using System.Net.Sockets;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
@@ -443,18 +444,16 @@ public static class ServiceSourcesBuilderExtensions
     }
 
     /// <summary>
-    /// Shadows Aspire's own <c>WithCommand&lt;T&gt;</c>. Re-registering a command under a name the
-    /// resource already carries takes a remove-then-add path whose halves land in different places
-    /// through the facade: the <c>Remove</c> is a direct <c>Resource.Annotations.Remove(...)</c> on
-    /// the facade, while the replacement goes through
-    /// <see cref="ServiceResourceBuilder.WithAnnotation{TAnnotation}"/> and dual-writes — so the real
-    /// resource ends up holding both, and invoking that command then throws out of
-    /// <c>ResourceCommandService</c>'s <c>SingleOrDefault</c> (#371). Same shadowing discipline as
-    /// the endpoint overloads above: a non-generic overload on the concrete
-    /// <see cref="ServiceResource"/> receiver, which C# overload resolution prefers over Aspire's
-    /// generic one, delegating through a fully-qualified static call. Mirrors Aspire's current public
-    /// signature exactly — no AppHost-visible signature change.
+    /// Shadows Aspire's own <c>WithCommand&lt;T&gt;</c>, whose remove-then-add path leaves a superseded
+    /// command behind on the real resource — see
+    /// <see cref="ServiceResourceBuilder.MirroringCommandRemovalsBy"/> for the mechanism and why the
+    /// mirror runs after the delegated call (#371). Same shadowing discipline as the endpoint
+    /// overloads above.
     /// </summary>
+    // Carried over from Aspire's own overload, not decoration: without it this and the obsolete
+    // overload below are equally applicable to `WithCommand(name, displayName, execute)` and that
+    // call stops compiling (CS0121).
+    [OverloadResolutionPriority(1)]
     [AspireExport]
     public static IResourceBuilder<ServiceResource> WithCommand(
         this IResourceBuilder<ServiceResource> builder,

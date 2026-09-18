@@ -93,6 +93,25 @@ public class CommandDualWriteTests
         Assert.Empty(ServiceSourcesWarnings.For(builder).Messages);
     }
 
+    // The plain WithCommand(name, displayName, execute) an AppHost writes, with no disambiguating
+    // fourth argument. Its value is mostly that OverloadProbe compiles at all; the assertions below
+    // then confirm the winning candidate is the shadow rather than Aspire's generic.
+    [Fact]
+    public void SecondWithCommand_WithoutCommandOptions_BindsTheShadowAndLeavesOneCommandOnTheRealResource()
+    {
+        var builder = Builder();
+        var service = ContainerService(builder, "orders");
+
+        OverloadProbe.CallWithCommandNoOptions(service, "restart", "Restart v1", Ok);
+        OverloadProbe.CallWithCommandNoOptions(service, "restart", "Restart v2", Ok);
+
+        var onReal = Assert.Single(CommandsOn(RealAnnotations(service)), c => c.Name == "restart");
+
+        Assert.Same(Assert.Single(CommandsOn(service.Resource.Annotations), c => c.Name == "restart"), onReal);
+        Assert.Equal("Restart v2", onReal.DisplayName);
+        Assert.Empty(ServiceSourcesWarnings.For(builder).Messages);
+    }
+
     // Guards the direction the fix must NOT overreach in: a command registered under a name nothing
     // else uses must still land on both collections, and re-registering "restart" must leave a
     // differently-named command alone.

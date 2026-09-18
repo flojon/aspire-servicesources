@@ -6,6 +6,13 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <!-- Only this leg needs raising: net9.0/net10.0 already default past C# 13, and
+       [OverloadResolutionPriority] on the WithCommand shadow is a C# 13 feature. Scoped to the one
+       framework so the other two keep whatever their SDK defaults to. -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net8.0'">
+    <LangVersion>13.0</LangVersion>
+  </PropertyGroup>
+
   <!-- Shared package metadata, MinVer and the LICENSE/README pack items live in
        Directory.Build.props. -->
   <PropertyGroup>

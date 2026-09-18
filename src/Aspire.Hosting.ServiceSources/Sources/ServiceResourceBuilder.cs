@@ -246,15 +246,18 @@ internal sealed class ServiceResourceBuilder(
     /// a rejected call must leave both collections exactly as it found them.
     /// <para>
     /// Unreachable sources return early, keeping the invariant that nothing mutates <c>real</c>
-    /// without consulting <see cref="Reachability"/>. It is not merely bookkeeping here: a
-    /// <c>kubernetes</c> facade inherits whatever annotations its real <c>kubectl port-forward</c>
-    /// already carried, and the add that follows the removal is skipped with a warning — so
-    /// mirroring would strip a real command and put nothing back.
+    /// without consulting <see cref="Reachability"/>. No <c>kubernetes</c> service can reach the
+    /// removal today — <c>KubernetesSource</c> builds its <c>kubectl port-forward</c> with
+    /// <c>WithArgs</c> and <c>WithEndpoint</c> only, so the facade
+    /// <see cref="ResolvedService.Bridge"/> hands back has no command annotation to supersede. The
+    /// clause guards the shape rather than a live case: were one ever present on <c>real</c> at
+    /// bridge time, the facade would share that instance, and mirroring would strip a real command
+    /// while the replacing add is skipped with a warning — putting nothing back.
     /// </para>
     /// <para>
-    /// Scoped to <see cref="ResourceCommandAnnotation"/>, and to instances the facade held before the
-    /// call, which is the whole of what <c>WithCommand</c> can drop. A general removal diff over
-    /// every annotation type is deliberately not built here.
+    /// The filter is narrow — <see cref="ResourceCommandAnnotation"/>, and only instances the facade
+    /// held before the call — because that is the whole of what <c>WithCommand</c> can drop. A
+    /// general removal diff over every annotation type is deliberately not built here.
     /// </para>
     /// </remarks>
     internal static IResourceBuilder<ServiceResource> MirroringCommandRemovalsBy(
@@ -271,13 +274,8 @@ internal sealed class ServiceResourceBuilder(
 
         var result = call();
 
-        if (beforeOnFacade.Length == 0)
-        {
-            return result;
-        }
-
         var stillOnFacade = new HashSet<IResourceAnnotation>(
-            serviceBuilder.Resource.Annotations, ReferenceEqualityComparer.Instance);
+            serviceBuilder.Resource.Annotations.OfType<ResourceCommandAnnotation>(), ReferenceEqualityComparer.Instance);
 
         foreach (var annotation in beforeOnFacade)
         {
