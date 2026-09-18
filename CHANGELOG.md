@@ -268,6 +268,13 @@ never existed. Check the tag of the last release before adding one.
   override is unaffected: it points at a checkout that already exists, so nothing is cloned and the
   absent `repository` costs it nothing.
 
+  "Declares no repository" now includes a `repository:` whose value is only whitespace, which every
+  decision built on the repository url spells the same way. Two consequences a yaml catalog can see:
+  a service whose `repository:` holds `"   "` is refused by the check above, where it previously
+  reached the git client and failed as a clone of `'   '`; and two ungrouped `local` services
+  sharing such a value no longer raise the "declare the same repository, but none of them are
+  grouped" warning, since no checkout would ever be cloned for either of them.
+
 - **The reserved-kind-name check is scoped to the service that actually names the kind from yaml**
   ([#133], [#317]). `url`, `container`, `kubernetes`, `repository`, `project`, `defaultRef` and
   `kind` collide with a well-known `ServiceMetadata` yaml property, so a kind by one of those names

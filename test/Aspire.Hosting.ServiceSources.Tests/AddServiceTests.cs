@@ -313,7 +313,7 @@ public class AddServiceTests
     }
 
     [Fact]
-    public void AddService_UrlOnlyEntrySelectedAsLocal_ReportsTheMissingRepositoryAgainstBothFiles()
+    public void AddService_UrlOnlyEntrySelectedAsLocal_ReportsTheMissingRepositoryNamingTheCatalogThatDeclaresIt()
     {
         // The end-to-end shape of #362: the catalog declares a source that is not a repository, and
         // servicesources.local.json picks 'local' for it anyway.

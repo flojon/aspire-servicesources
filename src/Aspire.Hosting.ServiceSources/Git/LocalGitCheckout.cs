@@ -189,9 +189,8 @@ internal static class LocalGitCheckout
     /// callers disagree about the same service.
     /// </para>
     /// <para>
-    /// Whitespace counts as blank. A url of spaces is nothing anyone can clone, and the three places
-    /// that spelled this rule inline did not agree: two asked <c>IsNullOrWhiteSpace</c> and one
-    /// <c>IsNullOrEmpty</c>, which calls "   " a repository and passes it to the git client.
+    /// Whitespace counts as blank: a url of spaces is nothing anyone can clone, and
+    /// <c>IsNullOrEmpty</c> would call "   " a repository and pass it to the git client.
     /// </para>
     /// </remarks>
     public static bool HasRepositoryToClone(ServiceDefinition definition) =>
@@ -374,13 +373,14 @@ internal static class LocalGitCheckout
         // developer can act on, and LocalCheckoutPrefetch reached here around that guard until #362
         // gave it a filter of its own. A third caller would have to re-derive the same rule, so it
         // is stated once where the clone is decided. Not a substitute for either — by the time a
-        // service gets here nobody can say which one it is, so this names the checkout and stops.
+        // service gets here nobody can say which caller it arrived from, so this names whatever the
+        // clone would have been for and stops.
         if (!HasRepositoryToClone(definition))
         {
             throw new ServiceSourcesConfigurationException(
                 $"{label}: there is no checkout at '{repoRoot}' and no repository url to clone one "
-                + "from. A checkout can only be created for a service whose catalog entry names a "
-                + "repository.");
+                + "from. A checkout can only be created where the catalog names a repository to "
+                + "clone from.");
         }
 
         // A clone that loses the race to a concurrent AppHost leaves us using *their*

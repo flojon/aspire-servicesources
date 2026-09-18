@@ -1744,7 +1744,7 @@ public class LocalProjectSourceTests
         TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
     [Fact]
-    public void Resolve_LocalOnEntryDeclaringOnlyUrl_ThrowsNamingServiceAndBothConfigFiles()
+    public void Resolve_LocalOnEntryDeclaringOnlyUrl_ThrowsNamingTheServiceAndTheCatalogThatDeclaresIt()
     {
         var gitClient = new FakeGitClient();
 
@@ -1768,7 +1768,7 @@ public class LocalProjectSourceTests
     }
 
     [Fact]
-    public void Resolve_LocalOnNonDotnetEntryDeclaringOnlyUrl_ThrowsNamingServiceAndBothConfigFiles()
+    public void Resolve_LocalOnNonDotnetEntryDeclaringOnlyUrl_ThrowsNamingTheServiceAndTheCatalogThatDeclaresIt()
     {
         // The kind-gated ValidateProject never runs for a non-dotnet kind, so before #362 a java or
         // javascript service had no guard at all in front of the clone. The kind is registered
@@ -1786,6 +1786,7 @@ public class LocalProjectSourceTests
 
         Assert.Contains($"Service '{ServiceName}'", ex.Message);
         Assert.Contains("'repository'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("servicesources.yaml", ex.Message, StringComparison.Ordinal);
         Assert.Contains("servicesources.local.json", ex.Message, StringComparison.Ordinal);
         Assert.False(gitClient.EnsureAvailableCalled);
         Assert.Empty(gitClient.ClonedRepos);
@@ -1817,7 +1818,6 @@ public class LocalProjectSourceTests
         Assert.DoesNotContain("'url'", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("'container'", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("'kubernetes'", ex.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain("which it does declare", ex.Message, StringComparison.Ordinal);
 
         // The one remedy that depends on nothing outside this guard: the exemption it checks itself.
         Assert.Contains(
@@ -1917,7 +1917,10 @@ public class LocalProjectSourceTests
         Assert.Contains($"'{SharedName}'", ex.Message, StringComparison.Ordinal);
 
         // It declares no other source block, so there is no switch to offer and none is claimed.
-        Assert.DoesNotContain("which it does declare", ex.Message, StringComparison.Ordinal);
+        // Spelled as the block names rather than the old clause, which no longer exists to match.
+        Assert.DoesNotContain("'url'", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("'container'", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("'kubernetes'", ex.Message, StringComparison.Ordinal);
         Assert.False(gitClient.EnsureAvailableCalled);
     }
 
@@ -1944,34 +1947,6 @@ public class LocalProjectSourceTests
     }
 
     /// <summary>
-    /// The single definition of "is there anything to clone for this service", pinned where it is
-    /// named rather than at each of its callers.
-    /// </summary>
-    /// <remarks>
-    /// The whitespace-only row is the encoding that had to be chosen: the rule was spelled three
-    /// times and one spelling used <c>IsNullOrEmpty</c>, which calls "   " a repository and hands it
-    /// to git.
-    /// </remarks>
-    [Theory]
-    [InlineData("https://github.com/company/orders", true)]
-    [InlineData("", false)]
-    [InlineData("   ", false)]
-    [InlineData("\t\n", false)]
-    public void HasRepositoryToClone_AnswersOnTheRepositoryUrlAloneAndTreatsBlankAsNothing(
-        string url, bool expected)
-    {
-        var definition = new ServiceDefinition
-        {
-            Repository = new RepositoryDefinition { Url = url, CheckoutName = ServiceName },
-            Project = "Orders.csproj",
-            Kind = LocalKinds.Dotnet,
-            Origin = CatalogOrigin.FromYaml("servicesources.yaml"),
-        };
-
-        Assert.Equal(expected, LocalGitCheckout.HasRepositoryToClone(definition));
-    }
-
-    /// <summary>
     /// Defence in depth for the route <see cref="LocalCheckoutPrefetch"/> re-opened once: the
     /// invariant sits where the clone is decided, so a call site that never passes through
     /// <see cref="LocalProjectSource"/>'s guard still cannot hand git a blank url.
@@ -1994,7 +1969,9 @@ public class LocalProjectSourceTests
                 ServiceName, definition, DevConfig(), repositoryConfig: null,
                 UnusedAppHostDirectory, gitClient));
 
-        Assert.Contains(ServiceName, ex.Message, StringComparison.Ordinal);
+        // The label, not just the name: the interpolated repoRoot already contains the bare service
+        // name, so asserting that alone would pass whatever the label selection did.
+        Assert.Contains($"Service '{ServiceName}':", ex.Message, StringComparison.Ordinal);
         Assert.Empty(gitClient.ClonedRepos);
     }
 

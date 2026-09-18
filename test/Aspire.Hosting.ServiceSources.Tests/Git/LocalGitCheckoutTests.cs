@@ -5,8 +5,8 @@ using Aspire.Hosting.ServiceSources.Git;
 namespace Aspire.Hosting.ServiceSources.Tests.Git;
 
 /// <summary>
-/// The path-only questions about a service's checkout — the ones answerable from the AppHost
-/// directory, the service name and the developer's configuration, without resolving anything.
+/// The questions about a service's checkout that are answerable without resolving anything — from
+/// the AppHost directory, the service name, the developer's configuration, or the catalog entry.
 /// Pinned here rather than only through their callers because the speculative prefetch and the
 /// deferral decision are both built on the same answer, for services nobody has added yet, and the
 /// prefetch's filter (#76/#177) is only safe while the two agree.
@@ -35,6 +35,33 @@ public class LocalGitCheckoutTests
     [Fact]
     public void IsManagedCheckout_PathOverride_IsFalse() =>
         Assert.False(LocalGitCheckout.IsManagedCheckout(WithPathOverride("/somewhere/of/their/own")));
+
+    /// <summary>
+    /// The single definition of "is there anything to clone for this service", pinned where it is
+    /// named rather than at each of its four callers.
+    /// </summary>
+    /// <remarks>
+    /// The whitespace rows are the load-bearing ones: <c>IsNullOrEmpty</c> would call "   " a
+    /// repository and hand it to git.
+    /// </remarks>
+    [Theory]
+    [InlineData("https://github.com/company/orders", true)]
+    [InlineData("", false)]
+    [InlineData("   ", false)]
+    [InlineData("\t\n", false)]
+    public void HasRepositoryToClone_TreatsABlankOrWhitespaceUrlAsNothingToClone(
+        string url, bool expected)
+    {
+        var definition = new ServiceDefinition
+        {
+            Repository = new RepositoryDefinition { Url = url, CheckoutName = "orders" },
+            Project = "Orders.csproj",
+            Kind = LocalKinds.Dotnet,
+            Origin = CatalogOrigin.FromYaml("servicesources.yaml"),
+        };
+
+        Assert.Equal(expected, LocalGitCheckout.HasRepositoryToClone(definition));
+    }
 
     [Fact]
     public void IsColdManagedCheckout_NothingAtTheManagedRoot_IsCold()

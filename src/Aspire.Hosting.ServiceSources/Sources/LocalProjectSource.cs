@@ -259,8 +259,8 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// with its own source. Offering one unchecked is how a reader ends up at a second, different
     /// failure; declaring the block is not enough, since a <c>container:</c> with no <c>image:</c>
     /// loads perfectly well. So the fault is stated, the key that chose the source is named in the
-    /// register any layer can be found from, and the only remedy offered is the exemption this
-    /// method checks on the line above.
+    /// register any layer can be found from, and the only remedies offered are the two that need
+    /// nothing from another source: declaring a repository, and the exemption checked above.
     /// </para>
     /// </remarks>
     private static void RequireRepositoryToCheckOut(

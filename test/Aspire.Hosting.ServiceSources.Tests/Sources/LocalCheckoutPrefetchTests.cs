@@ -1124,5 +1124,14 @@ public class LocalCheckoutPrefetchTests
         // Only the sibling that has something to clone. An empty url reaching IGitClient at all is
         // the ticket's symptom, whichever route carries it.
         Assert.Equal(["https://example.com/orders.git"], git.Cloned);
+
+        // Skipped, not started-and-failed. The invariant inside PrepareRepoRoot would also keep the
+        // blank url away from git, but only by throwing inside a speculative task whose failure is
+        // stored and reported against a service nobody mentioned — so the assertion above alone no
+        // longer tells the two apart.
+        var prefetch = LocalCheckoutPrefetch.For(builder, git);
+
+        Assert.Empty(prefetch.FailedUnusedCheckoutMessages);
+        Assert.Null(prefetch.UnusedCheckoutsMessage);
     }
 }
