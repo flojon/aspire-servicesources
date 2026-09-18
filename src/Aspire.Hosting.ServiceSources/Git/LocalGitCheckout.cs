@@ -180,21 +180,18 @@ internal static class LocalGitCheckout
     /// clone.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// Every service carries a <see cref="Config.Catalog.RepositoryDefinition"/> whatever its source
-    /// — one is minted unconditionally — so a url-, container- or kubernetes-sourced entry, which
-    /// never writes <c>repository:</c>, holds one whose <see cref="Config.Catalog.RepositoryDefinition.Url"/>
-    /// is <c>""</c>. A blank url is therefore the normal shape of "no repository", not a malformed
-    /// one, and every decision built on it has to spell the emptiness test the same way or the
-    /// callers disagree about the same service.
-    /// </para>
-    /// <para>
-    /// Whitespace counts as blank: a url of spaces is nothing anyone can clone, and
+    /// Whitespace counts as blank, matching every source that leaves <c>Repository.Url</c> unset —
     /// <c>IsNullOrEmpty</c> would call "   " a repository and pass it to the git client.
-    /// </para>
     /// </remarks>
     public static bool HasRepositoryToClone(ServiceDefinition definition) =>
         !string.IsNullOrWhiteSpace(definition.Repository.Url);
+
+    /// <summary>
+    /// Whether this service shares a repository with others rather than owning its own — the single
+    /// definition every caller that tells the two apart builds on.
+    /// </summary>
+    public static bool IsGrouped(ServiceDefinition definition, string serviceName) =>
+        definition.Repository.CheckoutName != serviceName;
 
     /// <summary>
     /// Whether a clone still has to happen before this checkout exists: the package manages the
@@ -295,7 +292,7 @@ internal static class LocalGitCheckout
         // Both checked ahead of everything else below — the managed-checkout branch, the ref this
         // checkout will sit on — because both are about a shape of configuration that must never be
         // acted on, not about a value to resolve.
-        var grouped = definition.Repository.CheckoutName != serviceName;
+        var grouped = IsGrouped(definition, serviceName);
 
         // Names whichever entity the clone/fetch phase below is actually about. For a grouped
         // repository that phase can run on the shared background task started by any one member
@@ -368,13 +365,9 @@ internal static class LocalGitCheckout
         }
 
         // Everything above resolves a directory; from here on a clone happens, and a clone needs a
-        // repository. Checked here rather than only at the callers because this is the one place all
-        // of them pass through: LocalProjectSource refuses this shape early, with the message a
-        // developer can act on, and LocalCheckoutPrefetch reached here around that guard until #362
-        // gave it a filter of its own. A third caller would have to re-derive the same rule, so it
-        // is stated once where the clone is decided. Not a substitute for either — by the time a
-        // service gets here nobody can say which caller it arrived from, so this names whatever the
-        // clone would have been for and stops.
+        // repository. Checked here, the one place every caller passes through, rather than only at
+        // each of them — by the time a service gets here nobody can say which caller it arrived
+        // from, so this names whatever the clone would have been for and stops.
         if (!HasRepositoryToClone(definition))
         {
             throw new ServiceSourcesConfigurationException(
