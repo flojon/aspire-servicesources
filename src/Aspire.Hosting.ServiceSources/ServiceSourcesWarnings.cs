@@ -294,7 +294,7 @@ internal sealed class ServiceSourcesWarnings
     /// </summary>
     private static string SkipReason(string serviceName, string source, IReadOnlyList<string> capabilities) =>
         $"Service '{Label(serviceName)}': skipped {DescribeCalls(capabilities)} because its source is " +
-        $"'{source}' — {SourceDetail(source)}. The service is expected to be configured wherever it actually " +
+        $"'{source}' — {OutOfBandSourceAdvice.SourceDetail(source)}. The service is expected to be configured wherever it actually " +
         $"runs. {SwitchSourceRemedy}";
 
     private const int MaxLabelLength = 64;
@@ -330,45 +330,17 @@ internal sealed class ServiceSourcesWarnings
     }
 
     /// <summary>
-    /// How to bring the service back under this AppHost's control, for every message that offers it.
+    /// How to bring the service back under this AppHost's control, for every warning that offers it.
     /// </summary>
     /// <remarks>
-    /// Conditional rather than an instruction, because the switch is only available where the
-    /// catalog already declares that source: <c>'local'</c> without a <c>repository</c>, or
-    /// <c>'container'</c> without a <c>container</c> block, throws
-    /// <see cref="ServiceSourcesConfigurationException"/> at the next resolve — so advice that
-    /// promised the switch outright sent the reader into an exception on both options it offered.
-    /// <para>
     /// Names start ordering as well as configuration because <see cref="Sources.UrlSource"/> records a
     /// consumer's dropped <c>WaitFor</c> through <see cref="SkipReason"/> too, and ordering is the only
-    /// half of the offer that reader lost.
-    /// </para>
-    /// <para>
-    /// The block, not the individual field, because what a block has to carry varies with the
-    /// service: <c>'local'</c> needs a <c>project</c> for the built-in <c>dotnet</c> kind and that
-    /// kind's own options for any other, and the error the catalog raises names whichever one is
-    /// missing. Naming fields here would be right for the common service and wrong for the rest.
-    /// </para>
+    /// half of the offer that reader lost. The exceptions offering the same switch lead into it
+    /// differently, which is why only the clause itself is shared.
     /// </remarks>
     private const string SwitchSourceRemedy =
-        "To make this AppHost's configuration and start ordering apply instead, give it a 'local' or " +
-        "'container' source in servicesources.local.json — which works only where its " +
-        "'servicesources.yaml' entry already declares that source: a 'repository' or 'repositoryRef' " +
-        "for 'local', a 'container' block for 'container'.";
-
-    /// <summary>
-    /// Why a source runs out of band, in the clause both <see cref="SkipReason"/> and
-    /// <see cref="RevertReason"/> build a sentence around.
-    /// </summary>
-    private static string SourceDetail(string source) => source switch
-    {
-        "url" =>
-            "it resolves to a fixed, already-running URL with no local process to configure",
-        "kubernetes" =>
-            "it resolves to a 'kubectl port-forward' in front of an already-running service, so the " +
-            "configuration would reach kubectl rather than the service",
-        _ => "it runs out of band",
-    };
+        "To make this AppHost's configuration and start ordering apply instead, " +
+        OutOfBandSourceAdvice.SwitchSource + ".";
 
     /// <summary>
     /// Explains state that was put back: what changed, that it was undone, and what to do instead.
@@ -382,7 +354,7 @@ internal sealed class ServiceSourcesWarnings
     /// </remarks>
     private static string RevertReason(string serviceName, string source, IReadOnlyList<string> reverts) =>
         $"Service '{Label(serviceName)}': {string.Join("; ", reverts)}. Its source is '{source}' — " +
-        $"{SourceDetail(source)}. An out-of-band service's endpoints are fixed by its source, so " +
+        $"{OutOfBandSourceAdvice.SourceDetail(source)}. An out-of-band service's endpoints are fixed by its source, so " +
         $"configure the service where it actually runs. {SwitchSourceRemedy}";
 
     /// <summary>

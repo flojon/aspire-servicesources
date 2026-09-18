@@ -1,3 +1,4 @@
+using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Sources;
@@ -6,8 +7,9 @@ using IPortAllocator = Aspire.Hosting.ServiceSources.PortAllocation.IPortAllocat
 namespace Aspire.Hosting.ServiceSources.Tests;
 
 /// <summary>
-/// The one sentence every skip and every revert this package reports ends in. A sentence that
-/// dead-ends is a defect in all of them at once, which is why it is pinned on its own.
+/// The one sentence every message offering the 'local'/'container' switch ends in — skips, reverts,
+/// and the three exceptions that offer it as a way out. A sentence that dead-ends is a defect in all
+/// of them at once, which is why it is pinned on its own.
 /// </summary>
 /// <remarks>
 /// It used to say "set its source to 'local' or 'container'" with no condition attached, and a
@@ -67,20 +69,74 @@ public class SkipRemedyTests
         return Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
     }
 
-    [Theory]
-    [InlineData("url", UrlOnlyService)]
-    [InlineData("kubernetes", SwitchableService)]
-    public void TheRemedyStatesTheCatalogPreconditionRatherThanPromisingTheSwitch(
-        string source, string serviceName)
+    private static void AssertStatesThePrecondition(string message)
     {
-        var message = SkipMessageFor(source, serviceName);
-
         Assert.Contains("servicesources.local.json", message);
         // Without these three the sentence reads as an unconditional instruction, which is what sent
         // a reader of a url-only service into an exception on both options.
         Assert.Contains("servicesources.yaml", message);
         Assert.Contains("'repository' or 'repositoryRef' for 'local'", message);
         Assert.Contains("'container' block for 'container'", message);
+    }
+
+    [Theory]
+    [InlineData("url", UrlOnlyService)]
+    [InlineData("kubernetes", SwitchableService)]
+    public void TheRemedyStatesTheCatalogPreconditionRatherThanPromisingTheSwitch(
+        string source, string serviceName)
+    {
+        AssertStatesThePrecondition(SkipMessageFor(source, serviceName));
+    }
+
+    /// <remarks>
+    /// <c>Unwrap&lt;T&gt;</c> refuses an out-of-band source and offers the same switch as its way
+    /// out, from an exception rather than a warning — so it owes the reader the same precondition.
+    /// </remarks>
+    [Theory]
+    [InlineData("url", UrlOnlyService)]
+    [InlineData("kubernetes", SwitchableService)]
+    public void UnwrapOnAnOutOfBandSource_StatesTheCatalogPrecondition(string source, string serviceName)
+    {
+        var builder = Builder();
+
+        var service = string.Equals(source, "url", StringComparison.Ordinal)
+            ? new UrlSource().Resolve(
+                builder, serviceName, UrlOnly, new ServiceDeveloperConfig { Source = "url" })
+            : new KubernetesSource(new FixedPortAllocator()).Resolve(
+                builder, serviceName, KubernetesOnly,
+                new ServiceDeveloperConfig { Source = "kubernetes", Kubernetes = new() { Context = "dev" } });
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => service.Unwrap<IResourceWithEnvironment>());
+
+        AssertStatesThePrecondition(ex.Message);
+    }
+
+    /// <remarks>
+    /// The third site, and the one where the switch is the only way forward at all: a container
+    /// consumer of a url service cannot be made to work any other way.
+    /// </remarks>
+    [Fact]
+    public async Task AContainerReferencingAUrlOnlyService_StatesTheCatalogPrecondition()
+    {
+        var directory = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(directory, "servicesources.yaml"), """
+            services:
+              inventory:
+                url:
+                  url: https://inventory.example.com
+            """);
+        File.WriteAllText(
+            Path.Combine(directory, "servicesources.local.json"),
+            """{ "services": { "inventory": { "source": "url" } } }""");
+
+        var builder = TestHelpers.CreateBuilderThatCanStart(directory);
+        builder.AddContainer("storefront", "nginx:alpine").WithReference(builder.AddService("inventory"));
+
+        var ex = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(
+            () => TestHelpers.PublishBeforeStartEventAsync(builder));
+
+        AssertStatesThePrecondition(ex.Message);
     }
 
     /// <remarks>

@@ -200,14 +200,15 @@ never existed. Check the tag of the last release before adding one.
   the endpoint — now go through the same escaping this package already applies to developer-written
   text echoed back, plus a length cap.
 
-- **The remedy every out-of-band warning offers no longer dead-ends** ([#372]). Warnings about
-  configuration skipped for a `url` or `kubernetes` service ended in "Set its source to `local` or
-  `container` in servicesources.local.json" with no condition attached — but a service whose
-  `servicesources.yaml` entry declares neither a repository nor a `container` block, which is the
-  ordinary shape of a service that is only ever a url, got `ServiceSourcesConfigurationException`
-  on both options offered. The sentence now names what the catalog entry has to carry for each
-  option, so a reader either makes the switch or learns from the message why it is not theirs to
-  make.
+- **The remedy every out-of-band message offers no longer dead-ends** ([#372]). Four messages
+  offered the same way back under this AppHost's control, each in its own words and all of them as
+  an unconditional instruction: the warning for configuration skipped on a `url` or `kubernetes`
+  service, the `Unwrap<T>` exception for each of those two sources, and the exception refusing a
+  container's reference to a `url` service. But a service whose `servicesources.yaml` entry declares
+  neither a repository nor a `container` block, which is the ordinary shape of a service that is
+  only ever a url, got `ServiceSourcesConfigurationException` on both options offered. All four now
+  share one sentence, which names what the catalog entry has to carry for each option, so a reader
+  either makes the switch or learns from the message why it is not theirs to make.
 
 - **An ungrouped service's repository url is now validated as required** ([#318]). A code-declared
   service (`WithRepository(url)`) or a yaml service with neither `repository:` nor `repositoryRef:`

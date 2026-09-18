@@ -117,8 +117,8 @@ internal sealed class UrlSource : IServiceSource
                     $"Container '{consumer.Name}' references service '{urlService.Name}', whose source is 'url'. " +
                     "A 'url'-sourced service has no resource for Aspire to run, so DCP has no Service object to " +
                     "plumb container-to-host networking through, and the container would fail to start. " +
-                    "Reference it from a project or executable instead, or give the service a source that runs " +
-                    "locally ('local' or 'container') in servicesources.local.json. " +
+                    "Reference it from a project or executable instead, or " +
+                    OutOfBandSourceAdvice.SwitchSource + ". " +
                     "Tracked as issue #72.");
             }
 
