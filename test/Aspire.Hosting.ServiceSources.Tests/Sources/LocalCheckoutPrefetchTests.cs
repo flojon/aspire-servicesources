@@ -1134,4 +1134,41 @@ public class LocalCheckoutPrefetchTests
         Assert.Empty(prefetch.FailedUnusedCheckoutMessages);
         Assert.Null(prefetch.UnusedCheckoutsMessage);
     }
+
+    /// <summary>
+    /// The notice names services the developer configured, so a name cannot close the quote that
+    /// delimits it (#375) — the notice quotes each name three times over, and an unescaped one
+    /// would leave the reader unable to tell the name from the sentence around it.
+    /// </summary>
+    /// <remarks>
+    /// A quote rather than a newline because the name arrives as a YAML mapping key, which cannot
+    /// carry a line break; the newline case is covered where the name reaches a message by a path
+    /// that can. The cause's own wording is bounded separately — see
+    /// <see cref="ServiceSourcesConfigurationExceptionTests"/> for the flattening rule.
+    /// </remarks>
+    [Fact]
+    public void ANameCannotCloseTheQuoteThatDelimitsItInTheNotice()
+    {
+        var dir = CreateAppHostDirectory("orders", "bill'ing");
+        var builder = TestHelpers.CreateBuilder(dir);
+        var git = new FakeGitClient();
+        git.FailFor("https://example.com/bill'ing.git", new InvalidOperationException("no such repo"));
+
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
+
+        var prefetch = LocalCheckoutPrefetch.For(builder, git);
+
+        Assert.True(
+            SpinWait.SpinUntil(
+                () => prefetch.FailedUnusedCheckoutMessages.Count == 1, TimeSpan.FromSeconds(30)),
+            "The failed speculative checkout for 'bill'ing' was never reported.");
+
+        var message = Assert.Single(prefetch.FailedUnusedCheckoutMessages);
+
+        // Present, not merely escaped somewhere: dropping the name would satisfy a negative alone.
+        Assert.Contains("'bill\\u0027ing'", message, StringComparison.Ordinal);
+
+        // The configuration key the notice tells the reader to clear carries the name too.
+        Assert.Contains($"'{DeveloperConfiguration.ServicesKey}:bill\\u0027ing:source'", message, StringComparison.Ordinal);
+    }
 }

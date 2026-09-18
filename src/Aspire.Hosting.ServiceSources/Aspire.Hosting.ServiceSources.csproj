@@ -8,6 +8,13 @@
     <LangVersion Condition="'$(TargetFramework)' == 'net8.0'">13.0</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- Raw.Literal/Join take [ConstantExpected] strings, and CA1857 is the only thing enforcing
+         that. At its default warning severity a runtime string would be a one-token bypass of the
+         message seam in any build without -warnaserror, including the IDE. -->
+    <WarningsAsErrors>$(WarningsAsErrors);CA1857</WarningsAsErrors>
+    <!-- The ban is a worklist, not a gate, until every throw is migrated: CI builds -warnaserror,
+         which would otherwise make each unmigrated site fail the build. -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);RS0030</WarningsNotAsErrors>
   </PropertyGroup>
 
   <!-- Shared package metadata, MinVer and the LICENSE/README pack items live in
@@ -21,6 +28,11 @@
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting" />
     <PackageReference Include="YamlDotNet" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" PrivateAssets="all" />
+    <AdditionalFiles Include="BannedSymbols.txt" />
   </ItemGroup>
 
   <!-- The two guest-language hosting packages are compile-time only: PrivateAssets="all" keeps

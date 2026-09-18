@@ -4,6 +4,7 @@ using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.BackingServices;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
 
@@ -322,10 +323,10 @@ internal sealed class UrlSource : IServiceSource
     /// diagnosed. Passing that through the redaction would answer it with <c>***</c>.
     /// </para>
     /// </remarks>
-    private static string Redacted(string url)
-        => url.AsSpan().IndexOfAny(CouldCarryACredential) < 0
+    private static Raw Redacted(string url)
+        => Raw.Escaped(url.AsSpan().IndexOfAny(CouldCarryACredential) < 0
             ? url
-            : ConnectionStringRedaction.Redact(url);
+            : ConnectionStringRedaction.Redact(url));
 
     /// <summary>
     /// The characters without which a value can hold neither a userinfo nor a pair.
@@ -339,21 +340,21 @@ internal sealed class UrlSource : IServiceSource
 
         if (string.IsNullOrWhiteSpace(rawUrl))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}' source is 'url' but no URL is configured — set " +
-                $"'url.url' in servicesources.local.json or in {definition.Origin.Describe()}.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}' source is 'url' but no URL is configured — set " +
+                $"'url.url' in servicesources.local.json or in {Raw.Origin(definition.Origin)}.");
         }
 
         if (!Uri.TryCreate(rawUrl, UriKind.Absolute, out var uri))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': 'url' value '{Redacted(rawUrl)}' is not a valid absolute URL.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': 'url' value '{Redacted(rawUrl)}' is not a valid absolute URL.");
         }
 
         if (uri.Scheme is not ("http" or "https"))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': 'url' value '{Redacted(rawUrl)}' must use the http or https scheme.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': 'url' value '{Redacted(rawUrl)}' must use the http or https scheme.");
         }
 
         return uri;

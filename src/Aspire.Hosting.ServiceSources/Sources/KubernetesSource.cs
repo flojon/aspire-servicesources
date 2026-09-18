@@ -2,6 +2,7 @@ using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using IPortAllocator = Aspire.Hosting.ServiceSources.PortAllocation.IPortAllocator;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
 
@@ -51,19 +52,19 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
 
         if (string.IsNullOrWhiteSpace(config.Kubernetes.Context))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': source 'kubernetes' requires 'kubernetes.context' in " +
-                "servicesources.local.json.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': source 'kubernetes' requires 'kubernetes.context' in " +
+                $"servicesources.local.json.");
         }
 
-        remotePort = config.Kubernetes.Port ?? kubernetes.Port ?? throw new ServiceSourcesConfigurationException(
-            $"Service '{serviceName}': no port configured for source 'kubernetes' — set " +
-            $"'kubernetes.port' in servicesources.local.json or in {definition.Origin.Describe()}.");
+        remotePort = config.Kubernetes.Port ?? kubernetes.Port ?? throw ServiceSourcesConfigurationException.For(
+            $"Service '{new Name(serviceName)}': no port configured for source 'kubernetes' — set " +
+            $"'kubernetes.port' in servicesources.local.json or in {Raw.Origin(definition.Origin)}.");
 
         if (remotePort is < 1 or > 65535)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': port value '{remotePort}' is not a valid port (must be between 1 and 65535).");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': port value '{remotePort}' is not a valid port (must be between 1 and 65535).");
         }
 
         localPort = portAllocator.AllocatePort();
@@ -80,9 +81,9 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
     {
         if (definition.Kubernetes is null || string.IsNullOrWhiteSpace(definition.Kubernetes.Service))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}' source is 'kubernetes' but {definition.Origin.Describe()} has no " +
-                "kubernetes.service entry.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}' source is 'kubernetes' but {Raw.Origin(definition.Origin)} has no " +
+                $"kubernetes.service entry.");
         }
 
         return definition.Kubernetes;

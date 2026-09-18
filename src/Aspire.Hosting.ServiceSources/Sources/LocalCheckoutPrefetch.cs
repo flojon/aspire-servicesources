@@ -4,6 +4,7 @@ using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
+using Aspire.Hosting.ServiceSources.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -357,16 +358,22 @@ internal sealed class LocalCheckoutPrefetch
     private static string FailedCheckoutMessage(IReadOnlyCollection<string> serviceNames, Exception exception)
     {
         var ordered = serviceNames.OrderBy(name => name, StringComparer.Ordinal).ToArray();
-        var quoted = string.Join(", ", ordered.Select(name => $"'{name}'"));
+
+        // Composed per name, not over the joined list: one Name hole would cap every name but the first.
+        var quoted = Raw.Join(", ", ordered.Select(name => Raw.Compose($"'{new Name(name)}'")));
+        var keys = Raw.Join(" and ", ordered.Select(name =>
+            Raw.Compose($"'{Raw.Literal(DeveloperConfiguration.ServicesKey)}:{new Name(name)}:source'")));
         var plural = ordered.Length != 1;
 
-        return $"{quoted} {(plural ? "are" : "is")} configured as 'local'"
-            + (plural ? ", sharing a git checkout, " : ", so its git checkout was prefetched, ")
-            + $"and the prefetch failed: {exception.Message} This AppHost never adds "
-            + $"{(plural ? "any of them" : quoted)}, so nothing else reports it — clear "
-            + string.Join(" and ", ordered.Select(name => $"'{DeveloperConfiguration.ServicesKey}:{name}:source'"))
-            + $" if you don't use {(plural ? "them" : "it")}, usually the entr{(plural ? "ies" : "y")} in "
-            + $"{DeveloperConfiguration.FileName}, or fix what the failure names.";
+        return Raw.Compose(
+            $"{quoted} {(plural ? Raw.Literal("are") : Raw.Literal("is"))} configured as 'local'"
+            + $"{(plural ? Raw.Literal(", sharing a git checkout, ") : Raw.Literal(", so its git checkout was prefetched, "))}"
+            + $"and the prefetch failed: {Raw.Cause(exception)} This AppHost never adds "
+            + $"{(plural ? Raw.Literal("any of them") : quoted)}, so nothing else reports it — clear "
+            + $"{keys}"
+            + $" if you don't use {(plural ? Raw.Literal("them") : Raw.Literal("it"))}, usually the "
+            + $"entr{(plural ? Raw.Literal("ies") : Raw.Literal("y"))} in "
+            + $"{Raw.Literal(DeveloperConfiguration.FileName)}, or fix what the failure names.").ToString();
     }
 
     /// <summary>
