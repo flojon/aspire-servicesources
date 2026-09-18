@@ -66,4 +66,38 @@ public class MigratedSiteEscapingTests
 
         Assert.Contains(new string('x', 400), exception.Describe(fullDetail: false), StringComparison.Ordinal);
     }
+
+    // Fully qualified deliberately: the test assembly already has an
+    // Aspire.Hosting.ServiceSources.Tests.Prepare namespace, so the simple name `Prepare` binds
+    // there and lookup stops — `Prepare.PreparePlan` is CS0234, not the production type.
+    private static string ServiceLabel(string name) =>
+        Aspire.Hosting.ServiceSources.Prepare.PreparePlan.ServiceLabel(name);
+
+    private static string RepositoryLabel(string name) =>
+        Aspire.Hosting.ServiceSources.Prepare.PreparePlan.RepositoryLabel(name);
+
+    [Fact]
+    public void ServiceLabel_EscapesTheName() =>
+        Assert.Equal("Service 'ord\\'ers\\nFATAL'", ServiceLabel("ord'ers\nFATAL"));
+
+    [Fact]
+    public void ServiceLabel_CapsTheName() =>
+        Assert.Equal($"Service '{new string('a', Name.MaxLength)}…'", ServiceLabel(new string('a', 200)));
+
+    [Fact]
+    public void RepositoryLabel_EscapesAndCaps()
+    {
+        Assert.Equal("Repository 'mono\\'repo'", RepositoryLabel("mono'repo"));
+        Assert.EndsWith("…'", RepositoryLabel(new string('b', 200)), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ServiceLabel_EscapesExactlyOnce()
+    {
+        // The four callers embed this result in a further message that this PR does not migrate, so
+        // the guard is that one pass has already happened — not that a second pass is safe. There is
+        // deliberately no way to feed a string back into the seam, which is why this asserts directly.
+        Assert.Equal("Service 'ord\\'ers'", ServiceLabel("ord'ers"));
+        Assert.DoesNotContain("\\\\'", ServiceLabel("ord'ers"), StringComparison.Ordinal);
+    }
 }
