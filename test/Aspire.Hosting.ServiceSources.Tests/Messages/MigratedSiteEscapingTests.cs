@@ -18,7 +18,7 @@ public class MigratedSiteEscapingTests
 
         Assert.DoesNotContain("\n", exception.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("' failed.\nFATAL", exception.Message, StringComparison.Ordinal);
-        Assert.StartsWith("Service 'orders\\'\\n", exception.Message, StringComparison.Ordinal);
+        Assert.StartsWith("Service 'orders\\u0027\\n", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -83,7 +83,7 @@ public class MigratedSiteEscapingTests
 
     [Fact]
     public void ServiceLabel_EscapesTheName() =>
-        Assert.Equal("Service 'ord\\'ers\\nFATAL'", ServiceLabel("ord'ers\nFATAL"));
+        Assert.Equal("Service 'ord\\u0027ers\\nFATAL'", ServiceLabel("ord'ers\nFATAL"));
 
     [Fact]
     public void ServiceLabel_CapsTheName() =>
@@ -92,7 +92,7 @@ public class MigratedSiteEscapingTests
     [Fact]
     public void RepositoryLabel_EscapesAndCaps()
     {
-        Assert.Equal("Repository 'mono\\'repo'", RepositoryLabel("mono'repo"));
+        Assert.Equal("Repository 'mono\\u0027repo'", RepositoryLabel("mono'repo"));
         Assert.EndsWith("…'", RepositoryLabel(new string('b', 200)), StringComparison.Ordinal);
     }
 
@@ -102,8 +102,8 @@ public class MigratedSiteEscapingTests
         // The four callers embed this result in a further message that this PR does not migrate, so
         // the guard is that one pass has already happened — not that a second pass is safe. There is
         // deliberately no way to feed a string back into the seam, which is why this asserts directly.
-        Assert.Equal("Service 'ord\\'ers'", ServiceLabel("ord'ers"));
-        Assert.DoesNotContain("\\\\'", ServiceLabel("ord'ers"), StringComparison.Ordinal);
+        Assert.Equal("Service 'ord\\u0027ers'", ServiceLabel("ord'ers"));
+        Assert.DoesNotContain("\\\\u0027", ServiceLabel("ord'ers"), StringComparison.Ordinal);
     }
 
     private sealed class FakePortAllocator : IPortAllocator
@@ -135,7 +135,7 @@ public class MigratedSiteEscapingTests
     // Each case carries its own expected rendering. Asserting only "no newline" would pass on the
     // UNMIGRATED code for every input that contains no newline, which is two of these three.
     [Theory]
-    [InlineData("orders'\nFATAL: resolved fine", "orders\\'\\nFATAL: resolved fine")]
+    [InlineData("orders'\nFATAL: resolved fine", "orders\\u0027\\nFATAL: resolved fine")]
     [InlineData("orders\"quoted", "orders\\\"quoted")]
     [InlineData("orders\\", "orders\\\\")]
     public void UrlSource_MissingUrl_EscapesTheServiceName(string serviceName, string expected)
@@ -177,7 +177,7 @@ public class MigratedSiteEscapingTests
     }
 
     [Theory]
-    [InlineData("orders'\nFATAL: resolved fine", "orders\\'\\nFATAL: resolved fine")]
+    [InlineData("orders'\nFATAL: resolved fine", "orders\\u0027\\nFATAL: resolved fine")]
     [InlineData("orders\"quoted", "orders\\\"quoted")]
     [InlineData("orders\\", "orders\\\\")]
     public void KubernetesSource_MissingContext_EscapesTheServiceName(string serviceName, string expected)
@@ -231,7 +231,7 @@ public class MigratedSiteEscapingTests
                 "payments": { "source": "container" } } }
             """);
 
-        Assert.Contains("'ord\\'ers\\nFATAL everything is fine'", warning, StringComparison.Ordinal);
+        Assert.Contains("'ord\\u0027ers\\nFATAL everything is fine'", warning, StringComparison.Ordinal);
         Assert.Contains("'payments'", warning, StringComparison.Ordinal);
         Assert.DoesNotContain("\n", warning, StringComparison.Ordinal);
     }
@@ -252,7 +252,7 @@ public class MigratedSiteEscapingTests
     }
 
     [Theory]
-    [InlineData("orders'\nFATAL: resolved fine", "orders\\'\\nFATAL: resolved fine")]
+    [InlineData("orders'\nFATAL: resolved fine", "orders\\u0027\\nFATAL: resolved fine")]
     [InlineData("orders\"quoted", "orders\\\"quoted")]
     [InlineData("orders\\", "orders\\\\")]
     public void LocalProjectSource_MissingProject_EscapesTheServiceName(string serviceName, string expected)
@@ -271,7 +271,7 @@ public class MigratedSiteEscapingTests
             new ProjectResource("orders"));
 
     [Theory]
-    [InlineData("orders'\nFATAL: started fine", "orders\\'\\nFATAL: started fine")]
+    [InlineData("orders'\nFATAL: started fine", "orders\\u0027\\nFATAL: started fine")]
     [InlineData("orders\"quoted", "orders\\\"quoted")]
     public void LaunchProfileEndpointWarning_EscapesTheServiceName(string serviceName, string expected)
     {
@@ -291,25 +291,89 @@ public class MigratedSiteEscapingTests
         var warning = LaunchProfileWarning("orders", "http://localhost:8081/'\nFATAL: bound fine");
 
         Assert.NotNull(warning);
-        Assert.Contains("http://localhost:8081/\\'\\nFATAL: bound fine", warning, StringComparison.Ordinal);
+        Assert.Contains("http://localhost:8081/\\u0027\\nFATAL: bound fine", warning, StringComparison.Ordinal);
         Assert.DoesNotContain("\n", warning, StringComparison.Ordinal);
     }
 
     [Fact]
     public void LaunchProfileEndpointWarning_DoesNotCapTheJoinedUrlList()
     {
-        // Each URL is composed on its own, so the 64-character name cap applies per URL and never
-        // to the list — three ordinary URLs already exceed it together.
+        // Every URL is over the 64-character cap on its own, so this fails for a per-URL cap as well
+        // as for a cap over the list. Three short URLs caught only the second, and a per-URL Name
+        // hole — which is what this site had — truncated away the port, the one fact it reports.
         string[] urls =
         [
-            "http://localhost:8081/orders",
-            "http://localhost:8082/payments",
-            "http://localhost:8083/shipping",
+            "http://localhost:8081/orders/api/v1/health/ready/with/a/long/path/segment",
+            "http://localhost:8082/payments/api/v1/health/ready/with/a/long/path/segment",
+            "http://localhost:8083/shipping/api/v1/health/ready/with/a/long/path/segment",
         ];
 
         var warning = LaunchProfileWarning("orders", urls);
 
         Assert.NotNull(warning);
         Assert.All(urls, url => Assert.Contains(url, warning, StringComparison.Ordinal));
+        Assert.DoesNotContain("…", warning, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LaunchProfileEndpointWarning_KeepsThePortOfALongUrl()
+    {
+        // The regression this guards: a Name hole capped each URL at 64 and dropped the ":5001" the
+        // sentence exists to report.
+        var url = "http://a-long-development-hostname.internal.example.com:5001/api/v1/health";
+
+        var warning = LaunchProfileWarning("orders", url);
+
+        Assert.NotNull(warning);
+        Assert.Contains(":5001/api/v1/health", warning, StringComparison.Ordinal);
+    }
+
+    // Raw.Origin blesses CatalogOrigin.Describe(), whose yaml path is a developer-chosen filesystem
+    // path sitting inside this message's own quotes. Four migrated messages consume it.
+    [Fact]
+    public void KubernetesSource_MissingService_EscapesTheCatalogOriginPath()
+    {
+        var definition = new ServiceMetadata
+        {
+            Repository = "https://github.com/company/orders",
+            Project = "Orders.csproj",
+        }.ToDefinition(
+            "/home/o'brien/src\nFATAL: catalog is fine/servicesources.yaml",
+            "orders",
+            TestHelpers.EmptyRepositories);
+
+        var exception = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            KubernetesSource.BuildPortForwardArgs(
+                "orders",
+                definition,
+                new ServiceDeveloperConfig { Source = "kubernetes", Kubernetes = new() { Context = "dev" } },
+                new FakePortAllocator(),
+                out _,
+                out _));
+
+        Assert.DoesNotContain("\n", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("brien", exception.Message, StringComparison.Ordinal);
+        // Escaped but never capped: it is a path, not a name.
+        Assert.Contains("servicesources.yaml", exception.Message, StringComparison.Ordinal);
+    }
+
+    // Raw.Cause hands the reader a third party's wording. .NET counts four more code points as
+    // line terminators than the three a hand-written rule covered, and a log viewer honours them.
+    // U+000B is deliberately absent: ReplaceLineEndings does not treat it as one, measured.
+    [Theory]
+    [InlineData("\u0085")]
+    [InlineData("\u2028")]
+    [InlineData("\u2029")]
+    [InlineData("\u000C")]
+    public void Describe_CannotForgeALineWithAnyLineTerminator(string terminator)
+    {
+        var forged = $"authentication failed{terminator}  caused by: nothing is wrong, carry on";
+        var exception = ServiceSourcesConfigurationException.For(
+            $"Service '{new Name("orders")}' failed.", new InvalidOperationException(forged));
+
+        var described = exception.Describe(fullDetail: false);
+
+        Assert.DoesNotContain(terminator, described, StringComparison.Ordinal);
+        Assert.Equal(2, described.Split(Environment.NewLine + "  caused by: ").Length);
     }
 }

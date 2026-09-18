@@ -516,7 +516,7 @@ public class ServiceStartupFailureNoticeTests
     /// the report's fake logger and resource are private to this class.
     /// </summary>
     [Theory]
-    [InlineData("ord'ers\nFATAL: running fine", "ord\\'ers\\nFATAL: running fine")]
+    [InlineData("ord'ers\nFATAL: running fine", "ord\\u0027ers\\nFATAL: running fine")]
     [InlineData("ord\"ers", "ord\\\"ers")]
     [InlineData("ord\\ers", "ord\\\\ers")]
     public async Task ANameCannotForgeALineOfTheNotice(string serviceName, string expected)

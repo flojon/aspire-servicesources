@@ -567,8 +567,10 @@ internal sealed class DeferredCheckout
             return null;
         }
 
-        // Joined from per-URL compositions: one Name over the whole list would cap it at 64.
-        var urls = Raw.Join(", ", declared.Select(url => Raw.Compose($"{new Name(url)}")));
+        // Joined from per-URL escapings, and Escaped rather than Name: one Name over the whole list
+        // would cap it at 64, and a Name per URL caps each one — which drops the port, the single
+        // fact this warning exists to report.
+        var urls = Raw.Join(", ", declared.Select(Raw.Escaped));
 
         return Raw.Compose(
             $"Service '{new Name(serviceName)}' was started from a checkout cloned during this run, and its launch "

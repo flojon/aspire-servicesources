@@ -290,7 +290,7 @@ public class BackingServiceConfigAuditTests
 
         var warning = Assert.Single(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
 
-        Assert.Contains("'ord\\'ers_db\\nFATAL everything is fine'", warning, StringComparison.Ordinal);
+        Assert.Contains("'ord\\u0027ers_db\\nFATAL everything is fine'", warning, StringComparison.Ordinal);
         Assert.DoesNotContain("\n", warning, StringComparison.Ordinal);
     }
 

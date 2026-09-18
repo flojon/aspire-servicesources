@@ -1,7 +1,8 @@
 # Making the escaping of caller-controlled names structural (#375)
 
 **Date:** 2026-09-18
-**Status:** Draft
+**Status:** Accepted — implemented by PR #381. See *What changed during implementation* at the end;
+where this document and the shipped code disagree, the code is what shipped and the note says why.
 **Resolves:** #375 (choose a design, and the migration scope, for escaping caller-controlled names in
 reader-facing messages).
 **Starts from:** [`2026-09-17-372-endpoint-mutation-detector-design.md`](2026-09-17-372-endpoint-mutation-detector-design.md)
@@ -577,3 +578,43 @@ this migration must not be accompanied by any loosening of those assertions.
 | 18 — catalog name validation out of scope | §14 | kept |
 | Human decision A — which design | §4 | recommended: strict choke point, no `string` hole overload |
 | Human decision B — migration scope | §8 | recommended: sink A whole + the composers behind sites 1–5 + `Describe`; neither "the 14" nor "all 124", and §8 says why both units are wrong |
+
+## What changed during implementation
+
+This section is the difference between the design above and PR #381 as it shipped. It is written
+because the two diverge in ways a reader of the spec alone would get wrong.
+
+- **`Raw` has six factories, not two.** The design describes a trust surface of "two constructors it
+  controls". What shipped is `Compose(ServiceTextHandler)`, `Literal([ConstantExpected] string)`,
+  `Escaped(string?)`, `Join([ConstantExpected] string, IEnumerable<Raw>)`, `Origin(CatalogOrigin)`
+  and `Cause(Exception)`. One of them, `Escaped`, does take a runtime `string` — it escapes it by the
+  `Name` rule rather than trusting it, which is what separates it from a bypass, and
+  `EveryStringTakingRawFactoryEscapesItsArgument` enforces that behaviourally rather than against a
+  name allowlist.
+
+- **Alignment and format-specifier overloads were not added.** The design asks for them so the forms
+  can be refused explicitly. In practice their absence already refuses them, as `CS1739`, which is a
+  better refusal than an overload that throws: it is a compile error rather than a runtime one.
+  `RawPathDoesNotCompileTests` pins both forms.
+
+- **`ServiceSourcesLog` does not exist.** The design declares it as sink B's counterpart. Sink B is
+  not closed by this PR at all — all fifteen `logger.Log*` calls pass their text as a structured
+  argument, so nothing done to an exception constructor reaches them. It is item 5 of the follow-up.
+
+- **The apostrophe is escaped as its unicode escape, not as a backslashed apostrophe.** Found in
+  review: the audit message tells the reader to paste the name back into `servicesources.local.json`,
+  and a backslashed apostrophe is not a legal JSON escape — it makes the whole file unparseable,
+  which is worse than the unescaped name was. The unicode escape round-trips through both JSON and
+  C#. This is the same reason `ConfiguredValue.Bare` already spells invisibles that way.
+
+- **`Raw.Origin` escapes the yaml path.** The design treats a catalog origin as safe because it is
+  not a name. It is a developer-chosen filesystem path rendered inside the message's own quotes, so
+  a directory with an apostrophe in it closes them.
+
+- **The launch-profile warning's URLs go through `Raw.Escaped`, not `Name`.** A `Name` hole capped
+  each URL at 64 characters and dropped the port — the one fact that warning exists to report.
+
+- **`BannedApiAnalyzers` bans only the exception constructor.** Banning `ServiceTextHandler`'s
+  constructor and `AppendLiteral` was measured and rejected: RS0030 also fires on the compiler's own
+  lowering of every `$"…"`, taking the deduplicated worklist from 154 to 1842. The hand-built-handler
+  bypass is closed by `[ConstantExpected]` on `AppendLiteral` plus the CA1857 escalation instead.

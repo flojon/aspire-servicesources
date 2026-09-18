@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Text;
 
@@ -20,7 +21,13 @@ internal ref struct ServiceTextHandler
         builder = new StringBuilder(literalLength + (formattedCount * 16));
 
     /// <summary>The message author's own words.</summary>
-    public void AppendLiteral(string value) => builder.Append(value);
+    /// <remarks>
+    /// <c>[ConstantExpected]</c> closes the one way past the seam that is not a hole: a hand-built
+    /// handler can call this with a runtime string and reach <c>For</c> with it. The compiler passes
+    /// the literal segments of a <c>$"…"</c>, which are constants, so only the hand-built path trips
+    /// it — and CA1857 is escalated to an error in this project, so that path does not compile.
+    /// </remarks>
+    public void AppendLiteral([ConstantExpected] string value) => builder.Append(value);
 
     /// <summary>Caller-controlled: escaped, then capped.</summary>
     public void AppendFormatted(Name value) => builder.Append(value.ToString());

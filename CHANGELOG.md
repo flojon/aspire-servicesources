@@ -222,8 +222,8 @@ never existed. Check the tag of the last release before adding one.
   `configuration that nothing read` audits, the launch-profile endpoint warning and the failed
   prefetch notice. A name is capped on its own rather than over a joined list, so a message naming
   ten services still names all ten. The wording of a cause flattened into
-  `ServiceSourcesConfigurationException.Describe` can no longer forge a line either — bounded rather
-  than escaped, because a cause is a diagnosis and truncating it would discard what it is for.
+  `ServiceSourcesConfigurationException.Describe` can no longer forge a line either — escaped rather
+  than bounded, because a cause is a diagnosis and truncating it would discard what it is for.
   Messages this package has not migrated yet still interpolate a name directly; the constructor
   behind them now reports each one, so the remainder is a worklist rather than a search.
 >>>>>>> 5072e5d (Record the structural name escaping under Fixed)

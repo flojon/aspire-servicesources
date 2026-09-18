@@ -139,6 +139,35 @@ public class RawPathDoesNotCompileTests
         return directory?.FullName ?? throw new InvalidOperationException("repository root not found");
     }
 
+    /// <summary>
+    /// The one way past the seam that is not a hole. A hand-built handler —
+    /// <c>new ServiceTextHandler(0, 0)</c>, then <c>AppendLiteral(runtimeString)</c>, then
+    /// <c>For(handler)</c> — reaches the message with an unescaped string, and neither the banned
+    /// constructor nor any refusal above sees it.
+    /// </summary>
+    /// <remarks>
+    /// Pinned by reflection for the same reason <see cref="ConstantExpectedIsEscalatedToAnError"/>
+    /// is pinned against the csproj: the in-memory compilation here runs no analyzers, so the CA1857
+    /// error that actually refuses this path cannot be demonstrated by compiling a snippet. The two
+    /// together are the guard — the attribute is present, and the rule that enforces it is an error.
+    /// Banning the two members outright was measured and rejected: RS0030 also fires on the
+    /// compiler's own lowering of every <c>$"…"</c>, taking the deduplicated worklist from 154 to
+    /// 1842 and burying the follow-up's scope.
+    /// </remarks>
+    [Fact]
+    public void HandBuiltHandler_CannotAppendARuntimeString()
+    {
+        var appendLiteral = typeof(ServiceTextHandler).GetMethod(nameof(ServiceTextHandler.AppendLiteral));
+
+        Assert.NotNull(appendLiteral);
+
+        var value = Assert.Single(appendLiteral.GetParameters());
+
+        Assert.Contains(
+            value.GetCustomAttributes(inherit: false),
+            attribute => attribute.GetType().Name == "ConstantExpectedAttribute");
+    }
+
     [Fact]
     public void RawOrigin_RefusesAString() =>
         AssertRefused("""ServiceSourcesConfigurationException.For($"a{Raw.Origin(s)}b")""", "CS1503");
@@ -183,7 +212,7 @@ public class RawPathDoesNotCompileTests
             var rendered = factory.Invoke(null, arguments)!.ToString()!;
 
             Assert.DoesNotContain("\n", rendered, StringComparison.Ordinal);
-            Assert.DoesNotContain("'", rendered.Replace("\\'", "", StringComparison.Ordinal), StringComparison.Ordinal);
+            Assert.DoesNotContain("'", rendered.Replace("\\u0027", "", StringComparison.Ordinal), StringComparison.Ordinal);
             Assert.DoesNotContain("\"", rendered.Replace("\\\"", "", StringComparison.Ordinal), StringComparison.Ordinal);
         });
     }

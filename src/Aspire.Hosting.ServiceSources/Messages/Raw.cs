@@ -43,7 +43,16 @@ internal readonly struct Raw
     /// Where a catalog entry came from. Takes the origin itself rather than its rendering, so a
     /// name cannot be passed here — and its wording carries quotes that must not be escaped.
     /// </summary>
-    internal static Raw Origin(CatalogOrigin origin) => new(origin.Describe());
+    /// <remarks>
+    /// The yaml path is escaped rather than trusted: it is a developer-chosen filesystem path sitting
+    /// inside this message's own quotes, so a directory named with an apostrophe closes them.
+    /// <see cref="CatalogOrigin.Describe"/> still renders it raw for the sites this seam has not
+    /// reached, which is why the escaped spelling is composed here instead of moved into it.
+    /// </remarks>
+    internal static Raw Origin(CatalogOrigin origin) =>
+        origin.Kind == CatalogOriginKind.Code
+            ? new(origin.Describe())
+            : Compose($"'{Escaped(origin.YamlPath)}'");
 
     /// <summary>
     /// A third party's wording, made unable to forge a line. Takes the exception rather than its
@@ -55,10 +64,12 @@ internal readonly struct Raw
     /// </remarks>
     internal static Raw Cause(Exception exception) => new(SingleLine(exception.Message));
 
-    private static string SingleLine(string message) =>
-        message.Replace("\r\n", "\\n", StringComparison.Ordinal)
-            .Replace("\n", "\\n", StringComparison.Ordinal)
-            .Replace("\r", "\\r", StringComparison.Ordinal);
+    /// <remarks>
+    /// <see cref="string.ReplaceLineEndings(string)"/> rather than a hand-written set of three:
+    /// U+0085, U+2028, U+2029 and U+000C also start a line, and a rule written out here is a fourth
+    /// spelling of one this package already has. U+000B is not in that set — measured, not assumed.
+    /// </remarks>
+    private static string SingleLine(string message) => message.ReplaceLineEndings("\\n");
 
     /// <summary>Empty rather than null: <c>default(Raw)</c> must render, not throw.</summary>
     public override string ToString() => text ?? string.Empty;

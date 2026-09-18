@@ -39,8 +39,13 @@ internal readonly struct Name
         // Bare must run between the two replaces: its own \t/\n/\uXXXX escapes are synthesized after
         // the doubling, so they are not themselves doubled, and are emitted before the quote escapes,
         // which do not touch '\' and so leave them alone.
+        //
+        // ' rather than \', for the reason Bare already spells invisibles as \uXXXX: these
+        // messages hand the reader a name to paste back into servicesources.local.json, and \' is
+        // not a legal JSON escape — it makes the whole file unparseable, which is worse than the
+        // unescaped name was. \" needs no such treatment; it is legal in both JSON and C#.
         return ConfiguredValue.Bare(literal)
-            .Replace("'", "\\'", StringComparison.Ordinal)
+            .Replace("'", "\\u0027", StringComparison.Ordinal)
             .Replace("\"", "\\\"", StringComparison.Ordinal);
     }
 
@@ -58,7 +63,10 @@ internal readonly struct Name
 
             if (escaped[i] != '\\')
             {
-                i += char.IsHighSurrogate(escaped[i]) && i + 1 < escaped.Length ? 2 : 1;
+                // The low surrogate has to be checked, not assumed: a lone high surrogate is not a
+                // pair, and stepping over the character after it desynchronises the walk from the
+                // escape units, which is how a cut lands on half of one.
+                i += char.IsSurrogatePair(escaped, i) ? 2 : 1;
                 continue;
             }
 

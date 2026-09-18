@@ -456,7 +456,7 @@ public class EndpointMutationDetectorTests
         var warning = Assert.Single(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
 
         // Doubled, so un-escaping yields one backslash and an escaped quote -- not a live delimiter.
-        Assert.Contains(@"evil\\\'", warning, StringComparison.Ordinal);
+        Assert.Contains(@"evil\\\u0027", warning, StringComparison.Ordinal);
         Assert.DoesNotContain("Service 'forged", warning, StringComparison.Ordinal);
     }
 

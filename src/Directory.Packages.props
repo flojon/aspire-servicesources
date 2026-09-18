@@ -72,7 +72,6 @@
          inherits through the nuspec - but the kind test projects reference them for real, and
          those live under test/, which sees only the root file. Declaring them in both places is
          NU1506, since this file imports that one. -->
-    <PackageVersion Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="4.14.0" />
     <PackageVersion Include="YamlDotNet" Version="18.1.0" />
   </ItemGroup>
 

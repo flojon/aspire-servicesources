@@ -12,7 +12,7 @@ public class ServiceTextHandlerTests
 
     [Fact]
     public void NameHole_IsEscaped() =>
-        Assert.Equal("Service 'ord\\'ers' failed.", Compose($"Service '{new Name("ord'ers")}' failed."));
+        Assert.Equal("Service 'ord\\u0027ers' failed.", Compose($"Service '{new Name("ord'ers")}' failed."));
 
     [Fact]
     public void NameHole_IsCapped()
@@ -25,7 +25,7 @@ public class ServiceTextHandlerTests
 
     [Fact]
     public void RawHole_IsNotEscapedAgain() =>
-        Assert.Equal("outer 'ord\\'ers' tail", Compose($"outer {Raw.Compose($"'{new Name("ord'ers")}'")} tail"));
+        Assert.Equal("outer 'ord\\u0027ers' tail", Compose($"outer {Raw.Compose($"'{new Name("ord'ers")}'")} tail"));
 
     [Fact]
     public void RawHole_IsNotCapped()
@@ -47,6 +47,6 @@ public class ServiceTextHandlerTests
 
     [Fact]
     public void MultipleNameHoles_AreEachEscapedIndependently() =>
-        Assert.Equal("'a\\'1' and 'b\\'2'",
+        Assert.Equal("'a\\u00271' and 'b\\u00272'",
             Compose($"'{new Name("a'1")}' and '{new Name("b'2")}'"));
 }

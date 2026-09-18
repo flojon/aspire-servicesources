@@ -1166,10 +1166,14 @@ public class LocalCheckoutPrefetchTests
         var message = Assert.Single(prefetch.FailedUnusedCheckoutMessages);
 
         // Present, not merely escaped somewhere: dropping the name would satisfy a negative alone.
-        Assert.Contains("'bill\\'ing'", message, StringComparison.Ordinal);
+        Assert.Contains("'bill\\u0027ing'", message, StringComparison.Ordinal);
 
         // The configuration key the notice tells the reader to clear carries the name too.
+<<<<<<< HEAD
         Assert.Contains($"'{DeveloperConfiguration.ServicesKey}:bill\\'ing:source'", message, StringComparison.Ordinal);
 >>>>>>> 2d508fb (Compose the five log-reaching message builders through the seam)
+=======
+        Assert.Contains($"'{DeveloperConfiguration.ServicesKey}:bill\\u0027ing:source'", message, StringComparison.Ordinal);
+>>>>>>> 912fd4a (Fix six defects the round-1 review found in the message seam)
     }
 }
