@@ -194,6 +194,7 @@ never existed. Check the tag of the last release before adding one.
 
 ### Fixed
 
+<<<<<<< HEAD
 - **`WithExternalHttpEndpoints` on a `url` or `kubernetes` service is now skipped and reported
   instead of applied silently** ([#359]). Aspire's method does not add an annotation — it walks the
   ones the service already has and writes `IsExternal` on each `http`/`https` one — so it went
@@ -210,6 +211,22 @@ never existed. Check the tag of the last release before adding one.
   after the fact; with the call skipped there is no longer any change for it to find, so there is one
   warning rather than two, and the detector remains the backstop for the guest-language endpoint
   callbacks, which no C# shadow can reach.
+=======
+- **A configured name can no longer forge a line in the messages that refuse or report a service**
+  ([#375]). The names these messages quote — a service, a backing service, a repository, a launch
+  profile's URL — were interpolated exactly as configured, so one carrying a newline or a closing
+  quote could end the line and write a sentence of its own into output a reader trusts. Escaping was
+  something each message site had to remember, and [#372] fixed four that had not. Fourteen more now
+  compose through a seam that escapes and caps every name by construction: the nine refusals raised
+  while a source resolves, and the five builders behind the startup-failure notice, the two
+  `configuration that nothing read` audits, the launch-profile endpoint warning and the failed
+  prefetch notice. A name is capped on its own rather than over a joined list, so a message naming
+  ten services still names all ten. The wording of a cause flattened into
+  `ServiceSourcesConfigurationException.Describe` can no longer forge a line either — bounded rather
+  than escaped, because a cause is a diagnosis and truncating it would discard what it is for.
+  Messages this package has not migrated yet still interpolate a name directly; the constructor
+  behind them now reports each one, so the remainder is a worklist rather than a search.
+>>>>>>> 5072e5d (Record the structural name escaping under Fixed)
 
 - **A service name can no longer forge a second log entry in four out-of-band messages** ([#372]).
   Each of them opens with the service's own name, taken from the catalog and interpolated between
