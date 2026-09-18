@@ -1086,7 +1086,6 @@ public class LocalCheckoutPrefetchTests
         Assert.Equal(["Receiving objects:  10% (1/10)"], await DrainProgressAsync(prefetch, "orders"));
         Assert.Equal(["Receiving objects:  20% (2/10)"], await DrainProgressAsync(prefetch, "billing"));
     }
-<<<<<<< HEAD
 
     /// <summary>
     /// The guard in <c>LocalProjectSource.Resolve</c> refuses a repositoryless <c>"local"</c>
@@ -1134,7 +1133,8 @@ public class LocalCheckoutPrefetchTests
 
         Assert.Empty(prefetch.FailedUnusedCheckoutMessages);
         Assert.Null(prefetch.UnusedCheckoutsMessage);
-=======
+    }
+
     /// <summary>
     /// The notice names services the developer configured, so a name cannot close the quote that
     /// delimits it (#375) — the notice quotes each name three times over, and an unescaped one
@@ -1169,11 +1169,6 @@ public class LocalCheckoutPrefetchTests
         Assert.Contains("'bill\\u0027ing'", message, StringComparison.Ordinal);
 
         // The configuration key the notice tells the reader to clear carries the name too.
-<<<<<<< HEAD
-        Assert.Contains($"'{DeveloperConfiguration.ServicesKey}:bill\\'ing:source'", message, StringComparison.Ordinal);
->>>>>>> 2d508fb (Compose the five log-reaching message builders through the seam)
-=======
         Assert.Contains($"'{DeveloperConfiguration.ServicesKey}:bill\\u0027ing:source'", message, StringComparison.Ordinal);
->>>>>>> 912fd4a (Fix six defects the round-1 review found in the message seam)
     }
 }
