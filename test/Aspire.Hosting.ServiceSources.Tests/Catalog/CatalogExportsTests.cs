@@ -90,7 +90,7 @@ public class CatalogExportsTests
         string[] expected =
         [
             "addService", "addBackingService", "asJava", "asJavaScript", "getServiceEndpoint", "useJava", "useJavaScript",
-            "addServiceCatalog", "withEndpoint", "withHttpEndpoint", "withHttpsEndpoint",
+            "addServiceCatalog", "withEndpoint", "withHttpEndpoint", "withHttpsEndpoint", "withCommand",
             $"{nameof(ServiceCatalogBuilder)}.{CamelCase(nameof(ServiceCatalogBuilder.AddService))}",
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithRepository))}",
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithProject))}",

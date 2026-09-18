@@ -51,4 +51,30 @@ public static class OverloadProbe
     public static IResourceBuilder<ServiceResource> CallWithEndpointCallback(
         IResourceBuilder<ServiceResource> service, string endpointName, Action<EndpointAnnotation> callback) =>
         service.WithEndpoint(endpointName, callback);
+
+    public static IResourceBuilder<ServiceResource> CallWithCommand(
+        IResourceBuilder<ServiceResource> service, string name, string displayName,
+        Func<ExecuteCommandContext, Task<ExecuteCommandResult>> executeCommand,
+        CommandOptions? commandOptions = null) =>
+        service.WithCommand(name, displayName, executeCommand, commandOptions);
+
+    // The three-argument form an AppHost actually writes. Compiling at all is the assertion: both
+    // shadows are applicable here, so dropping [OverloadResolutionPriority(1)] from the
+    // CommandOptions one makes this CS0121 -- which is how Aspire's own pair disambiguates, and
+    // which every other probe here hides by passing a disambiguating argument.
+    public static IResourceBuilder<ServiceResource> CallWithCommandNoOptions(
+        IResourceBuilder<ServiceResource> service, string name, string displayName,
+        Func<ExecuteCommandContext, Task<ExecuteCommandResult>> executeCommand) =>
+        service.WithCommand(name, displayName, executeCommand);
+
+    // The winning candidate is this package's own [Obsolete] shadow, which carries Aspire's
+    // deprecation message verbatim -- so CS0618 here is that deprecation, not a defect in the probe.
+#pragma warning disable CS0618
+    public static IResourceBuilder<ServiceResource> CallWithCommandLegacy(
+        IResourceBuilder<ServiceResource> service, string name, string displayName,
+        Func<ExecuteCommandContext, Task<ExecuteCommandResult>> executeCommand,
+        string? displayDescription = null) =>
+        service.WithCommand(name, displayName, executeCommand, updateState: null,
+            displayDescription: displayDescription);
+#pragma warning restore CS0618
 }

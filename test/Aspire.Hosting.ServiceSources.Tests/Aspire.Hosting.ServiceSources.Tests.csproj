@@ -2,6 +2,9 @@
 
   <PropertyGroup>
     <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <!-- Probe the WithCommand overload-priority guard on every leg: net8.0 would otherwise default
+         to C# 12, which ignores [OverloadResolutionPriority] and cannot bind the 3-argument form. -->
+    <LangVersion Condition="'$(TargetFramework)' == 'net8.0'">13.0</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>

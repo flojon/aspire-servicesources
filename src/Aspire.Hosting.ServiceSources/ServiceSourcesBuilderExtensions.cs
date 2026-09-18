@@ -1,5 +1,6 @@
 using System.Net.Sockets;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
@@ -440,6 +441,57 @@ public static class ServiceSourcesBuilderExtensions
         }
 
         return Aspire.Hosting.ResourceBuilderExtensions.WithHttpsEndpoint(builder, port, targetPort, name, env, (bool?)isProxied);
+    }
+
+    /// <summary>
+    /// Shadows Aspire's own <c>WithCommand&lt;T&gt;</c>, whose remove-then-add path leaves a superseded
+    /// command behind on the real resource — see
+    /// <see cref="ServiceResourceBuilder.MirroringCommandRemovalsBy"/> for the mechanism and why the
+    /// mirror runs after the delegated call (#371). Same shadowing discipline as the endpoint
+    /// overloads above.
+    /// </summary>
+    // Without it this and the obsolete overload below are equally applicable to
+    // WithCommand(name, displayName, execute), and that call stops compiling (CS0121).
+    [OverloadResolutionPriority(1)]
+    [AspireExport]
+    public static IResourceBuilder<ServiceResource> WithCommand(
+        this IResourceBuilder<ServiceResource> builder,
+        string name, string displayName,
+        Func<ExecuteCommandContext, Task<ExecuteCommandResult>> executeCommand,
+        CommandOptions? commandOptions = null)
+    {
+        // Fully-qualified static call, never `builder.WithCommand(...)` — extension-method syntax on
+        // `builder` would resolve back to this very shadow and recurse.
+        return ServiceResourceBuilder.MirroringCommandRemovalsBy(
+            builder,
+            () => Aspire.Hosting.ResourceBuilderExtensions.WithCommand(
+                builder, name, displayName, executeCommand, commandOptions));
+    }
+
+    /// <summary>
+    /// Aspire's pre-<see cref="CommandOptions"/> <c>WithCommand</c> overload — same shadowing, same
+    /// remove-then-add shape, same reason (#371). Obsolete upstream but still live API: an AppHost
+    /// written against the older signature binds here rather than to the overload above.
+    /// </summary>
+    [Obsolete("This method is obsolete and will be removed in a future version. Use the overload that accepts a CommandOptions instance instead.")]
+    [AspireExportIgnore(Reason = "Obsolete upstream overload, superseded by the CommandOptions one which is already exported.")]
+    public static IResourceBuilder<ServiceResource> WithCommand(
+        this IResourceBuilder<ServiceResource> builder,
+        string name, string displayName,
+        Func<ExecuteCommandContext, Task<ExecuteCommandResult>> executeCommand,
+        Func<UpdateCommandStateContext, ResourceCommandState>? updateState = null,
+        string? displayDescription = null,
+        object? parameter = null,
+        string? confirmationMessage = null,
+        string? iconName = null,
+        IconVariant? iconVariant = null,
+        bool isHighlighted = false)
+    {
+        return ServiceResourceBuilder.MirroringCommandRemovalsBy(
+            builder,
+            () => Aspire.Hosting.ResourceBuilderExtensions.WithCommand(
+                builder, name, displayName, executeCommand, updateState, displayDescription, parameter,
+                confirmationMessage, iconName, iconVariant, isHighlighted));
     }
 
     /// <summary>

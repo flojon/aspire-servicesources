@@ -229,4 +229,63 @@ internal sealed class ServiceResourceBuilder(
 
         return result;
     }
+
+    /// <summary>
+    /// Runs <paramref name="call"/> and drops from <c>real</c> every
+    /// <see cref="ResourceCommandAnnotation"/> the call removed from the facade alone. Aspire's
+    /// <c>WithCommand</c> supersedes a same-named command with a direct
+    /// <c>builder.Resource.Annotations.Remove(...)</c> rather than through
+    /// <see cref="WithAnnotation{TAnnotation}"/>, while the replacement it adds afterwards
+    /// dual-writes — so without this the real resource keeps both, and
+    /// <c>ResourceCommandService.ResolveCommandAnnotation</c>'s <c>SingleOrDefault</c> throws the
+    /// moment that command is invoked (#371).
+    /// </summary>
+    /// <remarks>
+    /// The mirror is taken <em>after</em> <paramref name="call"/> returns rather than by removing the
+    /// superseded annotation up front: Aspire validates its arguments before reaching the lookup, so
+    /// a rejected call must leave both collections exactly as it found them.
+    /// <para>
+    /// Unreachable sources return early, keeping the invariant that nothing mutates <c>real</c>
+    /// without consulting <see cref="Reachability"/>. No <c>kubernetes</c> service can reach the
+    /// removal today — <c>KubernetesSource</c> builds its <c>kubectl port-forward</c> with
+    /// <c>WithArgs</c> and <c>WithEndpoint</c> only, so the facade
+    /// <see cref="ResolvedService.Bridge"/> hands back has no command annotation to supersede. The
+    /// clause guards the shape rather than a live case: were one ever present on <c>real</c> at
+    /// bridge time, the facade would share that instance, and mirroring would strip a real command
+    /// while the replacing add is skipped with a warning — putting nothing back.
+    /// </para>
+    /// <para>
+    /// The filter is narrow — <see cref="ResourceCommandAnnotation"/>, and only instances the facade
+    /// held before the call — because that is the whole of what <c>WithCommand</c> can drop. A
+    /// general removal diff over every annotation type is deliberately not built here.
+    /// </para>
+    /// </remarks>
+    internal static IResourceBuilder<ServiceResource> MirroringCommandRemovalsBy(
+        IResourceBuilder<ServiceResource> builder, Func<IResourceBuilder<ServiceResource>> call)
+    {
+        if (builder is not ServiceResourceBuilder serviceBuilder
+            || serviceBuilder.Real is not { } realBuilder
+            || Reachability.IsUnreachable(typeof(ResourceCommandAnnotation), serviceBuilder.Source))
+        {
+            return call();
+        }
+
+        var beforeOnFacade = serviceBuilder.Resource.Annotations.OfType<ResourceCommandAnnotation>().ToArray();
+
+        var result = call();
+
+        var stillOnFacade = new HashSet<ResourceCommandAnnotation>(
+            serviceBuilder.Resource.Annotations.OfType<ResourceCommandAnnotation>(),
+            ReferenceEqualityComparer.Instance);
+
+        foreach (var annotation in beforeOnFacade)
+        {
+            if (!stillOnFacade.Contains(annotation))
+            {
+                realBuilder.Resource.Annotations.Remove(annotation);
+            }
+        }
+
+        return result;
+    }
 }

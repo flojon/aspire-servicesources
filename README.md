@@ -1772,7 +1772,8 @@ into `servicesources.yaml`/`servicesources.local.json`.
 `ServiceResource` implements `IResourceWithServiceDiscovery`, `IResourceWithEnvironment`,
 `IResourceWithArgs`, `IResourceWithEndpoints` and `IResourceWithWaitSupport`, so
 `WithEnvironment`, `WithReference`, `WithArgs`, `WithEndpoint`/`WithHttpEndpoint`/`WithHttpsEndpoint` and
-`WaitFor`/`WaitForCompletion` all bind directly — no capability-naming wrapper needed:
+`WaitFor`/`WaitForCompletion` all bind directly — no capability-naming wrapper needed. `WithCommand`
+binds too, on Aspire's `IResource` constraint rather than any of those five:
 
 ```csharp
 var backend = builder.AddService("backend")
@@ -1826,10 +1827,10 @@ the port-forward's builder rather than throwing.
 ### From a guest-language AppHost
 
 `ServiceResource`'s declared shape is what Aspire's Type System reads to generate a handle, so its
-own native methods — `withEnvironment`, `withReference`, `withArgs`,
-`withEndpoint`, `withHttpEndpoint`/`withHttpsEndpoint`, `waitFor`, `waitForCompletion` — project onto the generated
-`addService(...)` handle exactly as they do in C#, with no package-authored shim standing in front
-of them:
+native vocabulary — `withEnvironment`, `withReference`, `withArgs`, `withEndpoint`,
+`withHttpEndpoint`/`withHttpsEndpoint`, `withCommand`, `waitFor`, `waitForCompletion`, whether
+Aspire's own or shadowed in this package — projects onto the generated `addService(...)` handle
+exactly as it does in C#:
 
 ```typescript
 const payments = await builder
