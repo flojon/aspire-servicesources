@@ -294,8 +294,29 @@ internal sealed class ServiceSourcesWarnings
     private static string SkipReason(string serviceName, string source, IReadOnlyList<string> capabilities) =>
         $"Service '{serviceName}': skipped {DescribeCalls(capabilities)} because its source is " +
         $"'{source}' — {SourceDetail(source)}. The service is expected to be configured wherever it actually " +
-        "runs. Set its source to 'local' or 'container' in servicesources.local.json for this AppHost's " +
-        "configuration and start ordering to apply.";
+        $"runs. {SwitchSourceRemedy}";
+
+    /// <summary>
+    /// How to bring the service back under this AppHost's control, for every message that offers it.
+    /// </summary>
+    /// <remarks>
+    /// Conditional rather than an instruction, because the switch is only available where the
+    /// catalog already declares that source: <c>'local'</c> without a <c>repository</c>, or
+    /// <c>'container'</c> without a <c>container</c> block, throws
+    /// <see cref="ServiceSourcesConfigurationException"/> at the next resolve — so advice that
+    /// promised the switch outright sent the reader into an exception on both options it offered.
+    /// <para>
+    /// The block, not the individual field, because what a block has to carry varies with the
+    /// service: <c>'local'</c> needs a <c>project</c> for the built-in <c>dotnet</c> kind and that
+    /// kind's own options for any other, and the error the catalog raises names whichever one is
+    /// missing. Naming fields here would be right for the common service and wrong for the rest.
+    /// </para>
+    /// </remarks>
+    private const string SwitchSourceRemedy =
+        "To configure it from this AppHost instead, give it a 'local' or 'container' source in " +
+        "servicesources.local.json — which works only where its 'servicesources.yaml' entry already " +
+        "declares that source: a 'repository' or 'repositoryRef' for 'local', a 'container' block for " +
+        "'container'.";
 
     /// <summary>
     /// Why a source runs out of band, in the clause both <see cref="SkipReason"/> and
@@ -318,16 +339,13 @@ internal sealed class ServiceSourcesWarnings
     /// Its own sentence rather than <see cref="SkipReason"/>'s, because a revert is not a skip. The
     /// call landed and was undone, so "skipped" misdescribes it; and the entries count endpoints, not
     /// calls, so <see cref="DescribeCalls"/>'s "<c>N</c> calls" would state a number the developer
-    /// never wrote. The remedy differs too: switching source only works where the catalog entry
-    /// already carries the matching <c>project</c> or <c>container.image</c>, so saying so is the
-    /// difference between advice that can be followed and advice that throws.
+    /// never wrote. The remedy is shared with it, because the way back under this AppHost's control
+    /// does not depend on which of the two messages is reporting.
     /// </remarks>
     private static string RevertReason(string serviceName, string source, IReadOnlyList<string> reverts) =>
         $"Service '{serviceName}': {string.Join("; ", reverts)}. Its source is '{source}' — " +
         $"{SourceDetail(source)}. An out-of-band service's endpoints are fixed by its source, so " +
-        "configure the service where it actually runs. To configure it from this AppHost instead, give " +
-        "it a 'local' or 'container' source in servicesources.local.json — its 'servicesources.yaml' " +
-        "entry needs the matching 'project' or 'container.image'.";
+        $"configure the service where it actually runs. {SwitchSourceRemedy}";
 
     /// <summary>
     /// A single call reads as itself; several read as a count plus a per-capability tally, so the

@@ -156,8 +156,7 @@ never existed. Check the tag of the last release before adding one.
   this service resolved (IsExternal) and has been put back. Its source is 'kubernetes' — …` — so the
   outcome matches what gating the equivalent C# call already does. An endpoint *added* this way is
   removed again, so a reference taken to it before start will not resolve, and the warning says so.
-  This
-  measures the state rather than the call, so it also **covers**
+  This measures the state rather than the call, so it also **covers**
   `WithExternalHttpEndpoints` ([#359]), which sets `IsExternal` on existing endpoints directly from
   C# and was likewise unreported; that issue stays open and separately owned. Nothing changes for a
   `local` or `container` service, where configuring an endpoint after resolution is legitimate and
@@ -192,6 +191,15 @@ never existed. Check the tag of the last release before adding one.
   ordering contract no longer applies to either kind.
 
 ### Fixed
+
+- **The remedy every out-of-band warning offers no longer dead-ends** ([#372]). Warnings about
+  configuration skipped for a `url` or `kubernetes` service ended in "Set its source to `local` or
+  `container` in servicesources.local.json" with no condition attached — but a service whose
+  `servicesources.yaml` entry declares neither a repository nor a `container` block, which is the
+  ordinary shape of a service that is only ever a url, got `ServiceSourcesConfigurationException`
+  on both options offered. The sentence now names what the catalog entry has to carry for each
+  option, so a reader either makes the switch or learns from the message why it is not theirs to
+  make.
 
 - **An ungrouped service's repository url is now validated as required** ([#318]). A code-declared
   service (`WithRepository(url)`) or a yaml service with neither `repository:` nor `repositoryRef:`
