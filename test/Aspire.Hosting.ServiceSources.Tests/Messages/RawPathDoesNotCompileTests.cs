@@ -143,23 +143,48 @@ public class RawPathDoesNotCompileTests
     public void RawOrigin_RefusesAString() =>
         AssertRefused("""ServiceSourcesConfigurationException.For($"a{Raw.Origin(s)}b")""", "CS1503");
 
+    /// <summary>
+    /// Every way of making a <see cref="Raw"/> from a runtime string must escape it. Asserted
+    /// behaviourally rather than against a list of blessed factory names: a name allowlist is the
+    /// same fail-open recogniser this seam exists to replace, and would let a future
+    /// <c>Raw.Trusted(string)</c> through as soon as someone added it to the list.
+    /// </summary>
     [Fact]
-    public void NoStringTakingRawFactoryExists()
+    public void EveryStringTakingRawFactoryEscapesItsArgument()
     {
+        const string Forgery = "orders'\"\nFATAL: forged";
+
         var factories = typeof(Raw)
             .GetMethods(System.Reflection.BindingFlags.Static
                 | System.Reflection.BindingFlags.Public
                 | System.Reflection.BindingFlags.NonPublic)
-            .Where(method => method.ReturnType == typeof(Raw));
+            .Where(method => method.ReturnType == typeof(Raw))
+            .Where(method => method.GetParameters().Any(p => p.ParameterType == typeof(string)));
+
+        Assert.NotEmpty(factories);
 
         Assert.All(factories, factory =>
         {
-            var stringParameters = factory.GetParameters().Where(p => p.ParameterType == typeof(string));
+            var constrained = factory.GetParameters()
+                .Where(p => p.ParameterType == typeof(string))
+                .All(p => p.GetCustomAttributes(inherit: false)
+                    .Any(a => a.GetType().Name == "ConstantExpectedAttribute"));
 
-            // A string parameter is only allowed where the compiler forces it to be a constant.
-            Assert.All(stringParameters, parameter =>
-                Assert.Contains(parameter.GetCustomAttributes(inherit: false),
-                    a => a.GetType().Name == "ConstantExpectedAttribute"));
+            // A constant cannot carry a runtime value, so there is nothing to escape.
+            if (constrained)
+            {
+                return;
+            }
+
+            var arguments = factory.GetParameters()
+                .Select(p => p.ParameterType == typeof(string) ? (object?)Forgery : null)
+                .ToArray();
+
+            var rendered = factory.Invoke(null, arguments)!.ToString()!;
+
+            Assert.DoesNotContain("\n", rendered, StringComparison.Ordinal);
+            Assert.DoesNotContain("'", rendered.Replace("\\'", "", StringComparison.Ordinal), StringComparison.Ordinal);
+            Assert.DoesNotContain("\"", rendered.Replace("\\\"", "", StringComparison.Ordinal), StringComparison.Ordinal);
         });
     }
 }

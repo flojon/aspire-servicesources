@@ -23,6 +23,16 @@ internal readonly struct Raw
     internal static Raw Literal([ConstantExpected] string text) => new(text);
 
     /// <summary>
+    /// Caller-controlled text escaped by the <see cref="Name"/> rule but deliberately not capped —
+    /// a URL, where truncating at 64 would remove the diagnosis the message exists to give.
+    /// </summary>
+    /// <remarks>
+    /// Safe by the same rule as a <see cref="Name"/> hole, not by being trusted: this escapes its
+    /// argument rather than believing it, which is what separates it from a bypass.
+    /// </remarks>
+    internal static Raw Escaped(string? value) => new(Name.Escape(value));
+
+    /// <summary>
     /// Already-safe fragments joined. Safe by construction: every part is a <see cref="Raw"/>
     /// already and the separator is a constant, so nothing unescaped enters through here.
     /// </summary>

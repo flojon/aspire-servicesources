@@ -22,17 +22,26 @@ internal readonly struct Name
 
     public override string ToString()
     {
+        var escaped = Escape(value);
+
+        return escaped.Length <= MaxLength ? escaped : escaped[..CutAt(escaped)] + '…';
+    }
+
+    /// <summary>
+    /// The escaping rule without the cap, for the one hole kind that is caller-controlled but must
+    /// not be truncated: a URL, where the cut would remove the diagnosis the message exists for.
+    /// </summary>
+    internal static string Escape(string? value)
+    {
         // The escape character first, or a name's own '\' before a quote un-escapes back to a live one.
         var literal = value?.Replace("\\", "\\\\", StringComparison.Ordinal);
 
         // Bare must run between the two replaces: its own \t/\n/\uXXXX escapes are synthesized after
         // the doubling, so they are not themselves doubled, and are emitted before the quote escapes,
         // which do not touch '\' and so leave them alone.
-        var escaped = ConfiguredValue.Bare(literal)
+        return ConfiguredValue.Bare(literal)
             .Replace("'", "\\'", StringComparison.Ordinal)
             .Replace("\"", "\\\"", StringComparison.Ordinal);
-
-        return escaped.Length <= MaxLength ? escaped : escaped[..CutAt(escaped)] + '…';
     }
 
     /// <summary>

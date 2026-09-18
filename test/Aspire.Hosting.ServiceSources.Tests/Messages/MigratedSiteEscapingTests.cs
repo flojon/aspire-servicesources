@@ -1,4 +1,8 @@
+using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Messages;
+using Aspire.Hosting.ServiceSources.PortAllocation;
+using Aspire.Hosting.ServiceSources.Sources;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Messages;
 
@@ -99,5 +103,107 @@ public class MigratedSiteEscapingTests
         // deliberately no way to feed a string back into the seam, which is why this asserts directly.
         Assert.Equal("Service 'ord\\'ers'", ServiceLabel("ord'ers"));
         Assert.DoesNotContain("\\\\'", ServiceLabel("ord'ers"), StringComparison.Ordinal);
+    }
+
+    private sealed class FakePortAllocator : IPortAllocator
+    {
+        public bool IsAvailable(int candidate) => true;
+
+        public int AllocatePort() => 12345;
+
+        public IReadOnlyList<int> AllocatePorts(int count) => Enumerable.Range(12345, count).ToArray();
+    }
+
+    private static ServiceDefinition UrlDefinition(
+        string serviceName, string? url = "https://orders.example.com", string yamlPath = "servicesources.yaml") =>
+        new ServiceMetadata
+        {
+            Repository = "https://github.com/company/orders",
+            Project = "Orders.csproj",
+            Url = url is null ? null : new UrlMetadata { Url = url },
+        }.ToDefinition(yamlPath, serviceName, TestHelpers.EmptyRepositories);
+
+    private static ServiceDefinition KubernetesDefinition(string serviceName) =>
+        new ServiceMetadata
+        {
+            Repository = "https://github.com/company/orders",
+            Project = "Orders.csproj",
+            Kubernetes = new KubernetesMetadata { Service = "orders", Port = 8080 },
+        }.ToDefinition("servicesources.yaml", serviceName, TestHelpers.EmptyRepositories);
+
+    // Each case carries its own expected rendering. Asserting only "no newline" would pass on the
+    // UNMIGRATED code for every input that contains no newline, which is two of these three.
+    [Theory]
+    [InlineData("orders'\nFATAL: resolved fine", "orders\\'\\nFATAL: resolved fine")]
+    [InlineData("orders\"quoted", "orders\\\"quoted")]
+    [InlineData("orders\\", "orders\\\\")]
+    public void UrlSource_MissingUrl_EscapesTheServiceName(string serviceName, string expected)
+    {
+        var exception = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            UrlSource.ResolveUrl(serviceName, UrlDefinition(serviceName, url: null),
+                new ServiceDeveloperConfig { Source = "url", Url = new() { Url = null } }));
+
+        Assert.Contains($"Service '{expected}'", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n", exception.Message, StringComparison.Ordinal);
+    }
+
+    // A guard, not a red test: this passes on the unmigrated code too. It exists to catch a
+    // migration that reached for a Name hole here and silently truncated the origin.
+    [Fact]
+    public void UrlSource_MissingUrl_DoesNotTruncateTheOrigin()
+    {
+        var yamlPath = new string('p', 200) + ".yaml";
+
+        var exception = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            UrlSource.ResolveUrl("orders", UrlDefinition("orders", url: null, yamlPath),
+                new ServiceDeveloperConfig { Source = "url", Url = new() { Url = null } }));
+
+        Assert.Contains(yamlPath, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UrlSource_InvalidUrl_EscapesTheUrlWithoutCappingIt()
+    {
+        var url = "htttps://" + new string('h', 200) + ".example.com/'\n";
+
+        var exception = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            UrlSource.ResolveUrl("orders", UrlDefinition("orders"),
+                new ServiceDeveloperConfig { Source = "url", Url = new() { Url = url } }));
+
+        Assert.DoesNotContain("\n", exception.Message, StringComparison.Ordinal);
+        // Not capped at the name cap: truncating the URL removes the diagnosis the message is for.
+        Assert.DoesNotContain("…", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("orders'\nFATAL: resolved fine", "orders\\'\\nFATAL: resolved fine")]
+    [InlineData("orders\"quoted", "orders\\\"quoted")]
+    [InlineData("orders\\", "orders\\\\")]
+    public void KubernetesSource_MissingContext_EscapesTheServiceName(string serviceName, string expected)
+    {
+        var exception = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            KubernetesSource.BuildPortForwardArgs(
+                serviceName,
+                KubernetesDefinition(serviceName),
+                new ServiceDeveloperConfig { Source = "kubernetes", Kubernetes = new() { Context = null } },
+                new FakePortAllocator(),
+                out _,
+                out _));
+
+        Assert.Contains($"Service '{expected}'", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("orders'\nFATAL: resolved fine", "orders\\'\\nFATAL: resolved fine")]
+    [InlineData("orders\"quoted", "orders\\\"quoted")]
+    [InlineData("orders\\", "orders\\\\")]
+    public void LocalProjectSource_MissingProject_EscapesTheServiceName(string serviceName, string expected)
+    {
+        var exception = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => LocalProjectSource.ValidateProject(serviceName, project: null));
+
+        Assert.Contains($"Service '{expected}'", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n", exception.Message, StringComparison.Ordinal);
     }
 }
