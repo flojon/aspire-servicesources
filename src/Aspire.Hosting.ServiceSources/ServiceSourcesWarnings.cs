@@ -263,14 +263,20 @@ internal sealed class ServiceSourcesWarnings
     /// would report every skip outstanding, splitting another service's grouped message in two.
     /// </remarks>
     public void ReportRevertsNow(
-        IServiceProvider services, string serviceName, string source, IReadOnlyList<string> reverts)
+        IServiceProvider services,
+        string serviceName,
+        string source,
+        IReadOnlyList<string> reverts,
+        bool everyRevertWasAnAddition,
+        IReadOnlyList<string> registeredEndpoints)
     {
         if (reverts.Count == 0)
         {
             return;
         }
 
-        ReportNow(services, [RevertReason(serviceName, source, reverts)]);
+        ReportNow(services, [
+            RevertReason(serviceName, source, reverts, everyRevertWasAnAddition, registeredEndpoints)]);
     }
 
     private static void Write(IServiceProvider services, IReadOnlyList<string> messages)
@@ -311,12 +317,16 @@ internal sealed class ServiceSourcesWarnings
     /// <para>
     /// <see cref="ConfiguredValue"/> rather than a second spelling of it: it is this package's rule for
     /// developer-written text echoed back, and it catches the invisibles a control-character test
-    /// misses. The quote and the cap are what it does not cover, and both are these messages' own.
+    /// misses. The quote, its escape character and the cap are what it does not cover, and all three
+    /// are these messages' own.
     /// </para>
     /// </remarks>
     internal static string Label(string? name)
     {
-        var escaped = ConfiguredValue.Bare(name).Replace("'", "\\'", StringComparison.Ordinal);
+        // The escape character first, or a name's own '\' before a quote un-escapes back to a live one.
+        var literal = name?.Replace("\\", "\\\\", StringComparison.Ordinal);
+
+        var escaped = ConfiguredValue.Bare(literal).Replace("'", "\\'", StringComparison.Ordinal);
 
         if (escaped.Length <= MaxLabelLength)
         {
@@ -352,11 +362,42 @@ internal sealed class ServiceSourcesWarnings
     /// never wrote. The remedy is shared with it, because the way back under this AppHost's control
     /// does not depend on which of the two messages is reporting.
     /// </remarks>
-    private static string RevertReason(string serviceName, string source, IReadOnlyList<string> reverts) =>
+    private static string RevertReason(
+        string serviceName,
+        string source,
+        IReadOnlyList<string> reverts,
+        bool everyRevertWasAnAddition,
+        IReadOnlyList<string> registeredEndpoints) =>
         $"Service '{Label(serviceName)}': {string.Join("; ", reverts)}. Its source is '{source}' — " +
         $"{OutOfBandSourceAdvice.SourceDetail(source)}. An out-of-band service's endpoints are fixed by its source, so " +
-        $"configure the service where it actually runs. {OutOfBandSourceAdvice.RedirectTheEndpoint(source)} " +
+        $"configure the service where it actually runs. {WhereToGoInstead(source, everyRevertWasAnAddition, registeredEndpoints)}" +
         $"{SwitchSourceRemedy}";
+
+    /// <summary>
+    /// The clause for what the reader can still reach, chosen by what they were doing.
+    /// </summary>
+    /// <remarks>
+    /// A reader who was adding an endpoint cannot be sent to a redirect setting — none of them adds
+    /// one — so they are told the names that do exist. With no registered endpoint to name there is
+    /// nothing true left to offer, and the clause is dropped rather than guessed at.
+    /// </remarks>
+    private static string WhereToGoInstead(
+        string source, bool everyRevertWasAnAddition, IReadOnlyList<string> registeredEndpoints)
+    {
+        if (!everyRevertWasAnAddition)
+        {
+            return OutOfBandSourceAdvice.RedirectTheEndpoint(source) + " ";
+        }
+
+        if (registeredEndpoints.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var named = string.Join(", ", registeredEndpoints.Select(name => $"'{Label(name)}'"));
+
+        return OutOfBandSourceAdvice.TheEndpointsItHas(named) + " ";
+    }
 
     /// <summary>
     /// A single call reads as itself; several read as a count plus a per-capability tally, so the

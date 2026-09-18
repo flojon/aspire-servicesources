@@ -192,15 +192,18 @@ never existed. Check the tag of the last release before adding one.
 
 ### Fixed
 
-- **A service name can no longer forge a second log entry** ([#372]). Every message this package
-  reports about an out-of-band service opens with the service's own name, taken from the catalog and
-  interpolated between quotes without escaping. A name carrying a newline, a Unicode line separator
-  or an apostrophe therefore split the line, or closed the quote and wrote a sentence of its own,
-  into a log a reader trusts. Both names these messages carry — the service and, since this release,
-  the endpoint — now go through the same escaping this package already applies to developer-written
-  text echoed back, plus a length cap. That now covers the exceptions as well as the warnings:
-  `Unwrap<T>`'s refusal of an out-of-band source, and the refusal of a container's reference to a
-  `url` service, which is thrown from inside `BeforeStartEvent` and so lands in the host's own log.
+- **A service name can no longer forge a second log entry in four out-of-band messages** ([#372]).
+  Each of them opens with the service's own name, taken from the catalog and interpolated between
+  quotes without escaping. A name carrying a newline, a Unicode line separator or an apostrophe
+  therefore split the line, or closed the quote and wrote a sentence of its own, into a log a reader
+  trusts. The four are the warning for configuration skipped on a `url` or `kubernetes` service, the
+  revert warning added in this release, `Unwrap<T>`'s refusal of an out-of-band source, and the
+  refusal of a container's reference to a `url` service — the last thrown from inside
+  `BeforeStartEvent`, so it lands in the host's own log. Both names these messages carry, the service
+  and the endpoint, now go through the same escaping this package already applies to
+  developer-written text echoed back, plus a length cap. Messages elsewhere in the package still
+  interpolate a service name directly; making that structural rather than per-site is tracked as
+  [#375].
 
 - **The remedy every out-of-band message offers no longer dead-ends** ([#372]). Four messages
   offered the same way back under this AppHost's control, each in its own words and all of them as
@@ -1728,6 +1731,7 @@ Targets `net10.0`.
 [#350]: https://github.com/flojon/aspire-servicesources/issues/350
 [#359]: https://github.com/flojon/aspire-servicesources/issues/359
 [#372]: https://github.com/flojon/aspire-servicesources/issues/372
+[#375]: https://github.com/flojon/aspire-servicesources/issues/375
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

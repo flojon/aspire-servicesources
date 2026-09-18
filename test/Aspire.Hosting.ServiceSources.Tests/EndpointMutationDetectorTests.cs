@@ -125,8 +125,78 @@ public class EndpointMutationDetectorTests
         var urlWarning = Assert.Single(
             await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(urlBuilder));
 
-        Assert.Contains("'kubernetes.port' or 'kubernetes.scheme'", kubernetesWarning);
-        Assert.Contains("'url.url'", urlWarning);
+        Assert.Contains("set 'kubernetes.port' for this service", kubernetesWarning);
+        Assert.Contains("set 'url.url' for this service", urlWarning);
+    }
+
+    /// <remarks>
+    /// Following the kubernetes clause rather than trusting it, as its url sibling below does. Both
+    /// halves are checked because the sentence makes a different promise about each: the port half
+    /// moves what the forward points at and leaves the endpoint alone, and the scheme half renames
+    /// it — which is why the clause leads with the port and says so about the scheme.
+    /// </remarks>
+    [Fact]
+    public void TheNamedKubernetesLevers_BehaveAsTheClauseDescribes()
+    {
+        var redirected = new KubernetesSource(new FakePortAllocator(54321)).Resolve(
+            Builder(), "orders", KubernetesDefinition(),
+            new ServiceDeveloperConfig
+            {
+                Source = "kubernetes",
+                Kubernetes = new() { Context = "dev-west", Port = 9090 },
+            });
+
+        var endpoint = Assert.Single(Endpoints(redirected));
+        Assert.Equal("https", endpoint.Name);
+        Assert.Equal(54321, endpoint.Port);
+
+        var rescheme = new KubernetesSource(new FakePortAllocator(54321)).Resolve(
+            Builder(), "orders", KubernetesDefinition(),
+            new ServiceDeveloperConfig
+            {
+                Source = "kubernetes",
+                Kubernetes = new() { Context = "dev-west", Scheme = "http" },
+            });
+
+        // The rename the clause warns about: a reference taken to 'https' stops matching.
+        Assert.Equal("http", Assert.Single(Endpoints(rescheme)).Name);
+    }
+
+    /// <remarks>
+    /// No setting adds an endpoint to an out-of-band service — the C# overloads are gated and the
+    /// developer-config levers only redirect the one the source registers — so a reader who was
+    /// adding is told what exists instead of being sent to a lever that cannot do it.
+    /// </remarks>
+    [Fact]
+    public async Task ARevertOfAnAdditionAlone_NamesWhatTheServiceHasRatherThanARedirectLever()
+    {
+        var builder = Builder();
+
+        GuestLanguageEndpointCallbacks.EndpointCallback(Url(builder), "probe", ("Port", 4242));
+
+        var warning = Assert.Single(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+
+        Assert.Contains("This service has the endpoints its source registers — 'https' — and no others.", warning);
+        Assert.DoesNotContain("To change what this endpoint points at", warning);
+    }
+
+    /// <remarks>
+    /// The redirect lever is still offered when the reader's own endpoint survives, which is the
+    /// case it was written for.
+    /// </remarks>
+    [Fact]
+    public async Task ARevertOfAChangeAlongsideAnAddition_StillNamesTheRedirectLever()
+    {
+        var builder = Builder();
+        var service = Url(builder);
+
+        GuestLanguageEndpointCallbacks.HttpsEndpointCallback(service, "https", ("Port", 9999));
+        GuestLanguageEndpointCallbacks.EndpointCallback(service, "probe", ("Port", 4242));
+
+        var warning = Assert.Single(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+
+        Assert.Contains("set 'url.url' for this service", warning);
+        Assert.DoesNotContain("This service has the endpoints its source registers", warning);
     }
 
     /// <remarks>
@@ -310,6 +380,29 @@ public class EndpointMutationDetectorTests
         Assert.DoesNotContain("Service 'forged'", warning);
         Assert.Contains("endpoint 'evil", warning);
         Assert.Contains("…' was added after this service resolved", warning);
+    }
+
+    /// <remarks>
+    /// The escape character carried by the name itself, which escaping the quote alone leaves live:
+    /// a reader that honours the <c>\n</c> and <c>\uXXXX</c> this same message writes reads
+    /// <c>\\'</c> back as one backslash and a delimiter, and the entry the quote escape closes is
+    /// open again.
+    /// </remarks>
+    [Fact]
+    public async Task AnEndpointNameCarryingTheEscapeCharacter_CannotReconstituteTheDelimiter()
+    {
+        var builder = Builder();
+        var service = Kubernetes(builder);
+
+        GuestLanguageEndpointCallbacks.EndpointCallback(service, "probe", ("Port", 4242));
+        var added = Assert.Single(Endpoints(service), endpoint => endpoint.Name == "probe");
+        added.Name = @"evil\' was added: Service 'forged";
+
+        var warning = Assert.Single(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+
+        // Doubled, so un-escaping yields one backslash and an escaped quote -- not a live delimiter.
+        Assert.Contains(@"evil\\\'", warning, StringComparison.Ordinal);
+        Assert.DoesNotContain("Service 'forged", warning, StringComparison.Ordinal);
     }
 
     // The forging the quoting has to survive: a name can spell the separator the message puts between

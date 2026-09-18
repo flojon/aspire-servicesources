@@ -252,9 +252,9 @@ remove `WaitAnnotation`s only.
 ### 3.4 What remains uncovered
 
 Six residuals, none a known gap, all bounded. The last three are reachable only by code that already
-holds the annotation or the real resource — no surface this design polices reaches either — so both
-are named here rather than built against, and both were found by following the built output rather
-than by reading:
+holds the annotation or the real resource — no surface this design polices reaches either — so all
+three are named here rather than built against. The first two of those three were found by following
+the built output; the third by reading:
 
 1. **A handler subscribed *after* the detector that mutates an endpoint during `BeforeStartEvent`.**
    Nothing in Aspire 13.5.2 or in this package does this — the only in-event endpoint writer is
@@ -324,10 +324,13 @@ already accepted in-tree; what this document argues is its placement (§5.1) and
 
 ## 5. Fix shape
 
-One new file, two one-line call sites, no change to `Reachability`, to `GateEndpointCall`, to
-`ServiceResourceBuilder.WithAnnotation`, or to any public signature. `ServiceSourcesWarnings` does
-change: it gains the revert sentence this design needs and the immediate reporter that carries it
-(§5.4), and the remedy clause that sentence and the existing skip now share.
+Two new files, two one-line call sites, no change to `Reachability`, to `GateEndpointCall`, to
+`ServiceResourceBuilder.WithAnnotation`, or to any public signature. The second new file is
+`OutOfBandSourceAdvice`, which holds the clauses the messages share (§5.4). Four existing files
+change, all of them message text or the call sites above: `ServiceSourcesWarnings` gains the revert
+sentence this design needs and the immediate reporter that carries it (§5.4);
+`ServiceConfigurationExtensions`, `UrlSource` and `LocalProjectSource` take the shared clauses in
+place of their own drifted copies; `ResolvedService` carries the two call sites — five in all.
 
 ### 5.1 Decision 3 — where the snapshot lives
 
@@ -508,8 +511,9 @@ been put back; endpoint 'probe' was added after this service resolved and has be
 reference taken to it will not resolve. Its source is 'kubernetes' — it resolves to a 'kubectl
 port-forward' in front of an already-running service, so the configuration would reach kubectl rather
 than the service. An out-of-band service's endpoints are fixed by its source, so configure the service
-where it actually runs. To change what this endpoint points at, set 'kubernetes.port' or
-'kubernetes.scheme' for this service in servicesources.local.json. To make this AppHost's
+where it actually runs. To change what this endpoint points at, set 'kubernetes.port' for this
+service in servicesources.local.json. 'kubernetes.scheme' redirects it too, but renames the endpoint,
+which is named for its scheme. To make this AppHost's
 configuration and start ordering apply instead, give it a 'local' or 'container' source in
 servicesources.local.json — which works only where its 'servicesources.yaml' entry already declares
 that source: a 'repository' or 'repositoryRef' for 'local', a 'container' block for 'container'.
@@ -533,11 +537,12 @@ sentence is pre-existing, and four messages offered it in four spellings, so it 
 of them rather than corrected in one.
 
 **`OutOfBandSourceAdvice` is where it now lives** (`src/Aspire.Hosting.ServiceSources/`,
-`internal static`), holding the three clauses an out-of-band message is built from: `SourceDetail`
+`internal static`), holding the four clauses an out-of-band message is built from: `SourceDetail`
 (why the source runs out of band), `SwitchSource` (the conditional way back under this AppHost's
-control) and `RedirectTheEndpoint` (per source, for this message only). Four sites lead into
-`SwitchSource` in their own grammar: `SkipReason`, `RevertReason`,
-`ServiceConfigurationExtensions.Explain<T>`'s out-of-band arm, and `UrlSource`'s refusal of a
+control), and — for the revert message only — `RedirectTheEndpoint` (per source) and
+`TheEndpointsItHas`, which stand in for one another by what the reader was doing. Four sites lead
+into `SwitchSource` in their own grammar: `SkipReason`, `RevertReason`,
+`ServiceConfigurationExtensions.Explain<T>`'s `IsUnreachable<T>` arm, and `UrlSource`'s refusal of a
 container's reference to a `url` service. A clause rather than a whole sentence, because the lead-ins
 genuinely differ — two of the four embed it as the last item of an `or` list.
 
@@ -548,6 +553,19 @@ developer-config settings that *do* redirect it — `url.url`, or `kubernetes.po
 "what this endpoint points at" rather than as moving the endpoint: on `kubernetes` they choose what
 `kubectl port-forward` forwards to while the local port stays allocated, and promising the endpoint's
 own port would be the next dead end. Measured both ways round before the sentence was written.
+
+The clause also **names the rename**, because both sources name an endpoint after its scheme: a
+reader who follows the scheme half gets the redirect and loses the name their `GetEndpoint` matches,
+which is the failure this detector exists to report, reached by following its own advice. Measured on
+both sources — `kubernetes.scheme: http` against a catalog declaring `https` renames the endpoint
+`https` to `http`, and a scheme change inside `url.url` does the same.
+
+**And it is offered only to a reader whose endpoint survives.** No setting adds an endpoint to an
+out-of-band service — the C# overloads are gated and these levers only redirect the one the source
+registers — so for a revert whose entries are *all* additions the lever is advice that cannot be
+followed. That shape gets `TheEndpointsItHas` instead, naming what the service does have, which is
+the fact the reader lacks. Measured: following `url.url` after an added `probe` was removed produces
+one endpoint named for the URL's scheme and never a `probe`.
 
 **The service name is escaped and capped in all four**, not only in the two warnings. The name is a
 catalog key, so it is caller-controlled; escaping it in the warnings while interpolating it raw into

@@ -47,26 +47,30 @@ public class SkipRemedyTests
     private static IDistributedApplicationBuilder Builder() =>
         TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
 
+    private static IResourceBuilder<ServiceResource> Resolve(
+        IDistributedApplicationBuilder builder, string source, string serviceName) =>
+        string.Equals(source, "url", StringComparison.Ordinal)
+            ? new UrlSource().Resolve(
+                builder, serviceName, UrlOnly, new ServiceDeveloperConfig { Source = "url" })
+            : new KubernetesSource(new FixedPortAllocator()).Resolve(
+                builder, serviceName, KubernetesOnly,
+                new ServiceDeveloperConfig { Source = "kubernetes", Kubernetes = new() { Context = "dev" } });
+
     private static string SkipMessageFor(string source, string serviceName)
     {
         var builder = Builder();
 
-        if (string.Equals(source, "url", StringComparison.Ordinal))
-        {
-            new UrlSource()
-                .Resolve(builder, serviceName, UrlOnly, new ServiceDeveloperConfig { Source = "url" })
-                .WithEnvironment("A", "B");
-        }
-        else
-        {
-            new KubernetesSource(new FixedPortAllocator())
-                .Resolve(
-                    builder, serviceName, KubernetesOnly,
-                    new ServiceDeveloperConfig { Source = "kubernetes", Kubernetes = new() { Context = "dev" } })
-                .WithEnvironment("A", "B");
-        }
+        Resolve(builder, source, serviceName).WithEnvironment("A", "B");
 
         return Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+    }
+
+    private static string UnwrapMessageFor(string source, string serviceName)
+    {
+        var service = Resolve(Builder(), source, serviceName);
+
+        return Assert.Throws<ServiceSourcesConfigurationException>(
+            () => service.Unwrap<IResourceWithEnvironment>()).Message;
     }
 
     private static void AssertStatesThePrecondition(string message)
@@ -97,19 +101,7 @@ public class SkipRemedyTests
     [InlineData("kubernetes", SwitchableService)]
     public void UnwrapOnAnOutOfBandSource_StatesTheCatalogPrecondition(string source, string serviceName)
     {
-        var builder = Builder();
-
-        var service = string.Equals(source, "url", StringComparison.Ordinal)
-            ? new UrlSource().Resolve(
-                builder, serviceName, UrlOnly, new ServiceDeveloperConfig { Source = "url" })
-            : new KubernetesSource(new FixedPortAllocator()).Resolve(
-                builder, serviceName, KubernetesOnly,
-                new ServiceDeveloperConfig { Source = "kubernetes", Kubernetes = new() { Context = "dev" } });
-
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => service.Unwrap<IResourceWithEnvironment>());
-
-        AssertStatesThePrecondition(ex.Message);
+        AssertStatesThePrecondition(UnwrapMessageFor(source, serviceName));
     }
 
     /// <remarks>
@@ -180,14 +172,7 @@ public class SkipRemedyTests
     [Fact]
     public void AServiceNameShapedLikeASecondEntry_DoesNotForgeOneThroughUnwrap()
     {
-        var builder = Builder();
-        var service = new UrlSource().Resolve(
-            builder, HostileName, UrlOnly, new ServiceDeveloperConfig { Source = "url" });
-
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => service.Unwrap<IResourceWithEnvironment>());
-
-        AssertNoForgedEntry(ex.Message);
+        AssertNoForgedEntry(UnwrapMessageFor("url", HostileName));
     }
 
     /// <remarks>
@@ -223,14 +208,9 @@ public class SkipRemedyTests
     [Fact]
     public void AnOverlongServiceName_IsCappedInTheUnwrapException()
     {
-        var builder = Builder();
-        var service = new UrlSource().Resolve(
-            builder, new string('x', 300), UrlOnly, new ServiceDeveloperConfig { Source = "url" });
+        var message = UnwrapMessageFor("url", new string('x', 300));
 
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => service.Unwrap<IResourceWithEnvironment>());
-
-        Assert.Contains("…", ex.Message);
-        Assert.DoesNotContain(new string('x', 200), ex.Message);
+        Assert.Contains("…", message);
+        Assert.DoesNotContain(new string('x', 200), message);
     }
 }

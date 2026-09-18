@@ -1,8 +1,9 @@
 namespace Aspire.Hosting.ServiceSources;
 
 /// <summary>
-/// The two clauses every message about an out-of-band source is built from: why the source runs out
-/// of band, and the one way back under this AppHost's control.
+/// The clauses every message about an out-of-band source is built from: why the source runs out of
+/// band, the one way back under this AppHost's control, and what a reader whose endpoint write was
+/// undone can reach instead.
 /// </summary>
 /// <remarks>
 /// Shared across warnings and exceptions alike, because the offer is conditional and a copy that
@@ -62,15 +63,33 @@ internal static class OutOfBandSourceAdvice
     /// <c>kubectl port-forward</c> forwards to, while the local port stays allocated, so promising
     /// the endpoint's own port would be the next dead end.
     /// </para>
+    /// <para>
+    /// The rename is named because both sources name an endpoint after its scheme, so a reader who
+    /// follows the scheme half loses the name their <c>GetEndpoint</c> matches — the failure this
+    /// detector exists to report, arrived at by following its own advice.
+    /// </para>
     /// </remarks>
     internal static string RedirectTheEndpoint(string source) => source switch
     {
         "url" =>
             "To change what this endpoint points at, set 'url.url' for this service in " +
-            "servicesources.local.json.",
+            "servicesources.local.json. Changing its scheme renames the endpoint, which is named " +
+            "for it.",
         "kubernetes" =>
-            "To change what this endpoint points at, set 'kubernetes.port' or 'kubernetes.scheme' " +
-            "for this service in servicesources.local.json.",
+            "To change what this endpoint points at, set 'kubernetes.port' for this service in " +
+            "servicesources.local.json. 'kubernetes.scheme' redirects it too, but renames the " +
+            "endpoint, which is named for its scheme.",
         _ => "To change what this endpoint points at, configure its source in servicesources.local.json.",
     };
+
+    /// <summary>
+    /// What the service does have, for the reader whose <em>added</em> endpoint was removed.
+    /// </summary>
+    /// <remarks>
+    /// Stands in for <see cref="RedirectTheEndpoint"/> rather than joining it: no setting adds an
+    /// endpoint to an out-of-band service, so offering one to a reader who was adding is advice that
+    /// cannot be followed. What they lack is the name to reference instead.
+    /// </remarks>
+    internal static string TheEndpointsItHas(string quotedNames) =>
+        $"This service has the endpoints its source registers — {quotedNames} — and no others.";
 }

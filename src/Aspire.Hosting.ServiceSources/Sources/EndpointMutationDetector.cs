@@ -62,6 +62,7 @@ internal static class EndpointMutationDetector
         Dictionary<EndpointAnnotation, Fingerprint> snapshot)
     {
         var reverts = new List<string>();
+        var everyRevertWasAnAddition = true;
 
         // Materialised first: Annotations is the live collection this loop removes from.
         foreach (var endpoint in facade.Annotations.OfType<EndpointAnnotation>().ToArray())
@@ -72,6 +73,8 @@ internal static class EndpointMutationDetector
 
                 if (changed.Count > 0)
                 {
+                    everyRevertWasAnAddition = false;
+
                     reverts.Add(
                         $"endpoint '{Label(recorded.Name)}' was changed after this service resolved " +
                         $"({string.Join(", ", changed)}) and has been put back");
@@ -113,6 +116,8 @@ internal static class EndpointMutationDetector
                 real.Annotations.Add(endpoint);
             }
 
+            everyRevertWasAnAddition = false;
+
             reverts.Add(changed.Count == 0
                 ? $"endpoint '{Label(recorded.Name)}' was removed after this service resolved and has " +
                   "been put back"
@@ -121,7 +126,14 @@ internal static class EndpointMutationDetector
         }
 
         // ReporterFor, not For: subscribing during this event's own dispatch is inert.
-        ServiceSourcesWarnings.ReporterFor(builder).ReportRevertsNow(services, facade.Name, source, reverts);
+        ServiceSourcesWarnings.ReporterFor(builder).ReportRevertsNow(
+            services,
+            facade.Name,
+            source,
+            reverts,
+            everyRevertWasAnAddition,
+            // The snapshot, not the live collection: restored names, unreachable by a guest rename.
+            snapshot.Values.Select(recorded => recorded.Name).ToArray());
     }
 
     // Aspire matches an endpoint name case-insensitively, so a guard that matched any other way
