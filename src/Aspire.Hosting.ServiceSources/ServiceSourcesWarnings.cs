@@ -326,6 +326,9 @@ internal sealed class ServiceSourcesWarnings
         // The escape character first, or a name's own '\' before a quote un-escapes back to a live one.
         var literal = name?.Replace("\\", "\\\\", StringComparison.Ordinal);
 
+        // Bare must run between the two replaces above and below: its own \t/\n/\uXXXX escapes are
+        // synthesized after the doubling, so they are not themselves doubled, and are emitted before
+        // the quote-escape, which does not touch '\' and so leaves them alone.
         var escaped = ConfiguredValue.Bare(literal).Replace("'", "\\'", StringComparison.Ordinal);
 
         if (escaped.Length <= MaxLabelLength)
