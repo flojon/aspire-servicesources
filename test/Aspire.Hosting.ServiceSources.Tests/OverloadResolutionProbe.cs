@@ -51,4 +51,21 @@ public static class OverloadProbe
     public static IResourceBuilder<ServiceResource> CallWithEndpointCallback(
         IResourceBuilder<ServiceResource> service, string endpointName, Action<EndpointAnnotation> callback) =>
         service.WithEndpoint(endpointName, callback);
+
+    public static IResourceBuilder<ServiceResource> CallWithCommand(
+        IResourceBuilder<ServiceResource> service, string name, string displayName,
+        Func<ExecuteCommandContext, Task<ExecuteCommandResult>> executeCommand,
+        CommandOptions? commandOptions = null) =>
+        service.WithCommand(name, displayName, executeCommand, commandOptions);
+
+    // Aspire's pre-CommandOptions overload is itself [Obsolete], so whichever candidate wins here
+    // reports CS0618 -- the warning is about Aspire's deprecation, not about this probe.
+#pragma warning disable CS0618
+    public static IResourceBuilder<ServiceResource> CallWithCommandLegacy(
+        IResourceBuilder<ServiceResource> service, string name, string displayName,
+        Func<ExecuteCommandContext, Task<ExecuteCommandResult>> executeCommand,
+        string? displayDescription = null) =>
+        service.WithCommand(name, displayName, executeCommand, updateState: null,
+            displayDescription: displayDescription);
+#pragma warning restore CS0618
 }

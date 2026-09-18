@@ -229,4 +229,64 @@ internal sealed class ServiceResourceBuilder(
 
         return result;
     }
+
+    /// <summary>
+    /// Runs <paramref name="call"/> and drops from <c>real</c> every
+    /// <see cref="ResourceCommandAnnotation"/> the call removed from the facade alone. Aspire's
+    /// <c>WithCommand</c> supersedes a same-named command with a direct
+    /// <c>builder.Resource.Annotations.Remove(...)</c> rather than through
+    /// <see cref="WithAnnotation{TAnnotation}"/>, while the replacement it adds afterwards
+    /// dual-writes — so without this the real resource keeps both, and
+    /// <c>ResourceCommandService.ResolveCommandAnnotation</c>'s <c>SingleOrDefault</c> throws the
+    /// moment that command is invoked (#371).
+    /// </summary>
+    /// <remarks>
+    /// The mirror is taken <em>after</em> <paramref name="call"/> returns rather than by removing the
+    /// superseded annotation up front: Aspire validates its arguments before reaching the lookup, so
+    /// a rejected call must leave both collections exactly as it found them.
+    /// <para>
+    /// Unreachable sources return early, keeping the invariant that nothing mutates <c>real</c>
+    /// without consulting <see cref="Reachability"/>. It is not merely bookkeeping here: a
+    /// <c>kubernetes</c> facade inherits whatever annotations its real <c>kubectl port-forward</c>
+    /// already carried, and the add that follows the removal is skipped with a warning — so
+    /// mirroring would strip a real command and put nothing back.
+    /// </para>
+    /// <para>
+    /// Scoped to <see cref="ResourceCommandAnnotation"/>, and to instances the facade held before the
+    /// call, which is the whole of what <c>WithCommand</c> can drop. A general removal diff over
+    /// every annotation type is deliberately not built here.
+    /// </para>
+    /// </remarks>
+    internal static IResourceBuilder<ServiceResource> MirroringCommandRemovalsBy(
+        IResourceBuilder<ServiceResource> builder, Func<IResourceBuilder<ServiceResource>> call)
+    {
+        if (builder is not ServiceResourceBuilder serviceBuilder
+            || serviceBuilder.Real is not { } realBuilder
+            || Reachability.IsUnreachable(typeof(ResourceCommandAnnotation), serviceBuilder.Source))
+        {
+            return call();
+        }
+
+        var beforeOnFacade = serviceBuilder.Resource.Annotations.OfType<ResourceCommandAnnotation>().ToArray();
+
+        var result = call();
+
+        if (beforeOnFacade.Length == 0)
+        {
+            return result;
+        }
+
+        var stillOnFacade = new HashSet<IResourceAnnotation>(
+            serviceBuilder.Resource.Annotations, ReferenceEqualityComparer.Instance);
+
+        foreach (var annotation in beforeOnFacade)
+        {
+            if (!stillOnFacade.Contains(annotation))
+            {
+                realBuilder.Resource.Annotations.Remove(annotation);
+            }
+        }
+
+        return result;
+    }
 }
