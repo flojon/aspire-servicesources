@@ -1721,14 +1721,23 @@ public class LocalProjectSourceTests
     /// load, and still selectable as <c>local</c> by a developer's own config — the gap #362 closes.
     /// </summary>
     private static ServiceDefinition RepositorylessDefinition(
-        string project = "Orders.csproj", string kind = LocalKinds.Dotnet, bool container = false) =>
+        string project = "Orders.csproj", string kind = LocalKinds.Dotnet) =>
         new ServiceMetadata
         {
             Repository = "",
             Project = project,
             Kind = kind,
-            Url = container ? null : new UrlMetadata { Url = "https://orders.example.com" },
-            Container = container ? new ContainerMetadata { Image = "company/orders", Port = 8080 } : null,
+            Url = new UrlMetadata { Url = "https://orders.example.com" },
+        }.ToDefinition("servicesources.yaml", ServiceName, TestHelpers.EmptyRepositories);
+
+    /// <summary>The same shape declaring a <c>container</c> block instead of a <c>url</c> one.</summary>
+    private static ServiceDefinition RepositorylessContainerDefinition() =>
+        new ServiceMetadata
+        {
+            Repository = "",
+            Project = "",
+            Kind = LocalKinds.Dotnet,
+            Container = new ContainerMetadata { Image = "company/orders", Port = 8080 },
         }.ToDefinition("servicesources.yaml", ServiceName, TestHelpers.EmptyRepositories);
 
     private static IDistributedApplicationBuilder PlainBuilder() =>
@@ -1803,30 +1812,80 @@ public class LocalProjectSourceTests
     }
 
     [Fact]
-    public void Resolve_LocalOnContainerOnlyEntry_OffersContainerAndNotUrl()
+    public void Resolve_LocalOnContainerOnlyEntry_ReportsTheMissingRepositoryAndOffersOnlyContainer()
     {
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            new LocalProjectSource(new FakeGitClient()).Resolve(
-                PlainBuilder(), ServiceName, RepositorylessDefinition(project: "", container: true), DevConfig()));
-
-        Assert.Contains("'container'", ex.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain("'url'", ex.Message, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Resolve_LocalOnEntryDeclaringOnlyContainer_ReportsTheMissingRepositoryNotTheMissingProject()
-    {
-        // A container-only entry has no 'project' either, so this pins which of the two verdicts a
-        // developer gets: the one that names what is actually wrong with the source they chose.
+        // A container-only entry has no 'project' either, so this also pins which of the two verdicts
+        // a developer gets: the one that names what is actually wrong with the source they chose.
         var gitClient = new FakeGitClient();
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             new LocalProjectSource(gitClient).Resolve(
-                PlainBuilder(), ServiceName, RepositorylessDefinition(project: "", container: true), DevConfig()));
+                PlainBuilder(), ServiceName, RepositorylessContainerDefinition(), DevConfig()));
 
         Assert.Contains($"Service '{ServiceName}'", ex.Message);
         Assert.Contains("'repository'", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("'project' is required", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("'container'", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("'url'", ex.Message, StringComparison.Ordinal);
+        Assert.False(gitClient.EnsureAvailableCalled);
+    }
+
+    /// <summary>
+    /// A code-declared catalog has no yaml to send the reader to, so the remedy must speak builder
+    /// calls. Asserted as "names no yaml vocabulary" rather than against the exact sentence, so a
+    /// reworded remedy still fails only if it reintroduces the wrong register.
+    /// </summary>
+    [Fact]
+    public void Resolve_LocalOnCodeDeclaredEntry_NamesNoYamlVocabulary()
+    {
+        var gitClient = new FakeGitClient();
+
+        var definition = new ServiceDefinition
+        {
+            Repository = new RepositoryDefinition { Url = "", CheckoutName = ServiceName },
+            Project = "Orders.csproj",
+            Kind = LocalKinds.Dotnet,
+            Url = new UrlMetadata { Url = "https://orders.example.com" },
+            Origin = CatalogOrigin.Code,
+        };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(gitClient).Resolve(PlainBuilder(), ServiceName, definition, DevConfig()));
+
+        Assert.Contains($"Service '{ServiceName}'", ex.Message);
+        Assert.DoesNotContain("'repository'", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("repositoryRef", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("servicesources.yaml", ex.Message, StringComparison.Ordinal);
+        Assert.False(gitClient.EnsureAvailableCalled);
+    }
+
+    /// <summary>
+    /// A grouped service declares a <c>repositoryRef</c>, so what is missing is the url on the
+    /// repository it names — not a repository on its own entry. Asserted as "sends the reader to the
+    /// shared entry, by name" rather than against the exact sentence.
+    /// </summary>
+    [Fact]
+    public void Resolve_LocalOnRepositoryRefWithNoUrl_SendsTheReaderToTheSharedRepository()
+    {
+        const string SharedName = "platform";
+
+        var gitClient = new FakeGitClient();
+
+        var definition = new ServiceDefinition
+        {
+            Repository = new RepositoryDefinition { Url = "", CheckoutName = SharedName },
+            Project = "Orders.csproj",
+            Kind = LocalKinds.Dotnet,
+            Origin = CatalogOrigin.FromYaml("servicesources.yaml"),
+        };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(gitClient).Resolve(PlainBuilder(), ServiceName, definition, DevConfig()));
+
+        Assert.Contains($"'{SharedName}'", ex.Message, StringComparison.Ordinal);
+
+        // It declares no other source block, so there is no switch to offer and none is claimed.
+        Assert.DoesNotContain("which it does declare", ex.Message, StringComparison.Ordinal);
         Assert.False(gitClient.EnsureAvailableCalled);
     }
 

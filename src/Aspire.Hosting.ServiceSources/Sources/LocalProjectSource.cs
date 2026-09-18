@@ -296,7 +296,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         // A grouped service declares a repositoryRef and no repository of its own, so telling the
         // reader their entry declares neither is false and sends them to the wrong entry: what is
         // missing is the url on the repository they named. Same test as the checkout label above.
-        if (!string.Equals(definition.Repository.CheckoutName, serviceName, StringComparison.Ordinal))
+        if (definition.Repository.CheckoutName != serviceName)
         {
             return isCode
                 ? $"give the shared repository '{definition.Repository.CheckoutName}' a url where it is declared"
@@ -309,9 +309,9 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     }
 
     /// <summary>
-    /// The sources this entry could be switched to — the blocks it actually declares, which is
-    /// never all three and is frequently one. Empty is possible: a repositoryRef onto a url-less
-    /// repositories entry reaches here declaring nothing else, and is offered no switch at all.
+    /// The sources this entry could be switched to — the blocks it actually declares. Empty is
+    /// possible: a repositoryRef onto a url-less repositories entry reaches here declaring nothing
+    /// else, and is offered no switch at all.
     /// </summary>
     private static List<string> DeclaredAlternativeSources(ServiceDefinition definition)
     {
