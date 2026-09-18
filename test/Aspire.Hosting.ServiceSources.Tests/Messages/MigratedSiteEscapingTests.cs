@@ -30,4 +30,40 @@ public class MigratedSiteEscapingTests
     public void For_AcceptsAMessageWithNoHoles() =>
         Assert.Equal("nothing interpolated here",
             ServiceSourcesConfigurationException.For($"nothing interpolated here").Message);
+
+    [Fact]
+    public void Describe_CannotForgeACausedByLineFromAnInnerMessage()
+    {
+        // Environment.NewLine, not "\n": Describe writes the platform separator, so a payload hard-coding
+        // "\n" would already be harmless on Windows and the test would pass before the fix.
+        var forged = $"authentication failed{Environment.NewLine}  caused by: nothing is wrong, carry on";
+        var exception = ServiceSourcesConfigurationException.For(
+            $"Service '{new Name("orders")}' failed.", new InvalidOperationException(forged));
+
+        var described = exception.Describe(fullDetail: false);
+
+        // The forged text may survive as characters; what it must not do is start a line. Splitting on
+        // the separator + prefix counts real cause lines only, so exactly one wrapped cause means two parts.
+        Assert.Equal(2, described.Split(Environment.NewLine + "  caused by: ").Length);
+        Assert.Contains("\\n  caused by: nothing is wrong", described, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Describe_KeepsTheCausesWordingIntactApartFromLineBreaks()
+    {
+        var inner = new InvalidOperationException("could not read 'origin/main'");
+        var exception = ServiceSourcesConfigurationException.For($"Service '{new Name("orders")}' failed.", inner);
+
+        Assert.Contains("  caused by: could not read 'origin/main'",
+            exception.Describe(fullDetail: false), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Describe_DoesNotCapALongCause()
+    {
+        var inner = new InvalidOperationException(new string('x', 400));
+        var exception = ServiceSourcesConfigurationException.For($"Service '{new Name("orders")}' failed.", inner);
+
+        Assert.Contains(new string('x', 400), exception.Describe(fullDetail: false), StringComparison.Ordinal);
+    }
 }
