@@ -93,9 +93,8 @@ public class CommandDualWriteTests
         Assert.Empty(ServiceSourcesWarnings.For(builder).Messages);
     }
 
-    // The plain WithCommand(name, displayName, execute) an AppHost writes, with no disambiguating
-    // fourth argument. Its value is mostly that OverloadProbe compiles at all; the assertions below
-    // then confirm the winning candidate is the shadow rather than Aspire's generic.
+    // Confirms the winning candidate is the shadow, not Aspire's generic. That the call compiles at
+    // all is the other half of the guard, documented on OverloadProbe.CallWithCommandNoOptions.
     [Fact]
     public void SecondWithCommand_WithoutCommandOptions_BindsTheShadowAndLeavesOneCommandOnTheRealResource()
     {

@@ -274,8 +274,9 @@ internal sealed class ServiceResourceBuilder(
 
         var result = call();
 
-        var stillOnFacade = new HashSet<IResourceAnnotation>(
-            serviceBuilder.Resource.Annotations.OfType<ResourceCommandAnnotation>(), ReferenceEqualityComparer.Instance);
+        var stillOnFacade = new HashSet<ResourceCommandAnnotation>(
+            serviceBuilder.Resource.Annotations.OfType<ResourceCommandAnnotation>(),
+            ReferenceEqualityComparer.Instance);
 
         foreach (var annotation in beforeOnFacade)
         {

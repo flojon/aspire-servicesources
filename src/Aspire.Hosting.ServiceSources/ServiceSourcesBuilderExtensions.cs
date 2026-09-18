@@ -450,9 +450,8 @@ public static class ServiceSourcesBuilderExtensions
     /// mirror runs after the delegated call (#371). Same shadowing discipline as the endpoint
     /// overloads above.
     /// </summary>
-    // Carried over from Aspire's own overload, not decoration: without it this and the obsolete
-    // overload below are equally applicable to `WithCommand(name, displayName, execute)` and that
-    // call stops compiling (CS0121).
+    // Without it this and the obsolete overload below are equally applicable to
+    // WithCommand(name, displayName, execute), and that call stops compiling (CS0121).
     [OverloadResolutionPriority(1)]
     [AspireExport]
     public static IResourceBuilder<ServiceResource> WithCommand(

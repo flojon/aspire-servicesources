@@ -1826,9 +1826,10 @@ the port-forward's builder rather than throwing.
 ### From a guest-language AppHost
 
 `ServiceResource`'s declared shape is what Aspire's Type System reads to generate a handle, so its
-own native methods — `withEnvironment`, `withReference`, `withArgs`,
-`withEndpoint`, `withHttpEndpoint`/`withHttpsEndpoint`, `withCommand`, `waitFor`,
-`waitForCompletion` — project onto the generated `addService(...)` handle exactly as they do in C#:
+native vocabulary — `withEnvironment`, `withReference`, `withArgs`, `withEndpoint`,
+`withHttpEndpoint`/`withHttpsEndpoint`, `withCommand`, `waitFor`, `waitForCompletion`, whether
+Aspire's own or shadowed in this package — projects onto the generated `addService(...)` handle
+exactly as it does in C#:
 
 ```typescript
 const payments = await builder
