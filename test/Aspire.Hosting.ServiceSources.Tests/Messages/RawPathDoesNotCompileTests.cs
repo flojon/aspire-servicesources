@@ -113,9 +113,9 @@ public class RawPathDoesNotCompileTests
         AssertRefused("""ServiceSourcesConfigurationException.For($"a{Raw.Join(", ", new[] { s })}b")""", "CS1503");
 
     // A method group has no call site for CA1857 to inspect, so both shapes below carried a runtime
-    // string past [ConstantExpected] until Literal and Join took a parameter no delegate supplies.
-    // The second is the one that mattered: it is Select(Raw.Escaped), already written in this
-    // package, with one identifier changed. Unlike CA1857, this compilation can see them.
+    // string past [ConstantExpected] until Literal and Join took a trailing optional parameter. The
+    // second is the one that mattered: it is Select(Raw.Escaped), already written in this package,
+    // with one identifier changed. Unlike CA1857, this compilation can see them.
 
     [Fact]
     public void RawLiteral_CannotBeMethodGroupConverted() =>
@@ -124,6 +124,16 @@ public class RawPathDoesNotCompileTests
     [Fact]
     public void RawLiteral_CannotBeLinqProjected() =>
         AssertRefused("""ServiceSourcesConfigurationException.For($"a{Raw.Join(", ", new[] { s }.Select(Raw.Literal))}b")""", "CS0411");
+
+    // Known open, pinned so that a future tightening has a red/green signal instead of a guess. The
+    // trailing parameter closes single-argument delegate conversions only, and Enumerable.Zip takes a
+    // two-argument one whose shape Literal now matches exactly. A ref struct would not close it
+    // either: Func declares `allows ref struct` on net9 and later, so it would bite on net8.0 alone.
+    // This shape costs an author a token that has no reason to exist, which is why it is tolerated;
+    // if it ever starts being refused, this assertion failing is the intended signal.
+    [Fact]
+    public void RawLiteral_IsStillReachableThroughATwoArgumentZip() =>
+        AssertCompiles("""ServiceSourcesConfigurationException.For($"a{new[] { s }.Zip(new[] { default(Raw.ConstantOnly) }, Raw.Literal).First()}b")""");
 
     // The two [ConstantExpected] parameters are NOT enforced by the compiler — measured, against the
     // prediction that they raise CS9244. Their only enforcement is analyzer CA1857, which this

@@ -81,10 +81,10 @@ public class NameTests
         Assert.EndsWith("n…", rendered, StringComparison.Ordinal);
     }
 
-    // A lone high surrogate is not a pair, and it is not invisible either, so it reaches the walk
-    // verbatim. Stepping over the character after it desynchronises the walk from the escape units
-    // by one, and the run length decides where that lands - so the whole neighbourhood of the cap
-    // is swept rather than one value. Both assertions above held at 63 while this was broken.
+    // A lone high surrogate no longer reaches the walk verbatim: Bare spells it out upstream, so it
+    // arrives as the six characters of \ud83d. What this still sweeps is the cap neighbourhood - the
+    // run length decides where a desynchronised walk would land, so the whole range is swept rather
+    // than one value. Both assertions above held at 63 while CutAt was broken.
     [Theory]
     [InlineData(60)]
     [InlineData(61)]
@@ -113,6 +113,25 @@ public class NameTests
         Assert.StartsWith(body, escaped, StringComparison.Ordinal);
         Assert.NotEqual('\\', body[^1]);
         Assert.False(char.IsHighSurrogate(body[^1]) && char.IsLowSurrogate(escaped[body.Length]));
+    }
+
+    // An unpaired surrogate is category Surrogate, not Format, so IsInvisible says no and it reached
+    // the reader raw - where UTF-8 collapses every one of them to the same U+FFFD and two different
+    // names render identically. Escape rather than Render, so the cap plays no part in what is asserted.
+    [Fact]
+    public void LoneSurrogate_IsSpelledOutRatherThanReachingTheReaderRaw()
+    {
+        const char loneHigh = (char)0xD83D;
+        const char loneLow = (char)0xDE00;
+        var pair = char.ConvertFromUtf32(0x1F600);
+
+        Assert.Equal("orders\\ud83d", Name.Escape("orders" + loneHigh));
+        Assert.Equal("\\ude00orders", Name.Escape(loneLow + "orders"));
+        Assert.Equal("\\ud83d\\ud83d", Name.Escape(new string(loneHigh, 2)));
+
+        // The valid pair after a lone one must still render as itself: a printable pair is not an
+        // invisible, and the lone surrogate before it must not consume its high half.
+        Assert.Equal("\\ud83d" + pair, Name.Escape(loneHigh + pair));
     }
 
     // Pinned against what Label returned before the rewrite, so the 12 existing Label call sites

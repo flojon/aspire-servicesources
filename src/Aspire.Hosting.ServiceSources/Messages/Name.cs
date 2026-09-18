@@ -63,9 +63,10 @@ internal readonly struct Name
 
             if (escaped[i] != '\\')
             {
-                // The low surrogate has to be checked, not assumed: a lone high surrogate is not a
-                // pair, and stepping over the character after it desynchronises the walk from the
-                // escape units, which is how a cut lands on half of one.
+                // The low surrogate has to be checked, not assumed: stepping over the character
+                // after a high one without checking desynchronises the walk from the escape units,
+                // which is how a cut lands on half of one. Bare now spells out an unpaired surrogate
+                // upstream, so what reaches here is pairs only - this guards that, not lone halves.
                 i += char.IsSurrogatePair(escaped, i) ? 2 : 1;
                 continue;
             }

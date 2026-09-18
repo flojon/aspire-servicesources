@@ -79,13 +79,20 @@ internal readonly struct Raw
     /// <summary>Empty rather than null: <c>default(Raw)</c> must render, not throw.</summary>
     public override string ToString() => text ?? string.Empty;
 
-    /// <summary>A parameter no delegate shape supplies.</summary>
+    /// <summary>A parameter no single-argument delegate shape supplies.</summary>
     /// <remarks>
     /// <c>[ConstantExpected]</c> is checked by CA1857 at a call site, and a method group has no call
     /// site to check: <c>names.Select(Raw.Literal)</c> laundered a runtime string straight through,
-    /// one token from the <c>Select(Raw.Escaped)</c> this package already writes. An optional
-    /// parameter of a type nothing else names makes that conversion a compile error instead — which
-    /// also holds in the two workflows that build without <c>-warnaserror</c>.
+    /// one token from the <c>Select(Raw.Escaped)</c> this package already writes. A trailing optional
+    /// parameter makes that conversion <c>CS0123</c>/<c>CS0411</c>, which is an error in every
+    /// workflow — including the two that build without <c>-warnaserror</c>.
+    /// <para>
+    /// What it does not close, measured rather than assumed: a two-argument delegate that names this
+    /// type explicitly still binds, and <c>Enumerable.Zip</c> supplies exactly that shape. A
+    /// <c>ref struct</c> would not fix it — <c>Func</c> declares <c>allows ref struct</c> on net9 and
+    /// later, so it closes Zip on net8.0 alone. Every residual shape costs an author a token that has
+    /// no reason to exist; the realistic slip is the single-argument projection, and that is refused.
+    /// </para>
     /// </remarks>
     internal readonly struct ConstantOnly;
 }
