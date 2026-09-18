@@ -1086,4 +1086,52 @@ public class LocalCheckoutPrefetchTests
         Assert.Equal(["Receiving objects:  10% (1/10)"], await DrainProgressAsync(prefetch, "orders"));
         Assert.Equal(["Receiving objects:  20% (2/10)"], await DrainProgressAsync(prefetch, "billing"));
     }
+
+    /// <summary>
+    /// The guard in <c>LocalProjectSource.Resolve</c> refuses a repositoryless <c>"local"</c>
+    /// service on the thread that asked for it, but the prefetch sweeps the whole developer config
+    /// — so resolving a well-formed sibling used to hand the git client an empty url for a service
+    /// nobody had mentioned (#362). The failure was silent: speculative, stored, and only logged if
+    /// the service was never added.
+    /// </summary>
+    [Fact]
+    public void FirstAddService_RepositorylessLocalSibling_IsNotSpeculativelyCloned()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+
+        // "billing" declares a url: block and no repository: — the shape #318's catalog check
+        // deliberately exempts at load, which is exactly why it survives to here.
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"),
+            """
+            services:
+              orders:
+                repository: https://example.com/orders.git
+                project: Service.csproj
+              billing:
+                project: Service.csproj
+                url:
+                  url: https://billing.example.com
+
+            """);
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"),
+            """{ "services": { "orders": { "source": "local" }, "billing": { "source": "local" } } }""");
+
+        var builder = TestHelpers.CreateBuilder(dir);
+        var git = new FakeGitClient();
+
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
+
+        // Only the sibling that has something to clone. An empty url reaching IGitClient at all is
+        // the ticket's symptom, whichever route carries it.
+        Assert.Equal(["https://example.com/orders.git"], git.Cloned);
+
+        // Skipped, not started-and-failed. The invariant inside PrepareRepoRoot would also keep the
+        // blank url away from git, but only by throwing inside a speculative task whose failure is
+        // stored and reported against a service nobody mentioned — so the assertion above alone no
+        // longer tells the two apart.
+        var prefetch = LocalCheckoutPrefetch.For(builder, git);
+
+        Assert.Empty(prefetch.FailedUnusedCheckoutMessages);
+        Assert.Null(prefetch.UnusedCheckoutsMessage);
+    }
 }

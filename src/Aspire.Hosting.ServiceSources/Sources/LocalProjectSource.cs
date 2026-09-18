@@ -22,6 +22,10 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
         ServiceDeveloperConfig config, RepositoryDeveloperConfig? repositoryConfig = null)
     {
+        // Ahead of everything below, EnsureAvailable included, because it is the one check that can
+        // say this service has nothing to clone at all — and a cold clone is what the answer saves.
+        RequireRepositoryToCheckOut(serviceName, definition, config);
+
         // Before any network work: a machine without a usable git can't clone anything, and
         // finding that out once here beats finding it out as an identical clone failure on every
         // service the catalog holds. Cheap after the first call, which is why it sits on the hot
@@ -231,6 +235,81 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         ValidateWithKindHandler(serviceName, definition, repoRoot, handler!);
 
         return InvokeKindHandler(builder, serviceName, definition, repoRoot, handler!);
+    }
+
+    /// <summary>
+    /// Refuses a <c>"local"</c> service whose catalog entry declares no repository to clone.
+    /// </summary>
+    /// <remarks>
+    /// The runtime half of #318's catalog-load check. That one exempts an entry declaring only
+    /// <c>url</c>/<c>container</c>/<c>kubernetes</c>, since those are legitimate shapes — but a
+    /// developer's own <c>source</c> is chosen independently of which blocks the entry populates, so
+    /// selecting <c>local</c> for one of them used to hand the git client an empty url. Reported
+    /// here rather than at config resolution because <c>"local"</c> is the only source the missing
+    /// <c>repository</c> makes impossible, which is also why the message names the source.
+    /// <para>
+    /// A <c>local.path</c> override is exempt: it points at a checkout the developer already has, so
+    /// nothing is ever cloned and the absent <c>repository</c> costs that configuration nothing.
+    /// </para>
+    /// <para>
+    /// The message offers only remedies this guard itself can verify, and says nothing about the
+    /// other sources. Switching to <c>url</c>, <c>container</c> or <c>kubernetes</c> works only if
+    /// that source's own preconditions hold — a non-blank url, an image, a service plus a
+    /// developer-config-only context — none of which is readable from here, and each of which grows
+    /// with its own source. Offering one unchecked is how a reader ends up at a second, different
+    /// failure; declaring the block is not enough, since a <c>container:</c> with no <c>image:</c>
+    /// loads perfectly well. So the fault is stated, the key that chose the source is named in the
+    /// register any layer can be found from, and the only remedies offered are the two that need
+    /// nothing from another source: declaring a repository, and the exemption checked above.
+    /// </para>
+    /// </remarks>
+    private static void RequireRepositoryToCheckOut(
+        string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
+    {
+        if (!LocalGitCheckout.IsManagedCheckout(config)
+            || LocalGitCheckout.HasRepositoryToClone(definition))
+        {
+            return;
+        }
+
+        var serviceKey = $"{DeveloperConfiguration.ServicesKey}:{serviceName}";
+        var sourceKey = $"{serviceKey}:source";
+
+        throw new ServiceSourcesConfigurationException(
+            $"Service '{serviceName}' source is 'local' but {definition.Origin.Describe()} gives it no "
+            + $"repository to clone. Either {DeclareRepositoryRemedy(serviceName, definition)}, or set "
+            + $"'{serviceKey}:local:path' to a checkout you already have on disk, which needs no "
+            + $"repository. The key is '{sourceKey}', which any configuration layer can set: "
+            + $"{DeveloperConfiguration.FileName}, appsettings, user secrets, the environment variable "
+            + $"{sourceKey.Replace(":", "__", StringComparison.Ordinal)}, or the command line.");
+    }
+
+    /// <summary>
+    /// How to give this service a repository, in the terms of the catalog that declared it — yaml
+    /// property names for a yaml entry, builder calls for a code-declared one.
+    /// </summary>
+    private static string DeclareRepositoryRemedy(string serviceName, ServiceDefinition definition)
+    {
+        var isCode = definition.Origin.Kind == CatalogOriginKind.Code;
+
+        // A grouped service declares a repositoryRef and no repository of its own, so telling the
+        // reader their entry declares neither is false and sends them to the wrong entry: what is
+        // missing is the url on the repository they named. Same test as the checkout label above.
+        if (definition.Repository.CheckoutName != serviceName)
+        {
+            return isCode
+                ? $"give the shared repository '{definition.Repository.CheckoutName}' a url where it is declared"
+                : $"give the 'repositories' entry '{definition.Repository.CheckoutName}' a 'repository' url";
+        }
+
+        // "give ... a url" rather than "add a 'repository'": the predicate above is
+        // IsNullOrWhiteSpace, so an entry that already carries a blank 'repository:' scalar reaches
+        // here, and telling its author to add the key they can see would be advice they cannot take.
+        // No repositoryRef is offered for the same reason: the loader refuses one on any entry
+        // carrying a 'repository' key at all — blank included — which is not readable from here.
+        return isCode
+            ? "declare it with WithRepository(...) or WithSharedRepository(...)"
+            : "give its catalog entry a 'repository' url";
     }
 
     /// <summary>

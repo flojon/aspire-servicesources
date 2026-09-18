@@ -292,6 +292,54 @@ public class AddServiceTests
     }
 
     [Fact]
+    public void AddService_UrlOnlyEntryUnderItsOwnSource_LoadsAndResolves()
+    {
+        // The shape #318's catalog check exempts and #362's guard must leave alone: no 'repository'
+        // at all, resolved under the source the entry does declare.
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                url:
+                  url: https://orders.example.com
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "url" } } }
+            """);
+
+        var service = CreateBuilder(appHostDir).AddService("orders");
+
+        Assert.Equal("https://orders.example.com:443", service.GetEndpoint("https").Url);
+    }
+
+    [Fact]
+    public void AddService_UrlOnlyEntrySelectedAsLocal_ReportsTheMissingRepositoryNamingTheCatalogThatDeclaresIt()
+    {
+        // The end-to-end shape of #362: the catalog declares a source that is not a repository, and
+        // servicesources.local.json picks 'local' for it anyway.
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                project: Orders.csproj
+                url:
+                  url: https://orders.example.com
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "local" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
+
+        Assert.Contains("Service 'orders'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("'repository'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("servicesources.yaml", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("servicesources.local.json", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AddService_UrlSourceLocalOverride_TakesPrecedenceOverCatalogUrl()
     {
         var appHostDir = TempDirectories.CreateSubdirectory().FullName;

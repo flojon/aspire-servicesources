@@ -174,6 +174,29 @@ internal static class LocalGitCheckout
     public static bool IsManagedCheckout(ServiceDeveloperConfig config) => config.Local.Path is null;
 
     /// <summary>
+    /// Whether this service names a repository there is anything to clone from at all. The other
+    /// half of the same question <see cref="IsManagedCheckout"/> answers from the developer's side:
+    /// that one says whether we would do the cloning, this one whether there is a repository to
+    /// clone.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every service carries a <see cref="Config.Catalog.RepositoryDefinition"/> whatever its source
+    /// — one is minted unconditionally — so a url-, container- or kubernetes-sourced entry, which
+    /// never writes <c>repository:</c>, holds one whose <see cref="Config.Catalog.RepositoryDefinition.Url"/>
+    /// is <c>""</c>. A blank url is therefore the normal shape of "no repository", not a malformed
+    /// one, and every decision built on it has to spell the emptiness test the same way or the
+    /// callers disagree about the same service.
+    /// </para>
+    /// <para>
+    /// Whitespace counts as blank: a url of spaces is nothing anyone can clone, and
+    /// <c>IsNullOrEmpty</c> would call "   " a repository and pass it to the git client.
+    /// </para>
+    /// </remarks>
+    public static bool HasRepositoryToClone(ServiceDefinition definition) =>
+        !string.IsNullOrWhiteSpace(definition.Repository.Url);
+
+    /// <summary>
     /// Whether a clone still has to happen before this checkout exists: the package manages the
     /// directory (<see cref="IsManagedCheckout"/>) and there is nothing at
     /// <see cref="ManagedRepoRoot"/> yet. Configuration plus one <c>Directory.Exists</c>, so it is
@@ -342,6 +365,22 @@ internal static class LocalGitCheckout
         {
             // A working tree from an earlier run, or a developer's own. Untouched here.
             return new PreparedCheckout(repoRoot, NeedsReconciliation: true);
+        }
+
+        // Everything above resolves a directory; from here on a clone happens, and a clone needs a
+        // repository. Checked here rather than only at the callers because this is the one place all
+        // of them pass through: LocalProjectSource refuses this shape early, with the message a
+        // developer can act on, and LocalCheckoutPrefetch reached here around that guard until #362
+        // gave it a filter of its own. A third caller would have to re-derive the same rule, so it
+        // is stated once where the clone is decided. Not a substitute for either — by the time a
+        // service gets here nobody can say which caller it arrived from, so this names whatever the
+        // clone would have been for and stops.
+        if (!HasRepositoryToClone(definition))
+        {
+            throw new ServiceSourcesConfigurationException(
+                $"{label}: there is no checkout at '{repoRoot}' and no repository url to clone one "
+                + "from. A checkout can only be created where the catalog names a repository to "
+                + "clone from.");
         }
 
         // A clone that loses the race to a concurrent AppHost leaves us using *their*

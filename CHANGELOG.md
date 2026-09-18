@@ -246,6 +246,35 @@ never existed. Check the tag of the last release before adding one.
   rejects an entirely empty service entry. A service that legitimately has no local checkout —
   one sourced only from `url:`/`container:`/`kubernetes:` — is unaffected.
 
+- **`source: local` on a service that declares no repository is now refused instead of cloning an
+  empty url** ([#362]). [#318]'s check runs at catalog load and deliberately exempts an entry
+  declaring only `url:`/`container:`/`kubernetes:`, because those are legitimate shapes. But a
+  developer's `source` is chosen independently of which blocks the entry populates, so picking
+  `local` for one of them reached the git client with a blank repository url anyway — the exact
+  symptom [#318] fixed, by another route. Every non-`dotnet` kind was exposed, and so was a
+  `dotnet` service that declared `project:` alongside its `url:` block. The `local` source now
+  fails with a `ServiceSourcesConfigurationException` naming the service, the catalog that declares
+  no repository for it, and the configuration key that chose the source — before any clone or
+  network work, so a cold checkout is never paid for to reach the verdict. It says how to give the
+  service a repository, in the terms of the catalog that declared it — yaml properties for a yaml
+  entry, builder calls for a code-declared one — and names the `source` key in the register this
+  package uses wherever a value can come from any configuration layer, so a `source` set by the
+  environment or by a catalog `defaultSource` does not send its reader to edit a file that holds
+  nothing. It deliberately does **not** suggest switching the source to `url`, `container` or
+  `kubernetes`: whether any of those would resolve depends on that source's own preconditions, which
+  this check does not read, so an entry merely declaring the block is not enough to make the advice
+  true. The speculative prefetch skips such a service too, so resolving a well-formed sibling no
+  longer starts a background clone of a blank url for one the AppHost never added. A `local.path`
+  override is unaffected: it points at a checkout that already exists, so nothing is cloned and the
+  absent `repository` costs it nothing.
+
+  "Declares no repository" now includes a `repository:` whose value is only whitespace, which every
+  decision built on the repository url spells the same way. Two consequences a yaml catalog can see:
+  a service whose `repository:` holds `"   "` is refused by the check above, where it previously
+  reached the git client and failed as a clone of `'   '`; and two ungrouped `local` services
+  sharing such a value no longer raise the "declare the same repository, but none of them are
+  grouped" warning, since no checkout would ever be cloned for either of them.
+
 - **The reserved-kind-name check is scoped to the service that actually names the kind from yaml**
   ([#133], [#317]). `url`, `container`, `kubernetes`, `repository`, `project`, `defaultRef` and
   `kind` collide with a well-known `ServiceMetadata` yaml property, so a kind by one of those names
@@ -1749,6 +1778,7 @@ Targets `net10.0`.
 [#345]: https://github.com/flojon/aspire-servicesources/issues/345
 [#350]: https://github.com/flojon/aspire-servicesources/issues/350
 [#359]: https://github.com/flojon/aspire-servicesources/issues/359
+[#362]: https://github.com/flojon/aspire-servicesources/issues/362
 [#372]: https://github.com/flojon/aspire-servicesources/issues/372
 [#375]: https://github.com/flojon/aspire-servicesources/issues/375
 
