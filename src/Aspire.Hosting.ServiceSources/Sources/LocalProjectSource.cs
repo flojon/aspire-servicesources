@@ -477,7 +477,8 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}': 'project' is required for a 'local' service of kind 'dotnet'. It names "
                 + "the project file to run, relative to the service's checkout — for example "
-                + "'src/Orders.Api/Orders.Api.csproj'.");
+                + "'src/Orders.Api/Orders.Api.csproj'. It belongs on the service's 'servicesources.yaml' entry "
+                + "beside 'repository'; 'servicesources.local.json' chooses the source and carries no 'project'.");
         }
 
         if (CheckoutRelativePath.IsAbsolute(project))

@@ -251,7 +251,10 @@ remove `WaitAnnotation`s only.
 
 ### 3.4 What remains uncovered
 
-Three residuals, none a known gap, all bounded:
+Five residuals, none a known gap, all bounded. The last two are reachable only by code that already
+holds the annotation or the real resource — no surface this design polices reaches either — so both
+are named here rather than built against, and both were found by following the built output rather
+than by reading:
 
 1. **A handler subscribed *after* the detector that mutates an endpoint during `BeforeStartEvent`.**
    Nothing in Aspire 13.5.2 or in this package does this — the only in-event endpoint writer is
@@ -269,6 +272,20 @@ Three residuals, none a known gap, all bounded:
    `BeforeStartEvent` at composition time and be dispatched before the detector. Not enumerable
    here, because the set is open; named so that a future report of a reverted-legitimate-change is
    diagnosed against this list rather than from scratch.
+4. **`AllocatedEndpoint` is outside the fingerprint.** For a `url` service `UrlSource` sets it eagerly,
+   and it is the value consumers actually resolve — so code that rewrote it *and* a watched field
+   would see the watched field restored under a message saying the endpoint "has been put back" while
+   the allocated value still pointed elsewhere. Deliberately not added: `EndpointUpdateContext` does
+   not expose it (reflected, not assumed), the C# overload that would hand it over is shadowed and
+   gated, and it is a reference-compared object whose re-materialisation by Aspire would cost the
+   no-false-positives guarantee of §3.3 — which is load-bearing in a way this residual is not.
+5. **The re-add's `real`-side guard can decline.** If `real` already holds a *different*
+   `EndpointAnnotation` under the recorded name, the original is restored onto the facade and not onto
+   `real`, under the same "has been put back" line. The guard is there because Aspire resolves an
+   endpoint by name with `SingleOrDefault`, which throws on a duplicate, so declining is the safe
+   half of the trade. Unreachable through the policed surfaces — the guest holds only the facade,
+   Aspire's create branch adds to the facade, and the removal loop mirrors onto `real` — so it needs
+   code that already has `real` in hand.
 
 ## 4. Decision 6 — answering #352's design §2.5 head-on
 
@@ -294,7 +311,9 @@ already accepted in-tree; what this document argues is its placement (§5.1) and
 ## 5. Fix shape
 
 One new file, two one-line call sites, no change to `Reachability`, to `GateEndpointCall`, to
-`ServiceResourceBuilder.WithAnnotation`, to `ServiceSourcesWarnings`, or to any public signature.
+`ServiceResourceBuilder.WithAnnotation`, or to any public signature. `ServiceSourcesWarnings` does
+change: it gains the revert sentence this design needs and the immediate reporter that carries it
+(§5.4), and the remedy clause that sentence and the existing skip now share.
 
 ### 5.1 Decision 3 — where the snapshot lives
 
@@ -476,19 +495,24 @@ reference taken to it will not resolve. Its source is 'kubernetes' — it resolv
 port-forward' in front of an already-running service, so the configuration would reach kubectl rather
 than the service. An out-of-band service's endpoints are fixed by its source, so configure the service
 where it actually runs. To configure it from this AppHost instead, give it a 'local' or 'container'
-source in servicesources.local.json — its 'servicesources.yaml' entry needs the matching 'project' or
-'container.image'.
+source in servicesources.local.json — which works only where its 'servicesources.yaml' entry already
+declares that source: a 'repository' or 'repositoryRef' for 'local', a 'container' block for
+'container'.
 ```
 
-**Three things the skip frame got wrong, each measured by reading the built output rather than the
+**Two things the skip frame got wrong, each measured by reading the built output rather than the
 code.** *Skipped* says the call never landed; these calls landed and were undone, which is the one
 fact the reader most needs and the only one that explains why their endpoint is not what they set it
 to. *`N calls`* counts entries, and the entries here count endpoints: a single
 `WithExternalHttpEndpoints()` over a two-endpoint service reported "2 calls", a number the developer
-never wrote. And the skip remedy — "set its source to `local` or `container`" — throws for a service
-whose catalog entry has no matching `project` or `container.image`, which is the common case for a
-`url` service; following it literally on the very service that emitted it produced
-`ServiceSourcesConfigurationException`. The revert sentence says what the catalog entry needs.
+never wrote. Those two are why a revert gets its own sentence rather than reusing `SkipReason`.
+
+A third defect turned up the same way but did **not** distinguish the two sentences, because it was
+the skip's own: its remedy — "set its source to `local` or `container`" — threw for a service whose
+catalog entry declares neither, which is the common case for a `url` service, so following it
+literally on the very service that emitted it produced `ServiceSourcesConfigurationException`. That
+sentence is pre-existing and reaches every skip this package reports, so it was fixed where it lives
+and both messages now end in the same corrected clause.
 
 **The fields that changed are named.** The fingerprint carries eleven, and without naming them the
 reader is told an endpoint changed and left to bisect. `Restore` already compares field by field, so
@@ -581,16 +605,17 @@ All in `test/Aspire.Hosting.ServiceSources.Tests/`, reusing `EndpointSkipGapRepr
 **Detection and revert** — driving Aspire's internal generic reflectively, the way ATS capability
 dispatch does (findings §5 records the technique):
 
-1. `kubernetes` + `withHttpsEndpointCallback` setting `Port`/`TargetPort` → both restored, one skip
-   naming `endpoint 'https' was changed after this service resolved`, and the message reaches the log.
+1. `kubernetes` + `withHttpsEndpointCallback` setting `Port`/`TargetPort` → both restored, one revert
+   message naming `endpoint 'https' was changed after this service resolved`, and it reaches the log.
 2. `kubernetes` + `withEndpointCallback('probe', …)` → `probe` absent from the facade afterwards, one
-   skip naming `endpoint 'probe' was added after this service resolved`. Assert on the facade only: per §2.4 the added
+   revert message naming `endpoint 'probe' was added after this service resolved`. Assert on the facade only: per §2.4 the added
    instance never reaches `real`, so asserting its absence there would pass whether or not the
    detector ran. Assert instead that the facade's remaining endpoints are exactly the one the source
    registered.
-3. `url` + `withHttpsEndpointCallback` setting `TargetHost` → restored, skip recorded. (`url` has no
-   real resource; this pins the `real is null` path.)
-4. Both mutations on one service → one grouped message, two tallied capabilities.
+3. `url` + `withHttpsEndpointCallback` setting `TargetHost` → restored, revert reported. (`url` has
+   no real resource; this pins the `real is null` path.)
+4. Both mutations on one service → one grouped message, with **no** `N calls` tally: per §5.4 the
+   entries count endpoints rather than calls, so the tally is what the revert sentence drops.
 5. A rename — `Name` written directly on an existing `EndpointAnnotation` → detected and restored as
    a *change*, not as an add plus a remove, which is what pins the reference-identity key. Written
    against the annotation rather than through a callback, and labelled in the test name as such,
@@ -692,8 +717,9 @@ its disposition.
   **The endpoint name is the one untrusted string in the design** — for the *added* shape it comes
   verbatim from a guest-language script, and it is the first caller-controlled value this package
   interpolates into a warning (existing skips use a fixed capability label). Unbounded, it forges log
-  lines with an embedded newline. §5.4 requires it to pass through a control-character stripper and a
-  64-character truncation, and §7 test 6a pins that.
+  lines with an embedded newline. §5.4 requires it to pass through `ConfiguredValue.Bare` — which
+  also catches the hostile characters a control-character test misses — plus the single quote it
+  does not cover and a 64-character truncation, and §7 test 6a pins that.
 - **Denial of service:** one dictionary per out-of-band service, one pass over its endpoints at
   `BeforeStartEvent`. Bounded by the number of services in the AppHost.
 - **The one real hazard is a false revert** — reverting something legitimate. §3.3 and §5.1 bound it

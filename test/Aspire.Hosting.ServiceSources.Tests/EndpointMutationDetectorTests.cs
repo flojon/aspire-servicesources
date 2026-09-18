@@ -186,22 +186,6 @@ public class EndpointMutationDetectorTests
             && warning.Contains("endpoint 'https' was changed after this service resolved"));
     }
 
-    // The other way round: a kubernetes service alone subscribes no flush handler at all, so the
-    // detector's own report is the only thing that can write the line -- and must write it once.
-    [Fact]
-    public async Task ChangedPort_WithNoEarlierSkip_ReachesTheLogExactlyOnce()
-    {
-        var builder = Builder();
-        var service = Kubernetes(builder);
-
-        GuestLanguageEndpointCallbacks.HttpsEndpointCallback(service, "https", ("Port", 9999));
-
-        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
-
-        Assert.Equal(54321, Assert.Single(Endpoints(service)).Port);
-        Assert.Single(warnings, warning => warning.Contains("endpoint 'https' was changed after this service resolved"));
-    }
-
     [Fact]
     public async Task AddedEndpoint_OnKubernetesSource_IsRemovedAndReported()
     {

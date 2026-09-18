@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.ServiceSources.Config;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -292,9 +293,41 @@ internal sealed class ServiceSourcesWarnings
     /// dropped, and where the source is chosen.
     /// </summary>
     private static string SkipReason(string serviceName, string source, IReadOnlyList<string> capabilities) =>
-        $"Service '{serviceName}': skipped {DescribeCalls(capabilities)} because its source is " +
+        $"Service '{Label(serviceName)}': skipped {DescribeCalls(capabilities)} because its source is " +
         $"'{source}' — {SourceDetail(source)}. The service is expected to be configured wherever it actually " +
         $"runs. {SwitchSourceRemedy}";
+
+    private const int MaxLabelLength = 64;
+
+    /// <summary>
+    /// A caller-controlled name made safe to sit inside the quotes a message delimits it with, and
+    /// bounded.
+    /// </summary>
+    /// <remarks>
+    /// Both names these messages carry are caller-controlled: the endpoint name arrives verbatim from
+    /// a guest-language script, and the service name is a catalog key. Either one can forge a second
+    /// entry — by ending the line, or by closing the quote and writing its own sentence — so both go
+    /// through the same helper rather than one being escaped and the other interpolated raw beside it.
+    /// <para>
+    /// <see cref="ConfiguredValue"/> rather than a second spelling of it: it is this package's rule for
+    /// developer-written text echoed back, and it catches the invisibles a control-character test
+    /// misses. The quote and the cap are what it does not cover, and both are these messages' own.
+    /// </para>
+    /// </remarks>
+    internal static string Label(string? name)
+    {
+        var escaped = ConfiguredValue.Bare(name).Replace("'", "\\'", StringComparison.Ordinal);
+
+        if (escaped.Length <= MaxLabelLength)
+        {
+            return escaped;
+        }
+
+        // Never cut a surrogate pair in half: the half left behind is not text.
+        var cut = char.IsHighSurrogate(escaped[MaxLabelLength - 1]) ? MaxLabelLength - 1 : MaxLabelLength;
+
+        return escaped[..cut] + '…';
+    }
 
     /// <summary>
     /// How to bring the service back under this AppHost's control, for every message that offers it.
@@ -306,6 +339,11 @@ internal sealed class ServiceSourcesWarnings
     /// <see cref="ServiceSourcesConfigurationException"/> at the next resolve — so advice that
     /// promised the switch outright sent the reader into an exception on both options it offered.
     /// <para>
+    /// Names start ordering as well as configuration because <see cref="Sources.UrlSource"/> records a
+    /// consumer's dropped <c>WaitFor</c> through <see cref="SkipReason"/> too, and ordering is the only
+    /// half of the offer that reader lost.
+    /// </para>
+    /// <para>
     /// The block, not the individual field, because what a block has to carry varies with the
     /// service: <c>'local'</c> needs a <c>project</c> for the built-in <c>dotnet</c> kind and that
     /// kind's own options for any other, and the error the catalog raises names whichever one is
@@ -313,10 +351,10 @@ internal sealed class ServiceSourcesWarnings
     /// </para>
     /// </remarks>
     private const string SwitchSourceRemedy =
-        "To configure it from this AppHost instead, give it a 'local' or 'container' source in " +
-        "servicesources.local.json — which works only where its 'servicesources.yaml' entry already " +
-        "declares that source: a 'repository' or 'repositoryRef' for 'local', a 'container' block for " +
-        "'container'.";
+        "To make this AppHost's configuration and start ordering apply instead, give it a 'local' or " +
+        "'container' source in servicesources.local.json — which works only where its " +
+        "'servicesources.yaml' entry already declares that source: a 'repository' or 'repositoryRef' " +
+        "for 'local', a 'container' block for 'container'.";
 
     /// <summary>
     /// Why a source runs out of band, in the clause both <see cref="SkipReason"/> and
@@ -343,7 +381,7 @@ internal sealed class ServiceSourcesWarnings
     /// does not depend on which of the two messages is reporting.
     /// </remarks>
     private static string RevertReason(string serviceName, string source, IReadOnlyList<string> reverts) =>
-        $"Service '{serviceName}': {string.Join("; ", reverts)}. Its source is '{source}' — " +
+        $"Service '{Label(serviceName)}': {string.Join("; ", reverts)}. Its source is '{source}' — " +
         $"{SourceDetail(source)}. An out-of-band service's endpoints are fixed by its source, so " +
         $"configure the service where it actually runs. {SwitchSourceRemedy}";
 

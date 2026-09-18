@@ -265,30 +265,9 @@ internal static class EndpointMutationDetector
         endpoint.TlsEnabled,
         endpoint.Protocol);
 
-    /// <summary>
-    /// <paramref name="name"/> made safe to interpolate into a log line, and bounded.
-    /// </summary>
-    /// <remarks>
-    /// <see cref="ConfiguredValue"/> rather than a second spelling of it: an endpoint name is
-    /// developer-written text echoed back, which is the case that helper already states the rule for,
-    /// and it catches the invisibles a control-character test misses. The quote and the cap are what
-    /// it does not cover, and both are this message's own.
-    /// </remarks>
-    private static string Label(string name)
-    {
-        // The name is delimited with quotes in the message, so one inside it forges a second entry.
-        var escaped = ConfiguredValue.Bare(name).Replace("'", "\\'", StringComparison.Ordinal);
-
-        if (escaped.Length <= MaxNameLength)
-        {
-            return escaped;
-        }
-
-        // Never cut a surrogate pair in half: the half left behind is not text.
-        var cut = char.IsHighSurrogate(escaped[MaxNameLength - 1]) ? MaxNameLength - 1 : MaxNameLength;
-
-        return escaped[..cut] + '…';
-    }
+    // The service name in the same sentence needs the identical treatment, so the helper lives beside
+    // the messages rather than here.
+    private static string Label(string name) => ServiceSourcesWarnings.Label(name);
 
     /// <summary>
     /// Every field the endpoint-callback surface can write, plus <c>Name</c>.

@@ -192,6 +192,14 @@ never existed. Check the tag of the last release before adding one.
 
 ### Fixed
 
+- **A service name can no longer forge a second warning** ([#372]). Every warning this package
+  reports about an out-of-band service opens with the service's own name, taken from the catalog and
+  interpolated between quotes without escaping. A name carrying a newline, a Unicode line separator
+  or an apostrophe therefore split the line, or closed the quote and wrote a sentence of its own,
+  into a log a reader trusts. Both names these messages carry — the service and, since this release,
+  the endpoint — now go through the same escaping this package already applies to developer-written
+  text echoed back, plus a length cap.
+
 - **The remedy every out-of-band warning offers no longer dead-ends** ([#372]). Warnings about
   configuration skipped for a `url` or `kubernetes` service ended in "Set its source to `local` or
   `container` in servicesources.local.json" with no condition attached — but a service whose
