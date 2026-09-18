@@ -1772,7 +1772,8 @@ into `servicesources.yaml`/`servicesources.local.json`.
 `ServiceResource` implements `IResourceWithServiceDiscovery`, `IResourceWithEnvironment`,
 `IResourceWithArgs`, `IResourceWithEndpoints` and `IResourceWithWaitSupport`, so
 `WithEnvironment`, `WithReference`, `WithArgs`, `WithEndpoint`/`WithHttpEndpoint`/`WithHttpsEndpoint` and
-`WaitFor`/`WaitForCompletion` all bind directly — no capability-naming wrapper needed:
+`WaitFor`/`WaitForCompletion` all bind directly — no capability-naming wrapper needed. `WithCommand`
+binds too, on Aspire's `IResource` constraint rather than any of those five:
 
 ```csharp
 var backend = builder.AddService("backend")
