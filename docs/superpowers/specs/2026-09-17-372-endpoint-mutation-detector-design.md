@@ -512,8 +512,9 @@ reference taken to it will not resolve. Its source is 'kubernetes' — it resolv
 port-forward' in front of an already-running service, so the configuration would reach kubectl rather
 than the service. An out-of-band service's endpoints are fixed by its source, so configure the service
 where it actually runs. To change what this endpoint points at, set 'kubernetes.port' for this
-service in servicesources.local.json. 'kubernetes.scheme' redirects it too, but renames the endpoint,
-which is named for its scheme. To make this AppHost's
+service in servicesources.local.json. 'kubernetes.scheme' changes only the scheme consumers address
+it with — the forward reaches the same service — and renames the endpoint, which is named for it. To
+make this AppHost's
 configuration and start ordering apply instead, give it a 'local' or 'container' source in
 servicesources.local.json — which works only where its 'servicesources.yaml' entry already declares
 that source: a 'repository' or 'repositoryRef' for 'local', a 'container' block for 'container'.
@@ -548,17 +549,24 @@ genuinely differ — two of the four embed it as the last item of an `or` list.
 
 **Why a revert names a lever the other three do not.** The reader of a revert wanted the endpoint
 somewhere else, and the switch `SwitchSource` offers is exactly what a url-only entry cannot take. The
-developer-config settings that *do* redirect it — `url.url`, or `kubernetes.port`/`kubernetes.scheme`
-— work on that shape, and live in the file the next sentence already names. They are phrased as
+developer-config settings that *do* redirect it — `url.url`, or `kubernetes.port` — work on that
+shape, and live in the file the next sentence already names. They are phrased as
 "what this endpoint points at" rather than as moving the endpoint: on `kubernetes` they choose what
 `kubectl port-forward` forwards to while the local port stays allocated, and promising the endpoint's
 own port would be the next dead end. Measured both ways round before the sentence was written.
 
 The clause also **names the rename**, because both sources name an endpoint after its scheme: a
-reader who follows the scheme half gets the redirect and loses the name their `GetEndpoint` matches,
-which is the failure this detector exists to report, reached by following its own advice. Measured on
-both sources — `kubernetes.scheme: http` against a catalog declaring `https` renames the endpoint
-`https` to `http`, and a scheme change inside `url.url` does the same.
+reader who follows the scheme half loses the name their `GetEndpoint` matches, which is the failure
+this detector exists to report, reached by following its own advice. Measured on both sources —
+`kubernetes.scheme: http` against a catalog declaring `https` renames the endpoint `https` to `http`,
+and a scheme change inside `url.url` does the same.
+
+The two sources differ on what the scheme half *buys*, and the clause says so rather than treating
+them alike. For `url` the scheme is genuinely part of the target, so changing it inside `url.url`
+redirects and renames. For `kubernetes` it is not: the scheme never reaches `BuildPortForwardArgs`,
+so the forward keeps its service and remote port and only the name and the scheme consumers address
+move. Measured — `kubernetes.scheme: http` leaves the `kubectl port-forward` argv byte-identical, so
+offering it as a second redirect would cost the rename and buy nothing.
 
 **And it is offered only to a reader whose endpoint survives.** No setting adds an endpoint to an
 out-of-band service — the C# overloads are gated and these levers only redirect the one the source

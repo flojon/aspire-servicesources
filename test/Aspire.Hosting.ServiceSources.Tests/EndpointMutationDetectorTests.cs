@@ -127,6 +127,10 @@ public class EndpointMutationDetectorTests
 
         Assert.Contains("set 'kubernetes.port' for this service", kubernetesWarning);
         Assert.Contains("set 'url.url' for this service", urlWarning);
+
+        // The scheme half is not offered as a second redirect, because it moves nothing.
+        Assert.Contains("the forward reaches the same service", kubernetesWarning);
+        Assert.DoesNotContain("redirects it too", kubernetesWarning);
     }
 
     /// <remarks>
@@ -160,6 +164,36 @@ public class EndpointMutationDetectorTests
 
         // The rename the clause warns about: a reference taken to 'https' stops matching.
         Assert.Equal("http", Assert.Single(Endpoints(rescheme)).Name);
+
+        // The half the clause offers moves the forward's target.
+        KubernetesSource.BuildPortForwardArgs(
+            "orders",
+            KubernetesDefinition(),
+            new ServiceDeveloperConfig
+            {
+                Source = "kubernetes",
+                Kubernetes = new() { Context = "dev-west", Port = 9090 },
+            },
+            new FakePortAllocator(54321),
+            out _,
+            out var redirectedRemotePort);
+
+        Assert.Equal(9090, redirectedRemotePort);
+
+        // The half it declines to offer does not: 'kubernetes.scheme' is not a second redirect.
+        KubernetesSource.BuildPortForwardArgs(
+            "orders",
+            KubernetesDefinition(),
+            new ServiceDeveloperConfig
+            {
+                Source = "kubernetes",
+                Kubernetes = new() { Context = "dev-west", Scheme = "http" },
+            },
+            new FakePortAllocator(54321),
+            out _,
+            out var reschemedRemotePort);
+
+        Assert.Equal(8080, reschemedRemotePort);
     }
 
     /// <remarks>

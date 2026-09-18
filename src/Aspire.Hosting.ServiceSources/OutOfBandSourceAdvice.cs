@@ -68,6 +68,11 @@ internal static class OutOfBandSourceAdvice
     /// follows the scheme half loses the name their <c>GetEndpoint</c> matches — the failure this
     /// detector exists to report, arrived at by following its own advice.
     /// </para>
+    /// <para>
+    /// For <c>kubernetes</c> the scheme is not a second redirect: it never reaches
+    /// <c>BuildPortForwardArgs</c>, so the forward keeps its target and only the name and the scheme
+    /// consumers address move. Offering it as one would cost the rename and buy nothing.
+    /// </para>
     /// </remarks>
     internal static string RedirectTheEndpoint(string source) => source switch
     {
@@ -77,8 +82,9 @@ internal static class OutOfBandSourceAdvice
             "for it.",
         "kubernetes" =>
             "To change what this endpoint points at, set 'kubernetes.port' for this service in " +
-            "servicesources.local.json. 'kubernetes.scheme' redirects it too, but renames the " +
-            "endpoint, which is named for its scheme.",
+            "servicesources.local.json. 'kubernetes.scheme' changes only the scheme consumers " +
+            "address it with — the forward reaches the same service — and renames the endpoint, " +
+            "which is named for it.",
         _ => "To change what this endpoint points at, configure its source in servicesources.local.json.",
     };
 
