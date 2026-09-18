@@ -305,9 +305,11 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         // "give ... a url" rather than "add a 'repository'": the predicate above is
         // IsNullOrWhiteSpace, so an entry that already carries a blank 'repository:' scalar reaches
         // here, and telling its author to add the key they can see would be advice they cannot take.
+        // No repositoryRef is offered for the same reason: the loader refuses one on any entry
+        // carrying a 'repository' key at all — blank included — which is not readable from here.
         return isCode
             ? "declare it with WithRepository(...) or WithSharedRepository(...)"
-            : "give its catalog entry a 'repository' url or a 'repositoryRef' to one";
+            : "give its catalog entry a 'repository' url";
     }
 
     /// <summary>

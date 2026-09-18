@@ -1757,7 +1757,6 @@ public class LocalProjectSourceTests
 
         Assert.Contains($"Service '{ServiceName}'", ex.Message);
         Assert.Contains("'repository'", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("repositoryRef", ex.Message, StringComparison.Ordinal);
         Assert.Contains("servicesources.yaml", ex.Message, StringComparison.Ordinal);
         Assert.Contains("servicesources.local.json", ex.Message, StringComparison.Ordinal);
 
@@ -1822,6 +1821,45 @@ public class LocalProjectSourceTests
         // The one remedy that depends on nothing outside this guard: the exemption it checks itself.
         Assert.Contains(
             $"ServiceSources:Services:{ServiceName}:local:path", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The same fail-closed rule applied to the last remedy whose precondition this guard cannot
+    /// read: a <c>repositoryRef</c> on an entry that already carries a <c>repository</c> key.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ServiceCatalogLoader"/> refuses <c>repositoryRef</c> on any entry whose raw yaml
+    /// carries a <c>repository</c> key at all — a blank scalar counts — while this guard sees only
+    /// the parsed url. So on the very shape the remedy was worded for, an entry with
+    /// <c>repository:</c> and no value, following it landed the reader at "repositoryRef cannot be
+    /// combined with 'repository'". The surviving half, giving the entry a url, works on every
+    /// shape. Exercised on both the grouped and ungrouped arms, since only the ungrouped one ever
+    /// offered it.
+    /// </remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Resolve_LocalOnRepositorylessYamlEntry_OffersNoRepositoryRefTheCatalogLoaderWouldRefuse(
+        bool grouped)
+    {
+        var definition = grouped
+            ? new ServiceDefinition
+            {
+                Repository = new RepositoryDefinition { Url = "", CheckoutName = "platform" },
+                Project = "Orders.csproj",
+                Kind = LocalKinds.Dotnet,
+                Origin = CatalogOrigin.FromYaml("servicesources.yaml"),
+            }
+            : RepositorylessDefinition();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new FakeGitClient()).Resolve(
+                PlainBuilder(), ServiceName, definition, DevConfig()));
+
+        Assert.DoesNotContain("repositoryRef", ex.Message, StringComparison.Ordinal);
+
+        // The half that survives, so the assertion above cannot pass by the remedy vanishing.
+        Assert.Contains("'repository' url", ex.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
