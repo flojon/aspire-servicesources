@@ -3,6 +3,7 @@ using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Sources;
+using ServiceSourcesOverloadProbe;
 using IPortAllocator = Aspire.Hosting.ServiceSources.PortAllocation.IPortAllocator;
 
 namespace Aspire.Hosting.ServiceSources.Tests;
@@ -287,16 +288,15 @@ public class EndpointMutationDetectorTests
         Assert.Contains("(Protocol) and has been put back", Assert.Single(warnings));
     }
 
-    // The argument for a state-keyed detector over another per-method shadow: WithExternalHttpEndpoints
-    // is a public Aspire method that sets IsExternal directly on existing annotations, so no gate
-    // ever sees it. Caught here with no WithExternalHttpEndpoints-specific code at all.
+    // Driven through the callback rather than through C#'s WithExternalHttpEndpoints: that method is
+    // gated, so a test written through it would assert nothing about the detector (#359).
     [Fact]
-    public async Task ExternalHttpEndpoints_OnKubernetesSource_IsRevertedAndReported()
+    public async Task ChangedIsExternal_OnKubernetesSource_IsRevertedAndReported()
     {
         var builder = Builder();
         var service = Kubernetes(builder);
 
-        service.WithExternalHttpEndpoints();
+        GuestLanguageEndpointCallbacks.EndpointCallback(service, "https", ("IsExternal", true));
 
         Assert.True(Assert.Single(Endpoints(service)).IsExternal);
 
@@ -308,6 +308,27 @@ public class EndpointMutationDetectorTests
         Assert.Contains(
             "endpoint 'https' was changed after this service resolved (IsExternal) and has been put back",
             Assert.Single(warnings));
+    }
+
+    // The url counterpart the shipped suite lacked. UrlSource registers a single 'https' endpoint,
+    // so the callback name resolves to the update branch.
+    [Fact]
+    public async Task ChangedIsExternal_OnUrlSource_IsRevertedAndReported()
+    {
+        var builder = Builder();
+        var service = Url(builder);
+
+        GuestLanguageEndpointCallbacks.EndpointCallback(service, "https", ("IsExternal", true));
+
+        Assert.True(Assert.Single(Endpoints(service)).IsExternal);
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.False(Assert.Single(Endpoints(service)).IsExternal);
+        Assert.Contains(warnings, warning =>
+            warning.Contains("Service 'inventory'")
+            && warning.Contains(
+                "endpoint 'https' was changed after this service resolved (IsExternal) and has been put back"));
     }
 
     // Subscription order, the way round the prototype measured as LOGGED=0: an earlier, unrelated
@@ -705,5 +726,28 @@ public class EndpointMutationDetectorTests
 
         Assert.Equal(transport, Assert.Single(Endpoints(service)).Transport);
         Assert.DoesNotContain(warnings, warning => warning.Contains("was changed after this service resolved"));
+    }
+
+    // Checklist item 7: one warning, not two. The shadow returns before Aspire's method runs, so the
+    // detector finds nothing to revert -- structural, but the thing a reader most needs pinned.
+    // Assert.Single is what fails if a second warning ever appears; a Contains would pass with two.
+    [Fact]
+    public async Task ExternalHttpEndpoints_OnKubernetesSource_IsSkippedAndTheDetectorAddsNothing()
+    {
+        var builder = Builder();
+        var service = Kubernetes(builder);
+
+        // Routed through OverloadProbe — see OverloadResolutionProbe.cs for why.
+        OverloadProbe.CallWithExternalHttpEndpoints(service);
+
+        Assert.False(Assert.Single(Endpoints(service)).IsExternal);
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.False(Assert.Single(Endpoints(service)).IsExternal);
+
+        var warning = Assert.Single(warnings);
+        Assert.Contains("skipped WithExternalHttpEndpoints", warning);
+        Assert.DoesNotContain("has been put back", warning);
     }
 }

@@ -300,4 +300,78 @@ public class EndpointSkipGapRepro
             $"endpoint port after={after.Port}; warnings={warnings.Count}; "
             + $"text={(warnings.Count > 0 ? warnings[0] : "<none>")}");
     }
+
+    // #359: Aspire's WithExternalHttpEndpoints writes IsExternal onto the annotations that already
+    // exist, so WithAnnotation never sees it and only a shadow can stop it. Asserted at call time,
+    // not after BeforeStartEvent -- "never written" and "written and put back" are different
+    // guarantees, and this file's subject is the first one.
+    [Fact]
+    public void ExternalHttpEndpoints_OnUrlSource_IsSkippedAndReported()
+    {
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
+        var service = Url(builder);
+
+        // Routed through OverloadProbe — see OverloadResolutionProbe.cs for why.
+        OverloadProbe.CallWithExternalHttpEndpoints(service);
+
+        var endpoints = service.Resource.Annotations.OfType<EndpointAnnotation>().ToArray();
+        var warnings = ServiceSourcesWarnings.For(builder).Messages;
+
+        Assert.NotEmpty(endpoints);
+        Assert.All(endpoints, endpoint => Assert.False(endpoint.IsExternal));
+        Assert.Equal(
+            "Service 'inventory': skipped WithExternalHttpEndpoints because its source is 'url' — it "
+            + "resolves to a fixed, already-running URL with no local process to configure. The service "
+            + "is expected to be configured wherever it actually runs. To make this AppHost's "
+            + "configuration and start ordering apply instead, give it a 'local' or 'container' source "
+            + "in servicesources.local.json — which works only where its 'servicesources.yaml' entry "
+            + "already declares that source: a 'repository' or 'repositoryRef' for 'local', a "
+            + "'container' block for 'container'.",
+            Assert.Single(warnings));
+    }
+
+    // The same against a real kubectl port-forward, whose EndpointAnnotation instance the facade
+    // shares -- so an IsExternal write here lands on the running forward, not on a copy.
+    [Fact]
+    public void ExternalHttpEndpoints_OnKubernetesSource_IsSkippedAndReported()
+    {
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
+        var service = new KubernetesSource(new FakePortAllocator(54321))
+            .Resolve(builder, "orders", KubernetesDefinition(), KubernetesDevConfig());
+
+        // Routed through OverloadProbe — see OverloadResolutionProbe.cs for why.
+        OverloadProbe.CallWithExternalHttpEndpoints(service);
+
+        var endpoint = Assert.Single(service.Resource.Annotations.OfType<EndpointAnnotation>());
+        var warnings = ServiceSourcesWarnings.For(builder).Messages;
+
+        Assert.False(endpoint.IsExternal);
+        Assert.Equal(
+            "Service 'orders': skipped WithExternalHttpEndpoints because its source is 'kubernetes' — "
+            + "it resolves to a 'kubectl port-forward' in front of an already-running service, so the "
+            + "configuration would reach kubectl rather than the service. The service is expected to be "
+            + "configured wherever it actually runs. To make this AppHost's configuration and start "
+            + "ordering apply instead, give it a 'local' or 'container' source in "
+            + "servicesources.local.json — which works only where its 'servicesources.yaml' entry "
+            + "already declares that source: a 'repository' or 'repositoryRef' for 'local', a "
+            + "'container' block for 'container'.",
+            Assert.Single(warnings));
+    }
+
+    // Two capabilities on one service, which is the only place the new label meets the shared one.
+    // ServiceSourcesWarnings groups skips by (service, source), so this must stay one message.
+    [Fact]
+    public void ExternalHttpEndpointsAlongsideAnotherSkip_OnUrlSource_AreReportedInOneGroupedMessage()
+    {
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
+        var service = Url(builder);
+
+        service.WithHttpsEndpoint(port: 9999);
+        // Routed through OverloadProbe — see OverloadResolutionProbe.cs for why.
+        OverloadProbe.CallWithExternalHttpEndpoints(service);
+
+        Assert.Contains(
+            "skipped 2 calls (WithEndpoint/WithHttpEndpoint/WithHttpsEndpoint, WithExternalHttpEndpoints)",
+            Assert.Single(ServiceSourcesWarnings.For(builder).Messages));
+    }
 }

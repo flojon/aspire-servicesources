@@ -156,9 +156,11 @@ never existed. Check the tag of the last release before adding one.
   this service resolved (IsExternal) and has been put back. Its source is 'kubernetes' — …` — so the
   outcome matches what gating the equivalent C# call already does. An endpoint *added* this way is
   removed again, so a reference taken to it before start will not resolve, and the warning says so.
-  This measures the state rather than the call, so it also **covers**
-  `WithExternalHttpEndpoints` ([#359]), which sets `IsExternal` on existing endpoints directly from
-  C# and was likewise unreported; that issue stays open and separately owned. Nothing changes for a
+  This measures the state rather than the call, so it also caught `WithExternalHttpEndpoints`
+  ([#359]), which sets `IsExternal` on existing endpoints directly from C# and was likewise
+  unreported — an in-place writer no method-name audit had found. That call is now gated at the call
+  site instead, and is the entry below; the detector stays the backstop for the guest-language
+  callbacks and for whatever is found next. Nothing changes for a
   `local` or `container` service, where configuring an endpoint after resolution is legitimate and
   nothing is installed. The guest-language behaviour was measured in TypeScript, through
   `samples/DemoAppHostTypeScript`; other guest languages share the same capability ids but were not
@@ -191,6 +193,23 @@ never existed. Check the tag of the last release before adding one.
   ordering contract no longer applies to either kind.
 
 ### Fixed
+
+- **`WithExternalHttpEndpoints` on a `url` or `kubernetes` service is now skipped and reported
+  instead of applied silently** ([#359]). Aspire's method does not add an annotation — it walks the
+  ones the service already has and writes `IsExternal` on each `http`/`https` one — so it went
+  straight past the check every other endpoint call in this package goes through, and neither warned
+  nor appeared in the skipped-calls tally. For a `kubernetes` service that write landed on the real
+  `kubectl port-forward`'s own endpoint, publishing a port-forward to the world on the strength of a
+  line the AppHost author wrote about the service behind it. The call is now intercepted the same way
+  `WithHttpEndpoint` and `WithHttpsEndpoint` already are: nothing is written, and the service's
+  existing skip message names this call by name — `Service 'orders': skipped
+  WithExternalHttpEndpoints because its source is 'kubernetes' — …` — rather than naming the three
+  endpoint methods the shared label covers, which this one forwards to none of. A service that calls
+  both surfaces still gets one grouped message. Nothing changes for a `local` or `container` service,
+  where the call applies exactly as before. The detector added in this release ([#372]) reported this
+  after the fact; with the call skipped there is no longer any change for it to find, so there is one
+  warning rather than two, and the detector remains the backstop for the guest-language endpoint
+  callbacks, which no C# shadow can reach.
 
 - **A service name can no longer forge a second log entry in four out-of-band messages** ([#372]).
   Each of them opens with the service's own name, taken from the catalog and interpolated between

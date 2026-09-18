@@ -52,6 +52,12 @@ public static class OverloadProbe
         IResourceBuilder<ServiceResource> service, string endpointName, Action<EndpointAnnotation> callback) =>
         service.WithEndpoint(endpointName, callback);
 
+    // No sibling shadow to disambiguate, so no [OverloadResolutionPriority] on the target: this
+    // compiling and binding the non-generic shadow is the whole assertion (#359).
+    public static IResourceBuilder<ServiceResource> CallWithExternalHttpEndpoints(
+        IResourceBuilder<ServiceResource> service) =>
+        service.WithExternalHttpEndpoints();
+
     public static IResourceBuilder<ServiceResource> CallWithCommand(
         IResourceBuilder<ServiceResource> service, string name, string displayName,
         Func<ExecuteCommandContext, Task<ExecuteCommandResult>> executeCommand,
