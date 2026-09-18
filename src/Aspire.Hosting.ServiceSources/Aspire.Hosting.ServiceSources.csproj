@@ -8,6 +8,10 @@
     <LangVersion Condition="'$(TargetFramework)' == 'net8.0'">13.0</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- Raw.Literal/Join take [ConstantExpected] strings, and CA1857 is the only thing enforcing
+         that. At its default warning severity a runtime string would be a one-token bypass of the
+         message seam in any build without -warnaserror, including the IDE. -->
+    <WarningsAsErrors>$(WarningsAsErrors);CA1857</WarningsAsErrors>
   </PropertyGroup>
 
   <!-- Shared package metadata, MinVer and the LICENSE/README pack items live in
