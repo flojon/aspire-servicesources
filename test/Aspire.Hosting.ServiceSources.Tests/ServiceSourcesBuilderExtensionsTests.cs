@@ -64,6 +64,25 @@ public class ServiceSourcesBuilderExtensionsTests
         Assert.Empty(ServiceSourcesWarnings.For(builder).Messages);
     }
 
+    // The shadow's other leg. Every other WithExternalHttpEndpoints test is on an out-of-band
+    // source and returns at the gate, so without this one the delegate could become a no-op --
+    // or recurse -- with the suite still green.
+    [Fact]
+    public void WithExternalHttpEndpoints_OnReachableSource_AppliesThroughToTheRealEndpoint()
+    {
+        var builder = Builder();
+        var real = builder.AddResource(new ServiceContainerResource("orders")).WithImage("nginx");
+        var service = ResolvedService.Bridge(real, "orders", "container");
+        service.WithHttpsEndpoint(port: 9999, name: "probe");
+
+        var result = OverloadProbe.CallWithExternalHttpEndpoints(service);
+
+        var endpoint = Assert.Single(
+            result.Resource.Annotations.OfType<EndpointAnnotation>(), e => e.Name == "probe");
+        Assert.True(endpoint.IsExternal);
+        Assert.Empty(ServiceSourcesWarnings.For(builder).Messages);
+    }
+
     [Fact]
     public void WithEndpoint_DefaultNameOnUrlSource_IsSkippedAndReported()
     {

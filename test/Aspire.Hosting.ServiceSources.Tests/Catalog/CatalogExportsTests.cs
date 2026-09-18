@@ -91,6 +91,7 @@ public class CatalogExportsTests
         [
             "addService", "addBackingService", "asJava", "asJavaScript", "getServiceEndpoint", "useJava", "useJavaScript",
             "addServiceCatalog", "withEndpoint", "withHttpEndpoint", "withHttpsEndpoint", "withCommand",
+            "withExternalHttpEndpoints",
             $"{nameof(ServiceCatalogBuilder)}.{CamelCase(nameof(ServiceCatalogBuilder.AddService))}",
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithRepository))}",
             $"{nameof(ServiceDefinitionBuilder)}.{CamelCase(nameof(ServiceDefinitionBuilder.WithProject))}",

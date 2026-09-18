@@ -10,11 +10,20 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// </summary>
 /// <remarks>
 /// The call-site gate (<see cref="Reachability"/>, <c>GateEndpointCall</c>,
-/// <see cref="ServiceResourceBuilder.WithAnnotation{TAnnotation}"/>) can only stop calls that reach
-/// this package. A guest-language AppHost invokes Aspire's own endpoint-callback capabilities
-/// directly, and Aspire's <c>WithExternalHttpEndpoints</c> writes existing annotations in place, so
-/// neither is interceptable at all. This watches the state instead of the call, which is why it
-/// covers both without naming either.
+/// <see cref="ServiceResourceBuilder.WithAnnotation{TAnnotation}"/>) owns every mutation surface an
+/// AppHost binds directly on the concrete <see cref="IResourceBuilder{ServiceResource}"/> receiver,
+/// and stops those before they happen. It does not reach every call: an explicit type argument, a
+/// generic helper constrained on <c>IResourceWithEndpoints</c>, or a widened static type all bind
+/// Aspire's generic rather than a shadow. Binding the generic is not by itself an escape — one that
+/// <em>adds</em> an annotation still ends in <c>builder.WithAnnotation(...)</c>, which dispatches
+/// onto <see cref="ServiceResourceBuilder.WithAnnotation{TAnnotation}"/> and is gated there. What
+/// escapes is an in-place write to an <see cref="EndpointAnnotation"/> the resource already holds:
+/// it calls no annotation method at all, so nothing can intercept it. A guest-language AppHost
+/// likewise invokes Aspire's endpoint-callback capabilities directly, whose shape is
+/// <c>internal</c> to Aspire so no C# shadow can ever project them. This watches the state instead
+/// of the call, which is why it covers those — and any in-place writer nobody has enumerated yet —
+/// without naming any of them. A surface the gate did stop leaves no state change here to find, so
+/// the two cannot double-report.
 /// <para>
 /// Installed only for <see cref="Reachability.OutOfBandSources"/>, where
 /// <see cref="Reachability.IsUnreachable"/> is unconditionally true for an

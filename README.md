@@ -1771,7 +1771,8 @@ into `servicesources.yaml`/`servicesources.local.json`.
 
 `ServiceResource` implements `IResourceWithServiceDiscovery`, `IResourceWithEnvironment`,
 `IResourceWithArgs`, `IResourceWithEndpoints` and `IResourceWithWaitSupport`, so
-`WithEnvironment`, `WithReference`, `WithArgs`, `WithEndpoint`/`WithHttpEndpoint`/`WithHttpsEndpoint` and
+`WithEnvironment`, `WithReference`, `WithArgs`,
+`WithEndpoint`/`WithHttpEndpoint`/`WithHttpsEndpoint`/`WithExternalHttpEndpoints` and
 `WaitFor`/`WaitForCompletion` all bind directly — no capability-naming wrapper needed. `WithCommand`
 binds too, on Aspire's `IResource` constraint rather than any of those five:
 
@@ -1828,7 +1829,8 @@ the port-forward's builder rather than throwing.
 
 `ServiceResource`'s declared shape is what Aspire's Type System reads to generate a handle, so its
 native vocabulary — `withEnvironment`, `withReference`, `withArgs`, `withEndpoint`,
-`withHttpEndpoint`/`withHttpsEndpoint`, `withCommand`, `waitFor`, `waitForCompletion`, whether
+`withHttpEndpoint`/`withHttpsEndpoint`/`withExternalHttpEndpoints`, `withCommand`, `waitFor`,
+`waitForCompletion`, whether
 Aspire's own or shadowed in this package — projects onto the generated `addService(...)` handle
 exactly as it does in C#:
 

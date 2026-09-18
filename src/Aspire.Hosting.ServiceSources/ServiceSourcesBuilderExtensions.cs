@@ -299,6 +299,32 @@ public static class ServiceSourcesBuilderExtensions
     }
 
     /// <summary>
+    /// Shadows Aspire's own <c>WithExternalHttpEndpoints&lt;T&gt;</c>. Unlike every other endpoint
+    /// shadow in this file it is scoped to no endpoint name: Aspire's method walks the resource's
+    /// <em>existing</em> <see cref="EndpointAnnotation"/> instances and writes
+    /// <c>IsExternal = true</c> on each <c>http</c>/<c>https</c> one, never calling
+    /// <see cref="ServiceResourceBuilder.WithAnnotation{TAnnotation}"/> — so no gate saw it, and on a
+    /// <c>kubernetes</c> service the write landed on the real <c>kubectl port-forward</c>'s own
+    /// endpoint (#359). The gate is unaffected by the shape difference: it reads only the builder's
+    /// source, and <see cref="Reachability.IsUnreachable"/> for an <see cref="EndpointAnnotation"/>
+    /// is unconditionally true for both out-of-band sources, so "skip all of them" and "skip this
+    /// one" are the same answer. Non-generic on the concrete <see cref="ServiceResource"/> receiver,
+    /// which C# prefers over Aspire's generic — no AppHost-visible signature change.
+    /// </summary>
+    [AspireExport]
+    public static IResourceBuilder<ServiceResource> WithExternalHttpEndpoints(
+        this IResourceBuilder<ServiceResource> builder)
+    {
+        // Its own label: the shared one names three methods this call forwards to none of.
+        if (GateEndpointCall(builder, nameof(WithExternalHttpEndpoints)))
+        {
+            return builder;
+        }
+
+        return Aspire.Hosting.ResourceBuilderExtensions.WithExternalHttpEndpoints(builder);
+    }
+
+    /// <summary>
     /// Shadows Aspire's own generic <c>WithEndpoint&lt;T&gt;</c> — the overload
     /// <see cref="WithHttpEndpoint"/>/<see cref="WithHttpsEndpoint"/> themselves forward to. Same
     /// update-branch gap as those two (#334), same shadow-and-gate fix, for the call surface an
@@ -507,7 +533,15 @@ public static class ServiceSourcesBuilderExtensions
     /// <see cref="IResourceBuilder{ServiceResource}"/> — no such builder reaches <see cref="AddService"/>
     /// today.
     /// </summary>
-    private static bool GateEndpointCall(IResourceBuilder<ServiceResource> builder)
+    /// <param name="builder">The service builder the endpoint call was written against.</param>
+    /// <param name="capability">
+    /// What to name in the skip warning, for a surface the shared label would misdescribe. Defaults
+    /// to <see cref="Reachability.CapabilityLabel"/>'s three-method label, which the overloads that
+    /// forward to one another are all genuinely covered by. Must be a compile-time constant naming a
+    /// method — never caller or configuration data, which would reach the message unescaped beside
+    /// the service name that <c>ServiceSourcesWarnings.Label</c> deliberately escapes (#372).
+    /// </param>
+    private static bool GateEndpointCall(IResourceBuilder<ServiceResource> builder, string? capability = null)
     {
         var source = builder is ServiceResourceBuilder serviceBuilder
             ? serviceBuilder.Source
@@ -518,7 +552,10 @@ public static class ServiceSourcesBuilderExtensions
         }
 
         ServiceSourcesWarnings.For(builder.ApplicationBuilder)
-            .AddSkip(builder.Resource.Name, source, Reachability.CapabilityLabel(typeof(EndpointAnnotation)));
+            .AddSkip(
+                builder.Resource.Name,
+                source,
+                capability ?? Reachability.CapabilityLabel(typeof(EndpointAnnotation)));
         return true;
     }
 
