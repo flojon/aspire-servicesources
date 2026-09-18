@@ -2,6 +2,7 @@ using Aspire.Hosting;
 using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Catalog;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Git;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Catalog;
 
@@ -671,5 +672,53 @@ public class CatalogCompositionTests
         Assert.Contains("'orders'", warning, StringComparison.Ordinal);
         Assert.Contains("'billing'", warning, StringComparison.Ordinal);
         Assert.Contains("monorepo.git", warning, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// #380: the ungrouped-collision grouping filters candidates with
+    /// <see cref="LocalGitCheckout.HasRepositoryToClone"/> before grouping by
+    /// <c>Repository.Url</c> (<see cref="ServiceSourcesConfigCache"/>'s <c>LoadedConfig.Load</c>) —
+    /// two repositoryless services would otherwise share the blank string as a "url" and be reported
+    /// as an ungrouped collision neither of them actually has. Covers every blank spelling that
+    /// reaches this path: an absent <c>repository</c> property, an explicit empty string, and a
+    /// whitespace-only string. The whitespace row is load-bearing: it is the one
+    /// <c>HasRepositoryToClone</c> only started treating as blank once it moved off
+    /// <c>IsNullOrEmpty</c> (#376) — confirmed by temporarily reverting that predicate, see the
+    /// mutation evidence recorded for #380.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task TwoUngroupedServicesShareABlankRepositoryUrl_NoUngroupedCollisionWarning(string? repositoryUrl)
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        var repositoryLine = repositoryUrl is null ? "" : $"""
+                repository: "{repositoryUrl}"
+
+            """;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), $"""
+            services:
+              orders:
+            {repositoryLine}    project: src/Orders.Api/Orders.Api.csproj
+                kubernetes:
+                  service: orders-svc
+                  port: 8080
+              billing:
+            {repositoryLine}    project: src/Billing.Api/Billing.Api.csproj
+                kubernetes:
+                  service: billing-svc
+                  port: 8080
+            """);
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "local" }, "billing": { "source": "local" } } }
+            """);
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        ServiceSourcesConfigCache.ResolveService(builder, "billing");
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.DoesNotContain(warnings, w => w.Contains("are all 'local'", StringComparison.Ordinal));
     }
 }
