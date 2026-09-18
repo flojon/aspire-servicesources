@@ -5,6 +5,7 @@ using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Prepare;
 using Aspire.Hosting.ServiceSources.Git;
+using Aspire.Hosting.ServiceSources.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -566,15 +567,19 @@ internal sealed class DeferredCheckout
             return null;
         }
 
-        return $"Service '{serviceName}' was started from a checkout cloned during this run, and its launch " +
-               $"profile declares applicationUrl '{string.Join(", ", declared)}' — but a project's endpoints are " +
-               "read while the AppHost composes, before the repository was on disk, so Aspire allocated none. " +
-               "The project will bind that URL itself and run, but the port is outside Aspire's management: it " +
-               "is not moved off a collision, nothing proxies it, service discovery cannot resolve this service " +
-               $"and the dashboard will not link it. Declare it in the AppHost — builder.AddService(\"{serviceName}\")" +
-               ".WithHttpEndpoint() — which also takes effect on every later run, where the checkout is warm and " +
-               "the endpoint comes from the profile as usual. This is reported after the clone rather than " +
-               "refused before it, so a service that has no endpoints on either path costs you nothing.";
+        // Joined from per-URL compositions: one Name over the whole list would cap it at 64.
+        var urls = Raw.Join(", ", declared.Select(url => Raw.Compose($"{new Name(url)}")));
+
+        return Raw.Compose(
+            $"Service '{new Name(serviceName)}' was started from a checkout cloned during this run, and its launch "
+            + $"profile declares applicationUrl '{urls}' — but a project's endpoints are "
+            + $"read while the AppHost composes, before the repository was on disk, so Aspire allocated none. "
+            + $"The project will bind that URL itself and run, but the port is outside Aspire's management: it "
+            + $"is not moved off a collision, nothing proxies it, service discovery cannot resolve this service "
+            + $"and the dashboard will not link it. Declare it in the AppHost — builder.AddService(\"{new Name(serviceName)}\")"
+            + $".WithHttpEndpoint() — which also takes effect on every later run, where the checkout is warm and "
+            + $"the endpoint comes from the profile as usual. This is reported after the clone rather than "
+            + $"refused before it, so a service that has no endpoints on either path costs you nothing.").ToString();
     }
 
     /// <summary>

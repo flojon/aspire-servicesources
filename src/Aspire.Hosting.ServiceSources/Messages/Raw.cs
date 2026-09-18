@@ -45,6 +45,21 @@ internal readonly struct Raw
     /// </summary>
     internal static Raw Origin(CatalogOrigin origin) => new(origin.Describe());
 
+    /// <summary>
+    /// A third party's wording, made unable to forge a line. Takes the exception rather than its
+    /// message, so a name cannot be passed here.
+    /// </summary>
+    /// <remarks>
+    /// Neither quoted nor capped: a cause is a diagnosis, not a name, and truncating it would
+    /// discard the detail the line exists to carry.
+    /// </remarks>
+    internal static Raw Cause(Exception exception) => new(SingleLine(exception.Message));
+
+    private static string SingleLine(string message) =>
+        message.Replace("\r\n", "\\n", StringComparison.Ordinal)
+            .Replace("\n", "\\n", StringComparison.Ordinal)
+            .Replace("\r", "\\r", StringComparison.Ordinal);
+
     /// <summary>Empty rather than null: <c>default(Raw)</c> must render, not throw.</summary>
     public override string ToString() => text ?? string.Empty;
 }

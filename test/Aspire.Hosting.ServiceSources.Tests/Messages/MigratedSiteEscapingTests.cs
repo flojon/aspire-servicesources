@@ -3,6 +3,7 @@ using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Messages;
 using Aspire.Hosting.ServiceSources.PortAllocation;
 using Aspire.Hosting.ServiceSources.Sources;
+using ProjectResource = Aspire.Hosting.ApplicationModel.ProjectResource;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Messages;
 
@@ -194,6 +195,62 @@ public class MigratedSiteEscapingTests
         Assert.DoesNotContain("\n", exception.Message, StringComparison.Ordinal);
     }
 
+    private const string OrdersCatalog = """
+        services:
+          orders:
+            repository: https://github.com/company/orders
+            project: Orders.csproj
+            container:
+              image: ghcr.io/company/orders
+              port: 8080
+        """;
+
+    private static async Task<string> OrphanWarningAsync(string localJson)
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), OrdersCatalog);
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), localJson);
+
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.AddService("orders");
+
+        return Assert.Single(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+    }
+
+    [Fact]
+    public async Task OrphanedEntries_EscapeEachNameInTheList()
+    {
+        // The escaped orphan must be PRESENT, not merely newline-free: an implementation that
+        // dropped the offending name entirely would satisfy a DoesNotContain-only assertion.
+        // No ':' in the forged name: configuration treats it as a key separator, so the entry would
+        // be refused as a malformed key long before the audit that this test is about.
+        var warning = await OrphanWarningAsync("""
+            { "services": {
+                "orders": { "source": "container" },
+                "ord'ers\nFATAL everything is fine": { "source": "container" },
+                "payments": { "source": "container" } } }
+            """);
+
+        Assert.Contains("'ord\\'ers\\nFATAL everything is fine'", warning, StringComparison.Ordinal);
+        Assert.Contains("'payments'", warning, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n", warning, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task OrphanedEntries_DoNotCapTheJoinedList()
+    {
+        // Ten names of ten characters joined is well over the 64-character name cap; capping the
+        // list rather than each name would hide most of what the developer has to fix.
+        string[] orphans = [.. Enumerable.Range(0, 10).Select(i => $"service-{i:00}")];
+        var entries = string.Join(", ", orphans.Select(name => $"\"{name}\": {{ \"source\": \"container\" }}"));
+
+        var warning = await OrphanWarningAsync($$"""
+            { "services": { "orders": { "source": "container" }, {{entries}} } }
+            """);
+
+        Assert.All(orphans, name => Assert.Contains($"'{name}'", warning, StringComparison.Ordinal));
+    }
+
     [Theory]
     [InlineData("orders'\nFATAL: resolved fine", "orders\\'\\nFATAL: resolved fine")]
     [InlineData("orders\"quoted", "orders\\\"quoted")]
@@ -205,5 +262,54 @@ public class MigratedSiteEscapingTests
 
         Assert.Contains($"Service '{expected}'", exception.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("\n", exception.Message, StringComparison.Ordinal);
+    }
+
+    private static string? LaunchProfileWarning(string serviceName, params string[] applicationUrls) =>
+        DeferredCheckout.LaunchProfileEndpointWarning(
+            serviceName,
+            new LandedLaunchProfile(null, applicationUrls, new Dictionary<string, string>(StringComparer.Ordinal)),
+            new ProjectResource("orders"));
+
+    [Theory]
+    [InlineData("orders'\nFATAL: started fine", "orders\\'\\nFATAL: started fine")]
+    [InlineData("orders\"quoted", "orders\\\"quoted")]
+    public void LaunchProfileEndpointWarning_EscapesTheServiceName(string serviceName, string expected)
+    {
+        var warning = LaunchProfileWarning(serviceName, "http://localhost:8081");
+
+        Assert.NotNull(warning);
+        Assert.Contains($"Service '{expected}'", warning, StringComparison.Ordinal);
+
+        // The name is also quoted inside a double-quoted AddService("…") snippet the reader pastes.
+        Assert.Contains($"AddService(\"{expected}\")", warning, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n", warning, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LaunchProfileEndpointWarning_EscapesTheDeclaredUrl()
+    {
+        var warning = LaunchProfileWarning("orders", "http://localhost:8081/'\nFATAL: bound fine");
+
+        Assert.NotNull(warning);
+        Assert.Contains("http://localhost:8081/\\'\\nFATAL: bound fine", warning, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n", warning, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LaunchProfileEndpointWarning_DoesNotCapTheJoinedUrlList()
+    {
+        // Each URL is composed on its own, so the 64-character name cap applies per URL and never
+        // to the list — three ordinary URLs already exceed it together.
+        string[] urls =
+        [
+            "http://localhost:8081/orders",
+            "http://localhost:8082/payments",
+            "http://localhost:8083/shipping",
+        ];
+
+        var warning = LaunchProfileWarning("orders", urls);
+
+        Assert.NotNull(warning);
+        Assert.All(urls, url => Assert.Contains(url, warning, StringComparison.Ordinal));
     }
 }

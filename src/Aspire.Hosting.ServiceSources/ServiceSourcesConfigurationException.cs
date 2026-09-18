@@ -73,7 +73,7 @@ public sealed class ServiceSourcesConfigurationException : Exception
             // a genuine second occurrence (a retry that failed the same way) and still worth seeing.
             if (cause.Message != previous)
             {
-                description.Append(Environment.NewLine).Append("  caused by: ").Append(SingleLine(cause.Message));
+                description.Append(Environment.NewLine).Append("  caused by: ").Append(Raw.Cause(cause));
                 previous = cause.Message;
                 wroteACause = true;
             }
@@ -97,15 +97,6 @@ public sealed class ServiceSourcesConfigurationException : Exception
 
         return description.ToString();
     }
-
-    /// <summary>
-    /// A cause's own wording cannot forge a line of this summary. Not escaped or capped further: a
-    /// cause is a diagnosis, not a name, and truncating it would discard what the line is for.
-    /// </summary>
-    internal static string SingleLine(string message) =>
-        message.Replace("\r\n", "\\n", StringComparison.Ordinal)
-            .Replace("\n", "\\n", StringComparison.Ordinal)
-            .Replace("\r", "\\r", StringComparison.Ordinal);
 
     internal static bool FullDetailRequested(string? value) =>
         value is "1" || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);

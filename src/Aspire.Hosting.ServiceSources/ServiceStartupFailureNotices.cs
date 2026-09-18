@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.ServiceSources.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -480,37 +481,40 @@ internal sealed class ServiceStartupFailureNotices
         // The resource is normally named for the service, and "'orders' ... its resource 'orders'"
         // reads as two things rather than one.
         var resource = string.Equals(serviceName, resourceModel.Name, StringComparison.Ordinal)
-            ? "its resource"
-            : $"its resource '{resourceModel.Name}'";
+            ? Raw.Literal("its resource")
+            : Raw.Compose($"its resource '{new Name(resourceModel.Name)}'");
 
         // The instance id only where there is more than one instance to tell apart. DCP gives every
         // instance a suffixed id whether the service is replicated or not, so naming it
         // unconditionally would put an id nobody asked about into the ordinary one-replica line.
         if (resourceModel.Annotations.OfType<ReplicaAnnotation>().LastOrDefault() is { Replicas: > 1 })
         {
-            resource += $" replica '{resourceId}'";
+            resource = Raw.Compose($"{resource} replica '{new Name(resourceId)}'");
         }
 
-        var reported = exitCode is { } code ? $"'{state}' with exit code {code}" : $"'{state}'";
+        var reported = exitCode is { } code
+            ? Raw.Compose($"'{new Name(state)}' with exit code {code}")
+            : Raw.Compose($"'{new Name(state)}'");
 
         // Where the output actually is. Naming the dashboard unconditionally would send the reader
         // to the one place that does not exist on a run without one — a DistributedApplicationTestingBuilder
         // host, or any AppHost that turned it off — and the notice would then be the only account
         // of the failure while pointing at nothing.
         var elsewhere = dashboard
-            ? "its own console in the Aspire dashboard does, at the dashboard URL logged above"
-            : "that resource's own logs do, wherever this host surfaces them — this run has no dashboard";
+            ? Raw.Literal("its own console in the Aspire dashboard does, at the dashboard URL logged above")
+            : Raw.Literal("that resource's own logs do, wherever this host surfaces them — this run has no dashboard");
 
         // Only 'local' runs code from a working tree this package resolved, and only there is the
         // build itself something the developer has no other account of.
         var checkout = string.Equals(source, "local", StringComparison.Ordinal)
-            ? " A 'local' service runs from a checkout rather than from a project added to this " +
+            ? Raw.Literal(" A 'local' service runs from a checkout rather than from a project added to this " +
               "AppHost, and the build of that checkout writes to those same logs — so a failure " +
-              "to compile is reported nowhere else at all."
-            : string.Empty;
+              "to compile is reported nowhere else at all.")
+            : Raw.Literal("");
 
-        return $"Service '{serviceName}' is configured as '{source}' and {resource} is not running: it " +
-               $"reported {reported}. This console does not carry that resource's output, so nothing here " +
-               $"says why — {elsewhere}.{checkout}";
+        return Raw.Compose(
+            $"Service '{new Name(serviceName)}' is configured as '{new Name(source)}' and {resource} is not running: it "
+            + $"reported {reported}. This console does not carry that resource's output, so nothing here "
+            + $"says why — {elsewhere}.{checkout}").ToString();
     }
 }

@@ -272,4 +272,46 @@ public class BackingServiceConfigAuditTests
 
         Assert.Empty(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
     }
+    /// <summary>
+    /// An orphan key is developer-written, so it is escaped rather than interpolated as written
+    /// (#375) — each name on its own, so the cap never applies to the joined list.
+    /// </summary>
+    [Fact]
+    public async Task AnOrphanNameCannotForgeALineOfTheWarning()
+    {
+        // No ':' in the forged name: configuration reads it as a key separator, so the entry would
+        // be refused as a malformed key before reaching the audit this test is about.
+        var builder = CreateBuilder("""
+            { "backingServices": {
+                "ord'ers_db\nFATAL everything is fine": { "source": "local" } } }
+            """);
+
+        builder.AddBackingService("orders-db", Factory(builder, "orders-db"));
+
+        var warning = Assert.Single(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+
+        Assert.Contains("'ord\\'ers_db\\nFATAL everything is fine'", warning, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n", warning, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The joined list is never capped: each name is composed on its own, so ten orphans all survive
+    /// where a single 64-character cap over the list would have hidden most of what to fix.
+    /// </summary>
+    [Fact]
+    public async Task TheJoinedOrphanListIsNotCapped()
+    {
+        string[] orphans = [.. Enumerable.Range(0, 10).Select(i => $"service-{i:00}")];
+        var entries = string.Join(", ", orphans.Select(name => $"\"{name}\": {{ \"source\": \"local\" }}"));
+
+        var builder = CreateBuilder($$"""
+            { "backingServices": { {{entries}} } }
+            """);
+
+        builder.AddBackingService("orders-db", Factory(builder, "orders-db"));
+
+        var warning = Assert.Single(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+
+        Assert.All(orphans, name => Assert.Contains($"'{name}'", warning, StringComparison.Ordinal));
+    }
 }

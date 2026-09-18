@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.Config;
 
@@ -133,15 +134,21 @@ internal static class ServiceConfigAudit
         {
             var closest = NearMiss.Nearest(orphan, candidates, spelling: name => name).FirstOrDefault();
 
-            return closest is null ? $"'{orphan}'" : $"'{orphan}' (did you mean '{closest}'?)";
+            // Composed per name, not over the joined list: capping the list would hide most of it.
+            return closest is null
+                ? Raw.Compose($"'{new Name(orphan)}'")
+                : Raw.Compose($"'{new Name(orphan)}' (did you mean '{new Name(closest)}'?)");
         });
 
-        return $"Service configuration that nothing read: {string.Join(", ", described)}. No service in "
-            + $"this AppHost's catalog is named {(orphans.Count == 1 ? "it" : "any of them")}, so "
-            + $"{(orphans.Count == 1 ? "the entry configures" : "the entries configure")} nothing. This AppHost's "
-            + $"catalog declares: {string.Join(", ", candidates.Select(name => $"'{name}'"))}. Correct the key "
-            + $"under \"{DeveloperConfigFileSource.FileServicesKey}\" in '{DeveloperConfiguration.FileName}', or "
-            + "wherever a higher layer set it, or remove the entry if it is deliberately unused.";
+        var declared = candidates.Select(name => Raw.Compose($"'{new Name(name)}'"));
+
+        return Raw.Compose(
+            $"Service configuration that nothing read: {Raw.Join(", ", described)}. No service in "
+            + $"this AppHost's catalog is named {(orphans.Count == 1 ? Raw.Literal("it") : Raw.Literal("any of them"))}, so "
+            + $"{(orphans.Count == 1 ? Raw.Literal("the entry configures") : Raw.Literal("the entries configure"))} nothing. This AppHost's "
+            + $"catalog declares: {Raw.Join(", ", declared)}. Correct the key "
+            + $"under \"{Raw.Literal(DeveloperConfigFileSource.FileServicesKey)}\" in '{Raw.Literal(DeveloperConfiguration.FileName)}', or "
+            + $"wherever a higher layer set it, or remove the entry if it is deliberately unused.").ToString();
     }
 
     /// <summary>

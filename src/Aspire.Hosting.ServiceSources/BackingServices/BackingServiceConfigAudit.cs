@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.BackingServices;
 
@@ -178,17 +179,23 @@ internal static class BackingServiceConfigAudit
         {
             var closest = NearMiss.Nearest(orphan, candidates, spelling: name => name).FirstOrDefault();
 
-            return closest is null ? $"'{orphan}'" : $"'{orphan}' (did you mean '{closest}'?)";
+            // Composed per name, not over the joined list: capping the list would hide most of it.
+            return closest is null
+                ? Raw.Compose($"'{new Name(orphan)}'")
+                : Raw.Compose($"'{new Name(orphan)}' (did you mean '{new Name(closest)}'?)");
         });
 
-        return $"Backing service configuration that nothing read: {string.Join(", ", described)}. "
-            + $"No AddBackingService() call names {(orphans.Count == 1 ? "it" : "them")}, so "
-            + $"{(orphans.Count == 1 ? "the entry was" : "the entries were")} never looked up, and each backing "
-            + "service they were meant to configure resolved to its 'local' source instead — running from the "
-            + "factory this AppHost supplies rather than from the entry. This AppHost adds: "
-            + $"{string.Join(", ", candidates.Select(name => $"'{name}'"))}. Correct the key under "
-            + $"\"{DeveloperConfigFileSource.FileBackingServicesKey}\" in '{DeveloperConfiguration.FileName}', or "
-            + "wherever a higher layer set it, or remove the entry if it is deliberately unused.";
+        var adds = candidates.Select(name => Raw.Compose($"'{new Name(name)}'"));
+
+        return Raw.Compose(
+            $"Backing service configuration that nothing read: {Raw.Join(", ", described)}. "
+            + $"No AddBackingService() call names {(orphans.Count == 1 ? Raw.Literal("it") : Raw.Literal("them"))}, so "
+            + $"{(orphans.Count == 1 ? Raw.Literal("the entry was") : Raw.Literal("the entries were"))} never looked up, and each backing "
+            + $"service they were meant to configure resolved to its 'local' source instead — running from the "
+            + $"factory this AppHost supplies rather than from the entry. This AppHost adds: "
+            + $"{Raw.Join(", ", adds)}. Correct the key under "
+            + $"\"{Raw.Literal(DeveloperConfigFileSource.FileBackingServicesKey)}\" in '{Raw.Literal(DeveloperConfiguration.FileName)}', or "
+            + $"wherever a higher layer set it, or remove the entry if it is deliberately unused.").ToString();
     }
 
     /// <summary>
