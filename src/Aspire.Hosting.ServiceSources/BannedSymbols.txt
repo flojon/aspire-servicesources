@@ -1,0 +1,2 @@
+M:Aspire.Hosting.ServiceSources.ServiceSourcesConfigurationException.#ctor(System.String);compose the message through ServiceSourcesConfigurationException.For($"...") so caller-controlled names cannot reach a reader unescaped
+M:Aspire.Hosting.ServiceSources.ServiceSourcesConfigurationException.#ctor(System.String,System.Exception);compose the message through ServiceSourcesConfigurationException.For($"...", inner) so caller-controlled names cannot reach a reader unescaped

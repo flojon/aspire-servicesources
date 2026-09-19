@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -303,8 +304,6 @@ internal sealed class ServiceSourcesWarnings
         $"'{source}' — {OutOfBandSourceAdvice.SourceDetail(source)}. The service is expected to be configured wherever it actually " +
         $"runs. {SwitchSourceRemedy}";
 
-    private const int MaxLabelLength = 64;
-
     /// <summary>
     /// A caller-controlled name made safe to sit inside the quotes a message delimits it with, and
     /// bounded.
@@ -315,32 +314,11 @@ internal sealed class ServiceSourcesWarnings
     /// entry — by ending the line, or by closing the quote and writing its own sentence — so both go
     /// through the same helper rather than one being escaped and the other interpolated raw beside it.
     /// <para>
-    /// <see cref="ConfiguredValue"/> rather than a second spelling of it: it is this package's rule for
-    /// developer-written text echoed back, and it catches the invisibles a control-character test
-    /// misses. The quote, its escape character and the cap are what it does not cover, and all three
-    /// are these messages' own.
+    /// <see cref="Name"/> holds the rule itself, so a message composed through the seam and a message
+    /// still calling this helper cannot drift apart.
     /// </para>
     /// </remarks>
-    internal static string Label(string? name)
-    {
-        // The escape character first, or a name's own '\' before a quote un-escapes back to a live one.
-        var literal = name?.Replace("\\", "\\\\", StringComparison.Ordinal);
-
-        // Bare must run between the two replaces above and below: its own \t/\n/\uXXXX escapes are
-        // synthesized after the doubling, so they are not themselves doubled, and are emitted before
-        // the quote-escape, which does not touch '\' and so leaves them alone.
-        var escaped = ConfiguredValue.Bare(literal).Replace("'", "\\'", StringComparison.Ordinal);
-
-        if (escaped.Length <= MaxLabelLength)
-        {
-            return escaped;
-        }
-
-        // Never cut a surrogate pair in half: the half left behind is not text.
-        var cut = char.IsHighSurrogate(escaped[MaxLabelLength - 1]) ? MaxLabelLength - 1 : MaxLabelLength;
-
-        return escaped[..cut] + '…';
-    }
+    internal static string Label(string? name) => new Name(name).ToString();
 
     /// <summary>
     /// How to bring the service back under this AppHost's control, for every warning that offers it.

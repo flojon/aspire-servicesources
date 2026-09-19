@@ -4,6 +4,7 @@ using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Prepare;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
 
@@ -542,11 +543,11 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         // checkout root and reported after a clone as a .csproj that never appeared.
         if (string.IsNullOrWhiteSpace(project))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': 'project' is required for a 'local' service of kind 'dotnet'. It names "
-                + "the project file to run, relative to the service's checkout — for example "
-                + "'src/Orders.Api/Orders.Api.csproj'. It belongs on the service's 'servicesources.yaml' entry "
-                + "beside 'repository'; 'servicesources.local.json' chooses the source and carries no 'project'.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': 'project' is required for a 'local' service of kind 'dotnet'. It names "
+                + $"the project file to run, relative to the service's checkout — for example "
+                + $"'src/Orders.Api/Orders.Api.csproj'. It belongs on the service's 'servicesources.yaml' entry "
+                + $"beside 'repository'; 'servicesources.local.json' chooses the source and carries no 'project'.");
         }
 
         if (CheckoutRelativePath.IsAbsolute(project))

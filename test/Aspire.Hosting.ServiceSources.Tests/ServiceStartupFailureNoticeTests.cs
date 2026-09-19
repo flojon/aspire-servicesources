@@ -510,4 +510,42 @@ public class ServiceStartupFailureNoticeTests
         Assert.Empty(warnings);
         Assert.Null(ServiceStartupFailureNotices.For(builder).ReportTask);
     }
+    /// <summary>
+    /// The notice names a service the developer configured, so the name is escaped rather than
+    /// interpolated as written (#375). Lives here rather than beside the other #375 tests because
+    /// the report's fake logger and resource are private to this class.
+    /// </summary>
+    [Theory]
+    [InlineData("ord'ers\nFATAL: running fine", "ord\\u0027ers\\nFATAL: running fine")]
+    [InlineData("ord\"ers", "ord\\\"ers")]
+    [InlineData("ord\\ers", "ord\\\\ers")]
+    public async Task ANameCannotForgeALineOfTheNotice(string serviceName, string expected)
+    {
+        var written = await ReportAsync(
+            ServiceResource(serviceName),
+            Snapshot(KnownResourceStates.FailedToStart));
+
+        var notice = Assert.Single(written);
+
+        // Present, not merely newline-free: dropping the name would satisfy DoesNotContain alone.
+        Assert.Contains($"Service '{expected}'", notice, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n", notice, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Only the name is capped — the advice around it is this package's own prose and is what the
+    /// notice exists to deliver.
+    /// </summary>
+    [Fact]
+    public async Task TheAdviceAroundTheNameIsNotTruncated()
+    {
+        var written = await ReportAsync(
+            ServiceResource(new string('a', 200)),
+            Snapshot(KnownResourceStates.FailedToStart));
+
+        var notice = Assert.Single(written);
+
+        Assert.Contains("This console does not carry", notice, StringComparison.Ordinal);
+        Assert.Contains("…", notice, StringComparison.Ordinal);
+    }
 }

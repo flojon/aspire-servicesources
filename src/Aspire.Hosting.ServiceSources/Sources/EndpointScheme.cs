@@ -1,4 +1,5 @@
 using Aspire.Hosting.ServiceSources.Config.Catalog;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
 
@@ -58,10 +59,10 @@ public static class EndpointScheme
         // one the person reading this error owns. Phrased as "the X.scheme entry in Y" rather than
         // "Y's X.scheme" so this never collides with the closing quote CatalogOrigin.Describe()
         // wraps a yaml path in — "'servicesources.yaml''s" reads as a typo, not a possessive.
-        var origin = fromDeveloperConfig ? "servicesources.local.json" : catalogOrigin.Describe();
+        var origin = fromDeveloperConfig ? Raw.Literal("servicesources.local.json") : Raw.Origin(catalogOrigin);
 
-        throw new ServiceSourcesConfigurationException(
-            $"Service '{serviceName}': scheme '{configured}' is not supported for source '{source}' — " +
-            $"use '{Http}' or '{Https}'. Set the {source}.scheme entry in {origin}.");
+        throw ServiceSourcesConfigurationException.For(
+            $"Service '{new Name(serviceName)}': scheme '{new Name(configured)}' is not supported for source '{new Name(source)}' — " +
+            $"use '{Raw.Literal(Http)}' or '{Raw.Literal(Https)}'. Set the {new Name(source)}.scheme entry in {origin}.");
     }
 }

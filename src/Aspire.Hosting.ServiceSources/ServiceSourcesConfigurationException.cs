@@ -1,4 +1,5 @@
 using System.Text;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources;
 
@@ -18,6 +19,20 @@ public sealed class ServiceSourcesConfigurationException : Exception
     public ServiceSourcesConfigurationException(string message, Exception innerException) : base(message, innerException)
     {
     }
+
+    // The factory is the one legitimate caller of the banned constructor; the suppression is scoped
+    // to these two lines so every other use still reports.
+#pragma warning disable RS0030
+    /// <summary>
+    /// The only way this package builds a message: a raw <c>string</c> hole does not compile, so a
+    /// caller-controlled name cannot reach a reader unescaped.
+    /// </summary>
+    internal static ServiceSourcesConfigurationException For(ServiceTextHandler message) =>
+        new(message.Text);
+
+    internal static ServiceSourcesConfigurationException For(ServiceTextHandler message, Exception innerException) =>
+        new(message.Text, innerException);
+#pragma warning restore RS0030
 
     /// <summary>
     /// Every message on this type is written to be read by the developer who has to act on it, and
@@ -58,7 +73,7 @@ public sealed class ServiceSourcesConfigurationException : Exception
             // a genuine second occurrence (a retry that failed the same way) and still worth seeing.
             if (cause.Message != previous)
             {
-                description.Append(Environment.NewLine).Append("  caused by: ").Append(cause.Message);
+                description.Append(Environment.NewLine).Append("  caused by: ").Append(Raw.Cause(cause));
                 previous = cause.Message;
                 wroteACause = true;
             }
