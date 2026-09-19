@@ -6,6 +6,7 @@ using Aspire.Hosting.ServiceSources.Prepare;
 using Aspire.Hosting.ServiceSources.Sources;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Prepare;
 
@@ -14,6 +15,9 @@ namespace Aspire.Hosting.ServiceSources.Tests.Prepare;
 /// the clone and the kind's own post-clone checks. This is the run that matters most — deferral
 /// covers a cold managed checkout, so the one run it carries is the first, the expensive one.
 /// </summary>
+[Trait("IO", "true")]
+[Trait("Concurrency", "true")]
+[Trait("Timing", "true")]
 public class PrepareDeferredTests
 {
     private const string KindName = "stand-in";

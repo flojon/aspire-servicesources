@@ -3,6 +3,7 @@ using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Sources;
 using IPortAllocator = Aspire.Hosting.ServiceSources.PortAllocation.IPortAllocator;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests;
 
@@ -19,6 +20,7 @@ namespace Aspire.Hosting.ServiceSources.Tests;
 /// (<c>ContainerSourceTests</c>, <c>LocalProjectSourceTests</c>); what is pinned here is that the
 /// message says so before the reader acts on it.
 /// </remarks>
+[Trait("IO", "true")]
 public class SkipRemedyTests
 {
     private const string UrlOnlyService = "inventory";

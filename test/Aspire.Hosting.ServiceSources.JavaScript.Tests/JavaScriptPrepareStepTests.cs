@@ -4,6 +4,7 @@ using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Prepare;
 using Aspire.Hosting.ServiceSources.Sources;
 using static Aspire.Hosting.ServiceSources.JavaScript.Tests.TestHelpers;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.JavaScript.Tests;
 
@@ -17,6 +18,7 @@ namespace Aspire.Hosting.ServiceSources.JavaScript.Tests;
 /// declares no <c>prepare</c> block gets its dependencies installed exactly as before, which is what
 /// #164 settled before this landed.
 /// </remarks>
+[Trait("IO", "true")]
 public class JavaScriptPrepareStepTests
 {
     private const string ServiceName = "frontend";

@@ -1,9 +1,11 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Catalog;
 
+[Trait("IO", "true")]
 public class AddServiceCatalogTests
 {
     private static IDistributedApplicationBuilder CreateBuilder(string appHostDirectory) =>

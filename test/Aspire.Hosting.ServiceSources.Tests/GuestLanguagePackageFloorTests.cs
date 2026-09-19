@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests;
 
@@ -10,6 +11,7 @@ namespace Aspire.Hosting.ServiceSources.Tests;
 /// the repository's props files. Numbers that must agree and are edited in different files are
 /// exactly the shape that rots quietly, so they are checked against each other.
 /// </summary>
+[Trait("IO", "true")]
 public class GuestLanguagePackageFloorTests
 {
     [Fact]

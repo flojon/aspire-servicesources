@@ -1,12 +1,14 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.BackingServices;
 
 /// <summary>
 /// What a service actually receives when it is configured with a reference to a backing service.
 /// </summary>
+[Trait("IO", "true")]
 public class BackingServiceConsumerTests
 {
     private static string FixtureRepoPath => Path.Combine(AppContext.BaseDirectory, "Fixtures", "sample-service.git");

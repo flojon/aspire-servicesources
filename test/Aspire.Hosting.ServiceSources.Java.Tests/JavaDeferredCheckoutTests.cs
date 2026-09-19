@@ -1,5 +1,6 @@
 using Aspire.Hosting.ApplicationModel;
 using static Aspire.Hosting.ServiceSources.Java.Tests.TestHelpers;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Java.Tests;
 
@@ -7,6 +8,7 @@ namespace Aspire.Hosting.ServiceSources.Java.Tests;
 /// <c>ResolveDeferred</c> (#159): the java kind builds its whole resource against a checkout that
 /// has not been cloned yet, and hands core the checks it could not run because of that.
 /// </summary>
+[Trait("IO", "true")]
 public class JavaDeferredCheckoutTests
 {
     /// <summary>

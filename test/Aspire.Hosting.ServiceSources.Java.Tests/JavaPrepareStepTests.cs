@@ -4,6 +4,7 @@ using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Prepare;
 using Aspire.Hosting.ServiceSources.Sources;
 using static Aspire.Hosting.ServiceSources.Java.Tests.TestHelpers;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Java.Tests;
 
@@ -12,6 +13,7 @@ namespace Aspire.Hosting.ServiceSources.Java.Tests;
 /// repository that commits <c>prepare.sh</c> and gitignores the jar and the routing graph the script
 /// produces, so the checkout resolves cleanly and is not runnable until the step has run.
 /// </summary>
+[Trait("IO", "true")]
 public class JavaPrepareStepTests
 {
     private const string ServiceName = "routing";

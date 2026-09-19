@@ -1,5 +1,6 @@
 using Aspire.Hosting.ApplicationModel;
 using Microsoft.Extensions.DependencyInjection;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.BackingServices;
 
@@ -32,6 +33,8 @@ namespace Aspire.Hosting.ServiceSources.Tests.BackingServices;
 /// that resource to be running. Neither follows from the interfaces asserted below.
 /// </para>
 /// </remarks>
+[Trait("IO", "true")]
+[Trait("Timing", "true")]
 public class BackingServiceWaitTests
 {
     private static IDistributedApplicationBuilder CreateBuilder(string json)

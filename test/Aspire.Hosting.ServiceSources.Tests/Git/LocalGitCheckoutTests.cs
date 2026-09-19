@@ -1,6 +1,7 @@
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Git;
 
@@ -11,6 +12,7 @@ namespace Aspire.Hosting.ServiceSources.Tests.Git;
 /// deferral decision are both built on the same answer, for services nobody has added yet, and the
 /// prefetch's filter (#76/#177) is only safe while the two agree.
 /// </summary>
+[Trait("IO", "true")]
 public class LocalGitCheckoutTests
 {
     private static ServiceDeveloperConfig Managed() =>

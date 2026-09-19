@@ -1,4 +1,5 @@
 using Aspire.Hosting.ServiceSources.Git;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Git;
 
@@ -7,6 +8,7 @@ namespace Aspire.Hosting.ServiceSources.Tests.Git;
 /// watcher that has not attached yet, and what it does when the two ends disagree about when the
 /// clone is over.
 /// </summary>
+[Trait("Timing", "true")]
 public class CheckoutProgressTests
 {
     /// <summary>

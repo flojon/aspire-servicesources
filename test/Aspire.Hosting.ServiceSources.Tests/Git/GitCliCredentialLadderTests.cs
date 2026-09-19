@@ -1,4 +1,5 @@
 using Aspire.Hosting.ServiceSources.Git;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Git;
 
@@ -11,6 +12,7 @@ namespace Aspire.Hosting.ServiceSources.Tests.Git;
 /// test configures. Without that these assertions would depend on whatever credential helper the
 /// machine running the suite happens to have set up for <c>127.0.0.1</c>.
 /// </remarks>
+[Trait("IO", "true")]
 public class GitCliCredentialLadderTests
 {
     private const string EnvironmentToken = "env-token";

@@ -3,6 +3,7 @@ using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Sources;
 using IPortAllocator = Aspire.Hosting.ServiceSources.PortAllocation.IPortAllocator;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests;
 
@@ -11,6 +12,7 @@ namespace Aspire.Hosting.ServiceSources.Tests;
 /// native vocabulary on ServiceResource's own interfaces rather than Configure&lt;T&gt;. Each test
 /// drives a real source so the resource under test is the one an AppHost would actually get.
 /// </summary>
+[Trait("IO", "true")]
 public class ServiceConfigurationExtensionsTests
 {
     private static readonly ServiceDefinition ContainerDefinition = new ServiceMetadata

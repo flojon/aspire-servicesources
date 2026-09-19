@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Aspire.Hosting.ServiceSources.Prepare;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Prepare;
 
@@ -9,6 +10,9 @@ namespace Aspire.Hosting.ServiceSources.Tests.Prepare;
 /// — but what this class asserts cannot be asserted against a substitute: that cancelling the step
 /// ends the command, and its children, rather than merely ending the wait for it.
 /// </summary>
+[Trait("IO", "true")]
+[Trait("Concurrency", "true")]
+[Trait("Timing", "true")]
 public class ProcessPrepareCommandRunnerTests
 {
     /// <summary>

@@ -1,5 +1,6 @@
 using Aspire.Hosting.ApplicationModel;
 using static Aspire.Hosting.ServiceSources.Java.Tests.TestHelpers;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Java.Tests;
 
@@ -10,6 +11,7 @@ namespace Aspire.Hosting.ServiceSources.Java.Tests;
 /// the handler in isolation. <c>AddService()</c> resolves eagerly and returns the real resource, so
 /// there is no event to publish: the assertions run straight after the call.
 /// </summary>
+[Trait("IO", "true")]
 public class UseJavaTests
 {
     /// <summary>

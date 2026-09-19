@@ -4,6 +4,7 @@ using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Microsoft.Extensions.Configuration;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Config;
 
@@ -14,6 +15,7 @@ namespace Aspire.Hosting.ServiceSources.Tests.Config;
 /// the AppHost's own <c>IConfiguration</c>, so a read from <c>Program.cs</c> must not depend on how
 /// many <c>AddService()</c> calls happen to precede it.
 /// </summary>
+[Trait("IO", "true")]
 public class DeveloperConfigFileSourceTests
 {
     private const string OrdersCatalog = """

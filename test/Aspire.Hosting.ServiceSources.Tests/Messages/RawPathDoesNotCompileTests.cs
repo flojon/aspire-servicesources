@@ -1,6 +1,7 @@
 using Aspire.Hosting.ServiceSources.Messages;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Messages;
 
@@ -8,6 +9,7 @@ namespace Aspire.Hosting.ServiceSources.Tests.Messages;
 /// The ticket's deliverable is that the unescaped path stops compiling, so the proof has to be a
 /// compilation rather than an assertion about output.
 /// </summary>
+[Trait("IO", "true")]
 public class RawPathDoesNotCompileTests
 {
     private const string Preamble = """

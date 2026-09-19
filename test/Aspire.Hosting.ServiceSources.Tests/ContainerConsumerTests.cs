@@ -1,4 +1,5 @@
 using Aspire.Hosting.ApplicationModel;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests;
 
@@ -7,6 +8,7 @@ namespace Aspire.Hosting.ServiceSources.Tests;
 /// object to plumb container-to-host networking, and it only makes one for a resource that is
 /// actually in the app model — which the old facade never was.
 /// </summary>
+[Trait("IO", "true")]
 public class ContainerConsumerTests
 {
     private static string AppHostDirectory(string source)

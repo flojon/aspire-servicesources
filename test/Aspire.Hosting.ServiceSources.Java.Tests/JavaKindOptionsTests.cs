@@ -1,8 +1,10 @@
 using Aspire.Hosting.ServiceSources.Catalog;
 using static Aspire.Hosting.ServiceSources.Java.Tests.TestHelpers;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Java.Tests;
 
+[Trait("IO", "true")]
 public class JavaKindOptionsTests
 {
     [Fact]

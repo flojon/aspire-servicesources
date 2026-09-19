@@ -4,9 +4,11 @@ using Aspire.Hosting.ServiceSources.Messages;
 using Aspire.Hosting.ServiceSources.PortAllocation;
 using Aspire.Hosting.ServiceSources.Sources;
 using ProjectResource = Aspire.Hosting.ApplicationModel.ProjectResource;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Messages;
 
+[Trait("IO", "true")]
 public class MigratedSiteEscapingTests
 {
     private const string Forgery = "orders'\nFATAL: everything is fine";

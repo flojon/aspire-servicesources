@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Xml.Linq;
 using Aspire.Hosting.ServiceSources.Git;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Git;
 
@@ -9,6 +10,8 @@ namespace Aspire.Hosting.ServiceSources.Tests.Git;
 /// <c>.servicesources</c> directory, so a checkout underneath it builds under its own repository's
 /// settings instead of the AppHost repository's.
 /// </summary>
+[Trait("IO", "true")]
+[Trait("Concurrency", "true")]
 public class CheckoutBuildBarrierTests
 {
     private static string NewToolDirectory()

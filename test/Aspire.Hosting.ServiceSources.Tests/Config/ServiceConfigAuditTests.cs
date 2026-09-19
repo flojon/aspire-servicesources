@@ -1,5 +1,6 @@
 using Aspire.Hosting.ApplicationModel;
 using Microsoft.Extensions.Configuration;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Config;
 
@@ -15,6 +16,7 @@ namespace Aspire.Hosting.ServiceSources.Tests.Config;
 /// <c>BeforeStartEvent</c> is only the reporting of it, gated on at least one <c>AddService</c> call
 /// having happened — an AppHost that adds no service should never hear about the section.
 /// </remarks>
+[Trait("IO", "true")]
 public class ServiceConfigAuditTests
 {
     private static IDistributedApplicationBuilder CreateBuilder(string catalogYaml, string localJson)

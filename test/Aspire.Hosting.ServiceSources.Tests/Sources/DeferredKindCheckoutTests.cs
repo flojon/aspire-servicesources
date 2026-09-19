@@ -4,6 +4,7 @@ using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Sources;
 using Microsoft.Extensions.DependencyInjection;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 
@@ -12,6 +13,9 @@ namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 /// exercised through a stand-in <see cref="ILocalResourceKind"/> rather than through the java or
 /// javascript kinds, so what is asserted here is what <em>any</em> kind can rely on.
 /// </summary>
+[Trait("IO", "true")]
+[Trait("Concurrency", "true")]
+[Trait("Timing", "true")]
 public class DeferredKindCheckoutTests
 {
     private const string KindName = "stand-in";

@@ -1,6 +1,7 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources;
 using Microsoft.Extensions.Configuration;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Config;
 
@@ -19,6 +20,7 @@ namespace Aspire.Hosting.ServiceSources.Tests.Config;
 /// what is being pinned is that neither ever reaches it.
 /// </para>
 /// </remarks>
+[Trait("IO", "true")]
 public class PortBlockValidationTests
 {
     private static string AppHostDirectory(string json)

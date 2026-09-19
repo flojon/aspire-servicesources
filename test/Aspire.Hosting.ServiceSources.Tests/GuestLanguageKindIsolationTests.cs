@@ -1,4 +1,5 @@
 using System.Reflection;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests;
 
@@ -11,6 +12,7 @@ namespace Aspire.Hosting.ServiceSources.Tests;
 /// Hoist one into a type's shape and the kind type stops loading for every AppHost, including the
 /// ones that declare no service of that kind at all.
 /// </summary>
+[Trait("IO", "true")]
 public class GuestLanguageKindIsolationTests
 {
     /// <summary>

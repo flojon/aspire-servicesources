@@ -6,9 +6,12 @@ using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Sources;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 
+[Trait("IO", "true")]
+[Trait("Concurrency", "true")]
 public class LocalProjectSourceTests
 {
     private sealed class FakeGitClient : IGitClient

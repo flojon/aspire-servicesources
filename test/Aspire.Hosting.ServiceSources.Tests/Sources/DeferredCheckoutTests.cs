@@ -7,6 +7,7 @@ using Aspire.Hosting.ServiceSources.Tests.Git;
 using Aspire.Hosting.ServiceSources.Sources;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 
@@ -14,6 +15,9 @@ namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 /// Deferring a cold <c>"local"</c> checkout past startup (#130): the AppHost reaches the dashboard
 /// while the clone is still running, and the service starts when its checkout lands.
 /// </summary>
+[Trait("IO", "true")]
+[Trait("Concurrency", "true")]
+[Trait("Timing", "true")]
 public class DeferredCheckoutTests
 {
     private sealed class FakeGitClient : IGitClient

@@ -4,6 +4,7 @@ using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Sources;
 using Microsoft.Extensions.Configuration;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Config;
 
@@ -12,6 +13,7 @@ namespace Aspire.Hosting.ServiceSources.Tests.Config;
 /// <c>servicesources.local.json</c> is the lowest layer of the standard provider chain rather than
 /// the only place a value can come from.
 /// </summary>
+[Trait("IO", "true")]
 public class DeveloperConfigurationTests
 {
     private static IDistributedApplicationBuilder CreateBuilder(string appHostDirectory) =>
