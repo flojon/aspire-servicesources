@@ -1,4 +1,5 @@
 using Aspire.Hosting.ServiceSources.Sources;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 
@@ -7,6 +8,8 @@ namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 /// managed checkout at once — <see cref="LocalProjectSource"/> and <see cref="DeferredCheckout"/> are
 /// its two real callers, exercised in isolation here.
 /// </summary>
+[Trait("Concurrency", "true")]
+[Trait("Timing", "true")]
 public class CheckoutNameLockTests
 {
     private static readonly TimeSpan Rendezvous = TimeSpan.FromSeconds(10);

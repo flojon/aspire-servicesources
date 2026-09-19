@@ -1,8 +1,10 @@
 using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Config;
 
+[Trait("IO", "true")]
 public class ServiceCatalogLoaderTests
 {
     [Fact]

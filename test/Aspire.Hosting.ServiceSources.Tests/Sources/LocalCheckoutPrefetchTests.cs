@@ -3,6 +3,7 @@ using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Sources;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 
@@ -12,6 +13,9 @@ namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 /// and the speculative-prefetch rules that stop it inventing failures for services the AppHost
 /// never asks for.
 /// </summary>
+[Trait("IO", "true")]
+[Trait("Concurrency", "true")]
+[Trait("Timing", "true")]
 public class LocalCheckoutPrefetchTests
 {
     private sealed class FakeGitClient : IGitClient

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using Aspire.Hosting.ServiceSources.BackingServices;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.BackingServices;
 
@@ -13,6 +14,7 @@ namespace Aspire.Hosting.ServiceSources.Tests.BackingServices;
 /// <see cref="KubernetesBackingServiceTests"/> keeps the end-to-end cases: that the echo reaches the
 /// message, and what the message says about it.
 /// </remarks>
+[Trait("Concurrency", "true")]
 public class ConnectionStringRedactionTests
 {
     /// <summary>

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests;
 
@@ -14,6 +15,7 @@ namespace Aspire.Hosting.ServiceSources.Tests;
 /// version can be tested without a package that has it. Needs no restore and no network: the probe
 /// project imports the targets, declares the item, and calls the target.
 /// </remarks>
+[Trait("IO", "true")]
 public class GuestLanguageFloorTargetsTests
 {
     // The floor is 13.5.2 for Aspire.Hosting.JavaScript. Each case is the resolved version an

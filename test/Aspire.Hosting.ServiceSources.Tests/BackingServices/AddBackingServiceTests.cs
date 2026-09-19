@@ -3,6 +3,7 @@ using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Microsoft.Extensions.Configuration;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.BackingServices;
 
@@ -10,6 +11,7 @@ namespace Aspire.Hosting.ServiceSources.Tests.BackingServices;
 /// <c>AddBackingService</c> resolves the database, broker or cache a service connects to from
 /// whichever source the developer configured, without the AppHost's own code changing.
 /// </summary>
+[Trait("IO", "true")]
 public class AddBackingServiceTests
 {
     /// <summary>

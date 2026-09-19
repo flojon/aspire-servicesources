@@ -2,6 +2,7 @@ using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Sources;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests;
 
@@ -11,6 +12,7 @@ namespace Aspire.Hosting.ServiceSources.Tests;
 /// without a line of our own the AppHost's own console has nothing at all to say about a service
 /// that silently failed to appear.
 /// </summary>
+[Trait("Timing", "true")]
 public class ServiceStartupFailureNoticeTests
 {
     private sealed class FakeServiceResource(string name) : Resource(name), IResourceWithServiceDiscovery;

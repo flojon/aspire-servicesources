@@ -3,9 +3,11 @@ using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Catalog;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Git;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Catalog;
 
+[Trait("IO", "true")]
 public class CatalogCompositionTests
 {
     private static IDistributedApplicationBuilder CreateBuilder(string appHostDirectory) =>

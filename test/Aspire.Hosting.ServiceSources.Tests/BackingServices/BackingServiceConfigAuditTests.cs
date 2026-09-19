@@ -1,5 +1,6 @@
 using Aspire.Hosting.ApplicationModel;
 using Microsoft.Extensions.Configuration;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.BackingServices;
 
@@ -19,6 +20,7 @@ namespace Aspire.Hosting.ServiceSources.Tests.BackingServices;
 /// validates every entry without requiring each to be used.
 /// </para>
 /// </remarks>
+[Trait("IO", "true")]
 public class BackingServiceConfigAuditTests
 {
     private static IDistributedApplicationBuilder CreateBuilder(string json)

@@ -1,5 +1,6 @@
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Prepare;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Prepare;
 
@@ -7,6 +8,9 @@ namespace Aspire.Hosting.ServiceSources.Tests.Prepare;
 /// The step's decision, its output and its failure — the code both the eager and the deferred path
 /// call, exercised without either of them and without spawning a process.
 /// </summary>
+[Trait("IO", "true")]
+[Trait("Concurrency", "true")]
+[Trait("Timing", "true")]
 public class CheckoutPreparationTests
 {
     private const string ServiceName = "routing";

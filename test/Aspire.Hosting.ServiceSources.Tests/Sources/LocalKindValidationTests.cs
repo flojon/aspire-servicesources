@@ -3,6 +3,7 @@ using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Sources;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 
@@ -11,6 +12,7 @@ namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 /// through a stand-in kind rather than through the java or javascript ones, so these stay
 /// statements about core rather than about either handler.
 /// </summary>
+[Trait("IO", "true")]
 public class LocalKindValidationTests
 {
     private const string KindName = "stand-in";

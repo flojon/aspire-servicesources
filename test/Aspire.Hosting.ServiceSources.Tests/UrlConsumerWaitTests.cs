@@ -1,6 +1,7 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Sources;
 using Microsoft.Extensions.DependencyInjection;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests;
 
@@ -14,6 +15,8 @@ namespace Aspire.Hosting.ServiceSources.Tests;
 /// method Aspire's own orchestrator calls to honour a <see cref="WaitAnnotation"/>. That keeps the
 /// tests on the real code path without needing DCP to launch anything.
 /// </remarks>
+[Trait("IO", "true")]
+[Trait("Timing", "true")]
 public class UrlConsumerWaitTests
 {
     private static string AppHostDirectory(string source)

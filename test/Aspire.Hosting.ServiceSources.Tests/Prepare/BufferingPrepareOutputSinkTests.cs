@@ -1,6 +1,7 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Prepare;
 using Microsoft.Extensions.DependencyInjection;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Prepare;
 
@@ -8,6 +9,7 @@ namespace Aspire.Hosting.ServiceSources.Tests.Prepare;
 /// The eager path's buffering sink: forwards to the sink it wraps immediately, and separately caps
 /// and replays the same lines into the matching service's own resource log at BeforeStartEvent.
 /// </summary>
+[Trait("Timing", "true")]
 public class BufferingPrepareOutputSinkTests
 {
     private sealed class RecordingSink : IPrepareOutputSink

@@ -4,6 +4,7 @@ using Aspire.Hosting.ServiceSources.Config;
 using Microsoft.Extensions.Configuration;
 using System.Globalization;
 using System.Reflection;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Config;
 
@@ -12,6 +13,7 @@ namespace Aspire.Hosting.ServiceSources.Tests.Config;
 /// reported rather than silently dropped. Every block is checked, not only the one the entry's
 /// source names.
 /// </summary>
+[Trait("IO", "true")]
 public class DeveloperConfigValidatorTests
 {
     private const string Catalog = """

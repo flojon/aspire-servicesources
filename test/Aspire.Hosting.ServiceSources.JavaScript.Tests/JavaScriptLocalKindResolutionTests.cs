@@ -6,6 +6,7 @@ using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.JavaScript;
 using Aspire.Hosting.ServiceSources;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.JavaScript.Tests;
 
@@ -13,6 +14,7 @@ namespace Aspire.Hosting.ServiceSources.JavaScript.Tests;
 /// Covers what the handler builds out of an already-resolved checkout: which
 /// <c>Aspire.Hosting.JavaScript</c> integration runs the app, and how the options block reaches it.
 /// </summary>
+[Trait("IO", "true")]
 public class JavaScriptLocalKindResolutionTests
 {
     private static IResourceBuilder<IResourceWithServiceDiscovery> Resolve(

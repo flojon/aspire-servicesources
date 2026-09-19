@@ -2,9 +2,13 @@ using Aspire.Hosting;
 using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
 using Microsoft.Extensions.Configuration;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Config;
 
+[Trait("IO", "true")]
+[Trait("Concurrency", "true")]
+[Trait("Timing", "true")]
 public class ServiceSourcesConfigCacheTests
 {
     private static IDistributedApplicationBuilder CreateBuilder(string appHostDirectory) =>

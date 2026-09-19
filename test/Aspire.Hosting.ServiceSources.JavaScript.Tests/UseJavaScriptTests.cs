@@ -2,6 +2,7 @@ using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.JavaScript;
 using Aspire.Hosting.ServiceSources;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.JavaScript.Tests;
 
@@ -10,6 +11,7 @@ namespace Aspire.Hosting.ServiceSources.JavaScript.Tests;
 /// real <c>servicesources.yaml</c>, resolved through <c>AddService</c>. The developer config points
 /// <c>path</c> at an existing directory, so these exercise the whole path without needing git.
 /// </summary>
+[Trait("IO", "true")]
 public class UseJavaScriptTests
 {
     private static string CreateAppHost(string repoRoot, string catalogOptions = "")

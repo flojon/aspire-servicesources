@@ -1,5 +1,7 @@
+using Xunit;
 namespace Aspire.Hosting.ServiceSources.Tests;
 
+[Trait("IO", "true")]
 public class TempDirectoriesTests
 {
     [Fact]

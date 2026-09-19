@@ -2,9 +2,11 @@ using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources;
 using Microsoft.Extensions.DependencyInjection;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests;
 
+[Trait("IO", "true")]
 public class AddServiceIntegrationTests
 {
     private static string FixtureRepoPath => Path.Combine(AppContext.BaseDirectory, "Fixtures", "sample-service.git");

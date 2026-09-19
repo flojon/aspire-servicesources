@@ -4,9 +4,11 @@ using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Java;
 using Aspire.Hosting.ServiceSources.Sources;
 using Aspire.Hosting.ServiceSources.Tests;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 
+[Trait("IO", "true")]
 public class LocalKindRegistryTests
 {
     private sealed class FakeKind : ILocalResourceKind

@@ -1,8 +1,10 @@
 using Aspire.Hosting.ApplicationModel;
 using static Aspire.Hosting.ServiceSources.Java.Tests.TestHelpers;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Java.Tests;
 
+[Trait("IO", "true")]
 public class JavaLocalResourceKindTests
 {
     private static string CreateRepoRoot(params string[] subdirectories)

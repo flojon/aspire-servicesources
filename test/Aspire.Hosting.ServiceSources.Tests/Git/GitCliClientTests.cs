@@ -1,5 +1,6 @@
 using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Git;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Git;
 
@@ -7,6 +8,8 @@ namespace Aspire.Hosting.ServiceSources.Tests.Git;
 /// Drives <see cref="GitCliClient"/> against real repositories on disk, so every method is checked
 /// against the git it actually shells out to rather than against a description of it.
 /// </summary>
+[Trait("IO", "true")]
+[Trait("Concurrency", "true")]
 public class GitCliClientTests
 {
     /// <summary>

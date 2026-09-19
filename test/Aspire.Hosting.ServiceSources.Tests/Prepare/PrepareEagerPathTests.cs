@@ -4,6 +4,7 @@ using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Prepare;
 using Aspire.Hosting.ServiceSources.Sources;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Prepare;
 
@@ -11,6 +12,7 @@ namespace Aspire.Hosting.ServiceSources.Tests.Prepare;
 /// Where the step runs when the checkout is resolved during composition: after the working tree is
 /// complete and reconciled, and before the kind is allowed to judge it.
 /// </summary>
+[Trait("IO", "true")]
 public class PrepareEagerPathTests
 {
     private const string KindName = "stand-in";

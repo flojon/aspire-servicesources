@@ -4,9 +4,11 @@ using Aspire.Hosting.ServiceSources;
 using Microsoft.Extensions.DependencyInjection;
 using System.Linq;
 using System.Reflection;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests;
 
+[Trait("IO", "true")]
 public class AddServiceTests
 {
     private static IDistributedApplicationBuilder CreateBuilder(string appHostDirectory) =>

@@ -2,6 +2,7 @@ using Aspire.Hosting;
 using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
+using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Catalog;
 
@@ -10,6 +11,7 @@ namespace Aspire.Hosting.ServiceSources.Tests.Catalog;
 /// message. Exercises every reachable failure this package can throw against a code-only catalog and
 /// asserts none of them names a file that doesn't exist for that AppHost.
 /// </summary>
+[Trait("IO", "true")]
 public class CatalogErrorMessageTests
 {
     private static IDistributedApplicationBuilder CreateBuilder(string appHostDirectory) =>
