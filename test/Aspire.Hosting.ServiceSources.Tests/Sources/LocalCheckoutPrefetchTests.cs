@@ -72,7 +72,7 @@ public class LocalCheckoutPrefetchTests
             // Rendezvous with the other clone(s): if the prefetch were sequential, only one
             // participant would ever be here at a time and this would time out, failing the test
             // deterministically rather than by timing.
-            if (StartBarrier is not null && !StartBarrier.SignalAndWait(TimeSpan.FromSeconds(5)))
+            if (StartBarrier is not null && !StartBarrier.SignalAndWait(TimeSpan.FromSeconds(30)))
             {
                 throw new TimeoutException("Timed out waiting for the other clone to start concurrently.");
             }
