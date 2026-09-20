@@ -343,6 +343,12 @@ internal sealed class ServiceSourcesWarnings
     /// never wrote. The remedy is shared with it, because the way back under this AppHost's control
     /// does not depend on which of the two messages is reporting.
     /// </remarks>
+    // Not migrated onto the Raw/Name seam like the exception-message sites: every fragment here —
+    // reverts, SourceDetail, WhereToGoInstead, SwitchSourceRemedy — is already a fully-composed,
+    // safe sentence (built through Label or hardcoded in this package), carrying its own intentional
+    // quoting. Re-escaping a finished sentence through Raw.Escaped mangles that quoting instead of
+    // protecting anything — RS0030 does not reach this file in any case, since it only bans the
+    // ServiceSourcesConfigurationException string constructor and this method feeds a log warning.
     private static string RevertReason(
         string serviceName,
         string source,

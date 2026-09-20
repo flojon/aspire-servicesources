@@ -364,13 +364,13 @@ internal sealed class DeveloperConfiguration
     {
         var spellings = catalogNames
             .Where(name => string.Equals(name, configuredName, StringComparison.OrdinalIgnoreCase))
-            .Select(name => $"'{name}'");
+            .Select(name => Raw.Compose($"'{new Name(name)}'"));
 
-        return new ServiceSourcesConfigurationException(
-            $"Configuration names service '{configuredName}', which 'servicesources.yaml' declares more than "
-            + $"once under names differing only by case ({string.Join(", ", spellings)}). Configuration keys are "
-            + "case-insensitive, so there is no key that reaches one of them and not the other — rename them in "
-            + "'servicesources.yaml' so they differ by more than case.");
+        return ServiceSourcesConfigurationException.For(
+            $"Configuration names service '{new Name(configuredName)}', which 'servicesources.yaml' declares more than " +
+            $"once under names differing only by case ({Raw.Join(", ", spellings)}). Configuration keys are " +
+            $"case-insensitive, so there is no key that reaches one of them and not the other — rename them in " +
+            $"'servicesources.yaml' so they differ by more than case.");
     }
 
     /// <summary>
@@ -545,16 +545,18 @@ internal sealed class DeveloperConfiguration
     /// </para>
     /// </remarks>
     private ServiceSourcesConfigurationException NothingConfiguredError(string serviceName) =>
-        new("No service sources are configured: "
-            + (NearMissRootKey is not null
-                ? $"'{FilePath}' has a top-level key '{NearMissRootKey}'. Did you mean 'services'?"
-                : $"'{ServicesKey}' is empty in every configuration source, "
-                  + $"so no service has a source — including '{serviceName}'. "
-                  + $"Create '{FilePath}' ({(FileFound ? "found, but it configures no services" : "not found")}) with "
-                  + $"{{ \"services\": {{ \"{serviceName}\": {{ \"source\": \"...\" }} }} }}, "
-                  + $"or set the environment variable {EnvironmentVariableFor(serviceName)}. "
-                  + "Sources consulted: that file, appsettings.json, appsettings.{Environment}.json, user secrets, "
-                  + "environment variables and command-line arguments."));
+        ServiceSourcesConfigurationException.For(
+            $"{(NearMissRootKey is not null
+                ? Raw.Compose(
+                    $"No service sources are configured: '{Raw.Escaped(FilePath)}' has a top-level key '{new Name(NearMissRootKey)}'. Did you mean 'services'?")
+                : Raw.Compose(
+                    $"No service sources are configured: '{Raw.Literal(ServicesKey)}' is empty in every configuration source, " +
+                    $"so no service has a source — including '{new Name(serviceName)}'. " +
+                    $"Create '{Raw.Escaped(FilePath)}' ({Raw.Escaped(FileFound ? "found, but it configures no services" : "not found")}) with " +
+                    $"{{ \"services\": {{ \"{new Name(serviceName)}\": {{ \"source\": \"...\" }} }} }}, " +
+                    $"or set the environment variable {Raw.Escaped(EnvironmentVariableFor(serviceName))}. " +
+                    $"Sources consulted: that file, appsettings.json, appsettings.{{Environment}}.json, user secrets, " +
+                    $"environment variables and command-line arguments."))}");
 
     internal static string EnvironmentVariableFor(string serviceName) =>
         $"{ServicesKey.Replace(":", "__", StringComparison.Ordinal)}__{serviceName}__Source";

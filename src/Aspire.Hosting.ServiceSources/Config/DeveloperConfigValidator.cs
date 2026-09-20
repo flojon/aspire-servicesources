@@ -2,7 +2,7 @@ using Microsoft.Extensions.Configuration;
 using System.ComponentModel;
 using System.Globalization;
 using System.Reflection;
-using System.Text;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.Config;
 
@@ -43,7 +43,7 @@ internal static class DeveloperConfigValidator
     /// </remarks>
     public static void ValidateAll(IEnumerable<IConfigurationSection> entries, DeveloperConfigShape shape)
     {
-        List<(string Service, IReadOnlyList<string> Problems)>? faulted = null;
+        List<(string Service, IReadOnlyList<Raw> Problems)>? faulted = null;
 
         foreach (var entry in entries)
         {
@@ -82,10 +82,10 @@ internal static class DeveloperConfigValidator
     /// set of environment variables carrying the same mistakes need not agree on which one is
     /// named first.
     /// </remarks>
-    private static IReadOnlyList<string> Collect(
+    private static IReadOnlyList<Raw> Collect(
         string serviceName, IConfigurationSection entry, DeveloperConfigShape shape)
     {
-        var problems = new List<string>();
+        var problems = new List<Raw>();
 
         // The entry itself, before its keys. Two different mistakes put a value here, and they do
         // not deserve the same complaint.
@@ -170,7 +170,7 @@ internal static class DeveloperConfigValidator
     /// top-level one's rather than a thinner version of them.
     /// </remarks>
     private static void CollectBlock(
-        List<string> problems,
+        List<Raw> problems,
         string serviceName,
         IConfigurationSection block,
         string blockPath,
@@ -303,7 +303,7 @@ internal static class DeveloperConfigValidator
     /// </para>
     /// </remarks>
     private static void CollectValueOrMap(
-        List<string> problems,
+        List<Raw> problems,
         IConfigurationSection field,
         string blockPath,
         string noun,
@@ -428,8 +428,8 @@ internal static class DeveloperConfigValidator
     /// How a connection string reaches one of several named values, for the messages that send a
     /// developer to write a block and would otherwise not mention that the template changes too.
     /// </summary>
-    private static string ReachEachByName(string noun) =>
-        $" A connection string reaches each one as '${{{noun}:<name>}}'.";
+    private static Raw ReachEachByName(string noun) =>
+        Raw.Compose($" A connection string reaches each one as '${{{Raw.Escaped(noun)}:<name>}}'.");
 
     /// <summary>
     /// The error for a section carrying both a value and named entries.
@@ -445,7 +445,7 @@ internal static class DeveloperConfigValidator
     /// neither author can see the other's.
     /// </para>
     /// </remarks>
-    private static string ValueAndNamedEntries(IConfigurationSection field, string block, string noun)
+    private static Raw ValueAndNamedEntries(IConfigurationSection field, string block, string noun)
     {
         var names = QuotedNames(field.GetChildren().Select(entry => entry.Key));
 
@@ -453,16 +453,19 @@ internal static class DeveloperConfigValidator
         // written as a value alone. Here it still unsets — taking the names with it — so it is
         // refused, and the sentence has to say that rather than talk about a number nobody wrote.
         var cause = field.Value!.Length == 0
-            ? $"An empty value unsets a field, so a higher layer blanking this key would drop the whole block of "
-              + $"named {noun}s rather than any one of them."
-            : $"Configuration merges layers per key, so this is usually one layer writing a {noun} number over "
-              + "another layer's block of names.";
+            ? Raw.Compose(
+                $"An empty value unsets a field, so a higher layer blanking this key would drop the whole block of " +
+                $"named {new Name(noun)}s rather than any one of them.")
+            : Raw.Compose(
+                $"Configuration merges layers per key, so this is usually one layer writing a {new Name(noun)} number over " +
+                $"another layer's block of names.");
 
-        return $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block carries both the value {Escaped(field.Value)} and named "
-            + $"{noun}s ({names}). It takes one or the other, and a value is read first — so the names would be "
-            + $"dropped, and a value that is not a {noun} would take the whole entry with it. {cause}"
-            + ReachEachByName(noun)
-            + SetAt(field);
+        return Raw.Compose(
+            $"'{Raw.Escaped(field.Key)}' in the '{Raw.Escaped(block)}' block carries both the value {Escaped(field.Value)} and named " +
+            $"{new Name(noun)}s ({names}). It takes one or the other, and a value is read first — so the names would be " +
+            $"dropped, and a value that is not a {new Name(noun)} would take the whole entry with it. {cause}" +
+            $"{ReachEachByName(noun)}" +
+            $"{SetAt(field)}");
     }
 
     /// <summary>
@@ -475,44 +478,48 @@ internal static class DeveloperConfigValidator
     /// <c>AMQP</c> as <c>aMQP</c> — and it does not escape, because a declared key cannot contain a
     /// newline. A name out of a block of named values can contain anything at all.
     /// </remarks>
-    private static string QuotedNames(IEnumerable<string> names) =>
-        string.Join(", ", names.Select(Escaped));
+    private static Raw QuotedNames(IEnumerable<string> names) =>
+        Raw.Join(", ", names.Select(name => Raw.Compose($"'{Raw.Escaped(name)}'")));
 
     /// <summary>
     /// The error for a value-or-map field written as a value that is neither a number nor a block.
     /// </summary>
-    private static string NotAValueOrMap(IConfigurationSection field, string block, string noun) =>
-        $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block takes a {noun} number or a block of named {noun}s, "
-        + $"but is set to {Escaped(field.Value)}."
-        + SetAt(field);
+    private static Raw NotAValueOrMap(IConfigurationSection field, string block, string noun) =>
+        Raw.Compose(
+            $"'{Raw.Escaped(field.Key)}' in the '{Raw.Escaped(block)}' block takes a {new Name(noun)} number or a block of named {new Name(noun)}s, " +
+            $"but is set to {Escaped(field.Value)}." +
+            $"{SetAt(field)}");
 
     /// <summary>
     /// The error for a block of named values that names none — an empty block, or a JSON
     /// <c>null</c>, which arrive identically.
     /// </summary>
-    private static string EmptyMap(IConfigurationSection field, string block, string noun) =>
-        $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block is an empty block of named {noun}s, so nothing "
-        + $"would be forwarded. Write a {noun} number, or name at least one {noun}."
-        + ReachEachByName(noun)
-        + SetAtBlock(field, "<name>");
+    private static Raw EmptyMap(IConfigurationSection field, string block, string noun) =>
+        Raw.Compose(
+            $"'{Raw.Escaped(field.Key)}' in the '{Raw.Escaped(block)}' block is an empty block of named {new Name(noun)}s, so nothing " +
+            $"would be forwarded. Write a {new Name(noun)} number, or name at least one {new Name(noun)}." +
+            $"{ReachEachByName(noun)}" +
+            $"{SetAtBlock(field, "<name>")}");
 
     /// <summary>
     /// The error for a block of named values written as a list, whose entries are therefore keyed by
     /// position.
     /// </summary>
-    private static string PositionalMap(IConfigurationSection field, string block, string noun) =>
-        $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block is written as a list, so its {noun}s are keyed by "
-        + $"position. A block of named {noun}s gives each one a name, and a position is not one."
-        + ReachEachByName(noun)
-        + SetAtBlock(field, "<name>");
+    private static Raw PositionalMap(IConfigurationSection field, string block, string noun) =>
+        Raw.Compose(
+            $"'{Raw.Escaped(field.Key)}' in the '{Raw.Escaped(block)}' block is written as a list, so its {new Name(noun)}s are keyed by " +
+            $"position. A block of named {new Name(noun)}s gives each one a name, and a position is not one." +
+            $"{ReachEachByName(noun)}" +
+            $"{SetAtBlock(field, "<name>")}");
 
     /// <summary>The error for one entry named by a number among entries that are not.</summary>
-    private static string PositionalMapEntry(
+    private static Raw PositionalMapEntry(
         IConfigurationSection field, IConfigurationSection entry, string block, string noun) =>
-        $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block names a {noun} {Escaped(entry.Key)}, which is a position "
-        + $"rather than a name. Give it a name a connection string can reach it by."
-        + ReachEachByName(noun)
-        + SetAtMapEntry(field, entry);
+        Raw.Compose(
+            $"'{Raw.Escaped(field.Key)}' in the '{Raw.Escaped(block)}' block names a {new Name(noun)} {Escaped(entry.Key)}, which is a position " +
+            $"rather than a name. Give it a name a connection string can reach it by." +
+            $"{ReachEachByName(noun)}" +
+            $"{SetAtMapEntry(field, entry)}");
 
     /// <summary>The error for a named entry the binder would drop for want of a usable value.</summary>
     /// <remarks>
@@ -522,23 +529,25 @@ internal static class DeveloperConfigValidator
     /// reasoning <see cref="ListElementMissing"/> carries for a null list element, and the same
     /// consequence — something silently smaller than what was written.
     /// </remarks>
-    private static string MapEntryNotBindable(
+    private static Raw MapEntryNotBindable(
         IConfigurationSection field, IConfigurationSection entry, string block, string noun, Type valueType) =>
-        $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block names a {noun} {Escaped(entry.Key)}, but its value "
-        + $"{Escaped(entry.Value)} is not a {Described(valueType)}. A named {noun} whose value cannot be read "
-        + "is dropped rather than reported, so one fewer would be forwarded than the block names."
-        + (entry.Value!.Length == 0
-            ? " An empty value unsets a whole field; there is no spelling that takes one name out of a block."
-            : "")
-        + SetAtMapEntry(field, entry);
+        Raw.Compose(
+            $"'{Raw.Escaped(field.Key)}' in the '{Raw.Escaped(block)}' block names a {new Name(noun)} {Escaped(entry.Key)}, but its value " +
+            $"{Escaped(entry.Value)} is not a {new Name(Described(valueType))}. A named {new Name(noun)} whose value cannot be read " +
+            $"is dropped rather than reported, so one fewer would be forwarded than the block names." +
+            $"{(entry.Value!.Length == 0
+                ? Raw.Literal(" An empty value unsets a whole field; there is no spelling that takes one name out of a block.")
+                : Raw.Literal(""))}" +
+            $"{SetAtMapEntry(field, entry)}");
 
     /// <summary>The error for a named entry recorded with no value at all — a JSON <c>null</c>.</summary>
-    private static string MapEntryMissing(
+    private static Raw MapEntryMissing(
         IConfigurationSection field, IConfigurationSection entry, string block, string noun) =>
-        $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block names a {noun} {Escaped(entry.Key)}, but it has no "
-        + $"value. A named {noun} with no value is dropped rather than read, so one fewer would be "
-        + "forwarded than the block names."
-        + SetAtMapEntry(field, entry);
+        Raw.Compose(
+            $"'{Raw.Escaped(field.Key)}' in the '{Raw.Escaped(block)}' block names a {new Name(noun)} {Escaped(entry.Key)}, but it has no " +
+            $"value. A named {new Name(noun)} with no value is dropped rather than read, so one fewer would be " +
+            $"forwarded than the block names." +
+            $"{SetAtMapEntry(field, entry)}");
 
     /// <summary>The error for a named entry that is itself a block of settings.</summary>
     /// <remarks>
@@ -547,13 +556,14 @@ internal static class DeveloperConfigValidator
     /// reported is the part before it carrying the part after it as a child. The developer is then
     /// looking for a name they never wrote, which no other wording would explain.
     /// </remarks>
-    private static string MapEntryIsBlock(
+    private static Raw MapEntryIsBlock(
         IConfigurationSection field, IConfigurationSection entry, string block, string noun) =>
-        $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block names a {noun} {Escaped(entry.Key)}, but its entry "
-        + $"is a block of settings rather than a value. Every named {noun} is a single value. If the name you "
-        + "wrote contains a ':', that is why: a colon separates configuration keys, so the name arrived split "
-        + "in two and cannot be written that way."
-        + SetAtMapEntry(field, entry);
+        Raw.Compose(
+            $"'{Raw.Escaped(field.Key)}' in the '{Raw.Escaped(block)}' block names a {new Name(noun)} {Escaped(entry.Key)}, but its entry " +
+            $"is a block of settings rather than a value. Every named {new Name(noun)} is a single value. If the name you " +
+            $"wrote contains a ':', that is why: a colon separates configuration keys, so the name arrived split " +
+            $"in two and cannot be written that way." +
+            $"{SetAtMapEntry(field, entry)}");
 
     /// <summary>The error for a named entry with no name.</summary>
     /// <remarks>
@@ -561,11 +571,12 @@ internal static class DeveloperConfigValidator
     /// path ends in the separator, since the name is what is missing, so naming it would print a key
     /// no layer can set and that reads as a rendering fault.
     /// </remarks>
-    private static string UnnamedMapEntry(IConfigurationSection field, string block, string noun) =>
-        $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block names a {noun} with no name. Every {noun} in the "
-        + $"block needs one."
-        + ReachEachByName(noun)
-        + SetAtBlock(field, "<name>");
+    private static Raw UnnamedMapEntry(IConfigurationSection field, string block, string noun) =>
+        Raw.Compose(
+            $"'{Raw.Escaped(field.Key)}' in the '{Raw.Escaped(block)}' block names a {new Name(noun)} with no name. Every {new Name(noun)} in the " +
+            $"block needs one." +
+            $"{ReachEachByName(noun)}" +
+            $"{SetAtBlock(field, "<name>")}");
 
     /// <summary>
     /// Every problem with a field whose value is a list of values.
@@ -585,7 +596,7 @@ internal static class DeveloperConfigValidator
     /// what it never receives.
     /// </para>
     /// </remarks>
-    private static void CollectList(List<string> problems, IConfigurationSection field, string blockPath)
+    private static void CollectList(List<Raw> problems, IConfigurationSection field, string blockPath)
     {
         if (!HasChildren(field))
         {
@@ -678,11 +689,13 @@ internal static class DeveloperConfigValidator
     /// differs per problem.
     /// </remarks>
     private static ServiceSourcesConfigurationException Failure(
-        string serviceName, IReadOnlyList<string> problems, DeveloperConfigShape shape) =>
-        new(problems.Count == 1
-            ? $"{shape.Kind} '{ConfiguredValue.Bare(serviceName)}': {problems[0]}"
-            : $"{shape.Kind} '{ConfiguredValue.Bare(serviceName)}': {problems.Count} problems with the entry:"
-              + string.Concat(problems.Select(p => $"{Environment.NewLine}  - {p}")));
+        string serviceName, IReadOnlyList<Raw> problems, DeveloperConfigShape shape) =>
+        ServiceSourcesConfigurationException.For(
+            $"{(problems.Count == 1
+                ? Raw.Compose($"{Raw.Escaped(shape.Kind)} '{Raw.Escaped(serviceName)}': {problems[0]}")
+                : Raw.Compose(
+                    $"{Raw.Escaped(shape.Kind)} '{Raw.Escaped(serviceName)}': {problems.Count} problems with the entry:" +
+                    $"{Raw.Join("", problems.Select(p => Raw.Compose($"{Raw.NewLine}  - {p}")))}"))}");
 
     /// <summary>
     /// One exception for problems spread across several service entries.
@@ -692,25 +705,16 @@ internal static class DeveloperConfigValidator
     /// other, and a developer migrating a file works through it a service at a time.
     /// </remarks>
     private static ServiceSourcesConfigurationException CombinedFailure(
-        IReadOnlyList<(string Service, IReadOnlyList<string> Problems)> faulted, DeveloperConfigShape shape)
+        IReadOnlyList<(string Service, IReadOnlyList<Raw> Problems)> faulted, DeveloperConfigShape shape)
     {
         var total = faulted.Sum(entry => entry.Problems.Count);
 
-        var message = new StringBuilder()
-            .Append($"{total} problems across {faulted.Count} {shape.Noun} entries:");
+        var entries = faulted.Select(entry => Raw.Compose(
+            $"{Raw.NewLine}  {Raw.Escaped(shape.Kind)} '{Raw.Escaped(entry.Service)}':" +
+            $"{Raw.Join("", entry.Problems.Select(p => Raw.Compose($"{Raw.NewLine}    - {p}")))}"));
 
-        foreach (var (service, problems) in faulted)
-        {
-            message.Append(Environment.NewLine)
-                .Append($"  {shape.Kind} '{ConfiguredValue.Bare(service)}':");
-
-            foreach (var problem in problems)
-            {
-                message.Append(Environment.NewLine).Append($"    - {problem}");
-            }
-        }
-
-        return new ServiceSourcesConfigurationException(message.ToString());
+        return ServiceSourcesConfigurationException.For(
+            $"{total} problems across {faulted.Count} {Raw.Escaped(shape.Noun)} entries:{Raw.Join("", entries)}");
     }
 
     /// <summary>
@@ -770,24 +774,26 @@ internal static class DeveloperConfigValidator
     /// they did not mean.
     /// </para>
     /// </remarks>
-    private static string NotValidHere(
+    private static Raw NotValidHere(
         string serviceName, IConfigurationSection key, DeveloperConfigShape shape)
     {
         var homes = shape.HomeBlocksOf(key.Key).Select(Spelled).ToArray();
 
         if (homes.Length == 1)
         {
-            return $"'{ConfiguredValue.Bare(key.Key)}' is not a valid key here. It belongs in the "
-                + $"'{homes[0]}' block: \"{ConfiguredValue.Bare(serviceName)}\": {{ ..., \"{homes[0]}\": {{ \"{ConfiguredValue.Bare(key.Key)}\": ... }} }}."
-                + SetAt(key);
+            return Raw.Compose(
+                $"'{Raw.Escaped(key.Key)}' is not a valid key here. It belongs in the " +
+                $"'{Raw.Escaped(homes[0])}' block: \"{Raw.Escaped(serviceName)}\": {{ ..., \"{Raw.Escaped(homes[0])}\": {{ \"{Raw.Escaped(key.Key)}\": ... }} }}." +
+                $"{SetAt(key)}");
         }
 
         if (homes.Length > 1)
         {
-            return $"'{ConfiguredValue.Bare(key.Key)}' is not a valid key here. It belongs inside the block of the source "
-                + $"it configures — {Quoted(homes)}: "
-                + $"\"{ConfiguredValue.Bare(serviceName)}\": {{ ..., \"{homes[0]}\": {{ \"{ConfiguredValue.Bare(key.Key)}\": ... }} }}."
-                + SetAt(key);
+            return Raw.Compose(
+                $"'{Raw.Escaped(key.Key)}' is not a valid key here. It belongs inside the block of the source " +
+                $"it configures — {Quoted(homes)}: " +
+                $"\"{Raw.Escaped(serviceName)}\": {{ ..., \"{Raw.Escaped(homes[0])}\": {{ \"{Raw.Escaped(key.Key)}\": ... }} }}." +
+                $"{SetAt(key)}");
         }
 
         var near = shape.NearMissFieldsOf(key.Key);
@@ -799,19 +805,22 @@ internal static class DeveloperConfigValidator
         {
             var (field, block) = (Spelled(near[0].Field), Spelled(near[0].Block));
 
-            return $"'{ConfiguredValue.Bare(key.Key)}' is not a valid key here. Did you mean '{field}', in the "
-                + $"'{block}' block: \"{ConfiguredValue.Bare(serviceName)}\": {{ ..., \"{block}\": {{ \"{field}\": ... }} }}?"
-                + SetAt(key);
+            return Raw.Compose(
+                $"'{Raw.Escaped(key.Key)}' is not a valid key here. Did you mean '{Raw.Escaped(field)}', in the " +
+                $"'{Raw.Escaped(block)}' block: \"{Raw.Escaped(serviceName)}\": {{ ..., \"{Raw.Escaped(block)}\": {{ \"{Raw.Escaped(field)}\": ... }} }}?" +
+                $"{SetAt(key)}");
         }
 
         if (near.Count > 1)
         {
-            return $"'{ConfiguredValue.Bare(key.Key)}' is not a valid key here. Did you mean {DescribeNearMisses(near)}?"
-                + SetAt(key);
+            return Raw.Compose(
+                $"'{Raw.Escaped(key.Key)}' is not a valid key here. Did you mean {DescribeNearMisses(near)}?" +
+                $"{SetAt(key)}");
         }
 
-        return $"'{ConfiguredValue.Bare(key.Key)}' is not a valid key. Valid keys are {Quoted(shape.RootKeys)}."
-            + SetAt(key);
+        return Raw.Compose(
+            $"'{Raw.Escaped(key.Key)}' is not a valid key. Valid keys are {Quoted(shape.RootKeys)}." +
+            $"{SetAt(key)}");
     }
 
     /// <summary>
@@ -826,25 +835,28 @@ internal static class DeveloperConfigValidator
     /// <see cref="NearMiss.Nearest"/>, so what is added here is only the block ordering within a
     /// group.
     /// </remarks>
-    private static string DescribeNearMisses(IEnumerable<(string Field, string Block)> candidates) =>
-        string.Join(
+    private static Raw DescribeNearMisses(IEnumerable<(string Field, string Block)> candidates) =>
+        Raw.Join(
             ", or ",
             candidates
                 .GroupBy(candidate => candidate.Field, StringComparer.OrdinalIgnoreCase)
                 .Select(group =>
-                    $"'{Spelled(group.Key)}', in the "
-                    + string.Join(
-                        " or ",
-                        group.Select(candidate => $"'{Spelled(candidate.Block)}'")
-                            .Order(StringComparer.Ordinal))
-                    + " block"));
+                    Raw.Compose(
+                        $"'{Raw.Escaped(Spelled(group.Key))}', in the " +
+                        $"{Raw.Join(
+                            " or ",
+                            group.Select(candidate => Spelled(candidate.Block))
+                                .Order(StringComparer.Ordinal)
+                                .Select(block => Raw.Compose($"'{Raw.Escaped(block)}'")))}" +
+                        $" block")));
 
     /// <summary>The error for a key that no block of this name declares.</summary>
-    private static string NotValidInBlock(
+    private static Raw NotValidInBlock(
         IConfigurationSection field, string block, IReadOnlyDictionary<string, PropertyInfo> fields) =>
-        $"'{ConfiguredValue.Bare(field.Key)}' is not a valid key in the "
-        + $"'{ConfiguredValue.Bare(block.ToLowerInvariant())}' block. Valid keys there are {Quoted(fields.Keys)}."
-        + SetAt(field);
+        Raw.Compose(
+            $"'{Raw.Escaped(field.Key)}' is not a valid key in the " +
+            $"'{Raw.Escaped(block.ToLowerInvariant())}' block. Valid keys there are {Quoted(fields.Keys)}." +
+            $"{SetAt(field)}");
 
     /// <summary>
     /// The error for a whole service entry written as a value instead of a block of settings.
@@ -860,7 +872,7 @@ internal static class DeveloperConfigValidator
     /// Whether the entry carries settings as well as this value, which a merge of configuration
     /// layers can produce and a single file cannot.
     /// </param>
-    private static string EntryExpected(
+    private static Raw EntryExpected(
         string serviceName, IConfigurationSection entry, bool alsoHasKeys, DeveloperConfigShape shape)
     {
         var value = entry.Value ?? "";
@@ -871,21 +883,23 @@ internal static class DeveloperConfigValidator
         // describe a mistake nobody made. What is wrong is that this value does nothing.
         if (alsoHasKeys)
         {
-            return $"the entry carries the value {Escaped(value)} as well as its settings, and that "
-                + $"value is inert: a scalar at a {shape.Noun}'s own key binds to nothing, so "
-                + "nothing reads it. If it was meant to choose the source, that is the 'source' key "
-                + "inside the entry."
-                + SetAtBlock(entry, SourceKey);
+            return Raw.Compose(
+                $"the entry carries the value {Escaped(value)} as well as its settings, and that " +
+                $"value is inert: a scalar at a {Raw.Escaped(shape.Noun)}'s own key binds to nothing, so " +
+                $"nothing reads it. If it was meant to choose the source, that is the 'source' key " +
+                $"inside the entry." +
+                $"{SetAtBlock(entry, SourceKey)}");
         }
 
         // The suggestion needs no escaping of its own: a whitespace value is not the name of any
         // source, so it fails this lookup and the placeholder is what gets shown.
         var source = shape.SourceNames.Contains(value) ? value : "...";
 
-        return $"the entry takes a block of settings, not the value {Escaped(value)}: "
-            + $"\"{ConfiguredValue.Bare(serviceName)}\": {{ \"source\": \"{source}\" }}. "
-            + $"Valid keys there are {Quoted(shape.RootKeys)}."
-            + SetAtBlock(entry, SourceKey);
+        return Raw.Compose(
+            $"the entry takes a block of settings, not the value {Escaped(value)}: " +
+            $"\"{Raw.Escaped(serviceName)}\": {{ \"source\": \"{Raw.Escaped(source)}\" }}. " +
+            $"Valid keys there are {Quoted(shape.RootKeys)}." +
+            $"{SetAtBlock(entry, SourceKey)}");
     }
 
     /// <summary>
@@ -902,18 +916,19 @@ internal static class DeveloperConfigValidator
     /// What the block sits in, as the message shows it: the service's own name for a source block,
     /// and the enclosing block's path for one nested inside it.
     /// </param>
-    private static string BlockExpected(
+    private static Raw BlockExpected(
         string container, IConfigurationSection key, IReadOnlyDictionary<string, PropertyInfo> fields)
     {
         var block = key.Key.ToLowerInvariant();
 
-        return $"'{ConfiguredValue.Bare(key.Key)}' takes a block of settings, not a value: "
-            + $"\"{ConfiguredValue.Bare(container)}\": {{ ..., \"{block}\": {{ ... }} }}. "
-            + $"Valid keys there are {Quoted(fields.Keys)}."
+        return Raw.Compose(
+            $"'{Raw.Escaped(key.Key)}' takes a block of settings, not a value: " +
+            $"\"{Raw.Escaped(container)}\": {{ ..., \"{Raw.Escaped(block)}\": {{ ... }} }}. " +
+            $"Valid keys there are {Quoted(fields.Keys)}." +
             // FirstOrDefault rather than First: every block declares at least one field, but a
             // message builder that can throw would replace the configuration error being reported
             // with one about itself.
-            + SetAtBlock(key, fields.Keys.Order(StringComparer.Ordinal).FirstOrDefault() ?? "<field>");
+            $"{SetAtBlock(key, fields.Keys.Order(StringComparer.Ordinal).FirstOrDefault() ?? "<field>")}");
     }
 
     /// <summary>
@@ -929,11 +944,12 @@ internal static class DeveloperConfigValidator
     /// names is a key that has to hold a value, so setting it from an environment variable is the
     /// fix rather than the mistake.
     /// </remarks>
-    private static string ValueExpected(string serviceName, IConfigurationSection key, string? block) =>
-        $"'{ConfiguredValue.Bare(key.Key)}'{(block is null ? "" : $" in the '{block}' block")} "
-        + $"takes a value, not a block of settings: "
-        + $"\"{ConfiguredValue.Bare(block ?? serviceName)}\": {{ \"{ConfiguredValue.Bare(key.Key)}\": ... }}."
-        + SetAt(key);
+    private static Raw ValueExpected(string serviceName, IConfigurationSection key, string? block) =>
+        Raw.Compose(
+            $"'{Raw.Escaped(key.Key)}'{(block is null ? Raw.Literal("") : Raw.Compose($" in the '{Raw.Escaped(block)}' block"))} " +
+            $"takes a value, not a block of settings: " +
+            $"\"{Raw.Escaped(block ?? serviceName)}\": {{ \"{Raw.Escaped(key.Key)}\": ... }}." +
+            $"{SetAt(key)}");
 
     /// <summary>
     /// The error for a list field written as a single value — <c>"command": "./prepare.sh"</c>.
@@ -943,10 +959,11 @@ internal static class DeveloperConfigValidator
     /// value, and the remedy names the indexed key each flat configuration layer sets an element
     /// through.
     /// </remarks>
-    private static string ListExpected(IConfigurationSection field, string block) =>
-        $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block takes a list of values, not the single value "
-        + $"{Escaped(field.Value)}: \"{ConfiguredValue.Bare(field.Key)}\": [ ... ]."
-        + SetAtList(field);
+    private static Raw ListExpected(IConfigurationSection field, string block) =>
+        Raw.Compose(
+            $"'{Raw.Escaped(field.Key)}' in the '{Raw.Escaped(block)}' block takes a list of values, not the single value " +
+            $"{Escaped(field.Value)}: \"{Raw.Escaped(field.Key)}\": [ ... ]." +
+            $"{SetAtList(field)}");
 
     /// <summary>
     /// The error for a null element of a list — a JSON <c>null</c>, or a key a provider recorded
@@ -960,22 +977,24 @@ internal static class DeveloperConfigValidator
     /// argument — which is also the spelling this suggests, being what someone writing <c>null</c>
     /// most likely meant.
     /// </remarks>
-    private static string ListElementMissing(
+    private static Raw ListElementMissing(
         IConfigurationSection field, IConfigurationSection element, string block) =>
-        $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block has no value at element '{ConfiguredValue.Bare(element.Key)}'. A null element is "
-        + "dropped rather than passed on, which shortens the list and shifts every element after it down a "
-        + "place — so the command that ran would be missing an argument, with nothing to say so. Remove the "
-        + "element, or write it as \"\" if the command really takes an empty one."
-        + SetAt(element);
+        Raw.Compose(
+            $"'{Raw.Escaped(field.Key)}' in the '{Raw.Escaped(block)}' block has no value at element '{Raw.Escaped(element.Key)}'. A null element is " +
+            $"dropped rather than passed on, which shortens the list and shifts every element after it down a " +
+            $"place — so the command that ran would be missing an argument, with nothing to say so. Remove the " +
+            $"element, or write it as \"\" if the command really takes an empty one." +
+            $"{SetAt(element)}");
 
     /// <summary>
     /// The error for an element of a list field that is itself a block of settings.
     /// </summary>
-    private static string ListElementExpected(
+    private static Raw ListElementExpected(
         IConfigurationSection field, IConfigurationSection element, string block) =>
-        $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block is a list of values, but its element at "
-        + $"'{ConfiguredValue.Bare(element.Key)}' is a block of settings. Every element has to be a value."
-        + SetAt(element);
+        Raw.Compose(
+            $"'{Raw.Escaped(field.Key)}' in the '{Raw.Escaped(block)}' block is a list of values, but its element at " +
+            $"'{Raw.Escaped(element.Key)}' is a block of settings. Every element has to be a value." +
+            $"{SetAt(element)}");
 
     /// <summary>
     /// The error for a value the binder could not turn into the field's type — a key that is valid
@@ -995,15 +1014,17 @@ internal static class DeveloperConfigValidator
     /// the developer was reaching for. The wording has to differ from <see cref="Blank"/>'s: a
     /// field that cannot be unset is not helped by being told how to unset one.
     /// </remarks>
-    private static string NotBindable(
+    private static Raw NotBindable(
         IConfigurationSection field, string block, Type type, string value) =>
-        $"'{ConfiguredValue.Bare(field.Key)}' in the '{block}' block takes a {Described(type)}, "
-        + $"but is set to {Escaped(value)}."
-        + (value.Length == 0
-            ? " An empty value leaves a field unset where the field can be unset; this one cannot, "
-              + "so it needs a value."
-            : "")
-        + SetAt(field);
+        Raw.Compose(
+            $"'{Raw.Escaped(field.Key)}' in the '{Raw.Escaped(block)}' block takes a {new Name(Described(type))}, " +
+            $"but is set to {Escaped(value)}." +
+            $"{(value.Length == 0
+                ? Raw.Literal(
+                    " An empty value leaves a field unset where the field can be unset; this one cannot, "
+                    + "so it needs a value.")
+                : Raw.Literal(""))}" +
+            $"{SetAt(field)}");
 
     /// <summary>
     /// The error for a value whose surrounding whitespace is part of a name something outside this
@@ -1017,14 +1038,14 @@ internal static class DeveloperConfigValidator
     /// is what the sentence says — with the two spellings side by side, which is what makes a plain
     /// space visible, since <see cref="Escaped"/> leaves one as itself.
     /// </remarks>
-    private static string SurroundedByWhitespace(
+    private static Raw SurroundedByWhitespace(
         IConfigurationSection field,
         string block,
         string value,
         NoSurroundingWhitespaceAttribute rule)
     {
         var remedy = TrimInvisible(value);
-        var opening = $"'{field.Key}' in the '{block}' block is set to {Escaped(value)}";
+        var opening = Raw.Compose($"'{Raw.Escaped(field.Key)}' in the '{Raw.Escaped(block)}' block is set to {Escaped(value)}");
 
         // Nothing but whitespace and characters that cannot be seen. Blank did not take it — a
         // byte-order mark is not whitespace — but what Blank would have said is what this value
@@ -1032,9 +1053,10 @@ internal static class DeveloperConfigValidator
         // field nobody meant to set.
         if (remedy.Length == 0)
         {
-            return $"{opening}, which is whitespace and characters with no glyph rather than a "
-                + "value. Set it to an empty value to leave the field unset."
-                + SetAt(field);
+            return Raw.Compose(
+                $"{opening}, which is whitespace and characters with no glyph rather than a " +
+                $"value. Set it to an empty value to leave the field unset." +
+                $"{SetAt(field)}");
         }
 
         // The spelling is always named, even when it still carries something invisible of its own.
@@ -1045,18 +1067,20 @@ internal static class DeveloperConfigValidator
         // rather than "cannot see", because a tab and a non-breaking space both reach here and both
         // are perfectly visible — what they are not is distinguishable from an ordinary space.
         var caveat = PrintsAsItself(remedy)
-            ? ""
-            : " That spelling still carries characters you cannot pick out by looking, inside the "
-              + $"name rather than at its ends, so {rule.Receiver} gets those too. Retype the value "
-              + "if you did not mean them — outside the file an escape stays as its literal "
-              + "characters.";
+            ? Raw.Compose($"")
+            : Raw.Compose(
+                $" That spelling still carries characters you cannot pick out by looking, inside the " +
+                $"name rather than at its ends, so {Raw.Escaped(rule.Receiver)} gets those too. Retype the value " +
+                $"if you did not mean them — outside the file an escape stays as its literal " +
+                $"characters.");
 
-        return opening
-            + $", and {rule.Receiver} is given it exactly as written — so {rule.Receiver} looks "
-            + $"for {Escaped(value)} and not {Escaped(remedy)}. Set it to {Escaped(remedy)}."
-            + caveat
-            + (rule.IfDeliberate is { } deliberate ? $" {deliberate}" : "")
-            + SetAt(field);
+        return Raw.Compose(
+            $"{opening}" +
+            $", and {Raw.Escaped(rule.Receiver)} is given it exactly as written — so {Raw.Escaped(rule.Receiver)} looks " +
+            $"for {Escaped(value)} and not {Escaped(remedy)}. Set it to {Escaped(remedy)}." +
+            $"{caveat}" +
+            $"{(rule.IfDeliberate is { } deliberate ? Raw.Compose($" {Raw.Escaped(deliberate)}") : Raw.Compose($""))}" +
+            $"{SetAt(field)}");
     }
 
     /// <summary>
@@ -1199,18 +1223,18 @@ internal static class DeveloperConfigValidator
     /// The block the field sits in, or <see langword="null"/> when it sits directly on the entry —
     /// which is <c>source</c>, the one root key that takes a value.
     /// </param>
-    private static string Blank(IConfigurationSection field, string? block) =>
-        $"'{ConfiguredValue.Bare(field.Key)}'{(block is null ? "" : $" in the '{block}' block")} is set to "
-        + $"{Escaped(field.Value)}, which is whitespace rather than a value. Set it to an empty "
-        + "value to leave the field unset."
-        + SetAt(field);
+    private static Raw Blank(IConfigurationSection field, string? block) =>
+        Raw.Compose(
+            $"'{Raw.Escaped(field.Key)}'{(block is null ? Raw.Literal("") : Raw.Compose($" in the '{Raw.Escaped(block)}' block"))} is set to " +
+            $"{Escaped(field.Value)}, which is whitespace rather than a value. Set it to an empty " +
+            $"value to leave the field unset." +
+            $"{SetAt(field)}");
 
     /// <summary>
-    /// A value as a quoted literal with its whitespace spelled out. See
-    /// <see cref="ConfiguredValue.Escaped"/>, which now serves the two other files that echo a
-    /// developer-invented name.
+    /// A value as a quoted literal with its whitespace spelled out, through the same
+    /// <see cref="Raw.Escaped(string?)"/> every other hole in this file uses.
     /// </summary>
-    private static string Escaped(string? value) => ConfiguredValue.Escaped(value);
+    private static Raw Escaped(string? value) => Raw.Compose($"'{Raw.Escaped(value)}'");
 
     private static string Described(Type type)
     {
@@ -1233,10 +1257,11 @@ internal static class DeveloperConfigValidator
     /// what makes the layer that set it findable; naming a file would send that developer to edit
     /// the one place the value is not.
     /// </remarks>
-    private static string SetAt(IConfigurationSection section) =>
-        $" The key is '{Path(section)}', which any configuration layer can set: "
-        + $"{DeveloperConfiguration.FileName}, appsettings, user secrets, the environment variable "
-        + $"{Environmentally(section)}, or the command line.";
+    private static Raw SetAt(IConfigurationSection section) =>
+        Raw.Compose(
+            $" The key is '{Path(section)}', which any configuration layer can set: " +
+            $"{Raw.Escaped(DeveloperConfiguration.FileName)}, appsettings, user secrets, the environment variable " +
+            $"{Environmentally(section)}, or the command line.");
 
     /// <summary>
     /// A configuration key path with its whitespace spelled out.
@@ -1244,9 +1269,9 @@ internal static class DeveloperConfigValidator
     /// <remarks>
     /// Every path here contains developer-invented text — the entry's own name at the very least,
     /// and the name of a value inside a block of named values at most — so it is escaped like any
-    /// other echo. <see cref="ConfiguredValue.Bare"/> rather than
-    /// <see cref="ConfiguredValue.Escaped"/>, since these sentences quote the path themselves, and it
-    /// leaves the <c>:</c> separators alone because only whitespace is escaped.
+    /// other echo, through <see cref="Raw.Escaped(string?)"/> rather than the quoted <see cref="Name"/>
+    /// spelling, since these sentences quote the path themselves and the <c>:</c> separators need to
+    /// survive untouched.
     /// <para>
     /// #264: this echoes the section's own casing — whatever the developer actually wrote — rather
     /// than the shape's declared casing, which is what a message built after binding (e.g.
@@ -1257,22 +1282,23 @@ internal static class DeveloperConfigValidator
     /// exact text a developer can search their own file for.
     /// </para>
     /// </remarks>
-    private static string Path(IConfigurationSection section) => ConfiguredValue.Bare(section.Path);
+    private static Raw Path(IConfigurationSection section) => Raw.Escaped(section.Path);
 
     /// <summary>The same path spelled as the environment variable that sets it.</summary>
-    private static string Environmentally(IConfigurationSection section) =>
-        ConfiguredValue.Bare(section.Path.Replace(":", "__", StringComparison.Ordinal));
+    private static Raw Environmentally(IConfigurationSection section) =>
+        Raw.Escaped(section.Path.Replace(":", "__", StringComparison.Ordinal));
 
     /// <summary>
     /// The same, for a key that has to hold a list. The flat providers carry one leaf each, so an
     /// element is set through its index — which is also how such a layer's value merges over one in
     /// the file, per index rather than wholesale.
     /// </summary>
-    private static string SetAtList(IConfigurationSection section) =>
-        $" The key is '{Path(section)}', which any configuration layer can set: "
-        + $"{DeveloperConfiguration.FileName}, appsettings, user secrets, the environment or the "
-        + "command line — the flat layers an element at a time, as "
-        + $"{Environmentally(section)}__0.";
+    private static Raw SetAtList(IConfigurationSection section) =>
+        Raw.Compose(
+            $" The key is '{Path(section)}', which any configuration layer can set: " +
+            $"{Raw.Escaped(DeveloperConfiguration.FileName)}, appsettings, user secrets, the environment or the " +
+            $"command line — the flat layers an element at a time, as " +
+            $"{Environmentally(section)}__0.");
 
     /// <summary>
     /// The same, for a key that has to hold a block of settings rather than a value.
@@ -1286,11 +1312,12 @@ internal static class DeveloperConfigValidator
     /// changes is the spelling, which has to be of a field inside the block rather than of the
     /// block.
     /// </remarks>
-    private static string SetAtBlock(IConfigurationSection section, string exampleField) =>
-        $" The key is '{Path(section)}', which any configuration layer can set: "
-        + $"{DeveloperConfiguration.FileName}, appsettings, user secrets, the environment or the "
-        + "command line — the flat layers a field at a time, as "
-        + $"{Environmentally(section)}__{ConfiguredValue.Bare(exampleField)}.";
+    private static Raw SetAtBlock(IConfigurationSection section, string exampleField) =>
+        Raw.Compose(
+            $" The key is '{Path(section)}', which any configuration layer can set: " +
+            $"{Raw.Escaped(DeveloperConfiguration.FileName)}, appsettings, user secrets, the environment or the " +
+            $"command line — the flat layers a field at a time, as " +
+            $"{Environmentally(section)}__{Raw.Escaped(exampleField)}.");
 
     /// <summary>
     /// The same as <see cref="SetAt"/>, for one named entry of a block of named values.
@@ -1302,20 +1329,23 @@ internal static class DeveloperConfigValidator
     /// typed: a newline in it would otherwise break this sentence across lines in a startup failure
     /// that is relayed into a log and pasted into issues.
     /// </remarks>
-    private static string SetAtMapEntry(IConfigurationSection field, IConfigurationSection entry)
+    private static Raw SetAtMapEntry(IConfigurationSection field, IConfigurationSection entry)
     {
-        // Bare, not Escaped: Escaped wraps its value in apostrophes, and this is already building a
-        // quoted path around the name — so the quoted spelling nested a second pair inside the first
-        // and put literal apostrophes into an environment variable name nobody can type.
-        var name = ConfiguredValue.Bare(entry.Key);
+        // Escaped, not just Bare: this is a developer-invented name sitting inside the seam's own
+        // quotes, same as any other echo — the earlier apostrophe-nesting concern predates this
+        // seam, which escapes an embedded quote instead of leaving it to forge one.
+        var name = entry.Key;
 
-        return $" The key is '{Path(field)}:{name}', which any configuration layer can set: "
-            + $"{DeveloperConfiguration.FileName}, appsettings, user secrets, the environment variable "
-            + $"{Environmentally(field)}__{name}, or the command line.";
+        return Raw.Compose(
+            $" The key is '{Path(field)}:{Raw.Escaped(name)}', which any configuration layer can set: " +
+            $"{Raw.Escaped(DeveloperConfiguration.FileName)}, appsettings, user secrets, the environment variable " +
+            $"{Environmentally(field)}__{Raw.Escaped(name)}, or the command line.");
     }
 
-    private static string Quoted(IEnumerable<string> keys) =>
-        string.Join(", ", keys.Select(k => $"'{Spelled(k)}'").Order(StringComparer.Ordinal));
+    private static Raw Quoted(IEnumerable<string> keys) =>
+        Raw.Join(
+            ", ",
+            keys.Select(Spelled).Order(StringComparer.Ordinal).Select(k => Raw.Compose($"'{Raw.Escaped(k)}'")));
 
     /// <summary>
     /// A key as a developer writes it, from the property name the shape derived it from.

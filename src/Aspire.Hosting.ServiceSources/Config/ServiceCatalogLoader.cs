@@ -127,9 +127,9 @@ internal static class ServiceCatalogLoader
                 {
                     if (!KnownRepositoryProperties.Contains(key))
                     {
-                        throw new ServiceSourcesConfigurationException(
-                            $"Repository '{name}': unknown property '{key}'. Expected one of: " +
-                            string.Join(", ", KnownRepositoryProperties) + ".");
+                        throw ServiceSourcesConfigurationException.For(
+                            $"Repository '{new Name(name)}': unknown property '{new Name(key)}'. Expected one of: " +
+                            $"{Raw.Join(", ", KnownRepositoryProperties.Select(Raw.Escaped))}.");
                     }
 
                     if (KnownNestedProperties.TryGetValue(key, out var knownNested) &&
@@ -140,9 +140,9 @@ internal static class ServiceCatalogLoader
                             var nestedKey = nestedKeyObj?.ToString() ?? "";
                             if (!knownNested.Contains(nestedKey))
                             {
-                                throw new ServiceSourcesConfigurationException(
-                                    $"Repository '{name}': unknown property '{nestedKey}' inside '{key}'. Expected one of: " +
-                                    string.Join(", ", knownNested) + ".");
+                                throw ServiceSourcesConfigurationException.For(
+                                    $"Repository '{new Name(name)}': unknown property '{new Name(nestedKey)}' inside '{new Name(key)}'. Expected one of: " +
+                                    $"{Raw.Join(", ", knownNested.Select(Raw.Escaped))}.");
                             }
                         }
                     }
@@ -222,10 +222,10 @@ internal static class ServiceCatalogLoader
             {
                 if (!KnownTopLevelProperties.Contains(key) && key != kindBlockKey)
                 {
-                    throw new ServiceSourcesConfigurationException(
-                        $"Service '{name}': unknown property '{key}'. Expected one of: " +
-                        string.Join(", ", KnownTopLevelProperties) +
-                        (kindBlockKey is null ? "." : ", or a block matching the service's kind."));
+                    throw ServiceSourcesConfigurationException.For(
+                        $"Service '{new Name(name)}': unknown property '{new Name(key)}'. Expected one of: " +
+                        $"{Raw.Join(", ", KnownTopLevelProperties.Select(Raw.Escaped))}" +
+                        $"{(kindBlockKey is null ? Raw.Literal(".") : Raw.Literal(", or a block matching the service's kind."))}");
                 }
 
                 // The service's own kind block is opaque to core — validating it against a typed
@@ -245,9 +245,9 @@ internal static class ServiceCatalogLoader
                         var nestedKey = nestedKeyObj?.ToString() ?? "";
                         if (!knownNested.Contains(nestedKey))
                         {
-                            throw new ServiceSourcesConfigurationException(
-                                $"Service '{name}': unknown property '{nestedKey}' inside '{key}'. Expected one of: " +
-                                string.Join(", ", knownNested) + ".");
+                            throw ServiceSourcesConfigurationException.For(
+                                $"Service '{new Name(name)}': unknown property '{new Name(nestedKey)}' inside '{new Name(key)}'. Expected one of: " +
+                                $"{Raw.Join(", ", knownNested.Select(Raw.Escaped))}.");
                         }
                     }
                 }
