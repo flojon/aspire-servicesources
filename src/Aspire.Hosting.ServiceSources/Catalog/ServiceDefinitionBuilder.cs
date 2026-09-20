@@ -52,8 +52,8 @@ public sealed class ServiceDefinitionBuilder
 
         if (string.IsNullOrWhiteSpace(url))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{_serviceName}': {nameof(WithRepository)} - a repository url is required and cannot be empty or whitespace.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(_serviceName)}': {Raw.Literal(nameof(WithRepository))} - a repository url is required and cannot be empty or whitespace.");
         }
 
         _repositorySource = url;
@@ -106,12 +106,12 @@ public sealed class ServiceDefinitionBuilder
         {
             // The same runtime check WithPrepare raises when called after this one — raised here too
             // so the order the two calls are chained in doesn't decide whether the mistake is caught.
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{_serviceName}': {nameof(WithPrepare)} was already called, but this service's "
-                + $"repository is a shared handle ({nameof(WithSharedRepository)}('{repository.Name}')) — a "
-                + "shared repository's prepare step belongs on the handle, not on one of the services that "
-                + $"share it. Remove the call to {nameof(WithPrepare)} here and call it on the "
-                + $"{nameof(RepositoryBuilder)} returned by AddRepository instead.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(_serviceName)}': {Raw.Literal(nameof(WithPrepare))} was already called, but this service's "
+                + $"repository is a shared handle ({Raw.Literal(nameof(WithSharedRepository))}('{new Name(repository.Name)}')) — a "
+                + $"shared repository's prepare step belongs on the handle, not on one of the services that "
+                + $"share it. Remove the call to {Raw.Literal(nameof(WithPrepare))} here and call it on the "
+                + $"{Raw.Literal(nameof(RepositoryBuilder))} returned by AddRepository instead.");
         }
 
         _repositorySource = repository;
@@ -194,14 +194,15 @@ public sealed class ServiceDefinitionBuilder
             // one builder type for both an anonymous and a shared repository, there is no type to
             // withhold WithPrepare from a grouped service at compile time. The step belongs on the
             // repository once it is shared — see RepositoryBuilder.WithPrepare.
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{_serviceName}': {nameof(WithPrepare)} cannot be called here — its repository came "
-                + $"from {nameof(ServiceDefinitionBuilder.WithSharedRepository)}('{_sharedRepository.Name}'), and "
-                + "a shared repository's prepare step belongs on the handle, not on one of the services that "
-                + $"share it. Call WithPrepare on the {nameof(RepositoryBuilder)} returned by AddRepository instead.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(_serviceName)}': {Raw.Literal(nameof(WithPrepare))} cannot be called here — its repository came "
+                + $"from {Raw.Literal(nameof(ServiceDefinitionBuilder.WithSharedRepository))}('{new Name(_sharedRepository.Name)}'), and "
+                + $"a shared repository's prepare step belongs on the handle, not on one of the services that "
+                + $"share it. Call WithPrepare on the {Raw.Literal(nameof(RepositoryBuilder))} returned by AddRepository instead.");
         }
 
-        _prepare = PrepareMetadataFactory.Create($"Service '{_serviceName}'", command, windowsCommand, mode);
+        _prepare = PrepareMetadataFactory.Create(
+            Raw.Compose($"Service '{new Name(_serviceName)}'"), command, windowsCommand, mode);
 
         return this;
     }
@@ -223,9 +224,9 @@ public sealed class ServiceDefinitionBuilder
     {
         if (current is not null)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{_serviceName}': {blockName} was already called. Calls are additive across " +
-                "different blocks, but a repeated call to the same one is not — remove one of the two.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(_serviceName)}': {new Name(blockName)} was already called. Calls are additive across " +
+                $"different blocks, but a repeated call to the same one is not — remove one of the two.");
         }
     }
 
