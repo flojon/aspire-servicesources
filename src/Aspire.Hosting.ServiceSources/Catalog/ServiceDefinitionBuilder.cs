@@ -1,5 +1,6 @@
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
+using Aspire.Hosting.ServiceSources.Messages;
 using Aspire.Hosting.ServiceSources.Prepare;
 using Aspire.Hosting.ServiceSources.Sources;
 
@@ -84,7 +85,8 @@ public sealed class ServiceDefinitionBuilder
         RequireUnset(_defaultSource, nameof(WithDefaultSource));
 
         DeveloperConfigShape.Service.ValidateSourceName(
-            $"Service '{_serviceName}': {nameof(WithDefaultSource)}('{source}')", source);
+            Raw.Compose($"Service '{new Name(_serviceName)}': {Raw.Literal(nameof(WithDefaultSource))}('{new Name(source)}')"),
+            source);
 
         _defaultSource = source;
         return this;

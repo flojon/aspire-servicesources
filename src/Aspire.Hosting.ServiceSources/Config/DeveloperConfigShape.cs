@@ -1,4 +1,5 @@
 using System.Reflection;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.Config;
 
@@ -196,12 +197,12 @@ internal sealed class DeveloperConfigShape
     /// <exception cref="ServiceSourcesConfigurationException">
     /// <paramref name="value"/> is not one of <see cref="SourceNames"/>.
     /// </exception>
-    public void ValidateSourceName(string label, string value)
+    public void ValidateSourceName(Raw label, string value)
     {
         if (!SourceNames.Contains(value))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"{label} is not a valid source. Expected one of: " + string.Join(", ", SourceNames) + ".");
+            throw ServiceSourcesConfigurationException.For(
+                $"{label} is not a valid source. Expected one of: {Raw.Join(", ", SourceNames.Select(Raw.Escaped))}.");
         }
     }
 

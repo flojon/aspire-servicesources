@@ -3,6 +3,7 @@ using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.Config;
 
@@ -72,8 +73,8 @@ internal static class ServiceCatalogLoader
     {
         if (!File.Exists(path))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service catalog file not found at '{path}'. Expected a 'servicesources.yaml' file in the AppHost project directory.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service catalog file not found at '{Raw.Escaped(path)}'. Expected a 'servicesources.yaml' file in the AppHost project directory.");
         }
 
         var yaml = File.ReadAllText(path);
@@ -88,9 +89,8 @@ internal static class ServiceCatalogLoader
         {
             if (!KnownRootProperties.Contains(rootKey))
             {
-                throw new ServiceSourcesConfigurationException(
-                    $"Unknown top-level property '{rootKey}' in '{path}'. Expected one of: " +
-                    string.Join(", ", KnownRootProperties) + ".");
+                throw ServiceSourcesConfigurationException.For(
+                    $"Unknown top-level property '{new Name(rootKey)}' in '{Raw.Escaped(path)}'. Expected one of: {Raw.Join(", ", KnownRootProperties.Select(Raw.Escaped))}.");
             }
         }
 
@@ -103,8 +103,8 @@ internal static class ServiceCatalogLoader
             // A repository key with nothing under it deserializes to a null entry, same as a service.
             if (metadata is null)
             {
-                throw new ServiceSourcesConfigurationException(
-                    $"Repository '{name}': entry is empty. Expected at least a 'repository' property.");
+                throw ServiceSourcesConfigurationException.For(
+                    $"Repository '{new Name(name)}': entry is empty. Expected at least a 'repository' property.");
             }
 
             // Every name that becomes a checkout directory goes through this check (design "The
@@ -117,10 +117,8 @@ internal static class ServiceCatalogLoader
             // deep inside whichever service happens to resolve first.
             if (!LocalGitCheckout.IsContainedCheckoutDirectoryName(name))
             {
-                throw new ServiceSourcesConfigurationException(
-                    $"Repository '{name}': cannot be used as this repository's checkout directory name — "
-                    + LocalGitCheckout.ContainedNameRule
-                    + " Rename the 'repositories:' entry in servicesources.yaml.");
+                throw ServiceSourcesConfigurationException.For(
+                    $"Repository '{new Name(name)}': cannot be used as this repository's checkout directory name — {LocalGitCheckout.ContainedNameRule} Rename the 'repositories:' entry in servicesources.yaml.");
             }
 
             if (raw.Repositories.TryGetValue(name, out var rawRepository))
@@ -166,8 +164,8 @@ internal static class ServiceCatalogLoader
             // rather than dereferencing it below.
             if (metadata is null)
             {
-                throw new ServiceSourcesConfigurationException(
-                    $"Service '{name}': entry is empty. Expected at least a 'repository' property.");
+                throw ServiceSourcesConfigurationException.For(
+                    $"Service '{new Name(name)}': entry is empty. Expected at least a 'repository' property.");
             }
 
             // YamlDotNet assigns null for an empty `kind:` scalar, overriding the "dotnet" default —
@@ -187,7 +185,8 @@ internal static class ServiceCatalogLoader
             else
             {
                 DeveloperConfigShape.Service.ValidateSourceName(
-                    $"Service '{name}': defaultSource value '{metadata.DefaultSource}'", metadata.DefaultSource);
+                    Raw.Compose($"Service '{new Name(name)}': defaultSource value '{new Name(metadata.DefaultSource)}'"),
+                    metadata.DefaultSource);
             }
 
             if (!raw.Services.TryGetValue(name, out var rawService))
@@ -215,12 +214,8 @@ internal static class ServiceCatalogLoader
             // no document with these properties and is unaffected (#133).
             if (kindBlockKey is not null && IsReservedKindName(kindBlockKey))
             {
-                throw new ServiceSourcesConfigurationException(
-                    $"Service '{name}': kind '{kindBlockKey}' collides with a well-known property of a " +
-                    "service's yaml entry, so a block named after it would be read as that property " +
-                    "instead of as the kind's options. This restriction applies only to a kind referenced " +
-                    "from servicesources.yaml — a kind used only via WithKind in C# can use any name. " +
-                    "Choose a different kind name for this service.");
+                throw ServiceSourcesConfigurationException.For(
+                    $"Service '{new Name(name)}': kind '{new Name(kindBlockKey)}' collides with a well-known property of a service's yaml entry, so a block named after it would be read as that property instead of as the kind's options. This restriction applies only to a kind referenced from servicesources.yaml — a kind used only via WithKind in C# can use any name. Choose a different kind name for this service.");
             }
 
             foreach (var key in rawService.Keys)
@@ -270,25 +265,24 @@ internal static class ServiceCatalogLoader
             {
                 if (!repositories.ContainsKey(repositoryRef))
                 {
-                    throw new ServiceSourcesConfigurationException(
-                        $"Service '{name}': repositoryRef '{repositoryRef}' does not name a repositories entry. " +
-                        (repositories.Count == 0
-                            ? "This catalog declares no 'repositories:' section at all."
-                            : "Expected one of: " + string.Join(", ", repositories.Keys) + "."));
+                    var expectedRepositories = repositories.Count == 0
+                        ? Raw.Literal("This catalog declares no 'repositories:' section at all.")
+                        : Raw.Compose($"Expected one of: {Raw.Join(", ", repositories.Keys.Select(Raw.Escaped))}.");
+
+                    throw ServiceSourcesConfigurationException.For(
+                        $"Service '{new Name(name)}': repositoryRef '{new Name(repositoryRef)}' does not name a repositories entry. {expectedRepositories}");
                 }
 
                 if (rawService.ContainsKey("repository") || rawService.ContainsKey("defaultRef"))
                 {
-                    throw new ServiceSourcesConfigurationException(
-                        $"Service '{name}': repositoryRef cannot be combined with 'repository' or 'defaultRef' — " +
-                        $"those belong on the repositories entry '{repositoryRef}' instead.");
+                    throw ServiceSourcesConfigurationException.For(
+                        $"Service '{new Name(name)}': repositoryRef cannot be combined with 'repository' or 'defaultRef' — those belong on the repositories entry '{new Name(repositoryRef)}' instead.");
                 }
 
                 if (rawService.ContainsKey("prepare"))
                 {
-                    throw new ServiceSourcesConfigurationException(
-                        $"Service '{name}': repositoryRef cannot be combined with 'prepare' — " +
-                        $"move it to the repositories entry '{repositoryRef}' instead.");
+                    throw ServiceSourcesConfigurationException.For(
+                        $"Service '{new Name(name)}': repositoryRef cannot be combined with 'prepare' — move it to the repositories entry '{new Name(repositoryRef)}' instead.");
                 }
             }
             else if (string.IsNullOrWhiteSpace(metadata.Repository)
@@ -300,9 +294,8 @@ internal static class ServiceCatalogLoader
                 // declare url/container/kubernetes legitimately has no 'repository' — that combination
                 // is left alone here. Its own message, not the "entry is empty" one above: the entry
                 // can have real content (e.g. 'project:') and still lack any of these five properties.
-                throw new ServiceSourcesConfigurationException(
-                    $"Service '{name}': no source is configured. Expected a non-empty 'repository', a "
-                    + "'repositoryRef', or a 'url'/'container'/'kubernetes' block.");
+                throw ServiceSourcesConfigurationException.For(
+                    $"Service '{new Name(name)}': no source is configured. Expected a non-empty 'repository', a 'repositoryRef', or a 'url'/'container'/'kubernetes' block.");
             }
         }
 
