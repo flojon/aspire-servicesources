@@ -1760,7 +1760,10 @@ public class KubernetesBackingServiceTests
     /// The suggestion used to strip the quoting the escaper adds by trimming apostrophes off the
     /// result, which also strips any the name itself begins or ends with — so a port named
     /// <c>'amqp'</c> was suggested as <c>amqp</c>, a port that does not exist, while the list of
-    /// forwarded ports beside it showed the real spelling.
+    /// forwarded ports beside it showed the real spelling. The structural escaping seam (#385)
+    /// closes the same hole differently: the <c>Name</c> hole type escapes an embedded apostrophe
+    /// to a Unicode escape rather than relying on the surrounding quotes to survive it unescaped, so
+    /// a port literally named <c>'amqp'</c> is suggested with that escape either side of it instead.
     /// </remarks>
     [Fact]
     public void ANearMissSuggestion_KeepsApostrophesThatBelongToTheName()
@@ -1770,7 +1773,7 @@ public class KubernetesBackingServiceTests
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => Resolve(builder, NamedConfig("amqp://localhost:${port:'amqp}/", ("'amqp'", 5672), ("zzz", 1))));
 
-        Assert.Contains("Did you mean ''amqp''?", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Did you mean '\\u0027amqp\\u0027'?", ex.Message, StringComparison.Ordinal);
     }
 
     /// <remarks>
@@ -1903,8 +1906,9 @@ public class KubernetesBackingServiceTests
     /// This is the one message that quotes a whole connection string back, and it used to wrap it in
     /// double quotes while <see cref="ConfiguredValue.Bare"/> — which only spells out whitespace —
     /// left an embedded <c>"</c> alone, so a value like an ODBC <c>Data Source</c> path closed the
-    /// message's own quoting early. It now wraps the value in apostrophes instead, which a bare
-    /// double quote no longer has any reason to disturb.
+    /// message's own quoting early. The structural escaping seam (#385) wraps it in apostrophes and
+    /// escapes an embedded double quote through the <c>Name</c> hole type, so a value like an ODBC
+    /// <c>Data Source</c> path no longer has a way to close the message's own quoting.
     /// </remarks>
     [Fact]
     public void TheEchoedConnectionString_IsWrappedInApostrophesSoAnEmbeddedQuoteDoesNotCloseItEarly()
@@ -1918,7 +1922,8 @@ public class KubernetesBackingServiceTests
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => Resolve(builder, Config(connectionString: ConnectionString)));
 
-        Assert.Contains($"tunnel: '{ConnectionString}'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            "tunnel: 'redis://cache.internal:6379/\\\"tail\\\"'", ex.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -1927,11 +1932,13 @@ public class KubernetesBackingServiceTests
     /// mirror image.
     /// </summary>
     /// <remarks>
-    /// Doubled, the connection-string convention for escaping the quote delimiter itself, rather
-    /// than left alone or backslash-escaped: <c>O'Brien</c> reaches the message as <c>O''Brien</c>.
+    /// Escaped to a Unicode escape through the <c>Name</c> hole type, the same rule every other
+    /// echoed value in this package follows, rather than doubled the way the connection-string
+    /// convention itself would: <c>O'Brien</c> reaches the message with that escape in place of the
+    /// apostrophe.
     /// </remarks>
     [Fact]
-    public void TheEchoedConnectionString_DoublesAnEmbeddedApostropheSoItDoesNotCloseTheQuotingEarly()
+    public void TheEchoedConnectionString_EscapesAnEmbeddedApostropheSoItDoesNotCloseTheQuotingEarly()
     {
         var builder = CreateBuilder();
         const string ConnectionString = "redis://cache.internal:6379/O'Brien";
@@ -1943,7 +1950,7 @@ public class KubernetesBackingServiceTests
             () => Resolve(builder, Config(connectionString: ConnectionString)));
 
         Assert.Contains(
-            "tunnel: 'redis://cache.internal:6379/O''Brien'", ex.Message, StringComparison.Ordinal);
+            "tunnel: 'redis://cache.internal:6379/O\\u0027Brien'", ex.Message, StringComparison.Ordinal);
     }
 
     /// <remarks>

@@ -1,5 +1,6 @@
 using System.Text;
 using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.BackingServices;
 
@@ -138,7 +139,7 @@ internal sealed class ConnectionStringTemplate
     /// The configuration key <paramref name="template"/> was read from, so a message can name the
     /// layer that set it rather than only the file a developer usually writes it in.
     /// </param>
-    public static ConnectionStringTemplate Parse(string template, string backingServiceName, string configKey)
+    public static ConnectionStringTemplate Parse(string template, string backingServiceName, Raw configKey)
     {
         var segments = new List<Segment>();
 
@@ -242,7 +243,7 @@ internal sealed class ConnectionStringTemplate
     private static bool TryReadPlaceholder(
         string body,
         string backingServiceName,
-        string configKey,
+        Raw configKey,
         bool unterminated,
         out Segment placeholder)
     {
@@ -275,7 +276,8 @@ internal sealed class ConnectionStringTemplate
         // of every call, since a rejection is the exceptional case.
         if (unterminated)
         {
-            throw Malformed(backingServiceName, configKey, RejectionToken(body, unterminated: true), "it has no closing '}'.");
+            throw Malformed(
+                backingServiceName, configKey, RejectionToken(body, unterminated: true), Raw.Literal("it has no closing '}'."));
         }
 
         // Reassembled from the template's own text rather than from the keyword constants, so every
@@ -293,12 +295,14 @@ internal sealed class ConnectionStringTemplate
                 2 when IsNamed(parts[1]) => new Port(parts[1]) { Token = token },
                 2 => throw Malformed(
                     backingServiceName, configKey, RejectionToken(body, unterminated: false),
-                    "the port name after 'port:' is empty. Write '${port}' for the only forwarded port, "
-                    + "or '${port:<name>}' to name one of several."),
+                    Raw.Literal(
+                        "the port name after 'port:' is empty. Write '${port}' for the only forwarded port, "
+                        + "or '${port:<name>}' to name one of several.")),
                 _ => throw Malformed(
                     backingServiceName, configKey, RejectionToken(body, unterminated: false),
-                    $"a port placeholder takes at most one name, and this has {parts.Length - 1} "
-                    + "colon-separated parts after 'port'."),
+                    Raw.Compose(
+                        $"a port placeholder takes at most one name, and this has {parts.Length - 1} "
+                        + $"colon-separated parts after 'port'.")),
             };
 
             return true;
@@ -310,24 +314,27 @@ internal sealed class ConnectionStringTemplate
                 new Secret(parts[1], parts[2]) { Token = token },
             3 when !IsNamed(parts[1]) || !IsNamed(parts[2]) => throw Malformed(
                 backingServiceName, configKey, RejectionToken(body, unterminated: false),
-                "the secret name and key must both be given: '${secret:<name>:<key>}'."),
+                Raw.Literal("the secret name and key must both be given: '${secret:<name>:<key>}'.")),
             3 when !IsSecretName(parts[1]) => throw Malformed(
                 backingServiceName, configKey, RejectionToken(body, unterminated: false),
-                "a Kubernetes secret's name is lower-case letters, digits, '-' and '.', beginning and ending "
-                + "with a letter or a digit — narrower than its keys, which also take upper case and '_'. "
-                + "Nothing in a cluster can carry this name as written, so it is refused here rather than left "
-                + "to arrive as an indistinguishable \"not found\" at start time."),
+                Raw.Literal(
+                    "a Kubernetes secret's name is lower-case letters, digits, '-' and '.', beginning and ending "
+                    + "with a letter or a digit — narrower than its keys, which also take upper case and '_'. "
+                    + "Nothing in a cluster can carry this name as written, so it is refused here rather than left "
+                    + "to arrive as an indistinguishable \"not found\" at start time.")),
             3 => throw Malformed(
                 backingServiceName, configKey, RejectionToken(body, unterminated: false),
-                "a key inside a Kubernetes secret is letters, digits, '-', '.' and '_', and this key is not. "
-                + "Nothing in a cluster can carry the key as written."),
+                Raw.Literal(
+                    "a key inside a Kubernetes secret is letters, digits, '-', '.' and '_', and this key is not. "
+                    + "Nothing in a cluster can carry the key as written.")),
             < 3 => throw Malformed(
                 backingServiceName, configKey, RejectionToken(body, unterminated: false),
-                "a secret placeholder names a secret and a key inside it: '${secret:<name>:<key>}'."),
+                Raw.Literal("a secret placeholder names a secret and a key inside it: '${secret:<name>:<key>}'.")),
             _ => throw Malformed(
                 backingServiceName, configKey, RejectionToken(body, unterminated: false),
-                $"a secret placeholder takes exactly a name and a key, and this has {parts.Length - 1} "
-                + "colon-separated parts after 'secret'."),
+                Raw.Compose(
+                    $"a secret placeholder takes exactly a name and a key, and this has {parts.Length - 1} "
+                    + $"colon-separated parts after 'secret'.")),
         };
 
         return true;
@@ -494,10 +501,13 @@ internal sealed class ConnectionStringTemplate
     /// and in the README, where someone looking for it will be.
     /// </remarks>
     private static ServiceSourcesConfigurationException Malformed(
-        string backingServiceName, string configKey, string placeholder, string problem) =>
-        new($"Backing service '{backingServiceName}': the connection string carries the placeholder "
-            + $"{Config.ConfiguredValue.Escaped(placeholder)}, which cannot be read — {problem} "
+        string backingServiceName, Raw configKey, string placeholder, Raw problem) =>
+        ServiceSourcesConfigurationException.For(
+            $"Backing service '{new Name(backingServiceName)}': the connection string carries the placeholder "
+            + $"'{new Name(placeholder)}', which cannot be read — {problem} "
             + $"The key is '{configKey}', which any configuration layer can set: "
-            + $"{Config.DeveloperConfiguration.FileName}, appsettings, user secrets, the environment "
-            + $"variable {configKey.Replace(":", "__", StringComparison.Ordinal)}, or the command line.");
+            + $"{Raw.Literal(Config.DeveloperConfiguration.FileName)}, appsettings, user secrets, the environment "
+            // configKey is already escaped once, through Raw; re-wrapping its rendering is a second
+            // pass over the same text rather than a second, independent escape of caller data.
+            + $"variable {Raw.Escaped(configKey.ToString().Replace(":", "__", StringComparison.Ordinal))}, or the command line.");
 }

@@ -76,6 +76,9 @@ internal readonly struct Raw
     /// </remarks>
     internal static Raw Cause(Exception exception) => new(ConfiguredValue.Bare(exception.Message));
 
+    /// <summary>The platform's line terminator: carries no caller data, so nothing needs escaping.</summary>
+    internal static Raw NewLine { get; } = new(Environment.NewLine);
+
     /// <summary>Empty rather than null: <c>default(Raw)</c> must render, not throw.</summary>
     public override string ToString() => text ?? string.Empty;
 
