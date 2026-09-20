@@ -262,23 +262,22 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
             return;
         }
 
-        var serviceKey = $"{DeveloperConfiguration.ServicesKey}:{serviceName}";
-        var sourceKey = $"{serviceKey}:source";
+        var serviceKey = Raw.Compose($"{Raw.Literal(DeveloperConfiguration.ServicesKey)}:{new Name(serviceName)}");
 
-        throw new ServiceSourcesConfigurationException(
-            $"Service '{serviceName}' source is 'local' but {definition.Origin.Describe()} gives it no "
+        throw ServiceSourcesConfigurationException.For(
+            $"Service '{new Name(serviceName)}' source is 'local' but {Raw.Origin(definition.Origin)} gives it no "
             + $"repository to clone. Either {DeclareRepositoryRemedy(serviceName, definition)}, or set "
             + $"'{serviceKey}:local:path' to a checkout you already have on disk, which needs no "
-            + $"repository. The key is '{sourceKey}', which any configuration layer can set: "
-            + $"{DeveloperConfiguration.FileName}, appsettings, user secrets, the environment variable "
-            + $"{DeveloperConfiguration.EnvironmentVariableFor(serviceName)}, or the command line.");
+            + $"repository. The key is '{serviceKey}:source', which any configuration layer can set: "
+            + $"{Raw.Literal(DeveloperConfiguration.FileName)}, appsettings, user secrets, the environment variable "
+            + $"{Raw.Escaped(DeveloperConfiguration.EnvironmentVariableFor(serviceName))}, or the command line.");
     }
 
     /// <summary>
     /// How to give this service a repository, in the terms of the catalog that declared it — yaml
     /// property names for a yaml entry, builder calls for a code-declared one.
     /// </summary>
-    private static string DeclareRepositoryRemedy(string serviceName, ServiceDefinition definition)
+    private static Raw DeclareRepositoryRemedy(string serviceName, ServiceDefinition definition)
     {
         var isCode = definition.Origin.Kind == CatalogOriginKind.Code;
 
@@ -288,8 +287,8 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         if (LocalGitCheckout.IsGrouped(definition, serviceName))
         {
             return isCode
-                ? $"give the shared repository '{definition.Repository.CheckoutName}' a url where it is declared"
-                : $"give the 'repositories' entry '{definition.Repository.CheckoutName}' a 'repository' url";
+                ? Raw.Compose($"give the shared repository '{new Name(definition.Repository.CheckoutName)}' a url where it is declared")
+                : Raw.Compose($"give the 'repositories' entry '{new Name(definition.Repository.CheckoutName)}' a 'repository' url");
         }
 
         // "give ... a url" rather than "add a 'repository'": the predicate above is
@@ -298,8 +297,8 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         // No repositoryRef is offered for the same reason: the loader refuses one on any entry
         // carrying a 'repository' key at all — blank included — which is not readable from here.
         return isCode
-            ? "declare it with WithRepository(...) or WithSharedRepository(...)"
-            : "give its catalog entry a 'repository' url";
+            ? Raw.Literal("declare it with WithRepository(...) or WithSharedRepository(...)")
+            : Raw.Literal("give its catalog entry a 'repository' url");
     }
 
     /// <summary>
@@ -316,10 +315,10 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
             // "java"/"javascript" always resolve via LocalKindRegistry's own built-in fallback, so
             // reaching here means an unregistered third-party kind — there is no Use*() call to
             // suggest for one core doesn't know about.
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': kind '{definition.Kind}' is not registered. " +
-                registry.DescribeNearMatch(definition.Kind) +
-                "Register it with builder.AddLocalKind(name, handler) before the first AddService call.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': kind '{new Name(definition.Kind)}' is not registered. "
+                + $"{registry.DescribeNearMatch(definition.Kind)}"
+                + $"Register it with builder.AddLocalKind(name, handler) before the first AddService call.");
         }
 
         return handler;
@@ -346,17 +345,18 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         }
         catch (Exception ex) when (ex is not ServiceSourcesConfigurationException)
         {
-            throw new ServiceSourcesConfigurationException(
-                GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, definition.Kind)
-                    ?? DeferredHandlerFailedMessage(serviceName, definition.Kind),
-                ex);
+            var message = GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, definition.Kind) is { } missingPackage
+                ? Raw.Escaped(missingPackage)
+                : DeferredHandlerFailedMessage(serviceName, definition.Kind);
+
+            throw ServiceSourcesConfigurationException.For($"{message}", ex);
         }
 
         if (registration is not null && registration.Service is null)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': the handler for kind '{definition.Kind}' returned a " +
-                $"{nameof(DeferredLocalResource)} with no resource. Return null to decline deferral instead.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': the handler for kind '{new Name(definition.Kind)}' returned a "
+                + $"{Raw.Literal(nameof(DeferredLocalResource))} with no resource. Return null to decline deferral instead.");
         }
 
         return registration;
@@ -377,31 +377,32 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         }
         catch (Exception ex) when (ex is not ServiceSourcesConfigurationException)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': the handler for kind '{definition.Kind}' failed while being asked whether " +
-                "it supports a deferred checkout. That call is documented as answering rather than throwing — a " +
-                "block it cannot judge should answer false and let the eager path report it.", ex);
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': the handler for kind '{new Name(definition.Kind)}' failed while being asked whether "
+                + $"it supports a deferred checkout. That call is documented as answering rather than throwing — a "
+                + $"block it cannot judge should answer false and let the eager path report it.",
+                ex);
         }
     }
 
-    private static string HandlerFailedMessage(string serviceName, string kind) =>
-        $"Service '{serviceName}': the handler for kind '{kind}' failed while creating its " +
-        $"resource. If this is a configuration problem, report it from " +
-        $"{nameof(ILocalResourceKind)}.{nameof(ILocalResourceKind.Validate)} instead, which core calls " +
-        "immediately before this against the same checkout — including for a path that has to be in " +
-        "the repository — and before the service has added anything to the app model.";
+    private static Raw HandlerFailedMessage(string serviceName, string kind) =>
+        Raw.Compose($"Service '{new Name(serviceName)}': the handler for kind '{new Name(kind)}' failed while creating its "
+            + $"resource. If this is a configuration problem, report it from "
+            + $"{Raw.Literal(nameof(ILocalResourceKind))}.{Raw.Literal(nameof(ILocalResourceKind.Validate))} instead, which core calls "
+            + $"immediately before this against the same checkout — including for a path that has to be in "
+            + $"the repository — and before the service has added anything to the app model.");
 
     /// <summary>
     /// The deferred counterpart of <see cref="HandlerFailedMessage"/>. It cannot point at
     /// <see cref="ILocalResourceKind.Validate"/>: there is no checkout to validate against on this
     /// path, which is why core does not call it here.
     /// </summary>
-    private static string DeferredHandlerFailedMessage(string serviceName, string kind) =>
-        $"Service '{serviceName}': the handler for kind '{kind}' failed while creating its resource for a " +
-        $"checkout that has not landed yet. A check that needs the working tree belongs in " +
-        $"{nameof(DeferredLocalResource)}.{nameof(DeferredLocalResource.ValidateCheckout)}, which core runs " +
-        "once the clone is there; anything settleable from the options block alone should be reported as a " +
-        $"{nameof(ServiceSourcesConfigurationException)} naming the service.";
+    private static Raw DeferredHandlerFailedMessage(string serviceName, string kind) =>
+        Raw.Compose($"Service '{new Name(serviceName)}': the handler for kind '{new Name(kind)}' failed while creating its resource for a "
+            + $"checkout that has not landed yet. A check that needs the working tree belongs in "
+            + $"{Raw.Literal(nameof(DeferredLocalResource))}.{Raw.Literal(nameof(DeferredLocalResource.ValidateCheckout))}, which core runs "
+            + $"once the clone is there; anything settleable from the options block alone should be reported as a "
+            + $"{Raw.Literal(nameof(ServiceSourcesConfigurationException))} naming the service.");
 
     /// <summary>
     /// Asks the handler to pass judgement on the service's configuration against its resolved
@@ -424,10 +425,11 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         }
         catch (Exception ex) when (ex is not ServiceSourcesConfigurationException)
         {
-            throw new ServiceSourcesConfigurationException(
-                GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, definition.Kind)
-                    ?? ValidateFailedMessage(serviceName, definition.Kind),
-                ex);
+            var message = GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, definition.Kind) is { } missingPackage
+                ? Raw.Escaped(missingPackage)
+                : ValidateFailedMessage(serviceName, definition.Kind);
+
+            throw ServiceSourcesConfigurationException.For($"{message}", ex);
         }
     }
 
@@ -446,12 +448,12 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// something. Unlike <see cref="HandlerFailedMessage"/> it has nowhere better to point the
     /// author at: this <em>is</em> the place a configuration problem belongs.
     /// </summary>
-    private static string ValidateFailedMessage(string serviceName, string kind) =>
-        $"Service '{serviceName}': the handler for kind '{kind}' failed while checking the service's " +
-        $"configuration against its checkout. A configuration problem should be reported from " +
-        $"{nameof(ILocalResourceKind)}.{nameof(ILocalResourceKind.Validate)} as a " +
-        $"{nameof(ServiceSourcesConfigurationException)} naming the service; anything else out of that " +
-        "call is a fault in the handler.";
+    private static Raw ValidateFailedMessage(string serviceName, string kind) =>
+        Raw.Compose($"Service '{new Name(serviceName)}': the handler for kind '{new Name(kind)}' failed while checking the service's "
+            + $"configuration against its checkout. A configuration problem should be reported from "
+            + $"{Raw.Literal(nameof(ILocalResourceKind))}.{Raw.Literal(nameof(ILocalResourceKind.Validate))} as a "
+            + $"{Raw.Literal(nameof(ServiceSourcesConfigurationException))} naming the service; anything else out of that "
+            + $"call is a fault in the handler.");
 
     private static IResourceBuilder<ServiceResource> InvokeKindHandler(
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition, string repoRoot,
@@ -468,17 +470,18 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         }
         catch (Exception ex) when (ex is not ServiceSourcesConfigurationException)
         {
-            throw new ServiceSourcesConfigurationException(
-                GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, definition.Kind)
-                    ?? HandlerFailedMessage(serviceName, definition.Kind),
-                ex);
+            var message = GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, definition.Kind) is { } missingPackage
+                ? Raw.Escaped(missingPackage)
+                : HandlerFailedMessage(serviceName, definition.Kind);
+
+            throw ServiceSourcesConfigurationException.For($"{message}", ex);
         }
 
         if (resourceBuilder is null)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': the handler for kind '{definition.Kind}' returned no resource. " +
-                $"{nameof(ILocalResourceKind)}.{nameof(ILocalResourceKind.Resolve)} must return the resource it created.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': the handler for kind '{new Name(definition.Kind)}' returned no resource. "
+                + $"{Raw.Literal(nameof(ILocalResourceKind))}.{Raw.Literal(nameof(ILocalResourceKind.Resolve))} must return the resource it created.");
         }
 
         return ResolvedService.Bridge(resourceBuilder, serviceName, "local");
@@ -494,8 +497,8 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
 
         if (!File.Exists(projectPath))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': project file '{project}' was not found under '{repoRoot}'.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': project file '{Raw.Escaped(project)}' was not found under '{Raw.Escaped(repoRoot)}'.");
         }
 
         return projectPath;
@@ -552,24 +555,24 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
 
         if (CheckoutRelativePath.IsAbsolute(project))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': project '{project}' is an absolute path. 'project' has to be a path "
-                + "relative to the service's checkout — it names a project the repository commits, not one "
-                + "sitting elsewhere on a developer's machine.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': project '{Raw.Escaped(project)}' is an absolute path. 'project' has to be a path "
+                + $"relative to the service's checkout — it names a project the repository commits, not one "
+                + $"sitting elsewhere on a developer's machine.");
         }
 
         if (CheckoutRelativePath.UnusableSegment(project) is { } unusable)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': project '{project}' has a path segment '{unusable}' — "
-                + CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy.ToString());
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': project '{Raw.Escaped(project)}' has a path segment '{new Name(unusable)}' — "
+                + $"{CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy}");
         }
 
         if (CheckoutRelativePath.EscapesRoot(project))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': project '{project}' points outside the service's checkout. It must "
-                + "stay within the repository.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': project '{Raw.Escaped(project)}' points outside the service's checkout. It must "
+                + $"stay within the repository.");
         }
     }
 }

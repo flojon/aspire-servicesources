@@ -162,12 +162,12 @@ internal sealed class DeferredCheckout
         {
             if (_resolved)
             {
-                throw new ServiceSourcesConfigurationException(
-                    "UseDeferredCheckout() was called after a service had already resolved through " +
-                    "AddService(…), so that service's checkout could not be deferred. Because the decision " +
-                    "is made as each service is added, UseDeferredCheckout() must be called before the " +
-                    "first AddService(…) — near the top of the AppHost, next to AddServiceCatalog() and " +
-                    "AddLocalKind().");
+                throw ServiceSourcesConfigurationException.For(
+                    $"UseDeferredCheckout() was called after a service had already resolved through "
+                    + $"AddService(…), so that service's checkout could not be deferred. Because the decision "
+                    + $"is made as each service is added, UseDeferredCheckout() must be called before the "
+                    + $"first AddService(…) — near the top of the AppHost, next to AddServiceCatalog() and "
+                    + $"AddLocalKind().");
             }
 
             _enabled = true;
@@ -329,12 +329,12 @@ internal sealed class DeferredCheckout
             // under the same name. The handler is the only one that can fix that, so it is named.
             if (builder.Resources.Any(added => !before.Contains(added)))
             {
-                throw new ServiceSourcesConfigurationException(
-                    $"Service '{serviceName}': the handler for kind '{definition.Kind}' added resources to the app " +
-                    "model and then declined deferral by returning null from ResolveDeferred. Decide before " +
-                    "adding anything — SupportsDeferredCheckout is the side-effect-free place to decline — " +
-                    "because resources cannot be removed once added, and the eager path registers this service " +
-                    "again.");
+                throw ServiceSourcesConfigurationException.For(
+                    $"Service '{new Name(serviceName)}': the handler for kind '{new Name(definition.Kind)}' added resources to the app "
+                    + $"model and then declined deferral by returning null from ResolveDeferred. Decide before "
+                    + $"adding anything — SupportsDeferredCheckout is the side-effect-free place to decline — "
+                    + $"because resources cannot be removed once added, and the eager path registers this service "
+                    + $"again.");
             }
 
             return null;
@@ -364,12 +364,12 @@ internal sealed class DeferredCheckout
         {
             if (helper.Annotations.OfType<WaitAnnotation>().Any(wait => ReferenceEquals(wait.Resource, resource)))
             {
-                throw new ServiceSourcesConfigurationException(
-                    $"Service '{serviceName}': the handler for kind '{definition.Kind}' added resource " +
-                    $"'{helper.Name}' alongside the service and gave it a WaitFor on the service itself. A " +
-                    "deferred checkout starts the resources a handler added before the service they belong to, " +
-                    "so that wait could never be satisfied. Have the service wait on the helper rather than the " +
-                    "other way round, or return null from ResolveDeferred to opt this kind out of deferral.");
+                throw ServiceSourcesConfigurationException.For(
+                    $"Service '{new Name(serviceName)}': the handler for kind '{new Name(definition.Kind)}' added resource "
+                    + $"'{new Name(helper.Name)}' alongside the service and gave it a WaitFor on the service itself. A "
+                    + $"deferred checkout starts the resources a handler added before the service they belong to, "
+                    + $"so that wait could never be satisfied. Have the service wait on the helper rather than the "
+                    + $"other way round, or return null from ResolveDeferred to opt this kind out of deferral.");
             }
         }
 
@@ -440,9 +440,10 @@ internal sealed class DeferredCheckout
         }
         catch (Exception ex) when (ex is not ServiceSourcesConfigurationException)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': the handler for kind '{kind}' failed while checking the checkout that " +
-                "had just landed.", ex);
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': the handler for kind '{new Name(kind)}' failed while checking the checkout that "
+                + $"had just landed.",
+                ex);
         }
     }
 
@@ -811,10 +812,10 @@ internal sealed class DeferredCheckout
                 // for a 'path' override. Checked anyway, because being wrong about it is silent.
                 if (!string.Equals(repoRoot, deferred.RepoRoot, StringComparison.Ordinal))
                 {
-                    throw new ServiceSourcesConfigurationException(
-                        $"Service '{deferred.ServiceName}': the checkout resolved to '{repoRoot}', but the resource " +
-                        $"was registered against '{deferred.RepoRoot}' before the AppHost started and that path " +
-                        "cannot be changed afterwards.");
+                    throw ServiceSourcesConfigurationException.For(
+                        $"Service '{new Name(deferred.ServiceName)}': the checkout resolved to '{Raw.Escaped(repoRoot)}', but the resource "
+                        + $"was registered against '{Raw.Escaped(deferred.RepoRoot)}' before the AppHost started and that path "
+                        + $"cannot be changed afterwards.");
                 }
 
                 // The checkout is complete and nothing has judged it yet, which is where a prepare step
@@ -882,9 +883,9 @@ internal sealed class DeferredCheckout
 
                 if (!result.Success && !result.Canceled)
                 {
-                    throw new ServiceSourcesConfigurationException(
-                        $"Service '{deferred.ServiceName}': the checkout completed but starting resource " +
-                        $"'{withheld.Name}' failed. " + (result.Message ?? "No further detail was reported."));
+                    throw ServiceSourcesConfigurationException.For(
+                        $"Service '{new Name(deferred.ServiceName)}': the checkout completed but starting resource "
+                        + $"'{new Name(withheld.Name)}' failed. {Raw.Escaped(result.Message ?? "No further detail was reported.")}");
                 }
 
                 started.Add(withheld);
