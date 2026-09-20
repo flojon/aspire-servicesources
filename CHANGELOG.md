@@ -192,6 +192,9 @@ never existed. Check the tag of the last release before adding one.
   different `ILocalResourceKind` for the name. The "call this before the first `AddService()`"
   ordering contract no longer applies to either kind.
 
+- **NuGet package tagged `polyglot`.** The Aspire analyzer surfaces this tag for
+  integrations exposing any `[AspireExport]` method, which ServiceSources does.
+
 ### Fixed
 
 - **A configured name can no longer forge a line in the messages that refuse or report a service**
