@@ -108,10 +108,10 @@ public class CheckoutPreparationTests
 
     private static PrepareStep Step(string mode = "oncePerCommit", params string[] command) =>
         PrepareStep.Create(
-            ServiceName,
+            PreparePlan.ServiceLabel(ServiceName),
             command.Length == 0 ? ["./prepare.sh"] : command,
-            PrepareModes.Parse(ServiceName, mode, "prepare.mode"),
-            "prepare");
+            PrepareModes.Parse(PreparePlan.ServiceLabel(ServiceName), mode, Raw.Literal("prepare.mode")),
+            Raw.Literal("prepare"));
 
     private sealed record Fixture(
         string RepoRoot, string AppHostDirectory, FakeRunner Runner, FakeGitClient Git, RecordingSink Sink)
@@ -779,7 +779,8 @@ public class CheckoutPreparationTests
         fixture.Runner.LaunchException = new PrepareLaunchException("not executable");
 
         var windowsStep = PrepareStep.Create(
-            ServiceName, ["./prepare.sh"], PrepareMode.OncePerCommit, "prepare", windowsWithoutVariant: true);
+            PreparePlan.ServiceLabel(ServiceName), ["./prepare.sh"], PrepareMode.OncePerCommit, Raw.Literal("prepare"),
+            windowsWithoutVariant: true);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => Run(fixture, windowsStep));
 
@@ -1148,7 +1149,9 @@ public class CheckoutPreparationTests
         var exception = Assert.Throws<ServiceSourcesConfigurationException>(
             () => PrepareMarker.LocationFor(serviceName, "/unused", "/unused", managedCheckout: false));
 
-        Assert.Contains(serviceName, exception.Message, StringComparison.Ordinal);
+        // The escaped spelling, not the raw one: Name doubles a name's own backslashes so a
+        // developer can paste it back into servicesources.local.json without misreading it.
+        Assert.Contains(Name.Escape(serviceName), exception.Message, StringComparison.Ordinal);
     }
 
     /// <summary>

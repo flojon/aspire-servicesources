@@ -72,7 +72,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         // before anything is registered against a directory that does not exist yet. Only what needs
         // the working tree waits for one, which is the division ValidateCheckout draws for a kind.
         var prepare = PreparePlan.For(
-            serviceName, label.ToString(), definition.Repository.Prepare, config.Local.Prepare, managedCheckout,
+            serviceName, label, definition.Repository.Prepare, config.Local.Prepare, managedCheckout,
             OperatingSystem.IsWindows());
 
         if (prepare.IgnoredCatalogNotice is { } ignored)

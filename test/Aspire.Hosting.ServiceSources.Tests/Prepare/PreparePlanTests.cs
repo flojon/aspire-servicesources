@@ -1,4 +1,5 @@
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Messages;
 using Aspire.Hosting.ServiceSources.Prepare;
 using Aspire.Hosting.ServiceSources;
 
@@ -26,16 +27,16 @@ public class PreparePlanTests
         PrepareDeveloperConfig? developer = null,
         bool managedCheckout = true,
         bool windows = false,
-        string? label = null) =>
+        Raw? label = null) =>
         PreparePlan.For(
-            ServiceName, label ?? PreparePlan.ServiceLabel(ServiceName).ToString(), catalog, developer, managedCheckout, windows);
+            ServiceName, label ?? PreparePlan.ServiceLabel(ServiceName), catalog, developer, managedCheckout, windows);
 
     private static ServiceSourcesConfigurationException Rejects(
         PrepareMetadata? catalog = null,
         PrepareDeveloperConfig? developer = null,
         bool managedCheckout = true,
         bool windows = false,
-        string? label = null) =>
+        Raw? label = null) =>
         Assert.Throws<ServiceSourcesConfigurationException>(
             () => Plan(catalog, developer, managedCheckout, windows, label));
 
@@ -101,7 +102,7 @@ public class PreparePlanTests
     {
         var ex = Rejects(
             Catalog(["./prepare.sh"], mode: "sometimes"),
-            label: PreparePlan.RepositoryLabel("monorepo").ToString());
+            label: PreparePlan.RepositoryLabel("monorepo"));
 
         Assert.Contains("Repository 'monorepo'", ex.Message);
         Assert.DoesNotContain($"'{ServiceName}'", ex.Message);

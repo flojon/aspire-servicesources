@@ -130,7 +130,7 @@ internal static class CheckoutPreparation
         sink.Report($"{Tag(checkoutName)} {reason} Running: {RedactedDescribe(step)}");
 
         var tail = new Queue<string>(OutputTailLines);
-        var exitCode = Launch(label.ToString(), checkoutName, step, repoRoot, runner, sink, tail, cancellationToken);
+        var exitCode = Launch(label, checkoutName, step, repoRoot, runner, sink, tail, cancellationToken);
 
         if (exitCode != 0)
         {
@@ -145,7 +145,7 @@ internal static class CheckoutPreparation
                 quoted = [.. tail];
             }
 
-            throw new ServiceSourcesConfigurationException(FailedMessage(label.ToString(), step, exitCode, quoted));
+            throw ServiceSourcesConfigurationException.For($"{FailedMessage(label, step, exitCode, quoted)}");
         }
 
         // `always` records nothing: it is the mode whose command decides its own work, so a marker
@@ -274,7 +274,7 @@ internal static class CheckoutPreparation
     }
 
     private static int Launch(
-        string label,
+        Raw label,
         string checkoutName,
         PrepareStep step,
         string repoRoot,
@@ -318,7 +318,7 @@ internal static class CheckoutPreparation
         }
         catch (PrepareLaunchException ex)
         {
-            throw new ServiceSourcesConfigurationException(LaunchFailedMessage(label, step, ex), ex);
+            throw ServiceSourcesConfigurationException.For($"{LaunchFailedMessage(label, step, ex)}", ex);
         }
     }
 
@@ -344,17 +344,29 @@ internal static class CheckoutPreparation
     /// The output tail, already snapshotted by the caller — this must not enumerate the live queue,
     /// which a still-running stream reader can be appending to.
     /// </param>
-    private static string FailedMessage(
-        string label, PrepareStep step, int exitCode, string[] quoted)
-    {
-        return $"{label}: its prepare step failed. The command '{RedactedDescribe(step)}' exited with "
+    private static Raw FailedMessage(
+        Raw label, PrepareStep step, int exitCode, string[] quoted) =>
+        Raw.Compose($"{label}: its prepare step failed. The command '{Raw.Escaped(RedactedDescribe(step))}' exited with "
             + $"code {exitCode}, so the checkout was left as the command found it and nothing was recorded as "
-            + "completed — the step will run again from the beginning on the next start."
-            + (quoted.Length == 0
-                ? " It wrote no output."
-                : $"{Environment.NewLine}Last {(quoted.Length == 1 ? "line" : $"{quoted.Length} lines")} of its "
-                  + $"output:{Environment.NewLine}  " + string.Join($"{Environment.NewLine}  ", quoted));
-    }
+            + $"completed — the step will run again from the beginning on the next start.{QuotedTailSuffix(quoted)}");
+
+    /// <summary>The output-tail portion of <see cref="FailedMessage"/>, or a note that there was none.</summary>
+    private static Raw QuotedTailSuffix(string[] quoted) =>
+        quoted.Length == 0
+            ? Raw.Literal(" It wrote no output.")
+            : Raw.Compose($"{Raw.NewLine}Last {LineCountLabel(quoted.Length)} of its "
+                + $"output:{Raw.NewLine}  {JoinedQuotedLines(quoted)}");
+
+    private static Raw LineCountLabel(int count) =>
+        count == 1 ? Raw.Literal("line") : Raw.Compose($"{count} lines");
+
+    /// <summary>
+    /// The tail's lines, each escaped individually and joined by a real line break — not
+    /// <see cref="Raw.Join"/>, whose separator must be a compile-time constant and
+    /// <see cref="Raw.NewLine"/> is not one.
+    /// </summary>
+    private static Raw JoinedQuotedLines(IEnumerable<string> quoted) =>
+        quoted.Select(Raw.Escaped).Aggregate((a, b) => Raw.Compose($"{a}{Raw.NewLine}  {b}"));
 
     /// <remarks>
     /// Reported apart from a non-zero exit because it is a different problem with a different fix:
@@ -363,17 +375,20 @@ internal static class CheckoutPreparation
     /// this failure the configuration can be read off — a POSIX script has no execute bit there and
     /// no interpreter to reach it.
     /// </remarks>
-    private static string LaunchFailedMessage(string label, PrepareStep step, PrepareLaunchException ex) =>
-        $"{label}: its prepare step could not be started. {ex.Message} The command is "
-        + $"'{RedactedDescribe(step)}', run with its checkout as its working directory; its first element has "
-        + "to be a path to something executable inside the checkout, or the name of a program on PATH."
-        + (step.WindowsWithoutVariant
-            ? " This AppHost is running on Windows and the block declares no 'windowsCommand', so the command "
-              + "above is the cross-platform one, and that is the likely cause. Nothing runs through a shell, "
-              + "and Windows resolves a bare name on PATH by appending '.exe' rather than by walking PATHEXT — "
-              + "so a program that is a '.cmd' or '.bat' shim there needs naming in full ('npm.cmd' rather "
-              + "than 'npm'), and a POSIX script needs an interpreter, e.g. "
-              + "[\"pwsh\", \"-File\", \"prepare.ps1\"]. Either one goes in a 'windowsCommand' beside the "
-              + "command above."
-            : "");
+    private static Raw LaunchFailedMessage(Raw label, PrepareStep step, PrepareLaunchException ex) =>
+        Raw.Compose($"{label}: its prepare step could not be started. {Raw.Cause(ex)} The command is "
+            + $"'{Raw.Escaped(RedactedDescribe(step))}', run with its checkout as its working directory; its first element has "
+            + $"to be a path to something executable inside the checkout, or the name of a program on PATH."
+            + $"{WindowsWithoutVariantSuffix(step.WindowsWithoutVariant)}");
+
+    private static Raw WindowsWithoutVariantSuffix(bool windowsWithoutVariant) =>
+        windowsWithoutVariant
+            ? Raw.Literal(" This AppHost is running on Windows and the block declares no 'windowsCommand', so the command "
+                + "above is the cross-platform one, and that is the likely cause. Nothing runs through a shell, "
+                + "and Windows resolves a bare name on PATH by appending '.exe' rather than by walking PATHEXT — "
+                + "so a program that is a '.cmd' or '.bat' shim there needs naming in full ('npm.cmd' rather "
+                + "than 'npm'), and a POSIX script needs an interpreter, e.g. "
+                + "[\"pwsh\", \"-File\", \"prepare.ps1\"]. Either one goes in a 'windowsCommand' beside the "
+                + "command above.")
+            : Raw.Literal("");
 }

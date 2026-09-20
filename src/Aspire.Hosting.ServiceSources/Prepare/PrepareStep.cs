@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.Prepare;
 
@@ -67,17 +68,17 @@ internal sealed class PrepareStep
     /// The command is empty, holds a blank first element, or names something outside the checkout.
     /// </exception>
     public static PrepareStep Create(
-        string label,
+        Raw label,
         IReadOnlyList<string> command,
         PrepareMode mode,
-        string writtenAt,
+        Raw writtenAt,
         bool windowsWithoutVariant = false)
     {
         if (command.Count == 0)
         {
-            throw new ServiceSourcesConfigurationException(
+            throw ServiceSourcesConfigurationException.For(
                 $"{label}: {writtenAt}.command is an empty list, so there is no command to run. "
-                + "Give it the program to run and its arguments, e.g. [\"./prepare.sh\"] — or set "
+                + $"Give it the program to run and its arguments, e.g. [\"./prepare.sh\"] — or set "
                 + $"{writtenAt}.mode to 'never' to declare that nothing should run.");
         }
 
@@ -85,10 +86,10 @@ internal sealed class PrepareStep
 
         if (string.IsNullOrWhiteSpace(program))
         {
-            throw new ServiceSourcesConfigurationException(
+            throw ServiceSourcesConfigurationException.For(
                 $"{label}: the first element of {writtenAt}.command is blank, so it names no "
-                + "program. It has to be the program to run — a path inside the checkout, e.g. "
-                + "\"./prepare.sh\", or a name resolved through PATH, e.g. \"make\".");
+                + $"program. It has to be the program to run — a path inside the checkout, e.g. "
+                + $"\"./prepare.sh\", or a name resolved through PATH, e.g. \"make\".");
         }
 
         // Every element, not only the first. A yaml `~` or a JSON null binds as a null element, and
@@ -100,10 +101,10 @@ internal sealed class PrepareStep
         {
             if (command[index] is null)
             {
-                throw new ServiceSourcesConfigurationException(
+                throw ServiceSourcesConfigurationException.For(
                     $"{label}: element {index + 1} of {writtenAt}.command is empty — a yaml '~' "
-                    + "or a JSON null — which is not an argument. Remove it, or write it as \"\" if the command "
-                    + "really takes an empty one.");
+                    + $"or a JSON null — which is not an argument. Remove it, or write it as \"\" if the command "
+                    + $"really takes an empty one.");
             }
         }
 
@@ -130,7 +131,7 @@ internal sealed class PrepareStep
     /// elsewhere.
     /// </para>
     /// </remarks>
-    private static string ConfineProgram(string label, string program, string writtenAt)
+    private static string ConfineProgram(Raw label, string program, Raw writtenAt)
     {
         if (!LooksLikeAPath(program))
         {
@@ -139,25 +140,25 @@ internal sealed class PrepareStep
 
         if (CheckoutRelativePath.IsAbsolute(program))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"{label}: {writtenAt}.command runs '{program}', which is an absolute path. The "
-                + "command has to be a path relative to its checkout — it names a script the repository "
-                + "commits, not one sitting elsewhere on a developer's machine — or a bare program name resolved "
-                + "through PATH.");
+            throw ServiceSourcesConfigurationException.For(
+                $"{label}: {writtenAt}.command runs '{Raw.Escaped(program)}', which is an absolute path. The "
+                + $"command has to be a path relative to its checkout — it names a script the repository "
+                + $"commits, not one sitting elsewhere on a developer's machine — or a bare program name resolved "
+                + $"through PATH.");
         }
 
         if (CheckoutRelativePath.UnusableSegment(program) is { } unusable)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"{label}: {writtenAt}.command runs '{program}', which has a path segment "
-                + $"'{unusable}' — " + CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy.ToString());
+            throw ServiceSourcesConfigurationException.For(
+                $"{label}: {writtenAt}.command runs '{Raw.Escaped(program)}', which has a path segment "
+                + $"'{new Name(unusable)}' — {CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy}");
         }
 
         if (CheckoutRelativePath.EscapesRoot(program))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"{label}: {writtenAt}.command runs '{program}', which points outside "
-                + "its checkout. It must stay within the repository.");
+            throw ServiceSourcesConfigurationException.For(
+                $"{label}: {writtenAt}.command runs '{Raw.Escaped(program)}', which points outside "
+                + $"its checkout. It must stay within the repository.");
         }
 
         return CheckoutRelativePath.NormalizeSeparators(program);

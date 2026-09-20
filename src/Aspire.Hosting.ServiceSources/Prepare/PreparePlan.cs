@@ -100,7 +100,7 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
     /// </param>
     public static PreparePlan For(
         string serviceName,
-        string label,
+        Raw label,
         PrepareMetadata? catalog,
         PrepareDeveloperConfig? developer,
         bool managedCheckout,
@@ -110,8 +110,8 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
         // turns out to be absent, a catalog mode a `path` service ignores — because a value that
         // cannot be a mode is a mistake in a file whichever way resolution goes, and a developer who
         // typed it should hear about it rather than have it silently mean the default.
-        var catalogMode = catalog is null ? null : ParseOptional(label, catalog.Mode, CatalogBlock);
-        var developerMode = developer is null ? null : ParseOptional(label, developer.Mode, DeveloperBlock);
+        var catalogMode = catalog is null ? null : ParseOptional(label, catalog.Mode, Raw.Literal(CatalogBlock));
+        var developerMode = developer is null ? null : ParseOptional(label, developer.Mode, Raw.Literal(DeveloperBlock));
 
         return managedCheckout
             ? ForManagedCheckout(label, catalog, developer, catalogMode, developerMode, windows)
@@ -131,7 +131,7 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
         Raw.Compose($"Repository '{new Name(checkoutName)}'");
 
     private static PreparePlan ForManagedCheckout(
-        string label,
+        Raw label,
         PrepareMetadata? catalog,
         PrepareDeveloperConfig? developer,
         PrepareMode? catalogMode,
@@ -152,7 +152,7 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
 
         var command = developerSuppliedThePair ? developer!.Command : catalog?.Command;
         var windowsCommand = developerSuppliedThePair ? developer!.WindowsCommand : catalog?.WindowsCommand;
-        var writtenAt = developerSuppliedThePair ? DeveloperBlock : CatalogBlock;
+        var writtenAt = developerSuppliedThePair ? Raw.Literal(DeveloperBlock) : Raw.Literal(CatalogBlock);
 
         var selected = SelectPlatform(command, windowsCommand, windows);
 
@@ -169,7 +169,7 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
 
     private static PreparePlan ForPathCheckout(
         string serviceName,
-        string label,
+        Raw label,
         PrepareMetadata? catalog,
         PrepareDeveloperConfig? developer,
         PrepareMode? catalogMode,
@@ -213,7 +213,7 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
                 label,
                 inherited,
                 catalogMode ?? PrepareModes.Default,
-                CatalogBlock,
+                Raw.Literal(CatalogBlock),
                 WindowsWithoutVariant(catalog?.WindowsCommand, windows));
 
             return new PreparePlan(null, IgnoredCatalogStepNotice(serviceName, inherited));
@@ -241,12 +241,12 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
         // force one.
         if (developer!.Command is null && developer.WindowsCommand is null)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"{label}: {DeveloperBlock}.mode is set to "
-                + $"'{PrepareModes.Written(mode)}' but {DeveloperBlock}.command is not, and this service resolves "
-                + "through 'local.path' — a checkout you manage yourself, which never inherits the catalog's "
-                + $"'{CatalogBlock}' block, so there is no command for the mode to apply to. Add "
-                + $"{DeveloperBlock}.command, or set the mode to 'never' to declare that nothing should run there.");
+            throw ServiceSourcesConfigurationException.For(
+                $"{label}: {Raw.Literal(DeveloperBlock)}.mode is set to "
+                + $"'{Raw.Escaped(PrepareModes.Written(mode))}' but {Raw.Literal(DeveloperBlock)}.command is not, and this service resolves "
+                + $"through 'local.path' — a checkout you manage yourself, which never inherits the catalog's "
+                + $"'{Raw.Literal(CatalogBlock)}' block, so there is no command for the mode to apply to. Add "
+                + $"{Raw.Literal(DeveloperBlock)}.command, or set the mode to 'never' to declare that nothing should run there.");
         }
 
         var command = SelectPlatform(developer.Command, developer.WindowsCommand, windows);
@@ -258,7 +258,7 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
             ? Nothing
             : new PreparePlan(
                 PrepareStep.Create(
-                    label, command, mode, DeveloperBlock,
+                    label, command, mode, Raw.Literal(DeveloperBlock),
                     WindowsWithoutVariant(developer.WindowsCommand, windows)),
                 null);
     }
@@ -279,8 +279,8 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
     private static bool WindowsWithoutVariant(string[]? windowsCommand, bool windows) =>
         windows && windowsCommand is null;
 
-    private static PrepareMode? ParseOptional(string label, string? written, string block) =>
-        written is null ? null : PrepareModes.Parse(label, written, $"{block}.mode");
+    private static PrepareMode? ParseOptional(Raw label, string? written, Raw block) =>
+        written is null ? null : PrepareModes.Parse(label, written, Raw.Compose($"{block}.mode"));
 
     /// <remarks>
     /// <para>
