@@ -300,25 +300,9 @@ internal sealed class ServiceSourcesWarnings
     /// dropped, and where the source is chosen.
     /// </summary>
     private static string SkipReason(string serviceName, string source, IReadOnlyList<string> capabilities) =>
-        $"Service '{Label(serviceName)}': skipped {DescribeCalls(capabilities)} because its source is " +
+        $"Service '{new Name(serviceName)}': skipped {DescribeCalls(capabilities)} because its source is " +
         $"'{source}' — {OutOfBandSourceAdvice.SourceDetail(source)}. The service is expected to be configured wherever it actually " +
         $"runs. {SwitchSourceRemedy}";
-
-    /// <summary>
-    /// A caller-controlled name made safe to sit inside the quotes a message delimits it with, and
-    /// bounded.
-    /// </summary>
-    /// <remarks>
-    /// Both names these messages carry are caller-controlled: the endpoint name arrives verbatim from
-    /// a guest-language script, and the service name is a catalog key. Either one can forge a second
-    /// entry — by ending the line, or by closing the quote and writing its own sentence — so both go
-    /// through the same helper rather than one being escaped and the other interpolated raw beside it.
-    /// <para>
-    /// <see cref="Name"/> holds the rule itself, so a message composed through the seam and a message
-    /// still calling this helper cannot drift apart.
-    /// </para>
-    /// </remarks>
-    internal static string Label(string? name) => new Name(name).ToString();
 
     /// <summary>
     /// How to bring the service back under this AppHost's control, for every warning that offers it.
@@ -355,7 +339,7 @@ internal sealed class ServiceSourcesWarnings
         IReadOnlyList<string> reverts,
         bool everyRevertWasAnAddition,
         IReadOnlyList<string> registeredEndpoints) =>
-        $"Service '{Label(serviceName)}': {string.Join("; ", reverts)}. Its source is '{source}' — " +
+        $"Service '{new Name(serviceName)}': {string.Join("; ", reverts)}. Its source is '{source}' — " +
         $"{OutOfBandSourceAdvice.SourceDetail(source)}. An out-of-band service's endpoints are fixed by its source, so " +
         $"configure the service where it actually runs. {WhereToGoInstead(source, everyRevertWasAnAddition, registeredEndpoints)}" +
         $"{SwitchSourceRemedy}";
@@ -381,7 +365,7 @@ internal sealed class ServiceSourcesWarnings
             return string.Empty;
         }
 
-        var named = string.Join(", ", registeredEndpoints.Select(name => $"'{Label(name)}'"));
+        var named = string.Join(", ", registeredEndpoints.Select(name => $"'{new Name(name)}'"));
 
         return OutOfBandSourceAdvice.TheEndpointsItHas(named) + " ";
     }

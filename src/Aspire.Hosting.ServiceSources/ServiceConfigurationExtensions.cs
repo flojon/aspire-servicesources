@@ -125,7 +125,7 @@ public static class ServiceConfigurationExtensions
     {
         // The catalog key is caller-controlled and reaches a log through this exception, exactly as it
         // does through the warnings that share the sentence below — Name applies the same escaping
-        // ServiceSourcesWarnings.Label does, without rendering to a string first and risking a second
+        // those messages compose through, without rendering to a string first and risking a second
         // escape pass here.
         var name = new Name(annotation?.ServiceName ?? resource.Name);
 

@@ -546,7 +546,7 @@ public static class ServiceSourcesBuilderExtensions
     /// to <see cref="Reachability.CapabilityLabel"/>'s three-method label, which the overloads that
     /// forward to one another are all genuinely covered by. Must be a compile-time constant naming a
     /// method — never caller or configuration data, which would reach the message unescaped beside
-    /// the service name that <c>ServiceSourcesWarnings.Label</c> deliberately escapes (#372).
+    /// the service name that <see cref="Messages.Name"/> deliberately escapes (#372).
     /// </param>
     private static bool GateEndpointCall(IResourceBuilder<ServiceResource> builder, string? capability = null)
     {
