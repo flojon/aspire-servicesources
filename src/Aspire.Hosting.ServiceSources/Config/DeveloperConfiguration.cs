@@ -1,3 +1,4 @@
+using Aspire.Hosting.ServiceSources.Messages;
 using Microsoft.Extensions.Configuration;
 
 namespace Aspire.Hosting.ServiceSources.Config;
@@ -385,17 +386,22 @@ internal sealed class DeveloperConfiguration
     public ServiceSourcesConfigurationException NotConfiguredError(string serviceName) =>
         Services.Count == 0
             ? NothingConfiguredError(serviceName)
-            : new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}' has no source configured. Set '{ServicesKey}:{serviceName}:source' — "
-                + (FileFound
-                    ? $"add \"{serviceName}\": {{ \"source\": \"...\" }} under \"services\" in '{FilePath}', "
-                    : $"create '{FilePath}' with {{ \"services\": {{ \"{serviceName}\": {{ \"source\": \"...\" }} }} }}, ")
-                + $"or set the environment variable {EnvironmentVariableFor(serviceName)}."
+            : ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}' has no source configured. Set " +
+                $"'{Raw.Literal(ServicesKey)}:{new Name(serviceName)}:source' — " +
+                $"{(FileFound
+                    ? Raw.Compose(
+                        $"add \"{new Name(serviceName)}\": {{ \"source\": \"...\" }} under \"services\" in " +
+                        $"'{Raw.Escaped(FilePath)}', ")
+                    : Raw.Compose(
+                        $"create '{Raw.Escaped(FilePath)}' with {{ \"services\": {{ \"{new Name(serviceName)}\": " +
+                        $"{{ \"source\": \"...\" }} }} }}, "))}" +
+                $"or set the environment variable {Raw.Escaped(EnvironmentVariableFor(serviceName))}." +
                 // The root-key note first, because it is the causally prior fact: it says the
                 // file's service entries are going unread, which is what leaves the note below
                 // unable to say where the resembling entry was written.
-                + MisspelledRootKeyNote()
-                + MisspelledServiceNameNote(serviceName));
+                $"{MisspelledRootKeyNote()}" +
+                $"{MisspelledServiceNameNote(serviceName)}");
 
     /// <summary>
     /// The note that an entry the developer already has looks like a misspelling of the service
@@ -443,18 +449,20 @@ internal sealed class DeveloperConfiguration
     /// audit to be decided on its own.
     /// </para>
     /// </remarks>
-    private string MisspelledServiceNameNote(string serviceName) =>
+    private Raw MisspelledServiceNameNote(string serviceName) =>
         NearMissForService(serviceName) is not { } configured
-            ? ""
+            ? Raw.Literal("")
             // Generalized rather than naming a file: CatalogNames now covers code-declared names
             // too (design finding 5), and this note has no way to tell which catalog declared
             // 'serviceName' — code, yaml, or (with two catalogs) either.
-            : $" Note that '{configured}' is configured and reaches no declared service. "
-              + $"Did you mean '{serviceName}'? "
-              + (Services.ContainsKey(serviceName)
-                  ? $"An entry for '{serviceName}' is there already, so the source belongs on that "
-                    + $"one rather than on '{configured}'."
-                  : "If so, rename that entry rather than adding a second one.");
+            : Raw.Compose(
+                $" Note that '{new Name(configured)}' is configured and reaches no declared service. "
+                + $"Did you mean '{new Name(serviceName)}'? "
+                + $"{(Services.ContainsKey(serviceName)
+                    ? Raw.Compose(
+                        $"An entry for '{new Name(serviceName)}' is there already, so the source belongs on that "
+                        + $"one rather than on '{new Name(configured)}'.")
+                    : Raw.Literal("If so, rename that entry rather than adding a second one."))}");
 
     /// <summary>
     /// The configured entry that reads as a misspelling of <paramref name="serviceName"/>, or
@@ -509,12 +517,14 @@ internal sealed class DeveloperConfiguration
     /// message keeps saying what to set and adds what is wrong with the file.
     /// </para>
     /// </remarks>
-    private string MisspelledRootKeyNote() =>
+    private Raw MisspelledRootKeyNote() =>
         NearMissRootKey is null
-            ? ""
-            : $" Note that '{FilePath}' has a top-level key '{NearMissRootKey}' and configures no services "
-              + "under 'services', so none of the service entries in that file are being read — whatever "
-              + "is configured is coming from another layer. Did you mean 'services'?";
+            ? Raw.Literal("")
+            : Raw.Compose(
+                $" Note that '{Raw.Escaped(FilePath)}' has a top-level key '{new Name(NearMissRootKey)}' and " +
+                $"configures no services " +
+                $"under 'services', so none of the service entries in that file are being read — whatever " +
+                $"is configured is coming from another layer. Did you mean 'services'?");
 
     /// <summary>
     /// A typo in a key, or a file that was never created, yields an empty section rather than a

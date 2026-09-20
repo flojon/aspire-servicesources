@@ -5,6 +5,7 @@ using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Git;
+using Aspire.Hosting.ServiceSources.Messages;
 using Aspire.Hosting.ServiceSources.PortAllocation;
 using Aspire.Hosting.ServiceSources.Sources;
 
@@ -100,18 +101,24 @@ public static class ServiceSourcesBuilderExtensions
             // under a different spelling, which is what the old wording sent readers looking for.
             // An entry with no source at all never arrives here; ResolveService reports that
             // separately, against the key that would set it.
-            var known = string.Join(", ", Sources.Keys.Order(StringComparer.Ordinal).Select(s => $"'{s}'"));
+            var known = Raw.Join(", ", Sources.Keys.Order(StringComparer.Ordinal).Select(s => Raw.Compose($"'{new Name(s)}'")));
 
             // The key, not just the file: the file is only the lowest layer this value can arrive
             // from, so a developer whose environment carries a stale source would otherwise be sent
             // to edit the one place it is not. Same reasoning as DeveloperConfigValidator.
-            var key = $"{DeveloperConfiguration.ServicesKey}:{name}:source";
+            //
+            // Both spellings are built from the same raw pieces, rather than one derived from the
+            // other's already-escaped rendering, so a name carrying a colon is not escaped twice.
+            var key = Raw.Compose($"{Raw.Literal(DeveloperConfiguration.ServicesKey)}:{new Name(name)}:source");
+            var keyAsEnvironmentVariable = Raw.Compose(
+                $"{Raw.Escaped(DeveloperConfiguration.ServicesKey.Replace(":", "__", StringComparison.Ordinal))}"
+                + $"__{new Name(name)}__source");
 
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{name}' has unknown source '{developerConfig.Source}'. Valid sources are {known}. "
-                + $"Correct '{key}' in '{DeveloperConfiguration.FileName}', or wherever a higher layer set "
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(name)}' has unknown source '{new Name(developerConfig.Source)}'. Valid sources are {known}. "
+                + $"Correct '{key}' in '{Raw.Literal(DeveloperConfiguration.FileName)}', or wherever a higher layer set "
                 + $"it — appsettings, user secrets, the environment variable "
-                + $"{key.Replace(":", "__", StringComparison.Ordinal)}, or the command line.");
+                + $"{keyAsEnvironmentVariable}, or the command line.");
         }
 
         // Resolved once here rather than inside each source: the source that actually reads it —
@@ -633,20 +640,22 @@ public static class ServiceSourcesBuilderExtensions
         var declared = Array.Find(candidates, IsPreRepoRootShape) ?? candidates[0];
         var wanted = CurrentValidate();
 
-        throw new ServiceSourcesConfigurationException(
-            $"Kind '{kind}' is registered by '{type.FullName}', which declares '{Describe(declared)}' but does " +
-            $"not implement '{nameof(ILocalResourceKind)}.{nameof(ILocalResourceKind.Validate)}" +
-            "(string serviceName, string repoRoot, object? rawConfig)'. " +
-            (Describe(declared) == Describe(wanted)
-                ? "Those read alike here, so the difference is not in the parameter list — check the return " +
-                  "type, the accessibility, any generic parameters, and the nullability of 'rawConfig'. "
-                : string.Empty) +
-            "Validate gained a 'repoRoot' parameter — the service's resolved checkout directory, so a kind " +
-            "can check a path its options block names against the repository that path is relative to. " +
-            "Nothing failed to compile because Validate is a defaulted member: a method of any other shape " +
-            "is never called, and everything it rejected would now be accepted. Match the signature exactly " +
-            "— or, if that method was never meant to be the interface's, implement " +
-            "Validate(string, string, object?) alongside it.");
+        throw ServiceSourcesConfigurationException.For(
+            $"Kind '{new Name(kind)}' is registered by '{Raw.Escaped(type.FullName)}', which declares " +
+            $"'{Raw.Escaped(Describe(declared))}' but does " +
+            $"not implement '{Raw.Literal(nameof(ILocalResourceKind))}.{Raw.Literal(nameof(ILocalResourceKind.Validate))}" +
+            $"(string serviceName, string repoRoot, object? rawConfig)'. " +
+            $"{(Describe(declared) == Describe(wanted)
+                ? Raw.Literal(
+                    "Those read alike here, so the difference is not in the parameter list — check the return "
+                    + "type, the accessibility, any generic parameters, and the nullability of 'rawConfig'. ")
+                : Raw.Literal(""))}" +
+            $"Validate gained a 'repoRoot' parameter — the service's resolved checkout directory, so a kind " +
+            $"can check a path its options block names against the repository that path is relative to. " +
+            $"Nothing failed to compile because Validate is a defaulted member: a method of any other shape " +
+            $"is never called, and everything it rejected would now be accepted. Match the signature exactly " +
+            $"— or, if that method was never meant to be the interface's, implement " +
+            $"Validate(string, string, object?) alongside it.");
     }
 
     /// <summary>
