@@ -55,7 +55,7 @@ internal static class LocalGitCheckout
             throw ServiceSourcesConfigurationException.For(
                 $"'{new Name(checkoutName)}' cannot be given a managed checkout directory: it is the name of the " +
                 $"directory its checkout is cloned into, so it has to be a single directory name — " +
-                $"{Raw.Escaped(ContainedNameRuleAndRemedy)}");
+                $"{ContainedNameRuleAndRemedy}");
         }
 
         return Path.Combine(ToolDirectory.PathIn(appHostDirectory), "checkouts", checkoutName);
@@ -68,10 +68,10 @@ internal static class LocalGitCheckout
     /// normalization and every message went on naming only <c>.</c> and <c>..</c>, so a developer
     /// refused for <c>'.. '</c> was handed a list of two forbidden values, neither of them theirs.
     /// </summary>
-    public static string ContainedNameRule =>
-        "no '/' or '\\' separator, no ':', and not a name made only of dots and spaces — Windows "
-        + "strips those from the end of a path component, so such a name is not a directory of its "
-        + "own there.";
+    public static Raw ContainedNameRule =>
+        Raw.Compose($"no '/' or '\\' separator, no ':', and not a name made only of dots and spaces — Windows " +
+            $"strips those from the end of a path component, so such a name is not a directory of its " +
+            $"own there.");
 
     /// <summary>
     /// <see cref="ContainedNameRule"/> with the remedy for a service name refused this way — the
@@ -80,9 +80,9 @@ internal static class LocalGitCheckout
     /// <c>servicesources.local.json</c> entry to rename, so that call site builds its own remedy
     /// around <see cref="ContainedNameRule"/> instead.
     /// </summary>
-    public static string ContainedNameRuleAndRemedy =>
-        ContainedNameRule + " Rename the service in its catalog declaration and "
-        + $"'{Config.DeveloperConfiguration.FileName}'.";
+    public static Raw ContainedNameRuleAndRemedy =>
+        Raw.Compose($"{ContainedNameRule} Rename the service in its catalog declaration and " +
+            $"'{Raw.Literal(Config.DeveloperConfiguration.FileName)}'.");
 
     /// <summary>
     /// Whether <paramref name="serviceName"/> can be the single directory name a managed checkout is

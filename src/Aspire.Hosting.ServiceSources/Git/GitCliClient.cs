@@ -91,32 +91,34 @@ internal sealed partial class GitCliClient(
     /// Probed once per process: whether <c>git</c> can be run at all, and the message to report if
     /// it can't. An AppHost resolves many services, and the answer cannot change under it.
     /// </summary>
-    private static readonly Lazy<string?> Unavailability =
+    private static readonly Lazy<Raw?> Unavailability =
         new(ProbeUnavailability, LazyThreadSafetyMode.ExecutionAndPublication);
 
     public void EnsureAvailable()
     {
         if (Unavailability.Value is { } reason)
         {
-            throw ServiceSourcesConfigurationException.For($"{Raw.Escaped(reason)}");
+            throw ServiceSourcesConfigurationException.For($"{reason}");
         }
     }
 
-    private static string? ProbeUnavailability()
+    private static Raw? ProbeUnavailability()
     {
         try
         {
             return GitCommand.Run(["--version"]).Succeeded
                 ? null
-                : "'git' is on PATH but 'git --version' failed, so the 'local' source cannot clone or update " +
-                  "checkouts. Repair the git installation, or give each service a 'local.path' override " +
-                  "in servicesources.local.json to point at a checkout you manage yourself.";
+                : Raw.Compose(
+                    $"'git' is on PATH but 'git --version' failed, so the 'local' source cannot clone or update " +
+                    $"checkouts. Repair the git installation, or give each service a 'local.path' override " +
+                    $"in servicesources.local.json to point at a checkout you manage yourself.");
         }
         catch (GitUnavailableException ex)
         {
-            return "The 'local' source clones and updates service repositories with 'git', which was not found on " +
-                   $"PATH ({ex.Message}). Install git (2.7 or newer), or give each service a 'local.path' " +
-                   "override in servicesources.local.json to point at a checkout you manage yourself.";
+            return Raw.Compose(
+                $"The 'local' source clones and updates service repositories with 'git', which was not found on " +
+                $"PATH ({Raw.Cause(ex)}). Install git (2.7 or newer), or give each service a 'local.path' " +
+                $"override in servicesources.local.json to point at a checkout you manage yourself.");
         }
     }
 

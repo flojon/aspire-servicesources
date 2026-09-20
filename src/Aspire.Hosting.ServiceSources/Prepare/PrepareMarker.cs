@@ -75,7 +75,7 @@ internal sealed record PrepareMarker(
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}' cannot be prepared: a service's name is used as the name of the "
                 + "file recording that its 'prepare' step ran, so it has to be a single file name — "
-                + Git.LocalGitCheckout.ContainedNameRuleAndRemedy);
+                + Git.LocalGitCheckout.ContainedNameRuleAndRemedy.ToString());
         }
 
         return System.IO.Path.Combine(
