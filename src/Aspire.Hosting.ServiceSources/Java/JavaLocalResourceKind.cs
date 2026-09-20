@@ -1,4 +1,5 @@
 using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.Java;
 
@@ -133,7 +134,7 @@ internal sealed class JavaLocalResourceKind : ILocalResourceKind
         {
             if (!Directory.Exists(WorkingDirectory))
             {
-                throw new ServiceSourcesConfigurationException(
+                throw ServiceSourcesConfigurationException.For(
                     $"Service '{ServiceName}': java.workingDirectory '{Options.WorkingDirectory}' resolves to " +
                     $"'{WorkingDirectory}', which does not exist in the service's checkout.");
             }
@@ -145,12 +146,12 @@ internal sealed class JavaLocalResourceKind : ILocalResourceKind
 
             if (Wrapper.ConfiguredPath is not null)
             {
-                throw new ServiceSourcesConfigurationException(
+                throw ServiceSourcesConfigurationException.For(
                     $"Service '{ServiceName}': java.wrapperPath '{Wrapper.ConfiguredPath}' resolves to " +
                     $"'{Wrapper.Path}', which does not exist in the service's checkout.");
             }
 
-            throw new ServiceSourcesConfigurationException(
+            throw ServiceSourcesConfigurationException.For(
                 $"Service '{ServiceName}': java.{Wrapper.RunModeField} runs the repository's own " +
                 $"'{Wrapper.RelativeName}' wrapper script, but '{Wrapper.Path}' does not exist. Commit the " +
                 "wrapper beside the project, or set java.wrapperPath to where this checkout keeps it — a " +
