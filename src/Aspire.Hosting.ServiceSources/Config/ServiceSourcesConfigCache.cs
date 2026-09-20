@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration.Memory;
 using Aspire.Hosting.ServiceSources.Catalog;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.Config;
 
@@ -57,11 +58,11 @@ internal static class ServiceSourcesConfigCache
                 // and the AppHost stops.
                 if (_frozen)
                 {
-                    throw new ServiceSourcesConfigurationException(
-                        "AddServiceCatalog(…) was called after the service catalog had already been read, so " +
-                        "its entries could not be seen. Because a service is resolved as it is added, the " +
-                        "catalog must be declared before the first AddService(…) — near the top of the AppHost, " +
-                        "next to UseDeferredCheckout() and AddLocalKind().");
+                    throw ServiceSourcesConfigurationException.For(
+                        $"AddServiceCatalog(…) was called after the service catalog had already been read, so " +
+                        $"its entries could not be seen. Because a service is resolved as it is added, the " +
+                        $"catalog must be declared before the first AddService(…) — near the top of the AppHost, " +
+                        $"next to UseDeferredCheckout() and AddLocalKind().");
                 }
 
                 configure(Builder);
@@ -137,8 +138,8 @@ internal static class ServiceSourcesConfigCache
 
         if (!loaded.Catalog.Services.TryGetValue(serviceName, out var definition))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}' was not found in the service catalog{DescribeCatalogSources(loaded)}.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}' was not found in the service catalog{DescribeCatalogSources(loaded)}.");
         }
 
         if (!loaded.DeveloperConfig.Services.TryGetValue(serviceName, out var developerConfig))
@@ -166,17 +167,17 @@ internal static class ServiceSourcesConfigCache
     /// 'servicesources.yaml' for the still-majority yaml-only AppHost, which loses real diagnostics
     /// without it.
     /// </summary>
-    private static string DescribeCatalogSources(LoadedConfig loaded)
+    private static Raw DescribeCatalogSources(LoadedConfig loaded)
     {
         if (loaded.YamlPath is null)
         {
             // Code-only catalog: no yaml file exists for this AppHost.
-            return "";
+            return Raw.Literal("");
         }
 
         return loaded.HasCodeEntries
-            ? $" (declared in {CatalogOrigin.Code.Describe()} and in {CatalogOrigin.FromYaml(loaded.YamlPath).Describe()})"
-            : $" ({CatalogOrigin.FromYaml(loaded.YamlPath).Describe()})";
+            ? Raw.Compose($" (declared in {Raw.Origin(CatalogOrigin.Code)} and in {Raw.Origin(CatalogOrigin.FromYaml(loaded.YamlPath))})")
+            : Raw.Compose($" ({Raw.Origin(CatalogOrigin.FromYaml(loaded.YamlPath))})");
     }
 
     /// <summary>
@@ -273,9 +274,9 @@ internal static class ServiceSourcesConfigCache
 
             if (codeEntries.Count == 0 && !yamlExists)
             {
-                throw new ServiceSourcesConfigurationException(
+                throw ServiceSourcesConfigurationException.For(
                     $"No service catalog found. Declare one with builder.AddServiceCatalog(catalog => …) " +
-                    $"before the first AddService(…) call, or create '{yamlPath}'.");
+                    $"before the first AddService(…) call, or create '{Raw.Escaped(yamlPath)}'.");
             }
 
             var merged = new Dictionary<string, ServiceDefinition>(StringComparer.Ordinal);
@@ -314,9 +315,9 @@ internal static class ServiceSourcesConfigCache
                     // here really is a code/yaml collision rather than a yaml-vs-yaml one.
                     if (repositories.ContainsKey(name))
                     {
-                        throw new ServiceSourcesConfigurationException(
-                            $"Repository '{name}' is declared twice: in {CatalogOrigin.Code.Describe()} and in " +
-                            $"'{yamlPath}'. A repository belongs to one catalog; remove one of the two.");
+                        throw ServiceSourcesConfigurationException.For(
+                            $"Repository '{new Name(name)}' is declared twice: in {Raw.Origin(CatalogOrigin.Code)} and in " +
+                            $"'{Raw.Escaped(yamlPath)}'. A repository belongs to one catalog; remove one of the two.");
                     }
 
                     // Case-only, unlike the equivalent service check further down (which defers to
@@ -336,13 +337,13 @@ internal static class ServiceSourcesConfigCache
                     if (repositoryCaseCollision is not null)
                     {
                         var collisionOrigin = codeRepositoryNames.Contains(repositoryCaseCollision)
-                            ? CatalogOrigin.Code.Describe()
-                            : $"'{yamlPath}'";
+                            ? Raw.Origin(CatalogOrigin.Code)
+                            : Raw.Origin(CatalogOrigin.FromYaml(yamlPath));
 
-                        throw new ServiceSourcesConfigurationException(
-                            $"Repository '{name}' in '{yamlPath}' differs only by case from repository " +
-                            $"'{repositoryCaseCollision}' in {collisionOrigin}. Two repositories " +
-                            "must differ by more than case.");
+                        throw ServiceSourcesConfigurationException.For(
+                            $"Repository '{new Name(name)}' in '{Raw.Escaped(yamlPath)}' differs only by case from repository " +
+                            $"'{new Name(repositoryCaseCollision)}' in {collisionOrigin}. Two repositories " +
+                            $"must differ by more than case.");
                     }
 
                     repositories[name] = repository;
@@ -367,10 +368,10 @@ internal static class ServiceSourcesConfigCache
 
                     if (codeCollision is not null)
                     {
-                        throw new ServiceSourcesConfigurationException(
-                            $"Service '{name}' is declared twice: in {CatalogOrigin.Code.Describe()} and in " +
-                            $"'{yamlPath}'. A service belongs to one catalog; remove one of the two. To vary a " +
-                            "service per developer, set its 'source' in 'servicesources.local.json' instead.");
+                        throw ServiceSourcesConfigurationException.For(
+                            $"Service '{new Name(name)}' is declared twice: in {Raw.Origin(CatalogOrigin.Code)} and in " +
+                            $"'{Raw.Escaped(yamlPath)}'. A service belongs to one catalog; remove one of the two. To vary a " +
+                            $"service per developer, set its 'source' in 'servicesources.local.json' instead.");
                     }
 
                     // A yaml-vs-yaml case collision (e.g. "orders:" and "Orders:" both in the same
@@ -401,10 +402,10 @@ internal static class ServiceSourcesConfigCache
 
                 if (repositories.ContainsKey(serviceName))
                 {
-                    throw new ServiceSourcesConfigurationException(
-                        $"'{serviceName}' names both an ungrouped service — whose managed checkout is keyed on " +
-                        "its own name — and a repository declared under the same name, so the two would share " +
-                        "one checkout directory. Rename the service, or the repository, so they no longer match.");
+                    throw ServiceSourcesConfigurationException.For(
+                        $"'{new Name(serviceName)}' names both an ungrouped service — whose managed checkout is keyed on " +
+                        $"its own name — and a repository declared under the same name, so the two would share " +
+                        $"one checkout directory. Rename the service, or the repository, so they no longer match.");
                 }
 
                 // Case-only — see the repository/repository check above for why this cannot be left
@@ -417,11 +418,11 @@ internal static class ServiceSourcesConfigCache
 
                 if (serviceCaseCollision is not null)
                 {
-                    throw new ServiceSourcesConfigurationException(
-                        $"'{serviceName}' names an ungrouped service, and differs only by case from repository " +
-                        $"'{serviceCaseCollision}' — the two would still share one checkout directory on a " +
-                        "filesystem that does not distinguish them by case. Rename the service, or the " +
-                        "repository, so they no longer match even by case.");
+                    throw ServiceSourcesConfigurationException.For(
+                        $"'{new Name(serviceName)}' names an ungrouped service, and differs only by case from repository " +
+                        $"'{new Name(serviceCaseCollision)}' — the two would still share one checkout directory on a " +
+                        $"filesystem that does not distinguish them by case. Rename the service, or the " +
+                        $"repository, so they no longer match even by case.");
                 }
             }
 
@@ -469,10 +470,10 @@ internal static class ServiceSourcesConfigCache
 
                 if (defaultedSpellings.TryGetValue(name, out var existingSpelling))
                 {
-                    throw new ServiceSourcesConfigurationException(
-                        $"'{name}' and '{existingSpelling}' both declare a defaultSource, and differ only by " +
-                        "case. Configuration keys are case-insensitive, so there is no key that reaches one " +
-                        "default and not the other — rename one of them so they differ by more than case.");
+                    throw ServiceSourcesConfigurationException.For(
+                        $"'{new Name(name)}' and '{new Name(existingSpelling)}' both declare a defaultSource, and differ only by " +
+                        $"case. Configuration keys are case-insensitive, so there is no key that reaches one " +
+                        $"default and not the other — rename one of them so they differ by more than case.");
                 }
 
                 defaultedSpellings.Add(name);

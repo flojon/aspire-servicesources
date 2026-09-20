@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using YamlDotNet.Core;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources;
 
@@ -80,10 +81,10 @@ public static class LocalKindConfig
         // scalar/list message instead, unchanged.
         if (CameFromCode(rawConfig))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"{Prefix(serviceName)}the per-kind config block is a '{rawConfig.GetType().Name}', but this " +
-                $"kind expects '{typeof(T).Name}'. Pass the options type this kind's registration method " +
-                "documents, not another kind's.");
+            throw ServiceSourcesConfigurationException.For(
+                $"{Prefix(serviceName)}the per-kind config block is a '{new Name(rawConfig.GetType().Name)}', but this " +
+                $"kind expects '{new Name(typeof(T).Name)}'. Pass the options type this kind's registration method " +
+                $"documents, not another kind's.");
         }
 
         if (rawConfig is not System.Collections.IDictionary)
@@ -91,12 +92,12 @@ public static class LocalKindConfig
             // A sequence under the kind key stringifies to its CLR type name, which points the reader
             // nowhere — name the shape instead, and only quote the value when it really is a scalar.
             var found = rawConfig is System.Collections.IEnumerable and not string
-                ? "a list"
-                : $"the scalar '{rawConfig}'";
+                ? Raw.Literal("a list")
+                : Raw.Compose($"the scalar '{new Name(rawConfig.ToString())}'");
 
-            throw new ServiceSourcesConfigurationException(
+            throw ServiceSourcesConfigurationException.For(
                 $"{Prefix(serviceName)}the per-kind config block must be a block of key/value pairs, " +
-                $"but found {found}. {IndentationAdvice}");
+                $"but found {found}. {Raw.Literal(IndentationAdvice)}");
         }
 
         return Deserialize<T>(Serializer.Serialize(rawConfig), serviceName);
@@ -118,6 +119,12 @@ public static class LocalKindConfig
     /// prints inner-exception messages as "caused by" lines, which would print the discarded
     /// yaml advice right back into the output this method exists to remove.
     /// </summary>
+    // The other legitimate caller of the banned constructor, alongside ServiceSourcesConfigurationException.For
+    // itself: this swaps one hardcoded sentence for another inside a message this same seam already
+    // built, introducing no new caller-controlled text — there is nothing left for the seam to
+    // escape, and re-escaping the whole (already-escaped) message here would double-escape whatever
+    // Name the original throw already quoted (confirmed by a failing round-trip test when tried).
+#pragma warning disable RS0030
     internal static ServiceSourcesConfigurationException RewriteIndentationAdviceForCodeOrigin(
         ServiceSourcesConfigurationException ex) =>
         new(
@@ -126,6 +133,7 @@ public static class LocalKindConfig
                 "This block was passed to WithKind in code, not read from a file — pass the options object " +
                 "this kind's registration method documents, not a list or a raw value.",
                 StringComparison.Ordinal));
+#pragma warning restore RS0030
 
     /// <summary>
     /// Reads a block already in yaml text: yaml's own untyped shape re-serialized, or a guest
@@ -139,9 +147,8 @@ public static class LocalKindConfig
         }
         catch (YamlException ex)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"{Prefix(serviceName)}the per-kind config block is not valid: " +
-                (ex.InnerException ?? ex).Message,
+            throw ServiceSourcesConfigurationException.For(
+                $"{Prefix(serviceName)}the per-kind config block is not valid: {Raw.Cause(ex.InnerException ?? ex)}",
                 ex);
         }
     }
@@ -173,6 +180,6 @@ public static class LocalKindConfig
         typeof(TimeSpan),
     ];
 
-    private static string Prefix(string? serviceName) =>
-        serviceName is null ? "" : $"Service '{serviceName}': ";
+    private static Raw Prefix(string? serviceName) =>
+        serviceName is null ? Raw.Literal("") : Raw.Compose($"Service '{new Name(serviceName)}': ");
 }
