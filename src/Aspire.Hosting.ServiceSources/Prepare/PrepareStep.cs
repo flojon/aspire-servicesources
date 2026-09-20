@@ -150,7 +150,7 @@ internal sealed class PrepareStep
         {
             throw new ServiceSourcesConfigurationException(
                 $"{label}: {writtenAt}.command runs '{program}', which has a path segment "
-                + $"'{unusable}' — " + CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy);
+                + $"'{unusable}' — " + CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy.ToString());
         }
 
         if (CheckoutRelativePath.EscapesRoot(program))

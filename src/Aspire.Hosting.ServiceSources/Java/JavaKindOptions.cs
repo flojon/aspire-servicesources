@@ -178,7 +178,7 @@ internal sealed class JavaKindOptions
         if (CheckoutRelativePath.UnusableSegment(trimmed) is { } unusable)
         {
             throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': java.workingDirectory '{Raw.Escaped(trimmed)}' has a path segment '{new Name(unusable)}' — {Raw.Escaped(CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy)}");
+                $"Service '{new Name(serviceName)}': java.workingDirectory '{Raw.Escaped(trimmed)}' has a path segment '{new Name(unusable)}' — {CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy}");
         }
 
         if (CheckoutRelativePath.EscapesRoot(trimmed))
@@ -227,7 +227,7 @@ internal sealed class JavaKindOptions
         if (CheckoutRelativePath.UnusableSegment(jarPath) is { } unusable)
         {
             throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': java.jarPath '{Raw.Escaped(jarPath)}' has a path segment '{new Name(unusable)}' — {Raw.Escaped(CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy)}");
+                $"Service '{new Name(serviceName)}': java.jarPath '{Raw.Escaped(jarPath)}' has a path segment '{new Name(unusable)}' — {CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy}");
         }
 
         if (CheckoutRelativePath.EscapesRoot($"{workingDirectory}/{jarPath}"))
@@ -266,7 +266,7 @@ internal sealed class JavaKindOptions
         if (CheckoutRelativePath.UnusableSegment(trimmed) is { } unusable)
         {
             throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': java.wrapperPath '{Raw.Escaped(trimmed)}' has a path segment '{new Name(unusable)}' — {Raw.Escaped(CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy)}");
+                $"Service '{new Name(serviceName)}': java.wrapperPath '{Raw.Escaped(trimmed)}' has a path segment '{new Name(unusable)}' — {CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy}");
         }
 
         if (CheckoutRelativePath.EscapesRoot(trimmed))

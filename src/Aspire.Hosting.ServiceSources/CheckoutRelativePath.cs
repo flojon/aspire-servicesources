@@ -1,3 +1,5 @@
+using Aspire.Hosting.ServiceSources.Messages;
+
 namespace Aspire.Hosting.ServiceSources;
 
 /// <summary>
@@ -158,13 +160,13 @@ internal static class CheckoutRelativePath
     /// and this repository has no Windows leg to check the point on either way.
     /// </para>
     /// </remarks>
-    public static string OnlyDotsAndSpacesRuleAndRemedy =>
-        "a segment made only of dots and spaces does not mean the same thing on every platform: it "
-        + "is an ordinary directory name on Linux and macOS, while Windows removes trailing dots and "
-        + "spaces from the end of a path, so as the last segment it is erased and the path names the "
-        + "directory above it instead. Rewrite that segment — if it names a real, committed "
-        + "directory, rename the directory itself, not just this value. '.' and '..' are unaffected, "
-        + "and a segment with anything left after its trailing dots and spaces ('orders.') is fine.";
+    public static Raw OnlyDotsAndSpacesRuleAndRemedy =>
+        Raw.Compose($"a segment made only of dots and spaces does not mean the same thing on every platform: it " +
+            $"is an ordinary directory name on Linux and macOS, while Windows removes trailing dots and " +
+            $"spaces from the end of a path, so as the last segment it is erased and the path names the " +
+            $"directory above it instead. Rewrite that segment — if it names a real, committed " +
+            $"directory, rename the directory itself, not just this value. '.' and '..' are unaffected, " +
+            $"and a segment with anything left after its trailing dots and spaces ('orders.') is fine.");
 
     /// <summary>
     /// Rewrites the separators of an accepted relative path for the platform the app host is running

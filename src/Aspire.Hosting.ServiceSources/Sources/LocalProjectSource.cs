@@ -562,7 +562,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         {
             throw new ServiceSourcesConfigurationException(
                 $"Service '{serviceName}': project '{project}' has a path segment '{unusable}' — "
-                + CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy);
+                + CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy.ToString());
         }
 
         if (CheckoutRelativePath.EscapesRoot(project))
