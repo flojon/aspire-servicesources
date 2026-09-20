@@ -20,7 +20,7 @@
     | grep -oE "[^ ]+\.cs\([0-9]+,[0-9]+\): warning RS0030" | sort -u | wc -l
   ```
 - Run `dotnet restore` once at the start of the session before the first build (a clean checkout needs it; `--no-restore` after that is what makes `--no-incremental` fast enough to iterate with).
-- Test with `dotnet test --no-restore -c Release` after each task's build is clean. The suite leaks temp directories on a full run (pre-existing, unrelated to this work) — don't investigate that if seen.
+- Test with `dotnet test --no-restore -c Release -f net10.0` after each task's build is clean — this worktree's `CLAUDE.md` scopes intermediate rounds to net10.0 only, since TFM-specific failures are rare enough that the other two legs waste time for no signal. Run the full three-TFM `dotnet test --no-restore -c Release` (no `-f`) exactly once, after Task 16's final rebase and before marking the PR ready for review — not after every task. Every "run the full test suite" step below (Task 11 Step 7, Task 12 Step 5, Task 16 Step 7) means the cheap `-f net10.0` leg unless it explicitly says "full three-TFM matrix, once before landing." The suite leaks temp directories on a full run (pre-existing, unrelated to this work) — don't investigate that if seen.
 - **Out of scope for this plan:** issue #385 items 7a and 7b (the paste-ready-name contract and the unescaped truncation marker) are explicitly undecided design questions, not implementation tasks. Do not touch `Messages/Name.cs`'s escaping spelling or truncation logic here.
 
 ---
@@ -32,20 +32,20 @@
 | `Git/LocalGitCheckout.cs` (17), `Git/GitCliClient.cs` (2) | 1 |
 | `Java/JavaKindOptions.cs` (16), `Java/JavaLocalResourceKind.cs` (3) | 2 |
 | `JavaScript/JavaScriptLocalKind.cs` (15) | 3 |
-| `Config/ServiceCatalogLoader.cs` (14, one restructured separately), `Config/DeveloperConfigShape.cs` (1) | 4 |
+| `Config/ServiceCatalogLoader.cs` (14, four restructured separately as `+`-concatenation sites), `Config/DeveloperConfigShape.cs` (1) | 4 |
 | `Sources/LocalProjectSource.cs` (12), `Sources/DeferredCheckout.cs` (6), `Sources/ContainerSource.cs` (3), `Sources/LocalKindRegistry.cs` (2), `Sources/UrlSource.cs` (1, restructured separately) | 5 |
 | `Config/ServiceSourcesConfigCache.cs` (9), `LocalKindConfig.cs` (4) | 6 |
 | `BackingServices/KubernetesBackingServiceSource.cs` (9, config-exception throws only), `BackingServices/DirectBackingServiceSource.cs` (3), `BackingServices/ConnectionStringTemplate.cs` (1), `BackingServiceBuilderExtensions.cs` (3) | 7 |
 | `Catalog/ServiceCatalogBuilder.cs` (8), `Catalog/ServiceDefinitionBuilder.cs` (4), `Catalog/RepositoryBuilder.cs` (1), `Catalog/PrepareMetadataFactory.cs` (1) | 8 |
 | `Prepare/PrepareStep.cs` (6), `Prepare/CheckoutPreparation.cs` (2), `Prepare/PreparePlan.cs` (1), `Prepare/PrepareMode.cs` (1), `Prepare/PrepareMarker.cs` (1) | 9 |
-| `ServiceSourcesBuilderExtensions.cs` (2), `ServiceConfigurationExtensions.cs` (2), `ServiceEndpointExtensions.cs` (1), `Config/DeveloperConfiguration.cs` (3, one restructured separately) | 10 |
-| `UrlSource.cs:117-126`, `ServiceSourcesWarnings.cs:350-355`, `Config/ServiceCatalogLoader.cs` (the `+`-chain site), `Config/DeveloperConfiguration.cs:388-394` — four `+`-concatenation restructures | 11 |
-| `Config/DeveloperConfigValidator.cs:683-711` (the `StringBuilder` composer) + its 2 remaining raw-constructor sites | 11 |
+| `ServiceSourcesBuilderExtensions.cs` (2), `ServiceConfigurationExtensions.cs` (2), `ServiceEndpointExtensions.cs` (1), `Config/DeveloperConfiguration.cs` (3, two restructured separately) | 10 |
+| `UrlSource.cs:117-126`, `ServiceSourcesWarnings.cs:346-354`, `Config/ServiceCatalogLoader.cs` (four `+`-chain "unknown property" sites, not one — re-grep for `unknown property` before starting), `Config/DeveloperConfiguration.cs` (both `AmbiguousCatalogSpellingError` and `NothingConfiguredError`, re-grep for current lines — see Task 11 Step 4) — seven `+`-concatenation restructures total | 11 |
+| `Config/DeveloperConfigValidator.cs:680-712` (the `StringBuilder` composer) + its 2 remaining raw-constructor sites | 11 |
 | Delete `WarningsNotAsErrors`, flip RS0030 to error | 12 |
 | `ServiceSourcesWarnings.Label` call sites + `EndpointMutationDetector`'s local alias | 13 |
-| New `ServiceSourcesLog`, ban `LoggerExtensions.Log*`, convert 5 composers to return `Raw` | 14 |
+| New `ServiceSourcesLog`, ban `LoggerExtensions.Log*`, convert composers to return `Raw`, close `ConsolePrepareOutputSink`'s `Console.Out.WriteLine` path and `ServiceSourcesWarnings.cs`'s `logger?.LogWarning` call | 14 |
 | `KubernetesSecretException` throws (12) | 15 |
-| `Git*Exception` throws (5) + `KubernetesBackingServiceSource.cs:1051`/`:717` label/cap gaps | 16 |
+| `Git*Exception` throws (5) + `PrepareLaunchException` throws + `KubernetesBackingServiceSource.cs:1051`/`:717` label/cap gaps | 16 |
 
 Line numbers in the issue and above were read against `origin/main` at commit `275ceb4` (2026-09-19) — re-grep before editing since later merges shift lines.
 
@@ -98,7 +98,7 @@ Expected: no output.
 - [ ] **Step 5: Run the Git tests**
 
 ```bash
-dotnet test --no-restore -c Release --filter "FullyQualifiedName~LocalGitCheckoutTests"
+dotnet test --no-restore -c Release -f net10.0 --filter "FullyQualifiedName~LocalGitCheckoutTests"
 ```
 Expected: all pass, same count as before this task (this is a message-composition change, not a behavior change — no test should need updating unless it asserts on exact exception text, in which case update the expected string to match the new escaped form).
 
@@ -135,7 +135,7 @@ EOF
 - [ ] **Step 4: Confirm zero RS0030** in these two files (same grep as Task 1 Step 4).
 - [ ] **Step 5: Run the Java tests**
   ```bash
-  dotnet test --no-restore -c Release --filter "FullyQualifiedName~Java"
+  dotnet test --no-restore -c Release -f net10.0 --filter "FullyQualifiedName~Java"
   ```
 - [ ] **Step 6: Commit**
   ```bash
@@ -158,7 +158,7 @@ EOF
 - Modify: `src/Aspire.Hosting.ServiceSources/JavaScript/JavaScriptLocalKind.cs` (15 sites)
 - Test: search `test/Aspire.Hosting.ServiceSources.JavaScript.Tests/` for the exercising tests.
 
-Same six-step procedure as Task 1/2, scoped to this one file. Filter: `dotnet test --no-restore -c Release --filter "FullyQualifiedName~JavaScript"`.
+Same six-step procedure as Task 1/2, scoped to this one file. Filter: `dotnet test --no-restore -c Release -f net10.0 --filter "FullyQualifiedName~JavaScript"`.
 
 - [ ] **Step 1: Baseline grep** (expect 15 lines).
 - [ ] **Step 2: Rename constructor calls to `.For`.**
@@ -172,17 +172,17 @@ Same six-step procedure as Task 1/2, scoped to this one file. Filter: `dotnet te
 ### Task 4: Config catalog-loading cluster
 
 **Files:**
-- Modify: `src/Aspire.Hosting.ServiceSources/Config/ServiceCatalogLoader.cs` (13 of its 14 sites — leave the one at the "unknown property" `+`-concatenation flagged in the File Map for Task 11)
+- Modify: `src/Aspire.Hosting.ServiceSources/Config/ServiceCatalogLoader.cs` (10 of its 14 sites — leave the four "unknown property" `+`-concatenation sites flagged in the File Map for Task 11)
 - Modify: `src/Aspire.Hosting.ServiceSources/Config/DeveloperConfigShape.cs` (1 site)
 - Test: `test/Aspire.Hosting.ServiceSources.Tests/Config/ServiceCatalogLoaderTests.cs`
 
-- [ ] **Step 1: Baseline grep**, scoped to both files, and note which line is the `+`-chain site (currently the "unknown property" throw around `ServiceCatalogLoader.cs:122-124`, re-grep for `string.Join(", ", KnownRepositoryProperties)` to find its current line — leave it alone here).
+- [ ] **Step 1: Baseline grep**, scoped to both files, and note which lines are the `+`-chain sites. There are **four** of them, not one — `grep -n "unknown property" src/Aspire.Hosting.ServiceSources/Config/ServiceCatalogLoader.cs` currently finds them near lines 132-133, 145-146, 230-231 and 253-254 (two pairs: a top-level-property throw and a nested-property throw, each duplicated once for repositories and once for services). Re-grep before editing since lines shift; leave all four alone here — Task 11 restructures them together.
 - [ ] **Step 2: Rename** every *other* raw constructor call to `.For` in both files.
 - [ ] **Step 3: Compiler-fix loop.** Note `ServiceCatalogLoader.cs` already imports `Aspire.Hosting.ServiceSources.Messages` conventions used by `LocalGitCheckout.IsContainedCheckoutDirectoryName`'s caller — the `name` hole in most of these throws is a catalog/repository key the developer wrote, so it takes `new Name(name)`.
-- [ ] **Step 4: Confirm RS0030 count in these two files is exactly 1** (the deliberately-skipped `+`-chain site).
+- [ ] **Step 4: Confirm RS0030 count in this file is exactly 4** (the four deliberately-skipped `+`-chain "unknown property" sites).
 - [ ] **Step 5: Run the catalog loader tests.**
   ```bash
-  dotnet test --no-restore -c Release --filter "FullyQualifiedName~ServiceCatalogLoaderTests"
+  dotnet test --no-restore -c Release -f net10.0 --filter "FullyQualifiedName~ServiceCatalogLoaderTests"
   ```
 - [ ] **Step 6: Commit** ("Migrate ServiceCatalogLoader/DeveloperConfigShape exception messages onto the structural escaping seam").
 
@@ -204,7 +204,7 @@ Same six-step procedure as Task 1/2, scoped to this one file. Filter: `dotnet te
 - [ ] **Step 4: Confirm zero RS0030** in the four files.
 - [ ] **Step 5: Run the affected test files.**
   ```bash
-  dotnet test --no-restore -c Release --filter "FullyQualifiedName~LocalProjectSourceTests|FullyQualifiedName~DeferredCheckoutTests|FullyQualifiedName~LocalKindRegistryTests"
+  dotnet test --no-restore -c Release -f net10.0 --filter "FullyQualifiedName~LocalProjectSourceTests|FullyQualifiedName~DeferredCheckoutTests|FullyQualifiedName~LocalKindRegistryTests"
   ```
   DeferredCheckout tests have a documented history of flakiness unrelated to message text (fixed via a subscribe-handshake pattern) — a single flaky failure unrelated to escaping is not this task's regression; rerun once before investigating.
 - [ ] **Step 6: Commit** ("Migrate Sources package exception messages onto the structural escaping seam").
@@ -270,26 +270,26 @@ Same six-step procedure. Baseline expects 11 lines. Test filter: `--filter "Full
 - Modify: `src/Aspire.Hosting.ServiceSources/ServiceSourcesBuilderExtensions.cs` (2 sites)
 - Modify: `src/Aspire.Hosting.ServiceSources/ServiceConfigurationExtensions.cs` (2 sites)
 - Modify: `src/Aspire.Hosting.ServiceSources/ServiceEndpointExtensions.cs` (1 site)
-- Modify: `src/Aspire.Hosting.ServiceSources/Config/DeveloperConfiguration.cs` — only its `AddServiceError`-style site at line ~538 and the one at ~368 (2 of its 3 sites; leave the `AmbiguousCatalogSpellingError` `+`-chain at ~388-394 for Task 11)
+- Modify: `src/Aspire.Hosting.ServiceSources/Config/DeveloperConfiguration.cs` — **only** the single site inside `NotConfiguredError` (currently the `new ServiceSourcesConfigurationException($"Service '{serviceName}' has no source configured...` branch, `grep -n "has no source configured" src/Aspire.Hosting.ServiceSources/Config/DeveloperConfiguration.cs` to find its current line). This file's other two sites are both `+`-chain composers left for Task 11: `AmbiguousCatalogSpellingError` (its raw-constructor call is inside the method's body, currently starting around line 361 — re-grep for the method name, not a line range, since it shifts) and `NothingConfiguredError` (currently around line 537 — also a `+`-chain via a target-typed `new(...)`, not a plain interpolation, so do **not** treat it as one of this task's mechanical sites even though it looks like a single simple throw).
 - Test: `test/Aspire.Hosting.ServiceSources.Tests/ServiceSourcesBuilderExtensionsTests.cs`, `.../AddServiceTests.cs`
 
-- [ ] **Step 1: Baseline grep** across the four files, excluding the known `+`-chain line (expect 7 lines: 2+2+1+2).
+- [ ] **Step 1: Baseline grep** across the four files, excluding the two known `+`-chain sites in `DeveloperConfiguration.cs` (expect 6 lines: 2+2+1+1).
 - [ ] **Step 2–5:** same procedure. Test filter: `--filter "FullyQualifiedName~ServiceSourcesBuilderExtensionsTests|FullyQualifiedName~AddServiceTests"`.
 - [ ] **Step 6: Commit** ("Migrate top-level extension exception messages onto the structural escaping seam").
 
 ---
 
-### Task 11: Restructure the four `+`-concatenation sites and the `StringBuilder` composer
+### Task 11: Restructure the `+`-concatenation sites and the `StringBuilder` composer
 
 These don't fit the rename-and-wrap procedure: each builds its message from run-time `+`-concatenated fragments or a loop, which a single `$"..."` interpolation can't express as-is. Each needs the loop/concatenation rewritten to build a `Raw` first (via `Raw.Join` or `Raw.Compose`), then that `Raw` becomes one hole in the final `.For($"...")` call.
 
 **Files:**
 - Modify: `src/Aspire.Hosting.ServiceSources/Sources/UrlSource.cs:117-126`
-- Modify: `src/Aspire.Hosting.ServiceSources/ServiceSourcesWarnings.cs:350-355` (`RevertReason`)
-- Modify: `src/Aspire.Hosting.ServiceSources/Config/ServiceCatalogLoader.cs` (the "unknown property" throw left over from Task 4)
-- Modify: `src/Aspire.Hosting.ServiceSources/Config/DeveloperConfiguration.cs:388-394` (`AmbiguousCatalogSpellingError`)
-- Modify: `src/Aspire.Hosting.ServiceSources/Config/DeveloperConfigValidator.cs:683-711` (`Failure` and `CombinedFailure`)
-- Test: `test/Aspire.Hosting.ServiceSources.Tests/Config/ServiceCatalogLoaderTests.cs`, relevant `DeveloperConfigValidator`/`DeveloperConfiguration` tests (grep the test tree for `AmbiguousCatalogSpelling` and `CombinedFailure`/`ServiceSourcesConfigurationException` assertions).
+- Modify: `src/Aspire.Hosting.ServiceSources/ServiceSourcesWarnings.cs:346-354` (`RevertReason`)
+- Modify: `src/Aspire.Hosting.ServiceSources/Config/ServiceCatalogLoader.cs` (**four** "unknown property" throws left over from Task 4, not one — re-grep for `unknown property`; the file currently has duplicate top-level/nested pairs for both repository and service properties)
+- Modify: `src/Aspire.Hosting.ServiceSources/Config/DeveloperConfiguration.cs` (`AmbiguousCatalogSpellingError`, method currently starting around line 361 — re-grep for the method name, not a line range; **and** `NothingConfiguredError`, currently around line 537, which the plan's earlier drafts wrongly classified as a mechanical Task 10 site)
+- Modify: `src/Aspire.Hosting.ServiceSources/Config/DeveloperConfigValidator.cs:680-712` (`Failure` and `CombinedFailure`)
+- Test: `test/Aspire.Hosting.ServiceSources.Tests/Config/ServiceCatalogLoaderTests.cs`, relevant `DeveloperConfigValidator`/`DeveloperConfiguration` tests (grep the test tree for `AmbiguousCatalogSpelling`, `NothingConfigured` and `CombinedFailure`/`ServiceSourcesConfigurationException` assertions).
 
 **Interfaces:**
 - Consumes: `Raw.Join(string separator, IEnumerable<Raw> parts)`, `Raw.Compose(ServiceTextHandler)`, `new Name(string)`.
@@ -355,9 +355,11 @@ private static Raw RevertReason(
 ```
 Find `RevertReason`'s one caller in this file (`grep -n "RevertReason(" src/Aspire.Hosting.ServiceSources/ServiceSourcesWarnings.cs`) and update the hole it's placed in from a `string` interpolation to a `Raw` interpolation (drop the surrounding quotes it may currently add, since `Raw` supplies its own).
 
-- [ ] **Step 3: `ServiceCatalogLoader.cs` "unknown property" throw**
+- [ ] **Step 3: `ServiceCatalogLoader.cs` — all four "unknown property" throws**
 
-Before:
+There are two pairs, not one site: a top-level-property throw and a nested-property throw, each duplicated once under the repository parser and once under the service parser (currently near lines 132-133/145-146 for repositories, 230-231/253-254 for services — re-grep for `unknown property` first). Apply the same rewrite to all four.
+
+Before (repository, top-level — the other three follow the identical shape with `Repository`→`Service` and `KnownRepositoryProperties`→`KnownServiceProperties`/the matching nested-property set):
 ```csharp
 throw new ServiceSourcesConfigurationException(
     $"Repository '{name}': unknown property '{key}'. Expected one of: " +
@@ -369,9 +371,11 @@ throw ServiceSourcesConfigurationException.For(
     $"Repository '{new Name(name)}': unknown property '{new Name(key)}'. Expected one of: " +
     $"{Raw.Join(", ", KnownRepositoryProperties.Select(Raw.Literal))}.");
 ```
-`KnownRepositoryProperties` is a fixed, compile-time-known set of property names (not caller-controlled), so `Raw.Literal` is correct here — confirm by reading its declaration (`grep -n "KnownRepositoryProperties" src/Aspire.Hosting.ServiceSources/Config/ServiceCatalogLoader.cs`) before assuming; if it turns out to include a runtime-sourced entry, use `Raw.Escaped` instead.
+Each known-properties collection (`KnownRepositoryProperties`, `KnownServiceProperties`, and whatever the two nested-property sites reference) is a fixed, compile-time-known set of property names (not caller-controlled), so `Raw.Literal` is correct here — confirm by reading each declaration (`grep -n "KnownRepositoryProperties\|KnownServiceProperties" src/Aspire.Hosting.ServiceSources/Config/ServiceCatalogLoader.cs`) before assuming; if any turns out to include a runtime-sourced entry, use `Raw.Escaped` instead. `Raw.Literal` takes `[ConstantExpected] string`, so it cannot bind through `Select(Raw.Literal)` as a method group if any of these collections isn't itself a `const`/literal array — verify the collection is declared as one (`static readonly string[]` initialized from literals is fine to pass a delegate over only if each element is inlined as a constant at the call; if `dotnet build` reports `CS1503`/`CS0428` on this line, switch to `KnownRepositoryProperties.Select(Raw.Escaped)` instead, which is always safe and does not require the argument to be constant).
 
-- [ ] **Step 4: `DeveloperConfiguration.cs:388-394` — `AmbiguousCatalogSpellingError`**
+- [ ] **Step 4: `DeveloperConfiguration.cs` — `AmbiguousCatalogSpellingError` and `NothingConfiguredError`**
+
+Re-grep for both method names before editing — line numbers drift (`AmbiguousCatalogSpellingError`'s body is currently declared around line 361, not the 388-394 an earlier draft of this plan cited, which actually falls inside `NotConfiguredError`/`NothingConfiguredError` instead).
 
 Before:
 ```csharp
@@ -406,7 +410,39 @@ private static ServiceSourcesConfigurationException AmbiguousCatalogSpellingErro
 }
 ```
 
-- [ ] **Step 5: `DeveloperConfigValidator.cs:683-711` — `Failure` and `CombinedFailure`**
+`NothingConfiguredError` (currently around line 537) is a second `+`-chain site in this same file, missed by an earlier draft of this plan's Task 10:
+
+Before:
+```csharp
+private ServiceSourcesConfigurationException NothingConfiguredError(string serviceName) =>
+    new("No service sources are configured: "
+        + (NearMissRootKey is not null
+            ? $"'{FilePath}' has a top-level key '{NearMissRootKey}'. Did you mean 'services'?"
+            : $"'{ServicesKey}' is empty in every configuration source, "
+              + $"so no service has a source — including '{serviceName}'. "
+              + $"Create '{FilePath}' ({(FileFound ? "found, but it configures no services" : "not found")}) with "
+              + $"{{ \"services\": {{ \"{serviceName}\": {{ \"source\": \"...\" }} }} }}, "
+              + $"or set the environment variable {EnvironmentVariableFor(serviceName)}. "
+              + "Sources consulted: that file, appsettings.json, appsettings.{Environment}.json, user secrets, "
+              + "environment variables and command-line arguments."));
+```
+After:
+```csharp
+private ServiceSourcesConfigurationException NothingConfiguredError(string serviceName) =>
+    ServiceSourcesConfigurationException.For(
+        NearMissRootKey is not null
+            ? $"No service sources are configured: '{Raw.Escaped(FilePath)}' has a top-level key '{new Name(NearMissRootKey)}'. Did you mean 'services'?"
+            : $"No service sources are configured: '{Raw.Literal(ServicesKey)}' is empty in every configuration source, " +
+              $"so no service has a source — including '{new Name(serviceName)}'. " +
+              $"Create '{Raw.Escaped(FilePath)}' ({Raw.Literal(FileFound ? "found, but it configures no services" : "not found")}) with " +
+              $"{{ \"services\": {{ \"{new Name(serviceName)}\": {{ \"source\": \"...\" }} }} }}, " +
+              $"or set the environment variable {Raw.Escaped(EnvironmentVariableFor(serviceName))}. " +
+              $"Sources consulted: that file, appsettings.json, appsettings.{{Environment}}.json, user secrets, " +
+              $"environment variables and command-line arguments.");
+```
+`FilePath` is a filesystem path this package resolved, not caller-controlled text a developer typed into a config value, so it takes `Raw.Escaped` (never truncated) rather than `Name`. The ternary's two literal-string arms can't bind to `Raw.Literal`'s `[ConstantExpected]` parameter through a runtime ternary expression — if `dotnet build` rejects that call, fall back to `Raw.Escaped(...)` there too, same as the `shape.Kind` case in Step 5 below.
+
+- [ ] **Step 5: `DeveloperConfigValidator.cs:680-712` — `Failure` and `CombinedFailure`**
 
 Before:
 ```csharp
@@ -439,31 +475,33 @@ private static ServiceSourcesConfigurationException CombinedFailure(
     return new ServiceSourcesConfigurationException(message.ToString());
 }
 ```
-`problems` entries and `shape.Kind`/`shape.Noun` are this package's own diagnostic text (already composed elsewhere, not raw caller input) — confirm by checking where `problems` is populated (`grep -n "problems.Add\|IReadOnlyList<string> problems" src/Aspire.Hosting.ServiceSources/Config/DeveloperConfigValidator.cs`) before deciding whether each `p`/problem string needs `Name`/`Raw.Escaped` or is already a `Raw`-safe literal built by this file. `ConfiguredValue.Bare(serviceName)` already returns an escaped, non-`Name`-typed `string` per its existing use elsewhere in this file (`grep -n "ConfiguredValue.Bare" src/Aspire.Hosting.ServiceSources/Config/DeveloperConfigValidator.cs` to see the established convention neighboring call sites use to fit it into a `ServiceTextHandler` hole — likely `Raw.Escaped` around the bare value, or a dedicated `Raw`-returning overload already exists; match whatever the file's other migrated sites already settled on).
+`shape.Kind`/`shape.Noun` are `DeveloperConfigShape` instance properties (`get`-only, assigned in its constructor — `Config/DeveloperConfigShape.cs:81,84`), not `const` fields, so `Raw.Literal` — whose parameter is `[ConstantExpected]` (`Messages/Raw.cs`) — **cannot** take `shape.Kind`/`shape.Noun` directly; that call fails to compile, and `CA1857` is a build error unconditionally in this project (`<WarningsAsErrors>...CA1857</WarningsAsErrors>` in the csproj), not only under `-warnaserror`. Use `Raw.Escaped(shape.Kind)` / `Raw.Escaped(shape.Noun)` everywhere below instead.
 
-After (using `Raw.Join` to replace the `StringBuilder`/loop):
+`problems` is `IReadOnlyList<string>`, and each element is the return value of one of ~28 private composer methods in this file (`NotValidHere`, `EntryExpected`, `ValueExpected`, `Blank`, `BlockExpected`, etc. — `grep -n "problems.Add(" src/Aspire.Hosting.ServiceSources/Config/DeveloperConfigValidator.cs` lists every call). These methods already build a full, developer-facing sentence themselves, escaping the caller-controlled fragments they embed (via `ConfiguredValue.Bare`/`Escaped`) while also writing plenty of their own literal punctuation, including illustrative JSON snippets with real quote characters (e.g. `NotValidHere`: `"'{home}' block: \"{serviceName}\": {{ ..., \"{home}\": ... }}."`). Wrapping the *finished* sentence in `Raw.Escaped(problems[0])` would run `Name.Escape` over that whole sentence, backslash-escaping every quote in the illustrative JSON along with the actual caller value — mangling text that was never unsafe. The fix is the same shape Task 14 uses for the logging composers: change each of these ~28 methods to return `Raw` (wrap their existing body in `Raw.Compose($"...")`, using the `Name`/`Raw.Escaped` wrapping their own interpolations already need) instead of `string`, and change `problems`'s type from `IReadOnlyList<string>` to `IReadOnlyList<Raw>` everywhere it's threaded through (`problems.Add(...)`, the `Failure`/`CombinedFailure` parameters, and the `(string Service, IReadOnlyList<string> Problems)` tuple used by `CombinedFailure`'s caller). Do this as its own compiler-fix loop before touching `Failure`/`CombinedFailure` — rebuild after retyping `problems`, and the `CS1503`s point at exactly the composer methods still returning `string`.
+
+After (using `Raw.Join` to replace the `StringBuilder`/loop, and taking `problems`/`Problems` as `Raw` now that the composers return it):
 ```csharp
 private static ServiceSourcesConfigurationException Failure(
-    string serviceName, IReadOnlyList<string> problems, DeveloperConfigShape shape) =>
+    string serviceName, IReadOnlyList<Raw> problems, DeveloperConfigShape shape) =>
     ServiceSourcesConfigurationException.For(problems.Count == 1
-        ? $"{Raw.Literal(shape.Kind, default)} '{Raw.Escaped(ConfiguredValue.Bare(serviceName))}': {Raw.Escaped(problems[0])}"
-        : $"{Raw.Literal(shape.Kind, default)} '{Raw.Escaped(ConfiguredValue.Bare(serviceName))}': {problems.Count} problems with the entry:" +
-          $"{Raw.Join(string.Empty, problems.Select(p => Raw.Compose($"{Environment.NewLine}  - {Raw.Escaped(p)}")))}");
+        ? $"{Raw.Escaped(shape.Kind)} '{Raw.Escaped(ConfiguredValue.Bare(serviceName))}': {problems[0]}"
+        : $"{Raw.Escaped(shape.Kind)} '{Raw.Escaped(ConfiguredValue.Bare(serviceName))}': {problems.Count} problems with the entry:" +
+          $"{Raw.Join(string.Empty, problems.Select(p => Raw.Compose($"{Environment.NewLine}  - {p}")))}");
 
 private static ServiceSourcesConfigurationException CombinedFailure(
-    IReadOnlyList<(string Service, IReadOnlyList<string> Problems)> faulted, DeveloperConfigShape shape)
+    IReadOnlyList<(string Service, IReadOnlyList<Raw> Problems)> faulted, DeveloperConfigShape shape)
 {
     var total = faulted.Sum(entry => entry.Problems.Count);
 
     var entries = faulted.Select(entry => Raw.Compose(
-        $"{Environment.NewLine}  {Raw.Literal(shape.Kind, default)} '{Raw.Escaped(ConfiguredValue.Bare(entry.Service))}':" +
-        $"{Raw.Join(string.Empty, entry.Problems.Select(p => Raw.Compose($"{Environment.NewLine}    - {Raw.Escaped(p)}")))}"));
+        $"{Environment.NewLine}  {Raw.Escaped(shape.Kind)} '{Raw.Escaped(ConfiguredValue.Bare(entry.Service))}':" +
+        $"{Raw.Join(string.Empty, entry.Problems.Select(p => Raw.Compose($"{Environment.NewLine}    - {p}")))}"));
 
     return ServiceSourcesConfigurationException.For(
-        $"{total} problems across {faulted.Count} {shape.Noun} entries:{Raw.Join(string.Empty, entries)}");
+        $"{total} problems across {faulted.Count} {Raw.Escaped(shape.Noun)} entries:{Raw.Join(string.Empty, entries)}");
 }
 ```
-`shape.Kind` is passed with `Raw.Literal(shape.Kind, default)` only if it's genuinely a compile-time constant everywhere it's constructed — check `DeveloperConfigShape`'s definition (`grep -n "Kind" src/Aspire.Hosting.ServiceSources/Config/DeveloperConfigShape.cs`) first. If `Kind`/`Noun` are set from a `const`/literal at every construction site, `Raw.Literal` needs a `[ConstantExpected]` argument which a property getter can't satisfy directly — in that case use `Raw.Escaped(shape.Kind)` instead (safe either way, just not asserting constancy at the type level). Prefer the simpler `Raw.Escaped` here unless `Raw.Literal` compiles cleanly.
+`ConfiguredValue.Bare(serviceName)` returns a plain `string` per its existing use elsewhere in this file — confirm the convention neighboring call sites already use to fit it into a `ServiceTextHandler` hole (`grep -n "ConfiguredValue.Bare" src/Aspire.Hosting.ServiceSources/Config/DeveloperConfigValidator.cs`); wrapping it in `Raw.Escaped` above is safe regardless, since `Bare` only strips invisible characters and does not itself neutralize quotes.
 
 - [ ] **Step 6: Rebuild everything, confirm RS0030 dropped to exactly 0 project-wide**
 
@@ -473,11 +511,11 @@ dotnet build -c Release --no-restore --no-incremental -warnaserror 2>&1 \
 ```
 Expected: `0`. If not, re-run the full grep (no file filter) to find what Tasks 1–11 missed and fix it before continuing — the number is the completeness gate for item 3 below.
 
-- [ ] **Step 7: Run the full test suite**
+- [ ] **Step 7: Run the full test suite (cheap leg — net10.0 only)**
   ```bash
-  dotnet test --no-restore -c Release
+  dotnet test --no-restore -c Release -f net10.0
   ```
-  Expected: same pass count as `main` before this plan started (record the baseline count before Task 1 if you haven't already, via `dotnet test --no-restore -c Release` on a clean checkout).
+  Expected: same pass count as `main` before this plan started (record the baseline count before Task 1 if you haven't already, via `dotnet test --no-restore -c Release -f net10.0` on a clean checkout). The full three-TFM matrix runs once, in Task 16 Step 7, right before landing.
 
 - [ ] **Step 8: Commit**
   ```bash
@@ -533,9 +571,9 @@ Expected: `Build succeeded.` / `0 Error(s)`. If any RS0030 now shows as `error`,
 dotnet build -c Release --no-restore --no-incremental 2>&1 | tail -5
 ```
 
-- [ ] **Step 5: Run the full test suite**
+- [ ] **Step 5: Run the full test suite (cheap leg — net10.0 only)**
   ```bash
-  dotnet test --no-restore -c Release
+  dotnet test --no-restore -c Release -f net10.0
   ```
 
 - [ ] **Step 6: Commit**
@@ -613,7 +651,7 @@ Expected: build succeeds; the grep only matches unrelated `*Label` identifiers a
 
 - [ ] **Step 6: Run the affected tests**
   ```bash
-  dotnet test --no-restore -c Release --filter "FullyQualifiedName~EndpointMutationDetectorTests|FullyQualifiedName~ServiceSourcesBuilderExtensionsTests"
+  dotnet test --no-restore -c Release -f net10.0 --filter "FullyQualifiedName~EndpointMutationDetectorTests|FullyQualifiedName~ServiceSourcesBuilderExtensionsTests"
   ```
 
 - [ ] **Step 7: Commit**
@@ -640,8 +678,10 @@ EOF
 **Files:**
 - Create: `src/Aspire.Hosting.ServiceSources/ServiceSourcesLog.cs`
 - Modify: `src/Aspire.Hosting.ServiceSources/BannedSymbols.txt` (add `Microsoft.Extensions.Logging.LoggerExtensions.Log*` entries)
-- Modify: `src/Aspire.Hosting.ServiceSources/Sources/LocalCheckoutPrefetch.cs`, `Sources/DeferredCheckout.cs`, `ServiceStartupFailureNotices.cs` — replace `logger.LogInformation/LogWarning/LogError/LogDebug` calls with `ServiceSourcesLog` calls; convert the five composer methods (grep for methods returning `string` that feed these `logger.Log*` calls) to return `Raw`.
-- Test: `test/Aspire.Hosting.ServiceSources.Tests/Sources/LocalCheckoutPrefetchTests.cs`, `test/Aspire.Hosting.ServiceSources.Tests/ServiceStartupFailureNoticeTests.cs`, plus a new `test/Aspire.Hosting.ServiceSources.Tests/ServiceSourcesLogTests.cs`
+- Modify: `src/Aspire.Hosting.ServiceSources/Sources/LocalCheckoutPrefetch.cs`, `Sources/DeferredCheckout.cs`, `ServiceStartupFailureNotices.cs` — replace `logger.LogInformation/LogWarning/LogError/LogDebug` calls with `ServiceSourcesLog` calls; convert the composer methods that feed these calls (grep for methods returning `string`) to return `Raw`.
+- Modify: `src/Aspire.Hosting.ServiceSources/ServiceSourcesWarnings.cs:294` — its `logger?.LogWarning("{ServiceSourcesWarning}", message)` call is a second sink-B site this task must close too. It's easy to miss: the inventory grep below (`logger\.Log(...)`) only matches a literal `logger.` immediately before `Log`, and this call site is `logger?.LogWarning` — the `?.` breaks that match, so re-grep with `logger\??\.Log` before trusting the count is complete.
+- Modify: `src/Aspire.Hosting.ServiceSources/Prepare/IPrepareOutputSink.cs` (`ConsolePrepareOutputSink.Report`, currently `Console.Out.WriteLine(line)`) and `src/Aspire.Hosting.ServiceSources/Prepare/CheckoutPreparation.cs` (its `sink.Report($"{Tag(checkoutName)} ...")` call around line 129, and `Tag`/`LaunchFailedMessage` which build the lines `Report` prints) — this is a *third* sink this package writes caller-controlled names through, entirely separate from `ILogger` and from `ServiceSourcesConfigurationException`; it reaches the terminal directly via `Console.Out.WriteLine` and was not covered by the issue's original two-sink framing. Wrap the interpolated names going into `sink.Report(...)` the same way `ServiceSourcesLog` wraps a log message (`new Name(checkoutName)` in place of the raw `Tag(checkoutName)` composition, or make `Tag`/the report-building call sites in this file return/consume `Raw` consistently with the rest of this task).
+- Test: `test/Aspire.Hosting.ServiceSources.Tests/Sources/LocalCheckoutPrefetchTests.cs`, `test/Aspire.Hosting.ServiceSources.Tests/ServiceStartupFailureNoticeTests.cs`, `test/Aspire.Hosting.ServiceSources.Tests/Prepare/CheckoutPreparationTests.cs`, relevant `ServiceSourcesWarnings` tests, plus a new `test/Aspire.Hosting.ServiceSources.Tests/ServiceSourcesLogTests.cs`
 
 **Interfaces:**
 - Consumes: `Messages.Raw`, `Messages.ServiceTextHandler`, `Microsoft.Extensions.Logging.ILogger` (the underlying sink `ServiceSourcesLog` wraps).
@@ -650,9 +690,11 @@ EOF
 - [ ] **Step 1: Inventory every `logger.Log*` call and its message shape**
 
 ```bash
-grep -rn "logger\.Log\(Information\|Warning\|Error\|Debug\|Trace\|Critical\)" src/Aspire.Hosting.ServiceSources --include="*.cs"
+grep -rn "logger\??\.Log\(Information\|Warning\|Error\|Debug\|Trace\|Critical\)" src/Aspire.Hosting.ServiceSources --include="*.cs"
 ```
-For each, note: is the message already a `{StructuredField}, value` pair (safe today, per the issue), a literal, or a composed `string` from a local composer method? The issue names five composer methods with "safe bodies but still return `string`" — find them by tracing each `logger.LogInformation(...)`/`LogWarning(...)` call's argument back to its source (a local variable assigned from a method call, most likely in `DeferredCheckout.cs` given it has 8 of the 14 sites).
+Note the `\??` before the `.` — a plain `logger\.Log(...)` pattern misses any call written as `logger?.LogWarning(...)` (the nullable-conditional operator breaks the literal match), which is exactly the shape `ServiceSourcesWarnings.cs:294` uses. Don't trust a lower count than expected without checking for this.
+
+For each hit, note: is the message already a `{StructuredField}, value` pair (safe today, per the issue), a literal, or a composed `string` from a local composer method? The issue names five composer methods with "safe bodies but still return `string`" — find them by tracing each `logger.LogInformation(...)`/`LogWarning(...)`/`logger?.LogWarning(...)` call's argument back to its source (a local variable or method call — most sites are in `DeferredCheckout.cs` given it has 8 of the 14 `ILogger` sites; `ServiceSourcesWarnings.cs:294` traces back to `RevertReason`, already converted to return `Raw` in Task 11 Step 2 — that call's hole needs updating from a `string` interpolation to a `Raw` one here, not re-escaped).
 
 - [ ] **Step 2: Write the failing test for `ServiceSourcesLog`**
 
@@ -698,7 +740,7 @@ public class ServiceSourcesLogTests
 - [ ] **Step 3: Run it to see it fail**
 
 ```bash
-dotnet test --no-restore -c Release --filter "FullyQualifiedName~ServiceSourcesLogTests"
+dotnet test --no-restore -c Release -f net10.0 --filter "FullyQualifiedName~ServiceSourcesLogTests"
 ```
 Expected: `CS0246: The type or namespace name 'ServiceSourcesLog' could not be found` (test project doesn't compile yet).
 
@@ -738,9 +780,13 @@ Adjust the exact method set to match Step 1's inventory — if a call site needs
 
 Read the existing file first (`cat src/Aspire.Hosting.ServiceSources/BannedSymbols.txt`) to match its format (RS0030 config format — symbol-documentation-ID per line plus a `;`-separated message), then add entries for `M:Microsoft.Extensions.Logging.LoggerExtensions.LogInformation(...)` etc. for each overload actually used in this package, each with a message directing to `ServiceSourcesLog`. `ServiceSourcesLog.cs` itself will need the same `#pragma warning disable RS0030` / `restore` wrapping around its own calls that `ServiceSourcesConfigurationException.For` uses, since it's the one legitimate caller.
 
-- [ ] **Step 6: Migrate each of the 14 call sites and the five composer methods**
+- [ ] **Step 6: Migrate each `ILogger` call site (14 plus `ServiceSourcesWarnings.cs:294`) and every composer method that feeds one**
 
-For each site from Step 1's inventory: change `logger.LogInformation(...)` to `ServiceSourcesLog.Information(logger, $"...")`, converting any composer method that built the message string into one returning `Raw` (via `Raw.Compose`) so it plugs into the new call's interpolation as a hole, same pattern as prior tasks.
+For each site from Step 1's inventory: change `logger.LogInformation(...)`/`logger?.LogWarning(...)` to `ServiceSourcesLog.Information(logger, $"...")`/`ServiceSourcesLog.Warning(...)`, converting any composer method that built the message string into one returning `Raw` (via `Raw.Compose`) so it plugs into the new call's interpolation as a hole, same pattern as prior tasks.
+
+- [ ] **Step 6b: Close the console sink**
+
+Change `ConsolePrepareOutputSink.Report`'s signature (or the call sites feeding it in `CheckoutPreparation.cs`) so a caller-controlled name reaches `Console.Out.WriteLine` only after going through `Name`/`Raw`, the same discipline as the `ILogger` and exception sinks above — `Tag(checkoutName)` and `LaunchFailedMessage(...)` are the two composers to convert. Re-grep `Tag(\|LaunchFailedMessage(\|sink.Report(` in `Prepare/CheckoutPreparation.cs` first, since lines shift.
 
 - [ ] **Step 7: Rebuild and confirm no `LoggerExtensions.Log*` warnings remain**
 
@@ -751,22 +797,23 @@ Expected: only the intentional `ServiceSourcesLog.cs` suppression shows up (if i
 
 - [ ] **Step 8: Run the new and existing tests**
   ```bash
-  dotnet test --no-restore -c Release --filter "FullyQualifiedName~ServiceSourcesLogTests|FullyQualifiedName~LocalCheckoutPrefetchTests|FullyQualifiedName~ServiceStartupFailureNoticeTests"
+  dotnet test --no-restore -c Release -f net10.0 --filter "FullyQualifiedName~ServiceSourcesLogTests|FullyQualifiedName~LocalCheckoutPrefetchTests|FullyQualifiedName~ServiceStartupFailureNoticeTests"
   ```
   Expected: all pass, including the new test from Step 2.
 
 - [ ] **Step 9: Commit**
   ```bash
-  git add src/Aspire.Hosting.ServiceSources/ServiceSourcesLog.cs src/Aspire.Hosting.ServiceSources/BannedSymbols.txt src/Aspire.Hosting.ServiceSources/Sources/LocalCheckoutPrefetch.cs src/Aspire.Hosting.ServiceSources/Sources/DeferredCheckout.cs src/Aspire.Hosting.ServiceSources/ServiceStartupFailureNotices.cs test/Aspire.Hosting.ServiceSources.Tests/ServiceSourcesLogTests.cs
+  git add src/Aspire.Hosting.ServiceSources/ServiceSourcesLog.cs src/Aspire.Hosting.ServiceSources/BannedSymbols.txt src/Aspire.Hosting.ServiceSources/Sources/LocalCheckoutPrefetch.cs src/Aspire.Hosting.ServiceSources/Sources/DeferredCheckout.cs src/Aspire.Hosting.ServiceSources/ServiceStartupFailureNotices.cs src/Aspire.Hosting.ServiceSources/ServiceSourcesWarnings.cs src/Aspire.Hosting.ServiceSources/Prepare/IPrepareOutputSink.cs src/Aspire.Hosting.ServiceSources/Prepare/CheckoutPreparation.cs test/Aspire.Hosting.ServiceSources.Tests/ServiceSourcesLogTests.cs
   git commit -m "$(cat <<'EOF'
 Close sink B: introduce ServiceSourcesLog and ban raw LoggerExtensions.Log* calls
 
-PR #381 migrated the exception seam but not the structured-argument logging sink — all
-fifteen logger.Log* calls were exempted on the premise that structured arguments don't
-need escaping, which held for the five call sites with a literal message but not for the
-five composer methods that built the {ServiceSourcesMessage} string themselves. Those
-composers now return Raw, and every call site goes through ServiceSourcesLog the same way
-exception messages go through ServiceSourcesConfigurationException.For.
+PR #381 migrated the exception seam but not the structured-argument logging sink, nor the
+Console.Out sink CheckoutPreparation writes progress through — all were exempted on the
+premise that structured arguments don't need escaping, which held for the call sites with
+a literal message but not for the composer methods that built the {ServiceSourcesMessage}
+string themselves. Those composers now return Raw, and every call site goes through
+ServiceSourcesLog or a Name/Raw-wrapped console line the same way exception messages go
+through ServiceSourcesConfigurationException.For.
 
 Part of #385.
 
@@ -788,7 +835,7 @@ EOF
 - Consumes: `Messages.ServiceTextHandler`, `Messages.Name`, `Messages.Raw`.
 - Produces: `KubernetesSecretException.For(ServiceTextHandler)` / `.For(ServiceTextHandler, Exception)`, same shape as `ServiceSourcesConfigurationException`'s.
 
-- [ ] **Step 1: Read the exception's current definition** (`Read` the file `grep` finds) to see its existing constructors, then add `.For` factories following the exact pattern in `ServiceSourcesConfigurationException.cs:22-32` (same `#pragma warning disable RS0030` / `restore` scoping around the two `new(...)` calls inside the factories).
+- [ ] **Step 1: Read the exception's current definition** (`Read` the file `grep` finds) to see its existing constructors, then add `.For` factories mirroring the *shape* of `ServiceSourcesConfigurationException.cs:22-32` (same `#pragma warning disable RS0030` / `restore` scoping around the `new(...)` calls inside the factories) — not a literal copy-paste, since `KubernetesSecretException`'s own constructor parameter list may not match `ServiceSourcesConfigurationException`'s `(string)`/`(string, Exception)` pair exactly. Add one `.For` overload per existing constructor, keeping any extra parameters (e.g. a flag) in the same position.
 
 - [ ] **Step 2: Add `KubernetesSecretException` to the RS0030 ban list** (or confirm it's already covered if `BannedSymbols.txt` bans by a broader pattern — read the file).
 
@@ -809,18 +856,20 @@ Expected: no output (all now go through `.For`, except inside the `.For` factory
 
 ---
 
-### Task 16: Migrate `Git*Exception` throws and close the remaining escaping gaps
+### Task 16: Migrate `Git*Exception`/`PrepareLaunchException` throws and close the remaining escaping gaps
 
 **Files:**
 - Modify: `src/Aspire.Hosting.ServiceSources/Git/GitCliClient.cs` (3 sites: `GitCommandFailedException` ×2, `GitAuthenticationFailedException` ×1)
 - Modify: `src/Aspire.Hosting.ServiceSources/Git/GitCommand.cs` (2 sites: `GitUnavailableException` ×2)
-- Modify: wherever `GitCommandFailedException`, `GitAuthenticationFailedException`, `GitUnavailableException`, and any fourth `Git*` exception type are declared — add `.For` factories per the Task 15 pattern to each.
+- Modify: `src/Aspire.Hosting.ServiceSources/Prepare/IPrepareCommandRunner.cs:47` (`PrepareLaunchException`) and every `throw new PrepareLaunchException(...)` site (`grep -rn "throw new PrepareLaunchException(" src/Aspire.Hosting.ServiceSources`) — it has the same `(string message, Exception? innerException = null)` shape as the migrated types and was missing from every earlier draft of this plan's File Map, Task 15 and Task 16, despite being a fourth caller-controlled-name-bearing exception type this package throws.
+- Modify: wherever `GitCommandFailedException`, `GitAuthenticationFailedException`, `GitUnavailableException`, `PrepareLaunchException`, and any further `Git*`/other exception type are declared — add `.For` factories per the Task 15 pattern to each, matching each type's *actual* constructor shape (see Step 2 below — do not assume every type matches `ServiceSourcesConfigurationException`'s two-constructor pattern).
+- Modify: `src/Aspire.Hosting.ServiceSources/BannedSymbols.txt` — add ban entries for the raw constructors of `GitCommandFailedException`, `GitAuthenticationFailedException`, `GitUnavailableException` and `PrepareLaunchException`, the same way Task 15 Step 2 banned `KubernetesSecretException`'s. This step is easy to skip since Tasks 1-15 never needed it for these types — without it, RS0030 stays silent forever on a future raw `throw new GitCommandFailedException(...)`.
 - Modify: `src/Aspire.Hosting.ServiceSources/BackingServices/KubernetesBackingServiceSource.cs:473` — leave the bare `.Replace("'", "''")` in place (it's the connection-string escaping convention for a connection-string *value*, explicitly not a name per the issue — do not touch it in this task).
-- Test: `test/Aspire.Hosting.ServiceSources.Tests/Git/`
+- Test: `test/Aspire.Hosting.ServiceSources.Tests/Git/`, `test/Aspire.Hosting.ServiceSources.Tests/Prepare/CheckoutPreparationTests.cs` (or wherever `PrepareLaunchException` is exercised)
 
 **Interfaces:**
 - Consumes: same as Task 15.
-- Produces: `.For` factories on each of the `Git*Exception` types.
+- Produces: `.For` factories on each of the `Git*Exception` types and on `PrepareLaunchException`.
 
 - [ ] **Step 1: Find the fourth `Git*` exception type** the issue mentions (it counts "the four `Git*` types (6)" — Task 1/16 combined found only 3 distinct types across 5 call sites so far; grep to find what's missing):
 
@@ -830,39 +879,51 @@ grep -rn "throw new Git" src/Aspire.Hosting.ServiceSources --include="*.cs"
 ```
 Reconcile against the issue's count before proceeding — if a fourth type/site exists elsewhere (e.g. thrown from a different file than `GitCliClient.cs`/`GitCommand.cs`), add it to this task's file list.
 
-- [ ] **Step 2: Add `.For` factories to each `Git*Exception` type**, same pattern as Task 15 Step 1.
+- [ ] **Step 2: Add `.For` factories to each `Git*Exception` type and to `PrepareLaunchException`**, same pattern as Task 15 Step 1 — but read each type's real constructor list first, since they don't all match `ServiceSourcesConfigurationException`'s `(string)`/`(string, Exception)` pair:
+  - `GitCommandFailedException(string message)` — one constructor only, no `Exception` overload. Add just `.For(ServiceTextHandler message)`; do not add a two-argument overload that has nothing to wrap.
+  - `GitAuthenticationFailedException(string message, Exception innerException, bool noCredentialsResolved = false)` — three parameters, and `NoCredentialsResolved` is behavior existing callers rely on to distinguish remediation advice. Add `.For(ServiceTextHandler message, Exception innerException, bool noCredentialsResolved = false)` and thread the flag through to the underlying `new(...)`; do not drop it in favor of copying `ServiceSourcesConfigurationException`'s two-argument shape.
+  - `GitUnavailableException(string message, Exception? innerException)` — two required parameters, no default; add `.For(ServiceTextHandler message, Exception? innerException)` matching that.
+  - `PrepareLaunchException(string message, Exception? innerException = null)` — add `.For(ServiceTextHandler message, Exception? innerException = null)`.
+  - Add each `.For` factory to its own type's file, same `#pragma warning disable RS0030` / `restore` scoping as Task 15 Step 1.
 
-- [ ] **Step 3: Rename each `throw new Git*Exception(` to `throw Git*Exception.For(`.**
+- [ ] **Step 3: Rename each `throw new Git*Exception(`/`throw new PrepareLaunchException(` to `.For(`.**
 
-- [ ] **Step 4: Compiler-fix loop** for the resulting `CS1503`s — `Describe(result)` (used by `GitCommandFailedException`'s two sites) is a helper already in `GitCliClient.cs`; check its return type and whether it needs to change to return `Raw` rather than `string` (same treatment as the composer methods in Task 14).
+- [ ] **Step 4: Compiler-fix loop** for the resulting `CS1503`s — `Describe(result)` (used by `GitCommandFailedException`'s two sites) is a helper already in `GitCliClient.cs`; check its return type and whether it needs to change to return `Raw` rather than `string` (same treatment as the composer methods in Task 14). Do the same for `LaunchFailedMessage` in `Prepare/CheckoutPreparation.cs`, which feeds `PrepareLaunchException`.
 
-- [ ] **Step 5: Confirm zero remaining raw constructor calls for all `Git*Exception` types.**
+- [ ] **Step 5: Confirm zero remaining raw constructor calls for all `Git*Exception` types and `PrepareLaunchException`.**
 
 ```bash
-grep -rn "new Git.*Exception(" src/Aspire.Hosting.ServiceSources --include="*.cs" | grep -v "\.For("
+grep -rn "new Git.*Exception(\|new PrepareLaunchException(" src/Aspire.Hosting.ServiceSources --include="*.cs" | grep -v "\.For("
 ```
 Expected: only the internal `new(...)` calls inside each type's own `.For` factory.
 
-- [ ] **Step 6: Run the Git tests.**
+- [ ] **Step 5b: Confirm the new ban-list entries actually fire**
 
-- [ ] **Step 7: Full-project sanity pass**
+```bash
+dotnet build -c Release --no-restore --no-incremental -warnaserror 2>&1 | grep RS0030
+```
+Expected: no output (everything routed through `.For`). Then spot-check the ban actually works: temporarily reintroduce one raw `throw new GitCommandFailedException(...)` call, rebuild, confirm RS0030 fires as an error, then revert the temporary change — a ban entry with a typo'd symbol ID silently bans nothing.
+
+- [ ] **Step 6: Run the Git and Prepare tests.**
+
+- [ ] **Step 7: Full-project sanity pass — this is the expensive leg, run once, right before marking the PR ready for review**
 
 ```bash
 dotnet build -c Release --no-restore --no-incremental -warnaserror 2>&1 | tail -10
 dotnet test --no-restore -c Release
 ```
-Expected: build succeeds with RS0030 as an error and zero occurrences; full test suite passes at the same count recorded before Task 1 (plus the one new `ServiceSourcesLogTests` test from Task 14).
+Note: no `-f` here — this is the one full three-TFM run this plan calls for; every other test step above deliberately scoped to `-f net10.0`. Expected: build succeeds with RS0030 as an error and zero occurrences; full test suite passes at the same count recorded before Task 1 (plus the one new `ServiceSourcesLogTests` test from Task 14) across net8.0, net9.0 and net10.0.
 
 - [ ] **Step 8: Commit**
   ```bash
   git add -A
   git commit -m "$(cat <<'EOF'
-Migrate Git*Exception messages onto the structural escaping seam
+Migrate Git*Exception and PrepareLaunchException messages onto the structural escaping seam
 
-Closes the last exception hierarchy this package throws with a caller-controlled name:
-the secondary Kubernetes and Git exception types are now migrated the same way the
-primary ServiceSourcesConfigurationException path was, with the same .For seam and
-Name/Raw hole discipline.
+Closes the last exception hierarchies this package throws with a caller-controlled name:
+the secondary Kubernetes, Git and Prepare exception types are now migrated the same way
+the primary ServiceSourcesConfigurationException path was, with the same .For seam,
+Name/Raw hole discipline, and RS0030 ban-list coverage.
 
 Closes #385.
 
@@ -876,6 +937,17 @@ EOF
 ## Self-Review Notes
 
 **Spec coverage:** Items 1 (156 RS0030 sites, Tasks 1–11), 2 (`DeveloperConfigValidator` restructure, Task 11 Step 5), 3 (delete `WarningsNotAsErrors`, Task 12), 4 (unwrap `Label`, Task 13), 5 (`ServiceSourcesLog`, Task 14), 6 (secondary exception types + the two flagged gaps at `KubernetesBackingServiceSource.cs:1051/717`, Tasks 15–16) are all covered. Item 7 (7a/7b) is deliberately excluded per the issue's own framing — these are undecided design questions about the paste-ready contract and truncation marker, not implementation work; flagged in Global Constraints as out of scope. The "Not in scope" list from the issue (`DeferredCheckout.cs` structured-argument sites, `TreatWarningsAsErrors` repo-wide, catalog-name validation) is likewise excluded here.
+
+**Gaps found and closed during code review of this plan (2026-09-20), before any task landed:** an internal audit against the actual worktree source (not just the issue text) found several plan-doc defects that would have surfaced mid-implementation rather than at planning time — all fixed in place:
+- Task 11's `Raw.Literal(shape.Kind, default)` example didn't compile (`shape.Kind` is a runtime property, not a `[ConstantExpected]` constant, and `CA1857` is an unconditional build error in this project) — replaced with `Raw.Escaped(shape.Kind)` throughout.
+- Task 11's `Raw.Escaped(problems[0])`/`Raw.Escaped(p)` wrapping would have run `Name.Escape` over already-composed diagnostic sentences containing illustrative literal JSON quotes, mangling them — Task 11 Step 5 now converts the ~28 `problems`-producing composer methods in `DeveloperConfigValidator.cs` to return `Raw` directly (mirroring Task 14's composer treatment) instead of re-escaping their finished output.
+- Task 4/Task 11 assumed `ServiceCatalogLoader.cs` has one "unknown property" `+`-chain site; it has four (repository/service × top-level/nested) — both tasks' file lists, counts and gates now account for all four.
+- Task 10/11 misidentified `DeveloperConfiguration.cs`'s throw sites by line range (an earlier `388-394` citation actually pointed at `NotConfiguredError`, not `AmbiguousCatalogSpellingError`) and missed that `NothingConfiguredError` is a second `+`-chain composer, not a mechanical Task 10 site — both tasks now cite methods by name (re-grep, don't trust a line range) and Task 11 covers both composers.
+- Task 15's constructors for `GitCommandFailedException` (single-arg only) and `GitAuthenticationFailedException` (3-arg, with a `NoCredentialsResolved` flag) don't match `ServiceSourcesConfigurationException`'s two-constructor shape — Task 16 Step 2 now lists each `Git*Exception` type's actual constructor list instead of pointing at a "follow the exact pattern" copy-paste.
+- Task 16 never added `Git*Exception`'s raw constructors to `BannedSymbols.txt` (only Task 15 banned `KubernetesSecretException`), which would have left the exact caller-controlled-name leak this plan exists to close open indefinitely for the Git exception family — Task 16 now has its own ban-list step plus a step that verifies the ban actually fires.
+- `PrepareLaunchException` (`Prepare/IPrepareCommandRunner.cs:47`) has the identical two-constructor shape as the migrated exception types but was absent from the File Map, Task 15 and Task 16 with no stated reason — added to Task 16.
+- Task 14 ("close sink B") only closed the `ILogger` sink, missing `ServiceSourcesWarnings.cs:294`'s `logger?.LogWarning` call (its own inventory grep can't match it — the `?.` operator breaks a literal `logger\.Log` pattern) and the entirely separate `Console.Out.WriteLine` sink `ConsolePrepareOutputSink`/`CheckoutPreparation.cs` writes caller-controlled names through — both added to Task 14, and its inventory grep fixed to `logger\??\.Log(...)`.
+- The Global Constraints' test-cadence guidance (full three-TFM `dotnet test` after every task, run three separate times across the plan) contradicted this worktree's own `CLAUDE.md`, which scopes intermediate rounds to `-f net10.0` and reserves the full matrix for once, right before landing — every per-task test invocation now uses `-f net10.0`, and only Task 16 Step 7 runs the full matrix.
 
 **Known open risk carried forward, not fixed by this plan:** the two-argument `Enumerable.Zip` laundering path the issue names under "Known-open, deliberately tolerated by #381" is explicitly out of scope — no task here attempts it.
 
