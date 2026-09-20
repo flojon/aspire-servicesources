@@ -55,7 +55,7 @@ internal static class LocalGitCheckout
             throw ServiceSourcesConfigurationException.For(
                 $"'{new Name(checkoutName)}' cannot be given a managed checkout directory: it is the name of the " +
                 $"directory its checkout is cloned into, so it has to be a single directory name — " +
-                $"{Raw.Literal(ContainedNameRuleAndRemedy)}");
+                $"{Raw.Escaped(ContainedNameRuleAndRemedy)}");
         }
 
         return Path.Combine(ToolDirectory.PathIn(appHostDirectory), "checkouts", checkoutName);
