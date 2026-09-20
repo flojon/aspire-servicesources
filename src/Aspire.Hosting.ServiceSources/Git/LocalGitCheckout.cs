@@ -1,5 +1,6 @@
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
+using Aspire.Hosting.ServiceSources.Messages;
 using Aspire.Hosting.ServiceSources.Prepare;
 
 namespace Aspire.Hosting.ServiceSources.Git;
@@ -51,10 +52,10 @@ internal static class LocalGitCheckout
     {
         if (!IsContainedCheckoutDirectoryName(checkoutName))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"'{checkoutName}' cannot be given a managed checkout directory: it is the name of the "
-                + "directory its checkout is cloned into, so it has to be a single directory name — "
-                + ContainedNameRuleAndRemedy);
+            throw ServiceSourcesConfigurationException.For(
+                $"'{new Name(checkoutName)}' cannot be given a managed checkout directory: it is the name of the " +
+                $"directory its checkout is cloned into, so it has to be a single directory name — " +
+                $"{Raw.Escaped(ContainedNameRuleAndRemedy)}");
         }
 
         return Path.Combine(ToolDirectory.PathIn(appHostDirectory), "checkouts", checkoutName);
@@ -306,31 +307,25 @@ internal static class LocalGitCheckout
 
         if (grouped && config.Local.Ref is not null)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': 'local.ref' cannot be set — this service is grouped into the shared " +
-                $"repository '{definition.Repository.CheckoutName}', whose ref applies to every member " +
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': 'local.ref' cannot be set — this service is grouped into the shared " +
+                $"repository '{new Name(definition.Repository.CheckoutName)}', whose ref applies to every member " +
                 $"alike rather than to any one of them. Set " +
-                $"'{DeveloperConfiguration.RepositoriesKey}:{definition.Repository.CheckoutName}:ref' instead.");
+                $"'{Raw.Escaped($"{DeveloperConfiguration.RepositoriesKey}:{new Name(definition.Repository.CheckoutName)}:ref")}' instead.");
         }
 
         if (grouped && repositoryConfig?.Path is not null)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Repository '{definition.Repository.CheckoutName}': " +
-                $"'{DeveloperConfiguration.RepositoriesKey}:{definition.Repository.CheckoutName}:path' is " +
-                "reserved and does not redirect the group's checkout — that is not implemented yet. Redirect " +
-                $"one member service's own checkout with its 'local.path' override in " +
-                $"{DeveloperConfiguration.FileName} instead.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Repository '{new Name(definition.Repository.CheckoutName)}': '{Raw.Escaped($"{DeveloperConfiguration.RepositoriesKey}:{new Name(definition.Repository.CheckoutName)}:path")}' is reserved and does not redirect the group's checkout — that is not implemented yet. Redirect one member service's own checkout with its 'local.path' override in {Raw.Literal(DeveloperConfiguration.FileName)} instead.");
         }
 
         if (config.Local.Path is not null)
         {
             if (config.Local.Ref is not null)
             {
-                throw new ServiceSourcesConfigurationException(
-                    $"Service '{serviceName}': 'local.ref' cannot be combined with 'local.path' — " +
-                    "'local.path' points directly at an existing checkout, and 'local.ref' only applies " +
-                    "when this tool manages the clone.");
+                throw ServiceSourcesConfigurationException.For(
+                    $"Service '{new Name(serviceName)}': 'local.ref' cannot be combined with 'local.path' — 'local.path' points directly at an existing checkout, and 'local.ref' only applies when this tool manages the clone.");
             }
 
             // Anchor a relative `path` override to the AppHost directory (matching Aspire's own
@@ -345,9 +340,8 @@ internal static class LocalGitCheckout
             // error.
             if (!Directory.Exists(overridden))
             {
-                throw new ServiceSourcesConfigurationException(
-                    $"Service '{serviceName}': the 'local.path' override points at '{overridden}', which does " +
-                    "not exist. 'local.path' must name an existing local directory.");
+                throw ServiceSourcesConfigurationException.For(
+                    $"Service '{new Name(serviceName)}': the 'local.path' override points at '{Raw.Escaped(overridden)}', which does not exist. 'local.path' must name an existing local directory.");
             }
 
             // Used as-is: no clone, no checkout, no fetch, ever.
@@ -370,10 +364,8 @@ internal static class LocalGitCheckout
         // from, so this names whatever the clone would have been for and stops.
         if (!HasRepositoryToClone(definition))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"{label}: there is no checkout at '{repoRoot}' and no repository url to clone one "
-                + "from. A checkout can only be created where the catalog names a repository to "
-                + "clone from.");
+            throw ServiceSourcesConfigurationException.For(
+                $"{Raw.Escaped(label)}: there is no checkout at '{Raw.Escaped(repoRoot)}' and no repository url to clone one from. A checkout can only be created where the catalog names a repository to clone from.");
         }
 
         // A clone that loses the race to a concurrent AppHost leaves us using *their*
@@ -447,11 +439,8 @@ internal static class LocalGitCheckout
         var existingOrigin = gitClient.GetOriginUrl(repoRoot);
         if (existingOrigin is not null && !RepositoryUrlsMatch(existingOrigin, definition.Repository.Url))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': checkout at '{repoRoot}' already contains a clone of " +
-                $"'{GitUrl.Redact(existingOrigin)}', which does not match the configured repository " +
-                $"'{GitUrl.Redact(definition.Repository.Url)}'. " +
-                "Remove the checkout directory or fix the configured repository URL.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': checkout at '{Raw.Escaped(repoRoot)}' already contains a clone of '{Raw.Escaped(GitUrl.Redact(existingOrigin))}', which does not match the configured repository '{Raw.Escaped(GitUrl.Redact(definition.Repository.Url))}'. Remove the checkout directory or fix the configured repository URL.");
         }
 
         if (reference is null)
@@ -463,9 +452,8 @@ internal static class LocalGitCheckout
         {
             if (!gitClient.IsRefCheckedOut(repoRoot, reference))
             {
-                throw new ServiceSourcesConfigurationException(
-                    $"Service '{serviceName}': checkout at '{repoRoot}' has uncommitted changes and is not " +
-                    $"on the configured ref '{reference}'. Commit or stash your changes, then re-run.");
+                throw ServiceSourcesConfigurationException.For(
+                    $"Service '{new Name(serviceName)}': checkout at '{Raw.Escaped(repoRoot)}' has uncommitted changes and is not on the configured ref '{new Name(reference)}'. Commit or stash your changes, then re-run.");
             }
         }
         else if (!gitClient.IsRefCheckedOut(repoRoot, reference))
@@ -524,11 +512,8 @@ internal static class LocalGitCheckout
         // concurrent-clone collision below, this state is the user's own and cannot appear midway.
         if (File.Exists(Path.Combine(repoRoot, ".git")))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"{label}: the checkout at '{repoRoot}' has a '.git' file rather than a '.git' " +
-                "directory, so it is a linked worktree or a clone made with --separate-git-dir rather than a " +
-                "checkout this tool cloned. Move it aside and re-run to have it cloned fresh, or point the " +
-                "service at it with the 'local.path' override in servicesources.local.json.");
+            throw ServiceSourcesConfigurationException.For(
+                $"{Raw.Escaped(label)}: the checkout at '{Raw.Escaped(repoRoot)}' has a '.git' file rather than a '.git' directory, so it is a linked worktree or a clone made with --separate-git-dir rather than a checkout this tool cloned. Move it aside and re-run to have it cloned fresh, or point the service at it with the 'local.path' override in servicesources.local.json.");
         }
 
         // Unique per attempt: two builders resolving the same checkout concurrently (xUnit does
@@ -544,17 +529,16 @@ internal static class LocalGitCheckout
             }
             catch (GitAuthenticationFailedException ex)
             {
-                throw new ServiceSourcesConfigurationException(
-                    AuthFailureMessage(
-                        $"{label}: failed to clone repository '{displayRepository}' " +
-                        $"into '{repoRoot}'",
-                        ex.NoCredentialsResolved),
+                var failureDesc = $"{label}: failed to clone repository '{displayRepository}' into '{repoRoot}'";
+                var msg = AuthFailureMessage(failureDesc, ex.NoCredentialsResolved);
+                throw ServiceSourcesConfigurationException.For(
+                    $"{Raw.Escaped(msg)}",
                     ex);
             }
             catch (Exception ex)
             {
-                throw new ServiceSourcesConfigurationException(
-                    $"{label}: failed to clone repository '{displayRepository}' into '{repoRoot}'.", ex);
+                throw ServiceSourcesConfigurationException.For(
+                    $"{Raw.Escaped(label)}: failed to clone repository '{Raw.Escaped(displayRepository)}' into '{Raw.Escaped(repoRoot)}'.", ex);
             }
 
             // What happens to the destination is decided here, after the clone, rather than
@@ -590,9 +574,8 @@ internal static class LocalGitCheckout
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    throw new ServiceSourcesConfigurationException(
-                        $"{label}: the checkout at '{repoRoot}' is not a git repository — it is left over " +
-                        "from an interrupted clone — and could not be removed automatically. Delete it and re-run.", ex);
+                    throw ServiceSourcesConfigurationException.For(
+                        $"{Raw.Escaped(label)}: the checkout at '{Raw.Escaped(repoRoot)}' is not a git repository — it is left over from an interrupted clone — and could not be removed automatically. Delete it and re-run.", ex);
                 }
             }
 
@@ -613,10 +596,8 @@ internal static class LocalGitCheckout
                 // concurrent AppHost that got as far as creating it). Reported as a named
                 // configuration failure because the raw rename error — "Cannot create a file when
                 // that file already exists" — says neither which service failed nor what to do.
-                throw new ServiceSourcesConfigurationException(
-                    $"{label}: the freshly cloned checkout could not be moved into '{repoRoot}' — " +
-                    "something else created that path while the clone was running. Re-run; if it persists, delete " +
-                    "the directory and re-run.", ex);
+                throw ServiceSourcesConfigurationException.For(
+                    $"{Raw.Escaped(label)}: the freshly cloned checkout could not be moved into '{Raw.Escaped(repoRoot)}' — something else created that path while the clone was running. Re-run; if it persists, delete the directory and re-run.", ex);
             }
 
             return false;
@@ -710,8 +691,8 @@ internal static class LocalGitCheckout
         }
         catch (Exception ex)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"{label}: failed to checkout ref '{reference}' of repository '{displayRepository}' at '{repoRoot}'.", ex);
+            throw ServiceSourcesConfigurationException.For(
+                $"{Raw.Escaped(label)}: failed to checkout ref '{new Name(reference)}' of repository '{Raw.Escaped(displayRepository)}' at '{Raw.Escaped(repoRoot)}'.", ex);
         }
 
         try
@@ -720,18 +701,16 @@ internal static class LocalGitCheckout
         }
         catch (GitAuthenticationFailedException ex)
         {
-            throw new ServiceSourcesConfigurationException(
-                AuthFailureMessage(
-                    $"{label}: failed to fetch repository '{displayRepository}' at " +
-                    $"'{repoRoot}' while resolving ref '{reference}'",
-                    ex.NoCredentialsResolved),
+            var failureDesc = $"{label}: failed to fetch repository '{displayRepository}' at '{repoRoot}' while resolving ref '{reference}'";
+            var msg = AuthFailureMessage(failureDesc, ex.NoCredentialsResolved);
+            throw ServiceSourcesConfigurationException.For(
+                $"{Raw.Escaped(msg)}",
                 ex);
         }
         catch (Exception ex)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"{label}: failed to fetch repository '{displayRepository}' at '{repoRoot}' " +
-                $"while resolving ref '{reference}'.", ex);
+            throw ServiceSourcesConfigurationException.For(
+                $"{Raw.Escaped(label)}: failed to fetch repository '{Raw.Escaped(displayRepository)}' at '{Raw.Escaped(repoRoot)}' while resolving ref '{new Name(reference)}'.", ex);
         }
 
         try
@@ -740,8 +719,8 @@ internal static class LocalGitCheckout
         }
         catch (Exception ex)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"{label}: failed to checkout ref '{reference}' of repository '{displayRepository}' at '{repoRoot}'.", ex);
+            throw ServiceSourcesConfigurationException.For(
+                $"{Raw.Escaped(label)}: failed to checkout ref '{new Name(reference)}' of repository '{Raw.Escaped(displayRepository)}' at '{Raw.Escaped(repoRoot)}'.", ex);
         }
     }
 

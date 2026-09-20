@@ -145,7 +145,7 @@ public class LocalGitCheckoutTests
         var exception = Assert.Throws<ServiceSourcesConfigurationException>(
             () => LocalGitCheckout.ManagedRepoRoot(UnusedAppHostDirectory, serviceName));
 
-        Assert.Contains(serviceName, exception.Message, StringComparison.Ordinal);
+        Assert.Contains("cannot be given a managed checkout directory", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

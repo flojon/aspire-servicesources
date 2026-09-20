@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.Git;
 
@@ -97,7 +98,7 @@ internal sealed partial class GitCliClient(
     {
         if (Unavailability.Value is { } reason)
         {
-            throw new ServiceSourcesConfigurationException(reason);
+            throw ServiceSourcesConfigurationException.For($"{Raw.Escaped(reason)}");
         }
     }
 
@@ -166,8 +167,8 @@ internal sealed partial class GitCliClient(
             }
         }
 
-        throw new ServiceSourcesConfigurationException(
-            $"Ref '{reference}' was not found in repository at '{repositoryPath}'.");
+        throw ServiceSourcesConfigurationException.For(
+            $"Ref '{new Name(reference)}' was not found in repository at '{Raw.Escaped(repositoryPath)}'.");
     }
 
     public void Fetch(string repositoryPath)
