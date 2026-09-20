@@ -12,9 +12,6 @@
          that. At its default warning severity a runtime string would be a one-token bypass of the
          message seam in any build without -warnaserror, including the IDE. -->
     <WarningsAsErrors>$(WarningsAsErrors);CA1857</WarningsAsErrors>
-    <!-- The ban is a worklist, not a gate, until every throw is migrated: CI builds -warnaserror,
-         which would otherwise make each unmigrated site fail the build. -->
-    <WarningsNotAsErrors>$(WarningsNotAsErrors);RS0030</WarningsNotAsErrors>
   </PropertyGroup>
 
   <!-- Shared package metadata, MinVer and the LICENSE/README pack items live in
