@@ -269,15 +269,17 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
             return;
         }
 
-        var (what, remedy) = JavaScriptAppTypes.RunsAScriptFile(options.AppType)
-            ? ($"runScript '{options.RunScript}' names a package.json script",
-                "Remove it to run 'scriptPath' directly, or point 'appDirectory' at the directory holding the app's package.json.")
-            : ($"appType '{options.AppType}' runs a package.json script",
-                "Point 'appDirectory' at the directory holding the app's package.json.");
+        var what = JavaScriptAppTypes.RunsAScriptFile(options.AppType)
+            ? Raw.Compose($"runScript '{new Name(options.RunScript)}' names a package.json script")
+            : Raw.Compose($"appType '{new Name(options.AppType)}' runs a package.json script");
+
+        var remedy = JavaScriptAppTypes.RunsAScriptFile(options.AppType)
+            ? Raw.Literal("Remove it to run 'scriptPath' directly, or point 'appDirectory' at the directory holding the app's package.json.")
+            : Raw.Literal("Point 'appDirectory' at the directory holding the app's package.json.");
 
         throw ServiceSourcesConfigurationException.For(
-            $"Service '{new Name(serviceName)}': javascript {new Name(what)}, but no 'package.json' was found in " +
-            $"'{new Name(appDirectory)}'. {Raw.Escaped(remedy)}");
+            $"Service '{new Name(serviceName)}': javascript {what}, but no 'package.json' was found in " +
+            $"'{new Name(appDirectory)}'. {remedy}");
     }
 
     /// <summary>
@@ -385,7 +387,7 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
         else if (scriptPath is not null)
         {
             throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': javascript 'scriptPath' only applies to appType '{new Name(JavaScriptAppTypes.Node)}' or '{new Name(JavaScriptAppTypes.Bun)}', but this service's appType is '{new Name(appType)}', which runs a package.json script — use 'runScript' instead.");
+                $"Service '{new Name(serviceName)}': javascript 'scriptPath' only applies to appType '{Raw.Literal(JavaScriptAppTypes.Node)}' or '{Raw.Literal(JavaScriptAppTypes.Bun)}', but this service's appType is '{new Name(appType)}', which runs a package.json script — use 'runScript' instead.");
         }
 
         if (JavaScriptAppTypes.BindsItsOwnPort(appType) && portEnv is not null)
@@ -422,7 +424,7 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
         if (!allowed.Contains(normalized))
         {
             throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': javascript {new Name(field)} '{new Name(value)}' is not supported. Use one of: {Raw.Escaped(string.Join(", ", allowed))}.");
+                $"Service '{new Name(serviceName)}': javascript {new Name(field)} '{new Name(value)}' is not supported. Use one of: {Raw.Join(", ", allowed.Select(Raw.Escaped).ToList())}.");
         }
 
         return normalized;
