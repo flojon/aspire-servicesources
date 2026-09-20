@@ -59,7 +59,8 @@ internal sealed class DirectBackingServiceSource : IBackingServiceSource
                 + $"{configKeyAsEnvironmentVariable}.");
         }
 
-        var template = ConnectionStringTemplate.Parse(config.Direct.ConnectionString, name, configKey);
+        var template = ConnectionStringTemplate.Parse(
+            config.Direct.ConnectionString, name, configKey, configKeyAsEnvironmentVariable);
 
         // Parsed before this check rather than after, so that a malformed placeholder is reported as
         // malformed. Telling a developer who wrote `${secret:orders-creds}` that secrets are
@@ -83,13 +84,13 @@ internal sealed class DirectBackingServiceSource : IBackingServiceSource
                 // written as a placeholder and the paragraph would answer a question nobody asked.
                 case ConnectionStringTemplate.Port port:
                     throw ServiceSourcesConfigurationException.For(
-                        $"Backing service '{new Name(name)}': the connection string carries '{new Name(port.AsWritten)}', but source "
+                        $"Backing service '{new Name(name)}': the connection string carries '{Raw.Escaped(port.AsWritten)}', but source "
                         + $"'direct' forwards nothing, so there is no local port to substitute. Write the port the "
                         + $"backing service already listens on. The key is '{configKey}'.");
 
                 case ConnectionStringTemplate.Secret secret:
                     throw ServiceSourcesConfigurationException.For(
-                        $"Backing service '{new Name(name)}': the connection string carries '{new Name(secret.AsWritten)}', and source "
+                        $"Backing service '{new Name(name)}': the connection string carries '{Raw.Escaped(secret.AsWritten)}', and source "
                         + $"'direct' has no cluster to read a secret from — it carries a connection string and "
                         + $"nothing else, with no 'context' or 'namespace' to resolve one against. Source "
                         + $"'kubernetes' reads these. Under 'direct', put the value in the connection string, or set "

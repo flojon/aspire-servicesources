@@ -55,7 +55,11 @@ internal sealed partial class KubernetesBackingServiceSource(
         // should not burn an allocation on its way to saying so.
         var requested = RequireForwardablePorts(name, kubernetes.Port!);
 
-        var template = ConnectionStringTemplate.Parse(connectionString, name, ConfigKey(name, Raw.Literal("ConnectionString")));
+        var template = ConnectionStringTemplate.Parse(
+            connectionString,
+            name,
+            ConfigKey(name, Raw.Literal("ConnectionString")),
+            Environmentally(name, Raw.Literal("ConnectionString")));
 
         // Decided from the template's shape, which is local configuration and therefore known now,
         // even though the value it stands for is not fetched until start time. See
@@ -378,7 +382,7 @@ internal sealed partial class KubernetesBackingServiceSource(
     private static Raw UnnamedPortAgainstABlock(
         ConnectionStringTemplate.Port port, IReadOnlyList<string> names) =>
         Raw.Compose(
-            $"the connection string carries '{new Name(port.AsWritten)}', which stands for the one "
+            $"the connection string carries '{Raw.Escaped(port.AsWritten)}', which stands for the one "
             + $"forwarded port, but this backing service forwards "
             + $"{(names.Count == 1 ? Raw.Literal("its port") : Raw.Literal("several ports"))} "
             + $"by name: {Quoted(names)}. Name the one this addresses, as {Spelled(names[0])}.");
@@ -388,7 +392,7 @@ internal sealed partial class KubernetesBackingServiceSource(
     /// </summary>
     private static Raw NamedPortAgainstASinglePort(string name, ConnectionStringTemplate.Port port) =>
         Raw.Compose(
-            $"the connection string carries '{new Name(port.AsWritten)}', which names one of several "
+            $"the connection string carries '{Raw.Escaped(port.AsWritten)}', which names one of several "
             + $"forwarded ports, but this backing service forwards a single unnamed port — the one written at "
             + $"'{ConfigKey(name, Raw.Literal("Port"))}'. Write '${{port}}' for it. To forward several instead, give each a name: "
             + $"{Raw.Literal("\"port\": { \"amqp\": 5672, \"management\": 15672 }.")}");
@@ -436,7 +440,7 @@ internal sealed partial class KubernetesBackingServiceSource(
             : Raw.Literal("");
 
         return Raw.Compose(
-            $"the connection string carries '{new Name(port.AsWritten)}', which names a port this "
+            $"the connection string carries '{Raw.Escaped(port.AsWritten)}', which names a port this "
             + $"backing service does not forward.{suggestion} It forwards {Quoted(names)}.{caveat}");
     }
 
@@ -466,11 +470,13 @@ internal sealed partial class KubernetesBackingServiceSource(
     /// A connection string is neither short nor developer-chosen the way a name is: it is arbitrary
     /// text a real system produced, and an apostrophe in it — an ODBC value quoted with one, a
     /// password, a name like <c>O'Brien</c> — is not a corner case. Left unescaped, it would close
-    /// this message's own quoting. <see cref="Name"/>'s own apostrophe escaping (<c>'</c>)
-    /// closes that the same way it does for every other echoed value in this package, which is why
-    /// this no longer carries its own doubling convention.
+    /// this message's own quoting. <see cref="Raw.Escaped"/> closes that the same way it does for
+    /// every other echoed value in this package, which is why this no longer carries its own
+    /// doubling convention — and unlike <see cref="Name"/>, it does not cap the length: a real
+    /// connection string routinely runs past the 64 characters a developer-chosen name is bounded
+    /// at, and truncating it here would silently drop diagnostic content.
     /// </remarks>
-    private static Raw QuotedConnectionString(string shown) => Raw.Compose($"'{new Name(shown)}'");
+    private static Raw QuotedConnectionString(string shown) => Raw.Compose($"'{Raw.Escaped(shown)}'");
 
     /// <summary>
     /// Whether the whole connection string is one <c>${secret:...}</c> placeholder and nothing else.
@@ -560,7 +566,7 @@ internal sealed partial class KubernetesBackingServiceSource(
             if (!existing.Annotations.OfType<SecretParameterOrigin>().Contains(origin))
             {
                 throw ServiceSourcesConfigurationException.For(
-                    $"Backing service '{Named(name)}': the placeholder '{new Name(secret.AsWritten)}' derives the parameter name "
+                    $"Backing service '{Named(name)}': the placeholder '{Raw.Escaped(secret.AsWritten)}' derives the parameter name "
                     + $"'{Raw.Escaped(parameterName)}', which another resource in this AppHost already uses for something else. "
                     + $"The name is the backing service, the secret and the key joined by hyphens, so two different "
                     + $"placeholders can spell it the same way. Rename the backing service, or use a secret or key "
@@ -588,7 +594,7 @@ internal sealed partial class KubernetesBackingServiceSource(
             // now that the characters are folded — which is why the remedy named is a shorter name
             // and nothing about spelling.
             throw ServiceSourcesConfigurationException.For(
-                $"Backing service '{Named(name)}': the placeholder '{new Name(secret.AsWritten)}' becomes a parameter named "
+                $"Backing service '{Named(name)}': the placeholder '{Raw.Escaped(secret.AsWritten)}' becomes a parameter named "
                 + $"'{Raw.Escaped(parameterName)}', after the backing service, the secret and the key, and Aspire rejected that "
                 + $"name — \"{Raw.Escaped(WithoutParameterSuffix(ex.Message))}\" It is {parameterName.Length} characters, built "
                 + $"from the backing service ('{Named(name)}', {name.Length}), the secret ('{new Name(secret.Name)}', "
