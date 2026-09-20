@@ -78,10 +78,10 @@ public class MigratedSiteEscapingTests
     // Aspire.Hosting.ServiceSources.Tests.Prepare namespace, so the simple name `Prepare` binds
     // there and lookup stops — `Prepare.PreparePlan` is CS0234, not the production type.
     private static string ServiceLabel(string name) =>
-        Aspire.Hosting.ServiceSources.Prepare.PreparePlan.ServiceLabel(name);
+        Aspire.Hosting.ServiceSources.Prepare.PreparePlan.ServiceLabel(name).ToString();
 
     private static string RepositoryLabel(string name) =>
-        Aspire.Hosting.ServiceSources.Prepare.PreparePlan.RepositoryLabel(name);
+        Aspire.Hosting.ServiceSources.Prepare.PreparePlan.RepositoryLabel(name).ToString();
 
     [Fact]
     public void ServiceLabel_EscapesTheName() =>

@@ -1,4 +1,5 @@
 using Aspire.Hosting.ServiceSources.Git;
+using Aspire.Hosting.ServiceSources.Messages;
 using Aspire.Hosting.ServiceSources.Prepare;
 using Xunit;
 
@@ -128,7 +129,7 @@ public class CheckoutPreparationTests
         bool managedCheckout = true,
         CancellationToken cancellationToken = default,
         string? serviceName = null,
-        string? label = null,
+        Raw? label = null,
         string? checkoutName = null) =>
         CheckoutPreparation.Run(
             serviceName ?? ServiceName, label ?? PreparePlan.ServiceLabel(ServiceName),

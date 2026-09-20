@@ -28,7 +28,7 @@ public class PreparePlanTests
         bool windows = false,
         string? label = null) =>
         PreparePlan.For(
-            ServiceName, label ?? PreparePlan.ServiceLabel(ServiceName), catalog, developer, managedCheckout, windows);
+            ServiceName, label ?? PreparePlan.ServiceLabel(ServiceName).ToString(), catalog, developer, managedCheckout, windows);
 
     private static ServiceSourcesConfigurationException Rejects(
         PrepareMetadata? catalog = null,
@@ -101,7 +101,7 @@ public class PreparePlanTests
     {
         var ex = Rejects(
             Catalog(["./prepare.sh"], mode: "sometimes"),
-            label: PreparePlan.RepositoryLabel("monorepo"));
+            label: PreparePlan.RepositoryLabel("monorepo").ToString());
 
         Assert.Contains("Repository 'monorepo'", ex.Message);
         Assert.DoesNotContain($"'{ServiceName}'", ex.Message);

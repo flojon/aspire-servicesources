@@ -374,7 +374,7 @@ public class ServiceDefinitionBuilderTests
             .Build();
 
         var plan = PreparePlan.For(
-            "catalog", PreparePlan.ServiceLabel("catalog"), definition.Repository.Prepare, developer: null,
+            "catalog", PreparePlan.ServiceLabel("catalog").ToString(), definition.Repository.Prepare, developer: null,
             managedCheckout: true, windows: false);
 
         Assert.NotNull(plan.Step);

@@ -55,7 +55,7 @@ internal static class LocalGitCheckout
             throw ServiceSourcesConfigurationException.For(
                 $"'{new Name(checkoutName)}' cannot be given a managed checkout directory: it is the name of the " +
                 $"directory its checkout is cloned into, so it has to be a single directory name — " +
-                $"{Raw.Escaped(ContainedNameRuleAndRemedy)}");
+                $"{Raw.Literal(ContainedNameRuleAndRemedy)}");
         }
 
         return Path.Combine(ToolDirectory.PathIn(appHostDirectory), "checkouts", checkoutName);
@@ -308,16 +308,13 @@ internal static class LocalGitCheckout
         if (grouped && config.Local.Ref is not null)
         {
             throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': 'local.ref' cannot be set — this service is grouped into the shared " +
-                $"repository '{new Name(definition.Repository.CheckoutName)}', whose ref applies to every member " +
-                $"alike rather than to any one of them. Set " +
-                $"'{Raw.Escaped($"{DeveloperConfiguration.RepositoriesKey}:{new Name(definition.Repository.CheckoutName)}:ref")}' instead.");
+                $"Service '{new Name(serviceName)}': 'local.ref' cannot be set — this service is grouped into the shared repository '{new Name(definition.Repository.CheckoutName)}', whose ref applies to every member alike rather than to any one of them. Set '{Raw.Literal(DeveloperConfiguration.RepositoriesKey, default)}:{new Name(definition.Repository.CheckoutName)}:ref' instead.");
         }
 
         if (grouped && repositoryConfig?.Path is not null)
         {
             throw ServiceSourcesConfigurationException.For(
-                $"Repository '{new Name(definition.Repository.CheckoutName)}': '{Raw.Escaped($"{DeveloperConfiguration.RepositoriesKey}:{new Name(definition.Repository.CheckoutName)}:path")}' is reserved and does not redirect the group's checkout — that is not implemented yet. Redirect one member service's own checkout with its 'local.path' override in {Raw.Literal(DeveloperConfiguration.FileName)} instead.");
+                $"Repository '{new Name(definition.Repository.CheckoutName)}': '{Raw.Literal(DeveloperConfiguration.RepositoriesKey, default)}:{new Name(definition.Repository.CheckoutName)}:path' is reserved and does not redirect the group's checkout — that is not implemented yet. Redirect one member service's own checkout with its 'local.path' override in {Raw.Literal(DeveloperConfiguration.FileName)} instead.");
         }
 
         if (config.Local.Path is not null)
@@ -365,7 +362,7 @@ internal static class LocalGitCheckout
         if (!HasRepositoryToClone(definition))
         {
             throw ServiceSourcesConfigurationException.For(
-                $"{Raw.Escaped(label)}: there is no checkout at '{Raw.Escaped(repoRoot)}' and no repository url to clone one from. A checkout can only be created where the catalog names a repository to clone from.");
+                $"{label}: there is no checkout at '{Raw.Escaped(repoRoot)}' and no repository url to clone one from. A checkout can only be created where the catalog names a repository to clone from.");
         }
 
         // A clone that loses the race to a concurrent AppHost leaves us using *their*
@@ -490,7 +487,7 @@ internal static class LocalGitCheckout
     /// </para>
     /// </remarks>
     private static bool CloneIntoPlace(
-        string label,
+        Raw label,
         ServiceDefinition definition,
         string checkoutsRoot,
         string repoRoot,
@@ -513,7 +510,7 @@ internal static class LocalGitCheckout
         if (File.Exists(Path.Combine(repoRoot, ".git")))
         {
             throw ServiceSourcesConfigurationException.For(
-                $"{Raw.Escaped(label)}: the checkout at '{Raw.Escaped(repoRoot)}' has a '.git' file rather than a '.git' directory, so it is a linked worktree or a clone made with --separate-git-dir rather than a checkout this tool cloned. Move it aside and re-run to have it cloned fresh, or point the service at it with the 'local.path' override in servicesources.local.json.");
+                $"{label}: the checkout at '{Raw.Escaped(repoRoot)}' has a '.git' file rather than a '.git' directory, so it is a linked worktree or a clone made with --separate-git-dir rather than a checkout this tool cloned. Move it aside and re-run to have it cloned fresh, or point the service at it with the 'local.path' override in servicesources.local.json.");
         }
 
         // Unique per attempt: two builders resolving the same checkout concurrently (xUnit does
@@ -529,16 +526,16 @@ internal static class LocalGitCheckout
             }
             catch (GitAuthenticationFailedException ex)
             {
-                var failureDesc = $"{label}: failed to clone repository '{displayRepository}' into '{repoRoot}'";
+                var failureDesc = Raw.Join("", [label, Raw.Literal(": failed to clone repository '", default), Raw.Escaped(displayRepository), Raw.Literal("' into '", default), Raw.Escaped(repoRoot), Raw.Literal("'", default)]);
                 var msg = AuthFailureMessage(failureDesc, ex.NoCredentialsResolved);
                 throw ServiceSourcesConfigurationException.For(
-                    $"{Raw.Escaped(msg)}",
+                    $"{msg}",
                     ex);
             }
             catch (Exception ex)
             {
                 throw ServiceSourcesConfigurationException.For(
-                    $"{Raw.Escaped(label)}: failed to clone repository '{Raw.Escaped(displayRepository)}' into '{Raw.Escaped(repoRoot)}'.", ex);
+                    $"{label}: failed to clone repository '{Raw.Escaped(displayRepository)}' into '{Raw.Escaped(repoRoot)}'.", ex);
             }
 
             // What happens to the destination is decided here, after the clone, rather than
@@ -575,7 +572,7 @@ internal static class LocalGitCheckout
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
                     throw ServiceSourcesConfigurationException.For(
-                        $"{Raw.Escaped(label)}: the checkout at '{Raw.Escaped(repoRoot)}' is not a git repository — it is left over from an interrupted clone — and could not be removed automatically. Delete it and re-run.", ex);
+                        $"{label}: the checkout at '{Raw.Escaped(repoRoot)}' is not a git repository — it is left over from an interrupted clone — and could not be removed automatically. Delete it and re-run.", ex);
                 }
             }
 
@@ -597,7 +594,7 @@ internal static class LocalGitCheckout
                 // configuration failure because the raw rename error — "Cannot create a file when
                 // that file already exists" — says neither which service failed nor what to do.
                 throw ServiceSourcesConfigurationException.For(
-                    $"{Raw.Escaped(label)}: the freshly cloned checkout could not be moved into '{Raw.Escaped(repoRoot)}' — something else created that path while the clone was running. Re-run; if it persists, delete the directory and re-run.", ex);
+                    $"{label}: the freshly cloned checkout could not be moved into '{Raw.Escaped(repoRoot)}' — something else created that path while the clone was running. Re-run; if it persists, delete the directory and re-run.", ex);
             }
 
             return false;
@@ -675,7 +672,7 @@ internal static class LocalGitCheckout
     }
 
     private static void CheckoutWithFetchRetry(
-        string label, ServiceDefinition definition, string repoRoot, string reference, IGitClient gitClient)
+        Raw label, ServiceDefinition definition, string repoRoot, string reference, IGitClient gitClient)
     {
         // See PrepareRepoRoot: the real URL goes to git, the redacted one goes into messages.
         var displayRepository = GitUrl.Redact(definition.Repository.Url);
@@ -692,7 +689,7 @@ internal static class LocalGitCheckout
         catch (Exception ex)
         {
             throw ServiceSourcesConfigurationException.For(
-                $"{Raw.Escaped(label)}: failed to checkout ref '{new Name(reference)}' of repository '{Raw.Escaped(displayRepository)}' at '{Raw.Escaped(repoRoot)}'.", ex);
+                $"{label}: failed to checkout ref '{new Name(reference)}' of repository '{Raw.Escaped(displayRepository)}' at '{Raw.Escaped(repoRoot)}'.", ex);
         }
 
         try
@@ -701,16 +698,16 @@ internal static class LocalGitCheckout
         }
         catch (GitAuthenticationFailedException ex)
         {
-            var failureDesc = $"{label}: failed to fetch repository '{displayRepository}' at '{repoRoot}' while resolving ref '{reference}'";
+            var failureDesc = Raw.Join("", [label, Raw.Literal(": failed to fetch repository '", default), Raw.Escaped(displayRepository), Raw.Literal("' at '", default), Raw.Escaped(repoRoot), Raw.Literal("' while resolving ref '", default), Raw.Escaped(reference), Raw.Literal("'", default)]);
             var msg = AuthFailureMessage(failureDesc, ex.NoCredentialsResolved);
             throw ServiceSourcesConfigurationException.For(
-                $"{Raw.Escaped(msg)}",
+                $"{msg}",
                 ex);
         }
         catch (Exception ex)
         {
             throw ServiceSourcesConfigurationException.For(
-                $"{Raw.Escaped(label)}: failed to fetch repository '{Raw.Escaped(displayRepository)}' at '{Raw.Escaped(repoRoot)}' while resolving ref '{new Name(reference)}'.", ex);
+                $"{label}: failed to fetch repository '{Raw.Escaped(displayRepository)}' at '{Raw.Escaped(repoRoot)}' while resolving ref '{new Name(reference)}'.", ex);
         }
 
         try
@@ -720,7 +717,7 @@ internal static class LocalGitCheckout
         catch (Exception ex)
         {
             throw ServiceSourcesConfigurationException.For(
-                $"{Raw.Escaped(label)}: failed to checkout ref '{new Name(reference)}' of repository '{Raw.Escaped(displayRepository)}' at '{Raw.Escaped(repoRoot)}'.", ex);
+                $"{label}: failed to checkout ref '{new Name(reference)}' of repository '{Raw.Escaped(displayRepository)}' at '{Raw.Escaped(repoRoot)}'.", ex);
         }
     }
 
@@ -740,14 +737,15 @@ internal static class LocalGitCheckout
     /// <see cref="GitCliClient.ResolvedNoCredentials"/>), so it can state what the ladder found
     /// without having to hedge about whether the host was ever contacted.
     /// </remarks>
-    private static string AuthFailureMessage(string failureDescription, bool noCredentialsResolved) =>
-        noCredentialsResolved
+    private static Raw AuthFailureMessage(Raw failureDescription, bool noCredentialsResolved)
+    {
+        var suffix = noCredentialsResolved
             // Nothing was ever offered, so nothing was refused. Saying "authentication failed" here
             // sends the developer looking for a rejected or expired token they never had, when the
             // fix is to make a credential resolvable in the first place — and, since the helper is
             // consulted in whatever environment the AppHost runs in, it is worth naming that the
             // helper is where the gap is rather than the credential's contents.
-            ? $"{failureDescription} — no git credentials were resolved for this host, so the request " +
+            ? Raw.Literal(" — no git credentials were resolved for this host, so the request " +
               "carried only the machine's integrated credential, which a token-authenticated host " +
               "cannot use. `git credential fill` returned nothing for this host: either " +
               "SERVICESOURCES_GIT_TOKEN is unset or empty, or SERVICESOURCES_GIT_HOST doesn't name " +
@@ -755,11 +753,13 @@ internal static class LocalGitCheckout
               "one, port). Configure a git credential helper (`git credential fill` must resolve " +
               "credentials for this host in the environment the AppHost runs in, which is not " +
               "necessarily your shell) or set the SERVICESOURCES_GIT_USERNAME/" +
-              "SERVICESOURCES_GIT_TOKEN/SERVICESOURCES_GIT_HOST environment variables."
-            : $"{failureDescription} — authentication failed, or the repository is not visible to the " +
+              "SERVICESOURCES_GIT_TOKEN/SERVICESOURCES_GIT_HOST environment variables.", default)
+            : Raw.Literal(" — authentication failed, or the repository is not visible to the " +
               "credentials in use. Configure credentials via a git credential helper (`git credential " +
               "fill` must resolve them for this host) or the SERVICESOURCES_GIT_USERNAME/" +
-              "SERVICESOURCES_GIT_TOKEN/SERVICESOURCES_GIT_HOST environment variables.";
+              "SERVICESOURCES_GIT_TOKEN/SERVICESOURCES_GIT_HOST environment variables.", default);
+        return Raw.Join("", [failureDescription, suffix]);
+    }
 
     /// <summary>
     /// Creates the tool-owned <c>.servicesources</c> directory a checkout is about to land under,

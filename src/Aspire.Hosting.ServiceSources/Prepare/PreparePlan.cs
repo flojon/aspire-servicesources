@@ -119,16 +119,16 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
     }
 
     /// <summary>How a message names an ungrouped service — the common case, unchanged from before #291.</summary>
-    internal static string ServiceLabel(string serviceName) =>
-        Raw.Compose($"Service '{new Name(serviceName)}'").ToString();
+    internal static Raw ServiceLabel(string serviceName) =>
+        Raw.Compose($"Service '{new Name(serviceName)}'");
 
     /// <summary>
     /// How a message names the repository a grouped service's <c>prepare</c> block now lives on,
     /// keyed by <see cref="Config.Catalog.RepositoryDefinition.CheckoutName"/> — the repository's own
     /// name, not any one member service's.
     /// </summary>
-    internal static string RepositoryLabel(string checkoutName) =>
-        Raw.Compose($"Repository '{new Name(checkoutName)}'").ToString();
+    internal static Raw RepositoryLabel(string checkoutName) =>
+        Raw.Compose($"Repository '{new Name(checkoutName)}'");
 
     private static PreparePlan ForManagedCheckout(
         string label,

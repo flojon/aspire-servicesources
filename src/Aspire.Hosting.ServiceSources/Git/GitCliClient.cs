@@ -98,7 +98,7 @@ internal sealed partial class GitCliClient(
     {
         if (Unavailability.Value is { } reason)
         {
-            throw ServiceSourcesConfigurationException.For($"{Raw.Escaped(reason)}");
+            throw ServiceSourcesConfigurationException.For($"{Raw.Literal(reason)}");
         }
     }
 

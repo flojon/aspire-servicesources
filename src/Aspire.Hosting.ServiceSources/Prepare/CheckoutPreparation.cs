@@ -1,4 +1,5 @@
 using Aspire.Hosting.ServiceSources.Git;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.Prepare;
 
@@ -102,7 +103,7 @@ internal static class CheckoutPreparation
     /// </exception>
     public static void Run(
         string serviceName,
-        string label,
+        Raw label,
         string checkoutName,
         PrepareStep step,
         string repoRoot,
@@ -129,7 +130,7 @@ internal static class CheckoutPreparation
         sink.Report($"{Tag(checkoutName)} {reason} Running: {RedactedDescribe(step)}");
 
         var tail = new Queue<string>(OutputTailLines);
-        var exitCode = Launch(label, checkoutName, step, repoRoot, runner, sink, tail, cancellationToken);
+        var exitCode = Launch(label.ToString(), checkoutName, step, repoRoot, runner, sink, tail, cancellationToken);
 
         if (exitCode != 0)
         {
@@ -144,7 +145,7 @@ internal static class CheckoutPreparation
                 quoted = [.. tail];
             }
 
-            throw new ServiceSourcesConfigurationException(FailedMessage(label, step, exitCode, quoted));
+            throw new ServiceSourcesConfigurationException(FailedMessage(label.ToString(), step, exitCode, quoted));
         }
 
         // `always` records nothing: it is the mode whose command decides its own work, so a marker
