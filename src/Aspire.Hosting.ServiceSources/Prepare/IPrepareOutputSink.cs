@@ -20,6 +20,12 @@ namespace Aspire.Hosting.ServiceSources.Prepare;
 /// </remarks>
 internal interface IPrepareOutputSink
 {
+    /// <param name="line">
+    /// Already safe to print verbatim: any caller-controlled name a caller composed into it —
+    /// <c>CheckoutPreparation.Tag</c>'s checkout name — went through <c>Name</c>/<c>Raw</c> before
+    /// this was called, the same discipline the <see cref="Microsoft.Extensions.Logging.ILogger"/>
+    /// and exception-message sinks apply.
+    /// </param>
     void Report(string line);
 }
 

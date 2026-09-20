@@ -326,7 +326,7 @@ internal static class CheckoutPreparation
     /// The prefix every line about this step carries, so a step's output is attributable when
     /// several checkouts report at once.
     /// </summary>
-    private static string Tag(string checkoutName) => $"[prepare {checkoutName}]";
+    private static Raw Tag(string checkoutName) => Raw.Compose($"[prepare {new Name(checkoutName)}]");
 
     /// <summary>
     /// <see cref="PrepareStep.Describe"/>, with any URL credentials it echoes removed.

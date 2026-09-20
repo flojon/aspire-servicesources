@@ -270,7 +270,7 @@ public class MigratedSiteEscapingTests
         DeferredCheckout.LaunchProfileEndpointWarning(
             serviceName,
             new LandedLaunchProfile(null, applicationUrls, new Dictionary<string, string>(StringComparer.Ordinal)),
-            new ProjectResource("orders"));
+            new ProjectResource("orders"))?.ToString();
 
     [Theory]
     [InlineData("orders'\nFATAL: started fine", "orders\\u0027\\nFATAL: started fine")]

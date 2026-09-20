@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.ServiceSources.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -142,7 +143,7 @@ internal sealed class BufferingPrepareOutputSink
 
             foreach (var line in lines)
             {
-                logger.LogInformation("{PrepareOutput}", line);
+                ServiceSourcesLog.Information(logger, $"{Raw.Escaped(line)}");
             }
         }
     }

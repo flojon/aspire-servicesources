@@ -191,7 +191,14 @@ internal sealed class LocalCheckoutPrefetch
     /// when the AppHost used every service configured as <c>"local"</c>.
     /// Exposed for tests — the log itself isn't observable in-process.
     /// </summary>
-    public string? UnusedCheckoutsMessage
+    public string? UnusedCheckoutsMessage => UnusedCheckoutsRaw?.ToString();
+
+    /// <summary>
+    /// <see cref="UnusedCheckoutsMessage"/>, composed through the escaping seam so
+    /// <see cref="ReportSpeculativeWork"/> can hand it to <c>ServiceSourcesLog</c> without
+    /// re-escaping an already-finished sentence.
+    /// </summary>
+    private Raw? UnusedCheckoutsRaw
     {
         get
         {
@@ -209,20 +216,25 @@ internal sealed class LocalCheckoutPrefetch
                 return null;
             }
 
+            // Composed per name, not over the joined list: one Name hole would cap every name but
+            // the first.
+            var names = Raw.Join(", ", unused.Select(name => Raw.Compose($"{new Name(name)}")));
+
             // Named by configuration key rather than by file: the entry can equally have arrived
             // from appsettings, user secrets, an environment variable or the command line, and
             // sending a developer to a file that holds nothing — or doesn't exist — leaves them
             // nothing to act on.
-            return $"{unused.Length} {(unused.Length == 1 ? "service is" : "services are")} configured as " +
-                   $"'local' with no checkout yet that this AppHost never adds ({string.Join(", ", unused)}). " +
-                   "Cloning them was paid for anyway: AddService() has to hand back the real resource, so a " +
-                   "'local' entry whose first checkout the AppHost would have to wait for is cloned in parallel " +
-                   "with the others, before the AppHost says which ones it wants. Only the services this AppHost " +
-                   "adds are reconciled to their configured ref. Clear " +
-                   $"'{DeveloperConfiguration.ServicesKey}:<service>:source' for the ones you don't call " +
-                   $"AddService() for — usually their entries in {DeveloperConfiguration.FileName} — to stop " +
-                   "paying for them. builder.UseDeferredCheckout() also stops it: a service whose first checkout " +
-                   "is deferred past startup is cloned only when it is added.";
+            return Raw.Compose(
+                $"{unused.Length} {(unused.Length == 1 ? Raw.Literal("service is") : Raw.Literal("services are"))} "
+                + $"configured as 'local' with no checkout yet that this AppHost never adds ({names}). "
+                + $"Cloning them was paid for anyway: AddService() has to hand back the real resource, so a "
+                + $"'local' entry whose first checkout the AppHost would have to wait for is cloned in parallel "
+                + $"with the others, before the AppHost says which ones it wants. Only the services this AppHost "
+                + $"adds are reconciled to their configured ref. Clear "
+                + $"'{Raw.Literal(DeveloperConfiguration.ServicesKey)}:<service>:source' for the ones you don't call "
+                + $"AddService() for — usually their entries in {Raw.Literal(DeveloperConfiguration.FileName)} — to stop "
+                + $"paying for them. builder.UseDeferredCheckout() also stops it: a service whose first checkout "
+                + $"is deferred past startup is cloned only when it is added.");
         }
     }
 
@@ -236,7 +248,7 @@ internal sealed class LocalCheckoutPrefetch
         UnusedCheckouts()
             .Where(entry => entry.Checkout.IsCompleted && entry.Checkout.Result.Exception is not null)
             .Select(entry => FailedCheckoutMessage(
-                ServicesOnCheckout(entry.CheckoutName), entry.Checkout.Result.Exception!))
+                ServicesOnCheckout(entry.CheckoutName), entry.Checkout.Result.Exception!).ToString())
             .ToArray();
 
     /// <summary>
@@ -308,9 +320,9 @@ internal sealed class LocalCheckoutPrefetch
             return;
         }
 
-        if (UnusedCheckoutsMessage is { } message)
+        if (UnusedCheckoutsRaw is { } message)
         {
-            logger.LogInformation("{ServiceSourcesNotice}", message);
+            ServiceSourcesLog.Information(logger, $"{message}");
         }
 
         foreach (var (checkoutName, checkout) in UnusedCheckouts())
@@ -339,8 +351,8 @@ internal sealed class LocalCheckoutPrefetch
 
         try
         {
-            logger.LogWarning(
-                exception, "{ServiceSourcesNotice}", FailedCheckoutMessage(serviceNames, exception));
+            ServiceSourcesLog.Warning(
+                logger, exception, $"{FailedCheckoutMessage(serviceNames, exception)}");
         }
         catch (ObjectDisposedException)
         {
@@ -355,7 +367,7 @@ internal sealed class LocalCheckoutPrefetch
     /// sharing one repository (criterion 5: a failed shared checkout's notice names every service on
     /// it, not only whichever one happened to start the clone).
     /// </summary>
-    private static string FailedCheckoutMessage(IReadOnlyCollection<string> serviceNames, Exception exception)
+    private static Raw FailedCheckoutMessage(IReadOnlyCollection<string> serviceNames, Exception exception)
     {
         var ordered = serviceNames.OrderBy(name => name, StringComparer.Ordinal).ToArray();
 
@@ -373,7 +385,7 @@ internal sealed class LocalCheckoutPrefetch
             + $"{keys}"
             + $" if you don't use {(plural ? Raw.Literal("them") : Raw.Literal("it"))}, usually the "
             + $"entr{(plural ? Raw.Literal("ies") : Raw.Literal("y"))} in "
-            + $"{Raw.Literal(DeveloperConfiguration.FileName)}, or fix what the failure names.").ToString();
+            + $"{Raw.Literal(DeveloperConfiguration.FileName)}, or fix what the failure names.");
     }
 
     /// <summary>

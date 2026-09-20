@@ -289,9 +289,17 @@ internal sealed class ServiceSourcesWarnings
 
         var logger = services.GetService<ILoggerFactory>()?.CreateLogger("Aspire.Hosting.ServiceSources");
 
+        if (logger is null)
+        {
+            return;
+        }
+
         foreach (var message in messages)
         {
-            logger?.LogWarning("{ServiceSourcesWarning}", message);
+            // messages are already fully-composed, hand-escaped sentences (see RevertReason) rather
+            // than ServiceTextHandler holes, so this uses the pre-escaped-string overload rather than
+            // forcing them back through the seam and re-escaping what is already safe.
+            ServiceSourcesLog.Warning(logger, message);
         }
     }
 
@@ -329,10 +337,11 @@ internal sealed class ServiceSourcesWarnings
     /// </remarks>
     // Not migrated onto the Raw/Name seam like the exception-message sites: every fragment here —
     // reverts, SourceDetail, WhereToGoInstead, SwitchSourceRemedy — is already a fully-composed,
-    // safe sentence (built through Label or hardcoded in this package), carrying its own intentional
-    // quoting. Re-escaping a finished sentence through Raw.Escaped mangles that quoting instead of
-    // protecting anything — RS0030 does not reach this file in any case, since it only bans the
-    // ServiceSourcesConfigurationException string constructor and this method feeds a log warning.
+    // safe sentence (built through Name by hand in EndpointMutationDetector/OutOfBandSourceAdvice),
+    // carrying its own intentional quoting. Re-escaping a finished sentence through Raw.Escaped
+    // mangles that quoting instead of protecting anything — passed to ServiceSourcesLog.Warning's
+    // pre-escaped-string overload for exactly that reason, rather than forced back through
+    // ServiceTextHandler, which has no hole for "already safe, do not touch again".
     private static string RevertReason(
         string serviceName,
         string source,
