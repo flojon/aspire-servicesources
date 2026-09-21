@@ -1,4 +1,5 @@
 using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.ServiceSources.Messages;
 using Aspire.Hosting.ServiceSources.Prepare;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -16,7 +17,7 @@ public class BufferingPrepareOutputSinkTests
     {
         public List<string> Lines { get; } = [];
 
-        public void Report(string line) => Lines.Add(line);
+        public void Report(Raw line) => Lines.Add(line.ToString());
     }
 
     /// <summary>
@@ -76,8 +77,8 @@ public class BufferingPrepareOutputSinkTests
 
         var sink = BufferingPrepareOutputSink.Wrap(builder, "orders", inner);
 
-        sink.Report("first");
-        sink.Report("second");
+        sink.Report(Raw.Literal("first"));
+        sink.Report(Raw.Literal("second"));
 
         // Immediate and unconditional: nothing here waits for BeforeStartEvent, which is the whole
         // point — dotnet run's live terminal output must be exactly what it was before this wrapped
@@ -92,8 +93,8 @@ public class BufferingPrepareOutputSinkTests
         var orders = AddTaggedResource(builder, "orders");
 
         var sink = BufferingPrepareOutputSink.Wrap(builder, "orders", new RecordingSink());
-        sink.Report("[prepare orders] reason. Running: ./prepare.sh");
-        sink.Report("[prepare orders] line 1");
+        sink.Report(Raw.Literal("[prepare orders] reason. Running: ./prepare.sh"));
+        sink.Report(Raw.Literal("[prepare orders] line 1"));
 
         var services = builder.Services.BuildServiceProvider();
         await PublishBeforeStartEventAsync(builder, services);
@@ -116,7 +117,7 @@ public class BufferingPrepareOutputSinkTests
         var written = Enumerable.Range(0, 40).Select(i => $"line {i}").ToArray();
         foreach (var line in written)
         {
-            sink.Report(line);
+            sink.Report(Raw.Escaped(line));
         }
 
         var services = builder.Services.BuildServiceProvider();
@@ -137,7 +138,7 @@ public class BufferingPrepareOutputSinkTests
         const int total = 61; // head(20) + 21 elided + tail(20)
         for (var i = 0; i < total; i++)
         {
-            sink.Report($"line {i}");
+            sink.Report(Raw.Compose($"line {i}"));
         }
 
         var services = builder.Services.BuildServiceProvider();
@@ -164,7 +165,7 @@ public class BufferingPrepareOutputSinkTests
         const int total = 41; // head(20) + 1 elided + tail(20)
         for (var i = 0; i < total; i++)
         {
-            sink.Report($"line {i}");
+            sink.Report(Raw.Compose($"line {i}"));
         }
 
         var services = builder.Services.BuildServiceProvider();
@@ -187,7 +188,7 @@ public class BufferingPrepareOutputSinkTests
         // "routing" is wrapped — e.g. CheckoutPreparation.Run decided the step should not run — but
         // Report is never called on it, so its buffer stays empty.
         BufferingPrepareOutputSink.Wrap(builder, "routing", new RecordingSink());
-        BufferingPrepareOutputSink.Wrap(builder, "orders", new RecordingSink()).Report("orders line");
+        BufferingPrepareOutputSink.Wrap(builder, "orders", new RecordingSink()).Report(Raw.Literal("orders line"));
 
         var services = builder.Services.BuildServiceProvider();
         await PublishBeforeStartEventAsync(builder, services);
@@ -221,8 +222,8 @@ public class BufferingPrepareOutputSinkTests
         var orders = AddTaggedResource(builder, "orders");
         var routing = AddTaggedResource(builder, "routing");
 
-        BufferingPrepareOutputSink.Wrap(builder, "orders", new RecordingSink()).Report("orders line");
-        BufferingPrepareOutputSink.Wrap(builder, "routing", new RecordingSink()).Report("routing line");
+        BufferingPrepareOutputSink.Wrap(builder, "orders", new RecordingSink()).Report(Raw.Literal("orders line"));
+        BufferingPrepareOutputSink.Wrap(builder, "routing", new RecordingSink()).Report(Raw.Literal("routing line"));
 
         var services = builder.Services.BuildServiceProvider();
         await PublishBeforeStartEventAsync(builder, services);
@@ -239,8 +240,8 @@ public class BufferingPrepareOutputSinkTests
 
         // "phantom" has output buffered but was never added as a resource — e.g. a step that ran
         // and reported before its kind handler got as far as creating one.
-        BufferingPrepareOutputSink.Wrap(builder, "phantom", new RecordingSink()).Report("orphaned");
-        BufferingPrepareOutputSink.Wrap(builder, "orders", new RecordingSink()).Report("orders line");
+        BufferingPrepareOutputSink.Wrap(builder, "phantom", new RecordingSink()).Report(Raw.Literal("orphaned"));
+        BufferingPrepareOutputSink.Wrap(builder, "orders", new RecordingSink()).Report(Raw.Literal("orders line"));
 
         var services = builder.Services.BuildServiceProvider();
         await PublishBeforeStartEventAsync(builder, services);

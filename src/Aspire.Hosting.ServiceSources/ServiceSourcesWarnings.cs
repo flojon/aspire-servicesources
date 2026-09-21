@@ -206,13 +206,19 @@ internal sealed class ServiceSourcesWarnings
     /// twice, which reads as two problems.
     /// </para>
     /// </remarks>
-    public void AddNotice(string notice)
+    public void AddNotice(Raw notice)
     {
         lock (_gate)
         {
-            if (!_entries.OfType<Message>().Any(entry => string.Equals(entry.Text, notice, StringComparison.Ordinal)))
+            // Rendered here, at the seam's own boundary, rather than carried as a Raw inside Entry:
+            // Write's messages are already-escaped strings whichever producer built them (see its own
+            // remarks), and rendering once here keeps that single representation rather than adding a
+            // second one only this entry kind would use.
+            var text = notice.ToString();
+
+            if (!_entries.OfType<Message>().Any(entry => string.Equals(entry.Text, text, StringComparison.Ordinal)))
             {
-                _entries.Add(new Message(notice));
+                _entries.Add(new Message(text));
             }
         }
     }
@@ -294,10 +300,13 @@ internal sealed class ServiceSourcesWarnings
             return;
         }
 
-        // messages are already fully-composed, hand-escaped sentences (see SkipReason/RevertReason)
-        // rather than ServiceTextHandler holes; forcing them back through the seam would re-escape
-        // text that is already safe. Scoped exemption, not a reusable string-taking overload, so no
-        // other call site can silently bypass ServiceSourcesLog's compiler-enforced holes this way.
+        // messages are already fully-composed, hand-escaped sentences rather than ServiceTextHandler
+        // holes — SkipReason/RevertReason build theirs by hand through Name, and every Message-kind
+        // producer (AddNotice, ServiceConfigAudit/BackingServiceConfigAudit's Report) renders its own
+        // Raw to string at its call site before it ever reaches this list — so forcing them back
+        // through the seam here would re-escape text that is already safe. Scoped exemption, not a
+        // reusable string-taking overload, so no other call site can silently bypass
+        // ServiceSourcesLog's compiler-enforced holes this way.
 #pragma warning disable RS0030
         foreach (var message in messages)
         {
@@ -312,7 +321,7 @@ internal sealed class ServiceSourcesWarnings
     /// </summary>
     private static string SkipReason(string serviceName, string source, IReadOnlyList<string> capabilities) =>
         $"Service '{new Name(serviceName)}': skipped {DescribeCalls(capabilities)} because its source is " +
-        $"'{source}' — {OutOfBandSourceAdvice.SourceDetail(source)}. The service is expected to be configured wherever it actually " +
+        $"'{new Name(source)}' — {OutOfBandSourceAdvice.SourceDetail(source)}. The service is expected to be configured wherever it actually " +
         $"runs. {SwitchSourceRemedy}";
 
     /// <summary>
@@ -351,7 +360,7 @@ internal sealed class ServiceSourcesWarnings
         IReadOnlyList<string> reverts,
         bool everyRevertWasAnAddition,
         IReadOnlyList<string> registeredEndpoints) =>
-        $"Service '{new Name(serviceName)}': {string.Join("; ", reverts)}. Its source is '{source}' — " +
+        $"Service '{new Name(serviceName)}': {string.Join("; ", reverts)}. Its source is '{new Name(source)}' — " +
         $"{OutOfBandSourceAdvice.SourceDetail(source)}. An out-of-band service's endpoints are fixed by its source, so " +
         $"configure the service where it actually runs. {WhereToGoInstead(source, everyRevertWasAnAddition, registeredEndpoints)}" +
         $"{SwitchSourceRemedy}";

@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Messages;
@@ -32,7 +31,7 @@ namespace Aspire.Hosting.ServiceSources.Prepare;
 /// The notice for a <c>path</c> service whose catalog block was not run and whose developer declared
 /// no block of their own, or <see langword="null"/> when there is nothing to say.
 /// </param>
-internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNotice)
+internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
 {
     public static readonly PreparePlan Nothing = new(null, null);
 
@@ -290,14 +289,15 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
     /// developer on a managed checkout.
     /// </para>
     /// <para>
-    /// Each argument is serialized as JSON rather than wrapped in quotes, because the whole value of
-    /// this notice is that the snippet can be pasted into a JSON file. A Windows command carries
-    /// backslashes and quoting them by hand produces either invalid JSON or — worse, since it parses
-    /// — a different string: <c>C:\temp\x</c> written raw contains <c>\t</c>, which JSON reads as a
-    /// tab.
+    /// Each argument is quoted through <see cref="Name.Escape"/> rather than by hand, because the
+    /// whole value of this notice is that the snippet can be pasted into a JSON file, and <see
+    /// cref="Name"/>'s doubled backslashes and escaped quotes are valid JSON escaping too — a Windows
+    /// command's backslashes quoted by hand instead would produce either invalid JSON or — worse,
+    /// since it parses — a different string: <c>C:\temp\x</c> written raw contains <c>\t</c>, which
+    /// JSON reads as a tab.
     /// </para>
     /// <para>
-    /// Each argument goes through <see cref="GitUrl.RedactAll"/> before it is serialized — the same
+    /// Each argument goes through <see cref="GitUrl.RedactAll"/> before it is escaped — the same
     /// helper the other four sites #286 found use — so a credential the catalog command carries does
     /// not reach the log the notice is printed to. This is a step down from the other four: there the
     /// text redacted was only ever meant to be read, but here it is meant to be pasted, and stripping
@@ -307,15 +307,22 @@ internal sealed record PreparePlan(PrepareStep? Step, string? IgnoredCatalogNoti
     /// copied from.
     /// </para>
     /// </remarks>
-    private static string IgnoredCatalogStepNotice(string serviceName, IReadOnlyList<string> command) =>
-        $"Service '{serviceName}': its catalog entry declares a '{CatalogBlock}' step, which was not run — "
-        + "this service resolves through 'local.path', a checkout you manage yourself, and nothing runs a "
-        + "command in a directory this tool does not own unless you asked for it there. Nothing establishes "
-        + "that the directory is even a checkout of the repository the catalog names. To run it, copy it into "
-        + $"{DeveloperConfiguration.FileName}: \"{serviceName}\": {{ ..., \"local\": {{ \"{CatalogBlock}\": "
-        + "{ \"command\": ["
-        + string.Join(", ", command.Select(a => JsonSerializer.Serialize<string>(GitUrl.RedactAll(a))))
-        + "] } } } — or "
-        + $"declare {{ \"{CatalogBlock}\": {{ \"mode\": \"never\" }} }} to say that nothing should run there. "
-        + "Either one silences this notice; it repeats on every start until one of them is there.";
+    private static Raw IgnoredCatalogStepNotice(string serviceName, IReadOnlyList<string> command) =>
+        Raw.Compose($"Service '{new Name(serviceName)}': its catalog entry declares a '{Raw.Literal(CatalogBlock)}' step, which was not run — "
+            + $"this service resolves through 'local.path', a checkout you manage yourself, and nothing runs a "
+            + $"command in a directory this tool does not own unless you asked for it there. Nothing establishes "
+            + $"that the directory is even a checkout of the repository the catalog names. To run it, copy it into "
+            + $"{Raw.Literal(DeveloperConfiguration.FileName)}: \"{new Name(serviceName)}\": {{ ..., \"local\": {{ \"{Raw.Literal(CatalogBlock)}\": "
+            + $"{{ \"command\": [{Raw.Join(", ", QuotedCommandArgs(command))}] }} }} }} — or "
+            + $"declare {{ \"{Raw.Literal(CatalogBlock)}\": {{ \"mode\": \"never\" }} }} to say that nothing should run there. "
+            + $"Either one silences this notice; it repeats on every start until one of them is there.");
+
+    /// <summary>
+    /// Each argument, quoted as a JSON string, through the same escaping <see cref="Name"/> already
+    /// applies rather than <c>JsonSerializer</c> — doubled backslashes and escaped quotes are valid
+    /// JSON either way, and this keeps the snippet on the one seam every other reader-facing value
+    /// goes through.
+    /// </summary>
+    private static IEnumerable<Raw> QuotedCommandArgs(IReadOnlyList<string> command) =>
+        command.Select(a => Raw.Compose($"\"{Raw.Escaped(GitUrl.RedactAll(a))}\""));
 }

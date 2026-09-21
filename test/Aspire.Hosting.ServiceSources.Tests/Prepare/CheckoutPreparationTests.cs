@@ -92,7 +92,7 @@ public class CheckoutPreparationTests
     {
         public List<string> Lines { get; } = [];
 
-        public void Report(string line) => Lines.Add(line);
+        public void Report(Raw line) => Lines.Add(line.ToString());
     }
 
     /// <summary>
@@ -367,7 +367,7 @@ public class CheckoutPreparationTests
     {
         var step = Step("oncePerCommit", "curl", "https://user:s3cr3t-token@example.com/artifact.jar");
 
-        var notice = CheckoutPreparation.SkippedOutsideRunModeNotice(ServiceName, step);
+        var notice = CheckoutPreparation.SkippedOutsideRunModeNotice(ServiceName, step).ToString();
 
         Assert.DoesNotContain("s3cr3t-token", notice);
         Assert.Contains("https://example.com/artifact.jar", notice);
@@ -747,9 +747,9 @@ public class CheckoutPreparationTests
     private sealed class StoppingSink(
         string line, ManualResetEventSlim reached, ManualResetEventSlim release) : IPrepareOutputSink
     {
-        public void Report(string reported)
+        public void Report(Raw reported)
         {
-            if (!reported.EndsWith(line, StringComparison.Ordinal))
+            if (!reported.ToString().EndsWith(line, StringComparison.Ordinal))
             {
                 return;
             }

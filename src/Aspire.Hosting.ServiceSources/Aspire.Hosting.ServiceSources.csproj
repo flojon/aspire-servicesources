@@ -10,8 +10,11 @@
     <Nullable>enable</Nullable>
     <!-- Raw.Literal/Join take [ConstantExpected] strings, and CA1857 is the only thing enforcing
          that. At its default warning severity a runtime string would be a one-token bypass of the
-         message seam in any build without -warnaserror, including the IDE. -->
-    <WarningsAsErrors>$(WarningsAsErrors);CA1857</WarningsAsErrors>
+         message seam in any build without -warnaserror, including the IDE. RS0030 is the same
+         story for ServiceSourcesLog's banned-API exemption: at its default severity, a raw
+         LoggerExtensions.Log* or Raw/Name constructor call outside the seam's own allowed callers
+         merely warns rather than fails, in every build without -warnaserror, including the IDE. -->
+    <WarningsAsErrors>$(WarningsAsErrors);CA1857;RS0030</WarningsAsErrors>
   </PropertyGroup>
 
   <!-- Shared package metadata, MinVer and the LICENSE/README pack items live in

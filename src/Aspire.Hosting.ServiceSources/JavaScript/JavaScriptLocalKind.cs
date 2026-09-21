@@ -142,8 +142,8 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
             if (!Directory.Exists(AppDirectory))
             {
                 throw ServiceSourcesConfigurationException.For(
-                    $"Service '{new Name(ServiceName)}': javascript appDirectory '{new Name(Options.AppDirectory)}' was not found " +
-                    $"under '{new Name(Root)}'.");
+                    $"Service '{new Name(ServiceName)}': javascript appDirectory '{Raw.Escaped(Options.AppDirectory)}' was not found " +
+                    $"under '{Raw.Escaped(Root)}'.");
             }
 
             // Without the existence check a typo reaches the developer as "node: cannot find module"
@@ -151,8 +151,8 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
             if (ScriptPath is not null && !File.Exists(ScriptPath))
             {
                 throw ServiceSourcesConfigurationException.For(
-                    $"Service '{new Name(ServiceName)}': javascript scriptPath '{new Name(Options.ScriptPath)}' was not found under " +
-                    $"'{new Name(AppDirectory)}'.");
+                    $"Service '{new Name(ServiceName)}': javascript scriptPath '{Raw.Escaped(Options.ScriptPath)}' was not found under " +
+                    $"'{Raw.Escaped(AppDirectory)}'.");
             }
 
             RequirePackageJsonIfOneIsNeeded(ServiceName, AppDirectory, Options);
@@ -279,7 +279,7 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
 
         throw ServiceSourcesConfigurationException.For(
             $"Service '{new Name(serviceName)}': javascript {what}, but no 'package.json' was found in " +
-            $"'{new Name(appDirectory)}'. {remedy}");
+            $"'{Raw.Escaped(appDirectory)}'. {remedy}");
     }
 
     /// <summary>
@@ -296,20 +296,20 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
         if (CheckoutRelativePath.IsAbsolute(appDirectory))
         {
             throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': javascript appDirectory '{new Name(appDirectory)}' is an absolute path, but it must be a relative path within the repository.");
+                $"Service '{new Name(serviceName)}': javascript appDirectory '{Raw.Escaped(appDirectory)}' is an absolute path, but it must be a relative path within the repository.");
         }
 
         if (CheckoutRelativePath.UnusableSegment(appDirectory) is { } unusable)
         {
             throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': javascript appDirectory '{new Name(appDirectory)}' has a path segment " +
+                $"Service '{new Name(serviceName)}': javascript appDirectory '{Raw.Escaped(appDirectory)}' has a path segment " +
                 $"'{new Name(unusable)}' — {CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy}");
         }
 
         if (CheckoutRelativePath.EscapesRoot(appDirectory))
         {
             throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': javascript appDirectory '{new Name(appDirectory)}' points outside the service's checkout. It must be a relative path within the repository.");
+                $"Service '{new Name(serviceName)}': javascript appDirectory '{Raw.Escaped(appDirectory)}' points outside the service's checkout. It must be a relative path within the repository.");
         }
 
         return CheckoutRelativePath.NormalizeSeparators(appDirectory);
@@ -329,20 +329,20 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
         if (CheckoutRelativePath.IsAbsolute(scriptPath))
         {
             throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': javascript scriptPath '{new Name(scriptPath)}' is an absolute path, but it must be relative to appDirectory — it names a file in the service's own checkout, not one sitting elsewhere on the developer's machine.");
+                $"Service '{new Name(serviceName)}': javascript scriptPath '{Raw.Escaped(scriptPath)}' is an absolute path, but it must be relative to appDirectory — it names a file in the service's own checkout, not one sitting elsewhere on the developer's machine.");
         }
 
         if (CheckoutRelativePath.UnusableSegment(scriptPath) is { } unusable)
         {
             throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': javascript scriptPath '{new Name(scriptPath)}' has a path segment " +
+                $"Service '{new Name(serviceName)}': javascript scriptPath '{Raw.Escaped(scriptPath)}' has a path segment " +
                 $"'{new Name(unusable)}' — {CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy}");
         }
 
         if (CheckoutRelativePath.EscapesRoot($"{appDirectory}/{scriptPath}"))
         {
             throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': javascript scriptPath '{new Name(scriptPath)}', read relative to appDirectory '{new Name(appDirectory)}', points outside the service's checkout. It must be a relative path within the repository.");
+                $"Service '{new Name(serviceName)}': javascript scriptPath '{Raw.Escaped(scriptPath)}', read relative to appDirectory '{Raw.Escaped(appDirectory)}', points outside the service's checkout. It must be a relative path within the repository.");
         }
 
         return CheckoutRelativePath.NormalizeSeparators(scriptPath);

@@ -530,13 +530,14 @@ internal static class ServiceSourcesConfigCache
                     .Where(group => group.Count() > 1))
                 {
                     var serviceNames = sharedUrl.Select(entry => entry.Key).Order(StringComparer.Ordinal).ToArray();
+                    var namedServices = serviceNames.Select(name => Raw.Compose($"'{new Name(name)}'"));
 
-                    ServiceSourcesWarnings.For(builder).AddNotice(
-                        $"Services {string.Join(", ", serviceNames.Select(name => $"'{name}'"))} are all 'local' and " +
-                        $"declare the same repository '{GitUrl.Redact(sharedUrl.Key)}', but none of them are grouped " +
-                        "— each gets its own checkout, cloned and reconciled separately. To share one checkout " +
-                        "instead, group them: AddRepository(...)/WithSharedRepository(...) in code, or a " +
-                        "repositories: entry every member's repositoryRef: names, in yaml.");
+                    ServiceSourcesWarnings.For(builder).AddNotice(Raw.Compose(
+                        $"Services {Raw.Join(", ", namedServices)} are all 'local' and " +
+                        $"declare the same repository '{Raw.Escaped(GitUrl.Redact(sharedUrl.Key))}', but none of them are grouped " +
+                        $"— each gets its own checkout, cloned and reconciled separately. To share one checkout " +
+                        $"instead, group them: AddRepository(...)/WithSharedRepository(...) in code, or a " +
+                        $"repositories: entry every member's repositoryRef: names, in yaml."));
                 }
             }
             catch when (insertedDefaultSource is not null)

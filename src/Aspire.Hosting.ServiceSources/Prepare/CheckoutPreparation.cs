@@ -58,11 +58,11 @@ internal static class CheckoutPreparation
     /// composition never reaches would never be read.
     /// </para>
     /// </remarks>
-    public static string SkippedOutsideRunModeNotice(string serviceName, PrepareStep step) =>
-        $"{Tag(serviceName)} Not running the prepare step '{RedactedDescribe(step)}': this AppHost is composing a "
-        + "manifest rather than running anything, and a bootstrap produces what the service needs in order to "
-        + "run. If the service is then reported as missing a file its prepare step would have produced, that "
-        + "is why — run the AppHost once to materialize the checkout.";
+    public static Raw SkippedOutsideRunModeNotice(string serviceName, PrepareStep step) =>
+        Raw.Compose($"{Tag(serviceName)} Not running the prepare step '{RedactedDescribe(step)}': this AppHost is composing a "
+            + $"manifest rather than running anything, and a bootstrap produces what the service needs in order to "
+            + $"run. If the service is then reported as missing a file its prepare step would have produced, that "
+            + $"is why — run the AppHost once to materialize the checkout.");
 
     /// <summary>
     /// Runs <paramref name="step"/> if its mode and marker say it should, and records the completion.
@@ -127,7 +127,7 @@ internal static class CheckoutPreparation
         var checkoutPath = decision.CheckoutPath;
         var commit = decision.Commit;
 
-        sink.Report($"{Tag(checkoutName)} {reason} Running: {RedactedDescribe(step)}");
+        sink.Report(Raw.Compose($"{Tag(checkoutName)} {reason} Running: {RedactedDescribe(step)}"));
 
         var tail = new Queue<string>(OutputTailLines);
         var exitCode = Launch(label, checkoutName, step, repoRoot, runner, sink, tail, cancellationToken);
@@ -194,7 +194,7 @@ internal static class CheckoutPreparation
     /// </param>
     /// <param name="Commit">The commit the step would run against, where that is knowable.</param>
     private readonly record struct Decision(
-        string? Reason, string MarkerPath, string? CheckoutPath, string? Commit);
+        Raw? Reason, string MarkerPath, string? CheckoutPath, string? Commit);
 
     private static Decision Decide(
         string serviceName,
@@ -230,7 +230,7 @@ internal static class CheckoutPreparation
     /// their start is slow — including the case where the commit cannot be resolved, which is a fact
     /// about this start rather than a warning bolted onto a mode choice.
     /// </remarks>
-    private static string? ReasonToRun(
+    private static Raw? ReasonToRun(
         PrepareStep step, string markerPath, string? commit, string? checkoutPath)
     {
         // `never` should not reach here at all: it means "no step", so PreparePlan resolves it to
@@ -244,12 +244,12 @@ internal static class CheckoutPreparation
 
         if (step.Mode == PrepareMode.Always)
         {
-            return "its prepare step runs on every start (mode: always).";
+            return Raw.Literal("its prepare step runs on every start (mode: always).");
         }
 
         if (PrepareMarker.Read(markerPath) is not { } marker)
         {
-            return "no completed prepare step is recorded for this checkout.";
+            return Raw.Literal("no completed prepare step is recorded for this checkout.");
         }
 
         if (marker.Satisfies(step.CommandHash, commit, step.Mode, checkoutPath))
@@ -259,18 +259,19 @@ internal static class CheckoutPreparation
 
         if (!string.Equals(marker.CommandHash, step.CommandHash, StringComparison.Ordinal))
         {
-            return "its prepare command has changed since it last succeeded.";
+            return Raw.Literal("its prepare command has changed since it last succeeded.");
         }
 
         if (checkoutPath is not null && !string.Equals(marker.Path, checkoutPath, StringComparison.Ordinal))
         {
-            return "its 'local.path' now points at a different checkout than the one it last prepared.";
+            return Raw.Literal("its 'local.path' now points at a different checkout than the one it last prepared.");
         }
 
         return commit is null
-            ? "the commit its checkout is on could not be determined, so a completed prepare step "
-              + "cannot be matched against it (mode: oncePerCommit)."
-            : "its checkout has moved to another commit since its prepare step last succeeded.";
+            ? Raw.Literal(
+                "the commit its checkout is on could not be determined, so a completed prepare step "
+                + "cannot be matched against it (mode: oncePerCommit).")
+            : Raw.Literal("its checkout has moved to another commit since its prepare step last succeeded.");
     }
 
     private static int Launch(
@@ -306,7 +307,7 @@ internal static class CheckoutPreparation
                 // interleaved into one.
                 lock (tail)
                 {
-                    sink.Report($"{tag} {redacted}");
+                    sink.Report(Raw.Compose($"{tag} {Raw.Escaped(redacted)}"));
 
                     tail.Enqueue(redacted);
                     if (tail.Count > OutputTailLines)
@@ -338,7 +339,7 @@ internal static class CheckoutPreparation
     /// gets the same redaction #270 already gives its output, rather than only the lines it prints
     /// (#286).
     /// </remarks>
-    private static string RedactedDescribe(PrepareStep step) => GitUrl.RedactAll(step.Describe());
+    private static Raw RedactedDescribe(PrepareStep step) => Raw.Escaped(GitUrl.RedactAll(step.Describe()));
 
     /// <param name="quoted">
     /// The output tail, already snapshotted by the caller — this must not enumerate the live queue,
@@ -346,7 +347,7 @@ internal static class CheckoutPreparation
     /// </param>
     private static Raw FailedMessage(
         Raw label, PrepareStep step, int exitCode, string[] quoted) =>
-        Raw.Compose($"{label}: its prepare step failed. The command '{Raw.Escaped(RedactedDescribe(step))}' exited with "
+        Raw.Compose($"{label}: its prepare step failed. The command '{RedactedDescribe(step)}' exited with "
             + $"code {exitCode}, so the checkout was left as the command found it and nothing was recorded as "
             + $"completed — the step will run again from the beginning on the next start.{QuotedTailSuffix(quoted)}");
 
@@ -377,7 +378,7 @@ internal static class CheckoutPreparation
     /// </remarks>
     private static Raw LaunchFailedMessage(Raw label, PrepareStep step, PrepareLaunchException ex) =>
         Raw.Compose($"{label}: its prepare step could not be started. {Raw.Cause(ex)} The command is "
-            + $"'{Raw.Escaped(RedactedDescribe(step))}', run with its checkout as its working directory; its first element has "
+            + $"'{RedactedDescribe(step)}', run with its checkout as its working directory; its first element has "
             + $"to be a path to something executable inside the checkout, or the name of a program on PATH."
             + $"{WindowsWithoutVariantSuffix(step.WindowsWithoutVariant)}");
 

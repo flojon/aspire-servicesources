@@ -1,3 +1,5 @@
+using Aspire.Hosting.ServiceSources.Messages;
+
 namespace Aspire.Hosting.ServiceSources.Prepare;
 
 /// <summary>
@@ -21,12 +23,13 @@ namespace Aspire.Hosting.ServiceSources.Prepare;
 internal interface IPrepareOutputSink
 {
     /// <param name="line">
-    /// Already safe to print verbatim: any caller-controlled name a caller composed into it —
-    /// <c>CheckoutPreparation.Tag</c>'s checkout name — went through <c>Name</c>/<c>Raw</c> before
-    /// this was called, the same discipline the <see cref="Microsoft.Extensions.Logging.ILogger"/>
-    /// and exception-message sinks apply.
+    /// Already safe to print verbatim: a <see cref="Raw"/>, so the caller has to have built it via
+    /// <see cref="Raw.Compose"/> (or an equivalent <see cref="Raw"/> factory) with every
+    /// caller-controlled fragment escaped at composition time. This method's job is only to
+    /// transport an already-safe value to its sink — it must not escape <paramref name="line"/>
+    /// again, which would corrupt escaping that is already correct.
     /// </param>
-    void Report(string line);
+    void Report(Raw line);
 }
 
 /// <summary>
@@ -48,5 +51,5 @@ internal sealed class ConsolePrepareOutputSink : IPrepareOutputSink
     {
     }
 
-    public void Report(string line) => Console.Out.WriteLine(line);
+    public void Report(Raw line) => Console.Out.WriteLine(line.ToString());
 }

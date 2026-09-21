@@ -143,7 +143,7 @@ internal sealed class BufferingPrepareOutputSink
 
             foreach (var line in lines)
             {
-                ServiceSourcesLog.Information(logger, $"{Raw.Escaped(line)}");
+                ServiceSourcesLog.Information(logger, $"{line}");
             }
         }
     }
@@ -156,13 +156,13 @@ internal sealed class BufferingPrepareOutputSink
     {
         private readonly object _gate = new();
 
-        private readonly List<string> _head = new(HeadLines);
+        private readonly List<Raw> _head = new(HeadLines);
 
-        private readonly Queue<string> _tail = new(TailLines);
+        private readonly Queue<Raw> _tail = new(TailLines);
 
         private int _total;
 
-        public void Add(string line)
+        public void Add(Raw line)
         {
             lock (_gate)
             {
@@ -188,7 +188,7 @@ internal sealed class BufferingPrepareOutputSink
         /// present when the head and tail together already cover the whole of what was reported,
         /// so a truncated record can never be read as a complete one or vice versa.
         /// </summary>
-        public IReadOnlyList<string> Snapshot()
+        public IReadOnlyList<Raw> Snapshot()
         {
             lock (_gate)
             {
@@ -200,7 +200,9 @@ internal sealed class BufferingPrepareOutputSink
                     return [.. _head, .. tail];
                 }
 
-                var marker = $"... ({elided} line{(elided == 1 ? "" : "s")} elided) ...";
+                var marker = elided == 1
+                    ? Raw.Compose($"... ({elided} line elided) ...")
+                    : Raw.Compose($"... ({elided} lines elided) ...");
 
                 return [.. _head, marker, .. tail];
             }
@@ -209,7 +211,7 @@ internal sealed class BufferingPrepareOutputSink
 
     private sealed class ComposedSink(IPrepareOutputSink inner, ServiceBuffer buffer) : IPrepareOutputSink
     {
-        public void Report(string line)
+        public void Report(Raw line)
         {
             inner.Report(line);
             buffer.Add(line);

@@ -346,10 +346,11 @@ public class PreparePlanTests
 
         Assert.Null(plan.Step);
         Assert.NotNull(plan.IgnoredCatalogNotice);
-        Assert.Contains($"'{ServiceName}'", plan.IgnoredCatalogNotice!);
+        var notice = plan.IgnoredCatalogNotice!.Value.ToString();
+        Assert.Contains($"'{ServiceName}'", notice);
         // Carried verbatim (it has no credential in it), so it can be copied into the local file.
-        Assert.Contains("\"./prepare.sh\"", plan.IgnoredCatalogNotice);
-        Assert.Contains("local.path", plan.IgnoredCatalogNotice);
+        Assert.Contains("\"./prepare.sh\"", notice);
+        Assert.Contains("local.path", notice);
     }
 
     /// <remarks>
@@ -368,7 +369,7 @@ public class PreparePlanTests
             Catalog(["curl", "-u", "https://ci-user:hunter2@nexus.example.com/repo/artifact.jar"]),
             managedCheckout: false);
 
-        var notice = plan.IgnoredCatalogNotice!;
+        var notice = plan.IgnoredCatalogNotice!.Value.ToString();
 
         Assert.DoesNotContain("hunter2", notice);
         Assert.Contains("https://nexus.example.com/repo/artifact.jar", notice);
@@ -411,7 +412,7 @@ public class PreparePlanTests
             Catalog(["pwsh", "-File", @"C:\tools\prepare.ps1", "--label", "say \"hi\""]),
             managedCheckout: false);
 
-        var snippet = plan.IgnoredCatalogNotice!;
+        var snippet = plan.IgnoredCatalogNotice!.Value.ToString();
         var array = snippet[snippet.IndexOf("[", StringComparison.Ordinal)..(snippet.IndexOf("]", StringComparison.Ordinal) + 1)];
 
         var parsed = System.Text.Json.JsonSerializer.Deserialize<string[]>(array);

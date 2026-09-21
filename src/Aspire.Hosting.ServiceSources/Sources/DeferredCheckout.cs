@@ -1032,7 +1032,7 @@ internal sealed class DeferredCheckout
     /// </summary>
     private sealed class LoggerPrepareOutputSink(ILogger logger) : IPrepareOutputSink
     {
-        public void Report(string line) => ServiceSourcesLog.Information(logger, $"{Raw.Escaped(line)}");
+        public void Report(Raw line) => ServiceSourcesLog.Information(logger, $"{line}");
     }
 
     /// <param name="started">

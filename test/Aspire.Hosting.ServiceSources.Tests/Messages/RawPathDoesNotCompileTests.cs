@@ -142,13 +142,16 @@ public class RawPathDoesNotCompileTests
     // in-memory compilation does not run, and which at its default warning severity would leave
     // Raw.Literal(runtimeString) as a one-token bypass in any build without -warnaserror. So the
     // package escalates it, and that escalation is the thing worth pinning.
+    // Also pins RS0030 alongside CA1857: ServiceSourcesLog's own banned-API exemption is, at its
+    // default warning severity, the same one-token bypass in any build without -warnaserror — a raw
+    // LoggerExtensions.Log* call, or a Raw/Name constructor call reached some other way.
     [Fact]
     public void ConstantExpectedIsEscalatedToAnError()
     {
         var csproj = Path.Combine(RepositoryRoot(), "src", "Aspire.Hosting.ServiceSources",
             "Aspire.Hosting.ServiceSources.csproj");
 
-        Assert.Contains("<WarningsAsErrors>$(WarningsAsErrors);CA1857</WarningsAsErrors>",
+        Assert.Contains("<WarningsAsErrors>$(WarningsAsErrors);CA1857;RS0030</WarningsAsErrors>",
             File.ReadAllText(csproj), StringComparison.Ordinal);
     }
 
