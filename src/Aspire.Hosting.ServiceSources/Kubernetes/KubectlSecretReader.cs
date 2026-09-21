@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.Kubernetes;
 
@@ -88,20 +89,25 @@ internal sealed class KubectlSecretReader : IKubernetesSecretReader
         {
             Terminate(process);
 
-            throw new KubernetesSecretException(
-                $"Reading key '{key}' from secret '{secretName}' took longer than "
-                + $"{FetchTimeout.TotalSeconds:0} seconds and was cancelled. The cluster's API server may be "
-                + $"unreachable from here, or context '{context}' may name one that no longer exists.");
+            throw KubernetesSecretException.For(
+                $"Reading key '{new Name(key)}' from secret '{new Name(secretName)}' took longer than "
+                + $"{(int)FetchTimeout.TotalSeconds} seconds and was cancelled. The cluster's API server may be "
+                + $"unreachable from here, or context '{new Name(context)}' may name one that no longer exists.");
         }
 
         if (process.ExitCode != 0)
         {
             var diagnostic = FirstLine(Drained(standardError));
 
-            throw new KubernetesSecretException(
-                $"Reading key '{key}' from secret '{secretName}' in namespace '{@namespace}' failed"
-                + $" (kubectl exited {process.ExitCode})"
-                + (diagnostic.Length == 0 ? "." : $": {diagnostic}"));
+            // Built separately because a conditional expression's two branches cannot each be a
+            // handler-typed interpolated string inline within a larger concatenation.
+            var diagnosticSuffix = diagnostic.Length == 0
+                ? Raw.Literal(".")
+                : Raw.Compose($": {Raw.Escaped(diagnostic)}");
+
+            throw KubernetesSecretException.For(
+                $"Reading key '{new Name(key)}' from secret '{new Name(secretName)}' in namespace '{new Name(@namespace)}' failed"
+                + $" (kubectl exited {process.ExitCode}){diagnosticSuffix}");
         }
 
         var encoded = Drained(standardOutput).Trim();
@@ -112,11 +118,11 @@ internal sealed class KubectlSecretReader : IKubernetesSecretReader
         // string and the other is a cluster the developer would have to go and look at.
         if (encoded.Length == 0)
         {
-            throw new KubernetesSecretException(
-                $"Secret '{secretName}' in namespace '{@namespace}' has no key '{key}', or the key holds no "
-                + $"value. `kubectl get secret {secretName} --context {context} --namespace {@namespace} "
-                + "--output jsonpath='{.data}'` lists the keys it does have — with the context and the namespace "
-                + "this read used, which are not necessarily the ones kubectl is pointed at right now.");
+            throw KubernetesSecretException.For(
+                $"Secret '{new Name(secretName)}' in namespace '{new Name(@namespace)}' has no key '{new Name(key)}', or the key holds no "
+                + $"value. `kubectl get secret {new Name(secretName)} --context {new Name(context)} --namespace {new Name(@namespace)} "
+                + $"--output jsonpath='{{.data}}'` lists the keys it does have — with the context and the namespace "
+                + $"this read used, which are not necessarily the ones kubectl is pointed at right now.");
         }
 
         try
@@ -129,9 +135,9 @@ internal sealed class KubectlSecretReader : IKubernetesSecretReader
             // this is a broken assumption rather than a developer's mistake. It still gets a
             // message rather than a raw FormatException, because what the dashboard shows against a
             // failed parameter is the message.
-            throw new KubernetesSecretException(
-                $"Key '{key}' of secret '{secretName}' did not decode as base64, which is how the Kubernetes API "
-                + "stores every secret value.",
+            throw KubernetesSecretException.For(
+                $"Key '{new Name(key)}' of secret '{new Name(secretName)}' did not decode as base64, which is how the Kubernetes API "
+                + $"stores every secret value.",
                 ex);
         }
     }
@@ -237,16 +243,16 @@ internal sealed class KubectlSecretReader : IKubernetesSecretReader
         try
         {
             return Process.Start(startInfo)
-                ?? throw new KubernetesSecretException(
-                    $"Reading key '{key}' from secret '{secretName}' could not start kubectl.");
+                ?? throw KubernetesSecretException.For(
+                    $"Reading key '{new Name(key)}' from secret '{new Name(secretName)}' could not start kubectl.");
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
             // The same failure the port-forward hits, but this one surfaces against a parameter
             // rather than in a resource's log, so it has to say what it was trying to do.
-            throw new KubernetesSecretException(
-                $"Reading key '{key}' from secret '{secretName}' could not start kubectl. It has to be on PATH for "
-                + "a '${secret:...}' placeholder to resolve.",
+            throw KubernetesSecretException.For(
+                $"Reading key '{new Name(key)}' from secret '{new Name(secretName)}' could not start kubectl. It has to be on PATH for "
+                + $"a '${{secret:...}}' placeholder to resolve.",
                 ex);
         }
     }

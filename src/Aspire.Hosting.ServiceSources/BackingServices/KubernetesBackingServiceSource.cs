@@ -720,7 +720,7 @@ internal sealed partial class KubernetesBackingServiceSource(
         {
             // The reader knows the secret and the key; only this knows which backing service asked,
             // and a parameter's name is the only other thing the dashboard shows beside the failure.
-            throw new KubernetesSecretException($"Backing service '{Named(name)}': {ex.Message}", ex);
+            throw KubernetesSecretException.For($"Backing service '{Named(name)}': {Raw.Cause(ex)}", ex);
         }
 
         if (!wholeSecret)
@@ -743,9 +743,9 @@ internal sealed partial class KubernetesBackingServiceSource(
         // answer, and the developer can see both halves in the message.
         if (rewrites == 0)
         {
-            throw new KubernetesSecretException(
-                $"Backing service '{Named(name)}': the connection string in key '{secret.Key}' of secret '{secret.Name}' "
-                + $"does not address '{service}' in any form this can rewrite — '{service}', '{service}.{@namespace}', "
+            throw KubernetesSecretException.For(
+                $"Backing service '{Named(name)}': the connection string in key '{new Name(secret.Key)}' of secret '{new Name(secret.Name)}' "
+                + $"does not address '{new Name(service)}' in any form this can rewrite — '{new Name(service)}', '{new Name(service)}.{new Name(@namespace)}', "
                 + $"'.svc' or '.svc.cluster.local', after a host keyword or a URI's '@' or '//'. Nothing was "
                 + $"substituted, so the value still points into the cluster and would not reach the port-forward. "
                 + $"Check that '{ConfigKey(name, Raw.Literal("Service"))}' names the service the secret was written against.");
@@ -781,12 +781,12 @@ internal sealed partial class KubernetesBackingServiceSource(
             return;
         }
 
-        throw new KubernetesSecretException(
-            $"Backing service '{Named(name)}': the connection string in key '{secret.Key}' of secret '{secret.Name}' "
-            + "quotes or braces one of its values, and this cannot find where a host ends in a value that may "
-            + "carry a separator inside it. Rather than rewrite part of it and leave the rest addressed at the "
-            + "cluster, it is refused. Write the connection string yourself with per-field '${secret:...}' "
-            + "placeholders and a '${port}', which needs no rewriting at all.");
+        throw KubernetesSecretException.For(
+            $"Backing service '{Named(name)}': the connection string in key '{new Name(secret.Key)}' of secret '{new Name(secret.Name)}' "
+            + $"quotes or braces one of its values, and this cannot find where a host ends in a value that may "
+            + $"carry a separator inside it. Rather than rewrite part of it and leave the rest addressed at the "
+            + $"cluster, it is refused. Write the connection string yourself with per-field '${{secret:...}}' "
+            + $"placeholders and a '${{port}}', which needs no rewriting at all.");
     }
 
     /// <summary>
@@ -820,13 +820,13 @@ internal sealed partial class KubernetesBackingServiceSource(
             return;
         }
 
-        throw new KubernetesSecretException(
-            $"Backing service '{Named(name)}': the connection string in key '{secret.Key}' of secret '{secret.Name}' "
-            + $"still addresses the cluster after rewriting — '{stillAddressed.Value}' was left in it. Something "
-            + "was rewritten, so this is a shape only partly recognised rather than one that names the service "
-            + "in no form at all. Handing it over would send the credentials in it wherever that name resolves "
-            + "here. Write the connection string yourself with per-field '${secret:...}' placeholders and a "
-            + "'${port}', which needs no rewriting.");
+        throw KubernetesSecretException.For(
+            $"Backing service '{Named(name)}': the connection string in key '{new Name(secret.Key)}' of secret '{new Name(secret.Name)}' "
+            + $"still addresses the cluster after rewriting — '{Raw.Escaped(stillAddressed.Value)}' was left in it. Something "
+            + $"was rewritten, so this is a shape only partly recognised rather than one that names the service "
+            + $"in no form at all. Handing it over would send the credentials in it wherever that name resolves "
+            + $"here. Write the connection string yourself with per-field '${{secret:...}}' placeholders and a "
+            + $"'${{port}}', which needs no rewriting.");
     }
 
     /// <summary>
@@ -851,8 +851,8 @@ internal sealed partial class KubernetesBackingServiceSource(
             return;
         }
 
-        throw new KubernetesSecretException(
-            $"Backing service '{Named(name)}': the connection string in key '{secret.Key}' of secret '{secret.Name}' "
+        throw KubernetesSecretException.For(
+            $"Backing service '{Named(name)}': the connection string in key '{new Name(secret.Key)}' of secret '{new Name(secret.Name)}' "
             + $"addresses port {port}, and the port-forward serves {remotePort} — the port "
             + $"'{ConfigKey(name, Raw.Literal("Port"))}' names. The tunnel's health check watches {remotePort}, so every "
             + $"resource would report healthy while the app dialled {port}: nothing there, or whatever else on "
@@ -903,10 +903,10 @@ internal sealed partial class KubernetesBackingServiceSource(
             // A named failure rather than a stack trace out of the callback Aspire is resolving.
             // Reachable only for a value shaped to be pathological, whose author already owns the
             // credential in it — but what the dashboard shows is the message, so there should be one.
-            throw new KubernetesSecretException(
-                "Rewriting the in-cluster host in the fetched connection string took too long and was abandoned. "
-                + "The value is shaped in a way this cannot scan quickly; a per-field '${secret:...}' template "
-                + "avoids the rewrite entirely.",
+            throw KubernetesSecretException.For(
+                $"Rewriting the in-cluster host in the fetched connection string took too long and was abandoned. "
+                + $"The value is shaped in a way this cannot scan quickly; a per-field '${{secret:...}}' template "
+                + $"avoids the rewrite entirely.",
                 ex);
         }
     }
