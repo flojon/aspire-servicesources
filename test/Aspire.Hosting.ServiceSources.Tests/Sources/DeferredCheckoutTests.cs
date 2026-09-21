@@ -1288,7 +1288,14 @@ public class DeferredCheckoutTests
 
         var services = builder.Services.BuildServiceProvider();
 
+        // The watcher below has to be listening before NotStarted is published at all, not merely
+        // before the progress it asserts on: starting a Task.Run says nothing about when its
+        // enumerator has actually subscribed, and a subscription that lands late is replayed only
+        // the current snapshot, not the states it missed (#212). See PlantSubscriptionProbeAsync.
+        var probe = await PlantSubscriptionProbeAsync(services);
+
         var states = new List<string>();
+        var subscribed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var reachedProgress = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var backToCheckingOut = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -1299,6 +1306,12 @@ public class DeferredCheckoutTests
                 await foreach (var published in services.GetRequiredService<ResourceNotificationService>()
                                    .WatchAsync(watching.Token))
                 {
+                    if (string.Equals(published.Resource.Name, probe.Name, StringComparison.Ordinal))
+                    {
+                        subscribed.TrySetResult();
+                        continue;
+                    }
+
                     if (!string.Equals(published.Resource.Name, "orders", StringComparison.Ordinal)
                         || published.Snapshot.State?.Text is not { } text)
                     {
@@ -1321,6 +1334,8 @@ public class DeferredCheckoutTests
                 }
             },
             watching.Token);
+
+        await subscribed.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
         await builder.Eventing.PublishAsync(
             new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
