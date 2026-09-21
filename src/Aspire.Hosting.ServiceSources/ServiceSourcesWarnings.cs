@@ -301,7 +301,7 @@ internal sealed class ServiceSourcesWarnings
 #pragma warning disable RS0030
         foreach (var message in messages)
         {
-            logger.LogWarning("{ServiceSourcesWarning}", message);
+            logger.LogWarning("{ServiceSourcesMessage}", message);
         }
 #pragma warning restore RS0030
     }
