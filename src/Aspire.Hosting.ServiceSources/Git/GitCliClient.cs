@@ -289,7 +289,7 @@ internal sealed partial class GitCliClient(
         var result = TryRun(repositoryPath, arguments);
         if (!result.Succeeded)
         {
-            throw new GitCommandFailedException(Describe(result));
+            throw GitCommandFailedException.For($"{Describe(result)}");
         }
 
         return result;
@@ -347,13 +347,13 @@ internal sealed partial class GitCliClient(
         if (LooksLikeAuthFailure(result.StandardError))
         {
             var message = Describe(result);
-            throw new GitAuthenticationFailedException(
-                message,
-                new GitCommandFailedException(message),
+            throw GitAuthenticationFailedException.For(
+                $"{message}",
+                GitCommandFailedException.For($"{message}"),
                 ResolvedNoCredentials(result.StandardError));
         }
 
-        throw new GitCommandFailedException(Describe(result));
+        throw GitCommandFailedException.For($"{Describe(result)}");
     }
 
     /// <summary>
@@ -402,10 +402,10 @@ internal sealed partial class GitCliClient(
     /// git's own words for a failure, preferring stderr and falling back to the exit code when a
     /// command fails silently.
     /// </summary>
-    private static string Describe(GitCommandResult result)
+    private static Raw Describe(GitCommandResult result)
     {
         var stderr = result.StandardError.Trim();
-        return stderr.Length > 0 ? stderr : $"git exited with code {result.ExitCode}.";
+        return stderr.Length > 0 ? Raw.Escaped(stderr) : Raw.Compose($"git exited with code {result.ExitCode}.");
     }
 
     /// <summary>

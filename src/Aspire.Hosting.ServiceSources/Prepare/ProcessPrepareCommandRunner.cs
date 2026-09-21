@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.Prepare;
 
@@ -185,11 +186,13 @@ internal sealed class ProcessPrepareCommandRunner : IPrepareCommandRunner
         try
         {
             return Process.Start(startInfo)
-                ?? throw new PrepareLaunchException($"starting '{writtenProgram}' returned no process.");
+                ?? throw PrepareLaunchException.For(
+                    $"starting '{Raw.Escaped(writtenProgram)}' returned no process.");
         }
         catch (Exception ex) when (ex is Win32Exception or FileNotFoundException or PlatformNotSupportedException)
         {
-            throw new PrepareLaunchException($"'{writtenProgram}' could not be started: {ex.Message}", ex);
+            throw PrepareLaunchException.For(
+                $"'{Raw.Escaped(writtenProgram)}' could not be started: {Raw.Cause(ex)}", ex);
         }
     }
 

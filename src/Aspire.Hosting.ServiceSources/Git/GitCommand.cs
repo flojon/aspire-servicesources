@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.Git;
 
@@ -210,12 +211,12 @@ internal static class GitCommand
         try
         {
             return Process.Start(startInfo)
-                ?? throw new GitUnavailableException("Starting 'git' returned no process.", innerException: null);
+                ?? throw GitUnavailableException.For($"Starting 'git' returned no process.", innerException: null);
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException
                                       or InvalidOperationException or ObjectDisposedException)
         {
-            throw new GitUnavailableException($"'git' could not be started: {ex.Message}", ex);
+            throw GitUnavailableException.For($"'git' could not be started: {Raw.Cause(ex)}", ex);
         }
     }
 }
@@ -226,11 +227,31 @@ internal static class GitCommand
 /// not installed" into a message about the developer's machine rather than about their catalog.
 /// </summary>
 internal sealed class GitUnavailableException(string message, Exception? innerException)
-    : Exception(message, innerException);
+    : Exception(message, innerException)
+{
+#pragma warning disable RS0030
+    /// <summary>
+    /// The only way this package builds a message: a raw <c>string</c> hole does not compile, so a
+    /// caller-controlled name cannot reach a reader unescaped.
+    /// </summary>
+    internal static GitUnavailableException For(ServiceTextHandler message, Exception? innerException) =>
+        new(message.Text, innerException);
+#pragma warning restore RS0030
+}
 
 /// <summary>
 /// Thrown when a <c>git</c> command ran and exited non-zero. Carries git's own stderr as the
 /// message so the wrapping <see cref="ServiceSourcesConfigurationException"/> can show what git
 /// actually said underneath this package's own wording.
 /// </summary>
-internal sealed class GitCommandFailedException(string message) : Exception(message);
+internal sealed class GitCommandFailedException(string message) : Exception(message)
+{
+#pragma warning disable RS0030
+    /// <summary>
+    /// The only way this package builds a message: a raw <c>string</c> hole does not compile, so a
+    /// caller-controlled name cannot reach a reader unescaped.
+    /// </summary>
+    internal static GitCommandFailedException For(ServiceTextHandler message) =>
+        new(message.Text);
+#pragma warning restore RS0030
+}
