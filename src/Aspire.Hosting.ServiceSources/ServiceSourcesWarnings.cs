@@ -294,13 +294,16 @@ internal sealed class ServiceSourcesWarnings
             return;
         }
 
+        // messages are already fully-composed, hand-escaped sentences (see SkipReason/RevertReason)
+        // rather than ServiceTextHandler holes; forcing them back through the seam would re-escape
+        // text that is already safe. Scoped exemption, not a reusable string-taking overload, so no
+        // other call site can silently bypass ServiceSourcesLog's compiler-enforced holes this way.
+#pragma warning disable RS0030
         foreach (var message in messages)
         {
-            // messages are already fully-composed, hand-escaped sentences (see RevertReason) rather
-            // than ServiceTextHandler holes, so this uses the pre-escaped-string overload rather than
-            // forcing them back through the seam and re-escaping what is already safe.
-            ServiceSourcesLog.Warning(logger, message);
+            logger.LogWarning("{ServiceSourcesWarning}", message);
         }
+#pragma warning restore RS0030
     }
 
     /// <summary>
@@ -339,9 +342,9 @@ internal sealed class ServiceSourcesWarnings
     // reverts, SourceDetail, WhereToGoInstead, SwitchSourceRemedy — is already a fully-composed,
     // safe sentence (built through Name by hand in EndpointMutationDetector/OutOfBandSourceAdvice),
     // carrying its own intentional quoting. Re-escaping a finished sentence through Raw.Escaped
-    // mangles that quoting instead of protecting anything — passed to ServiceSourcesLog.Warning's
-    // pre-escaped-string overload for exactly that reason, rather than forced back through
-    // ServiceTextHandler, which has no hole for "already safe, do not touch again".
+    // mangles that quoting instead of protecting anything — Write logs it via a scoped RS0030
+    // exemption for exactly that reason, rather than forcing it back through ServiceTextHandler,
+    // which has no hole for "already safe, do not touch again".
     private static string RevertReason(
         string serviceName,
         string source,

@@ -36,19 +36,5 @@ internal static class ServiceSourcesLog
 
     internal static void Debug(ILogger logger, Exception exception, ServiceTextHandler message) =>
         logger.LogDebug(exception, "{ServiceSourcesMessage}", message.Text);
-
-    /// <summary>
-    /// The one exemption from "every hole is a <see cref="Name"/>/<see cref="Raw"/>":
-    /// <c>ServiceSourcesWarnings</c> composes its skip and notice sentences across several files this
-    /// task does not touch (<c>BackingServiceConfigAudit</c>, <c>ServiceConfigAudit</c>,
-    /// <c>LocalProjectSource</c>, <c>ServiceSourcesConfigCache</c>), each already escaping its own
-    /// caller-controlled fragments with <see cref="Name"/> by hand rather than through this seam.
-    /// Forcing an already-finished sentence back through <see cref="ServiceTextHandler"/> would mean
-    /// escaping it a second time — <see cref="Raw.Escaped"/> mangles the quoting those callers already
-    /// applied — so this takes the finished text directly instead. It must never be handed a value
-    /// that has not already been through that hand escaping.
-    /// </summary>
-    internal static void Warning(ILogger logger, string preEscapedMessage) =>
-        logger.LogWarning("{ServiceSourcesMessage}", preEscapedMessage);
 #pragma warning restore RS0030
 }

@@ -98,17 +98,4 @@ public class ServiceSourcesLogTests
         Assert.Contains("boom", entry.Message);
     }
 
-    [Fact]
-    public void Warning_preEscapedStringOverload_writesTheMessageVerbatim()
-    {
-        var logger = new RecordingLogger();
-
-        // The one exemption from the ServiceTextHandler seam: ServiceSourcesWarnings hands this
-        // overload an already-composed, hand-escaped sentence rather than a fresh interpolation.
-        ServiceSourcesLog.Warning(logger, "Service 'orders\\u0027' reverted.");
-
-        var entry = Assert.Single(logger.Entries);
-        Assert.Equal(LogLevel.Warning, entry.Level);
-        Assert.Equal("Service 'orders\\u0027' reverted.", entry.Message);
-    }
 }
