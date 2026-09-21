@@ -1288,10 +1288,7 @@ public class DeferredCheckoutTests
 
         var services = builder.Services.BuildServiceProvider();
 
-        // The watcher below has to be listening before NotStarted is published at all, not merely
-        // before the progress it asserts on: starting a Task.Run says nothing about when its
-        // enumerator has actually subscribed, and a subscription that lands late is replayed only
-        // the current snapshot, not the states it missed (#212). See PlantSubscriptionProbeAsync.
+        // Starting a Task.Run says nothing about when its enumerator actually subscribes; see PlantSubscriptionProbeAsync.
         var probe = await PlantSubscriptionProbeAsync(services);
 
         var states = new List<string>();
