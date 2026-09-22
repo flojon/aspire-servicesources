@@ -22,7 +22,7 @@
   <PropertyGroup>
     <PackageId>KoalaSoft.Aspire.Hosting.ServiceSources</PackageId>
     <Description>Aspire hosting integration for configurable, per-developer service sources — e.g. a git checkout or a Kubernetes cluster.</Description>
-    <PackageTags>aspire;dotnet-aspire;service-discovery;apphost;kubernetes;git;microservices;local-development;port-forward</PackageTags>
+    <PackageTags>aspire;dotnet-aspire;service-discovery;apphost;kubernetes;git;microservices;local-development;port-forward;external;container;url;multi-repo;java;javascript</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
