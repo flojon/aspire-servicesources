@@ -2,6 +2,7 @@ using Aspire.Hosting;
 using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Git;
+using Aspire.Hosting.ServiceSources.Messages;
 using Aspire.Hosting.ServiceSources.Sources;
 using Microsoft.Extensions.Configuration;
 using Xunit;
@@ -120,7 +121,7 @@ public class DeveloperConfigurationTests
             () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
 
         Assert.Contains("ServiceSources:Services", ex.Message);
-        Assert.Contains(Path.Combine(dir, "servicesources.local.json"), ex.Message);
+        Assert.Contains(Name.Escape(Path.Combine(dir, "servicesources.local.json")), ex.Message);
         Assert.Contains("environment variable", ex.Message);
     }
 
@@ -138,7 +139,7 @@ public class DeveloperConfigurationTests
 
         Assert.Contains("ServiceSources:Services:orders:source", ex.Message);
         Assert.Contains("under \"services\" in", ex.Message);
-        Assert.Contains(Path.Combine(dir, "servicesources.local.json"), ex.Message);
+        Assert.Contains(Name.Escape(Path.Combine(dir, "servicesources.local.json")), ex.Message);
     }
 
     [Fact]
@@ -455,7 +456,7 @@ public class DeveloperConfigurationTests
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
 
-        Assert.Contains($"create '{Path.Combine(dir, "servicesources.local.json")}'", ex.Message);
+        Assert.Contains($"create '{Name.Escape(Path.Combine(dir, "servicesources.local.json"))}'", ex.Message);
         Assert.DoesNotContain("under \"services\" in", ex.Message);
     }
 
@@ -616,7 +617,7 @@ public class DeveloperConfigurationTests
 
         Assert.Contains($"'{rootKey}'", ex.Message);
         Assert.Contains("'services'", ex.Message);
-        Assert.Contains(Path.Combine(dir, "servicesources.local.json"), ex.Message);
+        Assert.Contains(Name.Escape(Path.Combine(dir, "servicesources.local.json")), ex.Message);
     }
 
     /// <summary>

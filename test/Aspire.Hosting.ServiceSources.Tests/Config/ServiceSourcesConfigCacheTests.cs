@@ -1,6 +1,7 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Messages;
 using Microsoft.Extensions.Configuration;
 using Xunit;
 
@@ -62,7 +63,7 @@ public class ServiceSourcesConfigCacheTests
         Assert.Contains("not found", ex.Message, StringComparison.OrdinalIgnoreCase);
         // A yaml-only AppHost still learns which file to open — a real diagnostics loss if it
         // regressed (design finding 5's "name the right thing").
-        Assert.Contains(Path.Combine(dir, "servicesources.yaml"), ex.Message, StringComparison.Ordinal);
+        Assert.Contains(Name.Escape(Path.Combine(dir, "servicesources.yaml")), ex.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -106,7 +107,7 @@ public class ServiceSourcesConfigCacheTests
 
         Assert.Contains("shipping", ex.Message);
         Assert.Contains("code", ex.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(Path.Combine(dir, "servicesources.yaml"), ex.Message, StringComparison.Ordinal);
+        Assert.Contains(Name.Escape(Path.Combine(dir, "servicesources.yaml")), ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
