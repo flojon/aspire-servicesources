@@ -77,6 +77,27 @@ public class MigratedSiteEscapingTests
         Assert.Contains(new string('x', 400), exception.Describe(fullDetail: false), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// <see cref="Exception.Message"/> is non-null by signature, not by contract: a subclass can
+    /// still override it to return null. Only reachable past the adjacent-dedup guard when it is
+    /// not the first cause, so the fixture nests it two levels deep.
+    /// </summary>
+    private sealed class NullMessageException : Exception
+    {
+        public override string Message => null!;
+    }
+
+    [Fact]
+    public void Describe_ToleratesACauseWithANullMessage()
+    {
+        var inner = new InvalidOperationException("could not read 'origin/main'", new NullMessageException());
+        var exception = ServiceSourcesConfigurationException.For($"Service '{new Name("orders")}' failed.", inner);
+
+        var described = exception.Describe(fullDetail: false);
+
+        Assert.Contains("  caused by: could not read 'origin/main'", described, StringComparison.Ordinal);
+    }
+
     // Fully qualified deliberately: the test assembly already has an
     // Aspire.Hosting.ServiceSources.Tests.Prepare namespace, so the simple name `Prepare` binds
     // there and lookup stops — `Prepare.PreparePlan` is CS0234, not the production type.

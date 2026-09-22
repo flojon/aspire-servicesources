@@ -86,8 +86,10 @@ internal readonly struct Raw
     internal static Raw Cause(Exception exception) =>
         new(string.Join(" | ", SplitLines(exception.Message).Select(ConfiguredValue.Bare)));
 
-    private static string[] SplitLines(string text) =>
-        text.Split(["\r\n", "\r", "\n"], StringSplitOptions.None);
+    // Message is non-null by signature but not by contract — a subclass can still override it to
+    // return null, same as Bare (which this replaces for cause text) has always tolerated.
+    private static string[] SplitLines(string? text) =>
+        (text ?? "").Split(["\r\n", "\r", "\n"], StringSplitOptions.None);
 
     /// <summary>The platform's line terminator: carries no caller data, so nothing needs escaping.</summary>
     internal static Raw NewLine { get; } = new(Environment.NewLine);
