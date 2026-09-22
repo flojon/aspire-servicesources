@@ -3,7 +3,7 @@ using Aspire.Hosting.ApplicationModel;
 namespace Aspire.Hosting.ServiceSources.Java;
 
 /// <summary>
-/// Runs a <c>"local"</c>-sourced service written in Java, by handing its checkout to the .NET Aspire
+/// Runs a <c>"local"</c>-sourced service written in Java, by handing its checkout to the Aspire
 /// Community Toolkit's Java integration (<c>AddJavaApp</c> + <c>WithMavenGoal</c>/
 /// <c>WithGradleTask</c>). Registered for the <c>java</c> kind by
 /// <see cref="JavaServiceSourcesBuilderExtensions.UseJava"/>.

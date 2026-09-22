@@ -4,7 +4,7 @@
 [![Downloads](https://img.shields.io/nuget/dt/KoalaSoft.Aspire.Hosting.ServiceSources?logo=nuget&label=downloads)](https://www.nuget.org/packages/KoalaSoft.Aspire.Hosting.ServiceSources)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/flojon/aspire-servicesources/blob/main/LICENSE)
 
-A .NET Aspire AppHost extension that lets `builder.AddService("orders")` resolve to a real,
+An Aspire AppHost extension that lets `builder.AddService("orders")` resolve to a real,
 running resource whose *source* is chosen per developer, not baked into the AppHost.
 
 ## Why
@@ -1054,7 +1054,7 @@ that use them.
 
 #### Java: `kind: java`
 
-Runs the checkout through the .NET Aspire Community Toolkit's
+Runs the checkout through the Aspire Community Toolkit's
 [Java integration](https://github.com/CommunityToolkit/Aspire), which your AppHost references
 itself as `CommunityToolkit.Aspire.Hosting.Java` (13.3.0 or newer — see
 [Installation](#install)). `java` is a built-in kind, resolved the same way `dotnet` always has
