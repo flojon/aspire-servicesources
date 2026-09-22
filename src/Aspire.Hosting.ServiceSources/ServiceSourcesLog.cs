@@ -10,15 +10,19 @@ namespace Aspire.Hosting.ServiceSources;
 /// </summary>
 /// <remarks>
 /// <c>LoggerExtensions</c>'s <c>Log*</c> overloads this package actually uses are banned everywhere
-/// else (<c>BannedSymbols.txt</c>), so this class is the only place they may still be called — under
-/// the same pragma-scoped exemption <c>ServiceSourcesConfigurationException.For</c> uses for its own
-/// banned constructor. Every hole is a <see cref="Name"/>, a <see cref="Raw"/>, or a primitive —
-/// <see cref="ServiceTextHandler"/> refuses anything else — so a caller-controlled value cannot reach
-/// a log line unescaped.
+/// else (<c>BannedSymbols.txt</c>), under the same pragma-scoped exemption
+/// <c>ServiceSourcesConfigurationException.For</c> uses for its own banned constructor. Every hole
+/// here is a <see cref="Name"/>, a <see cref="Raw"/>, or a primitive — <see cref="ServiceTextHandler"/>
+/// refuses anything else — so a caller-controlled value cannot reach a log line unescaped.
+/// <para>
+/// One other exemption exists — <c>ServiceSourcesWarnings.Write</c> — for messages that are already
+/// fully-composed, hand-escaped sentences rather than <see cref="ServiceTextHandler"/> holes; routing
+/// them back through here would re-escape text that is already safe. See its own comment for why.
+/// </para>
 /// </remarks>
 internal static class ServiceSourcesLog
 {
-#pragma warning disable RS0030 // The one legitimate caller of the LoggerExtensions.Log* overloads this package bans.
+#pragma warning disable RS0030 // A legitimate caller of the LoggerExtensions.Log* overloads this package bans; see ServiceSourcesWarnings.Write for the other.
     internal static void Information(ILogger logger, ServiceTextHandler message) =>
         logger.LogInformation("{ServiceSourcesMessage}", message.Text);
 

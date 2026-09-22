@@ -52,7 +52,10 @@ public class MigratedSiteEscapingTests
         // The forged text may survive as characters; what it must not do is start a line. Splitting on
         // the separator + prefix counts real cause lines only, so exactly one wrapped cause means two parts.
         Assert.Equal(2, described.Split(Environment.NewLine + "  caused by: ").Length);
-        Assert.Contains("\\n  caused by: nothing is wrong", described, StringComparison.Ordinal);
+        // Raw.Cause joins a cause's own line breaks with " | " (readable), not a literal "\n" escape
+        // code — the join consumes the line terminator itself, so the forged prefix cannot survive to
+        // start a real line either way; this pins the new join spelling instead of the old escape one.
+        Assert.Contains("authentication failed |   caused by: nothing is wrong", described, StringComparison.Ordinal);
     }
 
     [Fact]
