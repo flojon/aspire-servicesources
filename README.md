@@ -1503,6 +1503,11 @@ developer (e.g. pointing at a personal tunnel or local proxy):
 }
 ```
 
+A resolved service implements `IResourceWithServiceDiscovery`, so any consumer that can't use
+`HttpClient` directly can still resolve its address with `ServiceEndpointResolver` from
+`Microsoft.Extensions.ServiceDiscovery` — the same as it would for a project reference,
+regardless of which source resolved it.
+
 ### `"container"` source
 
 Run a published container image locally via Aspire's own container-runtime integration —
@@ -1796,7 +1801,11 @@ backend.Unwrap<JavaScriptAppResource>().WithRunScript("dev");
 startup. Both resolve to something already running elsewhere — a `"url"` service has no local
 process at all, and a `"kubernetes"` service is a `kubectl port-forward` in front of a remote one,
 so environment variables applied here would configure `kubectl` rather than the service. Those
-services are expected to be configured wherever they actually run.
+services are expected to be configured wherever they actually run. This includes
+`WithHttpHealthCheck` — a `"kubernetes"` service's port-forward has a real local endpoint, but the
+call still dual-writes onto the `kubectl` process rather than the service behind it, so it's
+skipped the same as any other configuration call rather than treated as an exception alongside
+wait ordering.
 
 The one exception is **wait ordering on a `"kubernetes"` service**, which still applies:
 `WaitFor`/`WaitForCompletion` reach a real, registered `kubectl port-forward` executable, and
