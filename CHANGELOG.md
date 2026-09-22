@@ -207,8 +207,9 @@ never existed. Check the tag of the last release before adding one.
   ten services still names all ten. The wording of a cause flattened into
   `ServiceSourcesConfigurationException.Describe` can no longer forge a line either — escaped rather
   than bounded, because a cause is a diagnosis and truncating it would discard what it is for.
-  Messages this package has not migrated yet still interpolate a name directly; the constructor
-  behind them now reports each one, so the remainder is a worklist rather than a search.
+  Messages elsewhere in the package still interpolated a name directly at the time this shipped; the
+  constructor behind them reported each one, turning the remainder into a worklist rather than a
+  search — completed below in [#385].
 
 - **`WithExternalHttpEndpoints` on a `url` or `kubernetes` service is now skipped and reported
   instead of applied silently** ([#359]). Aspire's method does not add an annotation — it walks the
@@ -238,8 +239,21 @@ never existed. Check the tag of the last release before adding one.
   this package already applies to developer-written text echoed back, plus a length cap. The revert
   warning added earlier in this same `[Unreleased]` cycle (above) already escapes both names from the
   start, so it needed no fix here — it never shipped unescaped. Messages elsewhere in the package
-  still interpolate a service name directly; making that structural rather than per-site is tracked
-  as [#375].
+  interpolated a service name directly at the time this shipped; making that structural rather than
+  per-site is completed below in [#385].
+
+- **The last caller-controlled names in the package now go through the same escaping seam, and
+  bypassing it is a build error** ([#385], completes [#375]). The two entries above left messages
+  elsewhere in the package still interpolating a name directly, reported one at a time as a worklist.
+  That worklist is now empty: the Git, Java, JavaScript and Kubernetes exception hierarchies
+  (`GitAuthenticationFailedException`, `KubernetesSecretException`, `PrepareLaunchException`, and
+  every remaining raw `ServiceSourcesConfigurationException` constructor call), the structured-logging
+  sink, and the `prepare`-command's console and resource-log sinks now all compose through the same
+  `Name`/`Raw` escaping seam the entries above introduced. `RS0030` — the analyzer banning a raw
+  exception constructor — moves from a tolerated warning to a build error project-wide, so a call site
+  that skips the seam in the future fails CI instead of shipping an unescaped name. Entirely internal:
+  no public type or method this package documents changed, so there is nothing to migrate on your
+  side.
 
 - **The remedy every out-of-band message offers no longer dead-ends** ([#372]). Four messages
   offered the same way back under this AppHost's control, each in its own words and all of them as
@@ -1798,6 +1812,7 @@ Targets `net10.0`.
 [#362]: https://github.com/flojon/aspire-servicesources/issues/362
 [#372]: https://github.com/flojon/aspire-servicesources/issues/372
 [#375]: https://github.com/flojon/aspire-servicesources/issues/375
+[#385]: https://github.com/flojon/aspire-servicesources/issues/385
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
