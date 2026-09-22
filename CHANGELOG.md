@@ -227,18 +227,19 @@ never existed. Check the tag of the last release before adding one.
   warning rather than two, and the detector remains the backstop for the guest-language endpoint
   callbacks, which no C# shadow can reach.
 
-- **A service name can no longer forge a second log entry in four out-of-band messages** ([#372]).
+- **A service name can no longer forge a second log entry in three out-of-band messages** ([#372]).
   Each of them opens with the service's own name, taken from the catalog and interpolated between
   quotes without escaping. A name carrying a newline, a Unicode line separator or an apostrophe
   therefore split the line, or closed the quote and wrote a sentence of its own, into a log a reader
-  trusts. The four are the warning for configuration skipped on a `url` or `kubernetes` service, the
-  revert warning added in this release, `Unwrap<T>`'s refusal of an out-of-band source, and the
-  refusal of a container's reference to a `url` service — the last thrown from inside
-  `BeforeStartEvent`, so it lands in the host's own log. Both names these messages carry, the service
-  and the endpoint, now go through the same escaping this package already applies to
-  developer-written text echoed back, plus a length cap. Messages elsewhere in the package still
-  interpolate a service name directly; making that structural rather than per-site is tracked as
-  [#375].
+  trusts. The three are the warning for configuration skipped on a `url` or `kubernetes` service,
+  `Unwrap<T>`'s refusal of an out-of-band source, and the refusal of a container's reference to a
+  `url` service — the last thrown from inside `BeforeStartEvent`, so it lands in the host's own log.
+  Both names these messages carry, the service and the endpoint, now go through the same escaping
+  this package already applies to developer-written text echoed back, plus a length cap. The revert
+  warning added earlier in this same `[Unreleased]` cycle (above) already escapes both names from the
+  start, so it needed no fix here — it never shipped unescaped. Messages elsewhere in the package
+  still interpolate a service name directly; making that structural rather than per-site is tracked
+  as [#375].
 
 - **The remedy every out-of-band message offers no longer dead-ends** ([#372]). Four messages
   offered the same way back under this AppHost's control, each in its own words and all of them as
@@ -313,8 +314,8 @@ never existed. Check the tag of the last release before adding one.
   explicit capability id (`[AspireExport("…")]`) does. It does not collide for an **instance**
   method exposed via `ExposeMethods = true` — those are always receiver-qualified, so they need no
   explicit id ([#309]). See
-  `docs/superpowers/specs/2026-09-07-code-catalog-stage0-ats-probe-findings.md`. Nothing in the
-  package changed; this stage ships no code.
+  https://github.com/flojon/aspire-servicesources/blob/main/docs/superpowers/specs/2026-09-07-code-catalog-stage0-ats-probe-findings.md.
+  Nothing in the package changed; this stage ships no code.
 
 ## [0.5.1] - 2026-09-07
 

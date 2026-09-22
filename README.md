@@ -802,7 +802,10 @@ resolves eagerly, exactly as it does without `UseDeferredCheckout()`. Every othe
 
 Off by default: a service that used to be running by the time `Build()` returned is started
 after it instead, which is visible to anything in your AppHost that assumed otherwise. Call it
-before your first `AddService()`, which is where the decision is made.
+before your first `AddService()`, which is where the decision is made — the same ordering
+`AddServiceCatalog()` requires. A call made after any service has already resolved throws
+`ServiceSourcesConfigurationException` naming the service, rather than silently having no effect
+on it.
 
 #### Managed checkouts don't inherit your AppHost repository's build settings
 
@@ -2240,7 +2243,7 @@ carry entries for backing services only some configurations add. There is no way
 if you find yourself wanting one, say so on
 [#206](https://github.com/flojon/aspire-servicesources/issues/206).
 
-### From a guest-language AppHost
+### From a guest-language AppHost (backing services)
 
 `addBackingService` is exported, and the local factory crosses the boundary as an ordinary callback:
 
