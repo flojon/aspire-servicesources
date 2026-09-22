@@ -1,4 +1,5 @@
 using Aspire.Hosting.ServiceSources.Git;
+using Aspire.Hosting.ServiceSources.Messages;
 using Aspire.Hosting.ServiceSources.Prepare;
 using Xunit;
 
@@ -91,7 +92,7 @@ public class CheckoutPreparationTests
     {
         public List<string> Lines { get; } = [];
 
-        public void Report(string line) => Lines.Add(line);
+        public void Report(Raw line) => Lines.Add(line.ToString());
     }
 
     /// <summary>
@@ -107,10 +108,10 @@ public class CheckoutPreparationTests
 
     private static PrepareStep Step(string mode = "oncePerCommit", params string[] command) =>
         PrepareStep.Create(
-            ServiceName,
+            PreparePlan.ServiceLabel(ServiceName),
             command.Length == 0 ? ["./prepare.sh"] : command,
-            PrepareModes.Parse(ServiceName, mode, "prepare.mode"),
-            "prepare");
+            PrepareModes.Parse(PreparePlan.ServiceLabel(ServiceName), mode, Raw.Literal("prepare.mode")),
+            Raw.Literal("prepare"));
 
     private sealed record Fixture(
         string RepoRoot, string AppHostDirectory, FakeRunner Runner, FakeGitClient Git, RecordingSink Sink)
@@ -128,7 +129,7 @@ public class CheckoutPreparationTests
         bool managedCheckout = true,
         CancellationToken cancellationToken = default,
         string? serviceName = null,
-        string? label = null,
+        Raw? label = null,
         string? checkoutName = null) =>
         CheckoutPreparation.Run(
             serviceName ?? ServiceName, label ?? PreparePlan.ServiceLabel(ServiceName),
@@ -366,7 +367,7 @@ public class CheckoutPreparationTests
     {
         var step = Step("oncePerCommit", "curl", "https://user:s3cr3t-token@example.com/artifact.jar");
 
-        var notice = CheckoutPreparation.SkippedOutsideRunModeNotice(ServiceName, step);
+        var notice = CheckoutPreparation.SkippedOutsideRunModeNotice(ServiceName, step).ToString();
 
         Assert.DoesNotContain("s3cr3t-token", notice);
         Assert.Contains("https://example.com/artifact.jar", notice);
@@ -746,9 +747,9 @@ public class CheckoutPreparationTests
     private sealed class StoppingSink(
         string line, ManualResetEventSlim reached, ManualResetEventSlim release) : IPrepareOutputSink
     {
-        public void Report(string reported)
+        public void Report(Raw reported)
         {
-            if (!reported.EndsWith(line, StringComparison.Ordinal))
+            if (!reported.ToString().EndsWith(line, StringComparison.Ordinal))
             {
                 return;
             }
@@ -778,7 +779,8 @@ public class CheckoutPreparationTests
         fixture.Runner.LaunchException = new PrepareLaunchException("not executable");
 
         var windowsStep = PrepareStep.Create(
-            ServiceName, ["./prepare.sh"], PrepareMode.OncePerCommit, "prepare", windowsWithoutVariant: true);
+            PreparePlan.ServiceLabel(ServiceName), ["./prepare.sh"], PrepareMode.OncePerCommit, Raw.Literal("prepare"),
+            windowsWithoutVariant: true);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => Run(fixture, windowsStep));
 
@@ -1147,7 +1149,9 @@ public class CheckoutPreparationTests
         var exception = Assert.Throws<ServiceSourcesConfigurationException>(
             () => PrepareMarker.LocationFor(serviceName, "/unused", "/unused", managedCheckout: false));
 
-        Assert.Contains(serviceName, exception.Message, StringComparison.Ordinal);
+        // The escaped spelling, not the raw one: Name doubles a name's own backslashes so a
+        // developer can paste it back into servicesources.local.json without misreading it.
+        Assert.Contains(Name.Escape(serviceName), exception.Message, StringComparison.Ordinal);
     }
 
     /// <summary>

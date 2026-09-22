@@ -1,4 +1,5 @@
 using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.ServiceSources.Messages;
 using Aspire.Hosting.ServiceSources.Sources;
 
 namespace Aspire.Hosting.ServiceSources;
@@ -85,29 +86,33 @@ public static class ServiceEndpointExtensions
             return service.GetEndpoint(names[0]);
         }
 
-        throw new ServiceSourcesConfigurationException(Explain(service.Resource, names));
+        throw ServiceSourcesConfigurationException.For($"{Explain(service.Resource, names)}");
     }
 
-    private static string Explain(IResource resource, IReadOnlyCollection<string> names)
+    private static Raw Explain(IResource resource, IReadOnlyCollection<string> names)
     {
         var annotation = resource.Annotations.OfType<ServiceSourceAnnotation>().FirstOrDefault();
-        var name = annotation?.ServiceName ?? resource.Name;
-        var source = annotation is null ? "" : $" Its source is '{annotation.Source}'.";
+        var name = new Name(annotation?.ServiceName ?? resource.Name);
+        var source = annotation is null
+            ? Raw.Literal("")
+            : Raw.Compose($" Its source is '{new Name(annotation.Source)}'.");
 
         if (names.Count == 0)
         {
-            return $"Service '{name}' exposes no endpoint, so there is none to reference.{source} " +
-                   "Give the service an endpoint — a 'scheme'/'port' entry for a 'kubernetes' or " +
-                   "'container' source, a launch profile for a 'local' one, or declare one explicitly: " +
-                   "withHttpEndpoint()/withHttpsEndpoint() in TypeScript, or " +
-                   "WithHttpEndpoint()/WithHttpsEndpoint() in C#.";
+            return Raw.Compose(
+                $"Service '{name}' exposes no endpoint, so there is none to reference.{source} "
+                + $"Give the service an endpoint — a 'scheme'/'port' entry for a 'kubernetes' or "
+                + $"'container' source, a launch profile for a 'local' one, or declare one explicitly: "
+                + $"withHttpEndpoint()/withHttpsEndpoint() in TypeScript, or "
+                + $"WithHttpEndpoint()/WithHttpsEndpoint() in C#.");
         }
 
-        var endpointList = string.Join(", ", names.Select(n => $"'{n}'"));
+        var endpointList = Raw.Join(", ", names.Select(n => Raw.Compose($"'{new Name(n)}'")));
 
-        return $"Service '{name}' exposes several endpoints and none of them is named " +
-               $"'{EndpointScheme.Http}' or '{EndpointScheme.Https}': {endpointList}.{source} " +
-               "There is no single endpoint to mean, so name the one you want with " +
-               "GetEndpoint(\"<name>\") instead.";
+        return Raw.Compose(
+            $"Service '{name}' exposes several endpoints and none of them is named "
+            + $"'{Raw.Literal(EndpointScheme.Http)}' or '{Raw.Literal(EndpointScheme.Https)}': {endpointList}.{source} "
+            + $"There is no single endpoint to mean, so name the one you want with "
+            + $"GetEndpoint(\"<name>\") instead.");
     }
 }

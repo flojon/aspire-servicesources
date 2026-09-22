@@ -215,7 +215,7 @@ internal sealed class ServiceStartupFailureNotices
         {
             // ReportAsync swallows its own; this is the prologue's, and a provider already disposed
             // when a late BeforeStartEvent reaches it is the way it happens.
-            Note(logger, ex, "Reporting service start failures could not start");
+            Note(logger, ex, Raw.Literal("Reporting service start failures could not start"));
         }
         finally
         {
@@ -249,7 +249,7 @@ internal sealed class ServiceStartupFailureNotices
                         // An error rather than a warning, and deliberately louder than the
                         // prefetch's notices: a service the AppHost actually added and that is not
                         // running is not a cost to be aware of, it is the run being wrong.
-                        logger.LogError("{ServiceSourcesNotice}", notice);
+                        ServiceSourcesLog.Error(logger, $"{notice}");
                     }
                 }
                 catch (OperationCanceledException)
@@ -263,7 +263,7 @@ internal sealed class ServiceStartupFailureNotices
                     // the silence this class exists to break, and cost far more than the notice it
                     // gave up on. What survives is the loop-level catch below, for a stream that
                     // has genuinely ended.
-                    Note(logger, ex, "Reporting skipped one resource event");
+                    Note(logger, ex, Raw.Literal("Reporting skipped one resource event"));
                 }
             }
         }
@@ -273,7 +273,7 @@ internal sealed class ServiceStartupFailureNotices
         }
         catch (Exception ex)
         {
-            Note(logger, ex, "Reporting service start failures stopped early");
+            Note(logger, ex, Raw.Literal("Reporting service start failures stopped early"));
         }
     }
 
@@ -281,11 +281,11 @@ internal sealed class ServiceStartupFailureNotices
     /// Records something that went wrong inside the report itself, without becoming the next thing
     /// that goes wrong: the logger is one of the pieces that can be torn down under this loop.
     /// </summary>
-    private static void Note(ILogger logger, Exception exception, string what)
+    private static void Note(ILogger logger, Exception exception, Raw what)
     {
         try
         {
-            logger.LogDebug(exception, "{What}: {Message}", what, exception.Message);
+            ServiceSourcesLog.Debug(logger, exception, $"{what}: {Raw.Cause(exception)}");
         }
         catch (Exception)
         {
@@ -296,7 +296,7 @@ internal sealed class ServiceStartupFailureNotices
     /// The notice <paramref name="published"/> calls for, or <see langword="null"/> when it is not
     /// about a resource of ours, does not report a failure, or repeats one already reported.
     /// </summary>
-    private string? Notice(ResourceEvent published, bool dashboard)
+    private Raw? Notice(ResourceEvent published, bool dashboard)
     {
         // Read straight off the live collection rather than through a defensive copy: Aspire backs
         // ResourceAnnotationCollection with a list whose reads walk an ImmutableArray snapshot, so
@@ -469,7 +469,7 @@ internal sealed class ServiceStartupFailureNotices
     /// Says which service, what was reported for it, and where the reason is — without claiming to
     /// know what the reason was.
     /// </summary>
-    private static string FailureMessage(
+    private static Raw FailureMessage(
         IResource resourceModel,
         string serviceName,
         string resourceId,
@@ -515,6 +515,6 @@ internal sealed class ServiceStartupFailureNotices
         return Raw.Compose(
             $"Service '{new Name(serviceName)}' is configured as '{new Name(source)}' and {resource} is not running: it "
             + $"reported {reported}. This console does not carry that resource's output, so nothing here "
-            + $"says why — {elsewhere}.{checkout}").ToString();
+            + $"says why — {elsewhere}.{checkout}");
     }
 }

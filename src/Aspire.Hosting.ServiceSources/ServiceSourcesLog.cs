@@ -1,0 +1,44 @@
+using Aspire.Hosting.ServiceSources.Messages;
+using Microsoft.Extensions.Logging;
+
+namespace Aspire.Hosting.ServiceSources;
+
+/// <summary>
+/// The one way this package writes reader-facing text to an <see cref="ILogger"/> — mirrors
+/// <c>ServiceSourcesConfigurationException.For</c>'s seam, but for the logging sink rather than the
+/// exception-message one.
+/// </summary>
+/// <remarks>
+/// <c>LoggerExtensions</c>'s <c>Log*</c> overloads this package actually uses are banned everywhere
+/// else (<c>BannedSymbols.txt</c>), under the same pragma-scoped exemption
+/// <c>ServiceSourcesConfigurationException.For</c> uses for its own banned constructor. Every hole
+/// here is a <see cref="Name"/>, a <see cref="Raw"/>, or a primitive — <see cref="ServiceTextHandler"/>
+/// refuses anything else — so a caller-controlled value cannot reach a log line unescaped.
+/// <para>
+/// One other exemption exists — <c>ServiceSourcesWarnings.Write</c> — for messages that are already
+/// fully-composed, hand-escaped sentences rather than <see cref="ServiceTextHandler"/> holes; routing
+/// them back through here would re-escape text that is already safe. See its own comment for why.
+/// </para>
+/// </remarks>
+internal static class ServiceSourcesLog
+{
+#pragma warning disable RS0030 // A legitimate caller of the LoggerExtensions.Log* overloads this package bans; see ServiceSourcesWarnings.Write for the other.
+    internal static void Information(ILogger logger, ServiceTextHandler message) =>
+        logger.LogInformation("{ServiceSourcesMessage}", message.Text);
+
+    internal static void Warning(ILogger logger, ServiceTextHandler message) =>
+        logger.LogWarning("{ServiceSourcesMessage}", message.Text);
+
+    internal static void Warning(ILogger logger, Exception exception, ServiceTextHandler message) =>
+        logger.LogWarning(exception, "{ServiceSourcesMessage}", message.Text);
+
+    internal static void Error(ILogger logger, ServiceTextHandler message) =>
+        logger.LogError("{ServiceSourcesMessage}", message.Text);
+
+    internal static void Error(ILogger logger, Exception exception, ServiceTextHandler message) =>
+        logger.LogError(exception, "{ServiceSourcesMessage}", message.Text);
+
+    internal static void Debug(ILogger logger, Exception exception, ServiceTextHandler message) =>
+        logger.LogDebug(exception, "{ServiceSourcesMessage}", message.Text);
+#pragma warning restore RS0030
+}

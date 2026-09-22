@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Aspire.Hosting.ServiceSources.Java;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
 
@@ -36,8 +37,8 @@ internal sealed class LocalKindRegistry
     {
         if (string.Equals(kind, LocalKinds.Dotnet, StringComparison.Ordinal))
         {
-            throw new ServiceSourcesConfigurationException(
-                "Local kind 'dotnet' is reserved for the built-in project resolution and cannot be registered via AddLocalKind.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Local kind 'dotnet' is reserved for the built-in project resolution and cannot be registered via AddLocalKind.");
         }
 
         // The reserved-name collision is a yaml document-shape constraint (#73): a kind's options
@@ -49,8 +50,8 @@ internal sealed class LocalKindRegistry
         // actually occur: ServiceCatalogLoader.Load, scoped to the one service using it.
         if (!_handlers.TryAdd(kind, handler))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Local kind '{kind}' is already registered. Call AddLocalKind for a given kind at most once.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Local kind '{new Name(kind)}' is already registered. Call AddLocalKind for a given kind at most once.");
         }
     }
 
@@ -77,13 +78,13 @@ internal sealed class LocalKindRegistry
     /// are matched exactly — a casing slip would otherwise report only that the kind "is not
     /// registered", which sends the reader looking for a missing package instead of a typo.
     /// </summary>
-    public string DescribeNearMatch(string kind)
+    public Raw DescribeNearMatch(string kind)
     {
         var candidates = _handlers.Keys
             .Append(LocalKinds.Dotnet)
             .Append(JavaLocalResourceKind.KindName)
             .Append(JavaScriptLocalKind.KindName);
         var match = candidates.FirstOrDefault(k => string.Equals(k, kind, StringComparison.OrdinalIgnoreCase));
-        return match is null ? "" : $"Kind names are case-sensitive — did you mean '{match}'? ";
+        return match is null ? default : Raw.Compose($"Kind names are case-sensitive — did you mean '{new Name(match)}'? ");
     }
 }

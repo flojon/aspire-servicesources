@@ -1,5 +1,6 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.BackingServices;
 
@@ -40,19 +41,26 @@ internal sealed class DirectBackingServiceSource : IBackingServiceSource
         string name,
         BackingServiceDeveloperConfig config)
     {
-        var configKey = $"{DeveloperConfiguration.BackingServicesKey}:{name}:Direct:ConnectionString";
+        // Built from the same raw pieces as its environment-variable spelling below, rather than one
+        // derived from the other's already-escaped rendering, so a name carrying a colon is not
+        // escaped twice.
+        var configKey = Raw.Compose($"{Raw.Literal(DeveloperConfiguration.BackingServicesKey)}:{new Name(name)}:Direct:ConnectionString");
+        var configKeyAsEnvironmentVariable = Raw.Compose(
+            $"{Raw.Escaped(DeveloperConfiguration.BackingServicesKey.Replace(":", "__", StringComparison.Ordinal))}"
+            + $"__{new Name(name)}__Direct__ConnectionString");
 
         if (string.IsNullOrWhiteSpace(config.Direct.ConnectionString))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Backing service '{name}': source 'direct' requires 'direct.connectionString' — it is the whole "
-                + $"of what this source supplies. Add \"{name}\": {{ \"source\": \"direct\", \"direct\": "
-                + $"{{ \"connectionString\": \"...\" }} }} under \"{DeveloperConfigFileSource.FileBackingServicesKey}\" in "
-                + $"'{DeveloperConfiguration.FileName}', or set "
-                + $"{configKey.Replace(":", "__", StringComparison.Ordinal)}.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Backing service '{new Name(name)}': source 'direct' requires 'direct.connectionString' — it is the whole "
+                + $"of what this source supplies. Add \"{new Name(name)}\": {{ \"source\": \"direct\", \"direct\": "
+                + $"{{ \"connectionString\": \"...\" }} }} under \"{Raw.Literal(DeveloperConfigFileSource.FileBackingServicesKey)}\" in "
+                + $"'{Raw.Literal(DeveloperConfiguration.FileName)}', or set "
+                + $"{configKeyAsEnvironmentVariable}.");
         }
 
-        var template = ConnectionStringTemplate.Parse(config.Direct.ConnectionString, name, configKey);
+        var template = ConnectionStringTemplate.Parse(
+            config.Direct.ConnectionString, name, configKey, configKeyAsEnvironmentVariable);
 
         // Parsed before this check rather than after, so that a malformed placeholder is reported as
         // malformed. Telling a developer who wrote `${secret:orders-creds}` that secrets are
@@ -75,19 +83,19 @@ internal sealed class DirectBackingServiceSource : IBackingServiceSource
                 // now, which no connection-string dialect uses, so anything arriving here was
                 // written as a placeholder and the paragraph would answer a question nobody asked.
                 case ConnectionStringTemplate.Port port:
-                    throw new ServiceSourcesConfigurationException(
-                        $"Backing service '{name}': the connection string carries '{port.AsWritten}', but source "
-                        + "'direct' forwards nothing, so there is no local port to substitute. Write the port the "
+                    throw ServiceSourcesConfigurationException.For(
+                        $"Backing service '{new Name(name)}': the connection string carries '{Raw.Escaped(port.AsWritten)}', but source "
+                        + $"'direct' forwards nothing, so there is no local port to substitute. Write the port the "
                         + $"backing service already listens on. The key is '{configKey}'.");
 
                 case ConnectionStringTemplate.Secret secret:
-                    throw new ServiceSourcesConfigurationException(
-                        $"Backing service '{name}': the connection string carries '{secret.AsWritten}', and source "
-                        + "'direct' has no cluster to read a secret from — it carries a connection string and "
-                        + "nothing else, with no 'context' or 'namespace' to resolve one against. Source "
-                        + "'kubernetes' reads these. Under 'direct', put the value in the connection string, or set "
-                        + "the whole connection string from a configuration layer that already holds it — user "
-                        + $"secrets, or {configKey.Replace(":", "__", StringComparison.Ordinal)}.");
+                    throw ServiceSourcesConfigurationException.For(
+                        $"Backing service '{new Name(name)}': the connection string carries '{Raw.Escaped(secret.AsWritten)}', and source "
+                        + $"'direct' has no cluster to read a secret from — it carries a connection string and "
+                        + $"nothing else, with no 'context' or 'namespace' to resolve one against. Source "
+                        + $"'kubernetes' reads these. Under 'direct', put the value in the connection string, or set "
+                        + $"the whole connection string from a configuration layer that already holds it — user "
+                        + $"secrets, or {configKeyAsEnvironmentVariable}.");
 
                 default:
                     throw new InvalidOperationException($"Unhandled template segment '{segment.GetType().Name}'.");

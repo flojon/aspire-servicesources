@@ -1,4 +1,5 @@
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Messages;
 using Aspire.Hosting.ServiceSources.Prepare;
 
 namespace Aspire.Hosting.ServiceSources.Catalog;
@@ -22,19 +23,19 @@ internal static class PrepareMetadataFactory
     /// <paramref name="mode"/> is not one of the four <see cref="PrepareMode"/> values.
     /// </exception>
     public static PrepareMetadata Create(
-        string label, string[] command, string[]? windowsCommand, PrepareMode mode)
+        Raw label, string[] command, string[]? windowsCommand, PrepareMode mode)
     {
         // Before PrepareModes.Written, which is a lookup over the defined members and total only
         // over those.
         if (!Enum.IsDefined(mode))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"{label}: {MethodName} was given mode '{(int)mode}', which is not a "
-                + $"{nameof(PrepareMode)}. Set it to one of "
-                + string.Join(", ", Enum.GetValues<PrepareMode>().Select(m => $"{nameof(PrepareMode)}.{m}"))
-                + " — the four the yaml block spells "
-                + string.Join(", ", Enum.GetValues<PrepareMode>().Select(m => $"'{PrepareModes.Written(m)}'"))
-                + ".");
+            throw ServiceSourcesConfigurationException.For(
+                $"{label}: {Raw.Literal(MethodName)} was given mode '{(int)mode}', which is not a "
+                + $"{Raw.Literal(nameof(PrepareMode))}. Set it to one of "
+                + $"{Raw.Join(", ", Enum.GetValues<PrepareMode>().Select(m => Raw.Compose($"{Raw.Literal(nameof(PrepareMode))}.{Raw.Escaped(m.ToString())}")))}"
+                + $" — the four the yaml block spells "
+                + $"{Raw.Join(", ", Enum.GetValues<PrepareMode>().Select(m => Raw.Compose($"'{Raw.Escaped(PrepareModes.Written(m))}'")))}"
+                + $".");
         }
 
         // Stored as the spelling the yaml block uses, so that PrepareMetadata.Mode carries one

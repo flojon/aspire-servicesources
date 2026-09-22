@@ -114,16 +114,15 @@ internal sealed class UrlSource : IServiceSource
                     continue;
                 }
 
-                throw new ServiceSourcesConfigurationException(
-                    // The service name is a catalog key, so it is escaped and capped; consumer.Name is
-                    // an Aspire resource name, which Aspire's own validator already bounds.
-                    $"Container '{consumer.Name}' references service " +
-                    $"'{ServiceSourcesWarnings.Label(urlService.Name)}', whose source is 'url'. " +
-                    "A 'url'-sourced service has no resource for Aspire to run, so DCP has no Service object to " +
-                    "plumb container-to-host networking through, and the container would fail to start. " +
-                    "Reference it from a project or executable instead, or " +
-                    OutOfBandSourceAdvice.SwitchSource + ". " +
-                    "Tracked as issue #72.");
+                throw ServiceSourcesConfigurationException.For(
+                    // consumer.Name is an Aspire resource name, which Aspire's own validator already bounds,
+                    // so it is safe as Raw; urlService.Name is a catalog key and goes through Name.
+                    $"Container '{Raw.Escaped(consumer.Name)}' references service " +
+                    $"'{new Name(urlService.Name)}', whose source is 'url'. " +
+                    $"A 'url'-sourced service has no resource for Aspire to run, so DCP has no Service object to " +
+                    $"plumb container-to-host networking through, and the container would fail to start. " +
+                    $"Reference it from a project or executable instead, or {Raw.Literal(OutOfBandSourceAdvice.SwitchSource)}. " +
+                    $"Tracked as issue #72.");
             }
 
             var warnings = ServiceSourcesWarnings.For(builder);

@@ -52,7 +52,10 @@ public class MigratedSiteEscapingTests
         // The forged text may survive as characters; what it must not do is start a line. Splitting on
         // the separator + prefix counts real cause lines only, so exactly one wrapped cause means two parts.
         Assert.Equal(2, described.Split(Environment.NewLine + "  caused by: ").Length);
-        Assert.Contains("\\n  caused by: nothing is wrong", described, StringComparison.Ordinal);
+        // Raw.Cause joins a cause's own line breaks with " | " (readable), not a literal "\n" escape
+        // code — the join consumes the line terminator itself, so the forged prefix cannot survive to
+        // start a real line either way; this pins the new join spelling instead of the old escape one.
+        Assert.Contains("authentication failed |   caused by: nothing is wrong", described, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -74,14 +77,35 @@ public class MigratedSiteEscapingTests
         Assert.Contains(new string('x', 400), exception.Describe(fullDetail: false), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// <see cref="Exception.Message"/> is non-null by signature, not by contract: a subclass can
+    /// still override it to return null. Only reachable past the adjacent-dedup guard when it is
+    /// not the first cause, so the fixture nests it two levels deep.
+    /// </summary>
+    private sealed class NullMessageException : Exception
+    {
+        public override string Message => null!;
+    }
+
+    [Fact]
+    public void Describe_ToleratesACauseWithANullMessage()
+    {
+        var inner = new InvalidOperationException("could not read 'origin/main'", new NullMessageException());
+        var exception = ServiceSourcesConfigurationException.For($"Service '{new Name("orders")}' failed.", inner);
+
+        var described = exception.Describe(fullDetail: false);
+
+        Assert.Contains("  caused by: could not read 'origin/main'", described, StringComparison.Ordinal);
+    }
+
     // Fully qualified deliberately: the test assembly already has an
     // Aspire.Hosting.ServiceSources.Tests.Prepare namespace, so the simple name `Prepare` binds
     // there and lookup stops — `Prepare.PreparePlan` is CS0234, not the production type.
     private static string ServiceLabel(string name) =>
-        Aspire.Hosting.ServiceSources.Prepare.PreparePlan.ServiceLabel(name);
+        Aspire.Hosting.ServiceSources.Prepare.PreparePlan.ServiceLabel(name).ToString();
 
     private static string RepositoryLabel(string name) =>
-        Aspire.Hosting.ServiceSources.Prepare.PreparePlan.RepositoryLabel(name);
+        Aspire.Hosting.ServiceSources.Prepare.PreparePlan.RepositoryLabel(name).ToString();
 
     [Fact]
     public void ServiceLabel_EscapesTheName() =>
@@ -270,7 +294,7 @@ public class MigratedSiteEscapingTests
         DeferredCheckout.LaunchProfileEndpointWarning(
             serviceName,
             new LandedLaunchProfile(null, applicationUrls, new Dictionary<string, string>(StringComparer.Ordinal)),
-            new ProjectResource("orders"));
+            new ProjectResource("orders"))?.ToString();
 
     [Theory]
     [InlineData("orders'\nFATAL: started fine", "orders\\u0027\\nFATAL: started fine")]

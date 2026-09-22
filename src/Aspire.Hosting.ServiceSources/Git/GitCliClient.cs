@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.Git;
 
@@ -90,32 +91,34 @@ internal sealed partial class GitCliClient(
     /// Probed once per process: whether <c>git</c> can be run at all, and the message to report if
     /// it can't. An AppHost resolves many services, and the answer cannot change under it.
     /// </summary>
-    private static readonly Lazy<string?> Unavailability =
+    private static readonly Lazy<Raw?> Unavailability =
         new(ProbeUnavailability, LazyThreadSafetyMode.ExecutionAndPublication);
 
     public void EnsureAvailable()
     {
         if (Unavailability.Value is { } reason)
         {
-            throw new ServiceSourcesConfigurationException(reason);
+            throw ServiceSourcesConfigurationException.For($"{reason}");
         }
     }
 
-    private static string? ProbeUnavailability()
+    private static Raw? ProbeUnavailability()
     {
         try
         {
             return GitCommand.Run(["--version"]).Succeeded
                 ? null
-                : "'git' is on PATH but 'git --version' failed, so the 'local' source cannot clone or update " +
-                  "checkouts. Repair the git installation, or give each service a 'local.path' override " +
-                  "in servicesources.local.json to point at a checkout you manage yourself.";
+                : Raw.Compose(
+                    $"'git' is on PATH but 'git --version' failed, so the 'local' source cannot clone or update " +
+                    $"checkouts. Repair the git installation, or give each service a 'local.path' override " +
+                    $"in servicesources.local.json to point at a checkout you manage yourself.");
         }
         catch (GitUnavailableException ex)
         {
-            return "The 'local' source clones and updates service repositories with 'git', which was not found on " +
-                   $"PATH ({ex.Message}). Install git (2.7 or newer), or give each service a 'local.path' " +
-                   "override in servicesources.local.json to point at a checkout you manage yourself.";
+            return Raw.Compose(
+                $"The 'local' source clones and updates service repositories with 'git', which was not found on " +
+                $"PATH ({Raw.Cause(ex)}). Install git (2.7 or newer), or give each service a 'local.path' " +
+                $"override in servicesources.local.json to point at a checkout you manage yourself.");
         }
     }
 
@@ -166,8 +169,8 @@ internal sealed partial class GitCliClient(
             }
         }
 
-        throw new ServiceSourcesConfigurationException(
-            $"Ref '{reference}' was not found in repository at '{repositoryPath}'.");
+        throw ServiceSourcesConfigurationException.For(
+            $"Ref '{new Name(reference)}' was not found in repository at '{Raw.Escaped(repositoryPath)}'.");
     }
 
     public void Fetch(string repositoryPath)
@@ -286,7 +289,7 @@ internal sealed partial class GitCliClient(
         var result = TryRun(repositoryPath, arguments);
         if (!result.Succeeded)
         {
-            throw new GitCommandFailedException(Describe(result));
+            throw GitCommandFailedException.For($"{Describe(result)}");
         }
 
         return result;
@@ -344,13 +347,13 @@ internal sealed partial class GitCliClient(
         if (LooksLikeAuthFailure(result.StandardError))
         {
             var message = Describe(result);
-            throw new GitAuthenticationFailedException(
-                message,
-                new GitCommandFailedException(message),
+            throw GitAuthenticationFailedException.For(
+                $"{message}",
+                GitCommandFailedException.For($"{message}"),
                 ResolvedNoCredentials(result.StandardError));
         }
 
-        throw new GitCommandFailedException(Describe(result));
+        throw GitCommandFailedException.For($"{Describe(result)}");
     }
 
     /// <summary>
@@ -399,10 +402,10 @@ internal sealed partial class GitCliClient(
     /// git's own words for a failure, preferring stderr and falling back to the exit code when a
     /// command fails silently.
     /// </summary>
-    private static string Describe(GitCommandResult result)
+    private static Raw Describe(GitCommandResult result)
     {
         var stderr = result.StandardError.Trim();
-        return stderr.Length > 0 ? stderr : $"git exited with code {result.ExitCode}.";
+        return stderr.Length > 0 ? Raw.Escaped(stderr) : Raw.Compose($"git exited with code {result.ExitCode}.");
     }
 
     /// <summary>

@@ -99,7 +99,8 @@ internal static class BackingServiceConfigAudit
                     // ReporterFor rather than For for a related reason: For would subscribe the
                     // warnings class's flush handler from inside the event it handles, which Aspire
                     // has already snapshotted, so the handler would never run. See that method.
-                    ServiceSourcesWarnings.ReporterFor(builder).ReportNow(@event.Services, Report(builder, Snapshot()));
+                    ServiceSourcesWarnings.ReporterFor(builder).ReportNow(
+                        @event.Services, [.. Report(builder, Snapshot()).Select(reason => reason.ToString())]);
 
                     return Task.CompletedTask;
                 });
@@ -132,9 +133,9 @@ internal static class BackingServiceConfigAudit
     /// about the section it is not using.
     /// </para>
     /// </remarks>
-    private static IReadOnlyList<string> Report(IDistributedApplicationBuilder builder, HashSet<string> declared)
+    private static IReadOnlyList<Raw> Report(IDistributedApplicationBuilder builder, HashSet<string> declared)
     {
-        var reasons = new List<string>();
+        var reasons = new List<Raw>();
 
         if (DeveloperConfigFileSource.NearMissForBackingServicesKey(builder) is { } nearMiss)
         {
@@ -171,7 +172,7 @@ internal static class BackingServiceConfigAudit
     /// none of them is just as likely to be an entry for a backing service this AppHost does not add.
     /// </para>
     /// </remarks>
-    private static string OrphanedEntriesReason(IReadOnlyList<string> orphans, HashSet<string> declared)
+    private static Raw OrphanedEntriesReason(IReadOnlyList<string> orphans, HashSet<string> declared)
     {
         var candidates = declared.OrderBy(name => name, StringComparer.Ordinal).ToArray();
 
@@ -195,7 +196,7 @@ internal static class BackingServiceConfigAudit
             + $"factory this AppHost supplies rather than from the entry. This AppHost adds: "
             + $"{Raw.Join(", ", adds)}. Correct the key under "
             + $"\"{Raw.Literal(DeveloperConfigFileSource.FileBackingServicesKey)}\" in '{Raw.Literal(DeveloperConfiguration.FileName)}', or "
-            + $"wherever a higher layer set it, or remove the entry if it is deliberately unused.").ToString();
+            + $"wherever a higher layer set it, or remove the entry if it is deliberately unused.");
     }
 
     /// <summary>
@@ -206,10 +207,11 @@ internal static class BackingServiceConfigAudit
     /// Says the file rather than the configuration key, because a root key is a property of the file
     /// alone: no other configuration layer has one to misspell.
     /// </remarks>
-    private static string MisspelledRootKeyReason(IDistributedApplicationBuilder builder, string nearMiss) =>
-        $"'{Path.Combine(builder.AppHostDirectory, DeveloperConfiguration.FileName)}' has a top-level key "
-        + $"'{nearMiss}', and no '{DeveloperConfigFileSource.FileBackingServicesKey}' key. Did you mean "
-        + $"'{DeveloperConfigFileSource.FileBackingServicesKey}'? Nothing read it, so nothing in it configured "
-        + "anything — every backing service this AppHost adds takes its source from elsewhere, and any that has "
-        + "no source elsewhere resolves to 'local', running from the factory this AppHost supplies.";
+    private static Raw MisspelledRootKeyReason(IDistributedApplicationBuilder builder, string nearMiss) =>
+        Raw.Compose(
+            $"'{Raw.Escaped(Path.Combine(builder.AppHostDirectory, DeveloperConfiguration.FileName))}' has a top-level key "
+            + $"'{new Name(nearMiss)}', and no '{Raw.Literal(DeveloperConfigFileSource.FileBackingServicesKey)}' key. Did you mean "
+            + $"'{Raw.Literal(DeveloperConfigFileSource.FileBackingServicesKey)}'? Nothing read it, so nothing in it configured "
+            + $"anything — every backing service this AppHost adds takes its source from elsewhere, and any that has "
+            + $"no source elsewhere resolves to 'local', running from the factory this AppHost supplies.");
 }

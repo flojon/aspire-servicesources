@@ -5,6 +5,7 @@ using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
+using Aspire.Hosting.ServiceSources.Messages;
 using Aspire.Hosting.ServiceSources.Sources;
 using Xunit;
 
@@ -206,7 +207,7 @@ public class LocalProjectSourceTests
                 ServiceName, Definition(), DevConfig(path: "frontned"), null, appHostDirectory, gitClient));
 
         Assert.Contains(ServiceName, ex.Message);
-        Assert.Contains(missing, ex.Message);
+        Assert.Contains(Name.Escape(missing), ex.Message);
         Assert.Empty(gitClient.ClonedRepos);
     }
 
@@ -849,7 +850,7 @@ public class LocalProjectSourceTests
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("src/Missing.csproj", ex.Message);
-        Assert.Contains(repoDir, ex.Message);
+        Assert.Contains(Name.Escape(repoDir), ex.Message);
     }
 
     [Fact]
@@ -865,7 +866,7 @@ public class LocalProjectSourceTests
                 new FakeGitClient()));
 
         Assert.Contains(ServiceName, ex.Message);
-        Assert.Contains(elsewhere, ex.Message);
+        Assert.Contains(Name.Escape(elsewhere), ex.Message);
         Assert.Contains("absolute", ex.Message);
     }
 

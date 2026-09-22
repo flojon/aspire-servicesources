@@ -1,4 +1,5 @@
 using Aspire.Hosting.ServiceSources.BackingServices;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.Tests.BackingServices;
 
@@ -13,8 +14,10 @@ public class ConnectionStringTemplateTests
 
     private const string Key = "ServiceSources:BackingServices:orders-db:Direct:ConnectionString";
 
+    private const string KeyAsEnvironmentVariable = "ServiceSources__BackingServices__orders-db__Direct__ConnectionString";
+
     private static ConnectionStringTemplate Parse(string template) =>
-        ConnectionStringTemplate.Parse(template, Name, Key);
+        ConnectionStringTemplate.Parse(template, Name, Raw.Literal(Key), Raw.Literal(KeyAsEnvironmentVariable));
 
     private static ServiceSourcesConfigurationException Rejects(string template) =>
         Assert.Throws<ServiceSourcesConfigurationException>(() => Parse(template));

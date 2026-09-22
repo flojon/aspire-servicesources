@@ -2,6 +2,7 @@ using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.BackingServices;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Kubernetes;
+using Aspire.Hosting.ServiceSources.Messages;
 using Aspire.Hosting.ServiceSources.PortAllocation;
 
 namespace Aspire.Hosting.ServiceSources;
@@ -185,10 +186,10 @@ public static class BackingServiceBuilderExtensions
         if (sourceName.Equals(DefaultSource, StringComparison.OrdinalIgnoreCase))
         {
             var resource = local()
-                ?? throw new ServiceSourcesConfigurationException(
-                    $"Backing service '{name}': the factory passed to AddBackingService returned null. It has to "
-                    + "return the resource that carries the connection string, as "
-                    + "'() => builder.AddPostgres(\"pg\").AddDatabase(\"orders-db\", \"orders\")' does.");
+                ?? throw ServiceSourcesConfigurationException.For(
+                    $"Backing service '{new Name(name)}': the factory passed to AddBackingService returned null. It has to "
+                    + $"return the resource that carries the connection string, as "
+                    + $"'() => builder.AddPostgres(\"pg\").AddDatabase(\"orders-db\", \"orders\")' does.");
 
             // Ordinal, so casing counts. It is tempting to fold it — .NET's IConfiguration does, so
             // a .NET consumer reads 'ConnectionStrings__Orders-DB' and 'ConnectionStrings__orders-db'
@@ -240,17 +241,18 @@ public static class BackingServiceBuilderExtensions
     /// </remarks>
     private static ServiceSourcesConfigurationException MisnamedLocalResourceError(
         string name, string resourceName) =>
-        new($"Backing service '{name}': the factory passed to AddBackingService returned a resource named "
-            + $"'{resourceName}'. It has to be named '{name}', after the backing service, because Aspire keys a "
+        ServiceSourcesConfigurationException.For(
+            $"Backing service '{new Name(name)}': the factory passed to AddBackingService returned a resource named "
+            + $"'{new Name(resourceName)}'. It has to be named '{new Name(name)}', after the backing service, because Aspire keys a "
             + $"consumer's connection string on the referenced resource's own name — so this factory gives the app "
-            + $"'ConnectionStrings__{resourceName}' while every other source gives it 'ConnectionStrings__{name}', "
-            + "and switching source would move the key the app reads without anything reporting it. Rename the "
-            + $"resource to '{name}'. Where the Aspire resource and the database itself want different names, "
-            + $"AddDatabase names them separately: 'AddDatabase(\"{name}\", \"orders\")' is a resource called "
-            + $"'{name}' holding a database called 'orders'. Where the resource is not yours to rename, return "
-            + $"one that forwards it: 'builder.AddConnectionString(\"{name}\", ReferenceExpression.Create($\"{{theResource}}\"))' "
-            + "— a consumer's WaitFor still holds back for what it forwards, but is satisfied once that is "
-            + "running rather than healthy, so the health check stops gating it (#220).");
+            + $"'ConnectionStrings__{new Name(resourceName)}' while every other source gives it 'ConnectionStrings__{new Name(name)}', "
+            + $"and switching source would move the key the app reads without anything reporting it. Rename the "
+            + $"resource to '{new Name(name)}'. Where the Aspire resource and the database itself want different names, "
+            + $"AddDatabase names them separately: 'AddDatabase(\"{new Name(name)}\", \"orders\")' is a resource called "
+            + $"'{new Name(name)}' holding a database called 'orders'. Where the resource is not yours to rename, return "
+            + $"one that forwards it: 'builder.AddConnectionString(\"{new Name(name)}\", ReferenceExpression.Create($\"{{theResource}}\"))' "
+            + $"— a consumer's WaitFor still holds back for what it forwards, but is satisfied once that is "
+            + $"running rather than healthy, so the health check stops gating it (#220).");
 
     /// <summary>
     /// The error for a <c>source</c> this package does not recognize.
@@ -264,13 +266,19 @@ public static class BackingServiceBuilderExtensions
     {
         // KnownSources rather than the dispatch table, which does not carry the default source: a
         // list of valid sources that omitted 'local' would be a list the developer could not act on.
-        var known = string.Join(", ", KnownSources.Order(StringComparer.Ordinal).Select(s => $"'{s}'"));
-        var key = $"{DeveloperConfiguration.BackingServicesKey}:{name}:source";
+        var known = Raw.Join(", ", KnownSources.Order(StringComparer.Ordinal).Select(s => Raw.Compose($"'{new Name(s)}'")));
 
-        return new ServiceSourcesConfigurationException(
-            $"Backing service '{name}' has unknown source '{sourceName}'. Valid sources are {known}. "
-            + $"Correct '{key}' in '{DeveloperConfiguration.FileName}', or wherever a higher layer set it — "
-            + "appsettings, user secrets, the environment variable "
-            + $"{key.Replace(":", "__", StringComparison.Ordinal)}, or the command line.");
+        // Both spellings are built from the same raw pieces, rather than one derived from the
+        // other's already-escaped rendering, so a name carrying a colon is not escaped twice.
+        var key = Raw.Compose($"{Raw.Literal(DeveloperConfiguration.BackingServicesKey)}:{new Name(name)}:source");
+        var keyAsEnvironmentVariable = Raw.Compose(
+            $"{Raw.Escaped(DeveloperConfiguration.BackingServicesKey.Replace(":", "__", StringComparison.Ordinal))}"
+            + $"__{new Name(name)}__source");
+
+        return ServiceSourcesConfigurationException.For(
+            $"Backing service '{new Name(name)}' has unknown source '{new Name(sourceName)}'. Valid sources are {known}. "
+            + $"Correct '{key}' in '{Raw.Literal(DeveloperConfiguration.FileName)}', or wherever a higher layer set it — "
+            + $"appsettings, user secrets, the environment variable "
+            + $"{keyAsEnvironmentVariable}, or the command line.");
     }
 }

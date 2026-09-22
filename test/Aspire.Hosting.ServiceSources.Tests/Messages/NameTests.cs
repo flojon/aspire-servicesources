@@ -134,11 +134,9 @@ public class NameTests
         Assert.Equal("\\ud83d" + pair, Name.Escape(loneHigh + pair));
     }
 
-    // Pinned against what Label returned before the rewrite, so the 12 existing Label call sites
-    // keep their rendering. Asserting Label == Name would be tautological once Label delegates,
-    // and would leave exactly that behaviour unguarded. Two arms deliberately differ from the old
-    // rendering and say so: the double quote, which Label left alone, and the single quote, whose
-    // old \' spelling was not a legal JSON escape.
+    // Pinned against what the now-deleted Label wrapper returned, so its former call sites (now
+    // calling Name directly) keep their rendering. The double-quote arm records the one deliberate
+    // change from Label's behaviour: Label left it alone, Name neutralises it.
     [Theory]
     [InlineData("orders", "orders")]
     [InlineData("ord'ers", "ord\\u0027ers")]
@@ -147,11 +145,7 @@ public class NameTests
     [InlineData("ord\ters", "ord\\ters")]
     [InlineData("ord ers", "ord ers")]
     [InlineData("", "")]
-    // The one deliberate change: Label left the double quote alone, Name neutralises it.
     [InlineData("ord\"ers", "ord\\\"ers")]
-    public void Label_RendersAsItDidBeforeExceptForTheDoubleQuote(string input, string expected)
-    {
-        Assert.Equal(expected, ServiceSourcesWarnings.Label(input));
+    public void Label_RendersAsItDidBeforeExceptForTheDoubleQuote(string input, string expected) =>
         Assert.Equal(expected, Render(input));
-    }
 }

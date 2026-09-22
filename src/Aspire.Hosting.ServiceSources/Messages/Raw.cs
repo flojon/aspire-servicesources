@@ -73,8 +73,26 @@ internal readonly struct Raw
     /// which forges a log more completely than a newline does. Bare spells out every invisible,
     /// so what it does not recognise cannot pass through.
     /// </para>
+    /// <para>
+    /// A cause's own line breaks are joined with <c>" | "</c> rather than left as the <c>\r</c>/<c>\n</c>
+    /// escape codes <see cref="ConfiguredValue.Bare"/> would otherwise spell them as: git's stderr and a
+    /// YAML parser's own multi-line diagnosis are the common case here, not the adversarial one, and a
+    /// two-line failure reading as one line of visible backslash-r-backslash-n noise is harder to read
+    /// than the message it replaced. The join happens first, so no <c>\r</c>/<c>\n</c> reaches <c>Bare</c>
+    /// at all — the no-forged-lines guarantee comes from the join consuming every line terminator itself,
+    /// not from Bare's escape spelling of whatever it left behind.
+    /// </para>
     /// </remarks>
-    internal static Raw Cause(Exception exception) => new(ConfiguredValue.Bare(exception.Message));
+    internal static Raw Cause(Exception exception) =>
+        new(string.Join(" | ", SplitLines(exception.Message).Select(ConfiguredValue.Bare)));
+
+    // Message is non-null by signature but not by contract — a subclass can still override it to
+    // return null, same as Bare (which this replaces for cause text) has always tolerated.
+    private static string[] SplitLines(string? text) =>
+        (text ?? "").Split(["\r\n", "\r", "\n"], StringSplitOptions.None);
+
+    /// <summary>The platform's line terminator: carries no caller data, so nothing needs escaping.</summary>
+    internal static Raw NewLine { get; } = new(Environment.NewLine);
 
     /// <summary>Empty rather than null: <c>default(Raw)</c> must render, not throw.</summary>
     public override string ToString() => text ?? string.Empty;

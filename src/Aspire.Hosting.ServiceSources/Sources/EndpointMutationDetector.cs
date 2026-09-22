@@ -1,6 +1,7 @@
 using System.Net.Sockets;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
 
@@ -85,7 +86,7 @@ internal static class EndpointMutationDetector
                     everyRevertWasAnAddition = false;
 
                     reverts.Add(
-                        $"endpoint '{Label(recorded.Name)}' was changed after this service resolved " +
+                        $"endpoint '{new Name(recorded.Name)}' was changed after this service resolved " +
                         $"({string.Join(", ", changed)}) and has been put back");
                 }
 
@@ -99,7 +100,7 @@ internal static class EndpointMutationDetector
             real?.Annotations.Remove(endpoint);
 
             reverts.Add(
-                $"endpoint '{Label(endpoint.Name)}' was added after this service resolved and has been " +
+                $"endpoint '{new Name(endpoint.Name)}' was added after this service resolved and has been " +
                 "removed, so a reference taken to it will not resolve");
         }
 
@@ -140,20 +141,20 @@ internal static class EndpointMutationDetector
             // divergence the facade restore already masks from callers. Both can trip independently,
             // so neither branch below is allowed to hide the other's failure.
             reverts.Add(!facadeHasIt && !realHasIt
-                ? $"endpoint '{Label(recorded.Name)}' was removed after this service resolved, but " +
+                ? $"endpoint '{new Name(recorded.Name)}' was removed after this service resolved, but " +
                   "could not be put back onto either the facade or the underlying resource because " +
                   "another endpoint already uses that name"
                 : !facadeHasIt
-                    ? $"endpoint '{Label(recorded.Name)}' was removed after this service resolved, but " +
+                    ? $"endpoint '{new Name(recorded.Name)}' was removed after this service resolved, but " +
                       "could not be put back because another endpoint already uses that name"
                     : !realHasIt
-                        ? $"endpoint '{Label(recorded.Name)}' was removed after this service resolved and " +
+                        ? $"endpoint '{new Name(recorded.Name)}' was removed after this service resolved and " +
                           "has been put back, but could not be mirrored onto the underlying resource " +
                           "because another endpoint there already uses that name"
                         : changed.Count == 0
-                            ? $"endpoint '{Label(recorded.Name)}' was removed after this service resolved " +
+                            ? $"endpoint '{new Name(recorded.Name)}' was removed after this service resolved " +
                               "and has been put back"
-                            : $"endpoint '{Label(recorded.Name)}' was removed after this service resolved " +
+                            : $"endpoint '{new Name(recorded.Name)}' was removed after this service resolved " +
                               $"and has been put back, along with the fields changed with it ({string.Join(", ", changed)})");
         }
 
@@ -306,10 +307,6 @@ internal static class EndpointMutationDetector
         endpoint.ExcludeReferenceEndpoint,
         endpoint.TlsEnabled,
         endpoint.Protocol);
-
-    // The service name in the same sentence needs the identical treatment, so the helper lives beside
-    // the messages rather than here.
-    private static string Label(string name) => ServiceSourcesWarnings.Label(name);
 
     /// <summary>
     /// Every field the endpoint-callback surface can write, plus <c>Name</c>.

@@ -1,3 +1,5 @@
+using Aspire.Hosting.ServiceSources.Messages;
+
 namespace Aspire.Hosting.ServiceSources.Kubernetes;
 
 /// <summary>
@@ -21,4 +23,16 @@ internal sealed class KubernetesSecretException : Exception
         : base(message, innerException)
     {
     }
+
+#pragma warning disable RS0030
+    /// <summary>
+    /// The only way this package builds a message: a raw <c>string</c> hole does not compile, so a
+    /// caller-controlled name cannot reach a reader unescaped.
+    /// </summary>
+    internal static KubernetesSecretException For(ServiceTextHandler message) =>
+        new(message.Text);
+
+    internal static KubernetesSecretException For(ServiceTextHandler message, Exception innerException) =>
+        new(message.Text, innerException);
+#pragma warning restore RS0030
 }

@@ -1,5 +1,6 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.JavaScript;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources;
 
@@ -140,18 +141,18 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
         {
             if (!Directory.Exists(AppDirectory))
             {
-                throw new ServiceSourcesConfigurationException(
-                    $"Service '{ServiceName}': javascript appDirectory '{Options.AppDirectory}' was not found " +
-                    $"under '{Root}'.");
+                throw ServiceSourcesConfigurationException.For(
+                    $"Service '{new Name(ServiceName)}': javascript appDirectory '{Raw.Escaped(Options.AppDirectory)}' was not found " +
+                    $"under '{Raw.Escaped(Root)}'.");
             }
 
             // Without the existence check a typo reaches the developer as "node: cannot find module"
             // at run time rather than as a named config error.
             if (ScriptPath is not null && !File.Exists(ScriptPath))
             {
-                throw new ServiceSourcesConfigurationException(
-                    $"Service '{ServiceName}': javascript scriptPath '{Options.ScriptPath}' was not found under " +
-                    $"'{AppDirectory}'.");
+                throw ServiceSourcesConfigurationException.For(
+                    $"Service '{new Name(ServiceName)}': javascript scriptPath '{Raw.Escaped(Options.ScriptPath)}' was not found under " +
+                    $"'{Raw.Escaped(AppDirectory)}'.");
             }
 
             RequirePackageJsonIfOneIsNeeded(ServiceName, AppDirectory, Options);
@@ -268,15 +269,17 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
             return;
         }
 
-        var (what, remedy) = JavaScriptAppTypes.RunsAScriptFile(options.AppType)
-            ? ($"runScript '{options.RunScript}' names a package.json script",
-                "Remove it to run 'scriptPath' directly, or point 'appDirectory' at the directory holding the app's package.json.")
-            : ($"appType '{options.AppType}' runs a package.json script",
-                "Point 'appDirectory' at the directory holding the app's package.json.");
+        var what = JavaScriptAppTypes.RunsAScriptFile(options.AppType)
+            ? Raw.Compose($"runScript '{new Name(options.RunScript)}' names a package.json script")
+            : Raw.Compose($"appType '{new Name(options.AppType)}' runs a package.json script");
 
-        throw new ServiceSourcesConfigurationException(
-            $"Service '{serviceName}': javascript {what}, but no 'package.json' was found in " +
-            $"'{appDirectory}'. {remedy}");
+        var remedy = JavaScriptAppTypes.RunsAScriptFile(options.AppType)
+            ? Raw.Literal("Remove it to run 'scriptPath' directly, or point 'appDirectory' at the directory holding the app's package.json.")
+            : Raw.Literal("Point 'appDirectory' at the directory holding the app's package.json.");
+
+        throw ServiceSourcesConfigurationException.For(
+            $"Service '{new Name(serviceName)}': javascript {what}, but no 'package.json' was found in " +
+            $"'{Raw.Escaped(appDirectory)}'. {remedy}");
     }
 
     /// <summary>
@@ -292,23 +295,21 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
     {
         if (CheckoutRelativePath.IsAbsolute(appDirectory))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': javascript appDirectory '{appDirectory}' is an absolute path, but " +
-                "it must be a relative path within the repository.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': javascript appDirectory '{Raw.Escaped(appDirectory)}' is an absolute path, but it must be a relative path within the repository.");
         }
 
         if (CheckoutRelativePath.UnusableSegment(appDirectory) is { } unusable)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': javascript appDirectory '{appDirectory}' has a path segment " +
-                $"'{unusable}' — {CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy}");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': javascript appDirectory '{Raw.Escaped(appDirectory)}' has a path segment " +
+                $"'{new Name(unusable)}' — {CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy}");
         }
 
         if (CheckoutRelativePath.EscapesRoot(appDirectory))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': javascript appDirectory '{appDirectory}' points outside the " +
-                "service's checkout. It must be a relative path within the repository.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': javascript appDirectory '{Raw.Escaped(appDirectory)}' points outside the service's checkout. It must be a relative path within the repository.");
         }
 
         return CheckoutRelativePath.NormalizeSeparators(appDirectory);
@@ -327,25 +328,21 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
     {
         if (CheckoutRelativePath.IsAbsolute(scriptPath))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': javascript scriptPath '{scriptPath}' is an absolute path, but it " +
-                "must be relative to appDirectory — it names a file in the service's own checkout, not one " +
-                "sitting elsewhere on the developer's machine.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': javascript scriptPath '{Raw.Escaped(scriptPath)}' is an absolute path, but it must be relative to appDirectory — it names a file in the service's own checkout, not one sitting elsewhere on the developer's machine.");
         }
 
         if (CheckoutRelativePath.UnusableSegment(scriptPath) is { } unusable)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': javascript scriptPath '{scriptPath}' has a path segment " +
-                $"'{unusable}' — {CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy}");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': javascript scriptPath '{Raw.Escaped(scriptPath)}' has a path segment " +
+                $"'{new Name(unusable)}' — {CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy}");
         }
 
         if (CheckoutRelativePath.EscapesRoot($"{appDirectory}/{scriptPath}"))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': javascript scriptPath '{scriptPath}', read relative to appDirectory " +
-                $"'{appDirectory}', points outside the service's checkout. It must be a relative path within " +
-                "the repository.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': javascript scriptPath '{Raw.Escaped(scriptPath)}', read relative to appDirectory '{Raw.Escaped(appDirectory)}', points outside the service's checkout. It must be a relative path within the repository.");
         }
 
         return CheckoutRelativePath.NormalizeSeparators(scriptPath);
@@ -381,26 +378,22 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
         {
             if (scriptPath is null)
             {
-                throw new ServiceSourcesConfigurationException(
-                    $"Service '{serviceName}': javascript appType '{appType}' runs a script file directly, so " +
-                    "'scriptPath' is required (e.g. scriptPath: server.js).");
+                throw ServiceSourcesConfigurationException.For(
+                    $"Service '{new Name(serviceName)}': javascript appType '{new Name(appType)}' runs a script file directly, so 'scriptPath' is required (e.g. scriptPath: server.js).");
             }
 
             scriptPath = ValidateScriptPath(serviceName, scriptPath, appDirectory);
         }
         else if (scriptPath is not null)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': javascript 'scriptPath' only applies to appType " +
-                $"'{JavaScriptAppTypes.Node}' or '{JavaScriptAppTypes.Bun}', but this service's appType is " +
-                $"'{appType}', which runs a package.json script — use 'runScript' instead.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': javascript 'scriptPath' only applies to appType '{Raw.Literal(JavaScriptAppTypes.Node)}' or '{Raw.Literal(JavaScriptAppTypes.Bun)}', but this service's appType is '{new Name(appType)}', which runs a package.json script — use 'runScript' instead.");
         }
 
         if (JavaScriptAppTypes.BindsItsOwnPort(appType) && portEnv is not null)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': javascript 'portEnv' does not apply to appType '{appType}', whose " +
-                "integration binds the dev server's port itself. Use 'port' or 'targetPort' instead.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': javascript 'portEnv' does not apply to appType '{new Name(appType)}', whose integration binds the dev server's port itself. Use 'port' or 'targetPort' instead.");
         }
 
         RequireValidPort(serviceName, "port", options.Port);
@@ -430,9 +423,8 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
         var normalized = value.ToLowerInvariant();
         if (!allowed.Contains(normalized))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': javascript {field} '{value}' is not supported. " +
-                $"Use one of: {string.Join(", ", allowed)}.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': javascript {new Name(field)} '{new Name(value)}' is not supported. Use one of: {Raw.Join(", ", allowed.Select(Raw.Escaped).ToList())}.");
         }
 
         return normalized;
@@ -451,8 +443,8 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
 
         if (string.IsNullOrWhiteSpace(value))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': javascript '{field}' is set but empty. Give it a value or remove it.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': javascript '{new Name(field)}' is set but empty. Give it a value or remove it.");
         }
 
         return value.Trim();
@@ -462,9 +454,8 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
     {
         if (port is < 1 or > 65535)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': javascript {field} value '{port}' is not a valid port " +
-                "(must be between 1 and 65535).");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': javascript {new Name(field)} value '{port}' is not a valid port (must be between 1 and 65535).");
         }
     }
 

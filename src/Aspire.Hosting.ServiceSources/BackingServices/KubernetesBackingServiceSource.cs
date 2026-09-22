@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Kubernetes;
+using Aspire.Hosting.ServiceSources.Messages;
 using Aspire.Hosting.ServiceSources.Sources;
 using Microsoft.Extensions.DependencyInjection;
 using IPortAllocator = Aspire.Hosting.ServiceSources.PortAllocation.IPortAllocator;
@@ -54,7 +55,11 @@ internal sealed partial class KubernetesBackingServiceSource(
         // should not burn an allocation on its way to saying so.
         var requested = RequireForwardablePorts(name, kubernetes.Port!);
 
-        var template = ConnectionStringTemplate.Parse(connectionString, name, ConfigKey(name, "ConnectionString"));
+        var template = ConnectionStringTemplate.Parse(
+            connectionString,
+            name,
+            ConfigKey(name, Raw.Literal("ConnectionString")),
+            Environmentally(name, Raw.Literal("ConnectionString")));
 
         // Decided from the template's shape, which is local configuration and therefore known now,
         // even though the value it stands for is not fetched until start time. See
@@ -180,10 +185,10 @@ internal sealed partial class KubernetesBackingServiceSource(
             // a backing service whose own name Aspire rejected would not have reached this line.
             // Aspire stays the authority on what the rule is: this adds the missing half, which is
             // where the name came from.
-            throw new ServiceSourcesConfigurationException(
-                $"Backing service '{Named(name)}': its port-forward runs as a resource named '{tunnelName}', after the "
-                + $"backing service, and Aspire rejected that name — \"{WithoutParameterSuffix(ex.Message)}\" Aspire's limit is on the "
-                + $"derived name rather than on '{name}', so a shorter backing-service name is what fixes it.",
+            throw ServiceSourcesConfigurationException.For(
+                $"Backing service '{Named(name)}': its port-forward runs as a resource named '{Raw.Escaped(tunnelName)}', after the "
+                + $"backing service, and Aspire rejected that name — \"{Raw.Escaped(WithoutParameterSuffix(ex.Message))}\" Aspire's limit is on the "
+                + $"derived name rather than on '{Named(name)}', so a shorter backing-service name is what fixes it.",
                 ex);
         }
 
@@ -268,7 +273,7 @@ internal sealed partial class KubernetesBackingServiceSource(
         var forwardsOneUnnamedPort = requested is [{ Name: null }];
         var names = requested.Where(port => port.Name is not null).Select(port => port.Name!).ToArray();
 
-        var problems = new List<string>();
+        var problems = new List<Raw>();
         var ports = 0;
 
         foreach (var segment in template.Segments)
@@ -342,15 +347,16 @@ internal sealed partial class KubernetesBackingServiceSource(
     /// different one into, which only makes sense once there is a single number to match against. A
     /// block naming several ports leaves no way to tell which one the secret was written for.
     /// </remarks>
-    private static string WholeSecretAgainstNamedPorts(IReadOnlyList<(string? Name, int RemotePort)> requested)
+    private static Raw WholeSecretAgainstNamedPorts(IReadOnlyList<(string? Name, int RemotePort)> requested)
     {
         var names = requested.Where(port => port.Name is not null).Select(port => port.Name!).ToArray();
 
-        return "the connection string is a single '${secret:...}' placeholder, which addresses the tunnel at "
-            + "the port it already names, but this backing service forwards "
+        return Raw.Compose(
+            $"the connection string is a single '${{secret:...}}' placeholder, which addresses the tunnel at "
+            + $"the port it already names, but this backing service forwards "
             + $"{requested.Count} ports by name: {Quoted(names)}. Forward a single port for a whole-string "
-            + "secret, or write the connection string with per-field '${secret:...}' placeholders and "
-            + "'${port:<name>}' for each port instead.";
+            + $"secret, or write the connection string with per-field '${{secret:...}}' placeholders and "
+            + $"'${{port:<name>}}' for each port instead.");
     }
 
     /// <summary>
@@ -363,29 +369,33 @@ internal sealed partial class KubernetesBackingServiceSource(
     /// nothing for the collecting, and several read as a list with each remedy beside its own
     /// problem.
     /// </remarks>
-    private static ServiceSourcesConfigurationException Failure(string name, IReadOnlyList<string> problems) =>
-        new(problems.Count == 1
-            ? $"Backing service '{Named(name)}': {problems[0]}"
-            : $"Backing service '{Named(name)}': {problems.Count} problems with the connection string:"
-              + string.Concat(problems.Select(problem => $"{Environment.NewLine}  - {problem}")));
+    private static ServiceSourcesConfigurationException Failure(string name, IReadOnlyList<Raw> problems) =>
+        problems.Count == 1
+            ? ServiceSourcesConfigurationException.For($"Backing service '{Named(name)}': {problems[0]}")
+            : ServiceSourcesConfigurationException.For(
+                $"Backing service '{Named(name)}': {problems.Count} problems with the connection string:"
+                + $"{Raw.Join("", problems.Select(problem => Raw.Compose($"{Raw.NewLine}  - {problem}")))}");
 
     /// <summary>
     /// The error for <c>${port}</c> where the block names its ports, so there is no "the" port.
     /// </summary>
-    private static string UnnamedPortAgainstABlock(
+    private static Raw UnnamedPortAgainstABlock(
         ConnectionStringTemplate.Port port, IReadOnlyList<string> names) =>
-        $"the connection string carries {ConfiguredValue.Escaped(port.AsWritten)}, which stands for the one "
-        + $"forwarded port, but this backing service forwards {(names.Count == 1 ? "its port" : "several ports")} "
-        + $"by name: {Quoted(names)}. Name the one this addresses, as {Spelled(names[0])}.";
+        Raw.Compose(
+            $"the connection string carries '{Raw.Escaped(port.AsWritten)}', which stands for the one "
+            + $"forwarded port, but this backing service forwards "
+            + $"{(names.Count == 1 ? Raw.Literal("its port") : Raw.Literal("several ports"))} "
+            + $"by name: {Quoted(names)}. Name the one this addresses, as {Spelled(names[0])}.");
 
     /// <summary>
     /// The error for <c>${port:&lt;name&gt;}</c> where a single unnamed port is forwarded.
     /// </summary>
-    private static string NamedPortAgainstASinglePort(string name, ConnectionStringTemplate.Port port) =>
-        $"the connection string carries {ConfiguredValue.Escaped(port.AsWritten)}, which names one of several "
-        + "forwarded ports, but this backing service forwards a single unnamed port — the one written at "
-        + $"'{ConfigKey(name, "Port")}'. Write '${{port}}' for it. To forward several instead, give each a name: "
-        + "\"port\": { \"amqp\": 5672, \"management\": 15672 }.";
+    private static Raw NamedPortAgainstASinglePort(string name, ConnectionStringTemplate.Port port) =>
+        Raw.Compose(
+            $"the connection string carries '{Raw.Escaped(port.AsWritten)}', which names one of several "
+            + $"forwarded ports, but this backing service forwards a single unnamed port — the one written at "
+            + $"'{ConfigKey(name, Raw.Literal("Port"))}'. Write '${{port}}' for it. To forward several instead, give each a name: "
+            + $"{Raw.Literal("\"port\": { \"amqp\": 5672, \"management\": 15672 }.")}");
 
     /// <summary>
     /// The error for <c>${port:&lt;name&gt;}</c> naming a port the block does not carry.
@@ -397,7 +407,7 @@ internal sealed partial class KubernetesBackingServiceSource(
     /// and a developer looking at a name this backing service does not forward needs to be told
     /// which ones it does.
     /// </remarks>
-    private static string NoSuchForwardedPort(
+    private static Raw NoSuchForwardedPort(
         ConnectionStringTemplate.Port port, IReadOnlyList<string> names)
     {
         // Only worth asking of a name short enough to be a typo. The edit distance is O(n·m) with
@@ -407,10 +417,12 @@ internal sealed partial class KubernetesBackingServiceSource(
             ? NearMiss.Nearest(port.Name!, names, candidate => candidate)
             : [];
 
-        // Escaped, not trimmed of its quotes: Escaped wraps its value in apostrophes, and stripping
-        // them back off also strips any the name itself begins or ends with — so a port named
-        // 'amqp', apostrophes and all, was suggested as amqp, a port that does not exist.
-        var suggestion = near.Count == 1 ? $" Did you mean {ConfiguredValue.Escaped(near[0])}?" : "";
+        // Escaped, not trimmed of its quotes: stripping them back off also strips any the name
+        // itself begins or ends with — so a port named 'amqp', apostrophes and all, was suggested
+        // as amqp, a port that does not exist.
+        var suggestion = near.Count == 1
+            ? Raw.Compose($" Did you mean '{new Name(near[0])}'?")
+            : Raw.Literal("");
 
         // Escaping is not injective — a real tab and a written backslash-t both print as '\t' — so a
         // message quoting two names can render them identically and read as "you wrote X, which does
@@ -422,12 +434,14 @@ internal sealed partial class KubernetesBackingServiceSource(
             || names.Any(candidate => !ConfiguredValue.PrintsAsItself(candidate));
 
         var caveat = indistinguishable
-            ? " One of these spellings carries characters you cannot pick out by looking, so two of them "
-              + "can print the same — retype the name rather than copying it back."
-            : "";
+            ? Raw.Literal(
+                " One of these spellings carries characters you cannot pick out by looking, so two of them "
+                + "can print the same — retype the name rather than copying it back.")
+            : Raw.Literal("");
 
-        return $"the connection string carries {ConfiguredValue.Escaped(port.AsWritten)}, which names a port this "
-            + $"backing service does not forward.{suggestion} It forwards {Quoted(names)}.{caveat}";
+        return Raw.Compose(
+            $"the connection string carries '{Raw.Escaped(port.AsWritten)}', which names a port this "
+            + $"backing service does not forward.{suggestion} It forwards {Quoted(names)}.{caveat}");
     }
 
     /// <summary>
@@ -441,36 +455,28 @@ internal sealed partial class KubernetesBackingServiceSource(
     /// <remarks>
     /// Escaped like every other echo of a name — the list of forwarded ports beside this one always
     /// was, so a name carrying a newline was rendered safely in one half of a sentence and forged a
-    /// line in the other. Escaped <em>bare</em>, since this builds its own quoting around the name.
+    /// line in the other.
     /// </remarks>
-    private static string Spelled(string portName) => $"'${{port:{ConfiguredValue.Bare(portName)}}}'";
+    private static Raw Spelled(string portName) => Raw.Compose($"'${{port:{new Name(portName)}}}'");
 
     /// <summary>Developer-invented names, escaped, quoted and in the order they are forwarded.</summary>
-    private static string Quoted(IEnumerable<string> names) =>
-        string.Join(", ", names.Select(ConfiguredValue.Escaped));
+    private static Raw Quoted(IEnumerable<string> names) =>
+        Raw.Join(", ", names.Select(name => Raw.Compose($"'{new Name(name)}'")));
 
     /// <summary>
-    /// The connection string this message quotes back, with an embedded apostrophe doubled rather
-    /// than left alone.
+    /// The connection string this message quotes back.
     /// </summary>
     /// <remarks>
-    /// <see cref="ConfiguredValue.Escaped"/> is not enough here. It spells out whitespace and other
-    /// invisible characters but leaves an apostrophe untouched, which is fine for the short,
-    /// developer-chosen names it is normally used on — a port or key containing one is rare, and
-    /// tolerating it is an accepted trade-off there. A connection string is neither short nor
-    /// developer-chosen in that sense: it is arbitrary text a real system produced, and an
-    /// apostrophe in it — an ODBC value quoted with one, a password, a name like <c>O'Brien</c> — is
-    /// not a corner case. Left unescaped, it would close this message's own quoting exactly as an
-    /// unescaped <c>"</c> did before this echo moved off double quotes.
-    /// <para>
-    /// Doubling the delimiter rather than backslash-escaping it, because that is the actual
-    /// connection-string convention for it — the same rule <c>DbConnectionStringBuilder</c> uses
-    /// for a quote inside a quoted value — so a reader who has ever escaped one in a connection
-    /// string recognizes it here too.
-    /// </para>
+    /// A connection string is neither short nor developer-chosen the way a name is: it is arbitrary
+    /// text a real system produced, and an apostrophe in it — an ODBC value quoted with one, a
+    /// password, a name like <c>O'Brien</c> — is not a corner case. Left unescaped, it would close
+    /// this message's own quoting. <see cref="Raw.Escaped"/> closes that the same way it does for
+    /// every other echoed value in this package, which is why this no longer carries its own
+    /// doubling convention — and unlike <see cref="Name"/>, it does not cap the length: a real
+    /// connection string routinely runs past the 64 characters a developer-chosen name is bounded
+    /// at, and truncating it here would silently drop diagnostic content.
     /// </remarks>
-    private static string QuotedConnectionString(string shown) =>
-        $"'{ConfiguredValue.Bare(shown).Replace("'", "''")}'";
+    private static Raw QuotedConnectionString(string shown) => Raw.Compose($"'{Raw.Escaped(shown)}'");
 
     /// <summary>
     /// Whether the whole connection string is one <c>${secret:...}</c> placeholder and nothing else.
@@ -509,14 +515,14 @@ internal sealed partial class KubernetesBackingServiceSource(
             return remotePort;
         }
 
-        throw new ServiceSourcesConfigurationException(
+        throw ServiceSourcesConfigurationException.For(
             $"Backing service '{Named(name)}': its connection string is a single '${{secret:...}}' placeholder, so the "
             + $"port-forward has to listen locally on {remotePort} — the port "
-            + $"'{ConfigKey(name, "Port")}' names — and something is already listening on {remotePort} here. "
+            + $"'{ConfigKey(name, Raw.Literal("Port"))}' names — and something is already listening on {remotePort} here. "
             + $"Free that port, or write the connection string yourself with per-field '${{secret:...}}' "
             + $"placeholders and a '${{port}}' in it, which lets this source pick a local port that is free. "
             + $"Adding '${{port}}' to the whole-string placeholder does not work: it stops being a whole-string "
-            + "secret, and the in-cluster host inside the fetched value is then left as written.");
+            + $"secret, and the in-cluster host inside the fetched value is then left as written.");
     }
 
     /// <summary>
@@ -559,12 +565,12 @@ internal sealed partial class KubernetesBackingServiceSource(
         {
             if (!existing.Annotations.OfType<SecretParameterOrigin>().Contains(origin))
             {
-                throw new ServiceSourcesConfigurationException(
-                    $"Backing service '{Named(name)}': the placeholder '{secret.AsWritten}' derives the parameter name "
-                    + $"'{parameterName}', which another resource in this AppHost already uses for something else. "
-                    + "The name is the backing service, the secret and the key joined by hyphens, so two different "
-                    + "placeholders can spell it the same way. Rename the backing service, or use a secret or key "
-                    + "that does not collide.");
+                throw ServiceSourcesConfigurationException.For(
+                    $"Backing service '{Named(name)}': the placeholder '{Raw.Escaped(secret.AsWritten)}' derives the parameter name "
+                    + $"'{Raw.Escaped(parameterName)}', which another resource in this AppHost already uses for something else. "
+                    + $"The name is the backing service, the secret and the key joined by hyphens, so two different "
+                    + $"placeholders can spell it the same way. Rename the backing service, or use a secret or key "
+                    + $"that does not collide.");
             }
 
             return builder.CreateResourceBuilder(existing);
@@ -587,13 +593,13 @@ internal sealed partial class KubernetesBackingServiceSource(
             // authority on the rule, this adds where the name came from. Only length can reach here
             // now that the characters are folded — which is why the remedy named is a shorter name
             // and nothing about spelling.
-            throw new ServiceSourcesConfigurationException(
-                $"Backing service '{Named(name)}': the placeholder '{secret.AsWritten}' becomes a parameter named "
-                + $"'{parameterName}', after the backing service, the secret and the key, and Aspire rejected that "
-                + $"name — \"{WithoutParameterSuffix(ex.Message)}\" It is {parameterName.Length} characters, built "
-                + $"from the backing service ('{name}', {name.Length}), the secret ('{secret.Name}', "
-                + $"{secret.Name.Length}) and the key ('{secret.Key}', {secret.Key.Length}), joined. Shorten "
-                + "whichever of those you own — the backing service's name is the one this AppHost decides.",
+            throw ServiceSourcesConfigurationException.For(
+                $"Backing service '{Named(name)}': the placeholder '{Raw.Escaped(secret.AsWritten)}' becomes a parameter named "
+                + $"'{Raw.Escaped(parameterName)}', after the backing service, the secret and the key, and Aspire rejected that "
+                + $"name — \"{Raw.Escaped(WithoutParameterSuffix(ex.Message))}\" It is {parameterName.Length} characters, built "
+                + $"from the backing service ('{Named(name)}', {name.Length}), the secret ('{new Name(secret.Name)}', "
+                + $"{secret.Name.Length}) and the key ('{new Name(secret.Key)}', {secret.Key.Length}), joined. Shorten "
+                + $"whichever of those you own — the backing service's name is the one this AppHost decides.",
                 ex);
         }
     }
@@ -714,7 +720,7 @@ internal sealed partial class KubernetesBackingServiceSource(
         {
             // The reader knows the secret and the key; only this knows which backing service asked,
             // and a parameter's name is the only other thing the dashboard shows beside the failure.
-            throw new KubernetesSecretException($"Backing service '{Named(name)}': {ex.Message}", ex);
+            throw KubernetesSecretException.For($"Backing service '{Named(name)}': {Raw.Cause(ex)}", ex);
         }
 
         if (!wholeSecret)
@@ -737,12 +743,12 @@ internal sealed partial class KubernetesBackingServiceSource(
         // answer, and the developer can see both halves in the message.
         if (rewrites == 0)
         {
-            throw new KubernetesSecretException(
-                $"Backing service '{Named(name)}': the connection string in key '{secret.Key}' of secret '{secret.Name}' "
-                + $"does not address '{service}' in any form this can rewrite — '{service}', '{service}.{@namespace}', "
+            throw KubernetesSecretException.For(
+                $"Backing service '{Named(name)}': the connection string in key '{new Name(secret.Key)}' of secret '{new Name(secret.Name)}' "
+                + $"does not address '{new Name(service)}' in any form this can rewrite — '{new Name(service)}', '{new Name(service)}.{new Name(@namespace)}', "
                 + $"'.svc' or '.svc.cluster.local', after a host keyword or a URI's '@' or '//'. Nothing was "
                 + $"substituted, so the value still points into the cluster and would not reach the port-forward. "
-                + $"Check that '{ConfigKey(name, "Service")}' names the service the secret was written against.");
+                + $"Check that '{ConfigKey(name, Raw.Literal("Service"))}' names the service the secret was written against.");
         }
 
         RequireSecretPortMatches(name, ports, secret, remotePort);
@@ -775,12 +781,12 @@ internal sealed partial class KubernetesBackingServiceSource(
             return;
         }
 
-        throw new KubernetesSecretException(
-            $"Backing service '{Named(name)}': the connection string in key '{secret.Key}' of secret '{secret.Name}' "
-            + "quotes or braces one of its values, and this cannot find where a host ends in a value that may "
-            + "carry a separator inside it. Rather than rewrite part of it and leave the rest addressed at the "
-            + "cluster, it is refused. Write the connection string yourself with per-field '${secret:...}' "
-            + "placeholders and a '${port}', which needs no rewriting at all.");
+        throw KubernetesSecretException.For(
+            $"Backing service '{Named(name)}': the connection string in key '{new Name(secret.Key)}' of secret '{new Name(secret.Name)}' "
+            + $"quotes or braces one of its values, and this cannot find where a host ends in a value that may "
+            + $"carry a separator inside it. Rather than rewrite part of it and leave the rest addressed at the "
+            + $"cluster, it is refused. Write the connection string yourself with per-field '${{secret:...}}' "
+            + $"placeholders and a '${{port}}', which needs no rewriting at all.");
     }
 
     /// <summary>
@@ -814,13 +820,13 @@ internal sealed partial class KubernetesBackingServiceSource(
             return;
         }
 
-        throw new KubernetesSecretException(
-            $"Backing service '{Named(name)}': the connection string in key '{secret.Key}' of secret '{secret.Name}' "
-            + $"still addresses the cluster after rewriting — '{stillAddressed.Value}' was left in it. Something "
-            + "was rewritten, so this is a shape only partly recognised rather than one that names the service "
-            + "in no form at all. Handing it over would send the credentials in it wherever that name resolves "
-            + "here. Write the connection string yourself with per-field '${secret:...}' placeholders and a "
-            + "'${port}', which needs no rewriting.");
+        throw KubernetesSecretException.For(
+            $"Backing service '{Named(name)}': the connection string in key '{new Name(secret.Key)}' of secret '{new Name(secret.Name)}' "
+            + $"still addresses the cluster after rewriting — '{Raw.Escaped(stillAddressed.Value)}' was left in it. Something "
+            + $"was rewritten, so this is a shape only partly recognised rather than one that names the service "
+            + $"in no form at all. Handing it over would send the credentials in it wherever that name resolves "
+            + $"here. Write the connection string yourself with per-field '${{secret:...}}' placeholders and a "
+            + $"'${{port}}', which needs no rewriting.");
     }
 
     /// <summary>
@@ -845,12 +851,12 @@ internal sealed partial class KubernetesBackingServiceSource(
             return;
         }
 
-        throw new KubernetesSecretException(
-            $"Backing service '{Named(name)}': the connection string in key '{secret.Key}' of secret '{secret.Name}' "
+        throw KubernetesSecretException.For(
+            $"Backing service '{Named(name)}': the connection string in key '{new Name(secret.Key)}' of secret '{new Name(secret.Name)}' "
             + $"addresses port {port}, and the port-forward serves {remotePort} — the port "
-            + $"'{ConfigKey(name, "Port")}' names. The tunnel's health check watches {remotePort}, so every "
+            + $"'{ConfigKey(name, Raw.Literal("Port"))}' names. The tunnel's health check watches {remotePort}, so every "
             + $"resource would report healthy while the app dialled {port}: nothing there, or whatever else on "
-            + $"this machine happens to hold it. Set '{ConfigKey(name, "Port")}' to {port}, or point it at a "
+            + $"this machine happens to hold it. Set '{ConfigKey(name, Raw.Literal("Port"))}' to {port}, or point it at a "
             + $"secret written for port {remotePort}.");
     }
 
@@ -897,10 +903,10 @@ internal sealed partial class KubernetesBackingServiceSource(
             // A named failure rather than a stack trace out of the callback Aspire is resolving.
             // Reachable only for a value shaped to be pathological, whose author already owns the
             // credential in it — but what the dashboard shows is the message, so there should be one.
-            throw new KubernetesSecretException(
-                "Rewriting the in-cluster host in the fetched connection string took too long and was abandoned. "
-                + "The value is shaped in a way this cannot scan quickly; a per-field '${secret:...}' template "
-                + "avoids the rewrite entirely.",
+            throw KubernetesSecretException.For(
+                $"Rewriting the in-cluster host in the fetched connection string took too long and was abandoned. "
+                + $"The value is shaped in a way this cannot scan quickly; a per-field '${{secret:...}}' template "
+                + $"avoids the rewrite entirely.",
                 ex);
         }
     }
@@ -1034,8 +1040,8 @@ internal sealed partial class KubernetesBackingServiceSource(
     /// verbatim. The two can print the same key with different casing; harmless, since
     /// configuration keys are case-insensitive.
     /// </remarks>
-    private static string ConfigKey(string name, string field) =>
-        $"{DeveloperConfiguration.BackingServicesKey}:{Named(name)}:Kubernetes:{field}";
+    private static Raw ConfigKey(string name, Raw field) =>
+        Raw.Compose($"{Raw.Literal(DeveloperConfiguration.BackingServicesKey)}:{Named(name)}:Kubernetes:{field}");
 
     /// <summary>
     /// The backing service's name as a message shows it.
@@ -1048,11 +1054,26 @@ internal sealed partial class KubernetesBackingServiceSource(
     /// the collecting report, where a newline forges a bullet and an entry header, which is the same
     /// defect the developer-config validator's own multi-entry report was fixed for.
     /// </remarks>
-    private static string Named(string name) => ConfiguredValue.Bare(name);
+    private static Name Named(string name) => new(name);
 
-    /// <summary>The same key spelled as the environment variable that sets it.</summary>
-    private static string Environmentally(string configKey) =>
-        configKey.Replace(":", "__", StringComparison.Ordinal);
+    /// <summary>
+    /// The same key spelled as the environment variable that sets it.
+    /// </summary>
+    /// <remarks>
+    /// Built from the same raw pieces as <see cref="ConfigKey"/> rather than from its already-escaped
+    /// rendering, so a name carrying a colon is not run through <see cref="Name"/>'s escaping twice.
+    /// </remarks>
+    private static Raw Environmentally(string name, Raw field) =>
+        Raw.Compose(
+            $"{Raw.Escaped(BackingServicesKeyAsEnvironmentVariable)}__{Named(name)}__Kubernetes__{field}");
+
+    /// <summary>
+    /// <see cref="DeveloperConfiguration.BackingServicesKey"/> spelled the way an environment
+    /// variable spells it, computed once: it carries no caller data, so nothing here needs escaping
+    /// per call.
+    /// </summary>
+    private static readonly string BackingServicesKeyAsEnvironmentVariable =
+        DeveloperConfiguration.BackingServicesKey.Replace(":", "__", StringComparison.Ordinal);
 
     /// <summary>
     /// An <see cref="ArgumentException"/>'s message without the <c>(Parameter 'name')</c> that
@@ -1093,23 +1114,25 @@ internal sealed partial class KubernetesBackingServiceSource(
     /// </para>
     /// </remarks>
     private static readonly (
-        string Field,
-        string Property,
-        string WhatItIs,
+        Raw Field,
+        Raw Property,
+        Raw WhatItIs,
         Func<KubernetesBackingServiceDeveloperConfig, bool> IsWritten)[] RequiredFields =
     [
-        ("service", "Service", "the Kubernetes Service to forward to",
+        (Raw.Literal("service"), Raw.Literal("Service"), Raw.Literal("the Kubernetes Service to forward to"),
             k => !string.IsNullOrWhiteSpace(k.Service)),
-        ("port", "Port",
-            "the port that Service listens on inside the cluster, which is what the tunnel forwards to — one "
-            + "number, or a name per port to forward several through the one tunnel",
+        (Raw.Literal("port"), Raw.Literal("Port"),
+            Raw.Literal(
+                "the port that Service listens on inside the cluster, which is what the tunnel forwards to — one "
+                + "number, or a name per port to forward several through the one tunnel"),
             k => k.Port is { } ports && (ports.SinglePort is not null || ports.Count > 0)),
-        ("context", "Context", "the kubectl context to forward through",
+        (Raw.Literal("context"), Raw.Literal("Context"), Raw.Literal("the kubectl context to forward through"),
             k => !string.IsNullOrWhiteSpace(k.Context)),
-        ("connectionString", "ConnectionString",
-            "the connection string consumers receive, with '${port}' standing for the local end of the tunnel — "
-            + "or '${port:<name>}' where the block names its ports, and '${secret:<name>:<key>}' reading a "
-            + "credential from a Kubernetes secret",
+        (Raw.Literal("connectionString"), Raw.Literal("ConnectionString"),
+            Raw.Literal(
+                "the connection string consumers receive, with '${port}' standing for the local end of the tunnel — "
+                + "or '${port:<name>}' where the block names its ports, and '${secret:<name>:<key>}' reading a "
+                + "credential from a Kubernetes secret"),
             k => !string.IsNullOrWhiteSpace(k.ConnectionString)),
     ];
 
@@ -1142,8 +1165,9 @@ internal sealed partial class KubernetesBackingServiceSource(
         // sends the reader to the file, and the file spells the section "backingServices". The
         // colon-separated path belongs only in the environment-variable half, which is the one
         // place it is what the reader types.
-        var where = $"under \"{name}\" in \"{DeveloperConfigFileSource.FileBackingServicesKey}\" in "
-            + $"'{DeveloperConfiguration.FileName}'";
+        var where = Raw.Compose(
+            $"under \"{Named(name)}\" in \"{Raw.Literal(DeveloperConfigFileSource.FileBackingServicesKey)}\" in "
+            + $"'{Raw.Literal(DeveloperConfiguration.FileName)}'");
 
         // The shape DeveloperConfigValidator.Failure uses, and for its reason: one problem reads as
         // a sentence, several read as a list, and each keeps its own remedy beside it rather than
@@ -1152,28 +1176,30 @@ internal sealed partial class KubernetesBackingServiceSource(
         {
             var only = missing[0];
 
-            throw new ServiceSourcesConfigurationException(
+            throw ServiceSourcesConfigurationException.For(
                 $"Backing service '{Named(name)}': source 'kubernetes' requires 'kubernetes.{only.Field}' — "
-                + $"{only.WhatItIs}. Add it {where}, or set {Environmentally(ConfigKey(name, only.Property))}."
-                + PortIsWhichEnd(name, kubernetes));
+                + $"{only.WhatItIs}. Add it {where}, or set {Environmentally(name, only.Property)}."
+                + $"{PortIsWhichEnd(name, kubernetes)}");
         }
 
-        var lines = missing.Select(field =>
-            $"{Environment.NewLine}  - 'kubernetes.{field.Field}' — {field.WhatItIs}. Set it in the file, or as "
-            + $"{Environmentally(ConfigKey(name, field.Property))}.");
+        var lines = Raw.Join("", missing.Select(field =>
+            Raw.Compose(
+                $"{Raw.NewLine}  - 'kubernetes.{field.Field}' — {field.WhatItIs}. Set it in the file, or as "
+                + $"{Environmentally(name, field.Property)}.")));
 
         // Every field missing at once is a block nobody has filled in, which is the case a literal
         // example answers better than a list does — the same thing DirectBackingServiceSource
         // offers for its one field.
         var blank = missing.Length == RequiredFields.Length
-            ? $"{Environment.NewLine}{Environment.NewLine}A whole entry reads: \"{name}\": {{ \"source\": "
-              + "\"kubernetes\", \"kubernetes\": { \"service\": \"orders-pg\", \"port\": 5432, \"context\": "
-              + "\"dev-west\", \"connectionString\": \"Host=localhost;Port=${port};Database=orders\" } }."
-            : "";
+            ? Raw.Compose(
+                $"{Raw.NewLine}{Raw.NewLine}A whole entry reads: \"{Named(name)}\": {{ \"source\": "
+                + $"{Raw.Literal("\"kubernetes\", \"kubernetes\": { \"service\": \"orders-pg\", \"port\": 5432, \"context\": ")}"
+                + $"{Raw.Literal("\"dev-west\", \"connectionString\": \"Host=localhost;Port=${port};Database=orders\" } }.")}")
+            : Raw.Literal("");
 
-        throw new ServiceSourcesConfigurationException(
+        throw ServiceSourcesConfigurationException.For(
             $"Backing service '{Named(name)}': source 'kubernetes' needs {missing.Length} fields the entry does not "
-            + $"have, {where}:{string.Concat(lines)}{blank}{PortIsWhichEnd(name, kubernetes)}");
+            + $"have, {where}:{lines}{blank}{PortIsWhichEnd(name, kubernetes)}");
     }
 
     /// <summary>
@@ -1185,14 +1211,15 @@ internal sealed partial class KubernetesBackingServiceSource(
     /// in front of them, and only one of them goes in the file — so the message that asks for it
     /// says which. Nothing to say when the port is already written.
     /// </remarks>
-    private static string PortIsWhichEnd(string name, KubernetesBackingServiceDeveloperConfig kubernetes) =>
+    private static Raw PortIsWhichEnd(string name, KubernetesBackingServiceDeveloperConfig kubernetes) =>
         kubernetes.Port is { } written && (written.SinglePort is not null || written.Count > 0)
-            ? ""
-            : $"{Environment.NewLine}{Environment.NewLine}The local end of the tunnel is allocated rather than "
-              + "configured, so only the cluster's own port is written here and a connection string names the "
-              + "local end as '${port}' — or, where the block names its ports, as '${port:<name>}'. A block is "
-              + "written a name at a time from a flat layer, as "
-              + $"{Environmentally(ConfigKey(name, "Port"))}__<name>.";
+            ? Raw.Literal("")
+            : Raw.Compose(
+                $"{Raw.NewLine}{Raw.NewLine}The local end of the tunnel is allocated rather than "
+                + $"configured, so only the cluster's own port is written here and a connection string names the "
+                + $"local end as '${{port}}' — or, where the block names its ports, as '${{port:<name>}}'. A block is "
+                + $"written a name at a time from a flat layer, as "
+                + $"{Environmentally(name, Raw.Literal("Port"))}__<name>.");
 
     /// <summary>
     /// How many ports one backing service may forward through its tunnel.
@@ -1247,10 +1274,10 @@ internal sealed partial class KubernetesBackingServiceSource(
 
         if (ports.Count > MaxForwardedPorts)
         {
-            throw new ServiceSourcesConfigurationException(
+            throw ServiceSourcesConfigurationException.For(
                 $"Backing service '{Named(name)}': 'kubernetes.port' names {ports.Count} ports, and one tunnel forwards "
                 + $"at most {MaxForwardedPorts}. Every forwarded port holds a local socket open and adds a pair to "
-                + $"one kubectl command line. The key is '{ConfigKey(name, "Port")}'.");
+                + $"one kubectl command line. The key is '{ConfigKey(name, Raw.Literal("Port"))}'.");
         }
 
         return ports
@@ -1274,16 +1301,16 @@ internal sealed partial class KubernetesBackingServiceSource(
         if (port is < 1 or > 65535)
         {
             var which = portName is null
-                ? $"'kubernetes.port' is '{port}'"
-                : $"'kubernetes.port' gives the port named {ConfiguredValue.Escaped(portName)} the value '{port}'";
+                ? Raw.Compose($"'kubernetes.port' is '{port}'")
+                : Raw.Compose($"'kubernetes.port' gives the port named '{new Name(portName)}' the value '{port}'");
 
             // The named form points at the entry rather than at the block, so the key named is the
             // one that is wrong — as the validator's own per-entry messages do.
             var key = portName is null
-                ? ConfigKey(name, "Port")
-                : $"{ConfigKey(name, "Port")}:{ConfiguredValue.Bare(portName)}";
+                ? ConfigKey(name, Raw.Literal("Port"))
+                : Raw.Compose($"{ConfigKey(name, Raw.Literal("Port"))}:{new Name(portName)}");
 
-            throw new ServiceSourcesConfigurationException(
+            throw ServiceSourcesConfigurationException.For(
                 $"Backing service '{Named(name)}': {which}, which is not a port — a port is between "
                 + $"1 and 65535. The key is '{key}'.");
         }
@@ -1315,7 +1342,7 @@ internal sealed partial class KubernetesBackingServiceSource(
     /// first half of this message, since the spelling they wrote was already right.
     /// </para>
     /// </remarks>
-    private static string NothingAddressesTheTunnel(
+    private static Raw NothingAddressesTheTunnel(
         string connectionString, IReadOnlyList<(string? Name, int RemotePort)> requested)
     {
         var shown = ConnectionStringRedaction.Redact(connectionString);
@@ -1325,10 +1352,11 @@ internal sealed partial class KubernetesBackingServiceSource(
         // needed hiding and what is quoted is exactly what the developer wrote — leaving them to
         // wonder which part of it the package had hidden.
         var note = shown == connectionString || shown == ConnectionStringRedaction.Unscannable
-            ? ""
-            : " (a value is shown only when it is itself a well-formed placeholder, or when it sits "
-              + "under a key known to hold no secret; the rest read as ***, which does not mean they "
-              + "were secret)";
+            ? Raw.Literal("")
+            : Raw.Literal(
+                " (a value is shown only when it is itself a well-formed placeholder, or when it sits "
+                + "under a key known to hold no secret; the rest read as ***, which does not mean they "
+                + "were secret)");
 
         // The advice has to follow the block that was written. Telling someone whose block names
         // its ports to "write '${port}'" earns them a second startup failure that contradicts this
@@ -1343,21 +1371,23 @@ internal sealed partial class KubernetesBackingServiceSource(
         // of them would have done, and naming the first would tell a developer who meant the second
         // that they wrote the wrong one. The remedy below is where a single spelling belongs, because
         // there it is offered rather than asserted.
-        var missing = names.Length == 0 ? "'${port}'" : "'${port:<name>}'";
+        var missing = names.Length == 0 ? Raw.Literal("'${port}'") : Raw.Literal("'${port:<name>}'");
 
         var remedy = names.Length == 0
-            ? "Replace the port in it with '${port}', as 'Host=localhost;Port=${port};Database=orders'."
-            : $"This backing service forwards its ports by name — {Quoted(names)} — so name the one this "
-              + $"addresses: replace the port in it with {Spelled(names[0])}.";
+            ? Raw.Literal("Replace the port in it with '${port}', as 'Host=localhost;Port=${port};Database=orders'.")
+            : Raw.Compose(
+                $"This backing service forwards its ports by name — {Quoted(names)} — so name the one this "
+                + $"addresses: replace the port in it with {Spelled(names[0])}.");
 
-        return "source 'kubernetes' opens a kubectl port-forward on a local port allocated at startup, but the "
+        return Raw.Compose(
+            $"source 'kubernetes' opens a kubectl port-forward on a local port allocated at startup, but the "
             + $"connection string names no {missing} placeholder to put it in — so nothing would address the "
             + $"tunnel: {QuotedConnectionString(shown)}{note}."
-            + $"{Environment.NewLine}    {remedy}"
-            + $"{Environment.NewLine}    If you did write {missing}, a shell expanded it away before the AppHost "
-            + "saw it — '${...}' is a shell variable too, and double quotes do not protect it. Single-quote the "
-            + "value, and use env 'NAME=value' for a key with a hyphen in it."
-            + $"{Environment.NewLine}    A backing service reached at a fixed address you already have — an "
-            + "ingress, or an instance you run yourself — is source 'direct' rather than this one.";
+            + $"{Raw.NewLine}    {remedy}"
+            + $"{Raw.NewLine}    If you did write {missing}, a shell expanded it away before the AppHost "
+            + $"saw it — '${{...}}' is a shell variable too, and double quotes do not protect it. Single-quote the "
+            + $"value, and use env 'NAME=value' for a key with a hyphen in it."
+            + $"{Raw.NewLine}    A backing service reached at a fixed address you already have — an "
+            + $"ingress, or an instance you run yourself — is source 'direct' rather than this one.");
     }
 }

@@ -1,3 +1,5 @@
+using Aspire.Hosting.ServiceSources.Messages;
+
 namespace Aspire.Hosting.ServiceSources.Prepare;
 
 /// <summary>
@@ -45,4 +47,14 @@ internal interface IPrepareCommandRunner
 /// bit, a POSIX script on Windows with no <c>windowsCommand</c> variant declared.
 /// </summary>
 internal sealed class PrepareLaunchException(string message, Exception? innerException = null)
-    : Exception(message, innerException);
+    : Exception(message, innerException)
+{
+#pragma warning disable RS0030
+    /// <summary>
+    /// The only way this package builds a message: a raw <c>string</c> hole does not compile, so a
+    /// caller-controlled name cannot reach a reader unescaped.
+    /// </summary>
+    internal static PrepareLaunchException For(ServiceTextHandler message, Exception? innerException = null) =>
+        new(message.Text, innerException);
+#pragma warning restore RS0030
+}

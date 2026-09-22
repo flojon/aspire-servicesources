@@ -1,3 +1,5 @@
+using Aspire.Hosting.ServiceSources.Messages;
+
 namespace Aspire.Hosting.ServiceSources.Prepare;
 
 /// <summary>
@@ -20,7 +22,14 @@ namespace Aspire.Hosting.ServiceSources.Prepare;
 /// </remarks>
 internal interface IPrepareOutputSink
 {
-    void Report(string line);
+    /// <param name="line">
+    /// Already safe to print verbatim: a <see cref="Raw"/>, so the caller has to have built it via
+    /// <see cref="Raw.Compose"/> (or an equivalent <see cref="Raw"/> factory) with every
+    /// caller-controlled fragment escaped at composition time. This method's job is only to
+    /// transport an already-safe value to its sink — it must not escape <paramref name="line"/>
+    /// again, which would corrupt escaping that is already correct.
+    /// </param>
+    void Report(Raw line);
 }
 
 /// <summary>
@@ -42,5 +51,5 @@ internal sealed class ConsolePrepareOutputSink : IPrepareOutputSink
     {
     }
 
-    public void Report(string line) => Console.Out.WriteLine(line);
+    public void Report(Raw line) => Console.Out.WriteLine(line.ToString());
 }

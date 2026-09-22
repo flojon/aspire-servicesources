@@ -1,3 +1,4 @@
+using Aspire.Hosting.ServiceSources.Messages;
 using Aspire.Hosting.ServiceSources.Sources;
 
 namespace Aspire.Hosting.ServiceSources.Java;
@@ -73,9 +74,8 @@ internal sealed class JavaKindOptions
         // loader hands the handler the block's value, not whether the key was written — so the
         // message has to cover both rather than sending the reader looking for a block they can see.
         var options = LocalKindConfig.Parse<JavaKindOptions>(rawConfig, serviceName)
-            ?? throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}' has kind 'java' but its 'java:' block is missing or empty. It " +
-                "must name how to run the service, e.g. 'mavenGoal: spring-boot:run' and 'port: 8080'.");
+            ?? throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}' has kind 'java' but its 'java:' block is missing or empty. It must name how to run the service, e.g. 'mavenGoal: spring-boot:run' and 'port: 8080'.");
 
         var port = ValidatePort(serviceName, options.Port);
         var scheme = ValidateScheme(serviceName, options.Scheme);
@@ -114,13 +114,10 @@ internal sealed class JavaKindOptions
         return configured.Count switch
         {
             1 => configured[0].Mode,
-            0 => throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': the 'java:' block must say how to run the app — set exactly one of " +
-                "'mavenGoal' (e.g. spring-boot:run), 'gradleTask' (e.g. bootRun), or 'jarPath' (e.g. target/app.jar)."),
-            _ => throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': the 'java:' block sets " +
-                string.Join(" and ", configured.Select(c => $"'{c.Field}'")) +
-                ", but they are mutually exclusive run modes. Set exactly one of 'mavenGoal', 'gradleTask', or 'jarPath'."),
+            0 => throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': the 'java:' block must say how to run the app — set exactly one of 'mavenGoal' (e.g. spring-boot:run), 'gradleTask' (e.g. bootRun), or 'jarPath' (e.g. target/app.jar)."),
+            _ => throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': the 'java:' block sets {Raw.Join(" and ", configured.Select(c => Raw.Escaped(c.Field)).ToList())}, but they are mutually exclusive run modes. Set exactly one of 'mavenGoal', 'gradleTask', or 'jarPath'."),
         };
     }
 
@@ -128,15 +125,14 @@ internal sealed class JavaKindOptions
     {
         if (port is null)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': the 'java:' block has no 'port' entry. Set it to the port the Java app " +
-                "listens on, so consumers referencing this service can reach it.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': the 'java:' block has no 'port' entry. Set it to the port the Java app listens on, so consumers referencing this service can reach it.");
         }
 
         if (port is < 1 or > 65535)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': java.port value '{port}' is not a valid port (must be between 1 and 65535).");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': java.port value '{port}' is not a valid port (must be between 1 and 65535).");
         }
 
         return port.Value;
@@ -156,9 +152,8 @@ internal sealed class JavaKindOptions
             return normalized;
         }
 
-        throw new ServiceSourcesConfigurationException(
-            $"Service '{serviceName}': java.scheme value '{scheme}' is not supported — use " +
-            $"'{EndpointScheme.Http}' or '{EndpointScheme.Https}'.");
+        throw ServiceSourcesConfigurationException.For(
+            $"Service '{new Name(serviceName)}': java.scheme value '{new Name(scheme)}' is not supported — use '{Raw.Literal(EndpointScheme.Http)}' or '{Raw.Literal(EndpointScheme.Https)}'.");
     }
 
     private static string ValidateWorkingDirectory(string serviceName, string? workingDirectory)
@@ -176,24 +171,20 @@ internal sealed class JavaKindOptions
 
         if (CheckoutRelativePath.IsAbsolute(trimmed))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': java.workingDirectory '{trimmed}' is an absolute path, but it must be " +
-                "relative to the root of the service's checkout. Use 'local.path' in " +
-                "servicesources.local.json to point at a checkout somewhere else on disk.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': java.workingDirectory '{Raw.Escaped(trimmed)}' is an absolute path, but it must be relative to the root of the service's checkout. Use 'local.path' in servicesources.local.json to point at a checkout somewhere else on disk.");
         }
 
         if (CheckoutRelativePath.UnusableSegment(trimmed) is { } unusable)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': java.workingDirectory '{trimmed}' has a path segment '{unusable}' — " +
-                CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy);
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': java.workingDirectory '{Raw.Escaped(trimmed)}' has a path segment '{new Name(unusable)}' — {CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy}");
         }
 
         if (CheckoutRelativePath.EscapesRoot(trimmed))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': java.workingDirectory '{trimmed}' points outside the service's checkout. " +
-                "It must stay within the repository.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': java.workingDirectory '{Raw.Escaped(trimmed)}' points outside the service's checkout. It must stay within the repository.");
         }
 
         return CheckoutRelativePath.NormalizeSeparators(trimmed);
@@ -226,10 +217,8 @@ internal sealed class JavaKindOptions
 
         if (CheckoutRelativePath.IsAbsolute(jarPath))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': java.jarPath '{jarPath}' is an absolute path, but it must be relative to " +
-                "java.workingDirectory — it names a jar built from the service's own checkout, not one sitting " +
-                "elsewhere on the developer's machine.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': java.jarPath '{Raw.Escaped(jarPath)}' is an absolute path, but it must be relative to java.workingDirectory — it names a jar built from the service's own checkout, not one sitting elsewhere on the developer's machine.");
         }
 
         // Against the working directory, not the bare jarPath: '../app.jar' escapes a project at the
@@ -237,16 +226,14 @@ internal sealed class JavaKindOptions
         // every platform, so joining with it is safe whichever way workingDirectory was written.
         if (CheckoutRelativePath.UnusableSegment(jarPath) is { } unusable)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': java.jarPath '{jarPath}' has a path segment '{unusable}' — " +
-                CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy);
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': java.jarPath '{Raw.Escaped(jarPath)}' has a path segment '{new Name(unusable)}' — {CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy}");
         }
 
         if (CheckoutRelativePath.EscapesRoot($"{workingDirectory}/{jarPath}"))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': java.jarPath '{jarPath}', read relative to java.workingDirectory " +
-                $"'{workingDirectory}', points outside the service's checkout. It must stay within the repository.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': java.jarPath '{Raw.Escaped(jarPath)}', read relative to java.workingDirectory '{Raw.Escaped(workingDirectory)}', points outside the service's checkout. It must stay within the repository.");
         }
 
         return runMode with { Value = CheckoutRelativePath.NormalizeSeparators(jarPath) };
@@ -266,32 +253,26 @@ internal sealed class JavaKindOptions
 
         if (runMode.Kind == JavaRunModeKind.Jar)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': the 'java:' block sets 'wrapperPath', but 'jarPath' starts the app with " +
-                "'java -jar' and runs no Maven or Gradle wrapper at all. Drop 'wrapperPath', or run the app via " +
-                "'mavenGoal' or 'gradleTask' instead.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': the 'java:' block sets 'wrapperPath', but 'jarPath' starts the app with 'java -jar' and runs no Maven or Gradle wrapper at all. Drop 'wrapperPath', or run the app via 'mavenGoal' or 'gradleTask' instead.");
         }
 
         if (CheckoutRelativePath.IsAbsolute(trimmed))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': java.wrapperPath '{trimmed}' is an absolute path, but it must be relative " +
-                "to the root of the service's checkout — it names a wrapper script committed to the repository, not " +
-                "a Maven or Gradle installation on the developer's machine.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': java.wrapperPath '{Raw.Escaped(trimmed)}' is an absolute path, but it must be relative to the root of the service's checkout — it names a wrapper script committed to the repository, not a Maven or Gradle installation on the developer's machine.");
         }
 
         if (CheckoutRelativePath.UnusableSegment(trimmed) is { } unusable)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': java.wrapperPath '{trimmed}' has a path segment '{unusable}' — " +
-                CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy);
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': java.wrapperPath '{Raw.Escaped(trimmed)}' has a path segment '{new Name(unusable)}' — {CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy}");
         }
 
         if (CheckoutRelativePath.EscapesRoot(trimmed))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': java.wrapperPath '{trimmed}' points outside the service's checkout. " +
-                "It must stay within the repository.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': java.wrapperPath '{Raw.Escaped(trimmed)}' points outside the service's checkout. It must stay within the repository.");
         }
 
         return CheckoutRelativePath.NormalizeSeparators(trimmed);

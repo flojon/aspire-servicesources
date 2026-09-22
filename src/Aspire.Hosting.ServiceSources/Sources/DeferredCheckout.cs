@@ -162,12 +162,12 @@ internal sealed class DeferredCheckout
         {
             if (_resolved)
             {
-                throw new ServiceSourcesConfigurationException(
-                    "UseDeferredCheckout() was called after a service had already resolved through " +
-                    "AddService(…), so that service's checkout could not be deferred. Because the decision " +
-                    "is made as each service is added, UseDeferredCheckout() must be called before the " +
-                    "first AddService(…) — near the top of the AppHost, next to AddServiceCatalog() and " +
-                    "AddLocalKind().");
+                throw ServiceSourcesConfigurationException.For(
+                    $"UseDeferredCheckout() was called after a service had already resolved through "
+                    + $"AddService(…), so that service's checkout could not be deferred. Because the decision "
+                    + $"is made as each service is added, UseDeferredCheckout() must be called before the "
+                    + $"first AddService(…) — near the top of the AppHost, next to AddServiceCatalog() and "
+                    + $"AddLocalKind().");
             }
 
             _enabled = true;
@@ -329,12 +329,12 @@ internal sealed class DeferredCheckout
             // under the same name. The handler is the only one that can fix that, so it is named.
             if (builder.Resources.Any(added => !before.Contains(added)))
             {
-                throw new ServiceSourcesConfigurationException(
-                    $"Service '{serviceName}': the handler for kind '{definition.Kind}' added resources to the app " +
-                    "model and then declined deferral by returning null from ResolveDeferred. Decide before " +
-                    "adding anything — SupportsDeferredCheckout is the side-effect-free place to decline — " +
-                    "because resources cannot be removed once added, and the eager path registers this service " +
-                    "again.");
+                throw ServiceSourcesConfigurationException.For(
+                    $"Service '{new Name(serviceName)}': the handler for kind '{new Name(definition.Kind)}' added resources to the app "
+                    + $"model and then declined deferral by returning null from ResolveDeferred. Decide before "
+                    + $"adding anything — SupportsDeferredCheckout is the side-effect-free place to decline — "
+                    + $"because resources cannot be removed once added, and the eager path registers this service "
+                    + $"again.");
             }
 
             return null;
@@ -364,12 +364,12 @@ internal sealed class DeferredCheckout
         {
             if (helper.Annotations.OfType<WaitAnnotation>().Any(wait => ReferenceEquals(wait.Resource, resource)))
             {
-                throw new ServiceSourcesConfigurationException(
-                    $"Service '{serviceName}': the handler for kind '{definition.Kind}' added resource " +
-                    $"'{helper.Name}' alongside the service and gave it a WaitFor on the service itself. A " +
-                    "deferred checkout starts the resources a handler added before the service they belong to, " +
-                    "so that wait could never be satisfied. Have the service wait on the helper rather than the " +
-                    "other way round, or return null from ResolveDeferred to opt this kind out of deferral.");
+                throw ServiceSourcesConfigurationException.For(
+                    $"Service '{new Name(serviceName)}': the handler for kind '{new Name(definition.Kind)}' added resource "
+                    + $"'{new Name(helper.Name)}' alongside the service and gave it a WaitFor on the service itself. A "
+                    + $"deferred checkout starts the resources a handler added before the service they belong to, "
+                    + $"so that wait could never be satisfied. Have the service wait on the helper rather than the "
+                    + $"other way round, or return null from ResolveDeferred to opt this kind out of deferral.");
             }
         }
 
@@ -431,8 +431,8 @@ internal sealed class DeferredCheckout
             return;
         }
 
-        logger.LogInformation(
-            "Checking the landed checkout at {RepoRoot} against the service's configuration.", repoRoot);
+        ServiceSourcesLog.Information(
+            logger, $"Checking the landed checkout at {Raw.Escaped(repoRoot)} against the service's configuration.");
 
         try
         {
@@ -440,9 +440,10 @@ internal sealed class DeferredCheckout
         }
         catch (Exception ex) when (ex is not ServiceSourcesConfigurationException)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': the handler for kind '{kind}' failed while checking the checkout that " +
-                "had just landed.", ex);
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': the handler for kind '{new Name(kind)}' failed while checking the checkout that "
+                + $"had just landed.",
+                ex);
         }
     }
 
@@ -464,7 +465,7 @@ internal sealed class DeferredCheckout
         // than telling the developer their port is not Aspire's to manage.
         if (LaunchProfileEndpointWarning(resource.Name, profile, resource) is { } warning)
         {
-            logger.LogWarning("{Warning}", warning);
+            ServiceSourcesLog.Warning(logger, $"{warning}");
         }
     }
 
@@ -553,7 +554,7 @@ internal sealed class DeferredCheckout
     /// produce it rather than guessing at composition time.
     /// </para>
     /// </remarks>
-    public static string? LaunchProfileEndpointWarning(
+    public static Raw? LaunchProfileEndpointWarning(
         string serviceName, LandedLaunchProfile profile, IResource resource)
     {
         if (resource.Annotations.OfType<EndpointAnnotation>().Any())
@@ -581,7 +582,7 @@ internal sealed class DeferredCheckout
             + $"and the dashboard will not link it. Declare it in the AppHost — builder.AddService(\"{new Name(serviceName)}\")"
             + $".WithHttpEndpoint() — which also takes effect on every later run, where the checkout is warm and "
             + $"the endpoint comes from the profile as usual. This is reported after the clone rather than "
-            + $"refused before it, so a service that has no endpoints on either path costs you nothing.").ToString();
+            + $"refused before it, so a service that has no endpoints on either path costs you nothing.");
     }
 
     /// <summary>
@@ -657,12 +658,12 @@ internal sealed class DeferredCheckout
         applied.AddRange(profile.EnvironmentVariables.Keys.Where(
             key => !string.Equals(key, LaunchProfileNameVariable, StringComparison.Ordinal)));
 
-        logger.LogInformation(
-            "Applied {Count} environment variable(s) from the checkout's launch profile '{Profile}' ({Names}), "
-            + "which Aspire could not read while composing the AppHost.",
-            applied.Count,
-            profileName,
-            string.Join(", ", applied));
+        var names = Raw.Join(", ", applied.Select(key => Raw.Compose($"{new Name(key)}")));
+
+        ServiceSourcesLog.Information(
+            logger,
+            $"Applied {applied.Count} environment variable(s) from the checkout's launch profile "
+            + $"'{new Name(profileName)}' ({names}), which Aspire could not read while composing the AppHost.");
     }
 
     /// <summary>
@@ -756,10 +757,10 @@ internal sealed class DeferredCheckout
 
             await PublishCheckingOutAsync(notifications, deferred.Resource).ConfigureAwait(false);
 
-            logger.LogInformation(
-                "Resolving checkout of {Repository} into {RepoRoot} before starting.",
-                GitUrl.Redact(deferred.Definition.Repository.Url),
-                deferred.RepoRoot);
+            ServiceSourcesLog.Information(
+                logger,
+                $"Resolving checkout of {Raw.Escaped(GitUrl.Redact(deferred.Definition.Repository.Url))} into "
+                + $"{Raw.Escaped(deferred.RepoRoot)} before starting.");
 
             // Claimed here, on this thread, rather than inside the reporting task: the checkout
             // below may be the thing that starts the clone — a service the prefetch never enumerated
@@ -811,10 +812,10 @@ internal sealed class DeferredCheckout
                 // for a 'path' override. Checked anyway, because being wrong about it is silent.
                 if (!string.Equals(repoRoot, deferred.RepoRoot, StringComparison.Ordinal))
                 {
-                    throw new ServiceSourcesConfigurationException(
-                        $"Service '{deferred.ServiceName}': the checkout resolved to '{repoRoot}', but the resource " +
-                        $"was registered against '{deferred.RepoRoot}' before the AppHost started and that path " +
-                        "cannot be changed afterwards.");
+                    throw ServiceSourcesConfigurationException.For(
+                        $"Service '{new Name(deferred.ServiceName)}': the checkout resolved to '{Raw.Escaped(repoRoot)}', but the resource "
+                        + $"was registered against '{Raw.Escaped(deferred.RepoRoot)}' before the AppHost started and that path "
+                        + $"cannot be changed afterwards.");
                 }
 
                 // The checkout is complete and nothing has judged it yet, which is where a prepare step
@@ -865,7 +866,7 @@ internal sealed class DeferredCheckout
             // launch profile, a kind's DeferredLocalResource.ValidateCheckout.
             deferred.OnCheckoutLanded(deferred.Resource, repoRoot, logger);
 
-            logger.LogInformation("Checkout ready at {RepoRoot}. Starting.", repoRoot);
+            ServiceSourcesLog.Information(logger, $"Checkout ready at {Raw.Escaped(repoRoot)}. Starting.");
 
             var commands = services.GetRequiredService<ResourceCommandService>();
 
@@ -882,9 +883,9 @@ internal sealed class DeferredCheckout
 
                 if (!result.Success && !result.Canceled)
                 {
-                    throw new ServiceSourcesConfigurationException(
-                        $"Service '{deferred.ServiceName}': the checkout completed but starting resource " +
-                        $"'{withheld.Name}' failed. " + (result.Message ?? "No further detail was reported."));
+                    throw ServiceSourcesConfigurationException.For(
+                        $"Service '{new Name(deferred.ServiceName)}': the checkout completed but starting resource "
+                        + $"'{new Name(withheld.Name)}' failed. {Raw.Escaped(result.Message ?? "No further detail was reported.")}");
                 }
 
                 started.Add(withheld);
@@ -954,7 +955,7 @@ internal sealed class DeferredCheckout
                 // Verbatim, progress lines included: the logs are where the developer goes for what
                 // actually happened, and git's own stream is a better record of it than any summary
                 // of ours. The State column is where the summarising happens.
-                logger.LogInformation("{GitProgress}", line);
+                ServiceSourcesLog.Information(logger, $"{Raw.Escaped(line)}");
 
                 if (!GitProgressLine.TryParse(line, out var parsed))
                 {
@@ -1005,7 +1006,7 @@ internal sealed class DeferredCheckout
             // else.
             try
             {
-                logger.LogDebug(ex, "Reporting checkout progress stopped early: {Message}", ex.Message);
+                ServiceSourcesLog.Debug(logger, ex, $"Reporting checkout progress stopped early: {Raw.Cause(ex)}");
             }
             catch (Exception)
             {
@@ -1031,7 +1032,7 @@ internal sealed class DeferredCheckout
     /// </summary>
     private sealed class LoggerPrepareOutputSink(ILogger logger) : IPrepareOutputSink
     {
-        public void Report(string line) => logger.LogInformation("{PrepareOutput}", line);
+        public void Report(Raw line) => ServiceSourcesLog.Information(logger, $"{line}");
     }
 
     /// <param name="started">
@@ -1046,12 +1047,11 @@ internal sealed class DeferredCheckout
             var notifications = services.GetRequiredService<ResourceNotificationService>();
             var logger = services.GetRequiredService<ResourceLoggerService>().GetLogger(deferred.Resource);
 
-            logger.LogError(
+            ServiceSourcesLog.Error(
+                logger,
                 exception,
-                "Service '{ServiceName}': its checkout was deferred past startup and did not complete, so the " +
-                "service was never started. {Message}",
-                deferred.ServiceName,
-                exception.Message);
+                $"Service '{new Name(deferred.ServiceName)}': its checkout was deferred past startup and did not "
+                + $"complete, so the service was never started. {Raw.Cause(exception)}");
 
             // Every resource withheld for this service, not just the service's own: a held-back
             // helper left sitting in NotStarted reads as "still waiting" rather than as the casualty

@@ -1,4 +1,5 @@
 using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.ServiceSources.Messages;
 using Aspire.Hosting.ServiceSources.Sources;
 
 namespace Aspire.Hosting.ServiceSources;
@@ -60,7 +61,7 @@ public static class ServiceConfigurationExtensions
         // configuring the wrong process is exactly the failure mode issue #53 was filed about.
         if (annotation is not null && IsUnreachable<T>(annotation.Source))
         {
-            throw new ServiceSourcesConfigurationException(Explain<T>(service.Resource, annotation, real));
+            throw ServiceSourcesConfigurationException.For($"{Explain<T>(service.Resource, annotation, real)}");
         }
 
         // service.Resource is always the ServiceResource facade now (never the real, source-specific
@@ -73,7 +74,7 @@ public static class ServiceConfigurationExtensions
             return service.ApplicationBuilder.CreateResourceBuilder(typed);
         }
 
-        throw new ServiceSourcesConfigurationException(Explain<T>(service.Resource, annotation, real));
+        throw ServiceSourcesConfigurationException.For($"{Explain<T>(service.Resource, annotation, real)}");
     }
 
     /// <summary>
@@ -119,32 +120,38 @@ public static class ServiceConfigurationExtensions
     /// otherwise make every mismatch read "is a ServiceResource" regardless of what was actually
     /// requested.
     /// </param>
-    private static string Explain<T>(IResource resource, ServiceSourceAnnotation? annotation, IResource? real)
+    private static Raw Explain<T>(IResource resource, ServiceSourceAnnotation? annotation, IResource? real)
         where T : IResource
     {
         // The catalog key is caller-controlled and reaches a log through this exception, exactly as it
-        // does through the warnings that share the sentence below.
-        var name = ServiceSourcesWarnings.Label(annotation?.ServiceName ?? resource.Name);
+        // does through the warnings that share the sentence below — Name applies the same escaping
+        // those messages compose through, without rendering to a string first and risking a second
+        // escape pass here.
+        var name = new Name(annotation?.ServiceName ?? resource.Name);
 
         if (annotation is null)
         {
-            return $"Resource '{name}' ({resource.GetType().Name}) is not a {typeof(T).Name}.";
+            return Raw.Compose(
+                $"Resource '{name}' ({Raw.Escaped(resource.GetType().Name)}) is not a {Raw.Escaped(typeof(T).Name)}.");
         }
 
-        var opening = $"Service '{name}' cannot be configured as {typeof(T).Name}: its source is " +
-                      $"'{annotation.Source}'";
+        var opening = Raw.Compose(
+            $"Service '{name}' cannot be configured as {Raw.Escaped(typeof(T).Name)}: its source is "
+            + $"'{new Name(annotation.Source)}'");
 
         // Shared with the warnings rather than re-spelled: the same offer with the precondition
         // dropped is a dead end for a service whose catalog entry declares neither block. Keyed on
         // the same predicate the throw above gates on, so the two cannot disagree about a source.
         if (IsUnreachable<T>(annotation.Source))
         {
-            return $"{opening} — {OutOfBandSourceAdvice.SourceDetail(annotation.Source)}. Configure the " +
-                   $"service where it actually runs, drop the configuration, or " +
-                   $"{OutOfBandSourceAdvice.SwitchSource}.";
+            return Raw.Compose(
+                $"{opening} — {Raw.Escaped(OutOfBandSourceAdvice.SourceDetail(annotation.Source))}. Configure the "
+                + $"service where it actually runs, drop the configuration, or "
+                + $"{Raw.Literal(OutOfBandSourceAdvice.SwitchSource)}.");
         }
 
-        return $"{opening}. The resolved resource is a {(real ?? resource).GetType().Name}, which does " +
-               "not provide it.";
+        return Raw.Compose(
+            $"{opening}. The resolved resource is a {Raw.Escaped((real ?? resource).GetType().Name)}, which does "
+            + $"not provide it.");
     }
 }

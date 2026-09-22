@@ -3,6 +3,7 @@ using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Catalog;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Git;
+using Aspire.Hosting.ServiceSources.Messages;
 using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Catalog;
@@ -267,7 +268,7 @@ public class CatalogCompositionTests
 
         Assert.Contains("payments", ex.Message, StringComparison.Ordinal);
         Assert.Contains("code", ex.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(yamlPath, ex.Message, StringComparison.Ordinal);
+        Assert.Contains(Name.Escape(yamlPath), ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -491,7 +492,7 @@ public class CatalogCompositionTests
 
         Assert.Contains("'monorepo'", ex.Message, StringComparison.Ordinal);
         Assert.Contains("'Monorepo'", ex.Message, StringComparison.Ordinal);
-        Assert.Contains(yamlPath, ex.Message, StringComparison.Ordinal);
+        Assert.Contains(Name.Escape(yamlPath), ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("AddServiceCatalog", ex.Message, StringComparison.Ordinal);
     }
 
@@ -552,7 +553,7 @@ public class CatalogCompositionTests
 
         Assert.Contains("'shared'", ex.Message, StringComparison.Ordinal);
         Assert.Contains("twice", ex.Message, StringComparison.Ordinal);
-        Assert.Contains(yamlPath, ex.Message, StringComparison.Ordinal);
+        Assert.Contains(Name.Escape(yamlPath), ex.Message, StringComparison.Ordinal);
     }
 
     /// <summary>

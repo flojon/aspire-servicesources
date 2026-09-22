@@ -446,7 +446,7 @@ public class DeferredCheckoutTests
         var projectFile = WriteProjectWithLaunchProfile("http://localhost:8081");
 
         var warning = DeferredCheckout.LaunchProfileEndpointWarning(
-            "orders", LandedLaunchProfile.Read(projectFile, new ProjectResource("orders")), new ProjectResource("orders"));
+            "orders", LandedLaunchProfile.Read(projectFile, new ProjectResource("orders")), new ProjectResource("orders"))?.ToString();
 
         // Reported at the only moment the real URL is knowable, which is why it can quote it.
         Assert.NotNull(warning);

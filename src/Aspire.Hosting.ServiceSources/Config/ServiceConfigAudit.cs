@@ -70,7 +70,8 @@ internal static class ServiceConfigAudit
                     // then. Reporting only what this audit produced leaves everything else
                     // outstanding for whoever owns it. See BackingServiceConfigAudit, which takes
                     // the same route for the same reason.
-                    ServiceSourcesWarnings.ReporterFor(builder).ReportNow(@event.Services, Report(builder));
+                    ServiceSourcesWarnings.ReporterFor(builder).ReportNow(
+                        @event.Services, [.. Report(builder).Select(reason => reason.ToString())]);
 
                     return Task.CompletedTask;
                 });
@@ -86,11 +87,11 @@ internal static class ServiceConfigAudit
     /// already cached for the first <see cref="ServiceSourcesBuilderExtensions.AddService"/> call —
     /// nothing here re-reads the file or re-parses the catalog.
     /// </remarks>
-    private static IReadOnlyList<string> Report(IDistributedApplicationBuilder builder)
+    private static IReadOnlyList<Raw> Report(IDistributedApplicationBuilder builder)
     {
         var config = ServiceSourcesConfigCache.LoadedFor(builder).DeveloperConfig;
 
-        var reasons = new List<string>();
+        var reasons = new List<Raw>();
 
         if (config.NearMissRootKey is { } nearMiss)
         {
@@ -126,7 +127,7 @@ internal static class ServiceConfigAudit
     /// services.
     /// </para>
     /// </remarks>
-    private static string OrphanedEntriesReason(IReadOnlyList<string> orphans, IReadOnlyList<string> catalogNames)
+    private static Raw OrphanedEntriesReason(IReadOnlyList<string> orphans, IReadOnlyList<string> catalogNames)
     {
         var candidates = catalogNames.OrderBy(name => name, StringComparer.Ordinal).ToArray();
 
@@ -148,7 +149,7 @@ internal static class ServiceConfigAudit
             + $"{(orphans.Count == 1 ? Raw.Literal("the entry configures") : Raw.Literal("the entries configure"))} nothing. This AppHost's "
             + $"catalog declares: {Raw.Join(", ", declared)}. Correct the key "
             + $"under \"{Raw.Literal(DeveloperConfigFileSource.FileServicesKey)}\" in '{Raw.Literal(DeveloperConfiguration.FileName)}', or "
-            + $"wherever a higher layer set it, or remove the entry if it is deliberately unused.").ToString();
+            + $"wherever a higher layer set it, or remove the entry if it is deliberately unused.");
     }
 
     /// <summary>
@@ -158,10 +159,11 @@ internal static class ServiceConfigAudit
     /// Says the file rather than the configuration key, because a root key is a property of the
     /// file alone: no other configuration layer has one to misspell.
     /// </remarks>
-    private static string MisspelledRootKeyReason(IDistributedApplicationBuilder builder, string nearMiss) =>
-        $"'{Path.Combine(builder.AppHostDirectory, DeveloperConfiguration.FileName)}' has a top-level key "
-        + $"'{nearMiss}', and no '{DeveloperConfigFileSource.FileServicesKey}' key. Did you mean "
-        + $"'{DeveloperConfigFileSource.FileServicesKey}'? Nothing read it, so nothing in it configured a "
-        + "service — whatever this AppHost's services are configured with is coming from another layer, and "
-        + "any service with no source anywhere else fails when it is added.";
+    private static Raw MisspelledRootKeyReason(IDistributedApplicationBuilder builder, string nearMiss) =>
+        Raw.Compose(
+            $"'{Raw.Escaped(Path.Combine(builder.AppHostDirectory, DeveloperConfiguration.FileName))}' has a top-level key "
+            + $"'{new Name(nearMiss)}', and no '{Raw.Literal(DeveloperConfigFileSource.FileServicesKey)}' key. Did you mean "
+            + $"'{Raw.Literal(DeveloperConfigFileSource.FileServicesKey)}'? Nothing read it, so nothing in it configured a "
+            + $"service — whatever this AppHost's services are configured with is coming from another layer, and "
+            + $"any service with no source anywhere else fails when it is added.");
 }

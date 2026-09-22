@@ -1,6 +1,7 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
 
@@ -37,19 +38,19 @@ internal sealed class ContainerSource : IServiceSource
     {
         if (definition.Container is null || string.IsNullOrWhiteSpace(definition.Container.Image))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}' source is 'container' but {definition.Origin.Describe()} has no " +
-                "container.image entry.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}' source is 'container' but {Raw.Origin(definition.Origin)} has no "
+                + $"container.image entry.");
         }
 
-        var port = definition.Container.Port ?? throw new ServiceSourcesConfigurationException(
-            $"Service '{serviceName}' source is 'container' but {definition.Origin.Describe()} has no " +
-            "container.port entry.");
+        var port = definition.Container.Port ?? throw ServiceSourcesConfigurationException.For(
+            $"Service '{new Name(serviceName)}' source is 'container' but {Raw.Origin(definition.Origin)} has no "
+            + $"container.port entry.");
 
         if (port is < 1 or > 65535)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Service '{serviceName}': container.port value '{port}' is not a valid port (must be between 1 and 65535).");
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': container.port value '{port}' is not a valid port (must be between 1 and 65535).");
         }
 
         var tag = string.IsNullOrWhiteSpace(config.Container.Tag) ? definition.Container.DefaultTag : config.Container.Tag;

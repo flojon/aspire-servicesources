@@ -1,6 +1,7 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
+using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.Catalog;
 
@@ -38,8 +39,8 @@ public sealed class ServiceCatalogBuilder
 
         if (string.IsNullOrWhiteSpace(name))
         {
-            throw new ServiceSourcesConfigurationException(
-                "AddServiceCatalog: a service name is required and cannot be empty or whitespace.");
+            throw ServiceSourcesConfigurationException.For(
+                $"AddServiceCatalog: a service name is required and cannot be empty or whitespace.");
         }
 
         var caseCollision = _entries.Keys.FirstOrDefault(
@@ -48,15 +49,15 @@ public sealed class ServiceCatalogBuilder
 
         if (caseCollision is not null)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"AddServiceCatalog: service '{name}' differs only by case from already-declared " +
-                $"'{caseCollision}'. Two code-declared names must differ by more than case.");
+            throw ServiceSourcesConfigurationException.For(
+                $"AddServiceCatalog: service '{new Name(name)}' differs only by case from already-declared " +
+                $"'{new Name(caseCollision)}'. Two code-declared names must differ by more than case.");
         }
 
         if (!_entries.TryAdd(name, new ServiceDefinitionBuilder(name)))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"AddServiceCatalog: service '{name}' is declared twice in code. Remove one of the two calls.");
+            throw ServiceSourcesConfigurationException.For(
+                $"AddServiceCatalog: service '{new Name(name)}' is declared twice in code. Remove one of the two calls.");
         }
 
         return _entries[name];
@@ -88,29 +89,29 @@ public sealed class ServiceCatalogBuilder
 
         if (string.IsNullOrWhiteSpace(name))
         {
-            throw new ServiceSourcesConfigurationException(
-                "AddRepository: a repository name is required and cannot be empty or whitespace.");
+            throw ServiceSourcesConfigurationException.For(
+                $"AddRepository: a repository name is required and cannot be empty or whitespace.");
         }
 
         if (string.IsNullOrWhiteSpace(url))
         {
-            throw new ServiceSourcesConfigurationException(
-                "AddRepository: a repository url is required and cannot be empty or whitespace.");
+            throw ServiceSourcesConfigurationException.For(
+                $"AddRepository: a repository url is required and cannot be empty or whitespace.");
         }
 
         if (!LocalGitCheckout.IsContainedCheckoutDirectoryName(name))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"AddRepository: '{name}' cannot be used as this repository's checkout directory name — "
-                + LocalGitCheckout.ContainedNameRule);
+            throw ServiceSourcesConfigurationException.For(
+                $"AddRepository: '{new Name(name)}' cannot be used as this repository's checkout directory name — "
+                + $"{LocalGitCheckout.ContainedNameRule}");
         }
 
         if (_repositories.TryGetValue(name, out var existing))
         {
-            throw new ServiceSourcesConfigurationException(
-                $"AddRepository: '{name}' is already declared, naming '{GitUrl.Redact(existing.Url)}'. Two "
-                + "repositories cannot share one checkout directory name — pass a different name to this "
-                + $"AddRepository call for '{GitUrl.Redact(url)}', or to the other one already declared.");
+            throw ServiceSourcesConfigurationException.For(
+                $"AddRepository: '{new Name(name)}' is already declared, naming '{Raw.Escaped(GitUrl.Redact(existing.Url))}'. Two "
+                + $"repositories cannot share one checkout directory name — pass a different name to this "
+                + $"AddRepository call for '{Raw.Escaped(GitUrl.Redact(url))}', or to the other one already declared.");
         }
 
         // Case-only, the same rule AddService already applies to two code-declared service names
@@ -125,9 +126,9 @@ public sealed class ServiceCatalogBuilder
 
         if (caseCollision is not null)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"AddRepository: '{name}' differs only by case from already-declared "
-                + $"'{caseCollision}'. Two repositories must differ by more than case.");
+            throw ServiceSourcesConfigurationException.For(
+                $"AddRepository: '{new Name(name)}' differs only by case from already-declared "
+                + $"'{new Name(caseCollision)}'. Two repositories must differ by more than case.");
         }
 
         var repository = new RepositoryBuilder(url, name, defaultRef);

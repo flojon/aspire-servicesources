@@ -20,8 +20,9 @@ public sealed class ServiceSourcesConfigurationException : Exception
     {
     }
 
-    // The factory is the one legitimate caller of the banned constructor; the suppression is scoped
-    // to these two lines so every other use still reports.
+    // One of two legitimate callers of the banned constructor (the other is
+    // LocalKindConfig.RewriteIndentationAdviceForCodeOrigin, which only rewrites an already-escaped
+    // message); the suppression here is scoped to these two lines so every other use still reports.
 #pragma warning disable RS0030
     /// <summary>
     /// The only way this package builds a message: a raw <c>string</c> hole does not compile, so a

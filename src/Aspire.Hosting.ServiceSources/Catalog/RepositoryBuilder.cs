@@ -1,5 +1,6 @@
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
+using Aspire.Hosting.ServiceSources.Messages;
 using Aspire.Hosting.ServiceSources.Prepare;
 
 namespace Aspire.Hosting.ServiceSources.Catalog;
@@ -71,12 +72,13 @@ public sealed class RepositoryBuilder
 
         if (_prepare is not null)
         {
-            throw new ServiceSourcesConfigurationException(
-                $"Repository '{_name}': {nameof(WithPrepare)} was already called. Calls are additive across "
-                + "different blocks, but a repeated call to the same one is not — remove one of the two.");
+            throw ServiceSourcesConfigurationException.For(
+                $"Repository '{new Name(_name)}': {Raw.Literal(nameof(WithPrepare))} was already called. Calls are additive across "
+                + $"different blocks, but a repeated call to the same one is not — remove one of the two.");
         }
 
-        _prepare = PrepareMetadataFactory.Create($"Repository '{_name}'", command, windowsCommand, mode);
+        _prepare = PrepareMetadataFactory.Create(
+            Raw.Compose($"Repository '{new Name(_name)}'"), command, windowsCommand, mode);
 
         return this;
     }

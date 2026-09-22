@@ -1,3 +1,5 @@
+using Aspire.Hosting.ServiceSources.Messages;
+
 namespace Aspire.Hosting.ServiceSources.Git;
 
 /// <summary>
@@ -16,4 +18,14 @@ internal sealed class GitAuthenticationFailedException(
     /// host refused, and needs different remediation, so the two are not reported alike.
     /// </summary>
     public bool NoCredentialsResolved { get; } = noCredentialsResolved;
+
+#pragma warning disable RS0030
+    /// <summary>
+    /// The only way this package builds a message: a raw <c>string</c> hole does not compile, so a
+    /// caller-controlled name cannot reach a reader unescaped.
+    /// </summary>
+    internal static GitAuthenticationFailedException For(
+        ServiceTextHandler message, Exception innerException, bool noCredentialsResolved = false) =>
+        new(message.Text, innerException, noCredentialsResolved);
+#pragma warning restore RS0030
 }

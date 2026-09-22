@@ -1,3 +1,5 @@
+using Aspire.Hosting.ServiceSources.Messages;
+
 namespace Aspire.Hosting.ServiceSources.Prepare;
 
 /// <summary>
@@ -80,7 +82,7 @@ internal static class PrepareModes
     /// <exception cref="ServiceSourcesConfigurationException">
     /// <paramref name="written"/> is not one of the four.
     /// </exception>
-    public static PrepareMode Parse(string label, string? written, string writtenAt)
+    public static PrepareMode Parse(Raw label, string? written, Raw writtenAt)
     {
         if (written is null)
         {
@@ -97,10 +99,10 @@ internal static class PrepareModes
             }
         }
 
-        throw new ServiceSourcesConfigurationException(
-            $"{label}: {writtenAt} is '{written}', which is not a mode. Set it to one of "
-            + string.Join(", ", Spellings.Select(s => $"'{s.Written}'"))
-            + $" — or leave it out for '{Written(Default)}'.");
+        throw ServiceSourcesConfigurationException.For(
+            $"{label}: {writtenAt} is '{new Name(written)}', which is not a mode. Set it to one of "
+            + $"{Raw.Join(", ", Spellings.Select(s => Raw.Compose($"'{Raw.Escaped(s.Written)}'")))}"
+            + $" — or leave it out for '{Raw.Escaped(Written(Default))}'.");
     }
 
     /// <summary>How <paramref name="mode"/> is spelled in a file, for a message that names one.</summary>
