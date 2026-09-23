@@ -194,22 +194,6 @@ never existed. Check the tag of the last release before adding one.
 
 ### Fixed
 
-- **A configured name can no longer forge a line in the messages that refuse or report a service**
-  ([#375]). The names these messages quote — a service, a backing service, a repository, a launch
-  profile's URL — were interpolated exactly as configured, so one carrying a newline or a closing
-  quote could end the line and write a sentence of its own into output a reader trusts. Escaping was
-  something each message site had to remember, and [#372] fixed four that had not. Fourteen more now
-  compose through a seam that escapes every name by construction, and caps all but the URLs and
-  paths a cut would rob of the diagnosis they carry: the nine refusals raised while a source
-  resolves, and the five builders behind the startup-failure notice, the two
-  `configuration that nothing read` audits, the launch-profile endpoint warning and the failed
-  prefetch notice. A name is capped on its own rather than over a joined list, so a message naming
-  ten services still names all ten. The wording of a cause flattened into
-  `ServiceSourcesConfigurationException.Describe` can no longer forge a line either — escaped rather
-  than bounded, because a cause is a diagnosis and truncating it would discard what it is for.
-  Messages this package has not migrated yet still interpolate a name directly; the constructor
-  behind them now reports each one, so the remainder is a worklist rather than a search.
-
 - **`WithExternalHttpEndpoints` on a `url` or `kubernetes` service is now skipped and reported
   instead of applied silently** ([#359]). Aspire's method does not add an annotation — it walks the
   ones the service already has and writes `IsExternal` on each `http`/`https` one — so it went
@@ -227,18 +211,24 @@ never existed. Check the tag of the last release before adding one.
   warning rather than two, and the detector remains the backstop for the guest-language endpoint
   callbacks, which no C# shadow can reach.
 
-- **A service name can no longer forge a second log entry in four out-of-band messages** ([#372]).
-  Each of them opens with the service's own name, taken from the catalog and interpolated between
-  quotes without escaping. A name carrying a newline, a Unicode line separator or an apostrophe
-  therefore split the line, or closed the quote and wrote a sentence of its own, into a log a reader
-  trusts. The four are the warning for configuration skipped on a `url` or `kubernetes` service, the
-  revert warning added in this release, `Unwrap<T>`'s refusal of an out-of-band source, and the
-  refusal of a container's reference to a `url` service — the last thrown from inside
-  `BeforeStartEvent`, so it lands in the host's own log. Both names these messages carry, the service
-  and the endpoint, now go through the same escaping this package already applies to
-  developer-written text echoed back, plus a length cap. Messages elsewhere in the package still
-  interpolate a service name directly; making that structural rather than per-site is tracked as
-  [#375].
+- **A configured or caller-controlled name can no longer forge a line in a message this package
+  writes** ([#372], [#375], [#385]). Every name these messages quote — a service, a backing service,
+  a repository, a launch profile's URL, an endpoint — used to be interpolated exactly as configured
+  or as reported by git/Kubernetes, so one carrying a newline, a Unicode line separator, a closing
+  quote or an apostrophe could end the line early, or write a sentence of its own into output a
+  reader trusts. Every site now composes through one seam that escapes each name by construction and
+  caps all but the URLs and paths a cut would rob of the diagnosis they carry — a message naming ten
+  services still names all ten: the refusals raised while a source resolves, the builders behind the
+  startup-failure notice, the `configuration that nothing read` audits, the launch-profile endpoint
+  warning, the failed prefetch notice, the out-of-band log messages (the skip warning on a `url`/
+  `kubernetes` service, `Unwrap<T>`'s refusal, and the `url`-container refusal), the cause text
+  `ServiceSourcesConfigurationException.Describe` flattens, and the Git/Java/JavaScript/Kubernetes
+  exception hierarchies (`GitAuthenticationFailedException`, `KubernetesSecretException`,
+  `PrepareLaunchException`) plus the structured-logging and `prepare`-command output sinks. `RS0030`,
+  the analyzer banning a raw exception constructor, moves from a tolerated warning to a build error
+  project-wide, so a future call site that skips the seam fails CI instead of shipping. Entirely
+  internal: no public type or method this package documents changed, so there is nothing to migrate
+  on your side.
 
 - **The remedy every out-of-band message offers no longer dead-ends** ([#372]). Four messages
   offered the same way back under this AppHost's control, each in its own words and all of them as
@@ -300,21 +290,6 @@ never existed. Check the tag of the last release before adding one.
   service declared entirely in code (`WithKind(kind, options)`, [#134]) shares no yaml document with
   these properties and is unaffected either way. Only a service whose own `servicesources.yaml`
   entry actually names the reserved kind is rejected, naming the service and the kind.
-
-### Documentation
-
-- **The code-catalog design's ATS probe, measured** ([#134]). The accepted design for authoring the
-  service catalog in code depended on five shapes never measured against Aspire's Type System —
-  optional/named parameters, an extension method on a package-owned exported class, a lambda nested
-  inside a lambda, an enum as a parameter, and the generated name `addService` on two receivers. Four
-  cross cleanly as specified. The fifth collides for an **extension** method, and the design's own
-  named fallback (`[AspireExport(MethodName = …)]`) does not fix it — that property only renames
-  what a generated SDK calls the method, not the capability ID the collision is keyed on; an
-  explicit capability id (`[AspireExport("…")]`) does. It does not collide for an **instance**
-  method exposed via `ExposeMethods = true` — those are always receiver-qualified, so they need no
-  explicit id ([#309]). See
-  `docs/superpowers/specs/2026-09-07-code-catalog-stage0-ats-probe-findings.md`. Nothing in the
-  package changed; this stage ships no code.
 
 ## [0.5.1] - 2026-09-07
 
@@ -1786,7 +1761,6 @@ Targets `net10.0`.
 [#258]: https://github.com/flojon/aspire-servicesources/issues/258
 [#279]: https://github.com/flojon/aspire-servicesources/issues/279
 [#291]: https://github.com/flojon/aspire-servicesources/issues/291
-[#309]: https://github.com/flojon/aspire-servicesources/issues/309
 [#313]: https://github.com/flojon/aspire-servicesources/issues/313
 [#314]: https://github.com/flojon/aspire-servicesources/issues/314
 [#317]: https://github.com/flojon/aspire-servicesources/issues/317
@@ -1797,6 +1771,7 @@ Targets `net10.0`.
 [#362]: https://github.com/flojon/aspire-servicesources/issues/362
 [#372]: https://github.com/flojon/aspire-servicesources/issues/372
 [#375]: https://github.com/flojon/aspire-servicesources/issues/375
+[#385]: https://github.com/flojon/aspire-servicesources/issues/385
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
