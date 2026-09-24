@@ -16,6 +16,8 @@ never existed. Check the tag of the last release before adding one.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-24
+
 ### Breaking
 
 - **A late `UseDeferredCheckout()` call now throws instead of silently no-opping** ([#345]).
@@ -1675,7 +1677,8 @@ Targets `net10.0`.
 - Fail-fast configuration validation with `ServiceSourcesConfigurationException`.
 - MIT license, README, symbol packages, and Trusted Publishing (OIDC) to nuget.org.
 
-[Unreleased]: https://github.com/flojon/aspire-servicesources/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/flojon/aspire-servicesources/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/flojon/aspire-servicesources/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/flojon/aspire-servicesources/compare/v0.4.1...v0.5.1
 [0.4.1]: https://github.com/flojon/aspire-servicesources/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/flojon/aspire-servicesources/compare/v0.3.1...v0.4.0
