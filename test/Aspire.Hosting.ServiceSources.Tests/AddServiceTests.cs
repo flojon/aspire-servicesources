@@ -198,6 +198,7 @@ public class AddServiceTests
         Assert.Contains("'kubernetes'", ex.Message);
         Assert.Contains("'url'", ex.Message);
         Assert.Contains("'container'", ex.Message);
+        Assert.Contains("'disabled'", ex.Message);
         Assert.DoesNotContain("not implemented yet", ex.Message);
 
         // The key as well as the file, since the file is only the lowest layer it can arrive from.
@@ -291,6 +292,58 @@ public class AddServiceTests
         var endpoint = service.GetEndpoint("https");
         Assert.True(endpoint.IsAllocated);
         Assert.Equal("https://orders.example.com:443", endpoint.Url);
+    }
+
+    /// <summary>
+    /// Parallel to <see cref="AddService_UrlSource_StaysUnregisteredAndResolvesToConfiguredUrl"/>:
+    /// "disabled" is the other source resolved through <c>ResolvedService.BridgeUnregistered</c>, but
+    /// unlike "url" it registers no endpoint at all — there is nothing to point a consumer at.
+    /// </summary>
+    [Fact]
+    public void AddService_DisabledSource_StaysUnregisteredAndExposesNoEndpoint()
+    {
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "disabled" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var service = builder.AddService("orders");
+
+        Assert.IsType<ServiceResource>(service.Resource);
+        Assert.DoesNotContain(builder.Resources, r => ReferenceEquals(r, service.Resource));
+        Assert.Empty(service.Resource.Annotations.OfType<EndpointAnnotation>());
+    }
+
+    /// <summary>
+    /// "disabled" needs no catalog block of its own — unlike every other source, there is nothing to
+    /// resolve, so a bare "source": "disabled" is enough for a service the catalog declares any other
+    /// way.
+    /// </summary>
+    [Fact]
+    public void AddService_DisabledSource_NeedsNoCatalogBlockOfItsOwn()
+    {
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                url:
+                  url: https://orders.example.com
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "disabled" } } }
+            """);
+
+        var service = CreateBuilder(appHostDir).AddService("orders");
+
+        Assert.Equal("orders", service.Resource.Name);
     }
 
     [Fact]

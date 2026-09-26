@@ -10,8 +10,9 @@ internal interface IServiceSource
     /// Adds the real resource Aspire will run for this service and returns a handle to it. The
     /// resource must be registered in <c>builder.Resources</c> — an unregistered one gets no DCP
     /// Service, which breaks any container consumer that references it (reported as #58, still open
-    /// for the one source that cannot comply as #72). The one
-    /// exception is <see cref="Sources.UrlSource"/>; see its remarks.
+    /// for the one source that cannot comply as #72). The exceptions are <see cref="Sources.UrlSource"/>
+    /// and <see cref="Sources.DisabledSource"/>, which has no resource at all to register; see their
+    /// remarks.
     /// </summary>
     /// <param name="repositoryConfig">
     /// This service's group-level developer-config entry (#291), or <see langword="null"/> for the

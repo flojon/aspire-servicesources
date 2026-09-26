@@ -47,7 +47,25 @@ internal static class OutOfBandSourceAdvice
         "kubernetes" =>
             "it resolves to a 'kubectl port-forward' in front of an already-running service, so the " +
             "configuration would reach kubectl rather than the service",
+        "disabled" =>
+            "a developer has switched it off in servicesources.local.json, so there is nothing local to configure",
         _ => "it runs out of band",
+    };
+
+    /// <summary>
+    /// Where a skipped <c>Configure</c> call should go instead — the clause <see cref="ServiceSourcesWarnings.SkipReason"/>
+    /// builds its second sentence from.
+    /// </summary>
+    /// <remarks>
+    /// <c>"url"</c> and <c>"kubernetes"</c> share one answer because both really do run somewhere —
+    /// "wherever it actually runs" points a reader at a real place. <c>"disabled"</c> runs nowhere at
+    /// all, deliberately, so that phrase would send a reader looking for a process that doesn't
+    /// exist; its own answer says so instead of pointing anywhere.
+    /// </remarks>
+    internal static string ExpectedConfiguredWhere(string source) => source switch
+    {
+        "disabled" => "There is nowhere else to configure it while it stays disabled",
+        _ => "The service is expected to be configured wherever it actually runs",
     };
 
     /// <summary>

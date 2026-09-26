@@ -99,6 +99,18 @@ public static class ServiceEndpointExtensions
 
         if (names.Count == 0)
         {
+            // "disabled" gets its own advice: it deliberately has nothing a scheme/port entry, a
+            // launch profile or an explicit WithHttpEndpoint/WithHttpsEndpoint call could give it —
+            // the only way back is switching the source itself, same as every other Configure call
+            // this source skips (see Reachability.OutOfBandSources and OutOfBandSourceAdvice).
+            if (string.Equals(annotation?.Source, "disabled", StringComparison.Ordinal))
+            {
+                return Raw.Compose(
+                    $"Service '{name}' exposes no endpoint, so there is none to reference.{source} A "
+                    + $"'disabled' service has nothing running for it, deliberately, so there is no endpoint "
+                    + $"to declare one for. {Raw.Literal(OutOfBandSourceAdvice.SwitchSource)}.");
+            }
+
             return Raw.Compose(
                 $"Service '{name}' exposes no endpoint, so there is none to reference.{source} "
                 + $"Give the service an endpoint — a 'scheme'/'port' entry for a 'kubernetes' or "

@@ -38,8 +38,8 @@ public static class ServiceConfigurationExtensions
     /// </remarks>
     /// <exception cref="ServiceSourcesConfigurationException">
     /// The resolved resource is not a <typeparamref name="T"/>, or <typeparamref name="T"/> cannot
-    /// reach the service behind an out-of-band source (<c>"url"</c>, <c>"kubernetes"</c>) — see
-    /// <see cref="IsUnreachable{T}"/> for the one capability that still can.
+    /// reach the service behind an out-of-band source (<c>"url"</c>, <c>"kubernetes"</c>,
+    /// <c>"disabled"</c>) — see <see cref="IsUnreachable{T}"/> for the one capability that still can.
     /// </exception>
     [AspireExportIgnore(Reason =
         "A generic method projects into ATS with its type parameter dropped, and here T *is* " +
@@ -88,9 +88,9 @@ public static class ServiceConfigurationExtensions
     /// start ordering is not — holding the port-forward back until a migration finishes is exactly
     /// what the AppHost asked for, and Aspire honours it.
     /// <para>
-    /// Nothing is reachable for <c>"url"</c>: its resource is deliberately never registered (see
-    /// <see cref="Sources.UrlSource"/>), so there is no process to order and no configuration to
-    /// apply.
+    /// Nothing is reachable for <c>"url"</c> or <c>"disabled"</c>: neither's resource is ever
+    /// registered (see <see cref="Sources.UrlSource"/> and <see cref="Sources.DisabledSource"/>), so
+    /// there is no process to order and no configuration to apply.
     /// </para>
     /// <para>
     /// <see cref="Reachability.OutOfBandSources"/> is the same source list keyed differently — this
