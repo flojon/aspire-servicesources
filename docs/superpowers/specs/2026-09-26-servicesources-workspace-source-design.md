@@ -3,7 +3,9 @@
 **Date:** 2026-09-26
 **Status:** Draft — my own proposal, arrived at through discussion, not yet reviewed by a maintainer.
 No GitHub issue exists for this (checked via `search_issues` against the repo on 2026-09-26); open one
-if this direction is accepted.
+if this direction is accepted. All four open questions from the prior revision have since been
+investigated against the codebase, CHANGELOG and issue tracker — see "Open questions" below; one of
+them (combining `path` with `repository`) turned up a real modeling error in this draft, now fixed.
 **Resolves:** nothing filed yet. Motivated by a direct ask: "make ServiceSources work better in a
 repo with multiple services and an AppHost together."
 **Revised same day:** the first draft proposed a new, fifth source called `"workspace"`, added
@@ -142,6 +144,30 @@ next to without meaning the same thing. Two senses of "local" in one document fa
 its own; introducing a third (`"path"` almost being called "workspace" to dodge the collision, per
 the original draft) is a symptom of the same root problem, not a fix for it.
 
+**F8 — `repository:`/`url:`/`container:`/`kubernetes:` already combine freely on one entry, by
+design.** README "Combining sources on one catalog entry" (`README.md:1561-1608`) shows all four
+blocks on a single `orders:` entry at once — "the catalog just describes *how* each source would
+resolve the service; each developer's `servicesources.local.json` picks which one actually applies to
+them." Nothing about `path:` is special enough to be excluded from that pattern; a catalog offering
+both `repository:` (clone it) and `path:` (it's already here) for the same service, letting different
+developers pick per their own situation, is exactly the shape this feature already exists to support.
+This directly overturns the first draft of this design, which put `WithPath` in the same
+mutually-exclusive `_repositorySource` slot as `WithRepository`/`WithSharedRepository`
+(`Catalog/ServiceDefinitionBuilder.cs:20-23`) — that slot exists because `WithRepository` and
+`WithSharedRepository` are two spellings of *one* block (a service's own repository, or a shared
+one), not because "repository" and "path" compete for one slot the way `url`/`container`/`kubernetes`
+don't. `path:` belongs beside them as its own independent, freely-combinable block instead.
+
+**F9 — this project's own precedent for deprecating something is "mark it, don't schedule its
+removal."** `UseJava()`/`UseJavaScript()` were deprecated in 0.6.0 (#350) via `[Obsolete("...")]`
+plus a CHANGELOG `### Deprecated` entry (`CHANGELOG.md:69-81`,
+`Java/JavaServiceSourcesBuilderExtensions.cs:30-34`) — a clear message naming the replacement, and no
+committed removal version at all; the issue's own resolution is "marked `[Obsolete]` rather than
+renamed" with nothing about when they go away. They still compile, with a warning, on `main` today.
+`local.path` is data (a yaml/json field), not code a compiler can flag, so its equivalent is a
+runtime notice rather than `[Obsolete]` — but the *policy* transfers directly: deprecate with a clear
+message and a CHANGELOG entry, and don't commit to a removal release up front.
+
 ## Proposed shape
 
 ### Rename: `"local"` → `"repository"`
@@ -218,10 +244,15 @@ catalog.AddService("orders")
     .WithProject("src/Orders.Api/Orders.Api.csproj");
 ```
 
-`WithPath` and `WithRepository`/`WithSharedRepository` fill the same "where does this service's code
-come from" slot and are mutually exclusive the same way `WithRepository`/`WithSharedRepository`
-already are with each other (`_repositorySource` guard, `Catalog/ServiceDefinitionBuilder.cs:20-23`)
-— a service naming both is the additive "block already set" error, not a merge or a precedence rule.
+**`WithPath` combines freely with `WithRepository`/`WithSharedRepository`, `WithUrl`,
+`WithContainer` and `WithKubernetes`** — it does not share the `_repositorySource` slot those first
+two use to guard against each other (F8). It gets its own field and its own `RequireUnset` guard, the
+same as `WithUrl`/`WithContainer`/`WithKubernetes` already do: a *second* `WithPath` call on one
+service is the additive "block already set" error, but a `WithPath` next to a `WithRepository` on the
+same service is exactly the "combining sources" pattern the README already documents — one developer
+picks `source: "repository"` to clone it, another picks `source: "path"` to use the copy they already
+have. The single top-level `project:`/`WithProject` field still applies to both: the project's path
+relative to the service's root is the same code either way, only how that root was reached differs.
 
 ### Confinement differs by who wrote the value — same asymmetry that already exists
 
@@ -272,15 +303,17 @@ touches. Keeping both is two spellings for one behavior, which is exactly the co
 proposal exists to remove. So:
 
 - `local.path` **keeps working**, unlike the `"local"`→`"repository"` rename above — it doesn't
-  change meaning under the old spelling, so it's safe to leave functional during a deprecation
-  window, only a warning is owed:
+  change meaning under the old spelling, so it's safe to leave functional indefinitely, only a
+  warning is owed:
 
   > Service 'orders': 'local.path' is deprecated. Set 'source': 'path' and 'path':
   > '../services/orders' instead — same behavior (no clone, no ref), as a first-class source rather
-  > than a hidden mode of 'repository'. 'local.path' will be removed in a future release; see the
-  > CHANGELOG.
-- Removed in a later, documented release once the warning has had a real deprecation window —
-  timing is a maintainer call, not part of this design.
+  > than a hidden mode of 'repository'.
+- Following this project's own precedent (F9): a CHANGELOG `### Deprecated` entry naming the
+  replacement, no committed removal version. `UseJava()`/`UseJavaScript()` were deprecated the same
+  way in 0.6.0 and are still present, still working, on `main` today — nothing here should promise a
+  tighter timeline for `local.path` than that precedent sets. Revisit removal only if it becomes a
+  real maintenance burden, not on a schedule decided now.
 
 ### `defaultSource: path` is close to free
 
@@ -326,21 +359,35 @@ so a reader doesn't wonder why the guidance moved.
   break).
 - **It does not add repository grouping for `path` services.** Not needed — see above.
 
-## Open questions (mine, not yet decided)
+## Open questions — investigated 2026-09-26
 
-1. **Deprecation window for `local.path`.** One release with a warning? Several? Tied to a version
-   milestone (1.0)? Needs a maintainer call, not a default from me.
-2. **Combining `path` with `repository` on one catalog entry** (the existing "every source on one
-   entry" pattern, README "Combining sources on one catalog entry"). Nothing here forbids a catalog
-   offering both — `path:` for someone inside the monorepo, `repository:` for someone consuming the
-   service from outside it if it's ever split out — but it's unusual enough to deserve an explicit
-   yes/no rather than falling out by accident.
-3. **Should a catalog-declared `path:` default to `"."`** (the AppHost's own directory) when the
-   service *is* the AppHost's own project? Leaning no — that's just `AddProject`, and `AddService`
-   shouldn't grow a mode that points it at itself.
-4. **Naming collision with a future central registry (#11).** `"path"` and `"repository"` are both
-   reasonable words for a registry entry to mean something else later. Worth a note in that issue if
-   this ships first, not a blocker here.
+The four questions from the previous draft, resolved or narrowed against the actual codebase, issue
+tracker and CHANGELOG rather than left as guesses:
+
+1. **Deprecation window for `local.path`.** ~~Needs a maintainer call.~~ **Resolved by precedent
+   (F9):** mark it, cite the replacement, don't schedule removal. That's what #350 did for
+   `UseJava()`/`UseJavaScript()`, and they're still on `main`, still working, nine-plus releases
+   later with no removal date ever set. Nothing here should invent a stricter policy than the one
+   already in use.
+2. **Combining `path` with `repository` on one catalog entry.** ~~Deserves an explicit yes/no.~~
+   **Resolved: yes, and it needs no special-case at all.** F8 — the README already documents and
+   encourages exactly this shape for `repository`/`url`/`container`/`kubernetes`; `path` joining that
+   list is the default, not an exception carved out for it. The only actual design error this caught
+   was in the *first* draft, which wrongly modeled `WithPath` as sharing `WithRepository`'s
+   mutual-exclusion slot — fixed above.
+3. **Should a catalog-declared `path:` default to `"."`** when the service is the AppHost's own
+   project? **Investigated, no evidence of need — decided against, not merely "leaning."** Searched
+   the samples directory and this repo's issue titles for any existing self-referencing-AppHost
+   request; found none. That's exactly the shape of speculative feature this codebase's own culture
+   avoids (see, e.g., the central-registry issue's "no format is committed to... the minimum seam
+   needed" reasoning). A service that *is* the AppHost's own project is already `AddProject`; giving
+   `AddService` a mode that points it at itself solves a problem nobody has raised. Left out.
+4. **Naming collision with a future central registry (#11).** **Checked directly: nothing to
+   collide with yet.** Issue #11's own body, unedited since it was filed on 2026-08-13, ends "no
+   further detail captured yet — genuinely open." There is no shape, no vocabulary, and no schema
+   draft for that registry to collide with `"path"`/`"repository"` against. Nothing to resolve now;
+   a one-line pointer on #11 when someone actually designs the registry is the right amount of
+   anticipation, not a naming reservation made here.
 
 ## Staging (sketch, not committed to)
 
@@ -362,8 +409,9 @@ own catalog block.
   source" message and not silent success; every existing `"local"`-source test is updated to
   `"repository"` rather than duplicated.
 - **Catalog loader:** `path:` required for the `"path"` source, confined (absolute/`..`/unusable
-  segment rejected with the existing `CheckoutRelativePath` messages), mutually exclusive with
-  `repository`/`repositoryRef`.
+  segment rejected with the existing `CheckoutRelativePath` messages), and — per F8 — freely
+  combinable with `repository`/`repositoryRef`/`url`/`container`/`kubernetes` on one entry, with a
+  test asserting that combination resolves correctly under each `source` selection.
 - **Resolution:** missing directory at composition time reported by name, distinct from a clone
   failure; `dotnet`/`java`/`javascript` kinds all resolve against a `path` `repoRoot` unchanged from
   their existing checkout-based tests (parametrizing existing kind tests over the source rather than
