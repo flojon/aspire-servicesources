@@ -167,7 +167,7 @@ await builder.addServiceCatalog(async (catalog) => {
 `AddServiceCatalog` must be called before the first `AddService(...)` call anywhere in the
 AppHost — yaml-based `AddService` calls included — since a service is resolved as soon as
 it's added; calling it after throws, naming the ordering problem. Call it near the top of
-the AppHost, next to `UseDeferredCheckout()`. It can be called more than once — a helper
+the AppHost, next to `SetCheckoutTiming()`. It can be called more than once — a helper
 method can contribute its own entries — and calls append rather than replace.
 
 **Which builder method enables which `source`**, since the method names are not the four
@@ -380,21 +380,22 @@ service pointed at your own directory with `path` needs no git at all.
   used as-is — no clone, no checkout, no fetch, ever. A relative `path` is anchored to the
   AppHost directory, and must name a directory that already exists. `ref` cannot be combined
   with `path`.
-- Keep the file to the services you actually add — unless you use
-  [`UseDeferredCheckout()`](#first-run-usedeferredcheckout), which removes the reason to.
-  `AddService()` has to hand back the real resource, so it can't wait until the AppHost has finished
-  composing to find out which services it wants: an entry whose *first* checkout an `AddService()`
-  call would have to block on is cloned on the first call, in parallel with the others, before the
-  AppHost has said which ones it wants. Entries you never add cost network and disk for that first
-  clone. The AppHost logs which ones those were at startup — and warns if one of them failed, since
-  nothing else would ever tell you — so you know what to drop.
+- Keep the file to the services you actually add — unless you opt out with
+  `builder.SetCheckoutTiming(CheckoutTiming.Eager)`, which removes the reason to.
+  `AddService()` has to hand back the real resource, so under `CheckoutTiming.Eager` it can't wait
+  until the AppHost has finished composing to find out which services it wants: an entry whose
+  *first* checkout an `AddService()` call would have to block on is cloned on the first call, in
+  parallel with the others, before the AppHost has said which ones it wants. Entries you never add
+  cost network and disk for that first clone. The AppHost logs which ones those were at startup —
+  and warns if one of them failed, since nothing else would ever tell you — so you know what to
+  drop.
 
   Nothing else is speculated over. A checkout that already exists — every service on every run
   after the first — is resolved only for the services you add, and so is a `path` override. And a
-  service whose first checkout is *deferred* is cloned only when you add it: a deferred
-  registration blocks on nothing, so its clone no longer has to be started ahead of demand to run
-  alongside the others. With `UseDeferredCheckout()` on, a config listing ten `"local"` services in
-  front of an AppHost that adds two downloads two (#76).
+  service whose first checkout is *deferred* — the default since 0.7.0 — is cloned only when you
+  add it: a deferred registration blocks on nothing, so its clone no longer has to be started ahead
+  of demand to run alongside the others. Under the default `CheckoutTiming.Deferred`, a config
+  listing ten `"local"` services in front of an AppHost that adds two downloads two (#76).
 
   Either way, only the services you actually add are reconciled to their configured `ref`: a
   checkout that already exists is never touched on behalf of an entry you don't `AddService()`, so
@@ -456,9 +457,9 @@ services:
   ```
 
   On the run that creates the checkout under
-  [`UseDeferredCheckout()`](#first-run-usedeferredcheckout) those lines are the service's own
-  resource log, visible in the dashboard, and the service shows a **Preparing** state while the step
-  runs — which is what a four-minute import needs, so that it reads as an initialization phase
+  [deferred checkout](#first-run-deferred-checkout) — the default — those lines are the service's
+  own resource log, visible in the dashboard, and the service shows a **Preparing** state while the
+  step runs — which is what a four-minute import needs, so that it reads as an initialization phase
   rather than as a hang. Every other run reports to the AppHost's standard output: under
   `dotnet run` that is your terminal, and under `aspire run` the CLI relays it, live, into its own
   log under `~/.aspire/logs/` rather than printing it. A capped copy — its first and last lines,
@@ -602,8 +603,8 @@ A block with no catalog block behind it stands on its own: you may introduce a s
 declared.
 
 **Two steps can run at once.** Eagerly-resolved services prepare one after another, because
-`AddService()` is serial. Deferred ones don't: `UseDeferredCheckout()` gives each service a task of
-its own precisely so that one slow checkout isn't the start of every other, and serializing the step
+`AddService()` is serial. Deferred ones don't: deferral gives each service a task of its own
+precisely so that one slow checkout isn't the start of every other, and serializing the step
 inside it would put that coupling straight back. So a prepare command has to tolerate running
 alongside a *different* service's command. What those two share is the machine and whatever package
 caches they use — never a working tree, since managed checkouts are per-service clones and the one
@@ -686,22 +687,20 @@ resources itself, to attach a debugger, builds them the way it builds anything e
 project reached by a path isn't in your solution, so it may not be built at all
 ([microsoft/aspire#2154](https://github.com/microsoft/aspire/issues/2154), open upstream).
 
-#### First run: `UseDeferredCheckout()`
+#### First run: deferred checkout
 
-On a cold clone, `AddService()` blocks until the checkout it needs is on disk. Composition
-hasn't finished, so the AppHost hasn't started, so there is no dashboard to look at while
-several repositories clone — and a checkout that fails throws out of composition and takes the
-whole AppHost down with it, including the services that were fine.
+On a cold clone, eager resolution would block `AddService()` until the checkout it needs is on
+disk. Composition hasn't finished at that point, so the AppHost hasn't started, so there is no
+dashboard to look at while several repositories clone — and a checkout that fails throws out of
+composition and takes the whole AppHost down with it, including the services that were fine.
 
-`builder.UseDeferredCheckout()` moves that wait past startup for the case where it hurts: a
-`"local"` service whose *managed* checkout doesn't exist yet. The resource is registered against
-the path its checkout will have, held back with Aspire's own explicit-start behaviour, cloned
-while the AppHost runs, and started when its checkout lands:
+Deferred checkout — the default since 0.7.0 — moves that wait past startup for the case where it
+hurts: a `"local"` service whose *managed* checkout doesn't exist yet. The resource is registered
+against the path its checkout will have, held back with Aspire's own explicit-start behaviour,
+cloned while the AppHost runs, and started when its checkout lands. No call is needed:
 
 ```csharp
 var builder = DistributedApplication.CreateBuilder(args);
-
-builder.UseDeferredCheckout();
 
 var orders = builder.AddService("orders").WithHttpEndpoint();
 ```
@@ -797,15 +796,17 @@ resource the app waits on — only if they can see a `package.json` in the app d
 warm run builds depends on what the repository holds, and a checkout that hasn't landed can't be
 looked at. They are deferred only where the answer is already known: `runScript` is set (which
 requires a `package.json` anyway), or `packageManager` names one. Otherwise that one service
-resolves eagerly, exactly as it does without `UseDeferredCheckout()`. Every other `appType` runs a
+resolves eagerly, exactly as it does under `CheckoutTiming.Eager`. Every other `appType` runs a
 `package.json` script by definition and is deferred unconditionally.
 
-Off by default: a service that used to be running by the time `Build()` returned is started
-after it instead, which is visible to anything in your AppHost that assumed otherwise. Call it
-before your first `AddService()`, which is where the decision is made — the same ordering
-`AddServiceCatalog()` requires. A call made after any service has already resolved throws
+Deferred by default since 0.7.0: a service that used to be running by the time `Build()` returned
+is now started after it instead, which is visible to anything in your AppHost that assumed
+otherwise. An AppHost that needs every service running by the time `Build()` returns opts out
+permanently with `builder.SetCheckoutTiming(CheckoutTiming.Eager)`, called before your first
+`AddService()`, which is where the decision is made — the same ordering `AddServiceCatalog()`
+requires. A call made after any service has already resolved throws
 `ServiceSourcesConfigurationException` naming the service, rather than silently having no effect
-on it.
+on it. `UseDeferredCheckout()` is obsolete — it is a no-op now that deferred is the default.
 
 #### Managed checkouts don't inherit your AppHost repository's build settings
 
@@ -1131,8 +1132,8 @@ unsupported `scheme`, no run mode or more than one, a `workingDirectory`, `wrapp
 that isn't in the checkout, a wrapper script that isn't there — is reported by the
 `AddService("catalog")` call itself, before the service has added anything to the app model. The
 last two are read against the checkout, so under
-[`UseDeferredCheckout()`](#first-run-usedeferredcheckout), where there isn't one yet, they are
-reported after the clone lands as this service's resource state instead — the same two checks
+[deferred checkout](#first-run-deferred-checkout) — the default — where there isn't one yet, they
+are reported after the clone lands as this service's resource state instead — the same two checks
 saying the same two things.
 
 Add `scheme: https` if the app serves TLS on `port`:
@@ -1249,7 +1250,7 @@ your own is left alone unless it looks like that attempt: a private helper, one 
 options type, and one like `Validate(string message)` that carries no options block at all all
 register exactly as they did before.
 
-**Supporting [`UseDeferredCheckout()`](#first-run-usedeferredcheckout).** Two more members, both
+**Supporting [deferred checkout](#first-run-deferred-checkout).** Two more members, both
 optional and both defaulting to "no", decide whether a service of your kind can start before its
 checkout lands. Leave them alone and your kind keeps working exactly as it does now, always on the
 eager path:
@@ -1289,7 +1290,7 @@ adds to the app model, not just the one returned as `Service`.
 > neither for a service it defers — there is no checkout for `Validate` to judge the service
 > against, so `ResolveDeferred` runs in their place. A kind that can answer `true` from
 > `SupportsDeferredCheckout` and rejects a bad block only in `Validate` has arranged for that block
-> never to be checked at all under `UseDeferredCheckout()`. Parse it here as well and throw
+> never to be checked at all under deferred checkout. Parse it here as well and throw
 > `ServiceSourcesConfigurationException`. Nothing warns you: implementing both `Validate` and
 > `ResolveDeferred` is the ordinary, correct arrangement — the built-in `java` kind does — so
 > there is no signal to refuse the way a mismatched `Validate` signature is refused.
@@ -1640,7 +1641,7 @@ even this file — see the row above the base:
 > **The `ServiceSources:*` keys reach the AppHost's own `IConfiguration` on its first ServiceSources
 > call, not before.** `servicesources.local.json` is a file of ours, read from the AppHost directory
 > and re-keyed into the chain by whichever ServiceSources method the AppHost calls first — a call
-> like `UseDeferredCheckout()` or `AddLocalKind()`, or the first `AddService()`. A read placed
+> like `SetCheckoutTiming()` or `AddLocalKind()`, or the first `AddService()`. A read placed
 > *above* all of them sees the chain without that layer, so a selection written only in the file
 > comes back `null`, silently, since a missing key is not an error:
 >
@@ -1648,7 +1649,7 @@ even this file — see the row above the base:
 > // null — nothing of ours has been called yet, so the file is not in the chain.
 > var source = builder.Configuration["ServiceSources:Services:orders:source"];
 >
-> builder.UseDeferredCheckout();
+> builder.SetCheckoutTiming(CheckoutTiming.Eager);
 >
 > // "local" — the file joined the chain on the line above.
 > source = builder.Configuration["ServiceSources:Services:orders:source"];
@@ -2331,10 +2332,7 @@ It also carries a `catalog` service showing `kind: java` — a `"local"` checkou
 wrapper; `java` being a built-in kind, no `Program.cs` registration is needed. `AddService("catalog")`
 is commented out and the service is left out of `servicesources.local.json.example`, since unlike
 the three above it needs a JDK. To run it, do both: uncomment the call and add
-`"catalog": { "source": "local" }` to your `servicesources.local.json`. Leaving it out of that file
-by default is what keeps the sample from cloning PetClinic on its first run: the sample does not
-call `UseDeferredCheckout()`, so the first `AddService` clones every `"local"` entry there that has
-no checkout yet, whether or not you add it.
+`"catalog": { "source": "local" }` to your `servicesources.local.json`.
 
 ```bash
 cd samples/DemoAppHost

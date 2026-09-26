@@ -216,7 +216,7 @@ public class DeferredKindCheckoutTests
     {
         var dir = CreateAppHostDirectory("frontend");
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var kind = new StandInKind();
         builder.AddLocalKind(KindName, kind);
@@ -244,7 +244,7 @@ public class DeferredKindCheckoutTests
     {
         var dir = CreateAppHostDirectory("frontend");
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
         builder.AddLocalKind(KindName, new StandInKind());
 
         var git = new FakeGitClient();
@@ -266,7 +266,7 @@ public class DeferredKindCheckoutTests
     {
         var dir = CreateAppHostDirectory("frontend");
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var kind = new StandInKind(supportsDeferral: false);
         builder.AddLocalKind(KindName, kind);
@@ -293,7 +293,7 @@ public class DeferredKindCheckoutTests
     {
         var dir = CreateAppHostDirectory("frontend", "admin");
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var kind = new StandInKind();
         builder.AddLocalKind(KindName, kind);
@@ -319,7 +319,7 @@ public class DeferredKindCheckoutTests
     {
         var dir = CreateAppHostDirectory("frontend", "admin");
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var kind = new StandInKind(supportsDeferral: false);
         builder.AddLocalKind(KindName, kind);
@@ -334,7 +334,7 @@ public class DeferredKindCheckoutTests
     }
 
     [Fact]
-    public void WithoutOptIn_ColdCheckout_StillResolvesEagerly()
+    public void WithoutAnyCall_ColdCheckout_DefersByDefault()
     {
         var dir = CreateAppHostDirectory("frontend");
         var builder = TestHelpers.CreateBuilder(dir);
@@ -345,7 +345,24 @@ public class DeferredKindCheckoutTests
         var service = new LocalProjectSource(new FakeGitClient())
             .Resolve(builder, "frontend", Definition("frontend"), DevConfig());
 
-        // UseDeferredCheckout() stays the only way in, for every kind.
+        // Deferred by default since 0.7.0 (#216) — no call needed, for every kind that supports it.
+        Assert.False(kind.ResolvedEagerly);
+        Assert.True(IsHeldBack(service.Resource));
+    }
+
+    [Fact]
+    public void EagerOptOut_ColdCheckout_ResolvesEagerly()
+    {
+        var dir = CreateAppHostDirectory("frontend");
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
+
+        var kind = new StandInKind();
+        builder.AddLocalKind(KindName, kind);
+
+        var service = new LocalProjectSource(new FakeGitClient())
+            .Resolve(builder, "frontend", Definition("frontend"), DevConfig());
+
         Assert.True(kind.ResolvedEagerly);
         Assert.False(IsHeldBack(service.Resource));
     }
@@ -358,7 +375,7 @@ public class DeferredKindCheckoutTests
         Directory.CreateDirectory(Path.Combine(ExpectedRepoRoot(dir, "frontend"), ".git"));
 
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var kind = new StandInKind();
         builder.AddLocalKind(KindName, kind);
@@ -380,7 +397,7 @@ public class DeferredKindCheckoutTests
         Directory.CreateDirectory(Path.Combine(checkout, "app"));
 
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var kind = new StandInKind();
         builder.AddLocalKind(KindName, kind);
@@ -398,7 +415,7 @@ public class DeferredKindCheckoutTests
     {
         var dir = CreateAppHostDirectory("frontend");
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
         builder.AddLocalKind(KindName, new StandInKind(withHelper: true));
 
         var git = new FakeGitClient();
@@ -421,7 +438,7 @@ public class DeferredKindCheckoutTests
     {
         var dir = CreateAppHostDirectory("frontend");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var kind = new StandInKind();
         builder.AddLocalKind(KindName, kind);
@@ -452,7 +469,7 @@ public class DeferredKindCheckoutTests
     {
         var dir = CreateAppHostDirectory("frontend");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
         builder.AddLocalKind(KindName, new StandInKind(withHelper: true));
 
         var git = new FakeGitClient();
@@ -479,7 +496,7 @@ public class DeferredKindCheckoutTests
     {
         var dir = CreateAppHostDirectory("frontend");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var kind = new StandInKind();
         builder.AddLocalKind(KindName, kind);
@@ -506,7 +523,7 @@ public class DeferredKindCheckoutTests
     {
         var dir = CreateAppHostDirectory("frontend");
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
         builder.AddLocalKind(KindName, new ThrowingKind());
 
         var exception = Assert.Throws<ServiceSourcesConfigurationException>(() =>
@@ -526,7 +543,7 @@ public class DeferredKindCheckoutTests
     {
         var dir = CreateAppHostDirectory("frontend");
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var kind = new StandInKind(supportsDeferral: false);
         builder.AddLocalKind(KindName, kind);
@@ -563,7 +580,7 @@ public class DeferredKindCheckoutTests
     {
         var dir = CreateAppHostDirectory("frontend");
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var kind = new StandInKind();
         builder.AddLocalKind(KindName, kind);
@@ -585,7 +602,7 @@ public class DeferredKindCheckoutTests
     {
         var dir = CreateAppHostDirectory("frontend");
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var kind = new StandInKind(deferralReturnsNull: true);
         builder.AddLocalKind(KindName, kind);
@@ -613,7 +630,7 @@ public class DeferredKindCheckoutTests
     {
         var dir = CreateAppHostDirectory("frontend");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
         builder.AddLocalKind(KindName, new StandInKind(withParameter: true));
 
         var git = new FakeGitClient();
@@ -643,7 +660,7 @@ public class DeferredKindCheckoutTests
     {
         var dir = CreateAppHostDirectory("frontend");
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
         builder.AddLocalKind(KindName, new StandInKind(deferralReturnsNull: true, declineAfterAdding: true));
 
         var exception = Assert.Throws<ServiceSourcesConfigurationException>(() =>
@@ -662,7 +679,7 @@ public class DeferredKindCheckoutTests
     {
         var dir = CreateAppHostDirectory("frontend");
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
         builder.AddLocalKind(KindName, new StandInKind(withHelper: true, helperWaitsForService: true));
 
         var exception = Assert.Throws<ServiceSourcesConfigurationException>(() =>
@@ -681,7 +698,7 @@ public class DeferredKindCheckoutTests
     {
         var dir = CreateAppHostDirectory("frontend");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
         builder.AddLocalKind(KindName, new StandInKind(withHelper: true));
 
         var git = new FakeGitClient();

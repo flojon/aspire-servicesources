@@ -44,8 +44,8 @@ public interface ILocalResourceKind
     /// <see langword="true"/> has to parse and reject its block from <see cref="ResolveDeferred"/> as
     /// well, and hand the working-tree checks back as
     /// <see cref="DeferredLocalResource.ValidateCheckout"/>, which core runs once the clone has
-    /// landed. Validating only here leaves that service unvalidated under
-    /// <c>UseDeferredCheckout()</c>, silently: nothing reports the gap, because a kind that
+    /// landed. Validating only here leaves that service unvalidated under deferred checkout —
+    /// the default since 0.7.0 — silently: nothing reports the gap, because a kind that
     /// implements both members is the ordinary case rather than a mistake.
     /// </para>
     /// <para>
@@ -98,7 +98,8 @@ public interface ILocalResourceKind
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Called only when the AppHost opted in with <c>UseDeferredCheckout()</c>, this service's
+    /// Called only when this AppHost has not opted out with
+    /// <c>SetCheckoutTiming(CheckoutTiming.Eager)</c>, this service's
     /// managed checkout is genuinely cold, and <see cref="SupportsDeferredCheckout"/> answered
     /// <see langword="true"/> for this same <paramref name="rawConfig"/>. Returning
     /// <see langword="null"/> anyway is still honoured, but it is no longer free: the checkout

@@ -16,6 +16,25 @@ never existed. Check the tag of the last release before adding one.
 
 ## [Unreleased]
 
+### Breaking
+
+- **Deferred checkout is now the default for a cold `"local"` service; `UseDeferredCheckout()` is
+  obsolete** ([#216]). A service whose managed clone does not exist yet used to block
+  `AddService()` until the checkout landed; it now registers stopped and starts once the clone
+  finishes, so the dashboard comes up immediately and one failed clone costs one service rather
+  than the whole AppHost. This is the behaviour `UseDeferredCheckout()` used to opt into — nothing
+  changes for a warm checkout, a `path` override, or `aspire publish`.
+
+  `UseDeferredCheckout()` is now a no-op — deferred is what it always asked for, and that is
+  already the default — so it is `[Obsolete]`; delete the call. The new
+  `builder.SetCheckoutTiming(CheckoutTiming.Eager)` is the opt-out for an AppHost that needs every
+  service running by the time `Build()` returns, kept permanently rather than as a migration
+  window, since the package cannot detect an AppHost relying on the old ordering. A deferred
+  `dotnet` service should still declare its own endpoints — `Configure<IResourceWithEndpoints>` in
+  C#, or `withServiceHttpsEndpoint()`/`withServiceHttpEndpoint()` in a guest language ([#208]) —
+  since a deferred checkout has no launch profile for Aspire to read endpoints from while
+  composing.
+
 ## [0.6.0] - 2026-09-24
 
 ### Breaking
@@ -1750,6 +1769,7 @@ Targets `net10.0`.
 [#209]: https://github.com/flojon/aspire-servicesources/issues/209
 [#214]: https://github.com/flojon/aspire-servicesources/issues/214
 [#215]: https://github.com/flojon/aspire-servicesources/issues/215
+[#216]: https://github.com/flojon/aspire-servicesources/issues/216
 [#217]: https://github.com/flojon/aspire-servicesources/issues/217
 [#220]: https://github.com/flojon/aspire-servicesources/issues/220
 [#222]: https://github.com/flojon/aspire-servicesources/issues/222

@@ -303,7 +303,7 @@ public class PrepareDeferredTests
     {
         var dir = CreateAppHostDirectory("routing");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var journal = new Journal();
         builder.AddLocalKind(KindName, new StandInKind(journal, "app.jar"));
@@ -338,7 +338,7 @@ public class PrepareDeferredTests
     {
         var dir = CreateAppHostDirectory("routing");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var journal = new Journal();
         builder.AddLocalKind(KindName, new StandInKind(journal, "app.jar"));
@@ -365,7 +365,7 @@ public class PrepareDeferredTests
     {
         var dir = CreateAppHostDirectory("frontend");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var journal = new Journal();
         builder.AddLocalKind(KindName, new StandInKind(journal, "package.json", withHelper: true));
@@ -404,7 +404,7 @@ public class PrepareDeferredTests
     {
         var dir = CreateAppHostDirectory("frontend");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var journal = new Journal();
         builder.AddLocalKind(KindName, new StandInKind(journal, "package.json", withHelper: true));
@@ -440,7 +440,7 @@ public class PrepareDeferredTests
     {
         var dir = CreateAppHostDirectory("routing");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var journal = new Journal();
         builder.AddLocalKind(KindName, new StandInKind(journal, "app.jar"));
@@ -483,7 +483,7 @@ public class PrepareDeferredTests
     {
         var dir = CreateAppHostDirectory("routing");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var notices = TestHelpers.StreamServiceSourcesWarnings(builder);
 
@@ -519,7 +519,7 @@ public class PrepareDeferredTests
     {
         var dir = CreateAppHostDirectory("routing", "tiles");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var journal = new Journal();
         builder.AddLocalKind(KindName, new StandInKind(journal, "app.jar"));
@@ -582,7 +582,7 @@ public class PrepareDeferredTests
             """{ "services": { "orders": { "source": "local" } } }""");
 
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var journal = new Journal();
         var runner = new FakeRunner(journal, produces: "Generated.csproj");
@@ -638,7 +638,7 @@ public class PrepareDeferredTests
             """{ "services": { "orders": { "source": "local" } } }""");
 
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var orders = new LocalProjectSource(new FakeGitClient(), new FakeRunner(new Journal())).Resolve(
             builder,
@@ -687,7 +687,7 @@ public class PrepareDeferredTests
     {
         var dir = CreateAppHostDirectory("routing");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var journal = new Journal();
         builder.AddLocalKind(KindName, new StandInKind(journal, "app.jar"));
@@ -732,7 +732,7 @@ public class PrepareDeferredTests
         File.WriteAllText(Path.Combine(repoRoot, "app.jar"), "already built");
 
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var journal = new Journal();
         builder.AddLocalKind(KindName, new StandInKind(journal, "app.jar"));

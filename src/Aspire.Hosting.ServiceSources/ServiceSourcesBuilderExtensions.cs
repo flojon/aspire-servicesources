@@ -132,34 +132,35 @@ public static class ServiceSourcesBuilderExtensions
     }
 
     /// <summary>
-    /// Opts this AppHost into deferring a <c>"local"</c> service's <em>first</em> checkout past
-    /// startup: a service whose package-managed clone does not exist yet is registered stopped,
-    /// cloned while the AppHost runs, and started when its checkout lands — so the dashboard comes
-    /// up immediately, checkout progress and failure show as resource state, and one failed clone
-    /// costs one service rather than the whole AppHost.
+    /// Sets when a <c>"local"</c> service's <em>first</em> checkout happens, relative to
+    /// <c>Build()</c>. Deferred is the default: a service whose package-managed clone does not exist
+    /// yet is registered stopped, cloned while the AppHost runs, and started when its checkout lands
+    /// — so the dashboard comes up immediately, checkout progress and failure show as resource
+    /// state, and one failed clone costs one service rather than the whole AppHost.
     /// </summary>
     /// <remarks>
     /// <para>
     /// Must be called before the first <see cref="AddService"/>, which is where the decision is
     /// made. A service whose checkout already exists — every service on every run after the first —
-    /// resolves eagerly, with full launch-profile fidelity, exactly as it does without this call.
-    /// Services with a <c>path</c> override are never deferred either; that directory is the
-    /// developer's own and there is nothing to clone. Neither is anything outside run mode:
-    /// <c>aspire publish</c> and manifest generation clone first as they always have, because a
-    /// manifest written from a repository that is not on disk would describe a project without its
-    /// endpoints or its profile environment.
+    /// resolves eagerly regardless of this setting, with full launch-profile fidelity, exactly as a
+    /// warm run always has. Services with a <c>path</c> override are never deferred either; that
+    /// directory is the developer's own and there is nothing to clone. Neither is anything outside
+    /// run mode: <c>aspire publish</c> and manifest generation clone first as they always have,
+    /// because a manifest written from a repository that is not on disk would describe a project
+    /// without its endpoints or its profile environment.
     /// </para>
     /// <para>
-    /// The clones stay parallel and get narrower. A deferred registration blocks on nothing, so its
-    /// clone starts at its own <see cref="AddService"/> call and still overlaps the ones around it —
-    /// but it no longer has to be started ahead of demand to do that, which is what let the
-    /// speculative prefetch stop cloning services this AppHost never adds (#76). Without this call
-    /// the clones must start before the AppHost has said what it wants, so every <c>"local"</c>
-    /// entry with no checkout yet is cloned.
+    /// The clones stay parallel and get narrower under <see cref="CheckoutTiming.Deferred"/>. A
+    /// deferred registration blocks on nothing, so its clone starts at its own
+    /// <see cref="AddService"/> call and still overlaps the ones around it — but it no longer has to
+    /// be started ahead of demand to do that, which is what let the speculative prefetch stop
+    /// cloning services this AppHost never adds (#76). Under <see cref="CheckoutTiming.Eager"/> the
+    /// clones must start before the AppHost has said what it wants, so every <c>"local"</c> entry
+    /// with no checkout yet is cloned.
     /// </para>
     /// <para>
     /// Applies to the <c>"local"</c> kinds that own a managed checkout — <c>dotnet</c>, <c>java</c>
-    /// and <c>javascript</c>. Those two kinds pay none of the cost below: neither has a launch
+    /// and <c>javascript</c>. The latter two pay none of the cost below: neither has a launch
     /// profile, and both take their endpoints from the committed catalog, so a deferred one is
     /// identical to a warm one and only their post-clone checks move. <c>url</c>, <c>kubernetes</c>
     /// and <c>container</c> clone nothing, so there is nothing to defer.
@@ -172,11 +173,10 @@ public static class ServiceSourcesBuilderExtensions
     /// <para>
     /// A deferred <c>dotnet</c> service should declare its own endpoints in the AppHost, because a
     /// project's endpoints come from its launch profile and Aspire reads that while composing —
-    /// before the repository is on disk:
+    /// before the repository is on disk. Since 0.7.0 this needs no call at all — deferred is the
+    /// default — but an AppHost migrating from an explicit opt-in loses nothing by keeping the shape:
     /// </para>
     /// <code lang="csharp">
-    /// builder.UseDeferredCheckout();
-    ///
     /// var orders = builder.AddService("orders").WithHttpEndpoint();
     /// </code>
     /// <para>
@@ -189,26 +189,43 @@ public static class ServiceSourcesBuilderExtensions
     /// never reported. See <c>DeferredCheckout.LaunchProfileEndpointWarning</c>.
     /// </para>
     /// <para>
-    /// Off by default: a service that used to be running by the time <c>Build()</c> returned is
-    /// started after it instead, which is visible to anything in the AppHost that assumed otherwise.
+    /// Deferred by default since 0.7.0 (#216): a service that used to be running by the time
+    /// <c>Build()</c> returned is now started after it instead, which is visible to anything in the
+    /// AppHost that assumed otherwise. An AppHost that needs every service running by the time
+    /// <c>Build()</c> returns calls <c>builder.SetCheckoutTiming(CheckoutTiming.Eager)</c> to keep
+    /// the pre-0.7.0 behaviour, permanently rather than as a migration window — there is no way for
+    /// the package to detect that an AppHost relies on the old ordering, so the opt-out is not
+    /// scheduled for removal.
     /// </para>
     /// </remarks>
     /// <exception cref="ServiceSourcesConfigurationException">
     /// A service has already resolved through <see cref="AddService"/> on this builder — a late call
     /// can no longer change what already happened, so it is refused instead of silently leaving
-    /// those already-added services un-deferred.
+    /// those already-added services on the wrong timing.
     /// </exception>
     [AspireExportIgnore]
-    public static IDistributedApplicationBuilder UseDeferredCheckout(this IDistributedApplicationBuilder builder)
+    public static IDistributedApplicationBuilder SetCheckoutTiming(
+        this IDistributedApplicationBuilder builder, CheckoutTiming timing)
     {
         // The call an AppHost using deferred checkouts makes first of all, and the one whose own
         // guidance — declare a deferred service's endpoints yourself — is most likely to be followed
         // by a line that reads our configuration back.
         DeveloperConfigFileSource.EnsureRegistered(builder);
 
-        DeferredCheckout.For(builder).Enable();
+        DeferredCheckout.For(builder).SetTiming(timing);
         return builder;
     }
+
+    /// <summary>
+    /// No longer needed: deferred is the default since 0.7.0 (#216), so this call is a no-op.
+    /// </summary>
+    [Obsolete(
+        "UseDeferredCheckout() is a no-op: deferred is the default since 0.7.0. Delete the call, or " +
+        "call SetCheckoutTiming(CheckoutTiming.Eager) if this AppHost needs every service running by " +
+        "the time Build() returns.")]
+    [AspireExportIgnore]
+    public static IDistributedApplicationBuilder UseDeferredCheckout(this IDistributedApplicationBuilder builder) =>
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
     /// <summary>
     /// Registers <paramref name="handler"/> as the resolver for local-sourced services whose

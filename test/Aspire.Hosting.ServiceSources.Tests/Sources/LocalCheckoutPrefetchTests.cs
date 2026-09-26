@@ -248,6 +248,7 @@ public class LocalCheckoutPrefetchTests
     {
         var dir = CreateAppHostDirectory("orders", "billing");
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         // Two participants: neither Clone call can return until both have started.
         var git = new FakeGitClient { StartBarrier = new Barrier(2) };
         var source = new LocalProjectSource(git);
@@ -275,6 +276,7 @@ public class LocalCheckoutPrefetchTests
             """{ "services": { "orders": { "source": "local" }, "billing": { "source": "Local" } } }""");
 
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient { StartBarrier = new Barrier(2) };
         var source = new LocalProjectSource(git);
 
@@ -297,6 +299,7 @@ public class LocalCheckoutPrefetchTests
         const string Repository = "https://example.com/monorepo.git";
         var dir = CreateMonorepoAppHostDirectory(Repository, "orders", "billing");
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         // Barrier(2): neither clone may return until both have started, so this cannot pass unless
         // the two downloads really do overlap.
         var git = new FakeGitClient { StartBarrier = new Barrier(2) };
@@ -326,6 +329,7 @@ public class LocalCheckoutPrefetchTests
         const string Repository = "https://example.com/monorepo.git";
         var dir = CreateGroupedAppHostDirectory(Repository, "monorepo", "orders", "billing");
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient();
         var source = new LocalProjectSource(git);
         var repository = new RepositoryDefinition { Url = Repository, CheckoutName = "monorepo" };
@@ -342,6 +346,7 @@ public class LocalCheckoutPrefetchTests
     {
         var dir = CreateAppHostDirectory("orders", "billing");
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient { StartBarrier = new Barrier(2) };
         var source = new LocalProjectSource(git);
 
@@ -357,6 +362,7 @@ public class LocalCheckoutPrefetchTests
     {
         var dir = CreateAppHostDirectory("orders");
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var source = new LocalProjectSource(new FakeGitClient());
 
         var service = source.Resolve(builder, "orders", Definition("orders"), DevConfig());
@@ -372,6 +378,7 @@ public class LocalCheckoutPrefetchTests
     {
         var dir = CreateAppHostDirectory("orders", "billing");
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient();
         git.FailFor("https://example.com/billing.git", new InvalidOperationException("no such repo"));
         var source = new LocalProjectSource(git);
@@ -390,6 +397,7 @@ public class LocalCheckoutPrefetchTests
     {
         var dir = CreateAppHostDirectory("orders", "billing");
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient();
         // "billing" is prefetched speculatively and never finishes. The AppHost only asks for
         // "orders", so it must not wait on it — the prefetch is parallel *and* deferred.
@@ -417,6 +425,7 @@ public class LocalCheckoutPrefetchTests
     {
         var dir = CreateAppHostDirectory("billing");
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient();
         git.FailFor("https://example.com/billing.git", new InvalidOperationException("no such repo"));
         var source = new LocalProjectSource(git);
@@ -439,6 +448,7 @@ public class LocalCheckoutPrefetchTests
             Path.Combine(dir, "servicesources.local.json"),
             """{ "services": { "orders": { "source": "local" }, "ghost": { "source": "local" } } }""");
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient();
 
         var service = new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
@@ -475,6 +485,7 @@ public class LocalCheckoutPrefetchTests
             """{ "services": { "orders": { "source": "local" }, "../escapee": { "source": "local" } } }""");
 
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient();
 
         var service = new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
@@ -519,6 +530,7 @@ public class LocalCheckoutPrefetchTests
             """{ "services": { "orders": { "source": "local" }, "..\\escapee": { "source": "local" } } }""");
 
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient();
 
         new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
@@ -535,6 +547,7 @@ public class LocalCheckoutPrefetchTests
     {
         var dir = CreateAppHostDirectory("frontend");
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var handler = new FakeLocalResourceKind();
         builder.AddLocalKind("javascript", handler);
         var definition = new ServiceMetadata
@@ -557,6 +570,7 @@ public class LocalCheckoutPrefetchTests
         // own built-in fallback now — so this uses a third-party kind name nobody registered.
         var dir = CreateAppHostDirectory("frontend");
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var definition = new ServiceMetadata
         {
             Repository = "https://example.com/frontend.git", Kind = "rust",
@@ -581,6 +595,7 @@ public class LocalCheckoutPrefetchTests
     {
         var dir = CreateAppHostDirectory("orders", "billing");
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient { StartBarrier = new Barrier(2) };
 
         new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
@@ -615,6 +630,7 @@ public class LocalCheckoutPrefetchTests
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"),
             """{ "services": { "orders": { "source": "local" } } }""");
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient();
 
         new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
@@ -640,6 +656,7 @@ public class LocalCheckoutPrefetchTests
             """);
         // No servicesources.local.json at all.
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient();
 
         var service = new LocalProjectSource(git).Resolve(builder, "billing", Definition("billing"), DevConfig());
@@ -658,6 +675,7 @@ public class LocalCheckoutPrefetchTests
         var ordersRoot = PlantExistingCheckout(dir, "orders");
         PlantExistingCheckout(dir, "billing");
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient();
 
         new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders", defaultRef: "main"), DevConfig());
@@ -677,6 +695,7 @@ public class LocalCheckoutPrefetchTests
     {
         var dir = CreateAppHostDirectory("orders", "billing");
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient();
         git.FailFor("https://example.com/billing.git", new InvalidOperationException("no such repo"));
 
@@ -709,6 +728,7 @@ public class LocalCheckoutPrefetchTests
         const string Repository = "https://example.com/monorepo.git";
         var dir = CreateGroupedAppHostDirectory(Repository, "monorepo", "cart", "billing");
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient();
         git.FailFor(Repository, new InvalidOperationException("no such repo"));
 
@@ -735,6 +755,7 @@ public class LocalCheckoutPrefetchTests
     {
         var dir = CreateAppHostDirectory("orders", "billing");
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient { StartBarrier = new Barrier(2) };
         var source = new LocalProjectSource(git);
 
@@ -775,6 +796,7 @@ public class LocalCheckoutPrefetchTests
             """);
 
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient { StartBarrier = new Barrier(2) };
 
         new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
@@ -795,7 +817,7 @@ public class LocalCheckoutPrefetchTests
     {
         var dir = CreateAppHostDirectory("orders", "billing");
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
         var git = new FakeGitClient();
 
         new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
@@ -823,7 +845,7 @@ public class LocalCheckoutPrefetchTests
     {
         var dir = CreateAppHostDirectory("orders", "billing");
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
         // Barrier(2): neither clone may return until both have started. Had the per-service starts
         // serialised them, the first would wedge here and the second would never be reached.
         var git = new FakeGitClient { StartBarrier = new Barrier(2) };
@@ -839,7 +861,7 @@ public class LocalCheckoutPrefetchTests
 
     /// <summary>
     /// The filter puts the same question to <c>DeferredCheckout</c> that the registration will,
-    /// rather than merely checking that <c>UseDeferredCheckout()</c> was called. Publish mode clones
+    /// rather than merely checking the builder's checkout timing. Publish mode clones
     /// first as it always has — a manifest written from a repository that is not on disk would
     /// describe a project without its endpoints — so there the speculation is still the only thing
     /// keeping the clones parallel.
@@ -849,7 +871,7 @@ public class LocalCheckoutPrefetchTests
     {
         var dir = CreateAppHostDirectory("orders", "billing");
         var builder = TestHelpers.CreatePublishingBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
         var git = new FakeGitClient { StartBarrier = new Barrier(2) };
 
         new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
@@ -869,6 +891,7 @@ public class LocalCheckoutPrefetchTests
         var dir = CreateAppHostDirectory("orders", "billing");
         PlantExistingCheckout(dir, "billing");
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient();
 
         new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
@@ -895,6 +918,7 @@ public class LocalCheckoutPrefetchTests
                 "billing": { "source": "local", "local": { "path": "moved-away" } } } }
             """);
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient();
 
         new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
@@ -931,6 +955,7 @@ public class LocalCheckoutPrefetchTests
     {
         var dir = CreateAppHostDirectory("orders");
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient();
 
         new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
@@ -947,6 +972,7 @@ public class LocalCheckoutPrefetchTests
         PlantExistingCheckout(dir, "orders");
 
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient();
 
         new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
@@ -962,6 +988,7 @@ public class LocalCheckoutPrefetchTests
     {
         var dir = CreateAppHostDirectory("orders");
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient();
         git.FailFor("https://example.com/orders.git", new InvalidOperationException("no such repo"));
 
@@ -991,6 +1018,7 @@ public class LocalCheckoutPrefetchTests
             """);
 
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient();
 
         new LocalProjectSource(git).Resolve(builder, "billing", Definition("billing"), DevConfig());
@@ -1024,6 +1052,7 @@ public class LocalCheckoutPrefetchTests
         PlantExistingCheckout(dir, "billing");
 
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient();
         var reconciling = git.BlockReconciliation();
 
@@ -1060,6 +1089,7 @@ public class LocalCheckoutPrefetchTests
     {
         var dir = CreateAppHostDirectory("orders");
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient();
 
         // Resolved in full first: the checkout is over, and so is anything that was watching it.
@@ -1076,6 +1106,7 @@ public class LocalCheckoutPrefetchTests
     {
         var dir = CreateAppHostDirectory("orders", "billing");
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
 
         var git = new FakeGitClient();
         git.ReportProgress("https://example.com/orders.git", "Receiving objects:  10% (1/10)");
@@ -1121,6 +1152,7 @@ public class LocalCheckoutPrefetchTests
             """{ "services": { "orders": { "source": "local" }, "billing": { "source": "local" } } }""");
 
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient();
 
         new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
@@ -1155,6 +1187,7 @@ public class LocalCheckoutPrefetchTests
     {
         var dir = CreateAppHostDirectory("orders", "bill'ing");
         var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient();
         git.FailFor("https://example.com/bill'ing.git", new InvalidOperationException("no such repo"));
 

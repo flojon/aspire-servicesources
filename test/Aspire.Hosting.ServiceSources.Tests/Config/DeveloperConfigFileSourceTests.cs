@@ -64,16 +64,16 @@ public class DeveloperConfigFileSourceTests
     }
 
     /// <summary>
-    /// The opt-in an AppHost using deferred checkouts calls first of all, and the one whose own
+    /// The call an AppHost changing checkout timing makes first of all, and the one whose own
     /// guidance — a deferred <c>dotnet</c> service should declare its endpoints in the AppHost — puts
     /// a declaration right after it, which is where a source-dependent read would go.
     /// </summary>
     [Fact]
-    public void UseDeferredCheckout_MakesTheFileReadableThroughTheAppHostsOwnConfiguration()
+    public void SetCheckoutTiming_MakesTheFileReadableThroughTheAppHostsOwnConfiguration()
     {
         var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory());
 
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         Assert.Equal("local", builder.Configuration[SourceKey]);
     }
@@ -226,8 +226,8 @@ public class DeveloperConfigFileSourceTests
     {
         string[] accountedFor =
         [
-            "AddBackingService", "AddLocalKind", "AddService", "AddServiceCatalog", "UseDeferredCheckout",
-            "UseJava", "UseJavaScript",
+            "AddBackingService", "AddLocalKind", "AddService", "AddServiceCatalog", "SetCheckoutTiming",
+            "UseDeferredCheckout", "UseJava", "UseJavaScript",
         ];
 
         var entryPoints = typeof(ServiceSourcesBuilderExtensions).Assembly.GetExportedTypes()

@@ -999,6 +999,7 @@ public class LocalProjectSourceTests
             ProjectDirectory = appHostDir,
             Args = [TestBuilderDefaults.DisableConfigReloadArg],
         });
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var gitClient = new FakeGitClient();
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
@@ -1009,9 +1010,9 @@ public class LocalProjectSourceTests
         Assert.Contains("outside", ex.Message);
 
         // The check needs no working tree, so it belongs in front of the clone rather than after it
-        // — the same place the prepare command's identical check sits. Deferral is off by default,
-        // so without this the commonest configuration pays for a cold clone before being told the
-        // value was wrong before any of it started.
+        // — the same place the prepare command's identical check sits. Without this the commonest
+        // configuration pays for a cold clone before being told the value was wrong before any of it
+        // started.
         Assert.Empty(gitClient.ClonedRepos);
     }
 
@@ -1423,6 +1424,7 @@ public class LocalProjectSourceTests
             ProjectDirectory = appHostDir,
             Args = [TestBuilderDefaults.DisableConfigReloadArg],
         });
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var gitClient = new FakeGitClient();
         var source = new LocalProjectSource(gitClient);
 
