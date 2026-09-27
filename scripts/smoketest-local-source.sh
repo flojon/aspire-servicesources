@@ -352,7 +352,11 @@ prepare_runs() {
   [[ -f "$log_path" ]] && wc -l < "$log_path" | tr -d ' ' || echo 0
 }
 
-marker="$(run_until_marker "prepare step" "$checkout_dir")"
+# Forced eager: deferred is the default since 0.7.0, and a deferred checkout's prepare output
+# reaches its own resource log directly rather than the AppHost's stdout, which is what this step
+# checks below. The eager fallback path is still fully supported, and this is what exercises it.
+marker="$(run_until_marker "prepare step" "$checkout_dir" \
+  "SERVICESOURCES_DEMO_CHECKOUT_TIMING=Eager")"
 [[ "$marker" == "$MAIN_MARKER" ]] \
   || fail "prepare step: expected '$MAIN_MARKER', got '$marker'"
 

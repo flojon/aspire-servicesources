@@ -118,6 +118,7 @@ public class JavaScriptPrepareStepTests
     {
         var builder = CreateBuilder(CreateAppHostDirectory());
         builder.UseJavaScript();
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => new LocalProjectSource(new FakeGitClient(), new FakePrepareRunner())
@@ -132,6 +133,7 @@ public class JavaScriptPrepareStepTests
         var dir = CreateAppHostDirectory();
         var builder = CreateBuilder(dir);
         builder.UseJavaScript();
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
 
         var runner = new FakePrepareRunner();
 

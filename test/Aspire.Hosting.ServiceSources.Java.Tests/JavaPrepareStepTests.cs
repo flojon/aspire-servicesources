@@ -117,6 +117,7 @@ public class JavaPrepareStepTests
         var dir = CreateAppHostDirectory();
         var builder = CreateBuilder(dir);
         builder.UseJava();
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
 
         var runner = new FakePrepareRunner("graphhopper-web-11.0.jar");
 
@@ -148,6 +149,7 @@ public class JavaPrepareStepTests
         {
             var builder = CreateBuilder(dir);
             builder.UseJava();
+            builder.SetCheckoutTiming(CheckoutTiming.Eager);
 
             new LocalProjectSource(new FakeGitClient(), runner)
                 .Resolve(builder, ServiceName, Definition(Prepare(), GraphHopperBlock), DevConfig());
@@ -169,6 +171,7 @@ public class JavaPrepareStepTests
         var dir = CreateAppHostDirectory();
         var builder = CreateBuilder(dir);
         builder.UseJava();
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => new LocalProjectSource(new FakeGitClient(), new FakePrepareRunner("app.jar")).Resolve(
@@ -190,6 +193,7 @@ public class JavaPrepareStepTests
         var dir = CreateAppHostDirectory();
         var builder = CreateBuilder(dir);
         builder.UseJava();
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
 
         var service = new LocalProjectSource(new FakeGitClient(), new GeneratingRunner())
             .Resolve(
