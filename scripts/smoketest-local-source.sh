@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Manual smoke test for the 'local' ServiceSource: points DemoAppHost's `orders` service at a git
+# Manual smoke test for the 'repository' ServiceSource: points DemoAppHost's `orders` service at a git
 # repository this script creates, and checks that the package clones it, checks out the ref it was
 # told to, builds the project inside the clone and runs it as an Aspire resource — then that a
 # `local.ref` override moves the checkout, and that a `local.path` override uses a directory the
 # developer manages and clones nothing.
 #
-# Why this exists: `local` is the default source and carries the most machinery of the four
+# Why this exists: `repository` is the default source and carries the most machinery of the six
 # (clone, ref reconciliation, the build barrier, AddProject), and it is the only source with no
 # end-to-end coverage — `container` and `kubernetes` each have one. The unit tests fake the git
 # client, so nothing else in the repository proves a real clone builds and runs.
@@ -222,9 +222,9 @@ write_local_json() {
   #
   # Spelled out rather than folded into a ${1:+...} expansion: that form ends at the first
   # unmatched '}', so the braces a JSON block needs escape the expansion and land in the file.
-  local orders='    "orders": { "source": "local" },'
+  local orders='    "orders": { "source": "repository" },'
   if [[ -n "${1:-}" ]]; then
-    orders="    \"orders\": { \"source\": \"local\", \"local\": { $1 } },"
+    orders="    \"orders\": { \"source\": \"repository\", \"local\": { $1 } },"
   fi
   cat > "$apphost_dir/servicesources.local.json" <<EOF
 {
@@ -408,9 +408,9 @@ runs="$(prepare_runs)"
 printf '    ran again, ignoring the marker\n'
 
 # ---------------------------------------------------------------------------
-# 5. defaultSource: local resolves and clones with no servicesources.local.json entry at all
+# 5. defaultSource: repository resolves and clones with no servicesources.local.json entry at all
 # ---------------------------------------------------------------------------
-log "5. defaultSource: local, no servicesources.local.json entry for 'orders' at all"
+log "5. defaultSource: repository, no servicesources.local.json entry for 'orders' at all"
 rm -rf "$checkout_dir"
 cat > "$apphost_dir/servicesources.yaml" <<EOF
 services:
@@ -418,7 +418,7 @@ services:
     repository: $origin_repo
     project: SampleService/SampleService.csproj
     defaultRef: main
-    defaultSource: local
+    defaultSource: repository
   inventory:
     url:
       url: http://unused.invalid
@@ -440,4 +440,4 @@ marker="$(run_until_marker "defaultSource" "$checkout_dir")"
   || fail "defaultSource: expected the marker from defaultRef ('$MAIN_MARKER'), got '$marker'"
 printf '    resolved, cloned and ran orders with no servicesources.local.json entry for it at all\n'
 
-log "PASS: the local source cloned, reconciled a ref, honoured a path override, bootstrapped a checkout with a prepare step, resolved via a catalog defaultSource with no local.json entry at all, and ran the project in every case"
+log "PASS: the repository source cloned, reconciled a ref, honoured a path override, bootstrapped a checkout with a prepare step, resolved via a catalog defaultSource with no local.json entry at all, and ran the project in every case"
