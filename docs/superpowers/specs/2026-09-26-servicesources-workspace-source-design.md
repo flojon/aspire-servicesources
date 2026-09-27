@@ -342,8 +342,14 @@ they don't look like oversights later:
   Aspire layout puts the AppHost in its own project directory (`src/MyApp.AppHost/`) with services
   beside it, so `../Orders.Api` has to work. The repository root is the nearest directory at or above
   the AppHost holding a `.git` directory or file (a worktree or submodule has a file); the path is
-  rebased onto it and checked with the same `CheckoutRelativePath` rules. With no `.git` found, the
-  AppHost directory is the boundary.
+  rebased onto it and checked with the same `CheckoutRelativePath` rules. With no `.git` found — a
+  source archive, or a container build context that leaves `.git` out — a developer-set
+  `ServiceSources:RepositoryRoot` (any configuration layer, or `"repositoryRoot"` at the root of
+  `servicesources.local.json`) names the root; it must contain the AppHost directory, and it is read
+  only when no `.git` is found, so it can never widen a boundary git already draws. With neither, the
+  AppHost directory is the boundary, and the refusal says why and names the setting. A heuristic
+  fallback (nearest `*.sln`/`global.json`) was considered and rejected: a stray marker higher up
+  would silently widen a security boundary.
 - **A developer's own override**, in their personal `servicesources.local.json`, stays **unconfined**
   — exactly like `local.path` today (F2), which can point anywhere on disk. This is what continues to
   serve the case `local.path` was originally built for: a developer's own out-of-tree clone of a

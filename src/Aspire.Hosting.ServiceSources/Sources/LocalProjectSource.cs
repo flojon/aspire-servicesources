@@ -619,9 +619,13 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// <param name="outside">What the path climbed out of.</param>
     /// <param name="inside">Where it has to stay.</param>
     /// <param name="absoluteReason">Why an absolute value is refused, and what to do instead.</param>
+    /// <param name="escapeRemedy">
+    /// A sentence to add to the climbing-out refusal, when the caller has one — why the boundary sits
+    /// where it does and how to move it.
+    /// </param>
     internal static void ThrowIfBreached(
         string serviceName, string field, string value, ConfinementBreach? breach, Raw outside, Raw inside,
-        Raw absoluteReason)
+        Raw absoluteReason, Raw? escapeRemedy = null)
     {
         switch (breach)
         {
@@ -637,7 +641,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
             case { Kind: ConfinementBreachKind.EscapesRoot }:
                 throw ServiceSourcesConfigurationException.For(
                     $"Service '{new Name(serviceName)}': {Raw.Escaped(field)} '{Raw.Escaped(value)}' points outside {outside}. It must "
-                    + $"stay within {inside}.");
+                    + $"stay within {inside}.{(escapeRemedy is { } remedy ? Raw.Compose($" {remedy}") : Raw.Literal(""))}");
         }
     }
 }

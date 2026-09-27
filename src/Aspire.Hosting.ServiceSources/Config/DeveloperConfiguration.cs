@@ -24,6 +24,15 @@ internal sealed class DeveloperConfiguration
     /// </summary>
     public const string RepositoriesKey = "ServiceSources:Repositories";
 
+    /// <summary>
+    /// The configuration key naming the root of the repository the AppHost is in, for a copy with no
+    /// <c>.git</c> to find it by — a source archive, or a container build context that leaves
+    /// <c>.git</c> out. Consulted only when no <c>.git</c> is found above the AppHost, so it can
+    /// never widen a boundary a git repository already draws. See
+    /// <see cref="Sources.PathSource.ConfinementRootOf"/>.
+    /// </summary>
+    public const string RepositoryRootKey = "ServiceSources:RepositoryRoot";
+
     public const string FileName = "servicesources.local.json";
 
     public required IReadOnlyDictionary<string, ServiceDeveloperConfig> Services { get; init; }

@@ -6,6 +6,7 @@ using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Prepare;
 using Aspire.Hosting.ServiceSources.Sources;
+using Microsoft.Extensions.Configuration;
 using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Sources;
@@ -228,15 +229,134 @@ public class PathSourceTests
         Assert.Contains($"points outside the repository at '{repositoryRoot}'", ex.Message, StringComparison.Ordinal);
     }
 
+    // === A copy with no .git: ServiceSources:RepositoryRoot ===
+
+    /// <summary>The sibling layout, with no <c>.git</c> anywhere above it — a source archive's shape.</summary>
+    private static string CreateCopyWithAppHostBesideTheService(out string copyRoot)
+    {
+        copyRoot = TempDirectories.CreateSubdirectory().FullName;
+        var appHostDir = Directory.CreateDirectory(Path.Combine(copyRoot, "src", "MyApp.AppHost")).FullName;
+        var serviceDir = Directory.CreateDirectory(Path.Combine(copyRoot, "src", "Orders.Api")).FullName;
+        File.WriteAllText(Path.Combine(serviceDir, "Orders.csproj"), "<Project />");
+        return appHostDir;
+    }
+
+    /// <summary>
+    /// As its own configuration source, the way an environment variable arrives — a value set through
+    /// the indexer is lost when the file's source registers and the configuration rebuilds.
+    /// </summary>
+    private static void SetRepositoryRoot(IDistributedApplicationBuilder builder, string value) =>
+        builder.Configuration.AddInMemoryCollection([new(DeveloperConfiguration.RepositoryRootKey, value)]);
+
     [Fact]
-    public void RepositoryRootOf_FindsAGitFileAsWellAsAGitDirectory()
+    public void Resolve_NoGitAndNoSetting_RefusesTheClimbAndSaysHowToSetTheRoot()
+    {
+        var appHostDir = CreateCopyWithAppHostBesideTheService(out _);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new PathSource(new GitCliClient()).Resolve(
+                TestHelpers.CreateBuilder(appHostDir), ServiceName, Definition(path: "../Orders.Api"), DevConfig()));
+
+        Assert.Contains($"points outside the AppHost directory '{appHostDir}'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("No '.git' was found", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("'ServiceSources:RepositoryRoot'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("ServiceSources__RepositoryRoot", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("\"repositoryRoot\"", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Resolve_NoGitButTheRootIsSet_AllowsTheClimb(bool relative)
+    {
+        var appHostDir = CreateCopyWithAppHostBesideTheService(out var copyRoot);
+        var builder = TestHelpers.CreateBuilder(appHostDir);
+        SetRepositoryRoot(builder, relative ? "../.." : copyRoot);
+
+        new PathSource(new GitCliClient()).Resolve(builder, ServiceName, Definition(path: "../Orders.Api"), DevConfig());
+
+        Assert.IsAssignableFrom<ProjectResource>(Assert.Single(builder.Resources, r => r.Name == ServiceName));
+    }
+
+    [Fact]
+    public void Resolve_NoGitAndTheSetRootIsClimbedOutOf_IsRefusedNamingTheSetting()
+    {
+        var appHostDir = CreateCopyWithAppHostBesideTheService(out var copyRoot);
+        var builder = TestHelpers.CreateBuilder(appHostDir);
+        SetRepositoryRoot(builder, copyRoot);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new PathSource(new GitCliClient()).Resolve(
+                builder, ServiceName, Definition(path: "../../../elsewhere"), DevConfig()));
+
+        Assert.Contains(
+            $"points outside the repository root '{copyRoot}' set by 'ServiceSources:RepositoryRoot'",
+            ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("No '.git' was found", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The setting names the root of the repository the AppHost is in, so one that does not contain
+    /// the AppHost is a mistake — reported, not applied as a boundary nothing could satisfy.
+    /// </summary>
+    [Fact]
+    public void Resolve_TheSetRootDoesNotContainTheAppHost_IsRefused()
+    {
+        var appHostDir = CreateCopyWithAppHostBesideTheService(out _);
+        var elsewhere = TempDirectories.CreateSubdirectory().FullName;
+        var builder = TestHelpers.CreateBuilder(appHostDir);
+        SetRepositoryRoot(builder, elsewhere);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new PathSource(new GitCliClient()).Resolve(builder, ServiceName, Definition(path: "../Orders.Api"), DevConfig()));
+
+        Assert.Contains("does not contain the AppHost directory", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Resolve_TheSetRootDoesNotExist_IsRefused()
+    {
+        var appHostDir = CreateCopyWithAppHostBesideTheService(out _);
+        var builder = TestHelpers.CreateBuilder(appHostDir);
+        SetRepositoryRoot(builder, "/no/such/root");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new PathSource(new GitCliClient()).Resolve(builder, ServiceName, Definition(path: "../Orders.Api"), DevConfig()));
+
+        Assert.Contains("does not exist", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A found <c>.git</c> is the boundary, and the setting is not even read — so it can never widen
+    /// a boundary a repository already draws, and a stale value left in the environment breaks nothing.
+    /// </summary>
+    [Fact]
+    public void Resolve_GitFound_TheSettingIsNotRead()
+    {
+        var appHostDir = CreateRepositoryWithAppHostBesideTheService(out var repositoryRoot);
+        var builder = TestHelpers.CreateBuilder(appHostDir);
+        SetRepositoryRoot(builder, Path.GetDirectoryName(repositoryRoot)!);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new PathSource(new GitCliClient()).Resolve(
+                builder, ServiceName, Definition(path: "../../../elsewhere"), DevConfig()));
+        Assert.Contains($"points outside the repository at '{repositoryRoot}'", ex.Message, StringComparison.Ordinal);
+
+        SetRepositoryRoot(builder, "/no/such/root");
+        new PathSource(new GitCliClient()).Resolve(builder, ServiceName, Definition(path: "../Orders.Api"), DevConfig());
+    }
+
+    [Fact]
+    public void ConfinementRootOf_FindsAGitFileAsWellAsAGitDirectory()
     {
         // A worktree or submodule has a .git file rather than a directory; it is still a repository root.
         var repositoryRoot = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(repositoryRoot, ".git"), "gitdir: /elsewhere/.git/worktrees/x");
         var appHostDir = Directory.CreateDirectory(Path.Combine(repositoryRoot, "src", "MyApp.AppHost")).FullName;
 
-        Assert.Equal(repositoryRoot, PathSource.RepositoryRootOf(appHostDir));
+        Assert.Equal(
+            new PathSource.ConfinementRoot(repositoryRoot, PathSource.ConfinementRootKind.Git),
+            PathSource.ConfinementRootOf(appHostDir, configuredRoot: () => null));
     }
 
     // === Missing directory ===

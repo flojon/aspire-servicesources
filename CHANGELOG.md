@@ -66,7 +66,10 @@ never existed. Check the tag of the last release before adding one.
   repository the AppHost lives in (the nearest directory holding `.git`), so `../Orders.Api` beside a
   `src/MyApp.AppHost/` works while an absolute path or one climbing out of the repository is refused;
   a developer's own override (`path.path` in `servicesources.local.json`) is unconfined, exactly like
-  `local.path` today. `prepare` runs as `once`/`always`/`never` — never `oncePerCommit`, since there's
+  `local.path` today. A copy with no `.git` — a source archive, or a container build context that
+  leaves it out — names its root with the new `ServiceSources:RepositoryRoot` setting (e.g.
+  `ServiceSources__RepositoryRoot=/src`, or `"repositoryRoot"` in `servicesources.local.json`),
+  read only when no `.git` is found; with neither, the AppHost directory is the boundary. `prepare` runs as `once`/`always`/`never` — never `oncePerCommit`, since there's
   no separate commit for the directory to move to on its own, so an unwritten `mode`, or a catalog's
   `oncePerCommit` written for the `"repository"` source on the same entry, means `once` there. A
   catalog-declared `path:`'s own `prepare:` block runs normally; under a `path.path` override it is

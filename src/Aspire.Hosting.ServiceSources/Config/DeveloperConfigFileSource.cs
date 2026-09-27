@@ -48,6 +48,12 @@ internal static class DeveloperConfigFileSource
     /// </remarks>
     internal const string FileRepositoriesKey = "repositories";
 
+    /// <summary>The same, for the repository root a copy with no <c>.git</c> names by hand.</summary>
+    /// <remarks>
+    /// Internal for the same reason as <see cref="FileBackingServicesKey"/>.
+    /// </remarks>
+    internal const string FileRepositoryRootKey = "repositoryRoot";
+
     /// <summary>
     /// Every subtree of the file that crosses into the AppHost's configuration, and the key it
     /// lands under.
@@ -62,6 +68,15 @@ internal static class DeveloperConfigFileSource
         (FileServicesKey, DeveloperConfiguration.ServicesKey),
         (FileBackingServicesKey, DeveloperConfiguration.BackingServicesKey),
         (FileRepositoriesKey, DeveloperConfiguration.RepositoriesKey),
+    ];
+
+    /// <summary>
+    /// The same for the file's single values at its root, which cross over as themselves rather
+    /// than as a subtree of entries.
+    /// </summary>
+    private static readonly (string FileKey, string ConfigurationKey)[] ReRootedValues =
+    [
+        (FileRepositoryRootKey, DeveloperConfiguration.RepositoryRootKey),
     ];
 
     private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, Registration> Registrations = new();
@@ -210,6 +225,9 @@ internal static class DeveloperConfigFileSource
                 .SelectMany(section => file.GetSection(section.FileKey).AsEnumerable(makePathsRelative: true)
                     .Where(entry => entry.Value is not null)
                     .Select(entry => ($"{section.ConfigurationKey}:{entry.Key}", entry.Value)))
+                .Concat(ReRootedValues
+                    .Where(value => file[value.FileKey] is not null)
+                    .Select(value => (value.ConfigurationKey, file[value.FileKey])))
                 .ToDictionary(entry => entry.Item1, entry => entry.Item2);
 
             // Two lists, because the near-miss check asks two different questions and collapsing

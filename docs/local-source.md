@@ -675,8 +675,7 @@ configuration, so it's confined to the repository the AppHost lives in: no absol
 climbing out of that repository with `..`. It's still written relative to the AppHost directory, and
 may climb *out of that directory* — the usual layout, with the AppHost in `src/MyApp.AppHost/` and
 its services beside it, needs `path: ../Orders.Api`. The repository is the nearest directory at or
-above the AppHost holding a `.git` directory or file; with none (the AppHost isn't in a git
-repository at all), the AppHost directory itself is the boundary. Your own override, set in
+above the AppHost holding a `.git` directory or file. Your own override, set in
 `servicesources.local.json`, is unconfined instead — it's your own machine and directory, exactly
 like `local.path` is today for a `"repository"` service:
 
@@ -687,6 +686,21 @@ like `local.path` is today for a `"repository"` service:
   }
 }
 ```
+
+**A copy with no `.git`.** A source archive, or a container build context whose `.dockerignore`
+leaves `.git` out, has nothing to find the repository by. There, set `ServiceSources:RepositoryRoot`
+to the repository's root directory — absolute, or relative to the AppHost directory — from any
+configuration layer:
+
+```dockerfile
+ENV ServiceSources__RepositoryRoot=/src
+```
+
+or `"repositoryRoot": "../.."` at the root of `servicesources.local.json`, or appsettings, user
+secrets or the command line. It has to be the AppHost directory or one of the directories above it.
+It is read only when no `.git` is found — a `.git` always wins, so the setting can never widen the
+boundary a repository draws. With neither, the AppHost directory itself is the boundary, and a
+`path:` that climbs out of it is refused with an error saying so and naming this setting.
 
 If the resolved directory doesn't exist, resolution fails naming it and the AppHost directory it
 was looked for under — there is nothing to clone, so a missing directory is the only thing a

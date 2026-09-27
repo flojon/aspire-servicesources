@@ -138,6 +138,26 @@ public class DeveloperConfigFileSourceTests
     }
 
     /// <summary>
+    /// The file's one root-level value crosses over as itself, under the key the <c>"path"</c>
+    /// source reads it by — not as a subtree, which is how every other root key crosses.
+    /// </summary>
+    [Fact]
+    public void RepositoryRoot_AtTheFilesRoot_IsReadableUnderItsConfigurationKey()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), OrdersCatalog);
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.local.json"),
+            """{ "repositoryRoot": "../..", "services": { "orders": { "source": "repository" } } }""");
+        var builder = TestHelpers.CreateBuilder(dir);
+
+        builder.UseDeferredCheckout();
+
+        Assert.Equal("../..", builder.Configuration[DeveloperConfiguration.RepositoryRootKey]);
+        Assert.Equal("repository", builder.Configuration[SourceKey]);
+    }
+
+    /// <summary>
     /// Registration is the one thing every entry point does before anything else, so it happens even
     /// on the paths that then fail — a missing catalog is reported by <c>AddService()</c>, and the
     /// configuration the AppHost reads is complete either way.
