@@ -287,6 +287,35 @@ unlist. The way out is a patch release carrying the fix, which is what `0.3.1` w
 **Do not delete or move a tag that has published anything.** The packages it produced are
 permanent; the tag is the only record of what commit they were built from.
 
+## Documentation site
+
+Docs are built by [Read the Docs] from `mkdocs.yml`/`.readthedocs.yaml`, not by any GitHub
+Actions workflow. One-time setup, done once in the Read the Docs dashboard after importing
+this repository from GitHub:
+
+1. **Import the project** at https://app.readthedocs.org/dashboard/, pointing at
+   `flojon/aspire-servicesources`.
+2. **Default version:** Admin → Versions → set `main` as the default version, activated. This
+   is what `latest` resolves to.
+3. **Automation rule for tags:** Admin → Automation Rules → add a rule matching version type
+   "Tag", pattern `^v0\.(7|[89]|[1-9]\d+)\.` (regex — matches `v0.7.x` and later, never
+   `v0.1.x`–`v0.6.x`), action "Activate version", version scheme "Semantic Versioning". `v0.7.0`
+   is the first tag with `mkdocs.yml`/`.readthedocs.yaml` in its tree, so it's the first one
+   that can build at all — the pattern just makes that explicit instead of relying on the
+   older tags' builds failing silently. Widen the regex once a `v1.x` release ships.
+4. **Automation rule for stable:** a second rule, "Set version as STABLE", triggered on new
+   tags matching the same pattern — this keeps `stable` pointing at whichever tag is the
+   newest release, without a `stable` branch to maintain by hand.
+5. Confirm unwanted branches (feature branches, `claude/*` worktree branches) and the
+   pre-`v0.7.0` tags are **not** separately activated — only `main` and `v0.7.0`+ tags should
+   build.
+
+After this, every `git push origin vX.Y.Z` (the existing [release step](#4-tag-and-release))
+picks up a new numbered version and moves `stable` automatically; nothing in the release
+process above needs to change.
+
+[Read the Docs]: https://readthedocs.org/
+
 ## Prereleases
 
 There is no manual prerelease step. Every commit to `main` publishes one to GitHub Packages
