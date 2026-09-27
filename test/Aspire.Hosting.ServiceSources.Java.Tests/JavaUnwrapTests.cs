@@ -35,7 +35,7 @@ public class JavaUnwrapTests
         return CreateBuilder(appHostDirectory);
     }
 
-    private static string LocalPathJson(string serviceName, string checkout) => $$"""
+    private static string PathJson(string serviceName, string checkout) => $$"""
         {
           "services": {
             "{{serviceName}}": { "source": "path", "path": { "path": {{System.Text.Json.JsonSerializer.Serialize(checkout)}} } }
@@ -154,7 +154,7 @@ public class JavaUnwrapTests
     public void AddService_OnAKindWhoseResourceTypeIsInAMissingPackage_NamesThePackage()
     {
         var checkout = CreateTempDirectory();
-        var builder = CreateAppHost(LocalPathJson("tool", checkout), """
+        var builder = CreateAppHost(PathJson("tool", checkout), """
             services:
               tool:
                 repository: https://github.com/example/tool
@@ -172,7 +172,7 @@ public class JavaUnwrapTests
     public void AddService_OnAKindWhoseResourceTypeIsNull_Throws()
     {
         var checkout = CreateTempDirectory();
-        var builder = CreateAppHost(LocalPathJson("tool", checkout), """
+        var builder = CreateAppHost(PathJson("tool", checkout), """
             services:
               tool:
                 repository: https://github.com/example/tool
@@ -214,7 +214,7 @@ public class JavaUnwrapTests
     public void AddService_OnAKindWhoseResourceIsNotItsDeclaredType_Throws()
     {
         var checkout = CreateTempDirectory();
-        var builder = CreateAppHost(LocalPathJson("tool", checkout), """
+        var builder = CreateAppHost(PathJson("tool", checkout), """
             services:
               tool:
                 repository: https://github.com/example/tool
@@ -240,6 +240,7 @@ public class JavaUnwrapTests
 
         Assert.Contains("Unwrap<ProjectResource> can never apply", ex.Message);
         Assert.Contains($"'repository' ({nameof(JavaAppExecutableResource)})", ex.Message);
+        Assert.Contains($"'path' ({nameof(JavaAppExecutableResource)})", ex.Message);
         Assert.Contains("'container'", ex.Message);
     }
 
@@ -262,7 +263,7 @@ public class JavaUnwrapTests
     public void Unwrap_Delegate_OnAKindThatDeclaresNoType_NeverThrows()
     {
         var checkout = CreateTempDirectory();
-        var builder = CreateAppHost(LocalPathJson("tool", checkout), """
+        var builder = CreateAppHost(PathJson("tool", checkout), """
             services:
               tool:
                 repository: https://github.com/example/tool
