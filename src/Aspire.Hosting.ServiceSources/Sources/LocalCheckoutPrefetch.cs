@@ -11,12 +11,12 @@ using Microsoft.Extensions.Logging;
 namespace Aspire.Hosting.ServiceSources.Sources;
 
 /// <summary>
-/// Starts, in parallel and once, the git checkout for every <c>"local"</c>-sourced service whose
+/// Starts, in parallel and once, the git checkout for every <c>"repository"</c>-sourced service whose
 /// clone an <c>AddService()</c> call would otherwise have to wait for on its own.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <c>AddService()</c> has to hand back the real resource, so a <c>"local"</c> service can no longer
+/// <c>AddService()</c> has to hand back the real resource, so a <c>"repository"</c> service can no longer
 /// wait for <c>BeforeStartEvent</c> to be resolved. Cloning each service as it is asked for would
 /// serialize every cold clone — the tax issue #2 removed. Instead the trigger moves rather than the
 /// parallelism: the first call starts them all at once, so wall-clock stays <c>max(checkout)</c>,
@@ -24,7 +24,7 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// </para>
 /// <para>
 /// The prefetch set comes from the developer configuration, which must already name every service
-/// the AppHost adds. The converse does not hold — it may mark services <c>"local"</c> that this
+/// the AppHost adds. The converse does not hold — it may mark services <c>"repository"</c> that this
 /// AppHost never calls <c>AddService()</c> for — so the prefetch is <b>speculative</b> in
 /// both what it does and what it reports. It must never invent a failure: a service missing from the
 /// catalog is skipped, and a checkout that throws has its exception stored, re-thrown only if that
@@ -33,7 +33,7 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// <para>
 /// Nothing here blocks on the speculative part. Each checkout is its own task and
 /// <see cref="GetRepoRoot"/> waits only on the one it was asked for, so a developer whose config
-/// marks ten services <c>"local"</c> while the AppHost adds two waits for those two, not for all
+/// marks ten services <c>"repository"</c> while the AppHost adds two waits for those two, not for all
 /// ten.
 /// </para>
 /// <para>
@@ -188,7 +188,7 @@ internal sealed class LocalCheckoutPrefetch
 
     /// <summary>
     /// The notice for checkouts that were prefetched but never asked for, or <see langword="null"/>
-    /// when the AppHost used every service configured as <c>"local"</c>.
+    /// when the AppHost used every service configured as <c>"repository"</c>.
     /// Exposed for tests — the log itself isn't observable in-process.
     /// </summary>
     public string? UnusedCheckoutsMessage => UnusedCheckoutsRaw?.ToString();
@@ -226,9 +226,9 @@ internal sealed class LocalCheckoutPrefetch
             // nothing to act on.
             return Raw.Compose(
                 $"{unused.Length} {(unused.Length == 1 ? Raw.Literal("service is") : Raw.Literal("services are"))} "
-                + $"configured as 'local' with no checkout yet that this AppHost never adds ({names}). "
+                + $"configured as 'repository' with no checkout yet that this AppHost never adds ({names}). "
                 + $"Cloning them was paid for anyway: AddService() has to hand back the real resource, so a "
-                + $"'local' entry whose first checkout the AppHost would have to wait for is cloned in parallel "
+                + $"'repository' entry whose first checkout the AppHost would have to wait for is cloned in parallel "
                 + $"with the others, before the AppHost says which ones it wants. Only the services this AppHost "
                 + $"adds are reconciled to their configured ref. Clear "
                 + $"'{Raw.Literal(DeveloperConfiguration.ServicesKey)}:<service>:source' for the ones you don't call "
@@ -378,7 +378,7 @@ internal sealed class LocalCheckoutPrefetch
         var plural = ordered.Length != 1;
 
         return Raw.Compose(
-            $"{quoted} {(plural ? Raw.Literal("are") : Raw.Literal("is"))} configured as 'local'"
+            $"{quoted} {(plural ? Raw.Literal("are") : Raw.Literal("is"))} configured as 'repository'"
             + $"{(plural ? Raw.Literal(", sharing a git checkout, ") : Raw.Literal(", so its git checkout was prefetched, "))}"
             + $"and the prefetch failed: {Raw.Cause(exception)} This AppHost never adds "
             + $"{(plural ? Raw.Literal("any of them") : quoted)}, so nothing else reports it — clear "
@@ -648,19 +648,19 @@ internal sealed class LocalCheckoutPrefetch
 
         var candidates = config.DeveloperConfig.Services
             // Case-insensitive to agree with how AddService resolves the same value: a service whose
-            // source is spelled "Local" is one AddService resolves locally, so dropping it here
+            // source is spelled "Repository" is one AddService resolves locally, so dropping it here
             // would leave its clone to run alone on the AddService thread rather than with the
             // others — no error, just a slower first start. The same reasoning as the re-keying in
             // DeveloperConfiguration.CanonicalizeToCatalog, applied to the value instead of the key.
-            .Where(entry => string.Equals(entry.Value.Source, "local", StringComparison.OrdinalIgnoreCase))
+            .Where(entry => string.Equals(entry.Value.Source, "repository", StringComparison.OrdinalIgnoreCase))
             // A catalog defaultSource projects into the identical configuration key an explicit
-            // "local" entry would use (design "Default-derived exclusion"), so without this a
+            // "repository" entry would use (design "Default-derived exclusion"), so without this a
             // defaulted service would re-create the #76 clone-storm this filter exists to prevent
             // -- cloned in parallel whether or not AddService() is ever called for it. Excluded
             // here rather than by comparing values, because an explicit entry naming the identical
             // value is a deliberate opt-in and must stay eligible (see DefaultedServiceNames).
             .Where(entry => !config.DefaultedServiceNames.Contains(entry.Key))
-            // A service the developer marked "local" but that the catalog doesn't describe can't be
+            // A service the developer marked "repository" but that the catalog doesn't describe can't be
             // checked out and isn't this phase's problem to report — AddService still rejects it
             // properly if the AppHost actually asks for it.
             .Where(entry => config.Catalog.Services.ContainsKey(entry.Key))
@@ -679,7 +679,7 @@ internal sealed class LocalCheckoutPrefetch
                     config.Catalog.Services[entry.Key].Repository.CheckoutName)))
             // Only candidates with a repository to clone at all — checked first since it is a plain
             // string test, ahead of the filter below that has to stat the disk. Without this,
-            // resolving one well-formed "local" service would sweep a repositoryless sibling into
+            // resolving one well-formed "repository" service would sweep a repositoryless sibling into
             // the set and hand the git client an empty url. Skipped rather than reported, like the
             // filters around it: the service AddService() actually asks for is refused there, by
             // name, on the thread that asked.

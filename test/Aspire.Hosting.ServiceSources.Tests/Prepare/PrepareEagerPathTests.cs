@@ -132,7 +132,7 @@ public class PrepareEagerPathTests
 
         File.WriteAllText(
             Path.Combine(dir, "servicesources.local.json"),
-            $"{{ \"services\": {{ \"{serviceName}\": {{ \"source\": \"local\"{local} }} }} }}");
+            $"{{ \"services\": {{ \"{serviceName}\": {{ \"source\": \"repository\"{local} }} }} }}");
 
         return dir;
     }
@@ -152,7 +152,7 @@ public class PrepareEagerPathTests
 
     private static ServiceDeveloperConfig DevConfig(
         string? path = null, PrepareDeveloperConfig? prepare = null) =>
-        new() { Source = "local", Local = new() { Path = path, Prepare = prepare } };
+        new() { Source = "repository", Local = new() { Path = path, Prepare = prepare } };
 
     [Fact]
     public void TheStepRunsInTheResolvedCheckout_AfterTheCloneLanded()
@@ -247,7 +247,7 @@ public class PrepareEagerPathTests
     /// </summary>
     /// <remarks>
     /// The two facts that made this matter compose badly: deferral is refused outside run mode, so
-    /// <em>every</em> <c>"local"</c> service takes this path there — which for the motivating case
+    /// <em>every</em> <c>"repository"</c> service takes this path there — which for the motivating case
     /// meant an <c>aspire publish</c> over a cold checkout downloading hundreds of megabytes and
     /// importing a country-sized graph to emit a manifest that describes none of it.
     /// </remarks>

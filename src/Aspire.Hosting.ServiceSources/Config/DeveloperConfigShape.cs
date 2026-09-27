@@ -23,7 +23,7 @@ internal sealed class DeveloperConfigShape
 {
     /// <summary>A service entry, keyed under <see cref="DeveloperConfiguration.ServicesKey"/>.</summary>
     public static DeveloperConfigShape Service { get; } =
-        Of<ServiceDeveloperConfig>("Service", "service", ["local", "url", "kubernetes", "container"]);
+        Of<ServiceDeveloperConfig>("Service", "service", ["repository", "url", "kubernetes", "container"]);
 
     /// <summary>
     /// A backing-service entry, keyed under <see cref="DeveloperConfiguration.BackingServicesKey"/>.
@@ -199,6 +199,21 @@ internal sealed class DeveloperConfigShape
     /// </exception>
     public void ValidateSourceName(Raw label, string value)
     {
+        // Retired, not unknown (same rename as ServiceSourcesBuilderExtensions.AddService's dispatch
+        // miss, and owed here too: a catalog's defaultSource/WithDefaultSource("local") deserves the
+        // same named migration rather than falling through to the generic "not a valid source"
+        // message below). label already names which of the two callers this is — a yaml
+        // "defaultSource value 'local'" or a code "WithDefaultSource('local')" — so it reads
+        // naturally as the subject of this sentence too.
+        if (string.Equals(value, "local", StringComparison.OrdinalIgnoreCase))
+        {
+            throw ServiceSourcesConfigurationException.For(
+                $"{label} was renamed to 'repository' — same behavior (clone the catalog's 'repository:' url, "
+                + $"reconcile onto 'ref'), new name, so it doesn't read as the same word "
+                + $"'{Raw.Literal(DeveloperConfiguration.FileName)}' uses for something else. Change it to "
+                + $"'repository'.");
+        }
+
         if (!SourceNames.Contains(value))
         {
             throw ServiceSourcesConfigurationException.For(

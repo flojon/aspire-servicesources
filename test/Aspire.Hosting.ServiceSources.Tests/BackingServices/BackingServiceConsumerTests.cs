@@ -70,16 +70,16 @@ public class BackingServiceConsumerTests
     }
 
     /// <summary>
-    /// The acceptance case: a <c>"local"</c>-sourced service configured with a reference to a
+    /// The acceptance case: a <c>"repository"</c>-sourced service configured with a reference to a
     /// <c>"local"</c>-sourced backing service is started with that backing service's connection
     /// string.
     /// </summary>
     [Fact]
-    public async Task LocalService_ReferencingALocalBackingService_GetsItsConnectionString()
+    public async Task RepositoryService_ReferencingALocalBackingService_GetsItsConnectionString()
     {
         var builder = CreateBuilder("""
             {
-              "services": { "orders": { "source": "local" } },
+              "services": { "orders": { "source": "repository" } },
               "backingServices": { "orders-db": { "source": "local" } }
             }
             """);
@@ -109,7 +109,7 @@ public class BackingServiceConsumerTests
     {
         var builder = CreateBuilder("""
             {
-              "services": { "orders": { "source": "local" } },
+              "services": { "orders": { "source": "repository" } },
               "backingServices": { "orders-db": {
                 "source": "direct",
                 "direct": { "connectionString": "Host=shared-dev;Port=5432;Database=orders" } } }
@@ -145,7 +145,7 @@ public class BackingServiceConsumerTests
     {
         var builder = CreateBuilder("""
             {
-              "services": { "orders": { "source": "local" } },
+              "services": { "orders": { "source": "repository" } },
               "backingServices": { "orders-db": {
                 "source": "kubernetes",
                 "kubernetes": {
@@ -213,7 +213,7 @@ public class BackingServiceConsumerTests
     {
         var builder = CreateBuilder("""
             {
-              "services": { "orders": { "source": "local" } },
+              "services": { "orders": { "source": "repository" } },
               "backingServices": { "orders-db": { "source": "local" } }
             }
             """);
@@ -249,7 +249,7 @@ public class BackingServiceConsumerTests
     {
         var builder = CreateBuilder("""
             {
-              "services": { "orders": { "source": "local" } },
+              "services": { "orders": { "source": "repository" } },
               "backingServices": { "orders-db": { "source": "local" } }
             }
             """);
@@ -277,7 +277,7 @@ public class BackingServiceConsumerTests
     {
         var builder = CreateBuilder("""
             {
-              "services": { "orders": { "source": "local" } },
+              "services": { "orders": { "source": "repository" } },
               "backingServices": { "orders-db": { "source": "local" } }
             }
             """);

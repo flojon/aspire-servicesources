@@ -137,7 +137,7 @@ public class LocalProjectSourceTests
             .ToDefinition("servicesources.yaml", serviceName, TestHelpers.EmptyRepositories);
 
     private static ServiceDeveloperConfig DevConfig(string? path = null, string? @ref = null) =>
-        new() { Source = "local", Local = new() { Path = path, Ref = @ref } };
+        new() { Source = "repository", Local = new() { Path = path, Ref = @ref } };
 
     private static string UnusedAppHostDirectory => TempDirectories.CreateSubdirectory().FullName;
 
@@ -1927,9 +1927,12 @@ public class LocalProjectSourceTests
             new LocalProjectSource(gitClient).Resolve(PlainBuilder(), ServiceName, definition, DevConfig()));
 
         Assert.Contains($"Service '{ServiceName}'", ex.Message);
-        Assert.DoesNotContain("'repository'", ex.Message, StringComparison.Ordinal);
+        // Not the bare word — the source is now named 'repository' too (F7), so the yaml-specific
+        // phrase is what must not leak into a code-declared service's remedy.
+        Assert.DoesNotContain("'repository' url", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("repositoryRef", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("servicesources.yaml", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("WithRepository", ex.Message, StringComparison.Ordinal);
         Assert.False(gitClient.EnsureAvailableCalled);
     }
 

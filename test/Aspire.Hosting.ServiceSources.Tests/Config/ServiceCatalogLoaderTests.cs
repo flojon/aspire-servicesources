@@ -44,14 +44,14 @@ public class ServiceCatalogLoaderTests
               orders:
                 repository: https://github.com/company/orders
                 project: src/Orders.Api/Orders.Api.csproj
-                defaultSource: local
+                defaultSource: repository
             """);
 
         try
         {
             var (catalog, _) = ServiceCatalogLoader.Load(path);
 
-            Assert.Equal("local", catalog.Services["orders"].DefaultSource);
+            Assert.Equal("repository", catalog.Services["orders"].DefaultSource);
         }
         finally
         {
@@ -101,10 +101,44 @@ public class ServiceCatalogLoaderTests
 
             Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
             Assert.Contains("bogus", ex.Message, StringComparison.Ordinal);
-            Assert.Contains("local", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("repository", ex.Message, StringComparison.Ordinal);
             Assert.Contains("url", ex.Message, StringComparison.Ordinal);
             Assert.Contains("kubernetes", ex.Message, StringComparison.Ordinal);
             Assert.Contains("container", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// "local" is retired, not aliased: a catalog's <c>defaultSource: local</c> gets the same named
+    /// migration a developer's own <c>source: "local"</c> does, rather than falling through to the
+    /// generic "not a valid source" message <see cref="Load_ServiceWithInvalidDefaultSource_ThrowsNamingTheFourValues"/>
+    /// covers.
+    /// </summary>
+    [Fact]
+    public void Load_ServiceWithDefaultSourceLocal_ReportsTheRenameToRepository()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+                defaultSource: local
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("Service 'orders'", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("defaultSource", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("renamed", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("'repository'", ex.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("not a valid source", ex.Message, StringComparison.Ordinal);
         }
         finally
         {
@@ -474,7 +508,7 @@ public class ServiceCatalogLoaderTests
                 repository: https://github.com/company/orders
                 project: src/Orders.Api/Orders.Api.csproj
                 defaultRef: main
-                defaultSource: local
+                defaultSource: repository
                 kind: dotnet
                 kubernetes:
                   service: orders-svc
@@ -492,7 +526,7 @@ public class ServiceCatalogLoaderTests
             var orders = ServiceCatalogLoader.Load(path).Catalog.Services["orders"];
 
             Assert.Equal("main", orders.DefaultRef);
-            Assert.Equal("local", orders.DefaultSource);
+            Assert.Equal("repository", orders.DefaultSource);
             Assert.Equal("orders-svc", orders.Kubernetes!.Service);
             Assert.Equal("https://orders.example.com", orders.Url!.Url);
             Assert.Equal("latest", orders.Container!.DefaultTag);

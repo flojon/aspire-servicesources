@@ -8,11 +8,11 @@ namespace Aspire.Hosting.ServiceSources.Config;
 /// The nesting is what makes a source switchable from a higher configuration layer.
 /// <see cref="IConfiguration"/> merges layers per key rather than per object, so with the settings
 /// flat on this type a lower layer's <c>url</c> would survive a higher layer setting
-/// <c>source: local</c> and land here alongside it. Under a block it still survives, but nothing
+/// <c>source: repository</c> and land here alongside it. Under a block it still survives, but nothing
 /// reads it.
 ///
 /// The blocks are never null. An entry naming a source with no block of its own is the common case
-/// — <c>{ "source": "local" }</c> is a complete entry — and an absent block and an empty one mean
+/// — <c>{ "source": "repository" }</c> is a complete entry — and an absent block and an empty one mean
 /// the same thing, so consumers read through them without a null check.
 /// </remarks>
 internal sealed class ServiceDeveloperConfig

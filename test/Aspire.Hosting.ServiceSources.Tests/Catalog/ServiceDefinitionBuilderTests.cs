@@ -114,10 +114,10 @@ public class ServiceDefinitionBuilderTests
     {
         var definition = new ServiceCatalogBuilder().AddService("orders")
             .WithRepository("https://github.com/example/repo")
-            .WithDefaultSource("local")
+            .WithDefaultSource("repository")
             .Build();
 
-        Assert.Equal("local", definition.DefaultSource);
+        Assert.Equal("repository", definition.DefaultSource);
     }
 
     [Fact]
@@ -125,13 +125,34 @@ public class ServiceDefinitionBuilderTests
     {
         var chain = new ServiceCatalogBuilder().AddService("orders")
             .WithRepository("https://github.com/example/repo")
-            .WithDefaultSource("local");
+            .WithDefaultSource("repository");
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => chain.WithDefaultSource("url"));
 
         Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
         Assert.Contains("WithDefaultSource", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// "local" is retired, not aliased: <c>WithDefaultSource("local")</c> gets the same named
+    /// migration a yaml <c>defaultSource: local</c> does, rather than falling through to the generic
+    /// "not a valid source" message.
+    /// </summary>
+    [Fact]
+    public void WithDefaultSource_Local_ReportsTheRenameToRepository()
+    {
+        var chain = new ServiceCatalogBuilder().AddService("orders")
+            .WithRepository("https://github.com/example/repo");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => chain.WithDefaultSource("local"));
+
+        Assert.Contains("Service 'orders'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("WithDefaultSource", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("renamed", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("'repository'", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("not a valid source", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -145,7 +166,7 @@ public class ServiceDefinitionBuilderTests
 
         Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
         Assert.Contains("bogus", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("local", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("repository", ex.Message, StringComparison.Ordinal);
         Assert.Contains("url", ex.Message, StringComparison.Ordinal);
         Assert.Contains("kubernetes", ex.Message, StringComparison.Ordinal);
         Assert.Contains("container", ex.Message, StringComparison.Ordinal);

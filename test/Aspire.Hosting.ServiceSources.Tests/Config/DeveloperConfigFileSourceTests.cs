@@ -40,7 +40,7 @@ public class DeveloperConfigFileSourceTests
             throw new NotSupportedException("Not exercised by these tests.");
     }
 
-    private static string CreateAppHostDirectory(string? yaml = OrdersCatalog, string source = "local")
+    private static string CreateAppHostDirectory(string? yaml = OrdersCatalog, string source = "repository")
     {
         var dir = TempDirectories.CreateSubdirectory().FullName;
         if (yaml is not null)
@@ -60,7 +60,7 @@ public class DeveloperConfigFileSourceTests
 
         builder.AddLocalKind(KindUnderTest, new FakeKind());
 
-        Assert.Equal("local", builder.Configuration[SourceKey]);
+        Assert.Equal("repository", builder.Configuration[SourceKey]);
     }
 
     /// <summary>
@@ -75,7 +75,7 @@ public class DeveloperConfigFileSourceTests
 
         builder.UseDeferredCheckout();
 
-        Assert.Equal("local", builder.Configuration[SourceKey]);
+        Assert.Equal("repository", builder.Configuration[SourceKey]);
     }
 
     /// <summary>
@@ -90,7 +90,7 @@ public class DeveloperConfigFileSourceTests
 
         builder.AddServiceCatalog(c => c.AddService("orders"));
 
-        Assert.Equal("local", builder.Configuration[SourceKey]);
+        Assert.Equal("repository", builder.Configuration[SourceKey]);
     }
 
     /// <summary>
@@ -109,7 +109,7 @@ public class DeveloperConfigFileSourceTests
         // Named after the backing service, as a "local" factory has to be — see #200.
         builder.AddBackingService("orders-db", () => builder.AddConnectionString("orders-db"));
 
-        Assert.Equal("local", builder.Configuration[SourceKey]);
+        Assert.Equal("repository", builder.Configuration[SourceKey]);
     }
 
     /// <summary>
@@ -149,7 +149,7 @@ public class DeveloperConfigFileSourceTests
 
         Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
 
-        Assert.Equal("local", builder.Configuration[SourceKey]);
+        Assert.Equal("repository", builder.Configuration[SourceKey]);
     }
 
     /// <summary>
@@ -168,7 +168,7 @@ public class DeveloperConfigFileSourceTests
         ServiceSourcesConfigCache.ResolveService(builder, "orders");
 
         Assert.Equal(sourcesAfterTheFirstRegistration, builder.Configuration.Sources.Count);
-        Assert.Equal("local", builder.Configuration[SourceKey]);
+        Assert.Equal("repository", builder.Configuration[SourceKey]);
     }
 
     /// <summary>

@@ -13,7 +13,7 @@
   // whether the catalog itself came from servicesources.yaml or, as in this sample, from
   // AddServiceCatalog in Program.cs.
   "services": {
-    "orders": { "source": "local" },
+    "orders": { "source": "repository" },
     "inventory": { "source": "url" },
     "payments": {
       "source": "container",

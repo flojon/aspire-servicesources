@@ -17,20 +17,20 @@ internal static class OutOfBandSourceAdvice
     /// </summary>
     /// <remarks>
     /// Conditional rather than an instruction, because the switch is only available where the
-    /// catalog already declares that source: <c>'local'</c> without a <c>repository</c>, or
+    /// catalog already declares that source: <c>'repository'</c> without a <c>repository</c>, or
     /// <c>'container'</c> without a <c>container</c> block, throws
     /// <see cref="ServiceSourcesConfigurationException"/> at the next resolve.
     /// <para>
     /// The block, not the individual field, because what a block has to carry varies with the
-    /// service: <c>'local'</c> needs a <c>project</c> for the built-in <c>dotnet</c> kind and that
+    /// service: <c>'repository'</c> needs a <c>project</c> for the built-in <c>dotnet</c> kind and that
     /// kind's own options for any other, and the error the catalog raises names whichever one is
     /// missing. Naming fields here would be right for the common service and wrong for the rest.
     /// </para>
     /// </remarks>
     internal const string SwitchSource =
-        "give it a 'local' or 'container' source in servicesources.local.json — which works only " +
+        "give it a 'repository' or 'container' source in servicesources.local.json — which works only " +
         "where its 'servicesources.yaml' entry already declares that source: a 'repository' or " +
-        "'repositoryRef' for 'local', a 'container' block for 'container'";
+        "'repositoryRef' for 'repository', a 'container' block for 'container'";
 
     /// <summary>
     /// Why a source runs out of band, in the clause each message builds its sentence around.

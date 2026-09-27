@@ -181,8 +181,8 @@ public class CatalogCompositionTests
 
     /// <summary>
     /// The ungrouped-collision warning (design question 5) fires when two ungrouped services really
-    /// do share a repository URL and both actually resolve through the "local" source — the case its
-    /// own text describes ("are all 'local' ... each gets its own checkout").
+    /// do share a repository URL and both actually resolve through the "repository" source — the case its
+    /// own text describes ("are all 'repository' ... each gets its own checkout").
     /// </summary>
     [Fact]
     public async Task TwoUngroupedServicesShareUrlAndBothResolveLocally_WarnsToGroupThem()
@@ -198,7 +198,7 @@ public class CatalogCompositionTests
                 project: src/Billing.Api/Billing.Api.csproj
             """);
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), """
-            { "services": { "orders": { "source": "local" }, "billing": { "source": "local" } } }
+            { "services": { "orders": { "source": "repository" }, "billing": { "source": "repository" } } }
             """);
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
         ServiceSourcesConfigCache.ResolveService(builder, "orders");
@@ -206,7 +206,7 @@ public class CatalogCompositionTests
 
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 
-        Assert.Contains(warnings, w => w.Contains("are all 'local'", StringComparison.Ordinal));
+        Assert.Contains(warnings, w => w.Contains("are all 'repository'", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -215,7 +215,7 @@ public class CatalogCompositionTests
     /// <c>repository:</c> block alongside a <c>kubernetes:</c>/<c>url:</c>/<c>container:</c> one, with
     /// <c>servicesources.local.json</c> picking which applies. The ungrouped-collision warning must
     /// not fire for that shape: its advice ("share one checkout ... AddRepository/WithSharedRepository")
-    /// describes work that never happens when nothing resolves through "local" at all.
+    /// describes work that never happens when nothing resolves through "repository" at all.
     /// </summary>
     [Fact]
     public async Task TwoServicesShareUrlButResolveThroughKubernetes_NoUngroupedCollisionWarning()
@@ -245,7 +245,7 @@ public class CatalogCompositionTests
 
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 
-        Assert.DoesNotContain(warnings, w => w.Contains("are all 'local'", StringComparison.Ordinal));
+        Assert.DoesNotContain(warnings, w => w.Contains("are all 'repository'", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -617,9 +617,9 @@ public class CatalogCompositionTests
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"),
             """
             { "services": {
-                "orders": { "source": "local" },
-                "payments": { "source": "local" },
-                "billing": { "source": "local" }
+                "orders": { "source": "repository" },
+                "payments": { "source": "repository" },
+                "billing": { "source": "repository" }
             } }
             """);
         var builder = CreateBuilder(dir);
@@ -663,7 +663,7 @@ public class CatalogCompositionTests
                 project: Billing.csproj
             """);
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"),
-            """{ "services": { "orders": { "source": "local" }, "billing": { "source": "local" } } }""");
+            """{ "services": { "orders": { "source": "repository" }, "billing": { "source": "repository" } } }""");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
 
         // Any resolution reaches LoadedConfig.Load, where the notice is buffered.
@@ -714,7 +714,7 @@ public class CatalogCompositionTests
                   port: 8080
             """);
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), """
-            { "services": { "orders": { "source": "local" }, "billing": { "source": "local" } } }
+            { "services": { "orders": { "source": "repository" }, "billing": { "source": "repository" } } }
             """);
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
         ServiceSourcesConfigCache.ResolveService(builder, "orders");
@@ -722,6 +722,6 @@ public class CatalogCompositionTests
 
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 
-        Assert.DoesNotContain(warnings, w => w.Contains("are all 'local'", StringComparison.Ordinal));
+        Assert.DoesNotContain(warnings, w => w.Contains("are all 'repository'", StringComparison.Ordinal));
     }
 }

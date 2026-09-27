@@ -118,7 +118,7 @@ internal sealed class DeveloperConfiguration
         var section = builder.Configuration.GetSection(ServicesKey);
 
         // Before binding, and for every entry rather than only the ones an AddService call reaches:
-        // LocalCheckoutPrefetch clones every "local" entry the moment the first local-sourced
+        // LocalCheckoutPrefetch clones every "repository" entry the moment the first repository-sourced
         // service is resolved, including entries for services no AddService call ever names, so a
         // malformed one would otherwise pay for a checkout before anything looked at it. The keys
         // are checked as the developer spelled them, ahead of the canonicalization below.

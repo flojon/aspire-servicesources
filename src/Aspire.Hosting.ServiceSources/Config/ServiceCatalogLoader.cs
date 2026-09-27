@@ -290,7 +290,7 @@ internal static class ServiceCatalogLoader
             {
                 // Ungrouped (no repositoryRef) and no url/container/kubernetes block either: nothing
                 // here could ever resolve to a source, so this is caught now rather than reaching the
-                // git client with an empty url once "local" is selected (#318). A service that *does*
+                // git client with an empty url once "repository" is selected (#318). A service that *does*
                 // declare url/container/kubernetes legitimately has no 'repository' — that combination
                 // is left alone here. Its own message, not the "entry is empty" one above: the entry
                 // can have real content (e.g. 'project:') and still lack any of these five properties.

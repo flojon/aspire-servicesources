@@ -1,7 +1,7 @@
 namespace Aspire.Hosting.ServiceSources;
 
 /// <summary>
-/// The <c>javascript:</c> options block of a <c>"local"</c>-sourced service whose catalog entry
+/// The <c>javascript:</c> options block of a <c>"repository"</c>-sourced service whose catalog entry
 /// declares <c>kind: javascript</c>. Deserialized from the service's opaque per-kind yaml block by
 /// <see cref="LocalKindConfig.Parse{T}"/>, which rejects any property not defined here — so every
 /// name below is part of the package's public config surface even though the type is internal.

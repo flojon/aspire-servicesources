@@ -108,7 +108,7 @@ public class ContainerConsumerTests
                 project: Inventory.csproj
             """);
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), $$"""
-            { "services": { "inventory": { "source": "local", "local": { "path": "{{projectDir.Replace("\\", "\\\\")}}" } } } }
+            { "services": { "inventory": { "source": "repository", "local": { "path": "{{projectDir.Replace("\\", "\\\\")}}" } } } }
             """);
 
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);

@@ -5,7 +5,7 @@ namespace Aspire.Hosting.ServiceSources.Java;
 
 /// <summary>
 /// The <c>java:</c> block of a service's <c>servicesources.yaml</c> entry — how to run the
-/// service's checkout once the <c>"local"</c> source has cloned it. Deserialized from the opaque
+/// service's checkout once the <c>"repository"</c> source has cloned it. Deserialized from the opaque
 /// per-kind config block by <see cref="LocalKindConfig.Parse{T}"/>; validated by
 /// <see cref="Parse"/>, which is what callers should use.
 /// </summary>

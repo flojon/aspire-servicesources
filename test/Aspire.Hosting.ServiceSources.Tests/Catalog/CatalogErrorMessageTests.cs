@@ -143,7 +143,7 @@ public class CatalogErrorMessageTests
         {
             var dir = TempDirectories.CreateSubdirectory().FullName;
             File.WriteAllText(Path.Combine(dir, "servicesources.local.json"),
-                """{ "services": { "svc": { "source": "local" } } }""");
+                """{ "services": { "svc": { "source": "repository" } } }""");
             var builder = CreateBuilder(dir);
             builder.AddServiceCatalog(c => c.AddService("svc")
                 .WithRepository("https://github.com/example/repo")

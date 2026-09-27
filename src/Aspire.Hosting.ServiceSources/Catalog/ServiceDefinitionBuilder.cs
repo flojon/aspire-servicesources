@@ -42,7 +42,7 @@ public sealed class ServiceDefinitionBuilder
     internal string ServiceName => _serviceName;
 
     /// <summary>
-    /// Declares this service's own repository — the "local" source, ungrouped. See design "The
+    /// Declares this service's own repository — the "repository" source, ungrouped. See design "The
     /// authoring API". For several services sharing one repository, see
     /// <see cref="WithSharedRepository"/>.
     /// </summary>
@@ -75,7 +75,7 @@ public sealed class ServiceDefinitionBuilder
     }
 
     /// <summary>
-    /// Declares which source (<c>"local"</c>/<c>"url"</c>/<c>"kubernetes"</c>/<c>"container"</c>) a
+    /// Declares which source (<c>"repository"</c>/<c>"url"</c>/<c>"kubernetes"</c>/<c>"container"</c>) a
     /// developer gets for this service when nothing configures it explicitly — the code-authoring
     /// equivalent of yaml's <c>defaultSource:</c> field. See design "Projection: a config layer, not
     /// a resolver branch".
@@ -156,7 +156,7 @@ public sealed class ServiceDefinitionBuilder
     }
 
     /// <summary>
-    /// Declares a bootstrap command the <c>"local"</c> source runs inside the materialized checkout
+    /// Declares a bootstrap command the <c>"repository"</c> source runs inside the materialized checkout
     /// before the kind is allowed to judge it — the code-authoring equivalent of yaml's
     /// <c>prepare:</c> block. See the "prepare" step design
     /// (<c>docs/superpowers/specs/2026-08-28-servicesources-prepare-step-design.md</c>) for what it

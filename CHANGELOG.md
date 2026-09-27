@@ -16,6 +16,22 @@ never existed. Check the tag of the last release before adding one.
 
 ## [Unreleased]
 
+### Breaking
+
+- **The `"local"` source is renamed to `"repository"`.** Same behavior — clone the catalog's
+  `repository:` url, reconcile onto `ref` — new name: `"local"` was the only source whose value
+  didn't match its own catalog block (`url`↔`url:`, `container`↔`container:`,
+  `kubernetes`↔`kubernetes:`, but `local`↔`repository:`), and it collided in spelling, though not
+  in meaning, with `servicesources.local.json` — a different "local" (per-developer settings)
+  entirely. `"local"` is retired, not aliased: a `source: "local"` entry, a `defaultSource: local`
+  catalog field, or a `.WithDefaultSource("local")` call now throws
+  `ServiceSourcesConfigurationException` naming the rename and the fix, rather than silently
+  resolving as before or falling through to a generic "unrecognized source" message. Change
+  `source: "local"` to `source: "repository"` in `servicesources.local.json` (or wherever it's
+  set), and `defaultSource: local`/`.WithDefaultSource("local")` to `"repository"` in the catalog,
+  to migrate. `local.path`/`local.ref` — the developer's per-service override block nested under
+  `source` — keep their name unchanged; only the `source` value itself renames.
+
 ## [0.6.0] - 2026-09-24
 
 ### Breaking

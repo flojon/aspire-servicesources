@@ -12,7 +12,7 @@ internal sealed class ServiceMetadata
     public string? DefaultRef { get; set; }
 
     /// <summary>
-    /// The source (<c>"local"</c>/<c>"url"</c>/<c>"kubernetes"</c>/<c>"container"</c>) a developer
+    /// The source (<c>"repository"</c>/<c>"url"</c>/<c>"kubernetes"</c>/<c>"container"</c>) a developer
     /// gets when nothing configures this service's source explicitly, projected as the
     /// lowest-precedence configuration layer by
     /// <see cref="ServiceSourcesConfigCache.LoadedConfig.Load"/>. Validated against the same closed
@@ -40,7 +40,7 @@ internal sealed class ServiceMetadata
     public ContainerMetadata? Container { get; set; }
 
     /// <summary>
-    /// A bootstrap command the <c>"local"</c> source runs inside the materialized checkout, before
+    /// A bootstrap command the <c>"repository"</c> source runs inside the materialized checkout, before
     /// the kind is allowed to judge it. Absent for the services — most of them — whose checkout is
     /// runnable the moment it is cloned.
     /// </summary>

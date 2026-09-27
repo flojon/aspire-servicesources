@@ -27,7 +27,7 @@ public class UseJavaScriptTests
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), $$"""
             {
-              "services": { "frontend": { "source": "local", "local": { "path": {{System.Text.Json.JsonSerializer.Serialize(repoRoot)}} } } }
+              "services": { "frontend": { "source": "repository", "local": { "path": {{System.Text.Json.JsonSerializer.Serialize(repoRoot)}} } } }
             }
             """);
 

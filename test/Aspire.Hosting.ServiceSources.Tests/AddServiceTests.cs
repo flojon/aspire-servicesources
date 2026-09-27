@@ -15,7 +15,7 @@ public class AddServiceTests
         TestHelpers.CreateBuilder(appHostDirectory);
 
     [Fact]
-    public void AddService_LocalSourceWithPathOverride_ReturnsTheRealRegisteredProject()
+    public void AddService_RepositorySourceWithPathOverride_ReturnsTheRealRegisteredProject()
     {
         var projectDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(projectDir, "Orders.csproj"), """
@@ -34,7 +34,7 @@ public class AddServiceTests
                 project: Orders.csproj
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), $$"""
-            { "services": { "orders": { "source": "local", "local": { "path": "{{projectDir.Replace("\\", "\\\\")}}" } } } }
+            { "services": { "orders": { "source": "repository", "local": { "path": "{{projectDir.Replace("\\", "\\\\")}}" } } } }
             """);
 
         var builder = CreateBuilder(appHostDir);
@@ -72,7 +72,7 @@ public class AddServiceTests
                 project: Orders.csproj
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), $$"""
-            { "services": { "orders": { "source": "local", "local": { "path": "{{relativePath.Replace("\\", "\\\\")}}" } } } }
+            { "services": { "orders": { "source": "repository", "local": { "path": "{{relativePath.Replace("\\", "\\\\")}}" } } } }
             """);
 
         var builder = CreateBuilder(appHostDir);
@@ -108,7 +108,7 @@ public class AddServiceTests
                 project: Orders.csproj
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), $$"""
-            { "services": { "orders": { "source": "Local", "local": { "path": "{{projectDir.Replace("\\", "\\\\")}}" } } } }
+            { "services": { "orders": { "source": "Repository", "local": { "path": "{{projectDir.Replace("\\", "\\\\")}}" } } } }
             """);
 
         var builder = CreateBuilder(appHostDir);
@@ -194,7 +194,7 @@ public class AddServiceTests
         Assert.Contains("orders", ex.Message);
         Assert.Contains("docker", ex.Message);
         Assert.Contains("unknown source", ex.Message);
-        Assert.Contains("'local'", ex.Message);
+        Assert.Contains("'repository'", ex.Message);
         Assert.Contains("'kubernetes'", ex.Message);
         Assert.Contains("'url'", ex.Message);
         Assert.Contains("'container'", ex.Message);
@@ -203,6 +203,62 @@ public class AddServiceTests
         // The key as well as the file, since the file is only the lowest layer it can arrive from.
         Assert.Contains("'ServiceSources:Services:orders:source'", ex.Message);
         Assert.Contains("ServiceSources__Services__orders__source", ex.Message);
+    }
+
+    /// <summary>
+    /// "local" is retired, not aliased: a config still naming it gets the specific migration this
+    /// is, naming the rename and the fix, rather than either silently resolving as before or the
+    /// generic "unknown source" complaint <see cref="AddService_UnknownSource_ReportsItAsUnknownAndNamesTheSourcesThatDoExist"/>
+    /// covers.
+    /// </summary>
+    [Fact]
+    public void AddService_SourceLocal_ReportsTheRenameToRepository()
+    {
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "local" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
+
+        Assert.Contains("Service 'orders'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("renamed", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("'repository'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("source", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("servicesources.local.json", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("unknown source", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("not a valid source", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>Case-insensitive, like every other source-name comparison in this package.</summary>
+    [Fact]
+    public void AddService_SourceLOCALAnyCasing_StillReportsTheRename()
+    {
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "LOCAL" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
+
+        Assert.Contains("renamed", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("'repository'", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -315,10 +371,10 @@ public class AddServiceTests
     }
 
     [Fact]
-    public void AddService_UrlOnlyEntrySelectedAsLocal_ReportsTheMissingRepositoryNamingTheCatalogThatDeclaresIt()
+    public void AddService_UrlOnlyEntrySelectedAsRepository_ReportsTheMissingRepositoryNamingTheCatalogThatDeclaresIt()
     {
         // The end-to-end shape of #362: the catalog declares a source that is not a repository, and
-        // servicesources.local.json picks 'local' for it anyway.
+        // servicesources.local.json picks 'repository' for it anyway.
         var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
             services:
@@ -328,7 +384,7 @@ public class AddServiceTests
                   url: https://orders.example.com
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
-            { "services": { "orders": { "source": "local" } } }
+            { "services": { "orders": { "source": "repository" } } }
             """);
 
         var builder = CreateBuilder(appHostDir);
@@ -643,7 +699,7 @@ public class AddServiceTests
                 project: Orders.csproj
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
-            { "services": { "orders": { "source": "local",
+            { "services": { "orders": { "source": "repository",
                 "local": { "path": "/tmp/orders", "scheme": "https" } } } }
             """);
 

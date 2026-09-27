@@ -1,7 +1,7 @@
 namespace Aspire.Hosting.ServiceSources.Config;
 
 /// <summary>
-/// The developer's settings for the <c>"local"</c> source, read from the <c>local</c> block of a
+/// The developer's settings for the <c>"repository"</c> source, read from the <c>local</c> block of a
 /// service's entry. Bound only when that is the entry's effective source.
 /// </summary>
 internal sealed class LocalDeveloperConfig

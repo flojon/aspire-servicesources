@@ -19,7 +19,7 @@ per-developer choice, made without ever touching the AppHost's `.csproj`/`.sln`.
 
 `AddService()` is the seam: the AppHost calls it once per service, and a developer-local
 config file decides how it's actually resolved — a managed or self-managed local git
-checkout (`"local"`), a `kubectl port-forward` against a dev cluster (`"kubernetes"`), a
+checkout (`"repository"`), a `kubectl port-forward` against a dev cluster (`"kubernetes"`), a
 fixed, already-known URL (`"url"`), or a published container image run locally
 (`"container"`) — behind one stable return type, so the AppHost code never has to change
 when a developer switches sources.
@@ -175,7 +175,7 @@ values you type into `servicesources.local.json`:
 
 | Builder method | yaml it replaces | `"source"` it enables |
 | --- | --- | --- |
-| `WithRepository` + `WithProject` + `WithKind` | `repository:`, `project:`, `defaultRef:`, `kind:` | `"local"` |
+| `WithRepository` + `WithProject` + `WithKind` | `repository:`, `project:`, `defaultRef:`, `kind:` | `"repository"` |
 | `WithUrl` | `url:` | `"url"` |
 | `WithContainer` | `container:` | `"container"` |
 | `WithKubernetes` | `kubernetes:` | `"kubernetes"` |
@@ -188,10 +188,10 @@ equivalent of yaml's `defaultSource:`:
 catalog.AddService("orders")
     .WithRepository("https://github.com/example/orders", defaultRef: "main")
     .WithProject("src/Orders.Api/Orders.Api.csproj")
-    .WithDefaultSource("local");
+    .WithDefaultSource("repository");
 ```
 
-The same caveat as the yaml field applies: `WithDefaultSource("local")` means every developer, and
+The same caveat as the yaml field applies: `WithDefaultSource("repository")` means every developer, and
 CI, clones by default unless CI pins its own source.
 
 `WithContainer`/`WithKubernetes` both take a `scheme` parameter — the code-authoring
@@ -207,7 +207,7 @@ catalog.AddService("payments")
 
 Left unset on either call, `scheme` defaults to `http`, same as yaml.
 
-A `"local"` service can also declare a `prepare:`-equivalent bootstrap command:
+A `"repository"` service can also declare a `prepare:`-equivalent bootstrap command:
 
 ```csharp
 catalog.AddService("catalog")
@@ -218,7 +218,7 @@ catalog.AddService("catalog")
 
 `WithPrepare(command, windowsCommand: null, mode: PrepareMode.OncePerCommit)` is the
 code-authoring equivalent of yaml's `prepare:` block — see "`prepare`: a checkout that has to
-bootstrap itself" (under `"local"` source options below) for what it runs and when. `mode`
+bootstrap itself" (under `"repository"` source options below) for what it runs and when. `mode`
 takes a `PrepareMode` value — `PrepareMode.OncePerCommit` (the default), `.Once`, `.Always`,
 `.Never` — the enum behind yaml's four `mode` spellings (`"oncePerCommit"`, `"once"`,
 `"always"`, `"never"`).
@@ -234,7 +234,7 @@ service is a configuration error naming the service and the block, not a silent 
 A service declared in both the code catalog and `servicesources.yaml` is an error too,
 naming both sources — not a merge, and not a silent precedence rule.
 
-A `"local"` service that isn't the built-in `dotnet` kind takes its options through
+A `"repository"` service that isn't the built-in `dotnet` kind takes its options through
 `WithKind`, the same primitive a third-party kind package builds on. Registering and using
 one is three lines:
 
@@ -263,7 +263,7 @@ itself would.
 says what a service *is* — its repository, its URL, its container image — the same job
 `servicesources.yaml` does. It does not decide how to resolve it for you personally: that
 is still `servicesources.local.json`'s job, per developer, per service, with the same
-`"source"` values (`"local"`/`"url"`/`"container"`/`"kubernetes"`) it always took. A
+`"source"` values (`"repository"`/`"url"`/`"container"`/`"kubernetes"`) it always took. A
 service declared only in code and never given a `servicesources.local.json` entry fails to
 resolve exactly as a yaml-declared one would.
 
@@ -313,10 +313,10 @@ services:
     repository: https://github.com/example/orders
     project: src/Orders.Api/Orders.Api.csproj
     defaultRef: main
-    defaultSource: local     # optional; the source a developer gets with no entry of their own
+    defaultSource: repository     # optional; the source a developer gets with no entry of their own
 ```
 
-**`defaultSource: local` means every developer, and CI, clones and builds that repository by
+**`defaultSource: repository` means every developer, and CI, clones and builds that repository by
 default** — including on a machine or pipeline that never explicitly asked for it. If CI should not
 clone, CI must pin its own source (an environment variable, or its own configuration layer) rather
 than relying on the absence of a file.
@@ -327,7 +327,7 @@ per-developer):**
 ```json
 {
   "services": {
-    "orders": { "source": "local" }
+    "orders": { "source": "repository" }
   }
 }
 ```
@@ -341,7 +341,15 @@ That's it — running the AppHost now clones `orders` into
 Aspire's own project orchestration, wired up to `api` through service discovery exactly like
 a project reference would be.
 
-### `"local"` source options
+### `"repository"` source options
+
+> Renamed from `"local"`, which used to collide in spelling (though not in meaning) with
+> `servicesources.local.json` — a different "local" (per-developer settings) entirely, and was the
+> only source whose value didn't match its own catalog block (`url`↔`url:`, `container`↔`container:`,
+> `kubernetes`↔`kubernetes:`, but `local`↔`repository:`). Same behavior either way — clone the
+> catalog's `repository:` url, reconcile onto `ref`. A config still naming `source: "local"` fails
+> with a specific error naming the rename and the fix, rather than a generic "unrecognized source"
+> message.
 
 Requires `git` (2.7 or newer) on `PATH` for a managed checkout — the same "a tool you already
 have" trade the `"kubernetes"` source makes with `kubectl`. Every git operation runs under your own
@@ -351,9 +359,9 @@ service pointed at your own directory with `path` needs no git at all.
 ```json
 {
   "services": {
-    "orders": { "source": "local" },
+    "orders": { "source": "repository" },
     "payments": {
-      "source": "local",
+      "source": "repository",
       "local": { "path": "/home/dev/code/payments", "ref": "feature/new-checkout" }
     }
   }
@@ -393,7 +401,7 @@ service pointed at your own directory with `path` needs no git at all.
   after the first — is resolved only for the services you add, and so is a `path` override. And a
   service whose first checkout is *deferred* is cloned only when you add it: a deferred
   registration blocks on nothing, so its clone no longer has to be started ahead of demand to run
-  alongside the others. With `UseDeferredCheckout()` on, a config listing ten `"local"` services in
+  alongside the others. With `UseDeferredCheckout()` on, a config listing ten `"repository"` services in
   front of an AppHost that adds two downloads two (#76).
 
   Either way, only the services you actually add are reconciled to their configured `ref`: a
@@ -523,7 +531,7 @@ incorrect under every mode.
 Nothing here detects that a step's *outputs* are stale — at most that the checkout moved. That is
 deliberate: nothing in the catalog says what your script reads and writes, hashing the working tree
 is expensive and answers wrongly in both directions, and re-running whenever the tree is dirty would
-pay the full bootstrap on every start for exactly the developer `"local"` exists to serve.
+pay the full bootstrap on every start for exactly the developer `"repository"` exists to serve.
 Incremental rebuild is a solved problem with real dependency graphs behind it — `make`, Gradle,
 MSBuild, `npm ci` — so `mode: always` with a command that guards itself delegates to them:
 
@@ -554,7 +562,7 @@ script is entitled to run `git clean`. So the command that runs there has to be 
 {
   "services": {
     "routing": {
-      "source": "local",
+      "source": "repository",
       "local": {
         "path": "/home/dev/code/routing",
         "prepare": { "command": ["./prepare.sh"] }
@@ -616,7 +624,7 @@ concurrently with *itself*.
 between steps, no caching of produced artifacts across developers, no timeout (Ctrl-C works on a
 deferred first run, and a country-sized routing graph has no defensible default) and no injected
 environment variables.
-`prepare` also belongs to the `"local"` *service* source; the `"local"` source a
+`prepare` also belongs to the `"repository"` *service* source; the `"local"` source a
 [backing service](#backing-services-databases-brokers-and-caches) can have means something else
 entirely, with no repository and so nothing to bootstrap.
 
@@ -642,15 +650,15 @@ Two things to know when it goes wrong:
 
   ```text
   fail: Aspire.Hosting.ServiceSources[0]
-        Service 'orders' is configured as 'local' and its resource is not running: it reported
+        Service 'orders' is configured as 'repository' and its resource is not running: it reported
         'Finished' with exit code 1. This console does not carry that resource's output, so
         nothing here says why — its own console in the Aspire dashboard does, at the dashboard
-        URL logged above. A 'local' service runs from a checkout rather than from a project
+        URL logged above. A 'repository' service runs from a checkout rather than from a project
         added to this AppHost, and the build of that checkout writes to those same logs — so a
         failure to compile is reported nowhere else at all.
   ```
 
-  One line per failing resource instance, for every source rather than `"local"` alone, whenever
+  One line per failing resource instance, for every source rather than `"repository"` alone, whenever
   it reports `FailedToStart` or ends with a non-zero exit code. A replicated service gets one line
   per replica that failed, naming which one and its own exit code; an unreplicated one gets a
   single line and no instance id.
@@ -667,7 +675,7 @@ Two things to know when it goes wrong:
   `DistributedApplicationTestingBuilder` host, or an AppHost that turned it off — the line points
   at the resource's own logs instead of naming a dashboard that isn't there.
 
-  `"local"` is where this matters most, and why it was asked for there. You never added the
+  `"repository"` is where this matters most, and why it was asked for there. You never added the
   project — you wrote a name in `servicesources.local.json` — and you didn't choose where its code
   lives, so a resource that quietly fails to appear is one you may not know to look for. The same
   reasoning already covers a clone that fails for a service nothing waits on; this is the step
@@ -694,7 +702,7 @@ several repositories clone — and a checkout that fails throws out of compositi
 whole AppHost down with it, including the services that were fine.
 
 `builder.UseDeferredCheckout()` moves that wait past startup for the case where it hurts: a
-`"local"` service whose *managed* checkout doesn't exist yet. The resource is registered against
+`"repository"` service whose *managed* checkout doesn't exist yet. The resource is registered against
 the path its checkout will have, held back with Aspire's own explicit-start behaviour, cloned
 while the AppHost runs, and started when its checkout lands:
 
@@ -716,7 +724,7 @@ a kind of your own, [Implementing a kind](#implementing-a-kind) covers the two m
 this and what declining late costs.
 
 It also stops the AppHost downloading repositories it doesn't use. Without deferral the clones have
-to start before the AppHost has said which services it wants, so every `"local"` entry with no
+to start before the AppHost has said which services it wants, so every `"repository"` entry with no
 checkout yet is cloned; a deferred one is cloned only when it is added (#76).
 
 The wait is one you can watch. git's own progress becomes the service's state — the phase it is
@@ -775,7 +783,7 @@ Scoped deliberately narrowly, so the blast radius is first-run-only:
 - Only a checkout that doesn't exist yet. A warm checkout — every run after the first — takes
   the existing eager path unchanged, with full launch-profile fidelity.
 - Only managed checkouts. A `path` override is your own directory; there is nothing to clone.
-- Only the `"local"` source, and within it only the kinds that own a managed checkout: `dotnet`,
+- Only the `"repository"` source, and within it only the kinds that own a managed checkout: `dotnet`,
   `java` and `javascript`. The other sources — `url`, `kubernetes` and `container` — never clone a
   repository, so they have nothing to defer.
 - Only run mode. `aspire publish` and manifest generation clone first as they always have; a
@@ -954,7 +962,7 @@ whole group's shared checkout in one setting.
 
 ### Non-.NET local services: `kind`
 
-A `"local"` service is resolved as a .NET project by default. Set `kind` in the catalog to run
+A `"repository"` service is resolved as a .NET project by default. Set `kind` in the catalog to run
 the checkout some other way — the git clone/checkout is identical, only what gets built out of
 the resulting directory changes:
 
@@ -1082,7 +1090,7 @@ services:
       port: 8080
 ```
 
-The checkout is cloned exactly as for any other `"local"` service (`path`, `ref`, and
+The checkout is cloned exactly as for any other `"repository"` service (`path`, `ref`, and
 `defaultRef` all behave identically), then handed to that integration to run.
 
 **`java:` block options**
@@ -1173,7 +1181,7 @@ builder.AddService("catalog")
 
 Prefer the native vocabulary `ServiceResource` already exposes (`WithEnvironment`, `WithReference`,
 `WithArgs`, `WithEndpoint`/`WithHttpEndpoint`/`WithHttpsEndpoint`, `WaitFor`/`WaitForCompletion`) for anything that
-should survive a developer switching that service to a non-`local` source — `Unwrap<T>()` throws if
+should survive a developer switching that service to a non-`repository` source — `Unwrap<T>()` throws if
 the service no longer resolves to a Java resource, which is the point when the AppHost genuinely
 requires one.
 
@@ -1473,7 +1481,7 @@ The one wait not reported is the `WaitForStart` Aspire adds itself for each reso
 `AddConnectionString` expression references — nobody wrote it, so there is no line to point at.
 
 Note what this does **not** promise: the URL is not fetched, so the consumer starts whether or not
-anything is listening. A `WaitFor` written against a `"local"` service keeps its full meaning the
+anything is listening. A `WaitFor` written against a `"repository"` service keeps its full meaning the
 moment the service is switched back, which is the point — a developer choosing `"url"` in their own
 `servicesources.local.json` must not hang an AppHost they don't own. See
 [#170](https://github.com/flojon/aspire-servicesources/issues/170).
@@ -1580,14 +1588,14 @@ services:
       defaultTag: latest
 ```
 
-A developer editing the service picks `"local"`; one debugging against a shared dev cluster
+A developer editing the service picks `"repository"`; one debugging against a shared dev cluster
 picks `"kubernetes"`; one who just needs it reachable picks `"url"` or `"container"` — same
 catalog entry, same `AddService("orders")` call in the AppHost, no code changes either way.
 Each developer's own `servicesources.local.json` just names which source applies to them —
 editing `orders` locally:
 
 ```json
-{ "services": { "orders": { "source": "local" } } }
+{ "services": { "orders": { "source": "repository" } } }
 ```
 
 debugging against a shared dev cluster:
@@ -1602,7 +1610,7 @@ or just needing it reachable, not caring how:
 { "services": { "orders": { "source": "url" } } }
 ```
 
-The `source` value is matched without regard to case, so `"local"`, `"Local"` and `"LOCAL"` all name
+The `source` value is matched without regard to case, so `"repository"`, `"Repository"` and `"REPOSITORY"` all name
 the same source. A name none of the four has is refused at composition time, naming the ones that
 exist. (The `kind` names in `servicesources.yaml` are the exception — those *are* case-sensitive,
 because anything may register one and two registrations must not be able to collide by spelling.)
@@ -1650,7 +1658,7 @@ even this file — see the row above the base:
 >
 > builder.UseDeferredCheckout();
 >
-> // "local" — the file joined the chain on the line above.
+> // "repository" — the file joined the chain on the line above.
 > source = builder.Configuration["ServiceSources:Services:orders:source"];
 > ```
 >
@@ -1907,7 +1915,7 @@ Configured under a new `backingServices:` section of `servicesources.local.json`
 
 ```jsonc
 {
-  "services": { "orders": { "source": "local" } },
+  "services": { "orders": { "source": "repository" } },
   "backingServices": {
     "orders-db": {
       "source": "direct",
@@ -2260,9 +2268,9 @@ exposes is decided by whichever source resolved it:
 
 | Source | Endpoint name |
 |---|---|
-| `"local"`, `kind: dotnet` | whatever the launch profile's `applicationUrl` declares (`http`, `https`, or both) |
-| `"local"`, `kind: javascript` | `http` |
-| `"local"`, `kind: java` | the configured `java.scheme`, `http` unless set |
+| `"repository"`, `kind: dotnet` | whatever the launch profile's `applicationUrl` declares (`http`, `https`, or both) |
+| `"repository"`, `kind: javascript` | `http` |
+| `"repository"`, `kind: java` | the configured `java.scheme`, `http` unless set |
 | `"url"` | the configured URL's scheme |
 | `"kubernetes"`, `"container"` | the configured `scheme`, `http` unless set |
 
@@ -2303,7 +2311,7 @@ consumer speaks service discovery: it injects every endpoint the service has und
 whichever is there. `GetServiceEndpoint()` is for the case a plain URL in a plain environment
 variable is what the consumer reads.
 
-`GetEndpoint("<scheme>")` still has its place — a service you know will never move off `"local"`,
+`GetEndpoint("<scheme>")` still has its place — a service you know will never move off `"repository"`,
 or an endpoint you added yourself through `WithHttpEndpoint`/`WithHttpsEndpoint`. Just don't reach
 for it across a service whose source a developer chooses.
 
@@ -2319,21 +2327,21 @@ await builder
 ## Sample
 
 `samples/DemoAppHost` is a minimal working AppHost demonstrating all three easily-runnable
-sources: `orders` via a real managed `"local"` git checkout (a small project cloned from
+sources: `orders` via a real managed `"repository"` git checkout (a small project cloned from
 [`dotnet/aspire-samples`](https://github.com/dotnet/aspire-samples)), `inventory` via the
 `"url"` source (pointing at [httpbin.org](https://httpbin.org), a live public test API), and
 `payments` via the `"container"` source (the `nginxdemos/hello` hello-world image) — run it to
 see the whole flow end to end. (`"kubernetes"` isn't demoed here since it needs a real cluster
 and `kubectl`; see its section above.)
 
-It also carries a `catalog` service showing `kind: java` — a `"local"` checkout of
+It also carries a `catalog` service showing `kind: java` — a `"repository"` checkout of
 [Spring PetClinic](https://github.com/spring-projects/spring-petclinic) run with its own Maven
 wrapper; `java` being a built-in kind, no `Program.cs` registration is needed. `AddService("catalog")`
 is commented out and the service is left out of `servicesources.local.json.example`, since unlike
 the three above it needs a JDK. To run it, do both: uncomment the call and add
-`"catalog": { "source": "local" }` to your `servicesources.local.json`. Leaving it out of that file
+`"catalog": { "source": "repository" }` to your `servicesources.local.json`. Leaving it out of that file
 by default is what keeps the sample from cloning PetClinic on its first run: the sample does not
-call `UseDeferredCheckout()`, so the first `AddService` clones every `"local"` entry there that has
+call `UseDeferredCheckout()`, so the first `AddService` clones every `"repository"` entry there that has
 no checkout yet, whether or not you add it.
 
 ```bash
@@ -2420,7 +2428,7 @@ complete dump, type names, inner-exception blocks, stack traces and all.
 
 ## Status
 
-Early stage, evolving fast. `"local"`, `"kubernetes"`, `"url"`, and `"container"` sources are
+Early stage, evolving fast. `"repository"`, `"kubernetes"`, `"url"`, and `"container"` sources are
 all implemented — see [`docs/superpowers/`](docs/superpowers/) for design and implementation
 history, including the phase 2 backlog (repo auto-update, config discovery walk-up,
 dependency/infrastructure resolution, and more).

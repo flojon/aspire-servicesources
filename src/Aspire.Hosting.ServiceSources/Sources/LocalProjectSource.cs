@@ -38,7 +38,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         // Settled before paying for a checkout: looking the kind up is a dictionary probe against
         // registry state, needs no working tree, and running it after the clone would make a typo'd
         // kind — or a kind nobody registered — cost a cold clone of this repository before saying
-        // so. Only the first "local" AddService gets even that ahead of every clone: the prefetch
+        // so. Only the first "repository" AddService gets even that ahead of every clone: the prefetch
         // below starts the speculative ones at once, so once any service has been resolved they are
         // already in flight and this check no longer runs in front of them.
         //
@@ -95,7 +95,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
             ValidateProject(serviceName, definition.Project);
         }
 
-        // Starts the checkouts an AddService call would have to block on — every "local" service
+        // Starts the checkouts an AddService call would have to block on — every "repository" service
         // whose first clone nothing else is going to run — at once, on background threads, and
         // returns without waiting for any of them. See LocalCheckoutPrefetch.
         var prefetch = LocalCheckoutPrefetch.For(builder, gitClient);
@@ -170,7 +170,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
                 // Run mode only, which is the same gate DeferredCheckout.ShouldDefer applies and for
                 // a related reason: publish mode composes the model, writes the manifest and exits,
                 // and a bootstrap produces what a service needs in order to run. Without this,
-                // deferral being refused in publish mode means every "local" service takes this path,
+                // deferral being refused in publish mode means every "repository" service takes this path,
                 // so an `aspire publish` over a cold checkout pays the full download and import — for
                 // the motivating case, hundreds of megabytes and a multi-minute graph build — to emit
                 // a manifest that describes none of it.
@@ -225,7 +225,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
             // directory and its "--project" argument while preparing the model, which happens
             // before the dashboard is up. Mutating ProjectPath afterwards changes nothing, so the
             // absolute path has to be settled before Build() whatever the launch profile does.
-            return ResolvedService.Bridge(builder.AddProject(serviceName, projectPath), serviceName, "local");
+            return ResolvedService.Bridge(builder.AddProject(serviceName, projectPath), serviceName, "repository");
         }
 
         // The handler's verdict on the service's configuration, now that there is a checkout to
@@ -239,7 +239,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     }
 
     /// <summary>
-    /// Refuses a <c>"local"</c> service whose catalog entry declares no repository to clone.
+    /// Refuses a <c>"repository"</c> service whose catalog entry declares no repository to clone.
     /// </summary>
     /// <remarks>
     /// A <c>local.path</c> override is exempt: it points at a checkout the developer already has, so
@@ -265,7 +265,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         var serviceKey = Raw.Compose($"{Raw.Literal(DeveloperConfiguration.ServicesKey)}:{new Name(serviceName)}");
 
         throw ServiceSourcesConfigurationException.For(
-            $"Service '{new Name(serviceName)}' source is 'local' but {Raw.Origin(definition.Origin)} gives it no "
+            $"Service '{new Name(serviceName)}' source is 'repository' but {Raw.Origin(definition.Origin)} gives it no "
             + $"repository to clone. Either {DeclareRepositoryRemedy(serviceName, definition)}, or set "
             + $"'{serviceKey}:local:path' to a checkout you already have on disk, which needs no "
             + $"repository. The key is '{serviceKey}:source', which any configuration layer can set: "
@@ -484,7 +484,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
                 + $"{Raw.Literal(nameof(ILocalResourceKind))}.{Raw.Literal(nameof(ILocalResourceKind.Resolve))} must return the resource it created.");
         }
 
-        return ResolvedService.Bridge(resourceBuilder, serviceName, "local");
+        return ResolvedService.Bridge(resourceBuilder, serviceName, "repository");
     }
 
     /// <summary>
@@ -547,7 +547,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         if (string.IsNullOrWhiteSpace(project))
         {
             throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': 'project' is required for a 'local' service of kind 'dotnet'. It names "
+                $"Service '{new Name(serviceName)}': 'project' is required for a 'repository' service of kind 'dotnet'. It names "
                 + $"the project file to run, relative to the service's checkout — for example "
                 + $"'src/Orders.Api/Orders.Api.csproj'. It belongs on the service's 'servicesources.yaml' entry "
                 + $"beside 'repository'; 'servicesources.local.json' chooses the source and carries no 'project'.");

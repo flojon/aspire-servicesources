@@ -624,7 +624,7 @@ internal static class LocalGitCheckout
     /// <remarks>
     /// The <c>finally</c> in <see cref="CloneIntoPlace"/> removes the scratch directory on every
     /// path it controls, but it does not run when the process is killed — and checkouts are cloned
-    /// speculatively on background threads for every <c>"local"</c> service in
+    /// speculatively on background threads for every <c>"repository"</c> service in
     /// <c>servicesources.local.json</c>, including ones this AppHost never calls <c>AddService</c>
     /// for (see <see cref="Sources.LocalCheckoutPrefetch"/>). A Ctrl-C during startup, or the host
     /// exiting while an unrequested clone is still in flight, therefore leaks a partial copy of a

@@ -5,7 +5,7 @@ using Aspire.Hosting.ServiceSources.Messages;
 namespace Aspire.Hosting.ServiceSources;
 
 /// <summary>
-/// Resolves a <c>"local"</c>-sourced service whose catalog entry declares <c>kind: javascript</c>
+/// Resolves a <c>"repository"</c>-sourced service whose catalog entry declares <c>kind: javascript</c>
 /// by handing the already-cloned checkout to <c>Aspire.Hosting.JavaScript</c>. This package owns no
 /// process-launch logic of its own: it translates the service's <c>javascript:</c> options block
 /// into the matching <c>AddJavaScriptApp</c>/<c>AddViteApp</c>/<c>AddNextJsApp</c>/

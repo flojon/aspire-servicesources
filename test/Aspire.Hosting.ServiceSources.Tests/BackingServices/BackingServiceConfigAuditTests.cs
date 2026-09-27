@@ -250,7 +250,7 @@ public class BackingServiceConfigAuditTests
     public async Task ServicesRootKeyAlone_IsNotReadAsAMisspelling()
     {
         var builder = CreateBuilder("""
-            { "services": { "orders": { "source": "local" } } }
+            { "services": { "orders": { "source": "repository" } } }
             """);
 
         builder.AddBackingService("orders-db", Factory(builder, "orders-db"));

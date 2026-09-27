@@ -1,7 +1,7 @@
 namespace Aspire.Hosting.ServiceSources.Sources;
 
 /// <summary>
-/// The <see cref="IProjectMetadata"/> a deferred <c>"local"</c> service is registered with: a
+/// The <see cref="IProjectMetadata"/> a deferred <c>"repository"</c> service is registered with: a
 /// <c>.csproj</c> path that does not exist yet, plus just enough launch-settings cover to get the
 /// resource through composition without one.
 /// </summary>
