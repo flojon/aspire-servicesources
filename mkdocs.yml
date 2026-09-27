@@ -29,7 +29,8 @@ exclude_docs: |
 nav:
   - Home: index.md
   - Authoring in code: authoring-in-code.md
-  - The "local" source: local-source.md
+  - The yaml catalog: yaml-catalog.md
+  - The "repository" and "path" sources: local-source.md
   - Non-.NET services (kind): kinds.md
   - Other sources: other-sources.md
   - Configuration: configuration.md

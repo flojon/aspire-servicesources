@@ -14,11 +14,11 @@ only describe *what* it depends on; where that dependency actually comes from is
 per-developer choice, made without ever touching the AppHost's `.csproj`/`.sln`.
 
 `AddService()` is the seam: the AppHost calls it once per service, and a developer-local
-config file decides how it's actually resolved — a managed or self-managed local git
-checkout (`"local"`), a `kubectl port-forward` against a dev cluster (`"kubernetes"`), a
-fixed, already-known URL (`"url"`), a published container image run locally
-(`"container"`), or nothing at all (`"disabled"`) — behind one stable return type, so the
-AppHost code never has to change when a developer switches sources.
+config file decides how it's actually resolved — a managed git checkout (`"repository"`) or a
+directory already checked out beside the AppHost (`"path"`), a `kubectl port-forward` against
+a dev cluster (`"kubernetes"`), a fixed, already-known URL (`"url"`), a published container
+image run locally (`"container"`), or nothing at all (`"disabled"`) — behind one stable return
+type, so the AppHost code never has to change when a developer switches sources.
 
 ## Install
 
@@ -82,41 +82,48 @@ hosting package for its language too — see [Non-.NET local services](kinds.md)
 
 ## Getting started
 
-**1. Declare the service in `Program.cs`:**
+A service catalog is declared in the AppHost's own language — C# directly, or TypeScript
+(and any other Aspire guest language) through Aspire's Type System — via
+`AddServiceCatalog`, covered in full under
+[Authoring the catalog in code](authoring-in-code.md). It can be declared in
+`servicesources.yaml` instead; see [The yaml catalog](yaml-catalog.md) for that walkthrough.
+Everything else on this site applies the same way regardless of which one you use.
+
+**1. Declare the catalog and the service in `Program.cs`:**
 
 ```csharp
 using Aspire.Hosting.ServiceSources;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
-var orders = builder.AddService("orders");
-var api = builder.AddProject<Projects.Api>("api")
+builder.AddServiceCatalog(catalog =>
+{
+    catalog.AddService("orders")
+        .WithRepository("https://github.com/example/orders", defaultRef: "main")
+        .WithProject("src/Orders.Api/Orders.Api.csproj");
+});
+
+var orders = builder.AddService("orders");             // "orders" lives in a separate repository
+var api = builder.AddProject<Projects.Api>("api")       // "api" is part of *this* AppHost's own solution
     .WithReference(orders);
 
 builder.Build().Run();
 ```
 
-**2. Add the shared catalog, `servicesources.yaml`, next to the AppHost project (commit this
-file):**
+`AddProject<Projects.Api>()` only works for a project `ProjectReference`d from the AppHost's own
+`.csproj` — an external service like `orders` has no such reference to generate `Projects.Orders`
+from, which is exactly what `AddService()` is for. (A service that isn't a .NET project also
+takes a `WithKind`/`AsJava`/`AsJavaScript` call instead of `WithProject` — see
+[Non-.NET local services](kinds.md).) `AddServiceCatalog` must be called before the first
+`AddService(...)` call anywhere in the AppHost.
 
-```yaml
-services:
-  orders:
-    repository: https://github.com/example/orders
-    project: src/Orders.Api/Orders.Api.csproj
-    defaultRef: main          # optional; branch, tag, or commit SHA
-```
-
-(A service that isn't a .NET project also takes a `kind` — see
-[Non-.NET local services](kinds.md).)
-
-**3. Add your own `servicesources.local.json` next to it (gitignore this file — it's
-per-developer):**
+**2. Add your own `servicesources.local.json` next to the AppHost project (gitignore this
+file — it's per-developer):**
 
 ```json
 {
   "services": {
-    "orders": { "source": "local" }
+    "orders": { "source": "repository" }
   }
 }
 ```
@@ -128,11 +135,14 @@ a project reference would be.
 
 ## Documentation map
 
-- [Authoring the catalog in code](authoring-in-code.md) — declare the same catalog in C# or
-  TypeScript instead of yaml, via `AddServiceCatalog`.
-- [The `"local"` source](local-source.md) — managed git checkouts, the `prepare` bootstrap
-  step, why a checkout doesn't inherit your repository's build settings, and grouping several
-  services under one repository.
+- [Authoring the catalog in code](authoring-in-code.md) — the full `AddServiceCatalog` API in
+  C# and TypeScript: every source, `kind` options, `prepare`, and `defaultSource`.
+- [The yaml catalog](yaml-catalog.md) — declare the same catalog in `servicesources.yaml`
+  instead of code.
+- [The `"repository"` and `"path"` sources](local-source.md) — managed git checkouts, a
+  directory already checked out beside the AppHost, the `prepare` bootstrap step, why a
+  checkout doesn't inherit your repository's build settings, and grouping several services
+  under one repository.
 - [Non-.NET local services (`kind`)](kinds.md) — the built-in `javascript` and `java` kinds,
   and how to implement your own.
 - [Other sources: `kubernetes`, `url`, `container`, `disabled`](other-sources.md) — a
@@ -146,8 +156,8 @@ a project reference would be.
 
 ## Status
 
-Early stage, evolving fast. `"local"`, `"kubernetes"`, `"url"`, `"container"` and `"disabled"`
-sources are all implemented. Changes are recorded in the
+Early stage, evolving fast. `"repository"`, `"path"`, `"kubernetes"`, `"url"`, `"container"`
+and `"disabled"` sources are all implemented. Changes are recorded in the
 [changelog](https://github.com/flojon/aspire-servicesources/blob/main/CHANGELOG.md); how a
 release is cut is in
 [`RELEASING.md`](https://github.com/flojon/aspire-servicesources/blob/main/RELEASING.md); the

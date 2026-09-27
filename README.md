@@ -81,14 +81,6 @@ does not control — where neither raising it nor removing it may be yours to do
 `ServiceSourcesSkipGuestLanguageFloorCheck=true` in that project to turn the check off; the version
 problem is then reported at run time, by the service that needed it.
 
-Or reference the project directly from your AppHost instead:
-
-```xml
-<ItemGroup>
-  <ProjectReference Include="path/to/Aspire.Hosting.ServiceSources/Aspire.Hosting.ServiceSources.csproj" />
-</ItemGroup>
-```
-
 Requires .NET 8 or later (net8.0, net9.0, and net10.0 are all supported) and an AppHost
 project using the `Aspire.AppHost.Sdk` (`aspire new` / `aspire restore` sets this up).
 
@@ -99,60 +91,48 @@ while the version is below `1.0.0`, a breaking change can ship in a minor releas
 
 ## Getting started
 
-A service catalog can be declared either in `servicesources.yaml` — the walkthrough below
-— or in code via `AddServiceCatalog`, covered in full under
-[Authoring the catalog in code](https://github.com/flojon/aspire-servicesources/blob/main/docs/authoring-in-code.md). This walkthrough uses
-yaml because it's the simplest on-ramp; the "in code" section covers the alternative in
-full, and everything else in this README applies the same way regardless of which one you
-use.
+A service catalog is declared in the AppHost's own language — C# directly, or TypeScript
+(and any other Aspire guest language) through Aspire's Type System — via
+`AddServiceCatalog`, covered in full under
+[Authoring the catalog in code](https://github.com/flojon/aspire-servicesources/blob/main/docs/authoring-in-code.md). It can be declared in
+`servicesources.yaml` instead; see
+[The yaml catalog](https://github.com/flojon/aspire-servicesources/blob/main/docs/yaml-catalog.md) for that walkthrough. Everything else in this
+README applies the same way regardless of which one you use.
 
-**1. Declare the service in `Program.cs`:**
+**1. Declare the catalog and the service in `Program.cs`:**
 
 ```csharp
 using Aspire.Hosting.ServiceSources;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
-var orders = builder.AddService("orders");
-var api = builder.AddProject<Projects.Api>("api")
+builder.AddServiceCatalog(catalog =>
+{
+    catalog.AddService("orders")
+        .WithRepository("https://github.com/example/orders", defaultRef: "main")
+        .WithProject("src/Orders.Api/Orders.Api.csproj");
+});
+
+var orders = builder.AddService("orders");             // "orders" lives in a separate repository
+var api = builder.AddProject<Projects.Api>("api")       // "api" is part of *this* AppHost's own solution
     .WithReference(orders);
 
 builder.Build().Run();
 ```
 
-**2. Add the shared catalog, `servicesources.yaml`, next to the AppHost project (commit this
-file):**
+`AddProject<Projects.Api>()` only works for a project `ProjectReference`d from the AppHost's own
+`.csproj` — it needs a real project in the solution to generate `Projects.Api` from, which is
+exactly what an external service like `orders` doesn't have. That's what `AddService()` is for:
+it takes a plain string name and resolves per developer instead of at compile time.
 
-```yaml
-services:
-  orders:
-    repository: https://github.com/example/orders
-    project: src/Orders.Api/Orders.Api.csproj
-    defaultRef: main          # optional; branch, tag, or commit SHA
-```
+(A service that isn't a .NET project also takes a `WithKind`/`AsJava`/`AsJavaScript` call
+instead of `WithProject` — see [Non-.NET local services](https://github.com/flojon/aspire-servicesources/blob/main/docs/kinds.md).) `AddServiceCatalog`
+must be called before the first `AddService(...)` call anywhere in the AppHost. See
+[Authoring the catalog in code](https://github.com/flojon/aspire-servicesources/blob/main/docs/authoring-in-code.md) for the full API — every source,
+`kind` options, `prepare`, `WithDefaultSource`, and the TypeScript equivalent.
 
-(A service that isn't a .NET project also takes a `kind` — see
-[Non-.NET local services](https://github.com/flojon/aspire-servicesources/blob/main/docs/kinds.md).)
-
-A catalog entry may also declare `defaultSource`, so a service resolves without a
-`servicesources.local.json` entry at all:
-
-```yaml
-services:
-  orders:
-    repository: https://github.com/example/orders
-    project: src/Orders.Api/Orders.Api.csproj
-    defaultRef: main
-    defaultSource: repository     # optional; the source a developer gets with no entry of their own
-```
-
-**`defaultSource: repository` means every developer, and CI, clones and builds that repository by
-default** — including on a machine or pipeline that never explicitly asked for it. If CI should not
-clone, CI must pin its own source (an environment variable, or its own configuration layer) rather
-than relying on the absence of a file.
-
-**3. Add your own `servicesources.local.json` next to it (gitignore this file — it's
-per-developer):**
+**2. Add your own `servicesources.local.json` next to the AppHost project (gitignore this
+file — it's per-developer):**
 
 ```json
 {
@@ -176,8 +156,10 @@ a project reference would be.
 Full versioned docs: <https://aspire-servicesources.readthedocs.io/>. The same source also
 lives alongside this file, split by topic:
 
-- [Authoring the catalog in code](https://github.com/flojon/aspire-servicesources/blob/main/docs/authoring-in-code.md) — declare the same catalog in C# or
-  TypeScript instead of yaml, via `AddServiceCatalog`.
+- [Authoring the catalog in code](https://github.com/flojon/aspire-servicesources/blob/main/docs/authoring-in-code.md) — the full `AddServiceCatalog` API
+  in C# and TypeScript: every source, `kind` options, `prepare`, and `defaultSource`.
+- [The yaml catalog](https://github.com/flojon/aspire-servicesources/blob/main/docs/yaml-catalog.md) — declare the same catalog in `servicesources.yaml`
+  instead of code.
 - [The `"repository"` and `"path"` sources](https://github.com/flojon/aspire-servicesources/blob/main/docs/local-source.md) — managed git checkouts, a
   directory already checked out beside the AppHost, the `prepare` bootstrap step, why a checkout
   doesn't inherit your repository's build settings, and grouping several services under one
