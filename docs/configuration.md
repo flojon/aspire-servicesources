@@ -1,6 +1,6 @@
 # Configuring and consuming a resolved service
 
-[← Back to README](../README.md)
+[← Back to README](https://github.com/flojon/aspire-servicesources/blob/main/README.md)
 
 ### Overriding `servicesources.local.json`
 
@@ -8,7 +8,7 @@ The file is read through the AppHost's own `IConfiguration`, as the **lowest**-p
 the standard provider chain, under the key `ServiceSources:Services:<service>`. It is still the
 place a developer normally writes a source selection, and a `.NET` or TypeScript AppHost authors it
 identically — but every provider above it can override an entry without the file being touched. A
-catalog's own `defaultSource` (see above, under [Getting started](../README.md#getting-started)) sits below
+catalog's own `defaultSource` (see above, under [Getting started](https://github.com/flojon/aspire-servicesources/blob/main/README.md#getting-started)) sits below
 even this file — see the row above the base:
 
 | Layer | Overrides the file? |

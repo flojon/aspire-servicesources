@@ -1,0 +1,36 @@
+site_name: Aspire.Hosting.ServiceSources
+site_url: !ENV [READTHEDOCS_CANONICAL_URL, "https://aspire-servicesources.readthedocs.io/en/latest/"]
+repo_url: https://github.com/flojon/aspire-servicesources
+repo_name: flojon/aspire-servicesources
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - content.code.copy
+
+# No `extra.version` / mike provider here: Material's built-in version dropdown needs a
+# mike-produced versions.json, and this project deliberately doesn't use mike. Read the Docs
+# injects its own version flyout (latest/stable/numbered tags) into every hosted page
+# regardless of theme — that flyout is the version selector.
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - tables
+
+exclude_docs: |
+  superpowers/
+
+nav:
+  - Home: index.md
+  - Authoring in code: authoring-in-code.md
+  - The "local" source: local-source.md
+  - Non-.NET services (kind): kinds.md
+  - Other sources: other-sources.md
+  - Configuration: configuration.md
+  - Backing services: backing-services.md

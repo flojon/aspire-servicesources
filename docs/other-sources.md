@@ -1,6 +1,6 @@
 # Other sources: `kubernetes`, `url`, `container`, `disabled`
 
-[← Back to README](../README.md)
+[← Back to README](https://github.com/flojon/aspire-servicesources/blob/main/README.md)
 
 ### `"kubernetes"` source
 
