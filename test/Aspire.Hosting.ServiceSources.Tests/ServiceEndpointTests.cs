@@ -119,6 +119,27 @@ public class ServiceEndpointTests
         Assert.Equal("https://orders.example.com:443", endpoint.Url);
     }
 
+    /// <summary>
+    /// "disabled" registers no endpoint at all, so this reaches the same "no endpoints" branch a
+    /// container/kubernetes service with its endpoints stripped does — but the advice has to differ:
+    /// there is no scheme/port entry or launch profile that would give a disabled service one back.
+    /// </summary>
+    [Fact]
+    public void GetServiceEndpoint_DisabledSource_ThrowsWithDisabledSpecificAdvice()
+    {
+        var service = new DisabledSource().Resolve(
+            Builder(),
+            "orders",
+            new ServiceMetadata().ToDefinition("servicesources.yaml", "orders", TestHelpers.EmptyRepositories),
+            new ServiceDeveloperConfig { Source = "disabled" });
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => service.GetServiceEndpoint());
+
+        Assert.Contains("orders", ex.Message);
+        Assert.Contains("'disabled'", ex.Message);
+        Assert.DoesNotContain("Give the service an endpoint", ex.Message);
+    }
+
     [Fact]
     public void GetServiceEndpoint_SingleEndpointNamedNeitherHttpNorHttps_ReturnsIt()
     {

@@ -47,7 +47,27 @@ internal static class OutOfBandSourceAdvice
         "kubernetes" =>
             "it resolves to a 'kubectl port-forward' in front of an already-running service, so the " +
             "configuration would reach kubectl rather than the service",
+        "disabled" =>
+            "a developer has switched it off in servicesources.local.json, so there is nothing local to configure",
         _ => "it runs out of band",
+    };
+
+    /// <summary>Where a skipped <c>Configure</c> call should go instead.</summary>
+    /// <remarks>
+    /// "Wherever it actually runs" is true for <c>"url"</c>/<c>"kubernetes"</c> but not
+    /// <c>"disabled"</c>, which runs nowhere at all.
+    /// </remarks>
+    internal static string ExpectedConfiguredWhere(string source) => source switch
+    {
+        "disabled" => "There is nowhere else to configure it while it stays disabled",
+        _ => "The service is expected to be configured wherever it actually runs",
+    };
+
+    /// <summary>The lead-in <see cref="ServiceConfigurationExtensions.Unwrap{T}"/>'s error offers before the source switch.</summary>
+    internal static string ConfigureInsteadClause(string source) => source switch
+    {
+        "disabled" => "Drop the configuration",
+        _ => "Configure the service where it actually runs, drop the configuration",
     };
 
     /// <summary>

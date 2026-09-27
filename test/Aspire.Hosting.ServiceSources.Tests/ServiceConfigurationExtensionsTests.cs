@@ -30,6 +30,10 @@ public class ServiceConfigurationExtensionsTests
         Url = new UrlMetadata { Url = "https://orders.example.com" },
     }.ToDefinition("servicesources.yaml", "inventory", TestHelpers.EmptyRepositories);
 
+    // No block of its own — unlike every other source, "disabled" needs nothing from the catalog.
+    private static readonly ServiceDefinition DisabledDefinition =
+        new ServiceMetadata().ToDefinition("servicesources.yaml", "billing", TestHelpers.EmptyRepositories);
+
     private sealed class FixedPortAllocator : IPortAllocator
     {
         public bool IsAvailable(int port) => true;
@@ -51,6 +55,9 @@ public class ServiceConfigurationExtensionsTests
 
     private static IResourceBuilder<ServiceResource> AddUrlService(IDistributedApplicationBuilder builder) =>
         new UrlSource().Resolve(builder, "inventory", UrlDefinition, new ServiceDeveloperConfig { Source = "url" });
+
+    private static IResourceBuilder<ServiceResource> AddDisabledService(IDistributedApplicationBuilder builder) =>
+        new DisabledSource().Resolve(builder, "billing", DisabledDefinition, new ServiceDeveloperConfig { Source = "disabled" });
 
     [Fact]
     public void WithEnvironment_AppliesToTheRealResource()
@@ -309,5 +316,76 @@ public class ServiceConfigurationExtensionsTests
 
         Assert.Contains("payments", ex.Message);
         Assert.Contains("container", ex.Message);
+    }
+
+    /// <summary>
+    /// Parallel to <see cref="WithEnvironment_OnUrlSource_SkipsWithoutThrowing_SoSourceSwitchingKeepsWorking"/>:
+    /// a developer who switches a service to "disabled" in their own servicesources.local.json must
+    /// not break a Program.cs they don't own either.
+    /// </summary>
+    [Fact]
+    public void WithEnvironment_OnDisabledSource_SkipsWithoutThrowing()
+    {
+        var builder = Builder();
+        var callbackRan = false;
+
+        var service = AddDisabledService(builder).WithEnvironment("A", () =>
+        {
+            callbackRan = true;
+            return "B";
+        });
+
+        Assert.False(callbackRan);
+        Assert.NotNull(service);
+    }
+
+    [Fact]
+    public void WithEnvironment_OnDisabledSource_ReportsTheSkip()
+    {
+        var builder = Builder();
+
+        AddDisabledService(builder).WithEnvironment("A", "B");
+
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+        Assert.Contains("billing", message);
+        Assert.Contains("'disabled'", message);
+        Assert.Contains("servicesources.local.json", message);
+
+        // "wherever it actually runs" would be a lie for a service that runs nowhere at all —
+        // pins that the skip message doesn't reuse url/kubernetes's wording verbatim.
+        Assert.DoesNotContain("wherever it actually runs", message);
+    }
+
+    /// <summary>
+    /// Unlike "kubernetes", "disabled" has no local process at all — nothing corresponds to
+    /// "kubectl" here — so it gets no wait-ordering exception: this is the assertion that pins the
+    /// absence of that carve-out, matching <see cref="WaitFor_OnUrlSource_StillSkips_BecauseNothingIsRegisteredToOrder"/>.
+    /// </summary>
+    [Fact]
+    public void WaitFor_OnDisabledSource_StillSkips_BecauseNothingIsRegisteredToOrder()
+    {
+        var builder = Builder();
+        var migrations = builder.AddResource(new ServiceContainerResource("migrations")).WithImage("migrate");
+
+        var service = AddDisabledService(builder).WaitForCompletion(migrations);
+
+        Assert.Empty(service.Resource.Annotations.OfType<WaitAnnotation>());
+        Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+    }
+
+    [Fact]
+    public void Unwrap_OnDisabledSource_StillThrows_BecauseItMustReturnABuilder()
+    {
+        var builder = Builder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => AddDisabledService(builder).Unwrap<IResourceWithEnvironment>());
+
+        Assert.Contains("billing", ex.Message);
+        Assert.Contains("'disabled'", ex.Message);
+
+        // "Configure the service where it actually runs" would be self-contradictory for a service
+        // that runs nowhere at all — pins that this message doesn't reuse url/kubernetes's wording.
+        Assert.DoesNotContain("configure the service where it actually runs", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 }

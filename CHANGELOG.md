@@ -18,6 +18,15 @@ never existed. Check the tag of the last release before adding one.
 
 ### Added
 
+- **A `"disabled"` source for `AddService`.** Turns a service off — `AddService("orders")` still
+  returns a valid resource builder, but nothing runs and nothing is reachable — without deleting
+  the `AddService` call or the catalog entry. Needs no catalog block: set
+  `"source": "disabled"` in `servicesources.local.json` for a service declared any other way.
+  Configuration calls (`WithEnvironment`, `WithReference`, endpoints, commands, …) are skipped and
+  logged exactly as they are for `"url"`/`"kubernetes"`, and a consumer's `WaitFor`/`WaitForCompletion`
+  on a disabled service resolves immediately instead of waiting, the same protection `"url"` has
+  against #170. See [the `"disabled"` source](docs/other-sources.md#disabled-source).
+
 - **`Unwrap<T>` overload that takes a configuration delegate, and skips it on an out-of-band
   source instead of throwing.** The existing `Unwrap<T>()` has to throw for `"url"`/`"kubernetes"`
   because it has to hand back a `T` builder and there is none to give; the new
@@ -342,7 +351,7 @@ protection then blocked reusing the name, so this version carries what would hav
   **A second silent change, and this one has no registration-time refusal to catch it: `Validate`
   is no longer called for a service on the deferred path.** It is paired with `Resolve`, which core
   does not call there either — under
-  [`UseDeferredCheckout()`](README.md#first-run-usedeferredcheckout) there is no checkout for it to
+  [`UseDeferredCheckout()`](docs/local-source.md#first-run-usedeferredcheckout) there is no checkout for it to
   judge the service against, so `ResolveDeferred` is called instead. **If your kind can answer
   `true` from `SupportsDeferredCheckout` and validates its options block only in `Validate`, that
   block stops being validated at all for a deferred service.** Parse and reject it from
@@ -644,7 +653,7 @@ protection then blocked reusing the name, so this version carries what would hav
   Not included, deliberately: no task runner, no ordering between steps, no cross-developer caching
   of what a step produced, no timeout, and no injected environment variables. One command, one
   marker, per service. See the
-  [`prepare` section](README.md#prepare-a-checkout-that-has-to-bootstrap-itself).
+  [`prepare` section](docs/local-source.md#prepare-a-checkout-that-has-to-bootstrap-itself).
 
 - **`AddBackingService()` — the database, broker or cache a service connects to, source-switched
   the same way the service is** ([#144]). A service usually depends on a database, and a developer

@@ -62,7 +62,7 @@ what causes its `prepare` step to run again on the next AppHost start.** Pulling
 ordinary, frequent action that nobody reads as "approve a script to run on my machine" — worth
 knowing, since it's the actual trigger rather than anything more deliberate.
 
-See [`prepare`](README.md#prepare-a-checkout-that-has-to-bootstrap-itself) in the README for the
+See [`prepare`](docs/local-source.md#prepare-a-checkout-that-has-to-bootstrap-itself) for the
 full behaviour of that step, including how a developer overrides or disables a catalog's block
 entirely (`{ "prepare": { "mode": "never" } }`).
 
