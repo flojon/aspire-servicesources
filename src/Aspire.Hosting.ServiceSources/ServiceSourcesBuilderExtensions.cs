@@ -149,7 +149,9 @@ public static class ServiceSourcesBuilderExtensions
     /// </summary>
     private static IReadOnlyList<(string Source, Type ResourceType)> DeclaredResolutions(
         IDistributedApplicationBuilder builder, string name, Config.Catalog.ServiceDefinition definition) =>
+        // Sorted so the error message does not depend on dictionary enumeration order.
         [.. Sources
+            .OrderBy(s => s.Key, StringComparer.Ordinal)
             .Select(s => (Source: s.Key, ResourceType: s.Value.DeclaredResourceType(builder, name, definition)))
             .Where(d => d.ResourceType is not null)
             .Select(d => (d.Source, d.ResourceType!))];

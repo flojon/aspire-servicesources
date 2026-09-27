@@ -310,7 +310,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     {
         var registry = LocalKindRegistry.For(builder);
 
-        if (!registry.TryGet(definition.Kind, out var handler) || handler is null)
+        if (!registry.TryGet(definition.Kind, out var handler))
         {
             // "java"/"javascript" always resolve via LocalKindRegistry's own built-in fallback, so
             // reaching here means an unregistered third-party kind — there is no Use*() call to
@@ -425,7 +425,15 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     internal static void RequireDeclaredResourceType(
         string serviceName, string kind, ILocalResourceKind handler, IResource resource)
     {
-        var declared = ReadResourceType(serviceName, kind, handler);
+        Type declared;
+        try
+        {
+            declared = ReadResourceType(serviceName, kind, handler);
+        }
+        catch (Exception ex) when (GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, kind) is { } missingPackage)
+        {
+            throw ServiceSourcesConfigurationException.For($"{Raw.Escaped(missingPackage)}", ex);
+        }
 
         if (!declared.IsInstanceOfType(resource))
         {

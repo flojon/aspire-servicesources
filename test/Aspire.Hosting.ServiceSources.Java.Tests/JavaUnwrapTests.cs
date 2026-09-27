@@ -139,6 +139,35 @@ public class JavaUnwrapTests
         Assert.Contains($"'container' ({nameof(ContainerResource)})", ex.Message);
     }
 
+    private sealed class ResolvesButTypeMissingKind : ILocalResourceKind
+    {
+        public Type ResourceType => throw new FileNotFoundException(
+            "Could not load file or assembly.",
+            "CommunityToolkit.Aspire.Hosting.Java, Version=13.3.0.0, Culture=neutral, PublicKeyToken=null");
+
+        public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+            IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) =>
+            builder.AddResource(new UndeclaredTypeResource(serviceName, repoRoot));
+    }
+
+    [Fact]
+    public void AddService_OnAKindWhoseResourceTypeIsInAMissingPackage_NamesThePackage()
+    {
+        var checkout = CreateTempDirectory();
+        var builder = CreateAppHost(LocalPathJson("tool", checkout), """
+            services:
+              tool:
+                repository: https://github.com/example/tool
+                kind: typemissing
+            """);
+        builder.AddLocalKind("typemissing", new ResolvesButTypeMissingKind());
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("tool"));
+
+        Assert.Contains("CommunityToolkit.Aspire.Hosting.Java", ex.Message);
+        Assert.IsType<FileNotFoundException>(ex.InnerException);
+    }
+
     [Fact]
     public void AddService_OnAKindWhoseResourceTypeIsNull_Throws()
     {

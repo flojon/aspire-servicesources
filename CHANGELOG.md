@@ -55,7 +55,8 @@ never existed. Check the tag of the last release before adding one.
   theirs. It is what lets `Unwrap<T>(configure)` tell a call no source could satisfy apart from
   one a source switch skipped; a kind that doesn't declare it is assumed to match anything, so it
   never causes that throw. A kind that declares one is held to it: a resource from its `Resolve` or
-  `ResolveDeferred` that is not that type fails startup.
+  `ResolveDeferred` that is not that type fails startup, as does a `ResourceType` that returns null
+  or throws, naming the service and kind.
 
 ## [0.6.0] - 2026-09-24
 
