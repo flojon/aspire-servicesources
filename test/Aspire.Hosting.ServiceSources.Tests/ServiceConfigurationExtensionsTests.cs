@@ -56,6 +56,11 @@ public class ServiceConfigurationExtensionsTests
     private static IResourceBuilder<ServiceResource> AddUrlService(IDistributedApplicationBuilder builder) =>
         new UrlSource().Resolve(builder, "inventory", UrlDefinition, new ServiceDeveloperConfig { Source = "url" });
 
+    private static IResourceBuilder<ServiceResource> AddKubernetesService(IDistributedApplicationBuilder builder) =>
+        new KubernetesSource(new FixedPortAllocator()).Resolve(
+            builder, "orders", KubernetesDefinition,
+            new ServiceDeveloperConfig { Source = "kubernetes", Kubernetes = new() { Context = "dev" } });
+
     private static IResourceBuilder<ServiceResource> AddDisabledService(IDistributedApplicationBuilder builder) =>
         new DisabledSource().Resolve(builder, "billing", DisabledDefinition, new ServiceDeveloperConfig { Source = "disabled" });
 
@@ -264,6 +269,183 @@ public class ServiceConfigurationExtensionsTests
 
         Assert.Contains("inventory", ex.Message);
         Assert.Contains("'url'", ex.Message);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_OnReachableSource_InvokesConfigureAndReturnsTheService()
+    {
+        var builder = Builder();
+        var service = AddContainerService(builder);
+        ContainerResource? configured = null;
+
+        var returned = service.Unwrap<ContainerResource>(typed => configured = typed.Resource);
+
+        Assert.Same(service.Resource, returned.Resource);
+        Assert.NotNull(configured);
+        Assert.Equal("payments", configured!.Name);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_OnUrlSource_SkipsWithoutThrowing_SoSourceSwitchingKeepsWorking()
+    {
+        var builder = Builder();
+        var callbackRan = false;
+
+        // A developer switching this service to "url" in their own servicesources.local.json must
+        // not break a Program.cs they don't own.
+        var service = AddUrlService(builder).Unwrap<IResourceWithEnvironment>(_ => callbackRan = true);
+
+        Assert.False(callbackRan);
+        Assert.NotNull(service);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_OnUrlSource_ReportsTheSkip()
+    {
+        var builder = Builder();
+
+        AddUrlService(builder).Unwrap<IResourceWithEnvironment>(_ => { });
+
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+        Assert.Contains("inventory", message);
+        Assert.Contains("'url'", message);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_ReturnsTheFacade_SoNativeCallsChainAfterIt()
+    {
+        var builder = Builder();
+
+        var service = AddContainerService(builder)
+            .Unwrap<ContainerResource>(_ => { })
+            .WithEnvironment("A", "B")
+            .WithArgs("--verbose");
+
+        Assert.NotEmpty(service.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>());
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_OnKubernetesSource_SkipsRatherThanConfiguringThePortForward()
+    {
+        var builder = Builder();
+        var callbackRan = false;
+
+        AddKubernetesService(builder).Unwrap<ExecutableResource>(_ => callbackRan = true);
+
+        Assert.False(callbackRan);
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+        Assert.Contains("Unwrap<ExecutableResource>", message);
+        Assert.Contains("port-forward", message);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_ForWaitSupportOnKubernetesSource_StillRuns_LikeWaitFor()
+    {
+        var builder = Builder();
+        var callbackRan = false;
+
+        AddKubernetesService(builder).Unwrap<IResourceWithWaitSupport>(_ => callbackRan = true);
+
+        Assert.True(callbackRan);
+        Assert.Empty(ServiceSourcesWarnings.For(builder).Messages);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_OnDisabledSource_SkipsAndReportsTheSkip()
+    {
+        var builder = Builder();
+        var callbackRan = false;
+
+        AddDisabledService(builder).Unwrap<IResourceWithEnvironment>(_ => callbackRan = true);
+
+        Assert.False(callbackRan);
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+        Assert.Contains("billing", message);
+        Assert.Contains("'disabled'", message);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_MismatchedType_SkipsAndReportsWhatItResolvedTo()
+    {
+        var builder = Builder();
+        var callbackRan = false;
+
+        // The same mismatch a developer produces by switching a java service to "container", which
+        // must not break a Program.cs they don't own.
+        var ex = Record.Exception(
+            () => AddContainerService(builder).Unwrap<ProjectResource>(_ => callbackRan = true));
+
+        Assert.Null(ex);
+        Assert.False(callbackRan);
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+        Assert.Contains("payments", message);
+        Assert.Contains("Unwrap<ProjectResource>", message);
+        Assert.Contains("'container'", message);
+        Assert.Contains(nameof(ContainerResource), message);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_OnKubernetesSource_StillSkips_WhenTheSourceAnnotationWasStripped()
+    {
+        var builder = Builder();
+        var service = AddKubernetesService(builder);
+        var callbackRan = false;
+
+        // The annotation collection is public and mutable; the gate must not depend on it.
+        service.Resource.Annotations.Clear();
+        service.Unwrap<ExecutableResource>(_ => callbackRan = true);
+
+        Assert.False(callbackRan);
+        Assert.Contains("port-forward", Assert.Single(ServiceSourcesWarnings.For(builder).Messages));
+    }
+
+    [Fact]
+    public void Unwrap_OnKubernetesSource_StillThrows_WhenTheSourceAnnotationWasStripped()
+    {
+        var builder = Builder();
+        var service = AddKubernetesService(builder);
+
+        service.Resource.Annotations.Clear();
+
+        Assert.Throws<ServiceSourcesConfigurationException>(() => service.Unwrap<ExecutableResource>());
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_OnABuilderHeldAsServiceDiscovery_StillSkips()
+    {
+        var builder = Builder();
+        IResourceBuilder<IResourceWithServiceDiscovery> service = AddUrlService(builder);
+        var callbackRan = false;
+
+        var returned = service.Unwrap<IResourceWithEnvironment>(_ => callbackRan = true);
+
+        Assert.Same(service, returned);
+        Assert.False(callbackRan);
+        Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_MismatchedInterface_UsesTheRightArticle()
+    {
+        var builder = Builder();
+
+        AddContainerService(builder).Unwrap<IResourceWithConnectionString>(_ => { });
+
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+        Assert.Contains("not an IResourceWithConnectionString", message);
+        Assert.Contains($"resolves to a {nameof(ServiceContainerResource)}", message);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_MismatchedType_ReportsOnce_HoweverManyTimesItIsCalled()
+    {
+        var builder = Builder();
+        var service = AddContainerService(builder);
+
+        service.Unwrap<ProjectResource>(_ => { });
+        service.Unwrap<ProjectResource>(_ => { });
+
+        Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
     }
 
     /// <summary>

@@ -86,6 +86,7 @@ never existed. Check the tag of the last release before adding one.
   on a disabled service resolves immediately instead of waiting, the same protection `"url"` has
   against #170. See [the `"disabled"` source](docs/other-sources.md#disabled-source).
 
+<<<<<<< HEAD
 ### Deprecated
 
 - **`local.path` is deprecated in favor of the new `"path"` source.** The `"path"` source resolves a
@@ -104,6 +105,26 @@ never existed. Check the tag of the last release before adding one.
   A `local.prepare` block doesn't carry over by itself — it isn't read under `"path"` — so when one
   is declared the notice also says to move it to `path.prepare`. The catalog's own `prepare` step is
   not run in the directory under either spelling.
+=======
+- **`Unwrap<T>` overload that takes a configuration delegate, and skips it instead of throwing
+  when the service doesn't resolve to a `T`.** The existing `Unwrap<T>()` has to throw then, because
+  it has to hand back a `T` builder and there is none to give; the new
+  `Unwrap<T>(Action<IResourceBuilder<T>> configure)` returns the service itself instead, so
+  `configure` is simply skipped and the skip is logged at startup, the same way `WithEnvironment`
+  and every other native method already behave:
+
+  ```csharp
+  service
+      .Unwrap<JavaScriptAppResource>(js => js.WithRunScript("dev"))
+      .WithEnvironment("MODE", "dev");
+  ```
+
+  That covers the `"url"`, `"kubernetes"` and `"disabled"` sources, and a reachable source that
+  resolves to a different resource type — a `java` service switched to `"container"` in
+  `servicesources.local.json` — so a switch like that no longer breaks a `Program.cs` calling
+  kind-specific vocabulary. `Unwrap<IResourceWithWaitSupport>(...)` on a `"kubernetes"` service
+  still runs against the port-forward, matching `WaitFor`.
+>>>>>>> origin/main
 
 ## [0.6.0] - 2026-09-24
 
