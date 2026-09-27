@@ -135,7 +135,9 @@ public static class ServiceSourcesBuilderExtensions
 
         if (service is ServiceResourceBuilder serviceBuilder)
         {
-            serviceBuilder.DeclaredResolutions = DeclaredResolutions(builder, definition);
+            // Lazy: only a mismatched Unwrap reads it, and a kind's type may live in an assembly
+            // this AppHost does not reference.
+            serviceBuilder.DeclaredResolutions = new(() => DeclaredResolutions(builder, name, definition));
         }
 
         return service;
@@ -145,34 +147,12 @@ public static class ServiceSourcesBuilderExtensions
     /// What each source this catalog entry could be switched to would resolve to, for
     /// <c>Unwrap&lt;T&gt;(configure)</c> to tell a call no source could satisfy from one a switch skipped.
     /// </summary>
-    /// <remarks>
-    /// <c>"local"</c> is always included: a developer's own <c>path</c> makes it selectable even for an
-    /// entry with no repository, and over-including only ever turns a throw into a warning.
-    /// <c>"url"</c> and <c>"disabled"</c> are omitted because nothing is reachable through them.
-    /// </remarks>
     private static IReadOnlyList<(string Source, Type ResourceType)> DeclaredResolutions(
-        IDistributedApplicationBuilder builder, Config.Catalog.ServiceDefinition definition)
-    {
-        var localType = string.Equals(definition.Kind, LocalKinds.Dotnet, StringComparison.Ordinal)
-            ? typeof(ProjectResource)
-            : LocalKindRegistry.For(builder).TryGet(definition.Kind, out var handler) && handler is not null
-                ? handler.ResourceType
-                : typeof(IResourceWithServiceDiscovery);
-
-        List<(string, Type)> resolutions = [("local", localType)];
-
-        if (definition.Container is not null)
-        {
-            resolutions.Add(("container", typeof(ServiceContainerResource)));
-        }
-
-        if (definition.Kubernetes is not null)
-        {
-            resolutions.Add(("kubernetes", typeof(ServiceExecutableResource)));
-        }
-
-        return resolutions;
-    }
+        IDistributedApplicationBuilder builder, string name, Config.Catalog.ServiceDefinition definition) =>
+        [.. Sources
+            .Select(s => (Source: s.Key, ResourceType: s.Value.DeclaredResourceType(builder, name, definition)))
+            .Where(d => d.ResourceType is not null)
+            .Select(d => (d.Source, d.ResourceType!))];
 
     /// <summary>
     /// Opts this AppHost into deferring a <c>"local"</c> service's <em>first</em> checkout past

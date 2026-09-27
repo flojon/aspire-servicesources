@@ -132,7 +132,7 @@ internal sealed class ServiceResourceBuilder(
     /// <see langword="null"/> when this builder did not come from <c>AddService()</c> and the catalog
     /// is unknown.
     /// </summary>
-    internal IReadOnlyList<(string Source, Type ResourceType)>? DeclaredResolutions { get; set; }
+    internal Lazy<IReadOnlyList<(string Source, Type ResourceType)>>? DeclaredResolutions { get; set; }
 
     public IResourceBuilder<ServiceResource> WithAnnotation<TAnnotation>(
         TAnnotation annotation, ResourceAnnotationMutationBehavior behavior = ResourceAnnotationMutationBehavior.Append)

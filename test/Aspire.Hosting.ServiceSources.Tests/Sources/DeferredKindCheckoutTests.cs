@@ -83,8 +83,11 @@ public class DeferredKindCheckoutTests
         bool deferralReturnsNull = false,
         bool helperWaitsForService = false,
         bool declineAfterAdding = false,
-        bool withParameter = false) : ILocalResourceKind
+        bool withParameter = false,
+        Type? declaredType = null) : ILocalResourceKind
     {
+        public Type ResourceType => declaredType ?? typeof(IResourceWithServiceDiscovery);
+
         public string? DeferredRepoRoot { get; private set; }
 
         public int SupportsDeferredCheckoutCalls { get; private set; }
@@ -257,6 +260,29 @@ public class DeferredKindCheckoutTests
         // deferral costs them nothing and a consumer's WithReference still resolves.
         var endpoint = Assert.Single(service.Resource.Annotations.OfType<EndpointAnnotation>());
         Assert.Equal(8080, endpoint.TargetPort);
+
+        gate.Set();
+    }
+
+    [Fact]
+    public void DeferredKind_WhoseResourceIsNotItsDeclaredType_Throws()
+    {
+        var dir = CreateAppHostDirectory("frontend");
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.UseDeferredCheckout();
+        var kind = new StandInKind(declaredType: typeof(ContainerResource));
+        builder.AddLocalKind(KindName, kind);
+
+        var git = new FakeGitClient();
+        var gate = git.BlockFor("https://example.com/frontend.git");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(git).Resolve(builder, "frontend", Definition("frontend"), DevConfig()));
+
+        Assert.Equal(1, kind.ResolveDeferredCalls);
+        Assert.False(kind.ResolvedEagerly);
+        Assert.Contains(nameof(ILocalResourceKind.ResourceType), ex.Message);
+        Assert.Contains(nameof(ContainerResource), ex.Message);
 
         gate.Set();
     }

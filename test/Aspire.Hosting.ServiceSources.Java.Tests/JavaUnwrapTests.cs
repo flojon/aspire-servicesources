@@ -53,6 +53,152 @@ public class JavaUnwrapTests
     private sealed class UndeclaredTypeResource(string name, string workingDirectory)
         : ExecutableResource(name, "tool", workingDirectory), IResourceWithServiceDiscovery;
 
+    private sealed class MisdeclaredTypeKind : ILocalResourceKind
+    {
+        public Type ResourceType => typeof(ContainerResource);
+
+        public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+            IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) =>
+            builder.AddResource(new UndeclaredTypeResource(serviceName, repoRoot));
+    }
+
+    private sealed class NullTypeKind : ILocalResourceKind
+    {
+        public Type ResourceType => null!;
+
+        public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+            IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) =>
+            builder.AddResource(new UndeclaredTypeResource(serviceName, repoRoot));
+    }
+
+    private sealed class FaultingTypeKind : ILocalResourceKind
+    {
+        public Type ResourceType => throw new InvalidOperationException("broken");
+
+        public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+            IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) =>
+            throw new NotSupportedException();
+    }
+
+    /// <summary>A java kind as it behaves in an AppHost that does not reference the Java package.</summary>
+    private sealed class JavaPackageMissingKind : ILocalResourceKind
+    {
+        public Type ResourceType => throw new FileNotFoundException(
+            "Could not load file or assembly.",
+            "CommunityToolkit.Aspire.Hosting.Java, Version=13.3.0.0, Culture=neutral, PublicKeyToken=null");
+
+        public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+            IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) =>
+            throw new NotSupportedException();
+    }
+
+    [Fact]
+    public void AddService_OnAContainerSourcedJavaServiceWithoutTheJavaPackage_StillResolves()
+    {
+        var builder = CreateAppHost("""
+            { "services": { "java-api": { "source": "container" } } }
+            """);
+        builder.AddLocalKind("java", new JavaPackageMissingKind());
+
+        var ex = Record.Exception(() => builder.AddService("java-api").Unwrap<ProjectResource>(_ => { }));
+
+        // Installing the package would let 'local' produce a Java resource, so this skips, not throws.
+        Assert.Null(ex);
+        Assert.Contains("Unwrap<ProjectResource>", Assert.Single(ServiceSourcesWarnings.For(builder).Messages));
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_ForATypeNoDeclaredSourceProduces_ThrowsOnAnOutOfBandSourceToo()
+    {
+        var builder = CreateAppHost("""
+            { "services": { "java-api": { "source": "disabled" } } }
+            """);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("java-api")
+            .Unwrap<ProjectResource>(_ => { }));
+
+        Assert.Contains("Unwrap<ProjectResource> can never apply", ex.Message);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_ImpossibleTypeMessage_MarksOutOfBandSourcesAndNamesPublicTypes()
+    {
+        var builder = CreateAppHost("""
+            { "services": { "java-api": { "source": "container" } } }
+            """, JavaWithContainer + """
+
+                kubernetes:
+                  service: java-api-svc
+                  port: 8080
+            """);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("java-api")
+            .Unwrap<ProjectResource>(_ => { }));
+
+        Assert.Contains("'kubernetes' (out of band)", ex.Message);
+        Assert.Contains($"'container' ({nameof(ContainerResource)})", ex.Message);
+    }
+
+    [Fact]
+    public void AddService_OnAKindWhoseResourceTypeIsNull_Throws()
+    {
+        var checkout = CreateTempDirectory();
+        var builder = CreateAppHost(LocalPathJson("tool", checkout), """
+            services:
+              tool:
+                repository: https://github.com/example/tool
+                kind: nulltype
+            """);
+        builder.AddLocalKind("nulltype", new NullTypeKind());
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("tool"));
+
+        Assert.Contains("returned null", ex.Message);
+        Assert.Contains("'nulltype'", ex.Message);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_OnAKindWhoseResourceTypeFaults_NamesTheServiceAndKind()
+    {
+        var builder = CreateAppHost("""
+            { "services": { "tool": { "source": "container" } } }
+            """, """
+            services:
+              tool:
+                repository: https://github.com/example/tool
+                kind: faulting
+                container:
+                  image: example/tool
+                  port: 8080
+            """);
+        builder.AddLocalKind("faulting", new FaultingTypeKind());
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("tool")
+            .Unwrap<ProjectResource>(_ => { }));
+
+        Assert.Contains("'tool'", ex.Message);
+        Assert.Contains("'faulting'", ex.Message);
+        Assert.IsType<InvalidOperationException>(ex.InnerException);
+    }
+
+    [Fact]
+    public void AddService_OnAKindWhoseResourceIsNotItsDeclaredType_Throws()
+    {
+        var checkout = CreateTempDirectory();
+        var builder = CreateAppHost(LocalPathJson("tool", checkout), """
+            services:
+              tool:
+                repository: https://github.com/example/tool
+                kind: misdeclared
+            """);
+        builder.AddLocalKind("misdeclared", new MisdeclaredTypeKind());
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("tool"));
+
+        Assert.Contains(nameof(ILocalResourceKind.ResourceType), ex.Message);
+        Assert.Contains(nameof(ContainerResource), ex.Message);
+    }
+
     [Fact]
     public void Unwrap_Delegate_ForATypeNoDeclaredSourceProduces_Throws()
     {

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using Aspire.Hosting.ServiceSources.Java;
 using Aspire.Hosting.ServiceSources.Messages;
@@ -55,7 +56,7 @@ internal sealed class LocalKindRegistry
         }
     }
 
-    public bool TryGet(string kind, out ILocalResourceKind? handler)
+    public bool TryGet(string kind, [NotNullWhen(true)] out ILocalResourceKind? handler)
     {
         if (_handlers.TryGetValue(kind, out handler))
         {

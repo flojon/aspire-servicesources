@@ -40,6 +40,10 @@ internal sealed class KubernetesSource(IPortAllocator portAllocator) : IServiceS
         return ResolvedService.Bridge(executableBuilder, serviceName, "kubernetes");
     }
 
+    public Type? DeclaredResourceType(
+        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition) =>
+        definition.Kubernetes is null ? null : typeof(ServiceExecutableResource);
+
     internal static string[] BuildPortForwardArgs(
         string serviceName,
         ServiceDefinition definition,

@@ -147,34 +147,23 @@ public static class ServiceConfigurationExtensions
             return;
         }
 
-        if (IsUnreachable<T>(serviceBuilder.Source))
-        {
-            ServiceSourcesWarnings.For(service.ApplicationBuilder)
-                .AddSkip(service.Resource.Name, serviceBuilder.Source, $"Unwrap<{typeof(T).Name}>");
-            return;
-        }
-
+        var unreachable = IsUnreachable<T>(serviceBuilder.Source);
         var real = serviceBuilder.Real?.Resource;
 
-        if (real is T typed)
+        if (!unreachable && real is T typed)
         {
             configure(service.ApplicationBuilder.CreateResourceBuilder(typed));
             return;
         }
 
-        // Skipping is only right when a source switch caused the mismatch; if no declared source
-        // could ever produce a T, the call is dead for everyone and silently dropping it hides that.
-        if (serviceBuilder.DeclaredResolutions is { } declared
-            && !declared.Any(d => !IsUnreachable<T>(d.Source) && CouldBe(d.ResourceType, typeof(T))))
-        {
-            var sources = Raw.Join(", ", declared.Select(d => Raw.Compose(
-                $"'{new Name(d.Source)}' ({Raw.Escaped(d.ResourceType.Name)})")));
+        // Ahead of both skips, so whether the mistake surfaces does not depend on who runs it.
+        ThrowIfNoDeclaredSourceCouldBe<T>(serviceBuilder);
 
-            throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(service.Resource.Name)}': Unwrap<{Raw.Escaped(typeof(T).Name)}> can never "
-                + $"apply — none of the sources its catalog entry declares, {sources}, resolves to "
-                + $"{Raw.Escaped(WithArticle(typeof(T).Name))}. Remove the call, or unwrap a type one of those "
-                + $"sources resolves to.");
+        if (unreachable)
+        {
+            ServiceSourcesWarnings.For(service.ApplicationBuilder)
+                .AddSkip(service.Resource.Name, serviceBuilder.Source, $"Unwrap<{typeof(T).Name}>");
+            return;
         }
 
         ServiceSourcesWarnings.For(service.ApplicationBuilder).AddNotice(Raw.Compose(
@@ -272,6 +261,41 @@ public static class ServiceConfigurationExtensions
         Raw.Compose(
             $"its source '{new Name(source)}' resolves to {Raw.Escaped(WithArticle(resolved.GetType().Name))}, "
             + $"not {Raw.Escaped(WithArticle(typeof(T).Name))}");
+
+    /// <summary>
+    /// Skipping is only right when a source switch caused the mismatch; if no declared source could
+    /// ever produce a <typeparamref name="T"/>, the call is dead for everyone and skipping hides that.
+    /// </summary>
+    private static void ThrowIfNoDeclaredSourceCouldBe<T>(Sources.ServiceResourceBuilder serviceBuilder)
+        where T : IResource
+    {
+        if (serviceBuilder.DeclaredResolutions?.Value is not { } declared
+            || declared.Any(d => !IsUnreachable<T>(d.Source) && CouldBe(d.ResourceType, typeof(T))))
+        {
+            return;
+        }
+
+        var sources = Raw.Join(", ", declared.Select(d => IsUnreachable<T>(d.Source)
+            ? Raw.Compose($"'{new Name(d.Source)}' (out of band)")
+            : Raw.Compose($"'{new Name(d.Source)}' ({Raw.Escaped(PublicName(d.ResourceType))})")));
+
+        throw ServiceSourcesConfigurationException.For(
+            $"Service '{new Name(serviceBuilder.Resource.Name)}': Unwrap<{Raw.Escaped(typeof(T).Name)}> can never "
+            + $"apply — none of the sources its catalog entry declares, {sources}, can be configured as "
+            + $"{Raw.Escaped(WithArticle(typeof(T).Name))}. Remove the call, or unwrap a type one of those "
+            + $"sources resolves to.");
+    }
+
+    // Our own resource types are internal; name the public type an AppHost can actually unwrap.
+    private static string PublicName(Type type)
+    {
+        while (!type.IsVisible && type.BaseType is { } baseType)
+        {
+            type = baseType;
+        }
+
+        return type.Name;
+    }
 
     /// <summary>
     /// Whether a resource declared as <paramref name="declared"/> could, at runtime, be a

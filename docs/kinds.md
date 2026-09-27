@@ -276,8 +276,9 @@ public sealed class JavaScriptKind : ILocalResourceKind
         ...
     }
 
-    // Optional: the type every resource Resolve returns is, or derives from. Lets
-    // Unwrap<T>(configure) reject a T this kind could never produce instead of only warning.
+    // Optional: the type every resource Resolve/ResolveDeferred returns is, or derives from.
+    // Lets Unwrap<T>(configure) reject a T this kind could never produce instead of only
+    // warning; core fails startup if a returned resource isn't one.
     public Type ResourceType => typeof(JavaScriptAppResource);
 }
 
