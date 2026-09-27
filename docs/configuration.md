@@ -192,8 +192,11 @@ var backend = builder.AddService("backend")
 vocabulary doesn't cover — a non-`dotnet` local kind's own extension methods, for example:
 
 ```csharp
-backend.Unwrap<JavaScriptAppResource>().WithRunScript("dev");
+backend.Unwrap<JavaScriptAppResource>(js => js.WithRunScript("dev"));
 ```
+
+It returns `backend` itself, so native calls chain after it. When `backend` doesn't resolve to a
+`JavaScriptAppResource`, the delegate is skipped and logged rather than failing — see below.
 
 **Native calls are skipped for the `"url"`, `"kubernetes"` and `"disabled"` sources**, and the skip
 is logged at startup. None of the three has a local process this AppHost's own configuration should
@@ -229,23 +232,17 @@ warn: Aspire.Hosting.ServiceSources
       would reach kubectl rather than the service. ...
 ```
 
-`Unwrap<T>()` **throws** for those sources instead of skipping — it has to return a builder, and
-handing back the `kubectl` executable would silently configure the wrong process. Prefer the native
-calls above for anything that should survive a source switch. `Unwrap<T>()` follows the same
-wait-ordering exception: `Unwrap<IResourceWithWaitSupport>()` on a `"kubernetes"` service returns
-the port-forward's builder rather than throwing.
+`Unwrap<T>(configure)` skips the same way. On `"url"`, `"kubernetes"` and `"disabled"` the delegate
+never runs and the skip joins the service's message above. It also skips when a reachable source
+resolves to something other than a `T` — a `java` service a developer switched to `"container"`
+resolves to a container, not a `JavaAppExecutableResource` — and logs what the service resolved to
+instead. It follows the same wait-ordering exception: `Unwrap<IResourceWithWaitSupport>(...)` on a
+`"kubernetes"` service still runs, against the port-forward.
 
-When the call is itself kind-specific vocabulary — `Unwrap<T>()`'s whole reason to exist — the
-delegate overload skips instead of throwing, the same as the native calls above:
-
-```csharp
-backend.Unwrap<JavaScriptAppResource>(js => js.WithRunScript("dev"));
-```
-
-On `"url"`/`"kubernetes"` the delegate is never invoked, the skip is logged, and `backend` comes
-back unchanged, so a `Program.cs` that calls it unconditionally survives a source switch the same
-way `WithEnvironment` and friends already do. A type mismatch still throws either way — that's a
-programming error, not something a source switch should hide.
+The parameterless `Unwrap<T>()` **throws** in every one of those cases instead — it has to return
+a builder, and handing back the `kubectl` executable would silently configure the wrong process.
+Use it only where the AppHost genuinely requires that resource type, or needs the builder itself as
+a value; use the delegate form for anything that should survive a source switch.
 
 ### From a guest-language AppHost
 

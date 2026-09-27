@@ -56,6 +56,11 @@ public class ServiceConfigurationExtensionsTests
     private static IResourceBuilder<ServiceResource> AddUrlService(IDistributedApplicationBuilder builder) =>
         new UrlSource().Resolve(builder, "inventory", UrlDefinition, new ServiceDeveloperConfig { Source = "url" });
 
+    private static IResourceBuilder<ServiceResource> AddKubernetesService(IDistributedApplicationBuilder builder) =>
+        new KubernetesSource(new FixedPortAllocator()).Resolve(
+            builder, "orders", KubernetesDefinition,
+            new ServiceDeveloperConfig { Source = "kubernetes", Kubernetes = new() { Context = "dev" } });
+
     private static IResourceBuilder<ServiceResource> AddDisabledService(IDistributedApplicationBuilder builder) =>
         new DisabledSource().Resolve(builder, "billing", DisabledDefinition, new ServiceDeveloperConfig { Source = "disabled" });
 
@@ -307,15 +312,88 @@ public class ServiceConfigurationExtensionsTests
     }
 
     [Fact]
-    public void Unwrap_Delegate_MismatchedType_StillThrows_BecauseThatIsAProgrammingErrorNotASourceSwitch()
+    public void Unwrap_Delegate_ReturnsTheFacade_SoNativeCallsChainAfterIt()
     {
         var builder = Builder();
 
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => AddContainerService(builder).Unwrap<ProjectResource>(_ => { }));
+        var service = AddContainerService(builder)
+            .Unwrap<ContainerResource>(_ => { })
+            .WithEnvironment("A", "B")
+            .WithArgs("--verbose");
 
-        Assert.Contains("payments", ex.Message);
-        Assert.Contains("container", ex.Message);
+        Assert.NotEmpty(service.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>());
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_OnKubernetesSource_SkipsRatherThanConfiguringThePortForward()
+    {
+        var builder = Builder();
+        var callbackRan = false;
+
+        AddKubernetesService(builder).Unwrap<ExecutableResource>(_ => callbackRan = true);
+
+        Assert.False(callbackRan);
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+        Assert.Contains("Unwrap<ExecutableResource>", message);
+        Assert.Contains("port-forward", message);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_ForWaitSupportOnKubernetesSource_StillRuns_LikeWaitFor()
+    {
+        var builder = Builder();
+        var callbackRan = false;
+
+        AddKubernetesService(builder).Unwrap<IResourceWithWaitSupport>(_ => callbackRan = true);
+
+        Assert.True(callbackRan);
+        Assert.Empty(ServiceSourcesWarnings.For(builder).Messages);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_OnDisabledSource_SkipsAndReportsTheSkip()
+    {
+        var builder = Builder();
+        var callbackRan = false;
+
+        AddDisabledService(builder).Unwrap<IResourceWithEnvironment>(_ => callbackRan = true);
+
+        Assert.False(callbackRan);
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+        Assert.Contains("billing", message);
+        Assert.Contains("'disabled'", message);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_MismatchedType_SkipsAndReportsWhatItResolvedTo()
+    {
+        var builder = Builder();
+        var callbackRan = false;
+
+        // The same mismatch a developer produces by switching a java service to "container", which
+        // must not break a Program.cs they don't own.
+        var ex = Record.Exception(
+            () => AddContainerService(builder).Unwrap<ProjectResource>(_ => callbackRan = true));
+
+        Assert.Null(ex);
+        Assert.False(callbackRan);
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+        Assert.Contains("payments", message);
+        Assert.Contains("Unwrap<ProjectResource>", message);
+        Assert.Contains("'container'", message);
+        Assert.Contains(nameof(ContainerResource), message);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_MismatchedType_ReportsOnce_HoweverManyTimesItIsCalled()
+    {
+        var builder = Builder();
+        var service = AddContainerService(builder);
+
+        service.Unwrap<ProjectResource>(_ => { });
+        service.Unwrap<ProjectResource>(_ => { });
+
+        Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
     }
 
     /// <summary>
