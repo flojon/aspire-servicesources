@@ -149,8 +149,8 @@ that happens to be first in the group:
 `ServiceSources__Repositories__monorepo__Ref` is the environment-variable spelling, the same
 pattern `ServiceSources__Services__<service>__Local__Ref` uses. `path` exists on the shape but is
 reserved rather than implemented — a group's shared checkout is not yet redirectable in one
-setting, so a non-null value is a configuration error naming the repository; use a member's own
-`local.path` to split it out individually instead (see above).
+setting, so a non-null value is a configuration error naming the repository; switch one member to
+`"source": "path"` with its own `path.path` to split it out individually instead.
 
 Two failures are reported differently on purpose, because a typo in a configuration key produces an
 empty section rather than an error:

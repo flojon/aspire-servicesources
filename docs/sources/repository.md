@@ -32,13 +32,9 @@ repository and, for a .NET service, the project inside it:
 
 Requires `git` (2.7 or newer) on `PATH` for a managed checkout — the same "a tool you already
 have" trade the `"kubernetes"` source makes with `kubectl`. Every git operation runs under your own
-git, so your credential helper, SSH agent, `~/.gitconfig` and proxy settings apply unchanged. A
-service pointed at your own directory with `local.path` needs no git at all — and if that's true
-for every developer, because it's a fact about the repository rather than about any one of them,
-the [`"path"` source](path.md) skips git entirely instead.
+git, so your credential helper, SSH agent, `~/.gitconfig` and proxy settings apply unchanged.
 
-Each developer picks it in `servicesources.local.json`, optionally with their own `ref` or a
-directory of their own under `local`:
+Each developer picks it in `servicesources.local.json`, optionally with their own `ref`:
 
 ```json
 {
@@ -47,24 +43,35 @@ directory of their own under `local`:
     "payments": {
       "source": "repository",
       "local": { "ref": "feature/new-checkout" }
-    },
-    "shipping": {
-      "source": "repository",
-      "local": { "path": "/home/dev/code/shipping" }
     }
   }
 }
 ```
 
-- Omit `path` for a managed checkout: cloned once into
+**Already have a clone?** Don't point `"repository"` at it — switch that service to the
+[`"path"` source](path.md) with your own directory, which needs no git at all:
+
+```json
+{
+  "services": {
+    "payments": { "source": "path", "path": { "path": "/home/dev/code/payments" } }
+  }
+}
+```
+
+That works for any catalog entry, including one with no `path:` of its own. (`local.path` under
+`"repository"` still does the same thing, but is deprecated: it logs a startup notice with the
+`"path"` spelling to paste instead.)
+
+- A managed checkout is cloned once into
   `<AppHostDirectory>/.servicesources/checkouts/<serviceName>/`, and reconciled to the
   configured `ref` (or the catalog's `defaultRef`) on every run. Uncommitted edits are never
   discarded — if the checkout is dirty and the ref changed, resolution fails loudly instead of
   overwriting your work. Anything you put at that path yourself that isn't a plain clone — a linked
   `git worktree`, or a clone made with `--separate-git-dir` — is refused with an explanation rather
-  than replaced; point at it with `path` instead. A directory there with no `.git` entry at all is
-  treated as debris from an interrupted clone and **deleted**, so don't hand-place a plain directory
-  as a quick override — use `path` for that too. The `.servicesources/` directory gitignores itself
+  than replaced; point at it with the [`"path"` source](path.md) instead. A directory there with no
+  `.git` entry at all is treated as debris from an interrupted clone and **deleted**, so don't
+  hand-place a plain directory as a quick override — use `"path"` for that too. The `.servicesources/` directory gitignores itself
   on first use — no need to add it to your own `.gitignore` — and shields what it holds from your
   AppHost repository's build settings (see below).
 
@@ -72,10 +79,6 @@ directory of their own under `local`:
   "whatever's at the tip the first time each developer clones" into a reviewed checkout, since a
   resolved service can build and run code the checkout's own repository controls (see
   [`SECURITY.md`](https://github.com/flojon/aspire-servicesources/blob/main/SECURITY.md)). It costs a catalog edit per bump; that's the actual trade.
-- Set `path` to point at a checkout you manage yourself (e.g. an existing local clone). It's
-  used as-is — no clone, no checkout, no fetch, ever. A relative `path` is anchored to the
-  AppHost directory, and must name a directory that already exists. `ref` cannot be combined
-  with `path`.
 - Keep the file to the services you actually add — unless you use
   [`UseDeferredCheckout()`](#first-run-usedeferredcheckout), which removes the reason to.
   `AddService()` has to hand back the real resource, so it can't wait until the AppHost has finished
@@ -256,8 +259,9 @@ Every decision to run says why — no completion recorded, the command changed, 
 commit couldn't be determined, or the mode is `always`. A decision to *skip* says nothing: that's
 the ordinary case, and the marker already records it.
 
-**A `path` checkout declares its own step.** A service resolved through `local.path` **never
-inherits the catalog's `prepare` block**. Nothing establishes that your directory is even a checkout
+**Your own directory declares its own step.** A service pointed at your own directory — the
+[`"path"` source](path.md) with `path.path`, or the deprecated `local.path` — **never inherits the catalog's
+`prepare` block**. Nothing establishes that your directory is even a checkout
 of the repository the catalog names — `path` is validated by "does it exist" and nothing else — so a
 catalog command like `["npm", "ci"]` would run perfectly happily in a tree that has nothing to do
 with it. And it's your working tree, holding your in-flight work, where a repository's own bootstrap
@@ -267,8 +271,8 @@ script is entitled to run `git clean`. So the command that runs there has to be 
 {
   "services": {
     "routing": {
-      "source": "repository",
-      "local": {
+      "source": "path",
+      "path": {
         "path": "/home/dev/code/routing",
         "prepare": { "command": ["./prepare.sh"] }
       }
@@ -487,7 +491,7 @@ Scoped deliberately narrowly, so the blast radius is first-run-only:
 
 - Only a checkout that doesn't exist yet. A warm checkout — every run after the first — takes
   the existing eager path unchanged, with full launch-profile fidelity.
-- Only managed checkouts. A `local.path` override is your own directory; there is nothing to clone.
+- Only managed checkouts. Your own directory (the [`"path"` source](path.md)) has nothing to clone.
 - Only the `"repository"` source, and within it only the kinds that own a managed checkout: `dotnet`,
   `java` and `javascript`. The other sources — `url`, `kubernetes`, `container` and
   [`path`](path.md) — never clone a repository, so they have nothing to defer.
@@ -662,10 +666,10 @@ not grouped by that alone — each still gets its own checkout, cloned and recon
 and ServiceSources warns about it at startup. That is a suggestion, not an error: an existing
 catalog written this way keeps working, and the warning goes away the moment you group them.
 
-**The per-service escape from a group** is `local.path`, the same override an ungrouped service
-has: point one developer's own working copy of one member at a directory you manage yourself.
-There is no repository-level equivalent — `local.path` redirects one service at a time, never a
-whole group's shared checkout in one setting.
+**The per-service escape from a group** is the [`"path"` source](path.md) with your own
+`path.path`, the same override an ungrouped service has: point one developer's own working copy of
+one member at a directory you manage yourself. There is no repository-level equivalent — it
+redirects one service at a time, never a whole group's shared checkout in one setting.
 
 **None of this applies to the [`"path"` source](path.md).** Grouping exists to avoid cloning
 one external repository twice, and a `"path"` service has nothing to clone — two of them naming

@@ -66,8 +66,8 @@ climbing out of that repository with `..`. It's still written relative to the Ap
 may climb *out of that directory* — the usual layout, with the AppHost in `src/MyApp.AppHost/` and
 its services beside it, needs `path: ../Orders.Api`. The repository is the nearest directory at or
 above the AppHost holding a `.git` directory or file. Your own override, set in
-`servicesources.local.json`, is unconfined instead — it's your own machine and directory, exactly
-like `local.path` is today for a `"repository"` service:
+`servicesources.local.json`, is unconfined instead — it's your own machine and directory, and it
+works even for an entry whose catalog declares no `path:` at all:
 
 ```json
 {
