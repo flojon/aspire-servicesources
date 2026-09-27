@@ -82,6 +82,34 @@ internal static class CheckoutRelativePath
     public static string? UnusableSegment(string relativePath) => Classify(relativePath).UnusableSegment;
 
     /// <summary>
+    /// The first confinement rule <paramref name="path"/> breaks — absolute, a segment made only of
+    /// dots and spaces, or climbing out — or <see langword="null"/> when it breaks none.
+    /// </summary>
+    /// <remarks>
+    /// One ordering for every caller that confines a catalog-written path, so each only phrases the
+    /// breach in its own terms ("the service's checkout", "the AppHost directory") and none can check
+    /// the rules in a different order than another.
+    /// </remarks>
+    public static ConfinementBreach? FirstBreach(string path)
+    {
+        if (IsAbsolute(path))
+        {
+            return new ConfinementBreach(ConfinementBreachKind.Absolute, null);
+        }
+
+        var (refused, segment) = Classify(path);
+
+        if (!refused)
+        {
+            return null;
+        }
+
+        return segment is not null
+            ? new ConfinementBreach(ConfinementBreachKind.UnusableSegment, segment)
+            : new ConfinementBreach(ConfinementBreachKind.EscapesRoot, null);
+    }
+
+    /// <summary>
     /// The single left-to-right scan both <see cref="EscapesRoot"/> and <see cref="UnusableSegment"/>
     /// answer from, so they report the same first problem rather than each finding a different one.
     /// </summary>
@@ -180,3 +208,17 @@ internal static class CheckoutRelativePath
     public static string NormalizeSeparators(string relativePath) =>
         relativePath.Replace('\\', Path.DirectorySeparatorChar);
 }
+
+/// <summary>Which rule <see cref="CheckoutRelativePath.FirstBreach"/> found broken.</summary>
+internal enum ConfinementBreachKind
+{
+    Absolute,
+    UnusableSegment,
+    EscapesRoot,
+}
+
+/// <summary>
+/// A path's first confinement breach. <paramref name="Segment"/> is the offending segment for
+/// <see cref="ConfinementBreachKind.UnusableSegment"/>, and <see langword="null"/> otherwise.
+/// </summary>
+internal readonly record struct ConfinementBreach(ConfinementBreachKind Kind, string? Segment);

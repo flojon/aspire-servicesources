@@ -9,7 +9,7 @@ namespace Aspire.Hosting.ServiceSources.Git;
 /// <remarks>
 /// <para>
 /// A queue rather than a callback because the two ends do not overlap in time. The clone starts
-/// during composition — <see cref="Sources.LocalCheckoutPrefetch"/> kicks every <c>"local"</c>
+/// during composition — <see cref="Sources.LocalCheckoutPrefetch"/> kicks every <c>"repository"</c>
 /// checkout off on the first <c>AddService()</c> call — while the resource it reports against only
 /// gains a state and a log to write to once the host is up and DCP has created it. Buffering the
 /// lines written so far means a watcher that attaches late still sees the clone from its first byte
@@ -37,7 +37,7 @@ internal sealed class CheckoutProgress : IGitProgressSink
     /// <remarks>
     /// git throttles progress to a line per percentage point per phase, so a clone's whole stream is
     /// a few hundred lines and a reader that attaches at all sees all of it. The bound is for the
-    /// one that never does — a service configured <c>"local"</c> that this AppHost turns out not to
+    /// one that never does — a service configured <c>"repository"</c> that this AppHost turns out not to
     /// add, whose speculative clone still runs — so that its stream cannot be retained in full for
     /// as long as the builder lives.
     /// </remarks>

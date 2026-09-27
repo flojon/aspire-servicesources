@@ -8,7 +8,7 @@ internal interface IGitClient
     /// an unusable git is reported once and up front rather than as a clone failure per service.
     /// </summary>
     /// <remarks>
-    /// Cheap and idempotent — it runs on every <c>"local"</c> resolution. Defaulted to a no-op so
+    /// Cheap and idempotent — it runs on every <c>"repository"</c> resolution. Defaulted to a no-op so
     /// the test doubles that stand in for a real git don't each have to say they need nothing.
     /// </remarks>
     void EnsureAvailable()

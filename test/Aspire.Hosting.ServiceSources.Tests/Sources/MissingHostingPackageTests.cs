@@ -253,7 +253,7 @@ public class MissingHostingPackageTests
     }.ToDefinition("servicesources.yaml", ServiceName, TestHelpers.EmptyRepositories);
 
     private static ServiceDeveloperConfig DevConfig(string path) =>
-        new() { Source = "local", Local = new() { Path = path } };
+        new() { Source = "repository", Local = new() { Path = path } };
 
     /// <summary>
     /// Stands in for a kind whose body reached a type from an assembly that is not on disk. Thrown

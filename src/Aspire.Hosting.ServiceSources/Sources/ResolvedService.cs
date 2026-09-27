@@ -18,7 +18,7 @@ internal static class ResolvedService
         var facade = new ServiceResource(serviceName);
 
         // Copies the SAME instances `real` already carries — a container/kubernetes source's own
-        // EndpointAnnotation, a "local" project's launch-profile-derived endpoints and environment,
+        // EndpointAnnotation, a "repository" project's launch-profile-derived endpoints and environment,
         // whatever a deferred registration added — so GetServiceEndpoint/GetEndpoint and a second
         // WithHttpEndpoint() call see them on the facade exactly as they sat on `real` before the
         // facade existed. Sharing the instance rather than its value is what keeps a later

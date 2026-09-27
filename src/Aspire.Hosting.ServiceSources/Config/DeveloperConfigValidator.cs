@@ -893,7 +893,7 @@ internal static class DeveloperConfigValidator
 
         // The suggestion needs no escaping of its own: a whitespace value is not the name of any
         // source, so it fails this lookup and the placeholder is what gets shown.
-        var source = shape.SourceNames.Contains(value) ? value : "...";
+        var source = shape.SuggestedSourceFor(value) ?? "...";
 
         return Raw.Compose(
             $"the entry takes a block of settings, not the value {Escaped(value)}: " +

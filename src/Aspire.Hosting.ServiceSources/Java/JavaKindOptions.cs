@@ -5,7 +5,7 @@ namespace Aspire.Hosting.ServiceSources.Java;
 
 /// <summary>
 /// The <c>java:</c> block of a service's <c>servicesources.yaml</c> entry — how to run the
-/// service's checkout once the <c>"local"</c> source has cloned it. Deserialized from the opaque
+/// service's checkout once the <c>"repository"</c> source has cloned it. Deserialized from the opaque
 /// per-kind config block by <see cref="LocalKindConfig.Parse{T}"/>; validated by
 /// <see cref="Parse"/>, which is what callers should use.
 /// </summary>
@@ -172,7 +172,7 @@ internal sealed class JavaKindOptions
         if (CheckoutRelativePath.IsAbsolute(trimmed))
         {
             throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': java.workingDirectory '{Raw.Escaped(trimmed)}' is an absolute path, but it must be relative to the root of the service's checkout. Use 'local.path' in servicesources.local.json to point at a checkout somewhere else on disk.");
+                $"Service '{new Name(serviceName)}': java.workingDirectory '{Raw.Escaped(trimmed)}' is an absolute path, but it must be relative to the root of the service's checkout. To run a checkout somewhere else on disk, use the 'path' source ('path': {{ 'path': '...' }} in servicesources.local.json).");
         }
 
         if (CheckoutRelativePath.UnusableSegment(trimmed) is { } unusable)

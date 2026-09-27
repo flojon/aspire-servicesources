@@ -32,7 +32,7 @@ internal readonly record struct GitCommandResult(int ExitCode, string StandardOu
 /// </summary>
 /// <remarks>
 /// Holds no mutable state of its own: <see cref="Sources.LocalCheckoutPrefetch"/> starts every
-/// "local" service's checkout at once, so several of these run concurrently.
+/// "repository" service's checkout at once, so several of these run concurrently.
 /// </remarks>
 internal static class GitCommand
 {

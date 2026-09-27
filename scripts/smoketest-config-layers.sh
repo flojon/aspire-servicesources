@@ -82,7 +82,7 @@ fi
 # layer under test had been consulted. `orders` is the subject; the other two resolve to "url",
 # which starts nothing.
 #
-# `orders` keeps a repository and project so the entry is well formed for the "local" source, but
+# `orders` keeps a repository and project so the entry is well formed for the "repository" source, but
 # no run here ever reaches a clone: every one of them is refused at AddService for naming a source
 # that does not exist.
 log "installing a catalog whose 'orders' entry is the subject"

@@ -38,7 +38,7 @@ public class JavaUnwrapTests
     private static string LocalPathJson(string serviceName, string checkout) => $$"""
         {
           "services": {
-            "{{serviceName}}": { "source": "local", "local": { "path": {{System.Text.Json.JsonSerializer.Serialize(checkout)}} } }
+            "{{serviceName}}": { "source": "path", "path": { "path": {{System.Text.Json.JsonSerializer.Serialize(checkout)}} } }
           }
         }
         """;
@@ -102,7 +102,7 @@ public class JavaUnwrapTests
 
         var ex = Record.Exception(() => builder.AddService("java-api").Unwrap<ProjectResource>(_ => { }));
 
-        // Installing the package would let 'local' produce a Java resource, so this skips, not throws.
+        // Installing the package would let 'repository' produce a Java resource, so this skips, not throws.
         Assert.Null(ex);
         Assert.Contains("Unwrap<ProjectResource>", Assert.Single(ServiceSourcesWarnings.For(builder).Messages));
     }
@@ -239,15 +239,15 @@ public class JavaUnwrapTests
             .Unwrap<ProjectResource>(_ => { }));
 
         Assert.Contains("Unwrap<ProjectResource> can never apply", ex.Message);
-        Assert.Contains($"'local' ({nameof(JavaAppExecutableResource)})", ex.Message);
+        Assert.Contains($"'repository' ({nameof(JavaAppExecutableResource)})", ex.Message);
         Assert.Contains("'container'", ex.Message);
     }
 
     [Fact]
-    public void Unwrap_Delegate_OnTheCatalogsDefaultContainerSource_WarnsBecauseLocalWouldApply()
+    public void Unwrap_Delegate_OnTheCatalogsDefaultContainerSource_WarnsBecauseRepositoryWouldApply()
     {
         // No developer override at all: a mismatch under the catalog's own default is still a
-        // source choice, not a mistake, because switching to 'local' makes the call apply.
+        // source choice, not a mistake, because switching to 'repository' makes the call apply.
         var builder = CreateAppHost("""{ "services": {} }""", JavaWithContainer.Replace(
             "    kind: java", "    defaultSource: container\n    kind: java", StringComparison.Ordinal));
         var callbackRan = false;
@@ -277,14 +277,14 @@ public class JavaUnwrapTests
     }
 
     [Fact]
-    public void Unwrap_Delegate_OnALocalJavaService_ConfiguresTheJavaResource()
+    public void Unwrap_Delegate_OnAPathJavaService_ConfiguresTheJavaResource()
     {
         var checkout = CreateTempDirectory();
         WriteWrapper(checkout, MavenWrapperName);
         var builder = CreateAppHost($$"""
             {
               "services": {
-                "java-api": { "source": "local", "local": { "path": {{System.Text.Json.JsonSerializer.Serialize(checkout)}} } }
+                "java-api": { "source": "path", "path": { "path": {{System.Text.Json.JsonSerializer.Serialize(checkout)}} } }
               }
             }
             """);

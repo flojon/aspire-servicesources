@@ -94,7 +94,7 @@ public class ServiceEndpointTests
     [Fact]
     public void GetServiceEndpoint_ServiceExposingBothSchemes_PrefersHttps()
     {
-        // What a "local" dotnet service looks like when its launch profile declares both. Aspire's
+        // What a "repository" dotnet service looks like when its launch profile declares both. Aspire's
         // own service discovery resolves "https+http://" in the same order, so preferring https
         // here hands a consumer the same endpoint it would have picked itself.
         var service = ContainerService(Builder());

@@ -1,6 +1,6 @@
 # Configuring and consuming a resolved service
 
-[← Back to README](../README.md)
+[← Back to README](https://github.com/flojon/aspire-servicesources/blob/main/README.md)
 
 ### Overriding `servicesources.local.json`
 
@@ -8,7 +8,7 @@ The file is read through the AppHost's own `IConfiguration`, as the **lowest**-p
 the standard provider chain, under the key `ServiceSources:Services:<service>`. It is still the
 place a developer normally writes a source selection, and a `.NET` or TypeScript AppHost authors it
 identically — but every provider above it can override an entry without the file being touched. A
-catalog's own `defaultSource` (see above, under [Getting started](../README.md#getting-started)) sits below
+catalog's own `defaultSource` (see above, under [Getting started](https://github.com/flojon/aspire-servicesources/blob/main/README.md#getting-started)) sits below
 even this file — see the row above the base:
 
 | Layer | Overrides the file? |
@@ -45,7 +45,7 @@ even this file — see the row above the base:
 >
 > builder.UseDeferredCheckout();
 >
-> // "local" — the file joined the chain on the line above.
+> // "repository" — the file joined the chain on the line above.
 > source = builder.Configuration["ServiceSources:Services:orders:source"];
 > ```
 >
@@ -283,12 +283,15 @@ exposes is decided by whichever source resolved it:
 
 | Source | Endpoint name |
 |---|---|
-| `"local"`, `kind: dotnet` | whatever the launch profile's `applicationUrl` declares (`http`, `https`, or both) |
-| `"local"`, `kind: javascript` | `http` |
-| `"local"`, `kind: java` | the configured `java.scheme`, `http` unless set |
+| `"repository"`/`"path"`, `kind: dotnet` | whatever the launch profile's `applicationUrl` declares (`http`, `https`, or both) |
+| `"repository"`/`"path"`, `kind: javascript` | `http` |
+| `"repository"`/`"path"`, `kind: java` | the configured `java.scheme`, `http` unless set |
 | `"url"` | the configured URL's scheme |
 | `"kubernetes"`, `"container"` | the configured `scheme`, `http` unless set |
 | `"disabled"` | *(none — no endpoint at all)* |
+
+`"path"` shares every row with `"repository"` here — the endpoint comes from the same kind
+machinery reading the same checkout shape, whether that checkout was cloned or was already there.
 
 So naming a scheme resolves only while the service happens to be on a source that produces it.
 Switch that service and the consumer breaks — and it breaks *late*: composition succeeds, and the
@@ -327,7 +330,7 @@ consumer speaks service discovery: it injects every endpoint the service has und
 whichever is there. `GetServiceEndpoint()` is for the case a plain URL in a plain environment
 variable is what the consumer reads.
 
-`GetEndpoint("<scheme>")` still has its place — a service you know will never move off `"local"`,
+`GetEndpoint("<scheme>")` still has its place — a service you know will never move off `"repository"`,
 or an endpoint you added yourself through `WithHttpEndpoint`/`WithHttpsEndpoint`. Just don't reach
 for it across a service whose source a developer chooses.
 

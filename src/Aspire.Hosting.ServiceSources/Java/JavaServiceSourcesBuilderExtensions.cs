@@ -4,7 +4,7 @@ using Aspire.Hosting.ServiceSources.Java;
 namespace Aspire.Hosting.ServiceSources;
 
 /// <summary>
-/// Adds Java support to <c>AddService()</c>'s <c>"local"</c> source.
+/// Adds Java support to <c>AddService()</c>'s <c>"repository"</c> source.
 /// </summary>
 public static class JavaServiceSourcesBuilderExtensions
 {
@@ -20,7 +20,7 @@ public static class JavaServiceSourcesBuilderExtensions
     /// later <c>AddLocalKind("java", …)</c> throws "already registered" rather than being a no-op.
     /// </summary>
     /// <remarks>
-    /// Only the <c>"local"</c> source consults local kinds. A Java service reached over the
+    /// Only the <c>"repository"</c> source consults local kinds. A Java service reached over the
     /// <c>url</c>, <c>kubernetes</c>, or <c>container</c> source needs no registration at all —
     /// those sources are already language-agnostic.
     /// </remarks>
@@ -37,7 +37,7 @@ public static class JavaServiceSourcesBuilderExtensions
         builder.AddLocalKind(JavaLocalResourceKind.KindName, new JavaLocalResourceKind());
 
     /// <summary>
-    /// Configures this code-declared service to run as a <c>java</c>-kind <c>"local"</c> service,
+    /// Configures this code-declared service to run as a <c>java</c>-kind <c>"repository"</c> service,
     /// through a typed options handle instead of a raw dictionary. Sugar over
     /// <c>WithKind("java", …)</c> — calling this after <c>WithKind</c> (on either) throws the same
     /// "already called" error <c>WithKind</c> itself would, since this <em>is</em> that call.

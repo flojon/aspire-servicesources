@@ -12,7 +12,7 @@ using Xunit;
 namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 
 /// <summary>
-/// Deferring a cold <c>"local"</c> checkout past startup (#130): the AppHost reaches the dashboard
+/// Deferring a cold <c>"repository"</c> checkout past startup (#130): the AppHost reaches the dashboard
 /// while the clone is still running, and the service starts when its checkout lands.
 /// </summary>
 [Trait("IO", "true")]
@@ -111,7 +111,7 @@ public class DeferredCheckoutTests
             $"  {name}:\n    repository: https://example.com/{name}.git\n    project: Service.csproj"));
         File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), $"services:\n{yaml}\n");
 
-        var json = string.Join(",", localServices.Select(name => $"\"{name}\": {{ \"source\": \"local\" }}"));
+        var json = string.Join(",", localServices.Select(name => $"\"{name}\": {{ \"source\": \"repository\" }}"));
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), $"{{ \"services\": {{ {json} }} }}");
 
         return dir;
@@ -124,7 +124,7 @@ public class DeferredCheckoutTests
         }.ToDefinition("servicesources.yaml", name, TestHelpers.EmptyRepositories);
 
     private static ServiceDeveloperConfig DevConfig(string? path = null) =>
-        new() { Source = "local", Local = new() { Path = path } };
+        new() { Source = "repository", Local = new() { Path = path } };
 
     private static string ExpectedRepoRoot(string appHostDirectory, string serviceName) =>
         Path.Combine(appHostDirectory, ".servicesources", "checkouts", serviceName);
@@ -1166,7 +1166,7 @@ public class DeferredCheckoutTests
             $"services:\n  orders:\n    repository: {repository}\n    project: Service.csproj\n");
         File.WriteAllText(
             Path.Combine(dir, "servicesources.local.json"),
-            """{ "services": { "orders": { "source": "local" } } }""");
+            """{ "services": { "orders": { "source": "repository" } } }""");
 
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
         builder.UseDeferredCheckout();

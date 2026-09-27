@@ -9,7 +9,7 @@
   // ("kubernetes" needs a real cluster and kubectl, so it is not one to try against this sample;
   // the block is here to show what a source you are not currently on looks like in the file.)
   "services": {
-    "orders": { "source": "local" },
+    "orders": { "source": "repository" },
     "inventory": { "source": "url" },
     "payments": {
       "source": "container",

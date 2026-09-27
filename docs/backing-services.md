@@ -1,6 +1,6 @@
 # Backing services: databases, brokers and caches
 
-[← Back to README](../README.md)
+[← Back to README](https://github.com/flojon/aspire-servicesources/blob/main/README.md)
 
 A service usually depends on a database or a broker, and a developer wants the same choice for it
 that they have for the service: run it locally, or connect to the one already running in the shared

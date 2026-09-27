@@ -94,7 +94,7 @@ public class ServiceStartupFailureNoticeTests
         }
     }
 
-    private static IResource ServiceResource(string name = "orders", string source = "local")
+    private static IResource ServiceResource(string name = "orders", string source = "repository")
     {
         var resource = new FakeServiceResource(name);
         resource.Annotations.Add(new ServiceSourceAnnotation(name, source));
@@ -249,21 +249,21 @@ public class ServiceStartupFailureNoticeTests
     }
 
     [Fact]
-    public async Task ALocalService_IsToldItsBuildOutputIsNotHere()
+    public async Task ARepositoryService_IsToldItsBuildOutputIsNotHere()
     {
         var local = Assert.Single(await ReportAsync(
-            ServiceResource(source: "local"), Snapshot(KnownResourceStates.FailedToStart)));
+            ServiceResource(source: "repository"), Snapshot(KnownResourceStates.FailedToStart)));
 
         var container = Assert.Single(await ReportAsync(
             ServiceResource(source: "container"), Snapshot(KnownResourceStates.FailedToStart)));
 
-        // The reason issue #150 is filed against 'local' rather than against every source: the
+        // The reason issue #150 is filed against 'repository' rather than against every source: the
         // developer never added this project and did not choose where its code lives, so the
         // notice says which console the build wrote to.
         Assert.Contains("checkout", local);
         Assert.DoesNotContain("checkout", container);
 
-        Assert.Contains("'local'", local);
+        Assert.Contains("'repository'", local);
         Assert.Contains("'container'", container);
     }
 
@@ -456,7 +456,7 @@ public class ServiceStartupFailureNoticeTests
     public async Task AResourceNamedDifferentlyFromItsService_NamesBoth()
     {
         var resource = new FakeServiceResource("orders-app");
-        resource.Annotations.Add(new ServiceSourceAnnotation("orders", "local"));
+        resource.Annotations.Add(new ServiceSourceAnnotation("orders", "repository"));
 
         var notice = Assert.Single(await ReportAsync(resource, Snapshot(KnownResourceStates.FailedToStart)));
 
@@ -475,7 +475,7 @@ public class ServiceStartupFailureNoticeTests
         var notices = TestHelpers.StreamServiceSourcesWarnings(builder);
 
         var orders = builder.AddResource(new FakeServiceResource("orders"));
-        ResolvedService.Bridge(orders, "orders", "local");
+        ResolvedService.Bridge(orders, "orders", "repository");
 
         var services = builder.Services.BuildServiceProvider();
         await builder.Eventing.PublishAsync(
@@ -505,7 +505,7 @@ public class ServiceStartupFailureNoticeTests
         var builder = TestHelpers.CreatePublishingBuilder(TempDirectories.CreateSubdirectory().FullName);
 
         var orders = builder.AddResource(new FakeServiceResource("orders"));
-        ResolvedService.Bridge(orders, "orders", "local");
+        ResolvedService.Bridge(orders, "orders", "repository");
 
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 

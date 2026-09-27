@@ -175,6 +175,33 @@ internal static class LocalGitCheckout
     public static bool IsManagedCheckout(ServiceDeveloperConfig config) => config.Local.Path is null;
 
     /// <summary>
+    /// A developer's own directory override — <c>local.path</c> for a <c>"repository"</c> service,
+    /// <c>path.path</c> for a <c>"path"</c> one — resolved and checked to exist. Unconfined: it is
+    /// the developer's own machine, so unlike a catalog-written path it may point anywhere.
+    /// </summary>
+    /// <param name="key">The key the developer wrote, as the message should name it.</param>
+    /// <remarks>
+    /// Anchored to the AppHost directory (matching Aspire's own <c>AddProject</c>), not to the
+    /// process's working directory; <see cref="Path.GetFullPath(string, string)"/> is a no-op for an
+    /// absolute value. Checked here because only the <c>dotnet</c> kind goes on to look inside the
+    /// directory — every other kind hands it straight to its handler, where a typo'd override would
+    /// surface as an obscure failure rather than as a named config error.
+    /// </remarks>
+    public static string ResolveDeveloperDirectory(
+        string serviceName, string key, string path, string appHostDirectory)
+    {
+        var resolved = Path.GetFullPath(path, appHostDirectory);
+
+        if (!Directory.Exists(resolved))
+        {
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': the '{Raw.Escaped(key)}' override points at '{Raw.Escaped(resolved)}', which does not exist. '{Raw.Escaped(key)}' must name an existing local directory.");
+        }
+
+        return resolved;
+    }
+
+    /// <summary>
     /// Whether this service names a repository there is anything to clone from at all. The other
     /// half of the same question <see cref="IsManagedCheckout"/> answers from the developer's side:
     /// that one says whether we would do the cloning, this one whether there is a repository to
@@ -314,7 +341,7 @@ internal static class LocalGitCheckout
         if (grouped && repositoryConfig?.Path is not null)
         {
             throw ServiceSourcesConfigurationException.For(
-                $"Repository '{new Name(definition.Repository.CheckoutName)}': '{Raw.Literal(DeveloperConfiguration.RepositoriesKey, default)}:{new Name(definition.Repository.CheckoutName)}:path' is reserved and does not redirect the group's checkout — that is not implemented yet. Redirect one member service's own checkout with its 'local.path' override in {Raw.Literal(DeveloperConfiguration.FileName)} instead.");
+                $"Repository '{new Name(definition.Repository.CheckoutName)}': '{Raw.Literal(DeveloperConfiguration.RepositoriesKey, default)}:{new Name(definition.Repository.CheckoutName)}:path' is reserved and does not redirect the group's checkout — that is not implemented yet. Point one member service at a checkout you manage yourself with the 'path' source instead — 'source': 'path' and 'path': {{ 'path': '...' }} for that service in {Raw.Literal(DeveloperConfiguration.FileName)}.");
         }
 
         if (config.Local.Path is not null)
@@ -325,24 +352,10 @@ internal static class LocalGitCheckout
                     $"Service '{new Name(serviceName)}': 'local.ref' cannot be combined with 'local.path' — 'local.path' points directly at an existing checkout, and 'local.ref' only applies when this tool manages the clone.");
             }
 
-            // Anchor a relative `path` override to the AppHost directory (matching Aspire's own
-            // AddProject behavior), not to the process's current working directory.
-            // Path.GetFullPath is a no-op when config.Local.Path is already absolute.
-            var overridden = Path.GetFullPath(config.Local.Path, appHostDirectory);
-
-            // Only the built-in dotnet kind goes on to look for a project file underneath this
-            // directory; every other kind hands the checkout straight to its handler, so without
-            // this check a typo'd override surfaces as an obscure failure inside that handler (or
-            // as a resource with a nonsensical working directory) rather than as a named config
-            // error.
-            if (!Directory.Exists(overridden))
-            {
-                throw ServiceSourcesConfigurationException.For(
-                    $"Service '{new Name(serviceName)}': the 'local.path' override points at '{Raw.Escaped(overridden)}', which does not exist. 'local.path' must name an existing local directory.");
-            }
-
             // Used as-is: no clone, no checkout, no fetch, ever.
-            return new PreparedCheckout(overridden, NeedsReconciliation: false);
+            return new PreparedCheckout(
+                ResolveDeveloperDirectory(serviceName, "local.path", config.Local.Path, appHostDirectory),
+                NeedsReconciliation: false);
         }
 
         EnsureToolDirectory(appHostDirectory);
@@ -510,7 +523,7 @@ internal static class LocalGitCheckout
         if (File.Exists(Path.Combine(repoRoot, ".git")))
         {
             throw ServiceSourcesConfigurationException.For(
-                $"{label}: the checkout at '{Raw.Escaped(repoRoot)}' has a '.git' file rather than a '.git' directory, so it is a linked worktree or a clone made with --separate-git-dir rather than a checkout this tool cloned. Move it aside and re-run to have it cloned fresh, or point the service at it with the 'local.path' override in servicesources.local.json.");
+                $"{label}: the checkout at '{Raw.Escaped(repoRoot)}' has a '.git' file rather than a '.git' directory, so it is a linked worktree or a clone made with --separate-git-dir rather than a checkout this tool cloned. Move it aside and re-run to have it cloned fresh, or point the service at it with the 'path' source — 'source': 'path' and 'path': {{ 'path': '...' }} in servicesources.local.json.");
         }
 
         // Unique per attempt: two builders resolving the same checkout concurrently (xUnit does
@@ -624,7 +637,7 @@ internal static class LocalGitCheckout
     /// <remarks>
     /// The <c>finally</c> in <see cref="CloneIntoPlace"/> removes the scratch directory on every
     /// path it controls, but it does not run when the process is killed — and checkouts are cloned
-    /// speculatively on background threads for every <c>"local"</c> service in
+    /// speculatively on background threads for every <c>"repository"</c> service in
     /// <c>servicesources.local.json</c>, including ones this AppHost never calls <c>AddService</c>
     /// for (see <see cref="Sources.LocalCheckoutPrefetch"/>). A Ctrl-C during startup, or the host
     /// exiting while an unrequested clone is still in flight, therefore leaks a partial copy of a

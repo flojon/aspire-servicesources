@@ -1,7 +1,7 @@
 namespace Aspire.Hosting.ServiceSources.Config.Catalog;
 
 /// <summary>
-/// One repository: the "local" source's block, referenced by every <see cref="ServiceDefinition"/>
+/// One repository: the "repository" source's block, referenced by every <see cref="ServiceDefinition"/>
 /// that names it. Every service has one — an ungrouped service gets its own anonymous instance,
 /// minted by whichever producer declared it (<see cref="ServiceMetadata.ToDefinition"/> or
 /// <see cref="Catalog.ServiceDefinitionBuilder.Build"/>), so there is no null case downstream.

@@ -8,12 +8,12 @@ using Xunit;
 namespace Aspire.Hosting.ServiceSources.Tests;
 
 /// <summary>
-/// The one sentence every message offering the 'local'/'container' switch ends in — skips, reverts,
+/// The one sentence every message offering the 'repository'/'container' switch ends in — skips, reverts,
 /// and the three exceptions that offer it as a way out. A sentence that dead-ends is a defect in all
 /// of them at once, which is why it is pinned on its own.
 /// </summary>
 /// <remarks>
-/// It used to say "set its source to 'local' or 'container'" with no condition attached, and a
+/// It used to say "set its source to 'repository' or 'container'" with no condition attached, and a
 /// service whose catalog entry declares neither — the ordinary shape of a service that is only ever
 /// a url — got <see cref="ServiceSourcesConfigurationException"/> on both options it offered. That
 /// each option resolves once its block is declared is already pinned where those sources are tested
@@ -81,7 +81,7 @@ public class SkipRemedyTests
         // Without these three the sentence reads as an unconditional instruction, which is what sent
         // a reader of a url-only service into an exception on both options.
         Assert.Contains("servicesources.yaml", message);
-        Assert.Contains("'repository' or 'repositoryRef' for 'local'", message);
+        Assert.Contains("'repository' or 'repositoryRef' for 'repository'", message);
         Assert.Contains("'container' block for 'container'", message);
     }
 
