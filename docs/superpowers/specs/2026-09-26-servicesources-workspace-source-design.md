@@ -168,6 +168,41 @@ renamed" with nothing about when they go away. They still compile, with a warnin
 runtime notice rather than `[Obsolete]` — but the *policy* transfers directly: deprecate with a clear
 message and a CHANGELOG entry, and don't commit to a removal release up front.
 
+**F10 — the closed vocabulary of source names lives in exactly two lists, kept in sync by a test —
+plus a third site that compares against the literal string directly, outside either list:**
+- `ServiceSourcesBuilderExtensions.Sources` (`ServiceSourcesBuilderExtensions.cs:35-41`) — the actual
+  runtime dispatch: `["local"] = new LocalProjectSource(...)`, alongside `"kubernetes"`, `"url"`,
+  `"container"`. This is what a developer's own `source:` value in `servicesources.local.json` is
+  looked up against (`Sources.TryGetValue(developerConfig.Source, ...)`,
+  `ServiceSourcesBuilderExtensions.cs:97`).
+- `DeveloperConfigShape.Service.SourceNames` (`Config/DeveloperConfigShape.cs:25-26`) — a second,
+  separately-declared list, `["local", "url", "kubernetes", "container"]`, used by
+  `ValidateSourceName` (`:200-207`) for a catalog's `defaultSource:`/`WithDefaultSource(...)` — its
+  own doc comment confirms this is "the one check both a yaml `defaultSource:` entry... and its code
+  twin... run" — and reused by `DeveloperConfigValidator`'s bare-value suggestion
+  (`DeveloperConfigValidator.cs:896`) to render `{ "source": "..." }` correctly.
+- A comment on `DeveloperConfigShape` (`:97-98`) already notes "the dispatch tables remain the
+  authority; a test asserts these agree with them" — so the two lists cannot drift silently, and
+  that test's expected values need updating alongside both lists.
+- A third site compares a developer's resolved source against the literal string `"local"` directly
+  rather than through either list: the "two services, one repository, ungrouped" startup warning
+  (`Config/ServiceSourcesConfigCache.cs:528`, `string.Equals(devConfig.Source, "local", ...)`). Easy
+  to miss because it's neither dispatch nor validation — it's a diagnostic that silently stops firing
+  (not a compile error, not a thrown exception) if left matching the retired name after the rename,
+  which is the worst way for this kind of bug to surface.
+
+This closes a real gap in the previous draft, which asserted a config naming `source: "local"`
+"must fail with a specific, named error" without saying where that check lives. It lives in **two**
+places, not one: the dispatch miss at `ServiceSourcesBuilderExtensions.cs:97-104` (today's generic
+"not implemented yet"-avoiding message, which already *dynamically* lists `Sources.Keys` — so once
+`"local"` is removed and `"repository"`/`"path"` added there, every *other* bad value's error message
+is automatically correct with no further work) needs a special case ahead of that generic fallback
+for exactly `"local"`; and `ValidateSourceName` (`DeveloperConfigShape.cs:200-207`) needs the
+identical special case for a catalog's `defaultSource: "local"`/`.WithDefaultSource("local")`, which
+otherwise would fail only with the generic "not a valid source" message instead of naming the
+rename. Both sites, not just the developer-config one, need the loud, specific error — there's no
+reason a catalog author's mistake should be explained worse than a developer's own.
+
 ## Proposed shape
 
 ### Rename: `"local"` → `"repository"`
@@ -199,6 +234,12 @@ sends a reader hunting for a typo they didn't make:
 This is a genuine breaking change, acceptable pre-1.0 per the README's own policy ("while the version
 is below `1.0.0`, a breaking change can ship in a minor release") — but it must be *loud*, per the
 above, and recorded in the CHANGELOG the way every other breaking change here already is.
+
+The identical message is owed in **both** places a source name is checked (F10), not only where a
+developer's own `source:` selection is dispatched: a catalog's `defaultSource: "local"` or
+`.WithDefaultSource("local")` goes through the same `ValidateSourceName` check
+(`Config/DeveloperConfigShape.cs:200-207`) and deserves the same named rename error rather than
+falling through to "not a valid source. Expected one of: ...".
 
 Internal type names are **not** part of this rename. `LocalProjectSource`, `LocalGitCheckout`,
 `LocalDeveloperConfig`, `LocalKinds`, `ILocalResourceKind`, `AddLocalKind`, `LocalKindRegistry` all
@@ -253,6 +294,18 @@ same service is exactly the "combining sources" pattern the README already docum
 picks `source: "repository"` to clone it, another picks `source: "path"` to use the copy they already
 have. The single top-level `project:`/`WithProject` field still applies to both: the project's path
 relative to the service's root is the same code either way, only how that root was reached differs.
+
+Two small, free consequences of adding `path:` as a plain property on `ServiceMetadata`, worth
+recording so they don't look like oversights later:
+- **`"path"` becomes a reserved kind name automatically.** `IsReservedKindName` derives its set from
+  `ServiceMetadata`'s own properties by reflection (`Config/ServiceCatalogLoader.cs:17,39`), so a
+  yaml `kind: path` collides with the new top-level field the same way `kind: repository`/`kind: url`
+  already collide with theirs — no separate registration needed, and nothing to remember to add.
+- **The "no source configured" error needs `path` added to its list of remedies.**
+  `ServiceCatalogLoader.cs:288-299` currently reads "Expected a non-empty 'repository', a
+  'repositoryRef', or a 'url'/'container'/'kubernetes' block" for a service with nothing resolvable
+  declared at all; a bare `path:` must also satisfy that check, and the message's list of
+  alternatives should name it.
 
 ### Confinement differs by who wrote the value — same asymmetry that already exists
 
@@ -345,6 +398,34 @@ external-repository risk (F6) — same commit, same review as the AppHost, nothi
 developer-redirected `path` (today's `local.path`) is unchanged from today's story and should say so,
 so a reader doesn't wonder why the guidance moved.
 
+## Documentation
+
+Gathered here rather than left scattered through the sections above, matching how prior designs in
+this repo close out (e.g. the code-catalog design's own "Documentation" section):
+
+- **README:**
+  - "`\"local\"` source options" section retitled/reworded around `"repository"`, with a short note
+    at the top on the rename and the migration error.
+  - New section for `"path"`, sized like the existing per-source sections, covering: the field,
+    confinement (catalog vs. developer, per "Confinement" above), `prepare` mode restrictions,
+    `defaultSource: path` being close to free, and no `UseDeferredCheckout()` interaction.
+  - "Combining sources on one catalog entry" (`README.md:1561-1608`) gets a `path:` block added to
+    its worked example, since F8 makes it a first-class member of that pattern, not a footnote.
+  - "The `source` value is matched without regard to case... A name none of the four has is refused"
+    (`README.md:1605-1606`) — **"four" becomes "five"** once `path` exists alongside
+    `repository`/`url`/`container`/`kubernetes`. Small, easy to miss, wrong the moment either change
+    ships without it.
+  - "Several services from one repository" and the `prepare`/deferred-checkout sections each get the
+    one-line cross-references noted inline above (no `UseDeferredCheckout()` effect; no repository
+    grouping needed for `path`).
+- **CHANGELOG**, both under `## [Unreleased]`:
+  - `### Breaking` for the `"local"`→`"repository"` rename, naming the migration (mirroring the
+    `UseDeferredCheckout()` late-call entry's shape, `CHANGELOG.md:23-30`).
+  - `### Added` for `"path"`.
+  - `### Deprecated` for `local.path`, in the same style as the `UseJava()`/`UseJavaScript()` entry
+    (F9, `CHANGELOG.md:69-81`) — message, replacement, no removal version promised.
+- **SECURITY.md** — the two additions above.
+
 ## What this deliberately does not do
 
 - **It does not change `ILocalResourceKind`.** F1 — no interface member moves, no kind package needs
@@ -406,12 +487,19 @@ own catalog block.
 ## Testing (sketch)
 
 - **Rename:** old `source: "local"` produces the named migration error, not a generic "unrecognized
-  source" message and not silent success; every existing `"local"`-source test is updated to
-  `"repository"` rather than duplicated.
+  source" message and not silent success; the identical check for `defaultSource: "local"`/
+  `.WithDefaultSource("local")` (F10); every existing `"local"`-source test updated to `"repository"`
+  rather than duplicated; the "two services, one repository, ungrouped" warning
+  (`ServiceSourcesConfigCache.cs:528`) still fires under `source: "repository"`, since F10 flags this
+  as the one site a rename could silently stop reaching; and the dispatch-table/`SourceNames` sync
+  test (F10) updated to the new five-name vocabulary rather than left asserting the old four.
 - **Catalog loader:** `path:` required for the `"path"` source, confined (absolute/`..`/unusable
   segment rejected with the existing `CheckoutRelativePath` messages), and — per F8 — freely
   combinable with `repository`/`repositoryRef`/`url`/`container`/`kubernetes` on one entry, with a
-  test asserting that combination resolves correctly under each `source` selection.
+  test asserting that combination resolves correctly under each `source` selection; `kind: path` in
+  yaml rejected as a reserved name, matching `kind: repository`/`kind: url` today; a service with
+  none of `repository`/`repositoryRef`/`path`/`url`/`container`/`kubernetes` still gets the "no source
+  configured" error, now naming `path` among the alternatives.
 - **Resolution:** missing directory at composition time reported by name, distinct from a clone
   failure; `dotnet`/`java`/`javascript` kinds all resolve against a `path` `repoRoot` unchanged from
   their existing checkout-based tests (parametrizing existing kind tests over the source rather than
