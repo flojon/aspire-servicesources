@@ -179,6 +179,13 @@ public class DeveloperConfigurationTests
         Assert.Equal("kubernetes", config.Source);
         Assert.Equal("/home/dev/code/orders", config.Local.Path);
         Assert.Equal("feature/new-checkout", config.Local.Ref);
+
+        // The deprecated 'local' spelling reconciles into 'repository' — see
+        // ReconcileRepositoryAlias_LocalAliasBlock_ResolvesTheSameAsRepositoryAndEmitsTheNotice
+        // below for the notice this also triggers.
+        Assert.Equal("/home/dev/code/orders", config.Repository.Path);
+        Assert.Equal("feature/new-checkout", config.Repository.Ref);
+
         Assert.Equal("dev-west", config.Kubernetes.Context);
         Assert.Equal("orders-ns", config.Kubernetes.Namespace);
         Assert.Equal(8080, config.Kubernetes.Port);
@@ -200,11 +207,123 @@ public class DeveloperConfigurationTests
         Assert.Equal("repository", config.Source);
         Assert.Null(config.Local.Path);
         Assert.Null(config.Local.Ref);
+        Assert.Null(config.Repository.Path);
+        Assert.Null(config.Repository.Ref);
         Assert.Null(config.Kubernetes.Context);
         Assert.Null(config.Kubernetes.Namespace);
         Assert.Null(config.Kubernetes.Port);
         Assert.Null(config.Url.Url);
         Assert.Null(config.Container.Tag);
+    }
+
+    /// <summary>
+    /// The current spelling, written directly: resolves exactly as <c>local</c> always did, and
+    /// earns no deprecation notice — there is nothing deprecated about it.
+    /// </summary>
+    [Fact]
+    public void ResolveService_RepositoryBlock_PopulatesRepositoryWithNoNotice()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """
+            { "services": { "orders": { "source": "repository",
+                "repository": { "path": "/home/dev/code/orders", "ref": "feature/new-checkout" } } } }
+            """);
+
+        var builder = CreateBuilder(dir);
+
+        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+
+        Assert.Equal("/home/dev/code/orders", config.Repository.Path);
+        Assert.Equal("feature/new-checkout", config.Repository.Ref);
+        Assert.Null(config.Local.Path);
+        Assert.Null(config.Local.Ref);
+
+        Assert.DoesNotContain(
+            ServiceSourcesWarnings.For(builder).Messages,
+            m => m.Contains("the 'local' block is deprecated", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Design "the 'local' block is deprecated, renamed to 'repository'": the deprecated alias
+    /// keeps resolving exactly as it does today, behind a one-time startup notice naming the
+    /// current spelling — the block-name counterpart of the existing <c>local.path</c>/<c>"path"</c>
+    /// source deprecation.
+    /// </summary>
+    [Fact]
+    public void ResolveService_LocalAliasBlock_ResolvesTheSameAsRepositoryAndEmitsTheDeprecationNotice()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """
+            { "services": { "orders": { "source": "repository",
+                "local": { "path": "/home/dev/code/orders", "ref": "feature/new-checkout" } } } }
+            """);
+
+        var builder = CreateBuilder(dir);
+
+        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+
+        Assert.Equal("/home/dev/code/orders", config.Repository.Path);
+        Assert.Equal("feature/new-checkout", config.Repository.Ref);
+
+        var notice = Assert.Single(
+            ServiceSourcesWarnings.For(builder).Messages,
+            m => m.Contains("the 'local' block is deprecated", StringComparison.Ordinal));
+        Assert.Contains("Service 'orders'", notice, StringComparison.Ordinal);
+        Assert.Contains("renamed to 'repository'", notice, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Two spellings of the same block, both written: there is no rule for which one would win, so
+    /// this is a configuration error rather than a silent pick.
+    /// </summary>
+    [Fact]
+    public void ResolveService_BothLocalAndRepositoryDeclared_ThrowsNamingBothKeys()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """
+            { "services": { "orders": { "source": "repository",
+                "local": { "path": "/home/dev/code/orders" },
+                "repository": { "ref": "feature/new-checkout" } } } }
+            """);
+
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.Contains("Service 'orders'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("sets both 'local' and 'repository'", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <remarks>
+    /// The env-var counterpart of <see cref="ResolveService_LocalAliasBlock_ResolvesTheSameAsRepositoryAndEmitsTheDeprecationNotice"/>:
+    /// the alias resolves the identical way whichever layer sets it, since binding — not the file
+    /// reader — is what turns <c>Local</c> into a key. Arranged as an in-memory configuration
+    /// source rather than a real environment variable, for the reason given on
+    /// <see cref="ResolveService_EnvironmentVariableOverridesTheFile"/>.
+    /// </remarks>
+    [Fact]
+    public void ResolveService_EnvironmentVariableUsingLocalAlias_ResolvesAsRepository()
+    {
+        var dir = CreateAppHostDirectory(
+            EnvOverrideCatalog,
+            """{ "services": { "envoverride": { "source": "repository" } } }""");
+
+        var builder = CreateBuilder(dir);
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ServiceSources:Services:envoverride:Local:Ref"] = "feature/from-env",
+        });
+
+        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "envoverride");
+
+        Assert.Equal("feature/from-env", config.Repository.Ref);
+        Assert.Contains(
+            ServiceSourcesWarnings.For(builder).Messages,
+            m => m.Contains("the 'local' block is deprecated", StringComparison.Ordinal));
     }
 
     /// <remarks>

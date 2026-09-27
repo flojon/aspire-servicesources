@@ -139,9 +139,16 @@ internal sealed class DeveloperConfiguration
 
         var bound = section.Get<Dictionary<string, ServiceDeveloperConfig>>() ?? [];
 
-        foreach (var config in bound.Values)
+        foreach (var (name, config) in bound)
         {
             NormalizeBlankToAbsent(config, DeveloperConfigShape.Service);
+
+            // Settles the deprecated 'local' block against 'repository' before anything past this
+            // point reads either — see ServiceDeveloperConfig.ReconcileRepositoryAlias.
+            if (config.ReconcileRepositoryAlias(name) is { } notice)
+            {
+                ServiceSourcesWarnings.For(builder).AddNotice(notice);
+            }
         }
 
         var (services, undeclaredNames) = CanonicalizeToCatalog(bound, declaredNames);
@@ -247,7 +254,7 @@ internal sealed class DeveloperConfiguration
     /// gesture to be someone reaching for it, and far enough to be a typed value that lost its
     /// text, so <see cref="DeveloperConfigValidator"/> refuses it outright and names the
     /// spelling that works. Treating it as absent here instead is what made a whitespace
-    /// <c>local.path</c> run the service from its managed checkout without a word.
+    /// <c>repository.path</c> run the service from its managed checkout without a word.
     /// </remarks>
     private static void NormalizeBlankToAbsent(object config, DeveloperConfigShape shape)
     {
@@ -264,9 +271,9 @@ internal sealed class DeveloperConfiguration
     /// <see cref="NormalizeBlankToAbsent"/> for one block, and for any block nested inside it.
     /// </summary>
     /// <remarks>
-    /// Recursive because <c>local.prepare</c> is a block inside a block, and the gesture has to mean
-    /// the same thing at every depth: a higher layer blanking <c>local:prepare:mode</c> is dropping
-    /// the mode the file below set, exactly as blanking <c>local:path</c> drops the path. A walk that
+    /// Recursive because <c>repository.prepare</c> is a block inside a block, and the gesture has to mean
+    /// the same thing at every depth: a higher layer blanking <c>repository:prepare:mode</c> is dropping
+    /// the mode the file below set, exactly as blanking <c>repository:path</c> drops the path. A walk that
     /// stopped at the first level would leave that as the empty string, which the mode parse would
     /// then have to treat as a value nobody wrote.
     /// </remarks>

@@ -131,7 +131,7 @@ public class UseJavaScriptTests
     /// The "path" source reuses the non-dotnet kind dispatch completely unchanged (design finding 1
     /// — <c>ILocalResourceKind</c>/<c>LocalKindRegistry</c> never learn the directory wasn't cloned):
     /// a <c>javascript</c>-kind service resolves through <c>"path"</c> exactly as it does through
-    /// <c>"repository"</c>, with no clone and no <c>local.path</c> override involved.
+    /// <c>"repository"</c>, with no clone and no <c>repository.path</c> override involved.
     /// </summary>
     [Fact]
     public void AddService_PathSourceJavaScriptKind_ResolvesTheRealRegisteredResource()

@@ -232,7 +232,7 @@ public class PrepareDeferredTests
     private static PrepareMetadata Prepare(string? mode = null) =>
         new() { Command = ["./prepare.sh"], Mode = mode };
 
-    private static ServiceDeveloperConfig DevConfig() => new() { Source = "repository", Local = new() };
+    private static ServiceDeveloperConfig DevConfig() => new() { Source = "repository", Repository = new() };
 
     /// <summary>
     /// Waits for something a background task is about to make true. Polled rather than signalled,

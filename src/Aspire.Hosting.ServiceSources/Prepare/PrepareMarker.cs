@@ -44,7 +44,7 @@ internal sealed record PrepareMarker(
     /// A <c>path</c> checkout gets neither, and the part that is available would be unwelcome.
     /// <c>.git</c> is a <em>file</em> rather than a directory for a linked worktree and for a
     /// <c>--separate-git-dir</c> clone — the two shapes <c>CloneIntoPlace</c> refuses for managed
-    /// checkouts, telling the developer to point <c>local.path</c> at it, so the tool's own
+    /// checkouts, telling the developer to point <c>repository.path</c> at it, so the tool's own
     /// documented remedy produces exactly the shape a <c>.git</c> marker cannot handle. And writing
     /// into a directory the tool does not own is the one thing <c>path</c> exists to promise it will
     /// never do. So it goes in the tool's own tree, keyed on the resolved absolute path as well as
@@ -57,7 +57,7 @@ internal sealed record PrepareMarker(
     /// own — see <see cref="Git.LocalGitCheckout.IsContainedCheckoutDirectoryName"/>. This is the
     /// second place a service name becomes a path, and the only one
     /// <see cref="Git.LocalGitCheckout.ManagedRepoRoot"/> does not stand in front of: a
-    /// <c>local.path</c> service has no managed checkout, so nothing has judged its name by the time
+    /// <c>repository.path</c> service has no managed checkout, so nothing has judged its name by the time
     /// the marker is written under it. A traversal name would otherwise put the marker outside the
     /// tool directory — in the AppHost's own tree, and so back inside its source-control status,
     /// which is the harm #224 is about. The managed branch needs no check: <paramref name="repoRoot"/>

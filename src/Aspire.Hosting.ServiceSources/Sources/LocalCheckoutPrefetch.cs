@@ -48,7 +48,7 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// A checkout there is nothing to clone for — the complement of
 /// <see cref="LocalGitCheckout.IsColdManagedCheckout"/>, which is the rule the deferral decision
 /// is built on too. A working tree already on disk, or a
-/// <c>local.path</c> override naming the developer's own directory: speculating over one costs a
+/// <c>repository.path</c> override naming the developer's own directory: speculating over one costs a
 /// <c>Directory.Exists</c>, buys no parallelism, and — for a stale override — invents a failure
 /// about a repository nobody was going to download. <see cref="GetRepoRoot"/> resolves these
 /// directly, which is the same work in a different thread.
@@ -580,7 +580,7 @@ internal sealed class LocalCheckoutPrefetch
         if (checkout is null)
         {
             // Not in the prefetch set. Either nothing needed prefetching for it — a warm checkout, a
-            // 'local.path' override — or the developer config was loaded before this service was
+            // 'repository.path' override — or the developer config was loaded before this service was
             // added to it, or it is being resolved through a path the prefetch doesn't enumerate.
             // Resolve it directly rather than failing, reporting to the same stream a checkout
             // started anywhere else would have: this path can still run a full cold clone, and a

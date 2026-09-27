@@ -203,7 +203,7 @@ public class DeferredKindCheckoutTests
         new ServiceMetadata { Repository = $"https://example.com/{name}.git", Kind = KindName }
             .ToDefinition("servicesources.yaml", name, TestHelpers.EmptyRepositories);
 
-    private static ServiceDeveloperConfig DevConfig(string? path = null) => new() { Source = "repository", Local = new() { Path = path } };
+    private static ServiceDeveloperConfig DevConfig(string? path = null) => new() { Source = "repository", Repository = new() { Path = path } };
 
     private static string ExpectedRepoRoot(string appHostDirectory, string serviceName) =>
         Path.Combine(appHostDirectory, ".servicesources", "checkouts", serviceName);

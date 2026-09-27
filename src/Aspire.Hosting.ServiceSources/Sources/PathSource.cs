@@ -28,7 +28,7 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// that holds it — the nearest ancestor with a <c>.git</c> entry, else a configured
 /// <c>ServiceSources:RepositoryRoot</c>, else the AppHost directory itself — so the usual layout, an AppHost project beside its services
 /// (<c>../Orders.Api</c>), can be declared. A developer's own <c>path.path</c> override is unconfined,
-/// exactly like <c>local.path</c> today — it is the developer's own machine and directory (design
+/// exactly like <c>repository.path</c> today — it is the developer's own machine and directory (design
 /// "Confinement differs by who wrote the value").
 /// </para>
 /// </remarks>
@@ -82,14 +82,15 @@ internal sealed class PathSource(IGitClient? gitClient = null, IPrepareCommandRu
 
     /// <summary>
     /// The directory this service resolves to: a developer's own override if they set one — unconfined,
-    /// exactly like <c>local.path</c> today — or the catalog's own <c>path:</c>, relative to the AppHost
+    /// exactly like <c>repository.path</c> today — or the catalog's own <c>path:</c>, relative to the AppHost
     /// directory and confined to the repository around it.
     /// </summary>
     /// <remarks>
     /// There is no <c>ref</c> for a <c>"path"</c> service (design finding 3), and a leftover
-    /// <c>local.ref</c> is not read at all: <c>local</c> is the <c>"repository"</c> source's block, and a
-    /// block for a source that is not selected survives but nothing reads it — a lower layer's
-    /// <c>local.ref</c> must not break a higher layer that switches this service to <c>"path"</c>.
+    /// <c>repository.ref</c> is not read at all: <c>repository</c> (or its deprecated alias,
+    /// <c>local</c>) is the <c>"repository"</c> source's block, and a block for a source that is not
+    /// selected survives but nothing reads it — a lower layer's <c>repository.ref</c> must not break
+    /// a higher layer that switches this service to <c>"path"</c>.
     /// </remarks>
     private static string ResolveRepoRoot(
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
@@ -122,7 +123,7 @@ internal sealed class PathSource(IGitClient? gitClient = null, IPrepareCommandRu
     /// <summary>
     /// Refuses a <c>"path"</c> service whose catalog entry declares no directory to use — the
     /// counterpart of <see cref="LocalProjectSource.RequireRepositoryToCheckOut"/> for this source. A
-    /// <c>path.path</c> override is exempt, the same way a <c>local.path</c> override exempts a
+    /// <c>path.path</c> override is exempt, the same way a <c>repository.path</c> override exempts a
     /// <c>"repository"</c> service from needing a catalog <c>repository:</c> — this method only runs
     /// once the caller has already established there is no override.
     /// </summary>
@@ -318,7 +319,7 @@ internal sealed class PathSource(IGitClient? gitClient = null, IPrepareCommandRu
 
         // A developer's own path.path points at their working tree, anywhere on disk, which nothing
         // establishes is a checkout of the repository the catalog names — so, exactly as for
-        // local.path, the catalog's step is not run there; only one the developer declares is.
+        // repository.path, the catalog's step is not run there; only one the developer declares is.
         var plan = config.Path.Path is not null
             ? PreparePlan.ForPathOverride(serviceName, catalogPrepare, config.Path.Prepare, OperatingSystem.IsWindows())
             : PreparePlan.ForCatalogPath(serviceName, catalogPrepare, config.Path.Prepare, OperatingSystem.IsWindows());
