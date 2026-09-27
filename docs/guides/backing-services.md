@@ -1,7 +1,5 @@
 # Backing services: databases, brokers and caches
 
-[← Back to README](https://github.com/flojon/aspire-servicesources/blob/main/README.md)
-
 A service usually depends on a database or a broker, and a developer wants the same choice for it
 that they have for the service: run it locally, or connect to the one already running in the shared
 dev cluster. `AddBackingService()` is that choice.
@@ -38,7 +36,7 @@ Because the local case is a factory, this works for anything with a connection s
 `AddSqlServer(...).AddDatabase(...)`, `AddRabbitMQ(...)`, `AddRedis(...)` — with no support needed
 per backend.
 
-### Sources
+## Sources
 
 Configured under a new `backingServices:` section of `servicesources.local.json`, alongside
 `services:` and read through the same configuration layers, so every override in
@@ -83,7 +81,7 @@ being read alongside it.
 > (`docker port` / `podman port`) — or keep `"local"`, which is what "a database this AppHost runs"
 > already means.
 
-### Reaching a backing service in a cluster
+## Reaching a backing service in a cluster
 
 `"kubernetes"` connects to a database, broker or cache running in a dev cluster, through a
 `kubectl port-forward` this AppHost opens and Aspire manages for the life of the run:
@@ -135,7 +133,7 @@ that exits outright shows up as a failed resource regardless.
   `kubectl config set-context --current --namespace=…` nobody recorded.
 - **`kubectl` must be on `PATH`.** Nothing is bundled, and this source runs the same binary you do.
 
-#### Several ports through one tunnel
+### Several ports through one tunnel
 
 A broker usually wants two: the one the application speaks, and a management port you open in a
 browser. Write `port` as a block that names each one, and reach them as `${port:<name>}`:
@@ -177,7 +175,7 @@ a "did you mean" when the name is close to one of them.
 Reading credentials out of a Kubernetes secret is covered under
 [Connection-string placeholders](#connection-string-placeholders), with `${secret:<name>:<key>}`.
 
-### The local factory's resource must be named after the backing service
+## The local factory's resource must be named after the backing service
 
 Aspire's `WithReference(...)` keys the connection string on the **referenced resource's own name**,
 and under `"local"` that resource is whatever your factory built. So the names have to agree, and
@@ -248,7 +246,7 @@ what replaces it.
 > with the `"direct"` case, where the connection string references nothing and the wait is therefore
 > satisfied at once.
 
-### Connection-string placeholders
+## Connection-string placeholders
 
 A `connectionString` is normally a literal. **Braces reserve nothing** — `Driver={PostgreSQL}`,
 `Server={host}\instance` and `PWD={secret}` all pass through exactly as written, doubled braces
@@ -326,7 +324,7 @@ placeholder today.
 > write. Escaping could not fix it: doubling is the syntax ODBC already uses, and collapsing it
 > silently corrupted working connection strings in both directions.
 
-#### Setting a template from a shell: quote it with single quotes
+### Setting a template from a shell: quote it with single quotes
 
 `${…}` is also what a POSIX shell, docker-compose and a GitHub Actions `run:` block use for their
 own variables, so a template set through an environment variable can be expanded away before the
@@ -359,7 +357,7 @@ that lost its placeholder and one that never had it arrive looking the same.
 This does not apply to `servicesources.local.json`, `appsettings.json` or user secrets, where `$` is
 an ordinary character — which is where a template normally lives.
 
-### Configuration that nothing reads is reported
+## Configuration that nothing reads is reported
 
 A backing service with no entry legitimately runs from its `local` factory, so an entry whose key
 matches no `AddBackingService()` call cannot be told apart at read time from one that was never
@@ -382,7 +380,7 @@ carry entries for backing services only some configurations add. There is no way
 if you find yourself wanting one, say so on
 [#206](https://github.com/flojon/aspire-servicesources/issues/206).
 
-### From a guest-language AppHost (backing services)
+## From a guest-language AppHost (backing services)
 
 `addBackingService` is exported, and the local factory crosses the boundary as an ordinary callback:
 

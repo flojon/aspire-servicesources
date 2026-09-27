@@ -1,8 +1,6 @@
 # Configuring and consuming a resolved service
 
-[← Back to README](https://github.com/flojon/aspire-servicesources/blob/main/README.md)
-
-### Overriding `servicesources.local.json`
+## Overriding `servicesources.local.json`
 
 The file is read through the AppHost's own `IConfiguration`, as the **lowest**-precedence source in
 the standard provider chain, under the key `ServiceSources:Services:<service>`. It is still the
@@ -135,7 +133,7 @@ Note the extra `ServiceSources` root: inside the AppHost's shared configuration 
 `services` root because it is a file of ours, read from the AppHost directory and re-keyed as it
 joins the chain.
 
-**A grouped repository ([above](local-source.md#several-services-from-one-repository)) has its own sibling root,
+**A grouped repository ([above](../sources/repository.md#several-services-from-one-repository)) has its own sibling root,
 `repositories`**, keyed by the repository's name rather than by any one member service — a
 developer overriding a group's ref writes it once, for every member, instead of naming the service
 that happens to be first in the group:
@@ -219,8 +217,8 @@ skips wait ordering too, since neither has a registered resource for Aspire to h
 That is this service waiting for something else. The other direction — something else waiting for
 *this* service, `consumer.WaitFor(service)` — is dropped for `"url"` and `"disabled"` and honoured
 for every other source, including `"kubernetes"`. That drop is reported in the same message as the
-service's skipped calls. See [the `"url"` source](other-sources.md#url-source) and
-[the `"disabled"` source](other-sources.md#disabled-source).
+service's skipped calls. See [the `"url"` source](../sources/url.md) and
+[the `"disabled"` source](../sources/disabled.md).
 
 Skipping rather than failing is deliberate: a developer switching a service to a remote source in
 their own `servicesources.local.json` must not break a `Program.cs` they don't own. You'll see:
@@ -243,7 +241,7 @@ That skip is only for a mismatch some source switch could undo. When **no** sour
 catalog entry declares could ever resolve to a `T` — `Unwrap<ProjectResource>(...)` on a
 `kind: java` service with a `container:` block, say — the call can never apply for anyone, so it
 throws at startup, naming each declared source and the type it resolves to. A local kind that
-doesn't declare its resource type (see [implementing a kind](kinds.md#implementing-a-kind)) is
+doesn't declare its resource type (see [implementing a kind](non-dotnet-services.md#implementing-a-kind)) is
 assumed to match anything, so it never causes this throw.
 
 The parameterless `Unwrap<T>()` **throws** in every one of those cases instead — it has to return

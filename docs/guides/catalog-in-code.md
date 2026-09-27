@@ -1,7 +1,5 @@
 # Authoring the catalog in code
 
-[← Back to README](https://github.com/flojon/aspire-servicesources/blob/main/README.md)
-
 Everything `servicesources.yaml` declares can be written in the AppHost's own language
 instead — C# directly, or TypeScript (and any other Aspire guest language) through
 Aspire's Type System — alongside yaml or in place of it. `AddServiceCatalog` takes a
@@ -66,7 +64,7 @@ values you type into `servicesources.local.json`:
 
 `"disabled"` needs no builder call and no yaml block of its own — a developer just writes
 `"source": "disabled"` in their own `servicesources.local.json` for a service the catalog already
-declares some other way. See [the `"disabled"` source](other-sources.md#disabled-source) below.
+declares some other way. See [the `"disabled"` source](../sources/disabled.md) below.
 
 `WithPath` combines freely with `WithRepository`/`WithSharedRepository` (and `WithUrl`,
 `WithContainer`, `WithKubernetes`) on the same service — it doesn't share a slot with them the way
@@ -81,7 +79,7 @@ catalog.AddService("orders")
     .WithProject("src/Orders.Api/Orders.Api.csproj");
 ```
 
-See [the `"repository"` and `"path"` sources](local-source.md#path-source) for what `WithPath`
+See [the `"repository"` and `"path"` sources](../sources/path.md) for what `WithPath`
 does — no `ref`, no deferred checkout, confinement to the AppHost directory, and `prepare` modes
 restricted to `once`/`always`/`never`.
 
@@ -98,7 +96,7 @@ catalog.AddService("orders")
 
 The same caveat as the yaml field applies: `WithDefaultSource("repository")` means every developer, and
 CI, clones by default unless CI pins its own source. `WithDefaultSource("path")` carries no such
-caveat — see [`defaultSource: path` is close to free](local-source.md#path-source).
+caveat — see [`defaultSource: path` is close to free](../sources/path.md).
 
 `WithContainer`/`WithKubernetes` both take a `scheme` parameter — the code-authoring
 equivalent of yaml's `container.scheme`/`kubernetes.scheme` (documented under the

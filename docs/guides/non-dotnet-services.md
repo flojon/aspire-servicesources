@@ -1,10 +1,6 @@
-# Local services via a non-`dotnet` `kind`
+# Non-.NET services (`kind`)
 
-[← Back to README](https://github.com/flojon/aspire-servicesources/blob/main/README.md)
-
-### Non-.NET local services: `kind`
-
-A `"local"` service is resolved as a .NET project by default. Set `kind` in the catalog to run
+A `"repository"` or `"path"` service is resolved as a .NET project by default. Set `kind` in the catalog to run
 the checkout some other way — the git clone/checkout is identical, only what gets built out of
 the resulting directory changes:
 
@@ -31,7 +27,7 @@ Any other kind is resolved by a registered handler, and its options live in a bl
 the kind. Kind names are matched case-sensitively, and a kind with no registered handler fails
 at that service's `AddService()` call, before its checkout is used.
 
-#### JavaScript: `kind: javascript`
+## JavaScript: `kind: javascript`
 
 Runs the checkout through
 [`Aspire.Hosting.JavaScript`](https://www.nuget.org/packages/Aspire.Hosting.JavaScript), which
@@ -105,7 +101,7 @@ consumer names that endpoint without knowing which source produced it
 ([naming a service's endpoint](configuration.md#naming-a-services-endpoint)). Node and Bun must be on `PATH` for the app types
 that use them.
 
-#### Java: `kind: java`
+## Java: `kind: java`
 
 Runs the checkout through the Aspire Community Toolkit's
 [Java integration](https://github.com/CommunityToolkit/Aspire), which your AppHost references
@@ -132,7 +128,7 @@ services:
       port: 8080
 ```
 
-The checkout is cloned exactly as for any other `"local"` service (`path`, `ref`, and
+The checkout is cloned exactly as for any other `"repository"` service (`path`, `ref`, and
 `defaultRef` all behave identically), then handed to that integration to run.
 
 **`java:` block options**
@@ -181,7 +177,7 @@ unsupported `scheme`, no run mode or more than one, a `workingDirectory`, `wrapp
 that isn't in the checkout, a wrapper script that isn't there — is reported by the
 `AddService("catalog")` call itself, before the service has added anything to the app model. The
 last two are read against the checkout, so under
-[`UseDeferredCheckout()`](local-source.md#first-run-usedeferredcheckout), where there isn't one yet, they are
+[`UseDeferredCheckout()`](../sources/repository.md#first-run-usedeferredcheckout), where there isn't one yet, they are
 reported after the clone lands as this service's resource state instead — the same two checks
 saying the same two things.
 
@@ -237,7 +233,7 @@ for the same name throws. To substitute a *different* `ILocalResourceKind` for `
 double), call `AddLocalKind("java", yourKind)` directly — `UseJava()` cannot take a handler
 argument, so it was never able to do that.
 
-#### Implementing a kind
+## Implementing a kind
 
 A kind implements `ILocalResourceKind` and registers it from an extension
 method:
@@ -305,7 +301,7 @@ your own is left alone unless it looks like that attempt: a private helper, one 
 options type, and one like `Validate(string message)` that carries no options block at all all
 register exactly as they did before.
 
-**Supporting [`UseDeferredCheckout()`](local-source.md#first-run-usedeferredcheckout).** Two more members, both
+**Supporting [`UseDeferredCheckout()`](../sources/repository.md#first-run-usedeferredcheckout).** Two more members, both
 optional and both defaulting to "no", decide whether a service of your kind can start before its
 checkout lands. Leave them alone and your kind keeps working exactly as it does now, always on the
 eager path:
@@ -359,7 +355,7 @@ others. Decide in `SupportsDeferredCheckout` wherever you can, where the answer 
 malformed to answer for is `false`, which routes it to the eager path where `Validate` reports it
 properly.
 
-#### Private repositories
+## Private repositories
 
 Clone and fetch for a managed checkout (no `path` override) authenticate the same way, in order:
 

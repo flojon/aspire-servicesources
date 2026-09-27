@@ -6,7 +6,7 @@ namespace Aspire.Hosting.ServiceSources.Java.Tests;
 
 /// <summary>
 /// Covers <c>Unwrap&lt;JavaAppExecutableResource&gt;(configure)</c> through a real
-/// <c>AddService()</c>, the shape <c>docs/kinds.md</c> recommends for reaching the rest of the Java
+/// <c>AddService()</c>, the shape <c>docs/guides/non-dotnet-services.md</c> recommends for reaching the rest of the Java
 /// integration.
 /// </summary>
 [Trait("IO", "true")]
