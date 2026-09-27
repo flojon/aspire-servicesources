@@ -73,12 +73,10 @@ public static class ServiceSourcesBuilderExtensions
     /// <remarks>
     /// <para>
     /// Which configuration applies depends on the resolved source: <c>"url"</c>, <c>"kubernetes"</c>
-    /// and <c>"disabled"</c> run out of band — a fixed remote URL, a <c>kubectl port-forward</c> in
-    /// front of something already running, and nothing at all, respectively — so most configuration
-    /// is skipped with a warning rather than applied. Wait ordering survives for <c>"kubernetes"</c>,
-    /// whose port-forward is a real local process to order against; <c>"url"</c> and
-    /// <c>"disabled"</c> register no resource at all, so nothing applies to either — including a
-    /// consumer's own <c>WaitFor</c>, which is dropped rather than left to hang (see
+    /// and <c>"disabled"</c> run out of band, so most configuration is skipped with a warning rather
+    /// than applied. Wait ordering survives only for <c>"kubernetes"</c>, whose port-forward is a
+    /// real local process to order against; <c>"url"</c> and <c>"disabled"</c> register no resource,
+    /// so a consumer's own <c>WaitFor</c> is dropped too rather than left to hang (see
     /// <see cref="Sources.UnregisteredServiceStartupGuard"/>).
     /// </para>
     /// </remarks>

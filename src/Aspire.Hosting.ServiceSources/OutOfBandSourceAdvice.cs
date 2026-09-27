@@ -52,15 +52,10 @@ internal static class OutOfBandSourceAdvice
         _ => "it runs out of band",
     };
 
-    /// <summary>
-    /// Where a skipped <c>Configure</c> call should go instead — the clause <see cref="ServiceSourcesWarnings.SkipReason"/>
-    /// builds its second sentence from.
-    /// </summary>
+    /// <summary>Where a skipped <c>Configure</c> call should go instead.</summary>
     /// <remarks>
-    /// <c>"url"</c> and <c>"kubernetes"</c> share one answer because both really do run somewhere —
-    /// "wherever it actually runs" points a reader at a real place. <c>"disabled"</c> runs nowhere at
-    /// all, deliberately, so that phrase would send a reader looking for a process that doesn't
-    /// exist; its own answer says so instead of pointing anywhere.
+    /// "Wherever it actually runs" is true for <c>"url"</c>/<c>"kubernetes"</c> but not
+    /// <c>"disabled"</c>, which runs nowhere at all.
     /// </remarks>
     internal static string ExpectedConfiguredWhere(string source) => source switch
     {
@@ -68,12 +63,7 @@ internal static class OutOfBandSourceAdvice
         _ => "The service is expected to be configured wherever it actually runs",
     };
 
-    /// <summary>
-    /// The lead-in <see cref="ServiceConfigurationExtensions.Unwrap{T}"/>'s failure message offers before the source switch, chosen
-    /// the same way <see cref="ExpectedConfiguredWhere"/> is: "configure it where it runs" is a real
-    /// option for <c>"url"</c>/<c>"kubernetes"</c> and a dead end for <c>"disabled"</c>, which runs
-    /// nowhere at all.
-    /// </summary>
+    /// <summary>The lead-in <see cref="ServiceConfigurationExtensions.Unwrap{T}"/>'s error offers before the source switch.</summary>
     internal static string ConfigureInsteadClause(string source) => source switch
     {
         "disabled" => "Drop the configuration",

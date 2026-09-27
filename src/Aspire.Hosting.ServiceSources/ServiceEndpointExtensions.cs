@@ -99,10 +99,8 @@ public static class ServiceEndpointExtensions
 
         if (names.Count == 0)
         {
-            // "disabled" gets its own advice: it deliberately has nothing a scheme/port entry, a
-            // launch profile or an explicit WithHttpEndpoint/WithHttpsEndpoint call could give it —
-            // the only way back is switching the source itself, same as every other Configure call
-            // this source skips (see Reachability.OutOfBandSources and OutOfBandSourceAdvice).
+            // "disabled" gets its own advice: no scheme/port entry or endpoint call can give it one
+            // back — the only way is switching the source itself.
             if (string.Equals(annotation?.Source, "disabled", StringComparison.Ordinal))
             {
                 return Raw.Compose(
