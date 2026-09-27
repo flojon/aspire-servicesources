@@ -1,6 +1,6 @@
 # The `"local"` source
 
-[← Back to README](../README.md)
+[← Back to README](https://github.com/flojon/aspire-servicesources/blob/main/README.md)
 
 ### `"local"` source options
 
@@ -36,7 +36,7 @@ service pointed at your own directory with `path` needs no git at all.
   `ref`/`defaultRef` accept a commit SHA, not only a branch or tag — and a SHA is how a team turns
   "whatever's at the tip the first time each developer clones" into a reviewed checkout, since a
   resolved service can build and run code the checkout's own repository controls (see
-  [`SECURITY.md`](../SECURITY.md)). It costs a catalog edit per bump; that's the actual trade.
+  [`SECURITY.md`](https://github.com/flojon/aspire-servicesources/blob/main/SECURITY.md)). It costs a catalog edit per bump; that's the actual trade.
 - Set `path` to point at a checkout you manage yourself (e.g. an existing local clone). It's
   used as-is — no clone, no checkout, no fetch, ever. A relative `path` is anchored to the
   AppHost directory, and must name a directory that already exists. `ref` cannot be combined
@@ -155,7 +155,7 @@ services:
 is never fetched or moved on your behalf — the commit only moves when you move it — so under the
 default `oncePerCommit`, **`git pull` in a service checkout is what causes `prepare` to run again on
 the next AppHost start.** That's an ordinary, frequent action, and nothing about running it reads as
-"approve a script to run on my machine"; see [`SECURITY.md`](../SECURITY.md) for why that's worth
+"approve a script to run on my machine"; see [`SECURITY.md`](https://github.com/flojon/aspire-servicesources/blob/main/SECURITY.md) for why that's worth
 knowing rather than just worth stating.
 
 The `once` vs `oncePerCommit` question is **"does the repository define this step?"** rather than
@@ -242,7 +242,7 @@ to happen.
 catalog command mutate a directory this tool doesn't own. A managed checkout under
 `.servicesources/checkouts/` is exactly the opposite: fully tool-owned, so nothing here asks before
 its `prepare` step (or the `dotnet`/`javascript`/`java` build that follows it) runs the first time —
-yet that script is foreign code in the sense that matters for [`SECURITY.md`](../SECURITY.md): written
+yet that script is foreign code in the sense that matters for [`SECURITY.md`](https://github.com/flojon/aspire-servicesources/blob/main/SECURITY.md): written
 and reviewed by the service repository, not by you. Meeting this notice on a `path` service is not a
 sign that a managed one asks first too.
 

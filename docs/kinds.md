@@ -1,6 +1,6 @@
 # Local services via a non-`dotnet` `kind`
 
-[← Back to README](../README.md)
+[← Back to README](https://github.com/flojon/aspire-servicesources/blob/main/README.md)
 
 ### Non-.NET local services: `kind`
 
@@ -35,7 +35,7 @@ at that service's `AddService()` call, before its checkout is used.
 
 Runs the checkout through
 [`Aspire.Hosting.JavaScript`](https://www.nuget.org/packages/Aspire.Hosting.JavaScript), which
-your AppHost references itself (13.5.2 or newer — see [Installation](../README.md#install)). `javascript` is a
+your AppHost references itself (13.5.2 or newer — see [Installation](https://github.com/flojon/aspire-servicesources/blob/main/README.md#install)). `javascript` is a
 built-in kind, resolved the same way `dotnet` always has been — reference the package and declare
 `kind: javascript`, no registration call needed:
 
@@ -110,7 +110,7 @@ that use them.
 Runs the checkout through the Aspire Community Toolkit's
 [Java integration](https://github.com/CommunityToolkit/Aspire), which your AppHost references
 itself as `CommunityToolkit.Aspire.Hosting.Java` (13.3.0 or newer — see
-[Installation](../README.md#install)). `java` is a built-in kind, resolved the same way `dotnet` always has
+[Installation](https://github.com/flojon/aspire-servicesources/blob/main/README.md#install)). `java` is a built-in kind, resolved the same way `dotnet` always has
 been — reference the package and declare `kind: java`, no registration call needed:
 
 ```csharp

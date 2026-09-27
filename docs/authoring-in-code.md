@@ -1,6 +1,6 @@
 # Authoring the catalog in code
 
-[← Back to README](../README.md)
+[← Back to README](https://github.com/flojon/aspire-servicesources/blob/main/README.md)
 
 Everything `servicesources.yaml` declares can be written in the AppHost's own language
 instead — C# directly, or TypeScript (and any other Aspire guest language) through
