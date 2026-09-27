@@ -29,7 +29,7 @@ public static class ServiceSourcesBuilderExtensions
     /// That is the opposite of the deliberate case-sensitivity of <c>kind</c> names (see
     /// <see cref="Sources.LocalKindRegistry.DescribeNearMatch"/>), and for a reason: kinds are an
     /// open registry that anything may contribute names to, where folding case could collide two
-    /// independent registrations, while these four names are a closed set this package owns and
+    /// independent registrations, while these five names are a closed set this package owns and
     /// nothing else can add to.
     /// </remarks>
     private static readonly Dictionary<string, IServiceSource> Sources = new(StringComparer.OrdinalIgnoreCase)
@@ -38,6 +38,7 @@ public static class ServiceSourcesBuilderExtensions
         ["kubernetes"] = new KubernetesSource(new SocketPortAllocator()),
         ["url"] = new UrlSource(),
         ["container"] = new ContainerSource(),
+        ["disabled"] = new DisabledSource(),
     };
 
     /// <summary>
@@ -54,7 +55,9 @@ public static class ServiceSourcesBuilderExtensions
     /// HTTP endpoint — with no underlying resource for Aspire to run (the <c>"url"</c> source);
     /// or a published container image run locally via Aspire's own <c>AddContainer(...)</c>,
     /// with image pull and lifecycle managed entirely by Aspire's own container-runtime
-    /// integration (the <c>"container"</c> source).
+    /// integration (the <c>"container"</c> source); or nothing at all, deliberately — a service a
+    /// developer has switched off without removing its <c>AddService</c> call or its catalog entry
+    /// (the <c>"disabled"</c> source, see <see cref="Sources.DisabledSource"/>).
     /// </summary>
     /// <returns>
     /// An <see cref="IResourceBuilder{T}"/> over a <see cref="ServiceResource"/> facade — never the
@@ -69,12 +72,12 @@ public static class ServiceSourcesBuilderExtensions
     /// </returns>
     /// <remarks>
     /// <para>
-    /// Which configuration applies depends on the resolved source: <c>"url"</c> and
-    /// <c>"kubernetes"</c> run out of band — one is a fixed remote URL, the other a
-    /// <c>kubectl port-forward</c> in front of something already running — so most configuration is
-    /// skipped with a warning rather than applied. Wait ordering survives for <c>"kubernetes"</c>,
-    /// whose port-forward is a real local process to order against; <c>"url"</c> registers no
-    /// resource at all, so nothing applies to it.
+    /// Which configuration applies depends on the resolved source: <c>"url"</c>, <c>"kubernetes"</c>
+    /// and <c>"disabled"</c> run out of band, so most configuration is skipped with a warning rather
+    /// than applied. Wait ordering survives only for <c>"kubernetes"</c>, whose port-forward is a
+    /// real local process to order against; <c>"url"</c> and <c>"disabled"</c> register no resource,
+    /// so a consumer's own <c>WaitFor</c> is dropped too rather than left to hang (see
+    /// <see cref="Sources.UnregisteredServiceStartupGuard"/>).
     /// </para>
     /// </remarks>
     [AspireExport]

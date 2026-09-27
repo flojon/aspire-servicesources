@@ -99,6 +99,16 @@ public static class ServiceEndpointExtensions
 
         if (names.Count == 0)
         {
+            // "disabled" gets its own advice: no scheme/port entry or endpoint call can give it one
+            // back — the only way is switching the source itself.
+            if (string.Equals(annotation?.Source, "disabled", StringComparison.Ordinal))
+            {
+                return Raw.Compose(
+                    $"Service '{name}' exposes no endpoint, so there is none to reference.{source} A "
+                    + $"'disabled' service has nothing running for it, deliberately, so there is no endpoint "
+                    + $"to declare one for. {Raw.Literal(OutOfBandSourceAdvice.SwitchSource)}.");
+            }
+
             return Raw.Compose(
                 $"Service '{name}' exposes no endpoint, so there is none to reference.{source} "
                 + $"Give the service an endpoint — a 'scheme'/'port' entry for a 'kubernetes' or "
