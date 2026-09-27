@@ -100,10 +100,10 @@ public sealed class ServiceDefinitionBuilder
     }
 
     /// <summary>
-    /// Declares which source (<c>"repository"</c>/<c>"url"</c>/<c>"kubernetes"</c>/<c>"container"</c>/<c>"path"</c>) a
-    /// developer gets for this service when nothing configures it explicitly — the code-authoring
-    /// equivalent of yaml's <c>defaultSource:</c> field. See design "Projection: a config layer, not
-    /// a resolver branch".
+    /// Declares which source (<c>"repository"</c>/<c>"url"</c>/<c>"kubernetes"</c>/<c>"container"</c>/
+    /// <c>"path"</c>/<c>"disabled"</c>) a developer gets for this service when nothing configures it
+    /// explicitly — the code-authoring equivalent of yaml's <c>defaultSource:</c> field. See design
+    /// "Projection: a config layer, not a resolver branch".
     /// </summary>
     public ServiceDefinitionBuilder WithDefaultSource(string source)
     {

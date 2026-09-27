@@ -16,8 +16,10 @@ internal static class Reachability
     /// here is not the service itself — shared with
     /// <see cref="ServiceConfigurationExtensions.Unwrap{T}"/>'s own out-of-band check, since both are
     /// the same policy re-expressed at a different key (annotation type here, capability type there).
+    /// <c>"disabled"</c> belongs here too — nothing is running at all, deliberately, so every call is
+    /// configuration for a resource that no longer exists.
     /// </summary>
-    internal static readonly HashSet<string> OutOfBandSources = new(StringComparer.Ordinal) { "url", "kubernetes" };
+    internal static readonly HashSet<string> OutOfBandSources = new(StringComparer.Ordinal) { "url", "kubernetes", "disabled" };
 
     /// <summary>
     /// Annotation types Aspire attaches as decoration alongside a capability call — never something

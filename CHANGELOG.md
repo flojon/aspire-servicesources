@@ -53,16 +53,25 @@ never existed. Check the tag of the last release before adding one.
   source, so a service already checked out next to the AppHost no longer needs a `repository:` url
   it has nothing to clone from, and every developer no longer has to write the same personal
   `local.path` override for a path that's actually a fact about the shared catalog. `path:` combines
-  freely with `repository:`/`url:`/`container:`/`kubernetes:` on one entry — see "Combining sources
-  on one catalog entry" in the README — so one developer can clone the service while another uses
-  the copy they already have. A catalog-declared `path:` is confined to inside the AppHost
-  directory, the same rule `project:` follows; a developer's own override (`path.path` in
-  `servicesources.local.json`) is unconfined, exactly like `local.path` today. `prepare` accepts
-  `once`/`always`/`never` — never `oncePerCommit`, since there's no separate commit for the
-  directory to move to on its own — and, unlike a `local.path` override, a catalog-declared
-  `path:`'s own `prepare:` block runs normally rather than being ignored. See the new `"path"`
-  source section in the README for the full behavior, including `defaultSource: path` and its
-  (lack of) interaction with `UseDeferredCheckout()` and `repositories:` grouping.
+  freely with `repository:`/`url:`/`container:`/`kubernetes:` on one entry — see
+  [Combining sources on one catalog entry](docs/other-sources.md#combining-sources-on-one-catalog-entry)
+  — so one developer can clone the service while another uses the copy they already have. A
+  catalog-declared `path:` is confined to inside the AppHost directory, the same rule `project:`
+  follows; a developer's own override (`path.path` in `servicesources.local.json`) is unconfined,
+  exactly like `local.path` today. `prepare` accepts `once`/`always`/`never` — never
+  `oncePerCommit`, since there's no separate commit for the directory to move to on its own — and,
+  unlike a `local.path` override, a catalog-declared `path:`'s own `prepare:` block runs normally
+  rather than being ignored. See [the `"path"` source](docs/local-source.md#path-source) for the
+  full behavior, including `defaultSource: path` and its (lack of) interaction with
+  `UseDeferredCheckout()` and `repositories:` grouping.
+- **A `"disabled"` source for `AddService`.** Turns a service off — `AddService("orders")` still
+  returns a valid resource builder, but nothing runs and nothing is reachable — without deleting
+  the `AddService` call or the catalog entry. Needs no catalog block: set
+  `"source": "disabled"` in `servicesources.local.json` for a service declared any other way.
+  Configuration calls (`WithEnvironment`, `WithReference`, endpoints, commands, …) are skipped and
+  logged exactly as they are for `"url"`/`"kubernetes"`, and a consumer's `WaitFor`/`WaitForCompletion`
+  on a disabled service resolves immediately instead of waiting, the same protection `"url"` has
+  against #170. See [the `"disabled"` source](docs/other-sources.md#disabled-source).
 
 ### Deprecated
 
@@ -387,7 +396,7 @@ protection then blocked reusing the name, so this version carries what would hav
   **A second silent change, and this one has no registration-time refusal to catch it: `Validate`
   is no longer called for a service on the deferred path.** It is paired with `Resolve`, which core
   does not call there either — under
-  [`UseDeferredCheckout()`](README.md#first-run-usedeferredcheckout) there is no checkout for it to
+  [`UseDeferredCheckout()`](docs/local-source.md#first-run-usedeferredcheckout) there is no checkout for it to
   judge the service against, so `ResolveDeferred` is called instead. **If your kind can answer
   `true` from `SupportsDeferredCheckout` and validates its options block only in `Validate`, that
   block stops being validated at all for a deferred service.** Parse and reject it from
@@ -689,7 +698,7 @@ protection then blocked reusing the name, so this version carries what would hav
   Not included, deliberately: no task runner, no ordering between steps, no cross-developer caching
   of what a step produced, no timeout, and no injected environment variables. One command, one
   marker, per service. See the
-  [`prepare` section](README.md#prepare-a-checkout-that-has-to-bootstrap-itself).
+  [`prepare` section](docs/local-source.md#prepare-a-checkout-that-has-to-bootstrap-itself).
 
 - **`AddBackingService()` — the database, broker or cache a service connects to, source-switched
   the same way the service is** ([#144]). A service usually depends on a database, and a developer
