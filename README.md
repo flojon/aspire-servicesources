@@ -3,6 +3,7 @@
 [![NuGet](https://img.shields.io/nuget/v/KoalaSoft.Aspire.Hosting.ServiceSources?logo=nuget&label=nuget)](https://www.nuget.org/packages/KoalaSoft.Aspire.Hosting.ServiceSources)
 [![Downloads](https://img.shields.io/nuget/dt/KoalaSoft.Aspire.Hosting.ServiceSources?logo=nuget&label=downloads)](https://www.nuget.org/packages/KoalaSoft.Aspire.Hosting.ServiceSources)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/flojon/aspire-servicesources/blob/main/LICENSE)
+[![Docs](https://img.shields.io/readthedocs/aspire-servicesources)](https://aspire-servicesources.readthedocs.io/)
 
 An Aspire AppHost extension that lets `builder.AddService("orders")` resolve to a real,
 running resource whose *source* is chosen per developer, not baked into the AppHost.
@@ -172,7 +173,8 @@ a project reference would be.
 
 ## Documentation map
 
-The rest of the reference lives alongside this file, split by topic:
+Full versioned docs: <https://aspire-servicesources.readthedocs.io/>. The same source also
+lives alongside this file, split by topic:
 
 - [Authoring the catalog in code](https://github.com/flojon/aspire-servicesources/blob/main/docs/authoring-in-code.md) — declare the same catalog in C# or
   TypeScript instead of yaml, via `AddServiceCatalog`.
