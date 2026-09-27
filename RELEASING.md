@@ -314,6 +314,17 @@ After this, every `git push origin vX.Y.Z` (the existing [release step](#4-tag-a
 picks up a new numbered version and moves `stable` automatically; nothing in the release
 process above needs to change.
 
+### Local preview
+
+```bash
+pip install -r requirements-docs.txt
+mkdocs serve
+```
+
+Serves the site at <http://127.0.0.1:8000/> with live reload. `mkdocs build --strict` is the
+same check Read the Docs runs — a broken internal link or a nav entry pointing at a missing
+file fails the build instead of shipping a 404.
+
 [Read the Docs]: https://readthedocs.org/
 
 ## Prereleases
