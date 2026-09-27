@@ -78,6 +78,57 @@ public static class ServiceConfigurationExtensions
     }
 
     /// <summary>
+    /// Configures the resolved resource as <typeparamref name="T"/> when the source can reach it, and
+    /// skips <paramref name="configure"/> — recording the same skip warning <c>WithEnvironment</c> and
+    /// every other native method already give — when it cannot, instead of throwing.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Unwrap{T}(IResourceBuilder{IResourceWithServiceDiscovery})"/> has to throw for an
+    /// out-of-band source: it has to return a <c>T</c> builder and there is no such builder to hand
+    /// back. This overload has somewhere else to put that case — <paramref name="configure"/> simply
+    /// never runs, and <paramref name="service"/> comes back unchanged — the same shape a developer
+    /// switching a service to <c>"url"</c> or <c>"kubernetes"</c> in their own
+    /// <c>servicesources.local.json</c> already gets from <c>WithEnvironment</c>, <c>WithArgs</c> and
+    /// the rest. Prefer this over the type-returning overload whenever the call site does not need to
+    /// keep the unwrapped builder afterwards, so that switch does not break a <c>Program.cs</c> it
+    /// wasn't meant to.
+    /// <para>
+    /// A genuine type mismatch — the source is reachable but the real resource is not actually a
+    /// <typeparamref name="T"/> — still throws, exactly as the other overload does: that is a
+    /// programming error, not a source-switching concern, and skipping it would hide the mistake
+    /// instead of reporting it.
+    /// </para>
+    /// </remarks>
+    /// <returns><paramref name="service"/> itself, so calls stay chainable against the facade.</returns>
+    /// <exception cref="ServiceSourcesConfigurationException">
+    /// The resolved resource is reachable for <typeparamref name="T"/> but is not actually a
+    /// <typeparamref name="T"/>.
+    /// </exception>
+    [AspireExportIgnore(Reason =
+        "A generic method projects into ATS with its type parameter dropped, and here T *is* " +
+        "the resource type being requested, so the export would arrive broken rather than absent.")]
+    public static IResourceBuilder<IResourceWithServiceDiscovery> Unwrap<T>(
+        this IResourceBuilder<IResourceWithServiceDiscovery> service, Action<IResourceBuilder<T>> configure)
+        where T : IResource
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+
+        var annotation = service.Resource.Annotations.OfType<ServiceSourceAnnotation>().FirstOrDefault();
+
+        // Same reachability check the type-returning overload throws on — here it skips instead,
+        // because this overload has a value to return that isn't a T builder.
+        if (annotation is not null && IsUnreachable<T>(annotation.Source))
+        {
+            ServiceSourcesWarnings.For(service.ApplicationBuilder)
+                .AddSkip(service.Resource.Name, annotation.Source, $"Unwrap<{typeof(T).Name}>");
+            return service;
+        }
+
+        configure(service.Unwrap<T>());
+        return service;
+    }
+
+    /// <summary>
     /// Whether <typeparamref name="T"/> cannot reach the service behind <paramref name="source"/>.
     /// </summary>
     /// <remarks>

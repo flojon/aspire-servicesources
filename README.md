@@ -1837,6 +1837,18 @@ calls above for anything that should survive a source switch. `Unwrap<T>()` foll
 wait-ordering exception: `Unwrap<IResourceWithWaitSupport>()` on a `"kubernetes"` service returns
 the port-forward's builder rather than throwing.
 
+When the call is itself kind-specific vocabulary — `Unwrap<T>()`'s whole reason to exist — the
+delegate overload skips instead of throwing, the same as the native calls above:
+
+```csharp
+backend.Unwrap<JavaScriptAppResource>(js => js.WithRunScript("dev"));
+```
+
+On `"url"`/`"kubernetes"` the delegate is never invoked, the skip is logged, and `backend` comes
+back unchanged, so a `Program.cs` that calls it unconditionally survives a source switch the same
+way `WithEnvironment` and friends already do. A type mismatch still throws either way — that's a
+programming error, not something a source switch should hide.
+
 ### From a guest-language AppHost
 
 `ServiceResource`'s declared shape is what Aspire's Type System reads to generate a handle, so its

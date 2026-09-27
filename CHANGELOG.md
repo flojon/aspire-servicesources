@@ -16,6 +16,23 @@ never existed. Check the tag of the last release before adding one.
 
 ## [Unreleased]
 
+### Added
+
+- **`Unwrap<T>` overload that takes a configuration delegate, and skips it on an out-of-band
+  source instead of throwing.** The existing `Unwrap<T>()` has to throw for `"url"`/`"kubernetes"`
+  because it has to hand back a `T` builder and there is none to give; the new
+  `Unwrap<T>(Action<IResourceBuilder<T>> configure)` has somewhere else to put that case —
+  `configure` is simply skipped and the skip is reported, the same way `WithEnvironment` and every
+  other native method already behave when a service resolves out of band:
+
+  ```csharp
+  service.Unwrap<JavaScriptAppResource>(js => js.WithRunScript("dev"));
+  ```
+
+  so switching a service's source in `servicesources.local.json` no longer requires guarding every
+  `Unwrap<T>()` call site by hand. A genuine type mismatch — the source is reachable but the real
+  resource is not actually a `T` — still throws, exactly as the type-returning overload does.
+
 ## [0.6.0] - 2026-09-24
 
 ### Breaking

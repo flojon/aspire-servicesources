@@ -258,4 +258,56 @@ public class ServiceConfigurationExtensionsTests
         Assert.Contains("inventory", ex.Message);
         Assert.Contains("'url'", ex.Message);
     }
+
+    [Fact]
+    public void Unwrap_Delegate_OnReachableSource_InvokesConfigureAndReturnsTheService()
+    {
+        var builder = Builder();
+        var service = AddContainerService(builder);
+        ContainerResource? configured = null;
+
+        var returned = service.Unwrap<ContainerResource>(typed => configured = typed.Resource);
+
+        Assert.Same(service.Resource, returned.Resource);
+        Assert.NotNull(configured);
+        Assert.Equal("payments", configured!.Name);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_OnUrlSource_SkipsWithoutThrowing_SoSourceSwitchingKeepsWorking()
+    {
+        var builder = Builder();
+        var callbackRan = false;
+
+        // A developer switching this service to "url" in their own servicesources.local.json must
+        // not break a Program.cs they don't own.
+        var service = AddUrlService(builder).Unwrap<IResourceWithEnvironment>(_ => callbackRan = true);
+
+        Assert.False(callbackRan);
+        Assert.NotNull(service);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_OnUrlSource_ReportsTheSkip()
+    {
+        var builder = Builder();
+
+        AddUrlService(builder).Unwrap<IResourceWithEnvironment>(_ => { });
+
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+        Assert.Contains("inventory", message);
+        Assert.Contains("'url'", message);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_MismatchedType_StillThrows_BecauseThatIsAProgrammingErrorNotASourceSwitch()
+    {
+        var builder = Builder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => AddContainerService(builder).Unwrap<ProjectResource>(_ => { }));
+
+        Assert.Contains("payments", ex.Message);
+        Assert.Contains("container", ex.Message);
+    }
 }
