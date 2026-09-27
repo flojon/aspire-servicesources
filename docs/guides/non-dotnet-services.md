@@ -4,15 +4,25 @@ A `"repository"` or `"path"` service is resolved as a .NET project by default. S
 the checkout some other way — the git clone/checkout is identical, only what gets built out of
 the resulting directory changes:
 
-```yaml
-services:
-  frontend:
-    repository: https://github.com/example/frontend
-    kind: javascript          # optional; defaults to "dotnet"
-    javascript:               # per-kind options block, named after the kind
-      appDirectory: .
-      runScript: dev
-```
+=== "C#"
+
+    ```csharp
+    catalog.AddService("frontend")
+        .WithRepository("https://github.com/example/frontend")
+        .AsJavaScript(o => o.WithAppDirectory(".").WithRunScript("dev"));
+    ```
+
+=== "YAML"
+
+    ```yaml
+    services:
+      frontend:
+        repository: https://github.com/example/frontend
+        kind: javascript          # optional; defaults to "dotnet"
+        javascript:               # per-kind options block, named after the kind
+          appDirectory: .
+          runScript: dev
+    ```
 
 `kind: dotnet` (the default) uses the entry's `project` property and needs no options block.
 `project` is required for that kind, and is a path relative to the service's checkout that must
@@ -31,30 +41,40 @@ at that service's `AddService()` call, before its checkout is used.
 
 Runs the checkout through
 [`Aspire.Hosting.JavaScript`](https://www.nuget.org/packages/Aspire.Hosting.JavaScript), which
-your AppHost references itself (13.5.2 or newer — see [Installation](https://github.com/flojon/aspire-servicesources/blob/main/README.md#install)). `javascript` is a
+your AppHost references itself (13.5.2 or newer — see [Installation](../getting-started/installation.md#non-net-services)). `javascript` is a
 built-in kind, resolved the same way `dotnet` always has been — reference the package and declare
-`kind: javascript`, no registration call needed:
+the kind, no registration call needed:
 
-```csharp
-using Aspire.Hosting.ServiceSources;
+=== "C#"
 
-var builder = DistributedApplication.CreateBuilder(args);
+    ```csharp
+    builder.AddServiceCatalog(catalog =>
+        catalog.AddService("frontend")
+            .WithRepository("https://github.com/example/frontend")
+            .AsJavaScript(o => o
+                .WithAppType("vite")          // javascript (default) | vite | nextjs | node | bun
+                .WithAppDirectory("web")      // directory holding package.json, relative to the repo root
+                .WithRunScript("dev")         // package.json script to run
+                .WithPackageManager("pnpm")   // npm | yarn | pnpm | bun
+                .WithPort(4321)));            // the port consumers reach the service on
 
-var frontend = builder.AddService("frontend");
-```
+    var frontend = builder.AddService("frontend");
+    ```
 
-```yaml
-services:
-  frontend:
-    repository: https://github.com/example/frontend
-    kind: javascript
-    javascript:
-      appType: vite         # javascript (default) | vite | nextjs | node | bun
-      appDirectory: web     # directory holding package.json, relative to the repo root
-      runScript: dev        # package.json script to run
-      packageManager: pnpm  # npm | yarn | pnpm | bun
-      port: 4321            # the port consumers reach the service on
-```
+=== "YAML"
+
+    ```yaml
+    services:
+      frontend:
+        repository: https://github.com/example/frontend
+        kind: javascript
+        javascript:
+          appType: vite         # javascript (default) | vite | nextjs | node | bun
+          appDirectory: web     # directory holding package.json, relative to the repo root
+          runScript: dev        # package.json script to run
+          packageManager: pnpm  # npm | yarn | pnpm | bun
+          port: 4321            # the port consumers reach the service on
+    ```
 
 > **Keep `Aspire.Hosting.JavaScript` on the same version as `Aspire.Hosting`.** Aspire releases
 > the two together and tests them that way. They were also coupled across a friend-assembly
@@ -106,27 +126,31 @@ that use them.
 Runs the checkout through the Aspire Community Toolkit's
 [Java integration](https://github.com/CommunityToolkit/Aspire), which your AppHost references
 itself as `CommunityToolkit.Aspire.Hosting.Java` (13.3.0 or newer — see
-[Installation](https://github.com/flojon/aspire-servicesources/blob/main/README.md#install)). `java` is a built-in kind, resolved the same way `dotnet` always has
-been — reference the package and declare `kind: java`, no registration call needed:
+[Installation](../getting-started/installation.md#non-net-services)). `java` is a built-in kind, resolved the same way `dotnet` always has
+been — reference the package and declare the kind, no registration call needed:
 
-```csharp
-using Aspire.Hosting.ServiceSources;
+=== "C#"
 
-var builder = DistributedApplication.CreateBuilder(args);
+    ```csharp
+    builder.AddServiceCatalog(services =>
+        services.AddService("catalog")
+            .WithRepository("https://github.com/example/catalog")
+            .AsJava(o => o.WithMavenGoal("spring-boot:run").WithPort(8080)));
 
-var catalog = builder.AddService("catalog");
-```
+    var catalog = builder.AddService("catalog");
+    ```
 
-`servicesources.yaml`:
-```yaml
-services:
-  catalog:
-    repository: https://github.com/example/catalog
-    kind: java
-    java:
-      mavenGoal: spring-boot:run
-      port: 8080
-```
+=== "YAML"
+
+    ```yaml
+    services:
+      catalog:
+        repository: https://github.com/example/catalog
+        kind: java
+        java:
+          mavenGoal: spring-boot:run
+          port: 8080
+    ```
 
 The checkout is cloned exactly as for any other `"repository"` service (`path`, `ref`, and
 `defaultRef` all behave identically), then handed to that integration to run.
@@ -147,18 +171,33 @@ The checkout is cloned exactly as for any other `"repository"` service (`path`, 
 `mavenGoal`, `gradleTask`, and `jarPath` are mutually exclusive: exactly one must be set. A
 monorepo service, running a Gradle task with an extra argument:
 
-```yaml
-services:
-  catalog:
-    repository: https://github.com/example/monorepo
-    kind: java
-    java:
-      workingDirectory: services/catalog
-      gradleTask: bootRun
-      wrapperPath: gradlew
-      args: ["--args=--spring.profiles.active=dev"]
-      port: 8080
-```
+=== "C#"
+
+    ```csharp
+    catalog.AddService("catalog")
+        .WithRepository("https://github.com/example/monorepo")
+        .AsJava(o => o
+            .WithWorkingDirectory("services/catalog")
+            .WithGradleTask("bootRun")
+            .WithWrapperPath("gradlew")
+            .WithArgs(["--args=--spring.profiles.active=dev"])
+            .WithPort(8080));
+    ```
+
+=== "YAML"
+
+    ```yaml
+    services:
+      catalog:
+        repository: https://github.com/example/monorepo
+        kind: java
+        java:
+          workingDirectory: services/catalog
+          gradleTask: bootRun
+          wrapperPath: gradlew
+          args: ["--args=--spring.profiles.active=dev"]
+          port: 8080
+    ```
 
 A multi-project Gradle repository (like a multi-module Maven one) commits a single wrapper at its
 root rather than one per project, which is what `wrapperPath: gradlew` names here — without it the
@@ -183,16 +222,26 @@ saying the same two things.
 
 Add `scheme: https` if the app serves TLS on `port`:
 
-```yaml
-services:
-  catalog:
-    repository: https://github.com/example/catalog
-    kind: java
-    java:
-      mavenGoal: quarkus:run
-      port: 8443
-      scheme: https
-```
+=== "C#"
+
+    ```csharp
+    catalog.AddService("catalog")
+        .WithRepository("https://github.com/example/catalog")
+        .AsJava(o => o.WithMavenGoal("quarkus:run").WithPort(8443).WithScheme("https"));
+    ```
+
+=== "YAML"
+
+    ```yaml
+    services:
+      catalog:
+        repository: https://github.com/example/catalog
+        kind: java
+        java:
+          mavenGoal: quarkus:run
+          port: 8443
+          scheme: https
+    ```
 
 Like `port`, it's catalog-only — the app decides what it serves, so there's nothing
 per-developer to override — and it defaults to `http`. With `scheme: https` the service exposes

@@ -25,7 +25,7 @@ type, so the AppHost code never has to change when a developer switches sources.
 | File | Owner | Says |
 | --- | --- | --- |
 | `Program.cs` | The AppHost | *Which* services it depends on: `builder.AddService("orders")`. |
-| `servicesources.yaml` (committed) | The team | *How* each source would resolve each service: its repository, project, image, cluster service, URL. |
+| `AddServiceCatalog(...)` in `Program.cs` (or a committed `servicesources.yaml`) | The team | *How* each source would resolve each service: its repository, project, image, cluster service, URL. |
 | `servicesources.local.json` (gitignored) | Each developer | *Which* source actually applies to them. |
 
 ## Where to go next
@@ -34,7 +34,7 @@ type, so the AppHost code never has to change when a developer switches sources.
 
 - [Installation](getting-started/installation.md) — the package, the Aspire version it needs, and
   the extra package for each non-.NET language.
-- [Quickstart](getting-started/quickstart.md) — declare, catalog and run one service.
+- [Quickstart](getting-started/quickstart.md) — declare two services in code and run them.
 - [Samples](getting-started/samples.md) — runnable C# and TypeScript AppHosts.
 
 **Sources**
@@ -49,8 +49,10 @@ type, so the AppHost code never has to change when a developer switches sources.
 
 **Guides**
 
-- [Authoring the catalog in code](guides/catalog-in-code.md) — declare the catalog in C# or
-  TypeScript instead of yaml, via `AddServiceCatalog`.
+- [Authoring the catalog in code](guides/catalog-in-code.md) — the full `AddServiceCatalog` API,
+  in C# and TypeScript.
+- [The YAML catalog (advanced)](guides/yaml-catalog.md) — the same catalog in a committed
+  `servicesources.yaml`.
 - [Non-.NET services (`kind`)](guides/non-dotnet-services.md) — the built-in `javascript` and
   `java` kinds, and how to implement your own.
 - [Configuring and consuming a resolved service](guides/configuration.md) — overriding

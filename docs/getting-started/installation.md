@@ -66,16 +66,6 @@ does not control — where neither raising it nor removing it may be yours to do
 `ServiceSourcesSkipGuestLanguageFloorCheck=true` in that project to turn the check off; the version
 problem is then reported at run time, by the service that needed it.
 
-## Referencing the project directly
-
-Instead of the package, an AppHost can reference the project from a clone of this repository:
-
-```xml
-<ItemGroup>
-  <ProjectReference Include="path/to/Aspire.Hosting.ServiceSources/Aspire.Hosting.ServiceSources.csproj" />
-</ItemGroup>
-```
-
 ## Upgrading
 
 Every release is listed in the

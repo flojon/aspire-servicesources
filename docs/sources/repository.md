@@ -1,12 +1,34 @@
 # The `"repository"` source
 
-> Renamed from `"local"`, which used to collide in spelling (though not in meaning) with
-> `servicesources.local.json` — a different "local" (per-developer settings) entirely, and was the
-> only source whose value didn't match its own catalog block (`url`↔`url:`, `container`↔`container:`,
-> `kubernetes`↔`kubernetes:`, but `local`↔`repository:`). Same behavior either way — clone the
-> catalog's `repository:` url, reconcile onto `ref`. A config still naming `source: "local"` fails
-> with a specific error naming the rename and the fix, rather than a generic "unrecognized source"
-> message.
+Clone the service's own git repository, keep it on a ref, and run it. The catalog names the
+repository and, for a .NET service, the project inside it:
+
+=== "C#"
+
+    ```csharp
+    catalog.AddService("orders")
+        .WithRepository("https://github.com/example/orders", defaultRef: "main")
+        .WithProject("src/Orders.Api/Orders.Api.csproj");
+    ```
+
+=== "YAML"
+
+    ```yaml
+    services:
+      orders:
+        repository: https://github.com/example/orders
+        project: src/Orders.Api/Orders.Api.csproj
+        defaultRef: main
+    ```
+
+??? note "Renamed from `\"local\"`"
+    `"local"` used to collide in spelling (though not in meaning) with
+    `servicesources.local.json` — a different "local" (per-developer settings) entirely, and was the
+    only source whose value didn't match its own catalog block (`url`↔`url:`, `container`↔`container:`,
+    `kubernetes`↔`kubernetes:`, but `local`↔`repository:`). Same behavior either way — clone the
+    catalog's `repository:` url, reconcile onto `ref`. A config still naming `source: "local"` fails
+    with a specific error naming the rename and the fix, rather than a generic "unrecognized source"
+    message.
 
 Requires `git` (2.7 or newer) on `PATH` for a managed checkout — the same "a tool you already
 have" trade the `"kubernetes"` source makes with `kubectl`. Every git operation runs under your own
@@ -15,13 +37,20 @@ service pointed at your own directory with `local.path` needs no git at all — 
 for every developer, because it's a fact about the repository rather than about any one of them,
 the [`"path"` source](path.md) skips git entirely instead.
 
+Each developer picks it in `servicesources.local.json`, optionally with their own `ref` or a
+directory of their own under `local`:
+
 ```json
 {
   "services": {
     "orders": { "source": "repository" },
     "payments": {
       "source": "repository",
-      "local": { "path": "/home/dev/code/payments", "ref": "feature/new-checkout" }
+      "local": { "ref": "feature/new-checkout" }
+    },
+    "shipping": {
+      "source": "repository",
+      "local": { "path": "/home/dev/code/shipping" }
     }
   }
 }
@@ -78,20 +107,37 @@ names isn't there.
 `prepare` is a command run **inside the materialized checkout, before the kind is allowed to judge
 it**:
 
-```yaml
-services:
-  routing:
-    repository: https://github.com/example/routing
-    kind: java
-    prepare:
-      command: ["./prepare.sh"]
-      windowsCommand: ["pwsh", "-File", "prepare.ps1"]   # optional; replaces command on Windows
-      mode: oncePerCommit                                # the default | once | always | never
-    java:
-      jarPath: graphhopper-web-11.0.jar
-      args: ["server", "gh-config-local.yml"]
-      port: 8989
-```
+=== "C#"
+
+    ```csharp
+    catalog.AddService("routing")
+        .WithRepository("https://github.com/example/routing")
+        .AsJava(o => o
+            .WithJarPath("graphhopper-web-11.0.jar")
+            .WithArgs(["server", "gh-config-local.yml"])
+            .WithPort(8989))
+        .WithPrepare(
+            ["./prepare.sh"],
+            windowsCommand: ["pwsh", "-File", "prepare.ps1"], // optional; replaces command on Windows
+            mode: PrepareMode.OncePerCommit);                 // the default | Once | Always | Never
+    ```
+
+=== "YAML"
+
+    ```yaml
+    services:
+      routing:
+        repository: https://github.com/example/routing
+        kind: java
+        prepare:
+          command: ["./prepare.sh"]
+          windowsCommand: ["pwsh", "-File", "prepare.ps1"]   # optional; replaces command on Windows
+          mode: oncePerCommit                                # the default | once | always | never
+        java:
+          jarPath: graphhopper-web-11.0.jar
+          args: ["server", "gh-config-local.yml"]
+          port: 8989
+    ```
 
 - `command` is a **list, not a string**. There is no shell, so there are no quoting or
   word-splitting rules to get wrong and an argument containing spaces needs no escaping. The first
@@ -575,37 +621,39 @@ Group them: declare the repository once and have each service join it, and every
 one managed checkout automatically — cloned once, reconciled onto one ref, at
 `.servicesources/checkouts/<repository name>/`.
 
-```yaml
-repositories:
-  monorepo:
-    repository: https://github.com/example/monorepo
-    defaultRef: main
-services:
-  orders:
-    repositoryRef: monorepo
-    project: src/Orders.Api/Orders.Api.csproj
-  payments:
-    repositoryRef: monorepo
-    project: src/Payments.Api/Payments.Api.csproj
-```
+=== "C#"
 
-In code, the equivalent is `AddRepository` and `WithSharedRepository`:
+    ```csharp
+    var monorepo = catalog.AddRepository("monorepo", "https://github.com/example/monorepo", defaultRef: "main");
 
-```csharp
-var monorepo = catalog.AddRepository("monorepo", "https://github.com/example/monorepo", defaultRef: "main");
+    catalog.AddService("orders")
+        .WithSharedRepository(monorepo)
+        .WithProject("src/Orders.Api/Orders.Api.csproj");
 
-catalog.AddService("orders")
-    .WithSharedRepository(monorepo)
-    .WithProject("src/Orders.Api/Orders.Api.csproj");
+    catalog.AddService("payments")
+        .WithSharedRepository(monorepo)
+        .WithProject("src/Payments.Api/Payments.Api.csproj");
+    ```
 
-catalog.AddService("payments")
-    .WithSharedRepository(monorepo)
-    .WithProject("src/Payments.Api/Payments.Api.csproj");
-```
+=== "YAML"
+
+    ```yaml
+    repositories:
+      monorepo:
+        repository: https://github.com/example/monorepo
+        defaultRef: main
+    services:
+      orders:
+        repositoryRef: monorepo
+        project: src/Orders.Api/Orders.Api.csproj
+      payments:
+        repositoryRef: monorepo
+        project: src/Payments.Api/Payments.Api.csproj
+    ```
 
 A grouped repository's own `ref` and `prepare` step (see [`prepare`](#prepare-a-checkout-that-has-to-bootstrap-itself)) belong to the group, not to any
-one member — set them on the `repositories:` entry itself (or `WithPrepare` on the handle
-`AddRepository` returns), and a developer overrides the ref for everyone under
+one member — set them on the handle `AddRepository` returns (`WithPrepare`), or on the
+`repositories:` entry in yaml, and a developer overrides the ref for everyone under
 `ServiceSources:Repositories:<name>:ref` in `servicesources.local.json` rather than a member's own
 `local.ref`, which a grouped service can no longer set.
 

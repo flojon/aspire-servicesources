@@ -4,13 +4,22 @@ Point a service at a directory that's already checked out beside the AppHost —
 genuine monorepo has, where the AppHost and the services it depends on live in one repository, on
 one commit, by construction. There's nothing to clone: the directory is already there.
 
-`servicesources.yaml`:
-```yaml
-services:
-  orders:
-    path: services/orders                     # relative to the AppHost directory
-    project: src/Orders.Api/Orders.Api.csproj  # same field, same rules, as every other source
-```
+=== "C#"
+
+    ```csharp
+    catalog.AddService("orders")
+        .WithPath("services/orders")                      // relative to the AppHost directory
+        .WithProject("src/Orders.Api/Orders.Api.csproj"); // same rules as every other source
+    ```
+
+=== "YAML"
+
+    ```yaml
+    services:
+      orders:
+        path: services/orders                     # relative to the AppHost directory
+        project: src/Orders.Api/Orders.Api.csproj  # same field, same rules, as every other source
+    ```
 
 `servicesources.local.json`:
 ```json
@@ -26,19 +35,29 @@ services:
 Non-.NET kinds work exactly as they do for `"repository"` — the `kind`/`project` machinery never
 learns the directory wasn't cloned:
 
-```yaml
-services:
-  frontend:
-    path: services/frontend
-    kind: javascript
-    javascript:
-      appDirectory: .
-      runScript: dev
-```
+=== "C#"
+
+    ```csharp
+    catalog.AddService("frontend")
+        .WithPath("services/frontend")
+        .AsJavaScript(o => o.WithAppDirectory(".").WithRunScript("dev"));
+    ```
+
+=== "YAML"
+
+    ```yaml
+    services:
+      frontend:
+        path: services/frontend
+        kind: javascript
+        javascript:
+          appDirectory: .
+          runScript: dev
+    ```
 
 `path:` combines freely with `repository:`/`url:`/`container:`/`kubernetes:` on the same entry —
-see [Combining sources on one catalog entry](index.md#combining-sources-on-one-catalog-entry)
-in the other sources doc: one developer clones the service, another uses the copy they already
+see [Combining sources on one catalog entry](index.md#combining-sources-on-one-catalog-entry):
+one developer clones the service, another uses the copy they already
 have, same catalog entry either way.
 
 **Confinement depends on who wrote the value.** A catalog's own `path:` is committed, shared
@@ -108,12 +127,22 @@ about the clone every developer and CI trigger by default — a `"path"` service
 `servicesources.local.json` costs nothing extra when the directory is in-repo: it's already there,
 by construction.
 
-```yaml
-services:
-  orders:
-    path: services/orders
-    defaultSource: path
-```
+=== "C#"
+
+    ```csharp
+    catalog.AddService("orders")
+        .WithPath("services/orders")
+        .WithDefaultSource("path");
+    ```
+
+=== "YAML"
+
+    ```yaml
+    services:
+      orders:
+        path: services/orders
+        defaultSource: path
+    ```
 
 **No interaction with [`UseDeferredCheckout()`](repository.md#first-run-usedeferredcheckout).** Like `url`,
 `kubernetes` and `container`, a `"path"` service is always resolved eagerly, with full

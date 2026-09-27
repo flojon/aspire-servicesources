@@ -1,9 +1,9 @@
 # Authoring the catalog in code
 
-Everything `servicesources.yaml` declares can be written in the AppHost's own language
-instead — C# directly, or TypeScript (and any other Aspire guest language) through
-Aspire's Type System — alongside yaml or in place of it. `AddServiceCatalog` takes a
-catalog builder and covers every source:
+The catalog is declared in the AppHost's own language — C# directly, or TypeScript (and any other
+Aspire guest language) through Aspire's Type System. `AddServiceCatalog` takes a catalog builder
+and covers every source. (The same catalog can also be written in `servicesources.yaml` — see
+[The YAML catalog](yaml-catalog.md).)
 
 ```csharp
 builder.AddServiceCatalog(catalog =>
@@ -64,7 +64,7 @@ values you type into `servicesources.local.json`:
 
 `"disabled"` needs no builder call and no yaml block of its own — a developer just writes
 `"source": "disabled"` in their own `servicesources.local.json` for a service the catalog already
-declares some other way. See [the `"disabled"` source](../sources/disabled.md) below.
+declares some other way. See [the `"disabled"` source](../sources/disabled.md).
 
 `WithPath` combines freely with `WithRepository`/`WithSharedRepository` (and `WithUrl`,
 `WithContainer`, `WithKubernetes`) on the same service — it doesn't share a slot with them the way
@@ -79,7 +79,7 @@ catalog.AddService("orders")
     .WithProject("src/Orders.Api/Orders.Api.csproj");
 ```
 
-See [the `"repository"` and `"path"` sources](../sources/path.md) for what `WithPath`
+See [the `"path"` source](../sources/path.md) for what `WithPath`
 does — no `ref`, no deferred checkout, confinement to the AppHost directory, and `prepare` modes
 restricted to `once`/`always`/`never`.
 
@@ -99,8 +99,8 @@ CI, clones by default unless CI pins its own source. `WithDefaultSource("path")`
 caveat — see [`defaultSource: path` is close to free](../sources/path.md).
 
 `WithContainer`/`WithKubernetes` both take a `scheme` parameter — the code-authoring
-equivalent of yaml's `container.scheme`/`kubernetes.scheme` (documented under the
-`"container"` and `"kubernetes"` source sections below). A service declaring both sources
+equivalent of yaml's `container.scheme`/`kubernetes.scheme` (see the
+[`"container"`](../sources/container.md) and [`"kubernetes"`](../sources/kubernetes.md) sources). A service declaring both sources
 sets them independently:
 
 ```csharp
@@ -121,9 +121,9 @@ catalog.AddService("catalog")
 ```
 
 `WithPrepare(command, windowsCommand: null, mode: PrepareMode.OncePerCommit)` is the
-code-authoring equivalent of yaml's `prepare:` block — see "`prepare`: a checkout that has to
-bootstrap itself" (under `"repository"` source options below) for what it runs and when. `mode`
-takes a `PrepareMode` value — `PrepareMode.OncePerCommit` (the default), `.Once`, `.Always`,
+code-authoring equivalent of yaml's `prepare:` block — see [`prepare`: a checkout that has to
+bootstrap itself](../sources/repository.md#prepare-a-checkout-that-has-to-bootstrap-itself) for what it runs and when. `mode`
+takes a `PrepareMode` value (namespace `Aspire.Hosting.ServiceSources.Prepare`) — `PrepareMode.OncePerCommit` (the default), `.Once`, `.Always`,
 `.Never` — the enum behind yaml's four `mode` spellings (`"oncePerCommit"`, `"once"`,
 `"always"`, `"never"`).
 

@@ -3,14 +3,22 @@
 Point a service at an already-running instance in a Kubernetes dev cluster via
 `kubectl port-forward`, instead of running it locally at all.
 
-`servicesources.yaml`:
-```yaml
-services:
-  orders:
-    kubernetes:
-      service: orders-svc
-      port: 8080
-```
+=== "C#"
+
+    ```csharp
+    catalog.AddService("orders")
+        .WithKubernetes("orders-svc", port: 8080);
+    ```
+
+=== "YAML"
+
+    ```yaml
+    services:
+      orders:
+        kubernetes:
+          service: orders-svc
+          port: 8080
+    ```
 
 `servicesources.local.json`:
 ```json
@@ -28,14 +36,23 @@ Requires `kubectl` on `PATH`, authenticated against the named `context`.
 
 Add `scheme: https` if the pod behind that port serves TLS:
 
-```yaml
-services:
-  orders:
-    kubernetes:
-      service: orders-svc
-      port: 8443
-      scheme: https
-```
+=== "C#"
+
+    ```csharp
+    catalog.AddService("orders")
+        .WithKubernetes("orders-svc", port: 8443, scheme: "https");
+    ```
+
+=== "YAML"
+
+    ```yaml
+    services:
+      orders:
+        kubernetes:
+          service: orders-svc
+          port: 8443
+          scheme: https
+    ```
 
 `kubectl port-forward` is a byte-transparent TCP tunnel, so the TLS handshake terminates at the
 pod and `https://localhost:<port>` is the URL that actually works — the scheme is what the service

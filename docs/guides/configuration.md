@@ -307,7 +307,7 @@ survives a source switch:
 ```csharp
 var commonAuth = builder.AddService("common-auth");
 
-builder.AddProject<Projects.Web>("web")
+builder.AddService("web")
     .WithEnvironment("Services__CommonAuth", commonAuth.GetServiceEndpoint());
 ```
 

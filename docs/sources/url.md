@@ -13,7 +13,7 @@ consumer's `WaitFor` on it resolves immediately instead of waiting:
 ```csharp
 var orders = builder.AddService("orders");
 
-builder.AddProject<Projects.Storefront>("storefront")
+builder.AddService("storefront")
     .WaitFor(orders);   // no-op while 'orders' is "url"
 ```
 
@@ -40,13 +40,21 @@ moment the service is switched back, which is the point — a developer choosing
 `servicesources.local.json` must not hang an AppHost they don't own. See
 [#170](https://github.com/flojon/aspire-servicesources/issues/170).
 
-`servicesources.yaml`:
-```yaml
-services:
-  orders:
-    url:
-      url: https://orders.example.com
-```
+=== "C#"
+
+    ```csharp
+    catalog.AddService("orders")
+        .WithUrl("https://orders.example.com");
+    ```
+
+=== "YAML"
+
+    ```yaml
+    services:
+      orders:
+        url:
+          url: https://orders.example.com
+    ```
 
 `servicesources.local.json`:
 ```json

@@ -19,26 +19,40 @@ another language — see [Non-.NET services](../guides/non-dotnet-services.md).
 
 ## Combining sources on one catalog entry
 
-A single `servicesources.yaml` entry can carry blocks for every source at once — the catalog
+A single catalog entry can describe every source at once — the catalog
 just describes *how* each source would resolve the service; each developer's
 `servicesources.local.json` picks which one actually applies to them:
 
-```yaml
-services:
-  orders:
-    repository: https://github.com/example/orders
-    project: src/Orders.Api/Orders.Api.csproj
-    path: services/orders
-    kubernetes:
-      service: orders-svc
-      port: 8080
-    url:
-      url: https://orders.example.com
-    container:
-      image: ghcr.io/example/orders
-      port: 8080
-      defaultTag: latest
-```
+=== "C#"
+
+    ```csharp
+    catalog.AddService("orders")
+        .WithRepository("https://github.com/example/orders")
+        .WithPath("services/orders")
+        .WithProject("src/Orders.Api/Orders.Api.csproj")
+        .WithKubernetes("orders-svc", port: 8080)
+        .WithUrl("https://orders.example.com")
+        .WithContainer("ghcr.io/example/orders", port: 8080, defaultTag: "latest");
+    ```
+
+=== "YAML"
+
+    ```yaml
+    services:
+      orders:
+        repository: https://github.com/example/orders
+        project: src/Orders.Api/Orders.Api.csproj
+        path: services/orders
+        kubernetes:
+          service: orders-svc
+          port: 8080
+        url:
+          url: https://orders.example.com
+        container:
+          image: ghcr.io/example/orders
+          port: 8080
+          defaultTag: latest
+    ```
 
 A developer editing the service picks `"repository"` to clone it, or `"path"` if they already
 have it checked out beside the AppHost; one debugging against a shared dev cluster picks
