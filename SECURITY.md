@@ -24,7 +24,7 @@ they are opting into, and the one lever that shrinks it.
 
 ## A consent notice already exists — and it doesn't cover this
 
-A `local.path` service (an existing checkout you point the tool at, rather than one it clones and
+A `repository.path` service (an existing checkout you point the tool at, rather than one it clones and
 manages) already refuses to inherit the catalog's `prepare` block: it prints the resolved command
 at startup and asks you to paste it into `servicesources.local.json` yourself, saying plainly that
 nothing runs in a directory this tool doesn't own unless you asked for it there. That's real
@@ -39,9 +39,9 @@ build that follows it — runs for the first time. Yet that checkout's script is
 worth being asked about. A developer who has met the `path` notice and reasonably concludes some
 general "this tool asks before running anything foreign" rule exists would be wrong.
 
-## The lever: pin `defaultRef` / `local.ref` to a commit
+## The lever: pin `defaultRef` / `repository.ref` to a commit
 
-`defaultRef` (in the catalog) and `local.ref` (a developer's own override) both accept a commit
+`defaultRef` (in the catalog) and `repository.ref` (a developer's own override) both accept a commit
 SHA, not only a branch or tag name. A catalog that pins a reviewed commit gets every developer a
 reviewed checkout. A catalog that names `main` gets whatever is at the tip the first time each
 developer clones — and, per the next section, on some runs after that too.
@@ -77,9 +77,9 @@ the trust question this document exists to raise doesn't arise for it.
 
 A developer's own `path.path` override is the one case that keeps the old story unchanged: it
 points at a directory that isn't necessarily part of this repository at all — your own out-of-tree
-clone of something else, managed however you already manage it. That's exactly what `local.path`
+clone of something else, managed however you already manage it. That's exactly what `repository.path`
 is today, under a new, first-class name; nothing about the risk moved when the name did. As with
-`local.path`, the catalog's `prepare` step is never run in that directory — only a `path.prepare`
+`repository.path`, the catalog's `prepare` step is never run in that directory — only a `path.prepare`
 step you declare yourself.
 
 ## Reporting a vulnerability
