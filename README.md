@@ -782,10 +782,10 @@ Scoped deliberately narrowly, so the blast radius is first-run-only:
 
 - Only a checkout that doesn't exist yet. A warm checkout — every run after the first — takes
   the existing eager path unchanged, with full launch-profile fidelity.
-- Only managed checkouts. A `path` override is your own directory; there is nothing to clone.
+- Only managed checkouts. A `local.path` override is your own directory; there is nothing to clone.
 - Only the `"repository"` source, and within it only the kinds that own a managed checkout: `dotnet`,
-  `java` and `javascript`. The other sources — `url`, `kubernetes` and `container` — never clone a
-  repository, so they have nothing to defer.
+  `java` and `javascript`. The other sources — `url`, `kubernetes`, `container` and
+  [`path`](#path-source) — never clone a repository, so they have nothing to defer.
 - Only run mode. `aspire publish` and manifest generation clone first as they always have; a
   manifest written from a repository that isn't on disk would describe a project without its
   endpoints or its profile environment.
@@ -959,6 +959,10 @@ catalog written this way keeps working, and the warning goes away the moment you
 has: point one developer's own working copy of one member at a directory you manage yourself.
 There is no repository-level equivalent — `local.path` redirects one service at a time, never a
 whole group's shared checkout in one setting.
+
+**None of this applies to the [`"path"` source](#path-source).** Grouping exists to avoid cloning
+one external repository twice, and a `"path"` service has nothing to clone — two of them naming
+the same resolved directory are just two entries pointing at it, no `repositories:` entry needed.
 
 ### Non-.NET local services: `kind`
 
@@ -1566,6 +1570,107 @@ services:
       scheme: https
 ```
 
+### `"path"` source
+
+Point a service at a directory that's already checked out beside the AppHost — the shape a
+genuine monorepo has, where the AppHost and the services it depends on live in one repository, on
+one commit, by construction. There's nothing to clone: the directory is already there.
+
+`servicesources.yaml`:
+```yaml
+services:
+  orders:
+    path: services/orders                     # relative to the AppHost directory
+    project: src/Orders.Api/Orders.Api.csproj  # same field, same rules, as every other source
+```
+
+`servicesources.local.json`:
+```json
+{
+  "services": {
+    "orders": { "source": "path" }
+  }
+}
+```
+
+— or nothing in `servicesources.local.json` at all: see `defaultSource: path` below.
+
+Non-.NET kinds work exactly as they do for `"repository"` — the `kind`/`project` machinery never
+learns the directory wasn't cloned:
+
+```yaml
+services:
+  frontend:
+    path: services/frontend
+    kind: javascript
+    javascript:
+      appDirectory: .
+      runScript: dev
+```
+
+`path:` combines freely with `repository:`/`url:`/`container:`/`kubernetes:` on the same entry —
+see [Combining sources on one catalog entry](#combining-sources-on-one-catalog-entry) below: one
+developer clones the service, another uses the copy they already have, same catalog entry either
+way.
+
+**Confinement depends on who wrote the value.** A catalog's own `path:` is committed, shared
+configuration, so it's confined to inside the AppHost directory — the same rule `project:` and
+`java.jarPath` already follow: no absolute path, no climbing out with `..`. Your own override, set
+in `servicesources.local.json`, is unconfined instead — it's your own machine and directory,
+exactly like `local.path` is today for a `"repository"` service:
+
+```json
+{
+  "services": {
+    "orders": { "source": "path", "path": { "path": "/home/dev/code/orders" } }
+  }
+}
+```
+
+If the resolved directory doesn't exist, resolution fails naming it and the AppHost directory it
+was looked for under — there is nothing to clone, so a missing directory is the only thing a
+`"path"` service can fail on before its kind is even consulted.
+
+**No `ref`.** A directory that is not a separate checkout has no second commit for a ref to name:
+there's no `path.ref`, and setting `local.ref` on a `"path"`-sourced service is refused, naming
+the service.
+
+**`prepare` accepts `once`, `always` and `never` — never `oncePerCommit`, not even as the
+unwritten default.** There's no separate commit for this directory to move to on its own, so a
+`prepare:` block on a `"path"` service has to name `once` or `always` explicitly; leaving `mode`
+out is the same refusal an explicit `oncePerCommit` gets. Unlike a `local.path` override — whose
+catalog `prepare:` block is ignored, with a startup notice asking you to declare your own (see the
+`"repository"` source's `prepare` section above) — a catalog-declared `path:`'s own `prepare:`
+block runs normally: there's no "someone else's directory" here to protect. Two services sharing
+one resolved `path` serialize their step rather than run it concurrently. The marker lives where a
+`local.path` override's does, `<AppHostDirectory>/.servicesources/prepare/<service>.json`, keyed on
+the resolved path and the command.
+
+**`defaultSource: path` is close to free.** Unlike `defaultSource: repository`'s warning above —
+about the clone every developer and CI trigger by default — a `"path"` service with nothing in
+`servicesources.local.json` costs nothing extra when the directory is in-repo: it's already there,
+by construction.
+
+```yaml
+services:
+  orders:
+    path: services/orders
+    defaultSource: path
+```
+
+**No interaction with [`UseDeferredCheckout()`](#first-run-usedeferredcheckout).** Like `url`,
+`kubernetes` and `container`, a `"path"` service is always resolved eagerly, with full
+launch-profile fidelity — there's no clone to defer, so no "Preparing" state ever appears for one.
+
+**No `repositories:` grouping either.** Grouping exists to avoid cloning one external repository
+twice; a `"path"` service has nothing to clone, so there's no shared-checkout identity to opt into.
+Two services naming the same resolved `path` are just two entries pointing at one directory.
+
+**`local.path` is deprecated.** It's the identical mechanism — no clone, no ref — reachable a
+second, less discoverable way, nested under a source whose other machinery it never touches. It
+keeps working exactly as it does today, but sets `source: "path"` and `path:` instead, as a
+first-class source rather than a hidden mode of `"repository"`, and a startup notice says so once.
+
 ### Combining sources on one catalog entry
 
 A single `servicesources.yaml` entry can carry blocks for every source at once — the catalog
@@ -1576,6 +1681,7 @@ just describes *how* each source would resolve the service; each developer's
 services:
   orders:
     repository: https://github.com/example/orders
+    path: services/orders
     project: src/Orders.Api/Orders.Api.csproj
     kubernetes:
       service: orders-svc
@@ -1588,9 +1694,10 @@ services:
       defaultTag: latest
 ```
 
-A developer editing the service picks `"repository"`; one debugging against a shared dev cluster
-picks `"kubernetes"`; one who just needs it reachable picks `"url"` or `"container"` — same
-catalog entry, same `AddService("orders")` call in the AppHost, no code changes either way.
+A developer editing the service picks `"repository"`; one who already has this repository checked
+out beside the AppHost picks `"path"`; one debugging against a shared dev cluster picks
+`"kubernetes"`; one who just needs it reachable picks `"url"` or `"container"` — same catalog
+entry, same `AddService("orders")` call in the AppHost, no code changes either way.
 Each developer's own `servicesources.local.json` just names which source applies to them —
 editing `orders` locally:
 
@@ -1611,7 +1718,7 @@ or just needing it reachable, not caring how:
 ```
 
 The `source` value is matched without regard to case, so `"repository"`, `"Repository"` and `"REPOSITORY"` all name
-the same source. A name none of the four has is refused at composition time, naming the ones that
+the same source. A name none of the five has is refused at composition time, naming the ones that
 exist. (The `kind` names in `servicesources.yaml` are the exception — those *are* case-sensitive,
 because anything may register one and two registrations must not be able to collide by spelling.)
 

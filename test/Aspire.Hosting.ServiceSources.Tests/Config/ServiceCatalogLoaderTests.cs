@@ -1136,4 +1136,123 @@ public class ServiceCatalogLoaderTests
             File.Delete(path);
         }
     }
+
+    /// <summary>
+    /// The "no source configured" message's list of remedies grows to mention 'path' — design "New
+    /// source: path", free consequence 2.
+    /// </summary>
+    [Fact]
+    public void Load_ServiceHasNoResolvableFieldAtAll_MentionsPathAmongTheRemedies()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                project: src/Orders.Api/Orders.Api.csproj
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+                () => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("no source is configured", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("'path'", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// A bare 'path:' satisfies the "has a source" check by itself, the same way a bare 'url:' block
+    /// does — no 'repository' is required alongside it.
+    /// </summary>
+    [Fact]
+    public void Load_ServiceHasOnlyPath_DoesNotThrowNoSourceConfigured()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                path: services/orders
+                project: src/Orders.Api/Orders.Api.csproj
+            """);
+
+        try
+        {
+            var (catalog, _) = ServiceCatalogLoader.Load(path);
+
+            Assert.Equal("services/orders", catalog.Services["orders"].Path);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// Adding 'path' as a plain property on <see cref="ServiceMetadata"/> makes it a reserved kind
+    /// name automatically, through the same reflection-derived mechanism 'repository'/'url' already
+    /// collide with — design's free consequence 1, verified rather than assumed.
+    /// </summary>
+    [Fact]
+    public void Load_ServiceKindNamedPath_IsRejectedAsAReservedName()
+    {
+        Assert.True(ServiceCatalogLoader.IsReservedKindName("path"));
+
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                kind: path
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+                () => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("kind 'path'", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("collides", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// README "Combining sources on one catalog entry" (design finding 8): 'path:' joins
+    /// 'repository:'/'url:'/'container:'/'kubernetes:' on one entry without any special-casing.
+    /// </summary>
+    [Fact]
+    public void Load_PathCombinedWithRepositoryOnOneEntry_LoadsBothFields()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                path: services/orders
+                project: src/Orders.Api/Orders.Api.csproj
+            """);
+
+        try
+        {
+            var (catalog, _) = ServiceCatalogLoader.Load(path);
+
+            var orders = catalog.Services["orders"];
+            Assert.Equal("https://github.com/company/orders", orders.Repository);
+            Assert.Equal("services/orders", orders.Path);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

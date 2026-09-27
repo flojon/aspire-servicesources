@@ -504,12 +504,14 @@ internal sealed class ServiceStartupFailureNotices
             ? Raw.Literal("its own console in the Aspire dashboard does, at the dashboard URL logged above")
             : Raw.Literal("that resource's own logs do, wherever this host surfaces them — this run has no dashboard");
 
-        // Only 'repository' runs code from a working tree this package resolved, and only there is the
-        // build itself something the developer has no other account of.
-        var checkout = string.Equals(source, "repository", StringComparison.Ordinal)
-            ? Raw.Literal(" A 'repository' service runs from a checkout rather than from a project added to this " +
-              "AppHost, and the build of that checkout writes to those same logs — so a failure " +
-              "to compile is reported nowhere else at all.")
+        // Only 'repository' and 'path' run code from a directory this package resolved (cloned for
+        // one, already checked out for the other) rather than from a project added directly to this
+        // AppHost, and only there is the build itself something the developer has no other account
+        // of.
+        var checkout = source is "repository" or "path"
+            ? Raw.Compose($" A '{new Name(source)}' service runs from a checkout rather than from a project added to " +
+              $"this AppHost, and the build of that checkout writes to those same logs — so a failure to compile " +
+              $"is reported nowhere else at all.")
             : Raw.Literal("");
 
         return Raw.Compose(

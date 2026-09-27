@@ -41,6 +41,9 @@ internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
     /// <summary>How a message names the developer's.</summary>
     private const string DeveloperBlock = "local.prepare";
 
+    /// <summary>How a message names a "path"-sourced service's own developer block.</summary>
+    private const string PathDeveloperBlock = "path.prepare";
+
     /// <summary>
     /// Merges the catalog's block and the developer's into the one step that will run.
     /// </summary>
@@ -116,6 +119,76 @@ internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
             ? ForManagedCheckout(label, catalog, developer, catalogMode, developerMode, windows)
             : ForPathCheckout(serviceName, label, catalog, developer, catalogMode, developerMode, windows);
     }
+
+    /// <summary>
+    /// The <c>"path"</c> source's own prepare merge — a <c>path</c>-sourced service is never
+    /// grouped (design finding 4), so this always takes an ungrouped <see cref="ServiceLabel"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Distinct from <see cref="ForManagedCheckout"/>, which this otherwise mirrors exactly (mode
+    /// resolution, the command pair merged as a unit, the "mode alone with nothing to run" no-op) —
+    /// with one addition: an effective mode of <see cref="PrepareMode.OncePerCommit"/> is rejected
+    /// rather than honoured, whether it was written explicitly or is simply what
+    /// <see cref="PrepareModes.Default"/> supplies when neither block names a mode at all. A catalog
+    /// <c>path:</c> entry's own <c>prepare:</c> block runs — unlike <c>local.path</c>'s, which a
+    /// <c>path</c>-sourced developer override ignores entirely (see <see cref="ForPathCheckout"/>) —
+    /// because there is no "someone else's directory" here to protect (design "prepare: once/always/
+    /// never only").
+    /// </para>
+    /// <para>
+    /// The rejection is checked only once a command is actually about to run: a service that declares
+    /// no <c>prepare:</c> block at all — the overwhelming common case — must not be told to pick a
+    /// mode for a step it never asked for, so "nothing to run" is decided first, exactly as
+    /// <see cref="ForManagedCheckout"/> already decides it.
+    /// </para>
+    /// </remarks>
+    public static PreparePlan ForCatalogPath(
+        string serviceName,
+        PrepareMetadata? catalog,
+        PrepareDeveloperConfig? developer,
+        bool windows)
+    {
+        var label = ServiceLabel(serviceName);
+
+        var catalogMode = catalog is null ? null : ParseOptional(label, catalog.Mode, Raw.Literal(CatalogBlock));
+        var developerMode = developer is null ? null : ParseOptional(label, developer.Mode, Raw.Literal(PathDeveloperBlock));
+
+        var mode = developerMode ?? catalogMode ?? PrepareModes.Default;
+
+        if (mode == PrepareMode.Never)
+        {
+            return Nothing;
+        }
+
+        var developerSuppliedThePair = developer?.Command is not null || developer?.WindowsCommand is not null;
+
+        var command = developerSuppliedThePair ? developer!.Command : catalog?.Command;
+        var windowsCommand = developerSuppliedThePair ? developer!.WindowsCommand : catalog?.WindowsCommand;
+        var writtenAt = developerSuppliedThePair ? Raw.Literal(PathDeveloperBlock) : Raw.Literal(CatalogBlock);
+
+        var selected = SelectPlatform(command, windowsCommand, windows);
+
+        if (selected is null)
+        {
+            return Nothing;
+        }
+
+        if (mode == PrepareMode.OncePerCommit)
+        {
+            throw ServiceSourcesConfigurationException.For($"{OncePerCommitNotAllowedForPath(label, writtenAt)}");
+        }
+
+        return new PreparePlan(
+            PrepareStep.Create(label, selected, mode, writtenAt, WindowsWithoutVariant(windowsCommand, windows)),
+            null);
+    }
+
+    /// <summary>The drafted rejection for design "<c>prepare</c>: <c>once</c>/<c>always</c>/<c>never</c> only".</summary>
+    private static Raw OncePerCommitNotAllowedForPath(Raw label, Raw writtenAt) =>
+        Raw.Compose($"{label}: {writtenAt}.mode 'oncePerCommit' does not apply to a 'path' service — there is no "
+            + $"separate commit for this directory to move to on its own. Use 'once' (re-run only when the "
+            + $"command itself changes) or 'always' (an incremental script that decides its own work) instead.");
 
     /// <summary>How a message names an ungrouped service — the common case, unchanged from before #291.</summary>
     internal static Raw ServiceLabel(string serviceName) =>

@@ -32,6 +32,52 @@ never existed. Check the tag of the last release before adding one.
   to migrate. `local.path`/`local.ref` — the developer's per-service override block nested under
   `source` — keep their name unchanged; only the `source` value itself renames.
 
+### Added
+
+- **New source: `"path"`.** Points a service at a directory that's already checked out beside the
+  AppHost — the shape a genuine monorepo has, with no clone, no `ref`, and no reconciliation ever
+  involved:
+
+  ```yaml
+  services:
+    orders:
+      path: services/orders
+      project: src/Orders.Api/Orders.Api.csproj
+  ```
+
+  ```json
+  { "services": { "orders": { "source": "path" } } }
+  ```
+
+  It's the existing `local.path` mechanism (see **Deprecated** below) promoted to a first-class
+  source, so a service already checked out next to the AppHost no longer needs a `repository:` url
+  it has nothing to clone from, and every developer no longer has to write the same personal
+  `local.path` override for a path that's actually a fact about the shared catalog. `path:` combines
+  freely with `repository:`/`url:`/`container:`/`kubernetes:` on one entry — see "Combining sources
+  on one catalog entry" in the README — so one developer can clone the service while another uses
+  the copy they already have. A catalog-declared `path:` is confined to inside the AppHost
+  directory, the same rule `project:` follows; a developer's own override (`path.path` in
+  `servicesources.local.json`) is unconfined, exactly like `local.path` today. `prepare` accepts
+  `once`/`always`/`never` — never `oncePerCommit`, since there's no separate commit for the
+  directory to move to on its own — and, unlike a `local.path` override, a catalog-declared
+  `path:`'s own `prepare:` block runs normally rather than being ignored. See the new `"path"`
+  source section in the README for the full behavior, including `defaultSource: path` and its
+  (lack of) interaction with `UseDeferredCheckout()` and `repositories:` grouping.
+
+### Deprecated
+
+- **`local.path` is deprecated in favor of the new `"path"` source.** Same behavior — no clone, no
+  ref — but now a first-class source (`source: "path"`, `path: "..."`) rather than a hidden mode of
+  `"repository"`. `local.path` keeps working exactly as it does today; there is no removal planned.
+  A developer using it now gets a one-time startup notice naming the replacement:
+
+  ```
+  warn: Aspire.Hosting.ServiceSources
+        Service 'orders': 'local.path' is deprecated. Set 'source': 'path' and 'path':
+        '../services/orders' instead — same behavior (no clone, no ref), as a first-class source
+        rather than a hidden mode of 'repository'.
+  ```
+
 ## [0.6.0] - 2026-09-24
 
 ### Breaking

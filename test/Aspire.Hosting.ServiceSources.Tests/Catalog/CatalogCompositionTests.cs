@@ -54,6 +54,60 @@ public class CatalogCompositionTests
         Assert.Contains("inventory", ServiceSourcesConfigCache.LoadedFor(builder).DefaultedServiceNames);
     }
 
+    /// <summary>
+    /// Design "defaultSource: path is close to free": unlike 'repository', resolving a 'path'
+    /// service costs a developer or CI nothing extra when the path is in-repo, so no
+    /// servicesources.local.json entry at all is needed for it to work — the same shape #158 settled
+    /// for the other sources.
+    /// </summary>
+    [Fact]
+    public void YamlCatalogDefaultSourcePath_NoExplicitEntryAnywhere_ResolvesService()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        Directory.CreateDirectory(Path.Combine(dir, "services", "orders"));
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              orders:
+                path: services/orders
+                defaultSource: path
+            """);
+        // No servicesources.local.json at all -- the whole point of the "close to free" claim.
+        var builder = CreateBuilder(dir);
+
+        var (definition, devConfig) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+
+        Assert.Equal("services/orders", definition.Path);
+        Assert.Equal("path", devConfig.Source);
+        Assert.Contains("orders", ServiceSourcesConfigCache.LoadedFor(builder).DefaultedServiceNames);
+    }
+
+    /// <summary>
+    /// README "Combining sources on one catalog entry" (design finding 8): a 'path:' block sits
+    /// beside a 'repository:' block on one entry, and each developer's own
+    /// servicesources.local.json picks which one actually applies to them.
+    /// </summary>
+    [Fact]
+    public void PathCombinedWithRepository_EachDeveloperPicksTheirOwn()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                path: services/orders
+                project: src/Orders.Api/Orders.Api.csproj
+            """);
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"),
+            """{ "services": { "orders": { "source": "path" } } }""");
+        var builder = CreateBuilder(dir);
+
+        var (definition, devConfig) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+
+        Assert.Equal("path", devConfig.Source);
+        Assert.Equal("https://github.com/company/orders", definition.Repository.Url);
+        Assert.Equal("services/orders", definition.Path);
+    }
+
     [Fact]
     public void ExplicitEntry_SameValueAsCatalogDefault_IsNotMarkedAsDefaultDerived()
     {

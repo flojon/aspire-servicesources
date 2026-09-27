@@ -7,6 +7,16 @@ internal sealed class ServiceMetadata
 {
     public string Repository { get; set; } = "";
 
+    /// <summary>
+    /// A directory, relative to the AppHost directory, that is already checked out beside it — the
+    /// <c>"path"</c> source's catalog field. A plain scalar like <see cref="Repository"/>, since —
+    /// unlike <c>url:</c>/<c>container:</c>/<c>kubernetes:</c> — it has no sibling options of its own
+    /// to hold. Confined to inside the AppHost directory at resolution time
+    /// (<see cref="Sources.PathSource"/>) — unlike a developer's own <c>path.path</c> override, which
+    /// is unconfined for the same reason <c>local.path</c> is today.
+    /// </summary>
+    public string? Path { get; set; }
+
     public string Project { get; set; } = "";
 
     public string? DefaultRef { get; set; }
@@ -88,6 +98,7 @@ internal sealed class ServiceMetadata
                 CheckoutName = serviceName,
             },
         Project = Project,
+        Path = Path,
         Kubernetes = Kubernetes,
         Url = Url,
         Container = Container,

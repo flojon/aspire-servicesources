@@ -426,4 +426,84 @@ public class ServiceDefinitionBuilderTests
 
         Assert.Null(definition.Repository.Prepare);
     }
+
+    [Fact]
+    public void WithPath_SetsPath()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("orders")
+            .WithPath("services/orders")
+            .WithProject("src/Api.csproj")
+            .Build();
+
+        Assert.Equal("services/orders", definition.Path);
+        Assert.Equal("src/Api.csproj", definition.Project);
+    }
+
+    [Fact]
+    public void WithPath_CalledTwice_ThrowsNamingServiceAndBlock()
+    {
+        var chain = new ServiceCatalogBuilder().AddService("orders")
+            .WithPath("services/orders");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => chain.WithPath("services/orders-again"));
+
+        Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("WithPath", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithPath_BlankValue_Throws()
+    {
+        var chain = new ServiceCatalogBuilder().AddService("orders");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => chain.WithPath("   "));
+
+        Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithPath_NotCalled_PathStaysNull()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("orders")
+            .WithRepository("https://github.com/example/orders")
+            .Build();
+
+        Assert.Null(definition.Path);
+    }
+
+    /// <summary>
+    /// Design finding 8: <c>WithPath</c> does not share <c>WithRepository</c>'s
+    /// <c>_repositorySource</c> guard — a service naming both is the "combining sources" pattern, not
+    /// a repeated-block error. This was a real modeling mistake in an earlier draft of the design.
+    /// </summary>
+    [Fact]
+    public void WithPath_CombinedWithWithRepository_BothResolve()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("orders")
+            .WithRepository("https://github.com/example/orders")
+            .WithPath("services/orders")
+            .WithProject("src/Api.csproj")
+            .Build();
+
+        Assert.Equal("https://github.com/example/orders", definition.Repository.Url);
+        Assert.Equal("services/orders", definition.Path);
+    }
+
+    [Fact]
+    public void WithPath_CombinedWithWithUrlAndWithContainerAndWithKubernetes_AllResolve()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("orders")
+            .WithPath("services/orders")
+            .WithProject("src/Api.csproj")
+            .WithUrl("https://orders.example.com")
+            .WithContainer("company/orders", 8080)
+            .WithKubernetes("orders-svc")
+            .Build();
+
+        Assert.Equal("services/orders", definition.Path);
+        Assert.Equal("https://orders.example.com", definition.Url!.Url);
+        Assert.Equal("company/orders", definition.Container!.Image);
+        Assert.Equal("orders-svc", definition.Kubernetes!.Service);
+    }
 }

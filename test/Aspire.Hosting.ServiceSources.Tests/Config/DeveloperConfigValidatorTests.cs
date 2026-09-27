@@ -601,9 +601,9 @@ public class DeveloperConfigValidatorTests
     [Fact]
     public void Validate_FlatFieldAtEntryRoot_NamesTheBlockItBelongsUnder()
     {
-        var ex = Load("""{ "services": { "orders": { "source": "repository", "path": "/src/orders" } } }""");
+        var ex = Load("""{ "services": { "orders": { "source": "repository", "ref": "main" } } }""");
 
-        Assert.Contains("'path' is not a valid key here", ex.Message);
+        Assert.Contains("'ref' is not a valid key here", ex.Message);
         Assert.Contains("'local' block", ex.Message);
     }
 
@@ -769,21 +769,34 @@ public class DeveloperConfigValidatorTests
 
     /// <remarks>
     /// HomeBlockOf turns "that key does not go there" into "here is where it goes" by finding the
-    /// block whose fields contain the name. That is a single answer only while no two blocks share
-    /// a field name; a shared one — 'port' on the container block, say, which the catalog side
-    /// already has — would make the answer depend on the order GetProperties() happens to return,
-    /// which the CLR does not guarantee.
+    /// block whose fields contain the name. That is usually a single answer, since two blocks sharing
+    /// a field name would make it ambiguous — except where the sharing is intentional and the
+    /// multi-home branch (<see cref="DeveloperConfigShape.HomeBlocksOf"/>) exists precisely to name
+    /// every one of them rather than guess: 'local' (the "repository" source's own developer
+    /// override) and 'path' (the "path" source's, mirroring it — design "local.path is deprecated,
+    /// not removed yet") deliberately share 'path' and 'prepare', the identical shape of override on
+    /// two sources one service can combine but a developer resolves through exactly one of at a time
+    /// (<c>source</c> names only one). Every other pair still shares nothing, which this test keeps
+    /// guarding — an accidental collision anywhere else would still make the near-miss answer depend
+    /// on <c>GetProperties()</c>'s unspecified order.
     /// </remarks>
     [Fact]
-    public void Shape_NoFieldNameIsSharedByTwoBlocks()
+    public void Shape_NoFieldNameIsSharedByTwoBlocksExceptTheIntentionalLocalPathOverlap()
     {
         var blocks = DeveloperConfigShape.Service.BlockFields;
+        var intentionallyShared = new HashSet<string>(StringComparer.Ordinal) { "Path", "Prepare" };
 
         foreach (var (name, fields) in blocks)
         {
             foreach (var (otherName, otherFields) in blocks.Where(other => other.Key != name))
             {
-                var shared = fields.Keys.Where(otherFields.ContainsKey).ToArray();
+                var isLocalPathPair =
+                    (name == "Local" && otherName == "Path") || (name == "Path" && otherName == "Local");
+
+                var shared = fields.Keys
+                    .Where(otherFields.ContainsKey)
+                    .Where(field => !(isLocalPathPair && intentionallyShared.Contains(field)))
+                    .ToArray();
 
                 Assert.True(
                     shared.Length == 0,
@@ -1012,7 +1025,7 @@ public class DeveloperConfigValidatorTests
     public void Validate_EntryCarryingBothAValueAndKeys_ReportsBoth()
     {
         var dir = CreateAppHostDirectory("""
-            { "services": { "orders": { "source": "repository", "path": "/src/orders" } } }
+            { "services": { "orders": { "source": "repository", "ref": "main" } } }
             """);
 
         var builder = TestHelpers.CreateBuilder(dir);
@@ -1027,7 +1040,7 @@ public class DeveloperConfigValidatorTests
             () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
 
         Assert.Contains("2 problems with the entry", ex.Message);
-        Assert.Contains("'path' is not a valid key here", ex.Message);
+        Assert.Contains("'ref' is not a valid key here", ex.Message);
 
         // The entry does have its block of settings, and it binds: the binder finds no string
         // converter for the entry type and falls through to the children. So the fault is the
@@ -1062,14 +1075,14 @@ public class DeveloperConfigValidatorTests
     {
         var ex = Load("""
             { "services": {
-                "orders":   { "source": "repository", "path": "/src/orders" },
+                "orders":   { "source": "repository", "tag": "v1" },
                 "payments": { "source": "repository", "ref": "main" } } }
             """);
 
         Assert.Contains("2 service entries", ex.Message);
         Assert.Contains("Service 'orders'", ex.Message);
         Assert.Contains("Service 'payments'", ex.Message);
-        Assert.Contains("'path' is not a valid key here", ex.Message);
+        Assert.Contains("'tag' is not a valid key here", ex.Message);
         Assert.Contains("'ref' is not a valid key here", ex.Message);
     }
 
@@ -1086,14 +1099,32 @@ public class DeveloperConfigValidatorTests
     [Fact]
     public void Validate_MisspelledFieldAtEntryRoot_NamesTheFieldAndItsBlock()
     {
+        var ex = Load("""{ "services": { "orders": { "source": "repository", "raf": "main" } } }""");
+
+        Assert.Contains("'raf' is not a valid key here", ex.Message);
+        Assert.Contains("Did you mean 'ref'", ex.Message);
+        Assert.Contains("'local' block", ex.Message);
+
+        // The shape to write, as the exact-match message gives it.
+        Assert.Contains("""{ "ref": ... }""", ex.Message);
+
+        // The old message, which listed keys that cannot contain the answer.
+        Assert.DoesNotContain("Valid keys are", ex.Message);
+    }
+
+    /// <summary>
+    /// A field that two blocks now declare — 'path', on both 'local' (the "repository" source's own
+    /// developer override) and 'path' (the "path" source's, mirroring it) — names both rather than
+    /// picking one, since a misspelling gives no way to tell which the developer meant.
+    /// </summary>
+    [Fact]
+    public void Validate_MisspelledFieldAtEntryRoot_SharedByTwoBlocks_NamesBoth()
+    {
         var ex = Load("""{ "services": { "orders": { "source": "repository", "pth": "/src/orders" } } }""");
 
         Assert.Contains("'pth' is not a valid key here", ex.Message);
         Assert.Contains("Did you mean 'path'", ex.Message);
-        Assert.Contains("'local' block", ex.Message);
-
-        // The shape to write, as the exact-match message gives it.
-        Assert.Contains("""{ "path": ... }""", ex.Message);
+        Assert.Contains("'local' or 'path' block", ex.Message);
 
         // The old message, which listed keys that cannot contain the answer.
         Assert.DoesNotContain("Valid keys are", ex.Message);
@@ -1110,7 +1141,6 @@ public class DeveloperConfigValidatorTests
     /// explained the difference to whoever hit it.
     /// </remarks>
     [Theory]
-    [InlineData("paht", "path", "local")]
     [InlineData("prot", "port", "kubernetes")]
     [InlineData("tga", "tag", "container")]
     [InlineData("rul", "url", "url")]
@@ -1121,6 +1151,21 @@ public class DeveloperConfigValidatorTests
 
         Assert.Contains($"Did you mean '{field}'", ex.Message);
         Assert.Contains($"'{block}' block", ex.Message);
+    }
+
+    /// <summary>
+    /// The transposed counterpart of
+    /// <see cref="Validate_MisspelledFieldAtEntryRoot_SharedByTwoBlocks_NamesBoth"/>: 'path' is
+    /// declared by two blocks now, so its own transposition is the other shape this theory's rows
+    /// no longer cover.
+    /// </summary>
+    [Fact]
+    public void Validate_TransposedFieldAtEntryRoot_SharedByTwoBlocks_NamesBoth()
+    {
+        var ex = Load("""{ "services": { "orders": { "source": "repository", "paht": "x" } } }""");
+
+        Assert.Contains("Did you mean 'path'", ex.Message);
+        Assert.Contains("'local' or 'path' block", ex.Message);
     }
 
     /// <remarks>
@@ -1381,7 +1426,11 @@ public class DeveloperConfigValidatorTests
             """);
 
         Assert.Contains("'prepare' is not a valid key here", ex.Message);
-        Assert.Contains("'local' block", ex.Message);
+
+        // 'prepare' is declared by two blocks now — 'local' (the "repository" source's own developer
+        // override) and 'path' (the "path" source's, mirroring it) — so both are named rather than
+        // one picked arbitrarily.
+        Assert.Contains("'local', 'path'", ex.Message);
     }
 
     /// <summary>

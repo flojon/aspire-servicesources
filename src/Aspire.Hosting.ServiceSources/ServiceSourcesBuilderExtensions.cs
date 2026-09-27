@@ -38,6 +38,7 @@ public static class ServiceSourcesBuilderExtensions
         ["kubernetes"] = new KubernetesSource(new SocketPortAllocator()),
         ["url"] = new UrlSource(),
         ["container"] = new ContainerSource(),
+        ["path"] = new PathSource(new GitCliClient()),
     };
 
     /// <summary>

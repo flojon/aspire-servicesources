@@ -797,4 +797,109 @@ public class AddServiceTests
 
         Assert.Equal("inventory", service.Resource.Name);
     }
+
+    /// <summary>
+    /// The "path" source end to end, via AddService — catalog-declared, confined to the AppHost
+    /// directory. See design "New source: path".
+    /// </summary>
+    [Fact]
+    public void AddService_PathSource_ResolvesTheRealRegisteredProject()
+    {
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        var serviceDir = Directory.CreateDirectory(Path.Combine(appHostDir, "services", "orders")).FullName;
+        File.WriteAllText(Path.Combine(serviceDir, "Orders.csproj"), """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+              </PropertyGroup>
+            </Project>
+            """);
+
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                path: services/orders
+                project: Orders.csproj
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "path" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var service = builder.AddService("orders");
+
+        Assert.IsType<ServiceResource>(service.Resource);
+        Assert.IsAssignableFrom<ProjectResource>(Assert.Single(builder.Resources, r => r.Name == "orders"));
+    }
+
+    /// <summary>
+    /// Design "local.path is deprecated, not removed yet": the mechanism keeps working exactly as it
+    /// does today, but a developer using it gets a one-time startup notice naming the replacement.
+    /// </summary>
+    [Fact]
+    public async Task AddService_LocalPathOverride_EmitsTheDeprecationNoticeOnce()
+    {
+        var projectDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(projectDir, "Orders.csproj"), """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+              </PropertyGroup>
+            </Project>
+            """);
+
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+            """);
+        var escapedProjectDir = projectDir.Replace("\\", "\\\\");
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), $$"""
+            { "services": { "orders": { "source": "repository", "local": { "path": "{{escapedProjectDir}}" } } } }
+            """);
+
+        var builder = TestHelpers.CreateBuilderThatCanStart(appHostDir);
+
+        builder.AddService("orders");
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.Single(warnings, w =>
+            w.Contains("'local.path' is deprecated", StringComparison.Ordinal)
+            && w.Contains("Service 'orders'", StringComparison.Ordinal)
+            && w.Contains("'source': 'path'", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The rename's own counterpart: a "repository"-sourced service with no local.path override at
+    /// all must never see the deprecation notice — it has done nothing this notice is about.
+    /// </summary>
+    [Fact]
+    public async Task AddService_RepositorySourceWithNoPathOverride_NeverEmitsTheDeprecationNotice()
+    {
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                path: services/orders
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+            """);
+        Directory.CreateDirectory(Path.Combine(appHostDir, "services", "orders"));
+        File.WriteAllText(Path.Combine(appHostDir, "services", "orders", "Orders.csproj"), "<Project />");
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "path" } } }
+            """);
+
+        var builder = TestHelpers.CreateBuilderThatCanStart(appHostDir);
+
+        builder.AddService("orders");
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.DoesNotContain(warnings, w => w.Contains("'local.path' is deprecated", StringComparison.Ordinal));
+    }
 }

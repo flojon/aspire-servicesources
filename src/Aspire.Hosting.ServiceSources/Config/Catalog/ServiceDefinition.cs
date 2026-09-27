@@ -16,6 +16,12 @@ internal sealed class ServiceDefinition
 
     public required string Project { get; init; }
 
+    /// <summary>
+    /// The <c>"path"</c> source's catalog field — a directory, relative to the AppHost directory,
+    /// already checked out beside it. See <see cref="ServiceMetadata.Path"/>.
+    /// </summary>
+    public string? Path { get; init; }
+
     public KubernetesMetadata? Kubernetes { get; init; }
 
     public UrlMetadata? Url { get; init; }

@@ -21,6 +21,8 @@ internal sealed class ServiceDeveloperConfig
 
     public LocalDeveloperConfig Local { get; set; } = new();
 
+    public PathDeveloperConfig Path { get; set; } = new();
+
     public UrlDeveloperConfig Url { get; set; } = new();
 
     public KubernetesDeveloperConfig Kubernetes { get; set; } = new();
