@@ -307,6 +307,27 @@ recording so they don't look like oversights later:
   declared at all; a bare `path:` must also satisfy that check, and the message's list of
   alternatives should name it.
 
+**Mechanics — the types this actually adds, named rather than left implicit:**
+- `ServiceMetadata.Path` (`string?`, yaml `path:`), mirroring `ServiceMetadata.Repository`
+  (`Config/ServiceMetadata.cs:8`) — a plain scalar, not a nested block, since (unlike
+  `url:`/`container:`/`kubernetes:`) it has no sibling options of its own to hold.
+- `ServiceDefinition.Path` (`string?`), carried through `ToDefinition()` the same way `Repository`
+  is (`Config/ServiceMetadata.cs:78-98`).
+- `WithPath(string path)` on `ServiceDefinitionBuilder`, its own field and its own `RequireUnset`
+  guard (F8) — not sharing `_repositorySource`.
+- A new `PathSource : IServiceSource`, sibling to `UrlSource`/`ContainerSource`/`KubernetesSource`
+  (all in `Sources/`) — confinement check, directory-exists check, `prepare` (stage 3), then the
+  existing `dotnet` project-resolution path or the existing kind-handler dispatch (F1), reusing both
+  unchanged. Registered as `["path"] = new PathSource()` in `ServiceSourcesBuilderExtensions.Sources`
+  (`:35-41`) alongside the renamed `["repository"] = new LocalProjectSource(...)`.
+
+**The missing-directory error**, drafted rather than left as "reported by name":
+
+> Service 'orders': path 'services/orders' does not exist under '<AppHostDirectory>'. A 'path'
+> service names a directory that should already be checked out beside the AppHost — there is
+> nothing here to clone. If this service actually lives in a separate repository, give it a
+> 'repository:' instead (or add one alongside 'path:' so each developer can pick).
+
 ### Confinement differs by who wrote the value — same asymmetry that already exists
 
 - **Catalog-declared `path:`** (committed to `servicesources.yaml`, or via code's `WithPath`) is
@@ -500,10 +521,10 @@ own catalog block.
   yaml rejected as a reserved name, matching `kind: repository`/`kind: url` today; a service with
   none of `repository`/`repositoryRef`/`path`/`url`/`container`/`kubernetes` still gets the "no source
   configured" error, now naming `path` among the alternatives.
-- **Resolution:** missing directory at composition time reported by name, distinct from a clone
-  failure; `dotnet`/`java`/`javascript` kinds all resolve against a `path` `repoRoot` unchanged from
-  their existing checkout-based tests (parametrizing existing kind tests over the source rather than
-  writing new ones).
+- **Resolution:** missing directory at composition time produces the drafted message above (not a
+  generic clone-failure message — `PathSource` never touches git); `dotnet`/`java`/`javascript` kinds
+  all resolve against a `path` `repoRoot` unchanged from their existing checkout-based tests
+  (parametrizing existing kind tests over the source rather than writing new ones).
 - `ref`/`local.ref`-equivalent rejected on a `path` service, naming why.
 - `prepare`: `oncePerCommit` rejected with the F4 message; `once`/`always` markers keyed on path
   reused correctly; two services sharing one resolved path serialize their `prepare` under one lock.
