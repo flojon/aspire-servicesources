@@ -323,9 +323,9 @@ public class EndpointSkipGapRepro
             "Service 'inventory': skipped WithExternalHttpEndpoints because its source is 'url' — it "
             + "resolves to a fixed, already-running URL with no local process to configure. The service "
             + "is expected to be configured wherever it actually runs. To make this AppHost's "
-            + "configuration and start ordering apply instead, give it a 'local' or 'container' source "
+            + "configuration and start ordering apply instead, give it a 'repository' or 'container' source "
             + "in servicesources.local.json — which works only where its 'servicesources.yaml' entry "
-            + "already declares that source: a 'repository' or 'repositoryRef' for 'local', a "
+            + "already declares that source: a 'repository' or 'repositoryRef' for 'repository', a "
             + "'container' block for 'container'.",
             Assert.Single(warnings));
     }
@@ -351,9 +351,9 @@ public class EndpointSkipGapRepro
             + "it resolves to a 'kubectl port-forward' in front of an already-running service, so the "
             + "configuration would reach kubectl rather than the service. The service is expected to be "
             + "configured wherever it actually runs. To make this AppHost's configuration and start "
-            + "ordering apply instead, give it a 'local' or 'container' source in "
+            + "ordering apply instead, give it a 'repository' or 'container' source in "
             + "servicesources.local.json — which works only where its 'servicesources.yaml' entry "
-            + "already declares that source: a 'repository' or 'repositoryRef' for 'local', a "
+            + "already declares that source: a 'repository' or 'repositoryRef' for 'repository', a "
             + "'container' block for 'container'.",
             Assert.Single(warnings));
     }

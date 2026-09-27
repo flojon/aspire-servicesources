@@ -34,14 +34,14 @@ public class JavaUnwrapTests
     }
 
     [Fact]
-    public void Unwrap_Delegate_OnALocalJavaService_ConfiguresTheJavaResource()
+    public void Unwrap_Delegate_OnAPathJavaService_ConfiguresTheJavaResource()
     {
         var checkout = CreateTempDirectory();
         WriteWrapper(checkout, MavenWrapperName);
         var builder = CreateAppHost($$"""
             {
               "services": {
-                "java-api": { "source": "local", "local": { "path": {{System.Text.Json.JsonSerializer.Serialize(checkout)}} } }
+                "java-api": { "source": "path", "path": { "path": {{System.Text.Json.JsonSerializer.Serialize(checkout)}} } }
               }
             }
             """);

@@ -109,16 +109,18 @@ internal sealed partial class GitCliClient(
             return GitCommand.Run(["--version"]).Succeeded
                 ? null
                 : Raw.Compose(
-                    $"'git' is on PATH but 'git --version' failed, so the 'local' source cannot clone or update " +
-                    $"checkouts. Repair the git installation, or give each service a 'local.path' override " +
-                    $"in servicesources.local.json to point at a checkout you manage yourself.");
+                    $"'git' is on PATH but 'git --version' failed, so the 'repository' source cannot clone or update " +
+                    $"checkouts. Repair the git installation, or switch each service to the 'path' source " +
+                    $"('source': 'path', with 'path': {{ 'path': '...' }} naming a checkout you manage yourself) " +
+                    $"in servicesources.local.json — it needs no git at all.");
         }
         catch (GitUnavailableException ex)
         {
             return Raw.Compose(
-                $"The 'local' source clones and updates service repositories with 'git', which was not found on " +
-                $"PATH ({Raw.Cause(ex)}). Install git (2.7 or newer), or give each service a 'local.path' " +
-                $"override in servicesources.local.json to point at a checkout you manage yourself.");
+                $"The 'repository' source clones and updates service repositories with 'git', which was not found on " +
+                $"PATH ({Raw.Cause(ex)}). Install git (2.7 or newer), or switch each service to the 'path' source " +
+                $"('source': 'path', with 'path': {{ 'path': '...' }} naming a checkout you manage yourself) " +
+                $"in servicesources.local.json — it needs no git at all.");
         }
     }
 

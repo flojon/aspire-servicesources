@@ -41,6 +41,9 @@ internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
     /// <summary>How a message names the developer's.</summary>
     private const string DeveloperBlock = "local.prepare";
 
+    /// <summary>How a message names a "path"-sourced service's own developer block.</summary>
+    private const string PathDeveloperBlock = "path.prepare";
+
     /// <summary>
     /// Merges the catalog's block and the developer's into the one step that will run.
     /// </summary>
@@ -113,9 +116,110 @@ internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
         var developerMode = developer is null ? null : ParseOptional(label, developer.Mode, Raw.Literal(DeveloperBlock));
 
         return managedCheckout
-            ? ForManagedCheckout(label, catalog, developer, catalogMode, developerMode, windows)
-            : ForPathCheckout(serviceName, label, catalog, developer, catalogMode, developerMode, windows);
+            ? Merge(label, catalog, developer, catalogMode, developerMode, Raw.Literal(DeveloperBlock), PrepareModes.Default, windows)
+            : ForPathCheckout(
+                serviceName, label, catalog, developer, catalogMode, developerMode, LocalPathOverride,
+                PrepareModes.Default, windows);
     }
+
+    /// <summary>
+    /// How a developer's own directory override is named in the messages <see cref="ForPathCheckout"/>
+    /// writes: the key that set it, and the block a <c>prepare</c> of their own goes in.
+    /// </summary>
+    private sealed record DirectoryOverride(string Key, string Block)
+    {
+        public string PrepareBlock => $"{Block}.prepare";
+    }
+
+    private static readonly DirectoryOverride LocalPathOverride = new("local.path", "local");
+
+    private static readonly DirectoryOverride PathPathOverride = new("path.path", "path");
+
+    /// <summary>
+    /// The <c>"path"</c> source's prepare merge for a catalog-declared <c>path:</c>: the managed-checkout
+    /// merge (<see cref="Merge"/>), read against the developer's <c>path.prepare</c> block, with its own
+    /// meaning for <c>oncePerCommit</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <c>"path"</c> directory has no separate commit to move to on its own (design finding 4), so
+    /// <see cref="PrepareMode.OncePerCommit"/> means nothing there. What the catalog wrote — nothing, or
+    /// <c>oncePerCommit</c> — is read as <see cref="PathDefaultMode"/>: the same entry may also serve the
+    /// <c>"repository"</c> source, where both are right, and a value written for it must not make the
+    /// <c>"path"</c> source unusable for every developer who picks it.
+    /// </para>
+    /// <para>
+    /// Only the developer's own <c>path.prepare.mode: oncePerCommit</c> is refused — they wrote it for
+    /// this source — and only once a command is actually about to run.
+    /// </para>
+    /// </remarks>
+    public static PreparePlan ForCatalogPath(
+        string serviceName,
+        PrepareMetadata? catalog,
+        PrepareDeveloperConfig? developer,
+        bool windows)
+    {
+        var label = ServiceLabel(serviceName);
+
+        var catalogMode = catalog is null ? null : ParseOptional(label, catalog.Mode, Raw.Literal(CatalogBlock));
+        var developerMode = developer is null ? null : ParseOptional(label, developer.Mode, Raw.Literal(PathDeveloperBlock));
+
+        if (catalogMode == PrepareMode.OncePerCommit)
+        {
+            catalogMode = PathDefaultMode;
+        }
+
+        return RefuseOncePerCommit(
+            label,
+            Merge(label, catalog, developer, catalogMode, developerMode, Raw.Literal(PathDeveloperBlock), PathDefaultMode, windows));
+    }
+
+    /// <summary>
+    /// The <c>"path"</c> source's prepare merge for a developer's own <c>path.path</c> override: the
+    /// same rule a <c>local.path</c> override follows (<see cref="ForPathCheckout"/>) — the catalog's
+    /// block is never inherited, since nothing establishes the developer's directory is a checkout of
+    /// the repository the catalog names, and it is their working tree — with the <c>"path"</c>
+    /// source's default mode and refusal.
+    /// </summary>
+    public static PreparePlan ForPathOverride(
+        string serviceName,
+        PrepareMetadata? catalog,
+        PrepareDeveloperConfig? developer,
+        bool windows)
+    {
+        var label = ServiceLabel(serviceName);
+
+        var catalogMode = catalog is null ? null : ParseOptional(label, catalog.Mode, Raw.Literal(CatalogBlock));
+        var developerMode = developer is null ? null : ParseOptional(label, developer.Mode, Raw.Literal(PathDeveloperBlock));
+
+        return RefuseOncePerCommit(
+            label,
+            ForPathCheckout(
+                serviceName, label, catalog, developer, catalogMode, developerMode, PathPathOverride, PathDefaultMode,
+                windows));
+    }
+
+    /// <summary>
+    /// A <c>"path"</c> plan whose step would run under <c>oncePerCommit</c> — which by then can only be
+    /// the developer's own <c>path.prepare.mode</c> — refused; any other plan returned as is.
+    /// </summary>
+    private static PreparePlan RefuseOncePerCommit(Raw label, PreparePlan plan) =>
+        plan.Step?.Mode == PrepareMode.OncePerCommit
+            ? throw ServiceSourcesConfigurationException.For($"{OncePerCommitNotAllowedForPath(label)}")
+            : plan;
+
+    /// <summary>
+    /// What an unwritten <c>mode</c> means for a <c>"path"</c> service: re-run only when the command
+    /// itself changes — the nearest meaning <see cref="PrepareModes.Default"/> has once there is no
+    /// commit for it to key on.
+    /// </summary>
+    internal const PrepareMode PathDefaultMode = PrepareMode.Once;
+
+    /// <summary>The drafted rejection for design "<c>prepare</c>: <c>once</c>/<c>always</c>/<c>never</c> only".</summary>
+    private static Raw OncePerCommitNotAllowedForPath(Raw label) =>
+        Raw.Compose($"{label}: {Raw.Literal(PathDeveloperBlock)}.mode 'oncePerCommit' does not apply to a 'path' service — "
+            + $"there is no separate commit for this directory to move to on its own. Use 'once' (re-run only when "
+            + $"the command itself changes) or 'always' (an incremental script that decides its own work) instead.");
 
     /// <summary>How a message names an ungrouped service — the common case, unchanged from before #291.</summary>
     internal static Raw ServiceLabel(string serviceName) =>
@@ -129,15 +233,23 @@ internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
     internal static Raw RepositoryLabel(string checkoutName) =>
         Raw.Compose($"Repository '{new Name(checkoutName)}'");
 
-    private static PreparePlan ForManagedCheckout(
+    /// <summary>
+    /// The per-field merge a managed checkout and a <c>"path"</c> service share: the developer's mode
+    /// over the catalog's over <paramref name="defaultMode"/>, and the command pair taken as a unit
+    /// from whichever block supplied either half.
+    /// </summary>
+    /// <param name="developerBlock">How messages name the developer's block — <c>local.prepare</c> or <c>path.prepare</c>.</param>
+    private static PreparePlan Merge(
         Raw label,
         PrepareMetadata? catalog,
         PrepareDeveloperConfig? developer,
         PrepareMode? catalogMode,
         PrepareMode? developerMode,
+        Raw developerBlock,
+        PrepareMode defaultMode,
         bool windows)
     {
-        var mode = developerMode ?? catalogMode ?? PrepareModes.Default;
+        var mode = developerMode ?? catalogMode ?? defaultMode;
 
         if (mode == PrepareMode.Never)
         {
@@ -151,7 +263,7 @@ internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
 
         var command = developerSuppliedThePair ? developer!.Command : catalog?.Command;
         var windowsCommand = developerSuppliedThePair ? developer!.WindowsCommand : catalog?.WindowsCommand;
-        var writtenAt = developerSuppliedThePair ? Raw.Literal(DeveloperBlock) : Raw.Literal(CatalogBlock);
+        var writtenAt = developerSuppliedThePair ? developerBlock : Raw.Literal(CatalogBlock);
 
         var selected = SelectPlatform(command, windowsCommand, windows);
 
@@ -166,6 +278,8 @@ internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
                 null);
     }
 
+    /// <param name="directoryOverride">Which override put the service here — <c>local.path</c> or <c>path.path</c> — for the messages.</param>
+    /// <param name="defaultMode">What an unwritten mode in the developer's block means.</param>
     private static PreparePlan ForPathCheckout(
         string serviceName,
         Raw label,
@@ -173,6 +287,8 @@ internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
         PrepareDeveloperConfig? developer,
         PrepareMode? catalogMode,
         PrepareMode? developerMode,
+        DirectoryOverride directoryOverride,
+        PrepareMode defaultMode,
         bool windows)
     {
         var declared = developer?.IsDeclared == true;
@@ -215,10 +331,10 @@ internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
                 Raw.Literal(CatalogBlock),
                 WindowsWithoutVariant(catalog?.WindowsCommand, windows));
 
-            return new PreparePlan(null, IgnoredCatalogStepNotice(serviceName, inherited));
+            return new PreparePlan(null, IgnoredCatalogStepNotice(serviceName, inherited, directoryOverride));
         }
 
-        var mode = developerMode ?? PrepareModes.Default;
+        var mode = developerMode ?? defaultMode;
 
         // Before the command is so much as looked at, exactly as the managed branch checks it:
         // `never` means run nothing, and it means that whether or not a command sits beside it. A
@@ -240,12 +356,14 @@ internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
         // force one.
         if (developer!.Command is null && developer.WindowsCommand is null)
         {
+            var block = Raw.Escaped(directoryOverride.PrepareBlock);
+
             throw ServiceSourcesConfigurationException.For(
-                $"{label}: {Raw.Literal(DeveloperBlock)}.mode is set to "
-                + $"'{Raw.Escaped(PrepareModes.Written(mode))}' but {Raw.Literal(DeveloperBlock)}.command is not, and this service resolves "
-                + $"through 'local.path' — a checkout you manage yourself, which never inherits the catalog's "
+                $"{label}: {block}.mode is set to "
+                + $"'{Raw.Escaped(PrepareModes.Written(mode))}' but {block}.command is not, and this service resolves "
+                + $"through '{Raw.Escaped(directoryOverride.Key)}' — a checkout you manage yourself, which never inherits the catalog's "
                 + $"'{Raw.Literal(CatalogBlock)}' block, so there is no command for the mode to apply to. Add "
-                + $"{Raw.Literal(DeveloperBlock)}.command, or set the mode to 'never' to declare that nothing should run there.");
+                + $"{block}.command, or set the mode to 'never' to declare that nothing should run there.");
         }
 
         var command = SelectPlatform(developer.Command, developer.WindowsCommand, windows);
@@ -257,7 +375,7 @@ internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
             ? Nothing
             : new PreparePlan(
                 PrepareStep.Create(
-                    label, command, mode, Raw.Literal(DeveloperBlock),
+                    label, command, mode, Raw.Escaped(directoryOverride.PrepareBlock),
                     WindowsWithoutVariant(developer.WindowsCommand, windows)),
                 null);
     }
@@ -307,12 +425,13 @@ internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
     /// copied from.
     /// </para>
     /// </remarks>
-    private static Raw IgnoredCatalogStepNotice(string serviceName, IReadOnlyList<string> command) =>
+    private static Raw IgnoredCatalogStepNotice(
+        string serviceName, IReadOnlyList<string> command, DirectoryOverride directoryOverride) =>
         Raw.Compose($"Service '{new Name(serviceName)}': its catalog entry declares a '{Raw.Literal(CatalogBlock)}' step, which was not run — "
-            + $"this service resolves through 'local.path', a checkout you manage yourself, and nothing runs a "
+            + $"this service resolves through '{Raw.Escaped(directoryOverride.Key)}', a checkout you manage yourself, and nothing runs a "
             + $"command in a directory this tool does not own unless you asked for it there. Nothing establishes "
             + $"that the directory is even a checkout of the repository the catalog names. To run it, copy it into "
-            + $"{Raw.Literal(DeveloperConfiguration.FileName)}: \"{new Name(serviceName)}\": {{ ..., \"local\": {{ \"{Raw.Literal(CatalogBlock)}\": "
+            + $"{Raw.Literal(DeveloperConfiguration.FileName)}: \"{new Name(serviceName)}\": {{ ..., \"{Raw.Escaped(directoryOverride.Block)}\": {{ \"{Raw.Literal(CatalogBlock)}\": "
             + $"{{ \"command\": [{Raw.Join(", ", QuotedCommandArgs(command))}] }} }} }} — or "
             + $"declare {{ \"{Raw.Literal(CatalogBlock)}\": {{ \"mode\": \"never\" }} }} to say that nothing should run there. "
             + $"Either one silences this notice; it repeats on every start until one of them is there.");

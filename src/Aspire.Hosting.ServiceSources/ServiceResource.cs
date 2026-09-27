@@ -5,8 +5,8 @@ namespace Aspire.Hosting.ServiceSources;
 /// <summary>
 /// What <c>AddService()</c> returns for every source. Never the object DCP registers and starts —
 /// see <c>Sources.ResolvedService.Bridge</c> — so its own declared shape stays the same across
-/// <c>"container"</c>, <c>"disabled"</c>, <c>"kubernetes"</c>, <c>"local"</c> and <c>"url"</c>, while
-/// each dual-writes configuration to the real, source-specific resource behind it.
+/// <c>"container"</c>, <c>"disabled"</c>, <c>"kubernetes"</c>, <c>"path"</c>, <c>"repository"</c> and
+/// <c>"url"</c>, while each dual-writes configuration to the real, source-specific resource behind it.
 /// </summary>
 /// <remarks>
 /// Deliberately does not implement:

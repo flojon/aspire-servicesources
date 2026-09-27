@@ -19,11 +19,11 @@ only describe *what* it depends on; where that dependency actually comes from is
 per-developer choice, made without ever touching the AppHost's `.csproj`/`.sln`.
 
 `AddService()` is the seam: the AppHost calls it once per service, and a developer-local
-config file decides how it's actually resolved — a managed or self-managed local git
-checkout (`"local"`), a `kubectl port-forward` against a dev cluster (`"kubernetes"`), a
-fixed, already-known URL (`"url"`), a published container image run locally
-(`"container"`), or nothing at all (`"disabled"`) — behind one stable return type, so the
-AppHost code never has to change when a developer switches sources.
+config file decides how it's actually resolved — a managed git checkout (`"repository"`) or a
+directory already checked out beside the AppHost (`"path"`), a `kubectl port-forward` against
+a dev cluster (`"kubernetes"`), a fixed, already-known URL (`"url"`), a published container
+image run locally (`"container"`), or nothing at all (`"disabled"`) — behind one stable return
+type, so the AppHost code never has to change when a developer switches sources.
 
 ## Install
 
@@ -143,10 +143,10 @@ services:
     repository: https://github.com/example/orders
     project: src/Orders.Api/Orders.Api.csproj
     defaultRef: main
-    defaultSource: local     # optional; the source a developer gets with no entry of their own
+    defaultSource: repository     # optional; the source a developer gets with no entry of their own
 ```
 
-**`defaultSource: local` means every developer, and CI, clones and builds that repository by
+**`defaultSource: repository` means every developer, and CI, clones and builds that repository by
 default** — including on a machine or pipeline that never explicitly asked for it. If CI should not
 clone, CI must pin its own source (an environment variable, or its own configuration layer) rather
 than relying on the absence of a file.
@@ -157,7 +157,7 @@ per-developer):**
 ```json
 {
   "services": {
-    "orders": { "source": "local" }
+    "orders": { "source": "repository" }
   }
 }
 ```
@@ -178,9 +178,10 @@ lives alongside this file, split by topic:
 
 - [Authoring the catalog in code](https://github.com/flojon/aspire-servicesources/blob/main/docs/authoring-in-code.md) — declare the same catalog in C# or
   TypeScript instead of yaml, via `AddServiceCatalog`.
-- [The `"local"` source](https://github.com/flojon/aspire-servicesources/blob/main/docs/local-source.md) — managed git checkouts, the `prepare` bootstrap
-  step, why a checkout doesn't inherit your repository's build settings, and grouping several
-  services under one repository.
+- [The `"repository"` and `"path"` sources](https://github.com/flojon/aspire-servicesources/blob/main/docs/local-source.md) — managed git checkouts, a
+  directory already checked out beside the AppHost, the `prepare` bootstrap step, why a checkout
+  doesn't inherit your repository's build settings, and grouping several services under one
+  repository.
 - [Non-.NET local services (`kind`)](https://github.com/flojon/aspire-servicesources/blob/main/docs/kinds.md) — the built-in `javascript` and `java` kinds,
   and how to implement your own.
 - [Other sources: `kubernetes`, `url`, `container`, `disabled`](https://github.com/flojon/aspire-servicesources/blob/main/docs/other-sources.md) — a
@@ -195,21 +196,21 @@ lives alongside this file, split by topic:
 ## Sample
 
 `samples/DemoAppHost` is a minimal working AppHost demonstrating all three easily-runnable
-sources: `orders` via a real managed `"local"` git checkout (a small project cloned from
+sources: `orders` via a real managed `"repository"` git checkout (a small project cloned from
 [`dotnet/aspire-samples`](https://github.com/dotnet/aspire-samples)), `inventory` via the
 `"url"` source (pointing at [httpbin.org](https://httpbin.org), a live public test API), and
 `payments` via the `"container"` source (the `nginxdemos/hello` hello-world image) — run it to
 see the whole flow end to end. (`"kubernetes"` isn't demoed here since it needs a real cluster
 and `kubectl`; see [its section](https://github.com/flojon/aspire-servicesources/blob/main/docs/other-sources.md#kubernetes-source).)
 
-It also carries a `catalog` service showing `kind: java` — a `"local"` checkout of
+It also carries a `catalog` service showing `kind: java` — a `"repository"` checkout of
 [Spring PetClinic](https://github.com/spring-projects/spring-petclinic) run with its own Maven
 wrapper; `java` being a built-in kind, no `Program.cs` registration is needed. `AddService("catalog")`
 is commented out and the service is left out of `servicesources.local.json.example`, since unlike
 the three above it needs a JDK. To run it, do both: uncomment the call and add
-`"catalog": { "source": "local" }` to your `servicesources.local.json`. Leaving it out of that file
+`"catalog": { "source": "repository" }` to your `servicesources.local.json`. Leaving it out of that file
 by default is what keeps the sample from cloning PetClinic on its first run: the sample does not
-call `UseDeferredCheckout()`, so the first `AddService` clones every `"local"` entry there that has
+call `UseDeferredCheckout()`, so the first `AddService` clones every `"repository"` entry there that has
 no checkout yet, whether or not you add it.
 
 ```bash
@@ -296,8 +297,8 @@ complete dump, type names, inner-exception blocks, stack traces and all.
 
 ## Status
 
-Early stage, evolving fast. `"local"`, `"kubernetes"`, `"url"`, `"container"` and `"disabled"`
-sources are all implemented — see [`docs/superpowers/`](https://github.com/flojon/aspire-servicesources/blob/main/docs/superpowers/) for design and implementation
+Early stage, evolving fast. `"repository"`, `"path"`, `"kubernetes"`, `"url"`, `"container"` and
+`"disabled"` sources are all implemented — see [`docs/superpowers/`](https://github.com/flojon/aspire-servicesources/blob/main/docs/superpowers/) for design and implementation
 history, including the phase 2 backlog (repo auto-update, config discovery walk-up,
 dependency/infrastructure resolution, and more).
 

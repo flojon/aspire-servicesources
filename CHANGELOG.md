@@ -16,8 +16,67 @@ never existed. Check the tag of the last release before adding one.
 
 ## [Unreleased]
 
+### Breaking
+
+- **The `"local"` source is renamed to `"repository"`.** Same behavior — clone the catalog's
+  `repository:` url, reconcile onto `ref` — new name: `"local"` was the only source whose value
+  didn't match its own catalog block (`url`↔`url:`, `container`↔`container:`,
+  `kubernetes`↔`kubernetes:`, but `local`↔`repository:`), and it collided in spelling, though not
+  in meaning, with `servicesources.local.json` — a different "local" (per-developer settings)
+  entirely. `"local"` is retired, not aliased: a `source: "local"` entry, a `defaultSource: local`
+  catalog field, or a `.WithDefaultSource("local")` call now throws
+  `ServiceSourcesConfigurationException` naming the rename and the fix, rather than silently
+  resolving as before or falling through to a generic "unrecognized source" message. Change
+  `source: "local"` to `source: "repository"` in `servicesources.local.json` (or wherever it's
+  set), and `defaultSource: local`/`.WithDefaultSource("local")` to `"repository"` in the catalog,
+  to migrate. `local.path`/`local.ref` — the developer's per-service override block nested under
+  `source` — keep their name unchanged; only the `source` value itself renames.
+- **`path` is now a reserved `kind` name in `servicesources.yaml`.** The new `path:` catalog field
+  (see **Added**) makes `path` a well-known top-level property of a service entry, so a yaml service
+  declaring `kind: path` — a custom kind registered under that name — is now refused with "kind
+  'path' collides with a well-known property", the same rule `kind: repository` or `kind: url`
+  already hit: its options block would otherwise be read as the new field. Register the kind under
+  another name. A kind used only through `WithKind("path", …)` in code is unaffected.
+
 ### Added
 
+- **New source: `"path"`.** Points a service at a directory that's already checked out beside the
+  AppHost — the shape a genuine monorepo has, with no clone, no `ref`, and no reconciliation ever
+  involved:
+
+  ```yaml
+  services:
+    orders:
+      path: services/orders
+      project: src/Orders.Api/Orders.Api.csproj
+  ```
+
+  ```json
+  { "services": { "orders": { "source": "path" } } }
+  ```
+
+  It's the existing `local.path` mechanism (see **Deprecated** below) promoted to a first-class
+  source, so a service already checked out next to the AppHost no longer needs a `repository:` url
+  it has nothing to clone from, and every developer no longer has to write the same personal
+  `local.path` override for a path that's actually a fact about the shared catalog. `path:` combines
+  freely with `repository:`/`url:`/`container:`/`kubernetes:` on one entry — see
+  [Combining sources on one catalog entry](docs/other-sources.md#combining-sources-on-one-catalog-entry)
+  — so one developer can clone the service while another uses the copy they already have. A
+  catalog-declared `path:` is written relative to the AppHost directory and confined to the
+  repository the AppHost lives in (the nearest directory holding `.git`), so `../Orders.Api` beside a
+  `src/MyApp.AppHost/` works while an absolute path or one climbing out of the repository is refused;
+  a developer's own override (`path.path` in `servicesources.local.json`) is unconfined, exactly like
+  `local.path` today. A copy with no `.git` — a source archive, or a container build context that
+  leaves it out — names its root with the new `ServiceSources:RepositoryRoot` setting (e.g.
+  `ServiceSources__RepositoryRoot=/src`, or `"repositoryRoot"` in `servicesources.local.json`),
+  read only when no `.git` is found; with neither, the AppHost directory is the boundary. `prepare` runs as `once`/`always`/`never` — never `oncePerCommit`, since there's
+  no separate commit for the directory to move to on its own, so an unwritten `mode`, or a catalog's
+  `oncePerCommit` written for the `"repository"` source on the same entry, means `once` there. A
+  catalog-declared `path:`'s own `prepare:` block runs normally; under a `path.path` override it is
+  not run, exactly as under `local.path`, and a startup notice shows the command to declare as your
+  own `path.prepare`. See [the `"path"` source](docs/local-source.md#path-source) for the
+  full behavior, including `defaultSource: path` and its (lack of) interaction with
+  `UseDeferredCheckout()` and `repositories:` grouping.
 - **A `"disabled"` source for `AddService`.** Turns a service off — `AddService("orders")` still
   returns a valid resource builder, but nothing runs and nothing is reachable — without deleting
   the `AddService` call or the catalog entry. Needs no catalog block: set
@@ -27,6 +86,26 @@ never existed. Check the tag of the last release before adding one.
   on a disabled service resolves immediately instead of waiting, the same protection `"url"` has
   against #170. See [the `"disabled"` source](docs/other-sources.md#disabled-source).
 
+<<<<<<< HEAD
+### Deprecated
+
+- **`local.path` is deprecated in favor of the new `"path"` source.** The `"path"` source resolves a
+  directory the same way — no clone, no ref — as a first-class source
+  (`"source": "path"`, `"path": { "path": "..." }`) rather than a hidden mode of `"repository"`.
+  `local.path` keeps working exactly as it does today; there is no removal planned. A developer
+  using it now gets a one-time startup notice naming the replacement:
+
+  ```
+  warn: Aspire.Hosting.ServiceSources
+        Service 'orders': 'local.path' is deprecated. Use the 'path' source instead:
+        "source": "path", "path": { "path": "/home/dev/code/orders" } — which resolves the
+        directory the same way, with no clone and no ref.
+  ```
+
+  A `local.prepare` block doesn't carry over by itself — it isn't read under `"path"` — so when one
+  is declared the notice also says to move it to `path.prepare`. The catalog's own `prepare` step is
+  not run in the directory under either spelling.
+=======
 - **`Unwrap<T>` overload that takes a configuration delegate, and skips it instead of throwing
   when the service doesn't resolve to a `T`.** The existing `Unwrap<T>()` has to throw then, because
   it has to hand back a `T` builder and there is none to give; the new
@@ -45,6 +124,7 @@ never existed. Check the tag of the last release before adding one.
   `servicesources.local.json` — so a switch like that no longer breaks a `Program.cs` calling
   kind-specific vocabulary. `Unwrap<IResourceWithWaitSupport>(...)` on a `"kubernetes"` service
   still runs against the port-forward, matching `WaitFor`.
+>>>>>>> origin/main
 
 ## [0.6.0] - 2026-09-24
 

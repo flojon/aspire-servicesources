@@ -27,7 +27,7 @@ public class BufferingPrepareOutputSinkTests
     private static IResourceBuilder<ContainerResource> AddTaggedResource(
         IDistributedApplicationBuilder builder, string serviceName) =>
         builder.AddContainer(serviceName, "test-image")
-            .WithAnnotation(new ServiceSourceAnnotation(serviceName, "local"));
+            .WithAnnotation(new ServiceSourceAnnotation(serviceName, "repository"));
 
     private static Task PublishBeforeStartEventAsync(
         IDistributedApplicationBuilder builder, IServiceProvider services) =>

@@ -168,7 +168,7 @@ public class LocalKindValidationTests
     }.ToDefinition("servicesources.yaml", ServiceName, TestHelpers.EmptyRepositories);
 
     private static ServiceDeveloperConfig DevConfig(string path) =>
-        new() { Source = "local", Local = new() { Path = path } };
+        new() { Source = "repository", Local = new() { Path = path } };
 
     /// <summary>
     /// The service resolves through a <c>local.path</c> override, so nothing here should be called.

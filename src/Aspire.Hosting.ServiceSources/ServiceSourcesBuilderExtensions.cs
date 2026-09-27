@@ -29,15 +29,16 @@ public static class ServiceSourcesBuilderExtensions
     /// That is the opposite of the deliberate case-sensitivity of <c>kind</c> names (see
     /// <see cref="Sources.LocalKindRegistry.DescribeNearMatch"/>), and for a reason: kinds are an
     /// open registry that anything may contribute names to, where folding case could collide two
-    /// independent registrations, while these five names are a closed set this package owns and
+    /// independent registrations, while these six names are a closed set this package owns and
     /// nothing else can add to.
     /// </remarks>
     private static readonly Dictionary<string, IServiceSource> Sources = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["local"] = new LocalProjectSource(new GitCliClient()),
+        ["repository"] = new LocalProjectSource(new GitCliClient()),
         ["kubernetes"] = new KubernetesSource(new SocketPortAllocator()),
         ["url"] = new UrlSource(),
         ["container"] = new ContainerSource(),
+        ["path"] = new PathSource(new GitCliClient()),
         ["disabled"] = new DisabledSource(),
     };
 
@@ -48,7 +49,7 @@ public static class ServiceSourcesBuilderExtensions
     /// <c>servicesources.local.json</c>) or a package-managed git clone under
     /// <c>.servicesources/checkouts/&lt;serviceName&gt;</c> beneath the AppHost directory —
     /// added via Aspire's own <c>AddProject(name, path)</c> without ever
-    /// touching this AppHost's own <c>.csproj</c>/<c>.sln</c> (the <c>"local"</c> source); or a
+    /// touching this AppHost's own <c>.csproj</c>/<c>.sln</c> (the <c>"repository"</c> source); or a
     /// <c>kubectl port-forward</c> process against an already-running service in a Kubernetes
     /// dev cluster, added via Aspire's own <c>AddExecutable(...)</c> (the <c>"kubernetes"</c>
     /// source); or a fixed, already-known URL — e.g. a Kubernetes ingress or any other reachable
@@ -61,7 +62,7 @@ public static class ServiceSourcesBuilderExtensions
     /// </summary>
     /// <returns>
     /// An <see cref="IResourceBuilder{T}"/> over a <see cref="ServiceResource"/> facade — never the
-    /// resource DCP actually runs, which is a <see cref="ProjectResource"/> for <c>"local"</c>, a
+    /// resource DCP actually runs, which is a <see cref="ProjectResource"/> for <c>"repository"</c>, a
     /// container or executable resource for <c>"container"</c> and <c>"kubernetes"</c>, or whatever
     /// an <see cref="ILocalResourceKind"/> returns. Configuration applied through the returned
     /// builder — <c>WithEnvironment</c>, <c>WithReference</c>, <c>WithArgs</c>,
@@ -99,6 +100,15 @@ public static class ServiceSourcesBuilderExtensions
 
         if (!Sources.TryGetValue(developerConfig.Source, out var source))
         {
+            // Retired, not unknown: "local" used to be this exact source under its old name, so a
+            // config still naming it gets the specific migration rather than the generic "unknown
+            // source" complaint below, which would send a reader hunting for a typo they didn't make.
+            DeveloperConfigShape.ThrowIfRetiredSource(
+                Raw.Compose($"Service '{new Name(name)}': source '{new Name(developerConfig.Source)}'"),
+                developerConfig.Source,
+                Raw.Compose($"Change 'source' to 'repository' in '{Raw.Literal(DeveloperConfiguration.FileName)}' "
+                    + $"(or wherever this is set)."));
+
             // Names the alternatives rather than saying "not implemented yet": the lookup folds
             // case, so reaching here means the name itself is unknown — not that the source exists
             // under a different spelling, which is what the old wording sent readers looking for.
@@ -135,7 +145,7 @@ public static class ServiceSourcesBuilderExtensions
     }
 
     /// <summary>
-    /// Opts this AppHost into deferring a <c>"local"</c> service's <em>first</em> checkout past
+    /// Opts this AppHost into deferring a <c>"repository"</c> service's <em>first</em> checkout past
     /// startup: a service whose package-managed clone does not exist yet is registered stopped,
     /// cloned while the AppHost runs, and started when its checkout lands — so the dashboard comes
     /// up immediately, checkout progress and failure show as resource state, and one failed clone
@@ -157,12 +167,12 @@ public static class ServiceSourcesBuilderExtensions
     /// clone starts at its own <see cref="AddService"/> call and still overlaps the ones around it —
     /// but it no longer has to be started ahead of demand to do that, which is what let the
     /// speculative prefetch stop cloning services this AppHost never adds (#76). Without this call
-    /// the clones must start before the AppHost has said what it wants, so every <c>"local"</c>
+    /// the clones must start before the AppHost has said what it wants, so every <c>"repository"</c>
     /// entry with no checkout yet is cloned.
     /// </para>
     /// <para>
-    /// Applies to the <c>"local"</c> kinds that own a managed checkout — <c>dotnet</c>, <c>java</c>
-    /// and <c>javascript</c>. Those two kinds pay none of the cost below: neither has a launch
+    /// Applies to the <c>"repository"</c> source's kinds that own a managed checkout — <c>dotnet</c>,
+    /// <c>java</c> and <c>javascript</c>. Those two kinds pay none of the cost below: neither has a launch
     /// profile, and both take their endpoints from the committed catalog, so a deferred one is
     /// identical to a warm one and only their post-clone checks move. <c>url</c>, <c>kubernetes</c>
     /// and <c>container</c> clone nothing, so there is nothing to defer.

@@ -42,7 +42,7 @@ public sealed class RepositoryBuilder
     internal string Url => _url;
 
     /// <summary>
-    /// Declares a bootstrap command the <c>"local"</c> source runs once inside this repository's
+    /// Declares a bootstrap command the <c>"repository"</c> source runs once inside this repository's
     /// shared checkout, before any service on it is allowed to run — the equivalent of
     /// <see cref="ServiceDefinitionBuilder.WithPrepare"/>, moved here because the step runs once per
     /// checkout, not once per service (design "prepare moves to the repository", finding 3). See

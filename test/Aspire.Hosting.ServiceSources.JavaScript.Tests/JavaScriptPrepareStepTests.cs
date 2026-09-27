@@ -87,7 +87,7 @@ public class JavaScriptPrepareStepTests
 
         File.WriteAllText(
             Path.Combine(dir, "servicesources.local.json"),
-            $"{{ \"services\": {{ \"{ServiceName}\": {{ \"source\": \"local\" }} }} }}");
+            $"{{ \"services\": {{ \"{ServiceName}\": {{ \"source\": \"repository\" }} }} }}");
 
         return dir;
     }
@@ -106,7 +106,7 @@ public class JavaScriptPrepareStepTests
                 """),
         }.ToDefinition("servicesources.yaml", ServiceName, TestHelpers.EmptyRepositories);
 
-    private static ServiceDeveloperConfig DevConfig() => new() { Source = "local", Local = new() };
+    private static ServiceDeveloperConfig DevConfig() => new() { Source = "repository", Local = new() };
 
     /// <remarks>
     /// An <c>appType</c> that runs a <c>package.json</c> script is what makes the kind demand the

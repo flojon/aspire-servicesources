@@ -49,12 +49,12 @@ builder.AddServiceCatalog(catalog =>
     // (spring-petclinic) doesn't need a prepare step, so this exists purely to show the call.
     catalog.AddService("catalog")
         .WithRepository("https://github.com/spring-projects/spring-petclinic", defaultRef: "main")
-        .WithDefaultSource("local")
+        .WithDefaultSource("repository")
         .AsJava(o => o.WithMavenGoal("spring-boot:run").WithPort(8080))
         .WithPrepare(["./mvnw", "-q", "dependency:go-offline"], mode: PrepareMode.Once);
 });
 
-// "local" source: clones (or uses an existing checkout of) a real project and runs it via
+// "repository" source: clones (or uses an existing checkout of) a real project and runs it via
 // Aspire's own project orchestration. See servicesources.local.json.example.
 //
 // AddService returns a builder over the real resource, so the AppHost can inject configuration
@@ -72,9 +72,9 @@ var inventory = builder.AddService("inventory");
 var payments = builder.AddService("payments");
 
 // The "catalog" service above is kind: java. To run it, uncomment below AND add
-//   "catalog": { "source": "local" }
+//   "catalog": { "source": "repository" }
 // to servicesources.local.json. Both steps are needed, and deliberately: the first AddService call
-// clones every "local" entry in that file up front, so listing catalog there by default would clone
+// clones every "repository" entry in that file up front, so listing catalog there by default would clone
 // Spring PetClinic on every run of this sample even with the line below commented out. Unlike the
 // services above it also needs a JDK, since it builds the checkout with the repo's Maven wrapper.
 // var catalog = builder.AddService("catalog");

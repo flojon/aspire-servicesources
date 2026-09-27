@@ -103,7 +103,7 @@ The one wait not reported is the `WaitForStart` Aspire adds itself for each reso
 `AddConnectionString` expression references — nobody wrote it, so there is no line to point at.
 
 Note what this does **not** promise: the URL is not fetched, so the consumer starts whether or not
-anything is listening. A `WaitFor` written against a `"local"` service keeps its full meaning the
+anything is listening. A `WaitFor` written against a `"repository"` service keeps its full meaning the
 moment the service is switched back, which is the point — a developer choosing `"url"` in their own
 `servicesources.local.json` must not hang an AppHost they don't own. See
 [#170](https://github.com/flojon/aspire-servicesources/issues/170).
@@ -229,6 +229,7 @@ services:
   orders:
     repository: https://github.com/example/orders
     project: src/Orders.Api/Orders.Api.csproj
+    path: services/orders
     kubernetes:
       service: orders-svc
       port: 8080
@@ -240,14 +241,21 @@ services:
       defaultTag: latest
 ```
 
-A developer editing the service picks `"local"`; one debugging against a shared dev cluster
-picks `"kubernetes"`; one who just needs it reachable picks `"url"` or `"container"` — same
-catalog entry, same `AddService("orders")` call in the AppHost, no code changes either way.
-Each developer's own `servicesources.local.json` just names which source applies to them —
-editing `orders` locally:
+A developer editing the service picks `"repository"` to clone it, or `"path"` if they already
+have it checked out beside the AppHost; one debugging against a shared dev cluster picks
+`"kubernetes"`; one who just needs it reachable picks `"url"` or `"container"` — same catalog
+entry, same `AddService("orders")` call in the AppHost, no code changes either way. Each
+developer's own `servicesources.local.json` just names which source applies to them — cloning
+`orders` locally:
 
 ```json
-{ "services": { "orders": { "source": "local" } } }
+{ "services": { "orders": { "source": "repository" } } }
+```
+
+or using the copy already checked out beside the AppHost:
+
+```json
+{ "services": { "orders": { "source": "path" } } }
 ```
 
 debugging against a shared dev cluster:
@@ -268,8 +276,9 @@ or turning it off entirely — no block needed for this one:
 { "services": { "orders": { "source": "disabled" } } }
 ```
 
-The `source` value is matched without regard to case, so `"local"`, `"Local"` and `"LOCAL"` all name
-the same source. A name none of the five has is refused at composition time, naming the ones that
-exist. (The `kind` names in `servicesources.yaml` are the exception — those *are* case-sensitive,
-because anything may register one and two registrations must not be able to collide by spelling.)
+The `source` value is matched without regard to case, so `"repository"`, `"Repository"` and
+`"REPOSITORY"` all name the same source. A name none of the six has is refused at composition
+time, naming the ones that exist. (The `kind` names in `servicesources.yaml` are the exception —
+those *are* case-sensitive, because anything may register one and two registrations must not be
+able to collide by spelling.)
 

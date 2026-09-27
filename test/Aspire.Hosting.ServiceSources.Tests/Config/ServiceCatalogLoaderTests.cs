@@ -44,14 +44,14 @@ public class ServiceCatalogLoaderTests
               orders:
                 repository: https://github.com/company/orders
                 project: src/Orders.Api/Orders.Api.csproj
-                defaultSource: local
+                defaultSource: repository
             """);
 
         try
         {
             var (catalog, _) = ServiceCatalogLoader.Load(path);
 
-            Assert.Equal("local", catalog.Services["orders"].DefaultSource);
+            Assert.Equal("repository", catalog.Services["orders"].DefaultSource);
         }
         finally
         {
@@ -125,11 +125,45 @@ public class ServiceCatalogLoaderTests
 
             Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
             Assert.Contains("bogus", ex.Message, StringComparison.Ordinal);
-            Assert.Contains("local", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("repository", ex.Message, StringComparison.Ordinal);
             Assert.Contains("url", ex.Message, StringComparison.Ordinal);
             Assert.Contains("kubernetes", ex.Message, StringComparison.Ordinal);
             Assert.Contains("container", ex.Message, StringComparison.Ordinal);
             Assert.Contains("disabled", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// "local" is retired, not aliased: a catalog's <c>defaultSource: local</c> gets the same named
+    /// migration a developer's own <c>source: "local"</c> does, rather than falling through to the
+    /// generic "not a valid source" message <see cref="Load_ServiceWithInvalidDefaultSource_ThrowsNamingTheFourValues"/>
+    /// covers.
+    /// </summary>
+    [Fact]
+    public void Load_ServiceWithDefaultSourceLocal_ReportsTheRenameToRepository()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+                defaultSource: local
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("Service 'orders'", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("defaultSource", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("renamed", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("'repository'", ex.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("not a valid source", ex.Message, StringComparison.Ordinal);
         }
         finally
         {
@@ -499,7 +533,7 @@ public class ServiceCatalogLoaderTests
                 repository: https://github.com/company/orders
                 project: src/Orders.Api/Orders.Api.csproj
                 defaultRef: main
-                defaultSource: local
+                defaultSource: repository
                 kind: dotnet
                 kubernetes:
                   service: orders-svc
@@ -517,7 +551,7 @@ public class ServiceCatalogLoaderTests
             var orders = ServiceCatalogLoader.Load(path).Catalog.Services["orders"];
 
             Assert.Equal("main", orders.DefaultRef);
-            Assert.Equal("local", orders.DefaultSource);
+            Assert.Equal("repository", orders.DefaultSource);
             Assert.Equal("orders-svc", orders.Kubernetes!.Service);
             Assert.Equal("https://orders.example.com", orders.Url!.Url);
             Assert.Equal("latest", orders.Container!.DefaultTag);
@@ -1121,6 +1155,125 @@ public class ServiceCatalogLoaderTests
 
             Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
             Assert.Contains("repository", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// The "no source configured" message's list of remedies grows to mention 'path' — design "New
+    /// source: path", free consequence 2.
+    /// </summary>
+    [Fact]
+    public void Load_ServiceHasNoResolvableFieldAtAll_MentionsPathAmongTheRemedies()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                project: src/Orders.Api/Orders.Api.csproj
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+                () => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("no source is configured", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("'path'", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// A bare 'path:' satisfies the "has a source" check by itself, the same way a bare 'url:' block
+    /// does — no 'repository' is required alongside it.
+    /// </summary>
+    [Fact]
+    public void Load_ServiceHasOnlyPath_DoesNotThrowNoSourceConfigured()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                path: services/orders
+                project: src/Orders.Api/Orders.Api.csproj
+            """);
+
+        try
+        {
+            var (catalog, _) = ServiceCatalogLoader.Load(path);
+
+            Assert.Equal("services/orders", catalog.Services["orders"].Path);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// Adding 'path' as a plain property on <see cref="ServiceMetadata"/> makes it a reserved kind
+    /// name automatically, through the same reflection-derived mechanism 'repository'/'url' already
+    /// collide with — design's free consequence 1, verified rather than assumed.
+    /// </summary>
+    [Fact]
+    public void Load_ServiceKindNamedPath_IsRejectedAsAReservedName()
+    {
+        Assert.True(ServiceCatalogLoader.IsReservedKindName("path"));
+
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                kind: path
+            """);
+
+        try
+        {
+            var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+                () => ServiceCatalogLoader.Load(path));
+
+            Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("kind 'path'", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("collides", ex.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// README "Combining sources on one catalog entry" (design finding 8): 'path:' joins
+    /// 'repository:'/'url:'/'container:'/'kubernetes:' on one entry without any special-casing.
+    /// </summary>
+    [Fact]
+    public void Load_PathCombinedWithRepositoryOnOneEntry_LoadsBothFields()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                path: services/orders
+                project: src/Orders.Api/Orders.Api.csproj
+            """);
+
+        try
+        {
+            var (catalog, _) = ServiceCatalogLoader.Load(path);
+
+            var orders = catalog.Services["orders"];
+            Assert.Equal("https://github.com/company/orders", orders.Repository);
+            Assert.Equal("services/orders", orders.Path);
         }
         finally
         {

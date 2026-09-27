@@ -8,7 +8,7 @@ using Xunit;
 namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 
 /// <summary>
-/// The <c>"local"</c> source resolves eagerly now, so that <c>AddService()</c> can hand back the
+/// The <c>"repository"</c> source resolves eagerly now, so that <c>AddService()</c> can hand back the
 /// real resource (issues #53/#58). These cover the machinery that keeps checkouts parallel anyway,
 /// and the speculative-prefetch rules that stop it inventing failures for services the AppHost
 /// never asks for.
@@ -131,7 +131,7 @@ public class LocalCheckoutPrefetchTests
 
     /// <summary>
     /// Writes an app host directory whose config declares <paramref name="localServices"/> as
-    /// <c>"local"</c> — which is what the prefetch enumerates.
+    /// <c>"repository"</c> — which is what the prefetch enumerates.
     /// </summary>
     private static string CreateAppHostDirectory(params string[] localServices)
     {
@@ -141,7 +141,7 @@ public class LocalCheckoutPrefetchTests
             $"  {name}:\n    repository: https://example.com/{name}.git\n    project: Service.csproj"));
         File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), $"services:\n{yaml}\n");
 
-        var json = string.Join(",", localServices.Select(name => $"\"{name}\": {{ \"source\": \"local\" }}"));
+        var json = string.Join(",", localServices.Select(name => $"\"{name}\": {{ \"source\": \"repository\" }}"));
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), $"{{ \"services\": {{ {json} }} }}");
 
         return dir;
@@ -160,7 +160,7 @@ public class LocalCheckoutPrefetchTests
             $"    defaultRef: {defaultRef}"));
         File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), $"services:\n{yaml}\n");
 
-        var json = string.Join(",", localServices.Select(name => $"\"{name}\": {{ \"source\": \"local\" }}"));
+        var json = string.Join(",", localServices.Select(name => $"\"{name}\": {{ \"source\": \"repository\" }}"));
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), $"{{ \"services\": {{ {json} }} }}");
 
         return dir;
@@ -193,7 +193,7 @@ public class LocalCheckoutPrefetchTests
             $"  {name}:\n    repository: {repository}\n    project: Service.csproj"));
         File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), $"services:\n{yaml}\n");
 
-        var json = string.Join(",", localServices.Select(name => $"\"{name}\": {{ \"source\": \"local\" }}"));
+        var json = string.Join(",", localServices.Select(name => $"\"{name}\": {{ \"source\": \"repository\" }}"));
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), $"{{ \"services\": {{ {json} }} }}");
 
         return dir;
@@ -216,7 +216,7 @@ public class LocalCheckoutPrefetchTests
             Path.Combine(dir, "servicesources.yaml"),
             $"repositories:\n  {checkoutName}:\n    repository: {repository}\nservices:\n{services}\n");
 
-        var json = string.Join(",", localServices.Select(name => $"\"{name}\": {{ \"source\": \"local\" }}"));
+        var json = string.Join(",", localServices.Select(name => $"\"{name}\": {{ \"source\": \"repository\" }}"));
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), $"{{ \"services\": {{ {json} }} }}");
 
         return dir;
@@ -241,7 +241,7 @@ public class LocalCheckoutPrefetchTests
             Repository = $"https://example.com/{name}.git", Project = "Service.csproj", DefaultRef = defaultRef,
         }.ToDefinition("servicesources.yaml", name, TestHelpers.EmptyRepositories);
 
-    private static ServiceDeveloperConfig DevConfig() => new() { Source = "local" };
+    private static ServiceDeveloperConfig DevConfig() => new() { Source = "repository" };
 
     [Fact]
     public void FirstAddService_ClonesEveryLocalServiceInParallel()
@@ -260,19 +260,19 @@ public class LocalCheckoutPrefetchTests
 
     /// <summary>
     /// The prefetch enumerates on the <c>source</c> value, so it has to read that value the same way
-    /// <c>AddService()</c> resolves it — case-insensitively. A service spelled <c>"Local"</c> used to
+    /// <c>AddService()</c> resolves it — case-insensitively. A service spelled <c>"Repository"</c> used to
     /// be dropped from the set silently, and its clone then serialised on the <c>AddService()</c>
     /// thread instead of running with the others: no error, just a slower start (#167).
     /// </summary>
     [Fact]
-    public void FirstAddService_LocalSpelledWithACapital_IsStillPrefetchedInParallel()
+    public void FirstAddService_RepositorySpelledWithACapital_IsStillPrefetchedInParallel()
     {
         var dir = CreateAppHostDirectory("orders", "billing");
         // Re-spell one service's source. The Barrier below is what makes this an assertion about the
         // prefetch rather than about cloning at all: "billing" is only ever cloned on the prefetch's
         // own thread, so if the filter drops it, "orders" waits alone and times out.
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"),
-            """{ "services": { "orders": { "source": "local" }, "billing": { "source": "Local" } } }""");
+            """{ "services": { "orders": { "source": "repository" }, "billing": { "source": "Repository" } } }""");
 
         var builder = TestHelpers.CreateBuilder(dir);
         var git = new FakeGitClient { StartBarrier = new Barrier(2) };
@@ -437,7 +437,7 @@ public class LocalCheckoutPrefetchTests
         // not try to clone it, and must not fail the AppHost over it.
         File.WriteAllText(
             Path.Combine(dir, "servicesources.local.json"),
-            """{ "services": { "orders": { "source": "local" }, "ghost": { "source": "local" } } }""");
+            """{ "services": { "orders": { "source": "repository" }, "ghost": { "source": "repository" } } }""");
         var builder = TestHelpers.CreateBuilder(dir);
         var git = new FakeGitClient();
 
@@ -472,7 +472,7 @@ public class LocalCheckoutPrefetchTests
             """);
         File.WriteAllText(
             Path.Combine(dir, "servicesources.local.json"),
-            """{ "services": { "orders": { "source": "local" }, "../escapee": { "source": "local" } } }""");
+            """{ "services": { "orders": { "source": "repository" }, "../escapee": { "source": "repository" } } }""");
 
         var builder = TestHelpers.CreateBuilder(dir);
         var git = new FakeGitClient();
@@ -516,7 +516,7 @@ public class LocalCheckoutPrefetchTests
             """);
         File.WriteAllText(
             Path.Combine(dir, "servicesources.local.json"),
-            """{ "services": { "orders": { "source": "local" }, "..\\escapee": { "source": "local" } } }""");
+            """{ "services": { "orders": { "source": "repository" }, "..\\escapee": { "source": "repository" } } }""");
 
         var builder = TestHelpers.CreateBuilder(dir);
         var git = new FakeGitClient();
@@ -568,7 +568,7 @@ public class LocalCheckoutPrefetchTests
 
         // The kind lookup is a registry probe, so it has to happen before the checkout: a typo'd
         // kind must not cost a cold clone of this repository — nor, through the prefetch, of every
-        // other "local" service in the developer config.
+        // other "repository" service in the developer config.
         Assert.Empty(git.Cloned);
 
         Assert.Contains("frontend", ex.Message);
@@ -577,7 +577,7 @@ public class LocalCheckoutPrefetchTests
     }
 
     [Fact]
-    public void ServiceMarkedLocalButNeverAdded_IsReportedRatherThanClonedSilently()
+    public void ServiceMarkedRepositoryButNeverAdded_IsReportedRatherThanClonedSilently()
     {
         var dir = CreateAppHostDirectory("orders", "billing");
         var builder = TestHelpers.CreateBuilder(dir);
@@ -597,7 +597,7 @@ public class LocalCheckoutPrefetchTests
     }
 
     [Fact]
-    public void DefaultedToLocal_NeverAdded_IsExcludedFromThePrefetchAndReportsNothing()
+    public void DefaultedToRepository_NeverAdded_IsExcludedFromThePrefetchAndReportsNothing()
     {
         var dir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
@@ -608,19 +608,19 @@ public class LocalCheckoutPrefetchTests
               billing:
                 repository: https://example.com/billing.git
                 project: Service.csproj
-                defaultSource: local
+                defaultSource: repository
             """);
         // "orders" is explicit; "billing" has no entry anywhere and resolves only through the
         // catalog's own defaultSource.
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"),
-            """{ "services": { "orders": { "source": "local" } } }""");
+            """{ "services": { "orders": { "source": "repository" } } }""");
         var builder = TestHelpers.CreateBuilder(dir);
         var git = new FakeGitClient();
 
         new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
 
-        // Unlike an explicit "local" entry for a service never added (which IS reported -- see
-        // ServiceMarkedLocalButNeverAdded_IsReportedRatherThanClonedSilently -- so the developer knows
+        // Unlike an explicit "repository" entry for a service never added (which IS reported -- see
+        // ServiceMarkedRepositoryButNeverAdded_IsReportedRatherThanClonedSilently -- so the developer knows
         // to remove it), a defaulted service was never anyone's decision to clone: nothing was cloned
         // for it, and nothing is reported.
         Assert.Equal(["https://example.com/orders.git"], git.Cloned);
@@ -628,7 +628,7 @@ public class LocalCheckoutPrefetchTests
     }
 
     [Fact]
-    public void DefaultedToLocal_ActuallyAdded_ResolvesViaTheDirectNonPrefetchedPath()
+    public void DefaultedToRepository_ActuallyAdded_ResolvesViaTheDirectNonPrefetchedPath()
     {
         var dir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
@@ -636,7 +636,7 @@ public class LocalCheckoutPrefetchTests
               billing:
                 repository: https://example.com/billing.git
                 project: Service.csproj
-                defaultSource: local
+                defaultSource: repository
             """);
         // No servicesources.local.json at all.
         var builder = TestHelpers.CreateBuilder(dir);
@@ -721,7 +721,7 @@ public class LocalCheckoutPrefetchTests
                 () => prefetch.FailedUnusedCheckoutMessages.Count == 1, TimeSpan.FromSeconds(30)),
             "The failed speculative checkout for the shared repository was never reported.");
 
-        // Neither name is a word the message's own prose contains ("checkout", "local", "clone",
+        // Neither name is a word the message's own prose contains ("checkout", "repository", "clone",
         // "repository", "prefetch" all appear regardless of which service failed), so finding both
         // here is a real assertion about the reverse index rather than a coincidence of wording.
         var message = Assert.Single(prefetch.FailedUnusedCheckoutMessages);
@@ -771,7 +771,7 @@ public class LocalCheckoutPrefetchTests
         File.WriteAllText(
             Path.Combine(dir, "servicesources.local.json"),
             """
-            { "services": { "orders": { "source": "local" }, "Billing": { "source": "local" } } }
+            { "services": { "orders": { "source": "repository" }, "Billing": { "source": "repository" } } }
             """);
 
         var builder = TestHelpers.CreateBuilder(dir);
@@ -891,8 +891,8 @@ public class LocalCheckoutPrefetchTests
             Path.Combine(dir, "servicesources.local.json"),
             """
             { "services": {
-                "orders": { "source": "local" },
-                "billing": { "source": "local", "local": { "path": "moved-away" } } } }
+                "orders": { "source": "repository" },
+                "billing": { "source": "repository", "local": { "path": "moved-away" } } } }
             """);
         var builder = TestHelpers.CreateBuilder(dir);
         var git = new FakeGitClient();
@@ -976,7 +976,7 @@ public class LocalCheckoutPrefetchTests
     {
         var dir = CreateAppHostDirectory("orders");
 
-        // "billing" is in the catalog but not configured as "local", so the prefetch never
+        // "billing" is in the catalog but not configured as "repository", so the prefetch never
         // enumerates it and its checkout is resolved on the calling thread instead.
         File.WriteAllText(
             Path.Combine(dir, "servicesources.yaml"),
@@ -1004,7 +1004,7 @@ public class LocalCheckoutPrefetchTests
     [Fact]
     public async Task UnclaimedCheckout_EndsItsProgressStreamWhenTheCloneDoes_NotAfterReconciliation()
     {
-        // "billing" is in the catalog but not configured "local", so the prefetch never claims it
+        // "billing" is in the catalog but not configured "repository", so the prefetch never claims it
         // and GetRepoRoot resolves it itself — the path that has to close its own stream.
         var dir = CreateAppHostDirectory("orders");
         File.WriteAllText(
@@ -1092,7 +1092,7 @@ public class LocalCheckoutPrefetchTests
     }
 
     /// <summary>
-    /// The guard in <c>LocalProjectSource.Resolve</c> refuses a repositoryless <c>"local"</c>
+    /// The guard in <c>LocalProjectSource.Resolve</c> refuses a repositoryless <c>"repository"</c>
     /// service on the thread that asked for it, but the prefetch sweeps the whole developer config
     /// — so resolving a well-formed sibling used to hand the git client an empty url for a service
     /// nobody had mentioned (#362). The failure was silent: speculative, stored, and only logged if
@@ -1118,7 +1118,7 @@ public class LocalCheckoutPrefetchTests
 
             """);
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"),
-            """{ "services": { "orders": { "source": "local" }, "billing": { "source": "local" } } }""");
+            """{ "services": { "orders": { "source": "repository" }, "billing": { "source": "repository" } } }""");
 
         var builder = TestHelpers.CreateBuilder(dir);
         var git = new FakeGitClient();

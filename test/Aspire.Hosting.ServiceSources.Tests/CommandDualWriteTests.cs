@@ -59,7 +59,7 @@ public class CommandDualWriteTests
     {
         var builder = Builder();
         var real = builder.AddResource(new ProjectResource("orders"));
-        var service = ResolvedService.Bridge(real, "orders", "local");
+        var service = ResolvedService.Bridge(real, "orders", "repository");
 
         OverloadProbe.CallWithCommand(service, "restart", "Restart v1", Ok);
         OverloadProbe.CallWithCommand(service, "restart", "Restart v2", Ok);

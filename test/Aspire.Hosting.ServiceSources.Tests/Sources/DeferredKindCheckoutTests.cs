@@ -190,7 +190,7 @@ public class DeferredKindCheckoutTests
             $"  {name}:\n    repository: https://example.com/{name}.git\n    kind: {KindName}"));
         File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), $"services:\n{yaml}\n");
 
-        var json = string.Join(",", localServices.Select(name => $"\"{name}\": {{ \"source\": \"local\" }}"));
+        var json = string.Join(",", localServices.Select(name => $"\"{name}\": {{ \"source\": \"repository\" }}"));
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), $"{{ \"services\": {{ {json} }} }}");
 
         return dir;
@@ -200,7 +200,7 @@ public class DeferredKindCheckoutTests
         new ServiceMetadata { Repository = $"https://example.com/{name}.git", Kind = KindName }
             .ToDefinition("servicesources.yaml", name, TestHelpers.EmptyRepositories);
 
-    private static ServiceDeveloperConfig DevConfig(string? path = null) => new() { Source = "local", Local = new() { Path = path } };
+    private static ServiceDeveloperConfig DevConfig(string? path = null) => new() { Source = "repository", Local = new() { Path = path } };
 
     private static string ExpectedRepoRoot(string appHostDirectory, string serviceName) =>
         Path.Combine(appHostDirectory, ".servicesources", "checkouts", serviceName);

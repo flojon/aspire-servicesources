@@ -97,7 +97,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             EnvOverrideCatalog,
-            """{ "services": { "envoverride": { "source": "local" } } }""");
+            """{ "services": { "envoverride": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
@@ -191,13 +191,13 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
-            """{ "services": { "orders": { "source": "local" } } }""");
+            """{ "services": { "orders": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
         var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
 
-        Assert.Equal("local", config.Source);
+        Assert.Equal("repository", config.Source);
         Assert.Null(config.Local.Path);
         Assert.Null(config.Local.Ref);
         Assert.Null(config.Kubernetes.Context);
@@ -240,7 +240,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
-            """{ "services": { "orders": { "source": "local" } } }""");
+            """{ "services": { "orders": { "source": "repository" } } }""");
         File.WriteAllText(
             Path.Combine(dir, "appsettings.json"),
             """{ "ServiceSources": { "Services": { "orders": { "source": "url" } } } }""");
@@ -265,7 +265,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
-            """{ "services": { "orders": { "source": "local" } } }""");
+            """{ "services": { "orders": { "source": "repository" } } }""");
         File.WriteAllText(
             Path.Combine(dir, "appsettings.json"),
             """{ "ServiceSources": { "Services": { "orders": { "source": "url" } } } }""");
@@ -294,7 +294,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             EnvOverrideCatalog,
-            """{ "services": { "envoverride": { "source": "local" } } }""");
+            """{ "services": { "envoverride": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
         // A higher layer than the file, spelled with different casing — an in-memory source rather
@@ -320,7 +320,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
-            """{ "services": { "Orders": { "source": "local" } } }""");
+            """{ "services": { "Orders": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
@@ -348,7 +348,7 @@ public class DeveloperConfigurationTests
                 repository: https://github.com/company/orders-two
                 project: src/Orders.Two/Orders.Two.csproj
             """,
-            """{ "services": { "orders": { "source": "local" } } }""");
+            """{ "services": { "orders": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
@@ -381,7 +381,7 @@ public class DeveloperConfigurationTests
                 repository: https://github.com/company/payments
                 project: src/Payments.Api/Payments.Api.csproj
             """,
-            """{ "services": { "payments": { "source": "local" } } }""");
+            """{ "services": { "payments": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
@@ -420,7 +420,7 @@ public class DeveloperConfigurationTests
             OrdersCatalog,
             """
             {
-              "services": { "orders": { "source": "local" } },
+              "services": { "orders": { "source": "repository" } },
               "ConnectionStrings": { "db": "Server=somewhere" }
             }
             """);
@@ -429,7 +429,7 @@ public class DeveloperConfigurationTests
 
         var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
 
-        Assert.Equal("local", config.Source);
+        Assert.Equal("repository", config.Source);
         Assert.Null(builder.Configuration["ServiceSources:ConnectionStrings:db"]);
     }
 
@@ -487,17 +487,17 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["ServiceSources:Services:switcher:Source"] = "local",
+            ["ServiceSources:Services:switcher:Source"] = "repository",
             ["ServiceSources:Services:switcher:Local:Path"] = checkout,
         });
 
         var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "switcher");
 
-        Assert.Equal("local", config.Source);
+        Assert.Equal("repository", config.Source);
         Assert.Equal(checkout, config.Local.Path);
 
         // Still bound, and that is the point: the entry it came from is untouched, and nothing
-        // reads it while the effective source is "local".
+        // reads it while the effective source is "repository".
         Assert.Equal("http://from-local-json.invalid", config.Url.Url);
     }
 
@@ -528,7 +528,7 @@ public class DeveloperConfigurationTests
         var dir = CreateAppHostDirectory(
             BlankingCatalog,
             $$"""
-            { "services": { "blanking": { "source": "local",
+            { "services": { "blanking": { "source": "repository",
                 "local": { "path": "{{configured.Replace("\\", "\\\\")}}" } } } }
             """);
 
@@ -540,7 +540,7 @@ public class DeveloperConfigurationTests
 
         // Source comes only from the file, so it proves the file layer bound at all — without it a
         // null Path could as easily mean the file's value never arrived as that the blank dropped it.
-        Assert.Equal("local", config.Source);
+        Assert.Equal("repository", config.Source);
         Assert.Null(config.Local.Path);
 
         // The bug this closes: with the path left as "", PrepareRepoRoot takes its override branch
@@ -608,7 +608,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
-            $$"""{ "{{rootKey}}": { "orders": { "source": "local" } } }""");
+            $$"""{ "{{rootKey}}": { "orders": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
@@ -639,7 +639,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
-            """{ "serivces": { "orders": { "source": "local" } } }""");
+            """{ "serivces": { "orders": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
@@ -666,13 +666,13 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
-            """{ "Services": { "orders": { "source": "local" } } }""");
+            """{ "Services": { "orders": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
         var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
 
-        Assert.Equal("local", config.Source);
+        Assert.Equal("repository", config.Source);
     }
 
     /// <remarks>
@@ -706,7 +706,7 @@ public class DeveloperConfigurationTests
             OrdersCatalog,
             """
             {
-              "services": { "orders": { "source": "local" } },
+              "services": { "orders": { "source": "repository" } },
               "service": { "orders": { "source": "url" } }
             }
             """);
@@ -715,7 +715,7 @@ public class DeveloperConfigurationTests
 
         var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
 
-        Assert.Equal("local", config.Source);
+        Assert.Equal("repository", config.Source);
     }
 
     /// <summary>
@@ -749,7 +749,7 @@ public class DeveloperConfigurationTests
             """
             {
               "services": { },
-              "service": { "orders": { "source": "local" } }
+              "service": { "orders": { "source": "repository" } }
             }
             """);
 
@@ -827,7 +827,7 @@ public class DeveloperConfigurationTests
             """
             {
               "servcs": { "orders": { "source": "url" } },
-              "service": { "orders": { "source": "local" } }
+              "service": { "orders": { "source": "repository" } }
             }
             """);
 
@@ -859,7 +859,7 @@ public class DeveloperConfigurationTests
             """
             {
               "serivces": { "orders": { "source": "url" } },
-              "service": { "orders": { "source": "local" } }
+              "service": { "orders": { "source": "repository" } }
             }
             """);
 
@@ -886,7 +886,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
-            """{ "services": { "order": { "source": "local" } } }""");
+            """{ "services": { "order": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
@@ -922,7 +922,7 @@ public class DeveloperConfigurationTests
                 repository: https://github.com/company/order
                 project: src/Order.Api/Order.Api.csproj
             """,
-            """{ "services": { "order": { "source": "local" } } }""");
+            """{ "services": { "order": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
@@ -945,7 +945,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
-            """{ "services": { "billing": { "source": "local" } } }""");
+            """{ "services": { "billing": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
@@ -1009,7 +1009,7 @@ public class DeveloperConfigurationTests
             {
               "services": {
                 "ordrs": { "source": "url" },
-                "orderr": { "source": "local" }
+                "orderr": { "source": "repository" }
               }
             }
             """);
@@ -1031,7 +1031,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             CartCatalog,
-            """{ "services": { "crat": { "source": "local" } } }""");
+            """{ "services": { "crat": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
@@ -1064,7 +1064,7 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["ServiceSources:Services:nearmisenv:Source"] = "local",
+            ["ServiceSources:Services:nearmisenv:Source"] = "repository",
         });
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
@@ -1094,7 +1094,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             NeighbouringCartCatalog,
-            """{ "services": { "crat": { "source": "local" } } }""");
+            """{ "services": { "crat": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
@@ -1116,7 +1116,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             NeighbouringCartCatalog,
-            """{ "services": { "crat": { "source": "local" } } }""");
+            """{ "services": { "crat": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
@@ -1147,7 +1147,7 @@ public class DeveloperConfigurationTests
             {
               "services": {
                 "orders": { "local": { "path": "/tmp/orders" } },
-                "order": { "source": "local", "local": { "path": "/tmp/order" } }
+                "order": { "source": "repository", "local": { "path": "/tmp/order" } }
               }
             }
             """);
@@ -1184,7 +1184,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
-            """{ "serivces": { "orders": { "source": "local" } } }""");
+            """{ "serivces": { "orders": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
@@ -1218,7 +1218,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             CartCatalog,
-            """{ "services": { "carted": { "source": "local" } } }""");
+            """{ "services": { "carted": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
