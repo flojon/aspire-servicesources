@@ -385,6 +385,58 @@ public class ServiceConfigurationExtensionsTests
     }
 
     [Fact]
+    public void Unwrap_Delegate_OnKubernetesSource_StillSkips_WhenTheSourceAnnotationWasStripped()
+    {
+        var builder = Builder();
+        var service = AddKubernetesService(builder);
+        var callbackRan = false;
+
+        // The annotation collection is public and mutable; the gate must not depend on it.
+        service.Resource.Annotations.Clear();
+        service.Unwrap<ExecutableResource>(_ => callbackRan = true);
+
+        Assert.False(callbackRan);
+        Assert.Contains("port-forward", Assert.Single(ServiceSourcesWarnings.For(builder).Messages));
+    }
+
+    [Fact]
+    public void Unwrap_OnKubernetesSource_StillThrows_WhenTheSourceAnnotationWasStripped()
+    {
+        var builder = Builder();
+        var service = AddKubernetesService(builder);
+
+        service.Resource.Annotations.Clear();
+
+        Assert.Throws<ServiceSourcesConfigurationException>(() => service.Unwrap<ExecutableResource>());
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_OnABuilderHeldAsServiceDiscovery_StillSkips()
+    {
+        var builder = Builder();
+        IResourceBuilder<IResourceWithServiceDiscovery> service = AddUrlService(builder);
+        var callbackRan = false;
+
+        var returned = service.Unwrap<IResourceWithEnvironment>(_ => callbackRan = true);
+
+        Assert.Same(service, returned);
+        Assert.False(callbackRan);
+        Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_MismatchedInterface_UsesTheRightArticle()
+    {
+        var builder = Builder();
+
+        AddContainerService(builder).Unwrap<IResourceWithConnectionString>(_ => { });
+
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+        Assert.Contains("not an IResourceWithConnectionString", message);
+        Assert.Contains($"resolves to a {nameof(ServiceContainerResource)}", message);
+    }
+
+    [Fact]
     public void Unwrap_Delegate_MismatchedType_ReportsOnce_HoweverManyTimesItIsCalled()
     {
         var builder = Builder();

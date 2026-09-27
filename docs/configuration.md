@@ -188,8 +188,8 @@ var backend = builder.AddService("backend")
     .WaitForCompletion(migrationService);
 ```
 
-`Unwrap<T>()` reaches past the facade to the real, source-specific resource, for anything native
-vocabulary doesn't cover — a non-`dotnet` local kind's own extension methods, for example:
+`Unwrap<T>(configure)` reaches past the facade to the real, source-specific resource, for anything
+native vocabulary doesn't cover — a non-`dotnet` local kind's own extension methods, for example:
 
 ```csharp
 backend.Unwrap<JavaScriptAppResource>(js => js.WithRunScript("dev"));
