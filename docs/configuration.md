@@ -239,6 +239,13 @@ resolves to a container, not a `JavaAppExecutableResource` — and logs what the
 instead. It follows the same wait-ordering exception: `Unwrap<IResourceWithWaitSupport>(...)` on a
 `"kubernetes"` service still runs, against the port-forward.
 
+That skip is only for a mismatch some source switch could undo. When **no** source the service's
+catalog entry declares could ever resolve to a `T` — `Unwrap<ProjectResource>(...)` on a
+`kind: java` service with a `container:` block, say — the call can never apply for anyone, so it
+throws at startup, naming each declared source and the type it resolves to. A local kind that
+doesn't declare its resource type (see [implementing a kind](kinds.md#implementing-a-kind)) is
+assumed to match anything, so it never causes this throw.
+
 The parameterless `Unwrap<T>()` **throws** in every one of those cases instead — it has to return
 a builder, and handing back the `kubectl` executable would silently configure the wrong process.
 Use it only where the AppHost genuinely requires that resource type, or needs the builder itself as

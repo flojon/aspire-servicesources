@@ -96,11 +96,16 @@ public static class ServiceConfigurationExtensions
     /// wasn't meant to.
     /// <para>
     /// A reachable source whose resource is not a <typeparamref name="T"/> skips too, rather than
-    /// throwing: switching a <c>java</c> service to <c>"container"</c> produces exactly that mismatch,
-    /// and nothing at the call site can tell it apart from the AppHost author's own mistake.
+    /// throwing, as long as another source the catalog entry declares could produce one: switching a
+    /// <c>java</c> service to <c>"container"</c> produces exactly that mismatch. When no declared
+    /// source could ever produce a <typeparamref name="T"/>, the call is an AppHost mistake that no
+    /// source switch will fix, so it throws.
     /// </para>
     /// </remarks>
     /// <returns><paramref name="service"/> itself, so native calls can still be chained after it.</returns>
+    /// <exception cref="ServiceSourcesConfigurationException">
+    /// No source the service's catalog entry declares could ever resolve to a <typeparamref name="T"/>.
+    /// </exception>
     [AspireExportIgnore(Reason =
         "A generic method projects into ATS with its type parameter dropped, and here T *is* " +
         "the resource type being requested, so the export would arrive broken rather than absent.")]
@@ -155,6 +160,21 @@ public static class ServiceConfigurationExtensions
         {
             configure(service.ApplicationBuilder.CreateResourceBuilder(typed));
             return;
+        }
+
+        // Skipping is only right when a source switch caused the mismatch; if no declared source
+        // could ever produce a T, the call is dead for everyone and silently dropping it hides that.
+        if (serviceBuilder.DeclaredResolutions is { } declared
+            && !declared.Any(d => !IsUnreachable<T>(d.Source) && CouldBe(d.ResourceType, typeof(T))))
+        {
+            var sources = Raw.Join(", ", declared.Select(d => Raw.Compose(
+                $"'{new Name(d.Source)}' ({Raw.Escaped(d.ResourceType.Name)})")));
+
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(service.Resource.Name)}': Unwrap<{Raw.Escaped(typeof(T).Name)}> can never "
+                + $"apply — none of the sources its catalog entry declares, {sources}, resolves to "
+                + $"{Raw.Escaped(WithArticle(typeof(T).Name))}. Remove the call, or unwrap a type one of those "
+                + $"sources resolves to.");
         }
 
         ServiceSourcesWarnings.For(service.ApplicationBuilder).AddNotice(Raw.Compose(
@@ -252,6 +272,20 @@ public static class ServiceConfigurationExtensions
         Raw.Compose(
             $"its source '{new Name(source)}' resolves to {Raw.Escaped(WithArticle(resolved.GetType().Name))}, "
             + $"not {Raw.Escaped(WithArticle(typeof(T).Name))}");
+
+    /// <summary>
+    /// Whether a resource declared as <paramref name="declared"/> could, at runtime, be a
+    /// <paramref name="requested"/>.
+    /// </summary>
+    /// <remarks>
+    /// Errs towards "could": a subclass of an unsealed class may implement any interface, and a
+    /// declared interface (a kind that did not name its type) may be anything.
+    /// </remarks>
+    private static bool CouldBe(Type declared, Type requested) =>
+        requested.IsAssignableFrom(declared)
+        || declared.IsAssignableFrom(requested)
+        || (requested.IsInterface && !declared.IsSealed)
+        || (declared.IsInterface && !requested.IsSealed);
 
     private static string WithArticle(string typeName) =>
         ("AEIOU".Contains(typeName[0], StringComparison.Ordinal) ? "an " : "a ") + typeName;

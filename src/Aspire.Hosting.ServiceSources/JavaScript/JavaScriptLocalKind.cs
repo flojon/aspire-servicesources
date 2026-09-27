@@ -20,6 +20,9 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
     /// </summary>
     public const string KindName = "javascript";
 
+    // Every AddApp branch returns this type or a subclass (Vite, Next.js, Node, Bun).
+    public Type ResourceType => typeof(JavaScriptAppResource);
+
     /// <summary>
     /// The whole verdict on a service's <c>javascript:</c> block, the paths in it included: core
     /// calls this against the resolved checkout, immediately before <see cref="Resolve"/> and before

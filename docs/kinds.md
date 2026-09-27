@@ -275,6 +275,10 @@ public sealed class JavaScriptKind : ILocalResourceKind
         var options = LocalKindConfig.Parse<Options>(rawConfig, serviceName);
         ...
     }
+
+    // Optional: the type every resource Resolve returns is, or derives from. Lets
+    // Unwrap<T>(configure) reject a T this kind could never produce instead of only warning.
+    public Type ResourceType => typeof(JavaScriptAppResource);
 }
 
 public static IDistributedApplicationBuilder UseCustomJavaScriptKind(this IDistributedApplicationBuilder builder) =>

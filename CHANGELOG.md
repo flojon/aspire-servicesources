@@ -46,6 +46,16 @@ never existed. Check the tag of the last release before adding one.
   kind-specific vocabulary. `Unwrap<IResourceWithWaitSupport>(...)` on a `"kubernetes"` service
   still runs against the port-forward, matching `WaitFor`.
 
+  A call **no** source the catalog entry declares could ever satisfy — `Unwrap<ProjectResource>`
+  on a `kind: java` service with a `container:` block — throws at startup instead, naming each
+  declared source and the type it resolves to, since no source switch would ever make it apply.
+
+- **`ILocalResourceKind.ResourceType`**, an optional member naming the type every resource the
+  kind's `Resolve` returns is, or derives from. The built-in `java` and `javascript` kinds declare
+  theirs. It is what lets `Unwrap<T>(configure)` tell a call no source could satisfy apart from
+  one a source switch skipped; a kind that doesn't declare it is assumed to match anything, so it
+  never causes that throw.
+
 ## [0.6.0] - 2026-09-24
 
 ### Breaking

@@ -12,25 +12,93 @@ namespace Aspire.Hosting.ServiceSources.Java.Tests;
 [Trait("IO", "true")]
 public class JavaUnwrapTests
 {
-    private static IDistributedApplicationBuilder CreateAppHost(string localJson)
+    private const string JavaWithContainer = """
+        services:
+          java-api:
+            repository: https://github.com/example/java-api
+            kind: java
+            java:
+              mavenGoal: spring-boot:run
+              port: 8080
+            container:
+              image: example/java-api
+              port: 8080
+        """;
+
+    private static IDistributedApplicationBuilder CreateAppHost(string localJson, string catalog = JavaWithContainer)
     {
         var appHostDirectory = CreateTempDirectory();
 
-        File.WriteAllText(Path.Combine(appHostDirectory, "servicesources.yaml"), """
-            services:
-              java-api:
-                repository: https://github.com/example/java-api
-                kind: java
-                java:
-                  mavenGoal: spring-boot:run
-                  port: 8080
-                container:
-                  image: example/java-api
-                  port: 8080
-            """);
+        File.WriteAllText(Path.Combine(appHostDirectory, "servicesources.yaml"), catalog);
         File.WriteAllText(Path.Combine(appHostDirectory, "servicesources.local.json"), localJson);
 
         return CreateBuilder(appHostDirectory);
+    }
+
+    private static string LocalPathJson(string serviceName, string checkout) => $$"""
+        {
+          "services": {
+            "{{serviceName}}": { "source": "local", "local": { "path": {{System.Text.Json.JsonSerializer.Serialize(checkout)}} } }
+          }
+        }
+        """;
+
+    private sealed class UndeclaredTypeKind : ILocalResourceKind
+    {
+        public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+            IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) =>
+            builder.AddResource(new UndeclaredTypeResource(serviceName, repoRoot));
+    }
+
+    private sealed class UndeclaredTypeResource(string name, string workingDirectory)
+        : ExecutableResource(name, "tool", workingDirectory), IResourceWithServiceDiscovery;
+
+    [Fact]
+    public void Unwrap_Delegate_ForATypeNoDeclaredSourceProduces_Throws()
+    {
+        var builder = CreateAppHost("""
+            { "services": { "java-api": { "source": "container" } } }
+            """);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("java-api")
+            .Unwrap<ProjectResource>(_ => { }));
+
+        Assert.Contains("Unwrap<ProjectResource> can never apply", ex.Message);
+        Assert.Contains($"'local' ({nameof(JavaAppExecutableResource)})", ex.Message);
+        Assert.Contains("'container'", ex.Message);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_OnTheCatalogsDefaultContainerSource_WarnsBecauseLocalWouldApply()
+    {
+        // No developer override at all: a mismatch under the catalog's own default is still a
+        // source choice, not a mistake, because switching to 'local' makes the call apply.
+        var builder = CreateAppHost("""{ "services": {} }""", JavaWithContainer.Replace(
+            "    kind: java", "    defaultSource: container\n    kind: java", StringComparison.Ordinal));
+        var callbackRan = false;
+
+        builder.AddService("java-api").Unwrap<JavaAppExecutableResource>(_ => callbackRan = true);
+
+        Assert.False(callbackRan);
+        Assert.Contains("Unwrap<JavaAppExecutableResource>", Assert.Single(ServiceSourcesWarnings.For(builder).Messages));
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_OnAKindThatDeclaresNoType_NeverThrows()
+    {
+        var checkout = CreateTempDirectory();
+        var builder = CreateAppHost(LocalPathJson("tool", checkout), """
+            services:
+              tool:
+                repository: https://github.com/example/tool
+                kind: undeclared
+            """);
+        builder.AddLocalKind("undeclared", new UndeclaredTypeKind());
+
+        var ex = Record.Exception(() => builder.AddService("tool").Unwrap<ProjectResource>(_ => { }));
+
+        Assert.Null(ex);
+        Assert.Contains("Unwrap<ProjectResource>", Assert.Single(ServiceSourcesWarnings.For(builder).Messages));
     }
 
     [Fact]
