@@ -96,28 +96,6 @@ Every release is listed in the
 is where breaking changes and their migrations are recorded. Check it before upgrading —
 while the version is below `1.0.0`, a breaking change can ship in a minor release.
 
-### Preview builds
-
-Every push to `main` publishes a prerelease build (`0.x.y-alpha.0.N`) to GitHub Packages.
-Stable releases go to nuget.org only — use those unless you specifically need an unreleased
-fix. Previews are pruned after each release — only the five most recent are kept — so treat
-them as disposable and never pin one in a long-lived project.
-
-GitHub's NuGet registry requires authentication for every download, even for public
-packages — unlike the container registry, it has no anonymous access. This is *not* a grant
-on this repository: any authenticated GitHub user can download a public package, so all you
-need is a token on your own account. It must be a **classic** personal access token with the
-`read:packages` scope; fine-grained tokens are not supported by GitHub Packages.
-
-```bash
-dotnet nuget add source https://nuget.pkg.github.com/flojon/index.json \
-  --name servicesources-preview --username <your-github-username> --password <your-pat>
-dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources --prerelease
-```
-
-One package, so one prerelease. The language hosting packages are Aspire's own and come from
-nuget.org as usual — a preview of this package does not imply a preview of those.
-
 ## Authoring the catalog in code
 
 Everything `servicesources.yaml` declares can be written in the AppHost's own language
