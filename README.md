@@ -20,9 +20,9 @@ per-developer choice, made without ever touching the AppHost's `.csproj`/`.sln`.
 `AddService()` is the seam: the AppHost calls it once per service, and a developer-local
 config file decides how it's actually resolved — a managed or self-managed local git
 checkout (`"local"`), a `kubectl port-forward` against a dev cluster (`"kubernetes"`), a
-fixed, already-known URL (`"url"`), or a published container image run locally
-(`"container"`) — behind one stable return type, so the AppHost code never has to change
-when a developer switches sources.
+fixed, already-known URL (`"url"`), a published container image run locally
+(`"container"`), or nothing at all (`"disabled"`) — behind one stable return type, so the
+AppHost code never has to change when a developer switches sources.
 
 ## Install
 
@@ -170,7 +170,7 @@ it's added; calling it after throws, naming the ordering problem. Call it near t
 the AppHost, next to `UseDeferredCheckout()`. It can be called more than once — a helper
 method can contribute its own entries — and calls append rather than replace.
 
-**Which builder method enables which `source`**, since the method names are not the four
+**Which builder method enables which `source`**, since the method names are not the five
 values you type into `servicesources.local.json`:
 
 | Builder method | yaml it replaces | `"source"` it enables |
@@ -179,9 +179,14 @@ values you type into `servicesources.local.json`:
 | `WithUrl` | `url:` | `"url"` |
 | `WithContainer` | `container:` | `"container"` |
 | `WithKubernetes` | `kubernetes:` | `"kubernetes"` |
+| *(none)* | *(none)* | `"disabled"` |
+
+`"disabled"` needs no builder call and no yaml block of its own — a developer just writes
+`"source": "disabled"` in their own `servicesources.local.json` for a service the catalog already
+declares some other way. See [the `"disabled"` source](#disabled-source) below.
 
 `WithDefaultSource(source)` is a separate call, not a `source` value of its own — it names which of
-the four a developer gets when nothing configures this service explicitly, the code-authoring
+the five a developer gets when nothing configures this service explicitly, the code-authoring
 equivalent of yaml's `defaultSource:`:
 
 ```csharp
@@ -263,7 +268,7 @@ itself would.
 says what a service *is* — its repository, its URL, its container image — the same job
 `servicesources.yaml` does. It does not decide how to resolve it for you personally: that
 is still `servicesources.local.json`'s job, per developer, per service, with the same
-`"source"` values (`"local"`/`"url"`/`"container"`/`"kubernetes"`) it always took. A
+`"source"` values (`"local"`/`"url"`/`"container"`/`"kubernetes"`/`"disabled"`) it always took. A
 service declared only in code and never given a `servicesources.local.json` entry fails to
 resolve exactly as a yaml-declared one would.
 
@@ -1558,6 +1563,36 @@ services:
       scheme: https
 ```
 
+### `"disabled"` source
+
+Turn a service off without deleting its `AddService("orders")` call or its catalog entry. Nothing
+runs, nothing is reachable — no endpoint, no process, no container — and `AddService` still hands
+back a valid resource builder, so the rest of the AppHost needs no change.
+
+`servicesources.local.json`:
+```json
+{
+  "services": {
+    "orders": { "source": "disabled" }
+  }
+}
+```
+
+No catalog block and no builder call are needed — `"disabled"` is chosen entirely from
+`servicesources.local.json` (or a higher configuration layer), for a service the catalog already
+declares some other way.
+
+Named `"disabled"` rather than leaving `source` blank: a blank or absent `source` already means
+something else — the entry is not configured at all — and reports
+`'orders' has no source configured`. `"disabled"` is a deliberate, distinct choice.
+
+Like [`"url"`](#url-source), there is no real resource for Aspire to run, so the AppHost's own
+[`Configure` calls are skipped and logged](#configuring-a-resolved-service), and a consumer's
+`WaitFor`/`WaitForCompletion` on it resolves immediately instead of waiting — the same #170
+protection `"url"` gets. Unlike `"url"`, no endpoint is registered at all: there is nothing to
+point a consumer at, deliberately, so a container that references a disabled service simply gets no
+endpoint wiring rather than the DCP failure [`"url"` warns about](#url-source).
+
 ### Combining sources on one catalog entry
 
 A single `servicesources.yaml` entry can carry blocks for every source at once — the catalog
@@ -1602,8 +1637,14 @@ or just needing it reachable, not caring how:
 { "services": { "orders": { "source": "url" } } }
 ```
 
+or turning it off entirely — no block needed for this one:
+
+```json
+{ "services": { "orders": { "source": "disabled" } } }
+```
+
 The `source` value is matched without regard to case, so `"local"`, `"Local"` and `"LOCAL"` all name
-the same source. A name none of the four has is refused at composition time, naming the ones that
+the same source. A name none of the five has is refused at composition time, naming the ones that
 exist. (The `kind` names in `servicesources.yaml` are the exception — those *are* case-sensitive,
 because anything may register one and two registrations must not be able to collide by spelling.)
 
@@ -1800,26 +1841,29 @@ vocabulary doesn't cover — a non-`dotnet` local kind's own extension methods, 
 backend.Unwrap<JavaScriptAppResource>().WithRunScript("dev");
 ```
 
-**Native calls are skipped for the `"url"` and `"kubernetes"` sources**, and the skip is logged at
-startup. Both resolve to something already running elsewhere — a `"url"` service has no local
-process at all, and a `"kubernetes"` service is a `kubectl port-forward` in front of a remote one,
-so environment variables applied here would configure `kubectl` rather than the service. Those
-services are expected to be configured wherever they actually run. This includes
-`WithHttpHealthCheck` — a `"kubernetes"` service's port-forward has a real local endpoint, but the
-call still dual-writes onto the `kubectl` process rather than the service behind it, so it's
-skipped the same as any other configuration call rather than treated as an exception alongside
-wait ordering.
+**Native calls are skipped for the `"url"`, `"kubernetes"` and `"disabled"` sources**, and the skip
+is logged at startup. None of the three has a local process this AppHost's own configuration should
+reach: a `"url"` service is already running elsewhere, a `"kubernetes"` service is a `kubectl
+port-forward` in front of something already running elsewhere, and a `"disabled"` service is not
+running at all, deliberately — so environment variables applied here would configure `kubectl`
+rather than the service, or configure nothing anyone will ever see. A `"url"`/`"kubernetes"`
+service is expected to be configured wherever it actually runs; a `"disabled"` one is expected to
+be switched back on first. This includes `WithHttpHealthCheck` — a `"kubernetes"` service's
+port-forward has a real local endpoint, but the call still dual-writes onto the `kubectl` process
+rather than the service behind it, so it's skipped the same as any other configuration call rather
+than treated as an exception alongside wait ordering.
 
 The one exception is **wait ordering on a `"kubernetes"` service**, which still applies:
 `WaitFor`/`WaitForCompletion` reach a real, registered `kubectl port-forward` executable, and
 holding *that* back until a migration finishes is exactly what the AppHost asked for. Only
-configuration that would land on the wrong process is dropped. A `"url"` service skips wait
-ordering too, since it has no registered resource for Aspire to hold back.
+configuration that would land on the wrong process is dropped. A `"url"` or `"disabled"` service
+skips wait ordering too, since neither has a registered resource for Aspire to hold back.
 
 That is this service waiting for something else. The other direction — something else waiting for
-*this* service, `consumer.WaitFor(service)` — is dropped for `"url"` and honoured for every other
-source, including `"kubernetes"`. That drop is reported in the same message as the service's
-skipped calls. See [the `"url"` source](#url-source).
+*this* service, `consumer.WaitFor(service)` — is dropped for `"url"` and `"disabled"` and honoured
+for every other source, including `"kubernetes"`. That drop is reported in the same message as the
+service's skipped calls. See [the `"url"` source](#url-source) and
+[the `"disabled"` source](#disabled-source).
 
 Skipping rather than failing is deliberate: a developer switching a service to a remote source in
 their own `servicesources.local.json` must not break a `Program.cs` they don't own. You'll see:
@@ -1853,7 +1897,7 @@ const payments = await builder
   .withReference(inventory);
 ```
 
-Out-of-band sources (`"url"`, `"kubernetes"`) are skipped and logged exactly as on the C# side,
+Out-of-band sources (`"url"`, `"kubernetes"`, `"disabled"`) are skipped and logged exactly as on the C# side,
 including the wait-ordering exception for `waitFor`/`waitForCompletion` against a `"kubernetes"`
 service. `Unwrap<T>()` itself has no TypeScript equivalent — it is a generic method, and Aspire's
 Type System erases a generic method's type parameter to its constraint, which here is exactly the
@@ -2265,6 +2309,7 @@ exposes is decided by whichever source resolved it:
 | `"local"`, `kind: java` | the configured `java.scheme`, `http` unless set |
 | `"url"` | the configured URL's scheme |
 | `"kubernetes"`, `"container"` | the configured `scheme`, `http` unless set |
+| `"disabled"` | *(none — no endpoint at all)* |
 
 So naming a scheme resolves only while the service happens to be on a source that produces it.
 Switch that service and the consumer breaks — and it breaks *late*: composition succeeds, and the
@@ -2420,8 +2465,8 @@ complete dump, type names, inner-exception blocks, stack traces and all.
 
 ## Status
 
-Early stage, evolving fast. `"local"`, `"kubernetes"`, `"url"`, and `"container"` sources are
-all implemented — see [`docs/superpowers/`](docs/superpowers/) for design and implementation
+Early stage, evolving fast. `"local"`, `"kubernetes"`, `"url"`, `"container"` and `"disabled"`
+sources are all implemented — see [`docs/superpowers/`](docs/superpowers/) for design and implementation
 history, including the phase 2 backlog (repo auto-update, config discovery walk-up,
 dependency/infrastructure resolution, and more).
 

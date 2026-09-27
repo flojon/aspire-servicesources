@@ -60,6 +60,30 @@ public class ServiceCatalogLoaderTests
     }
 
     [Fact]
+    public void Load_ServiceWithDisabledDefaultSource_SetsTheField()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+                defaultSource: disabled
+            """);
+
+        try
+        {
+            var (catalog, _) = ServiceCatalogLoader.Load(path);
+
+            Assert.Equal("disabled", catalog.Services["orders"].DefaultSource);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void Load_ServiceWithBlankDefaultSource_TreatedAsAbsent()
     {
         var path = Path.GetTempFileName();
@@ -84,7 +108,7 @@ public class ServiceCatalogLoaderTests
     }
 
     [Fact]
-    public void Load_ServiceWithInvalidDefaultSource_ThrowsNamingTheFourValues()
+    public void Load_ServiceWithInvalidDefaultSource_ThrowsNamingTheFiveValues()
     {
         var path = Path.GetTempFileName();
         File.WriteAllText(path, """
@@ -105,6 +129,7 @@ public class ServiceCatalogLoaderTests
             Assert.Contains("url", ex.Message, StringComparison.Ordinal);
             Assert.Contains("kubernetes", ex.Message, StringComparison.Ordinal);
             Assert.Contains("container", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("disabled", ex.Message, StringComparison.Ordinal);
         }
         finally
         {

@@ -16,6 +16,17 @@ never existed. Check the tag of the last release before adding one.
 
 ## [Unreleased]
 
+### Added
+
+- **A `"disabled"` source for `AddService`.** Turns a service off — `AddService("orders")` still
+  returns a valid resource builder, but nothing runs and nothing is reachable — without deleting
+  the `AddService` call or the catalog entry. Needs no catalog block: set
+  `"source": "disabled"` in `servicesources.local.json` for a service declared any other way.
+  Configuration calls (`WithEnvironment`, `WithReference`, endpoints, commands, …) are skipped and
+  logged exactly as they are for `"url"`/`"kubernetes"`, and a consumer's `WaitFor`/`WaitForCompletion`
+  on a disabled service resolves immediately instead of waiting, the same protection `"url"` has
+  against #170. See [the `"disabled"` source](README.md#disabled-source).
+
 ## [0.6.0] - 2026-09-24
 
 ### Breaking

@@ -23,7 +23,7 @@ internal sealed class DeveloperConfigShape
 {
     /// <summary>A service entry, keyed under <see cref="DeveloperConfiguration.ServicesKey"/>.</summary>
     public static DeveloperConfigShape Service { get; } =
-        Of<ServiceDeveloperConfig>("Service", "service", ["local", "url", "kubernetes", "container"]);
+        Of<ServiceDeveloperConfig>("Service", "service", ["local", "url", "kubernetes", "container", "disabled"]);
 
     /// <summary>
     /// A backing-service entry, keyed under <see cref="DeveloperConfiguration.BackingServicesKey"/>.
