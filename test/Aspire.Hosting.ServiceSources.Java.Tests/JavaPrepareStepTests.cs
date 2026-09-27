@@ -1,8 +1,10 @@
+using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Prepare;
 using Aspire.Hosting.ServiceSources.Sources;
+using Microsoft.Extensions.DependencyInjection;
 using static Aspire.Hosting.ServiceSources.Java.Tests.TestHelpers;
 using Xunit;
 
@@ -133,6 +135,51 @@ public class JavaPrepareStepTests
         Assert.True(File.Exists(Path.Combine(repoRoot, "graphhopper-web-11.0.jar")));
         Assert.True(Directory.Exists(Path.Combine(repoRoot, "data")));
     }
+
+    /// <summary>
+    /// #216: deferred is the default now, and the built-in java kind already supported it before
+    /// that flip — so a cold checkout with a prepare step, resolved with no call at all, has to run
+    /// the same bootstrap the eager path does, just moved past <c>BeforeStartEvent</c>.
+    /// </summary>
+    [Fact]
+    public async Task Deferred_AJavaServiceWhoseJarTheStepProduces_ResolvesAfterTheClone()
+    {
+        var dir = CreateAppHostDirectory();
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.UseJava();
+
+        var runner = new FakePrepareRunner("graphhopper-web-11.0.jar");
+
+        var service = new LocalProjectSource(new FakeGitClient(), runner)
+            .Resolve(builder, ServiceName, Definition(Prepare(), GraphHopperBlock), DevConfig());
+
+        // Registered stopped immediately: nothing has cloned or run yet.
+        Assert.Equal(0, runner.Runs);
+
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+
+        // Stands in for DCP, which publishes NotStarted when it withholds an explicit-start
+        // resource — the state each deferred task waits for before it touches the resource.
+        await PublishNotStartedAsync(services, service.Resource);
+
+        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Equal(1, runner.Runs);
+        Assert.Equal(ServiceName, service.Resource.Name);
+
+        var repoRoot = Path.Combine(dir, ".servicesources", "checkouts", ServiceName);
+        Assert.True(File.Exists(Path.Combine(repoRoot, "graphhopper-web-11.0.jar")));
+        Assert.True(Directory.Exists(Path.Combine(repoRoot, "data")));
+    }
+
+    private static Task PublishNotStartedAsync(IServiceProvider services, IResource resource) =>
+        services.GetRequiredService<ResourceNotificationService>()
+            .PublishUpdateAsync(resource, snapshot => snapshot with
+            {
+                State = new ResourceStateSnapshot(KnownResourceStates.NotStarted, null),
+            });
 
     /// <remarks>
     /// The step is what completes the checkout, and the marker is what stops it doing so twice. Both

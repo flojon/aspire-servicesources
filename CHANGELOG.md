@@ -35,6 +35,15 @@ never existed. Check the tag of the last release before adding one.
   since a deferred checkout has no launch profile for Aspire to read endpoints from while
   composing.
 
+  **`java` and `javascript` are affected too**, not only `dotnet`: both built-in kinds already
+  supported deferral, so a cold checkout of either now defers by default as well, with no endpoint
+  caveat (`java.port` and `javascript`'s allocated `http` endpoint are already fully known from the
+  catalog, not synthesised from a launch profile). One consequence worth calling out: a `prepare`
+  step's post-clone validation — and any `ServiceSourcesConfigurationException` the kind would have
+  thrown at composition on the eager path (a missing wrapper, a bad `workingDirectory`) — now
+  surfaces later, as that service's own resource state, rather than failing the AppHost synchronously
+  at `AddService()`.
+
 ## [0.6.0] - 2026-09-24
 
 ### Breaking
