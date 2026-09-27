@@ -291,26 +291,39 @@ permanent; the tag is the only record of what commit they were built from.
 
 Docs are built by [Read the Docs] from `mkdocs.yml`/`.readthedocs.yaml`, not by any GitHub
 Actions workflow. One-time setup, done once in the Read the Docs dashboard after importing
-this repository from GitHub:
+this repository from GitHub, project slug `aspire-servicesources` (hardcoded into the README
+badge, `mkdocs.yml`'s `site_url`, and the docs it links to — keep the slug in sync if it ever
+changes):
 
 1. **Import the project** at https://app.readthedocs.org/dashboard/, pointing at
    `flojon/aspire-servicesources`.
-2. **Default version:** Admin → Versions → set `main` as the default version, activated. This
-   is what `latest` resolves to.
-3. **Automation rule for tags:** Admin → Automation Rules → add a rule matching version type
-   "Tag", pattern `^v0\.(7|[89]|[1-9]\d+)\.` (regex — matches `v0.7.x` and later, never
-   `v0.1.x`–`v0.6.x`), action "Activate version", version scheme "Semantic Versioning". `v0.7.0`
-   is the first tag with `mkdocs.yml`/`.readthedocs.yaml` in its tree, so it's the first one
-   that can build at all — the pattern just makes that explicit instead of relying on the
-   older tags' builds failing silently. Widen the regex once a `v1.x` release ships.
-4. **Automation rule for stable:** a second rule, "Set version as STABLE", triggered on new
-   tags matching the same pattern — this keeps `stable` pointing at whichever tag is the
-   newest release, without a `stable` branch to maintain by hand.
+2. **Default branch and version:** Admin → Settings → set "Default branch" to `main` (this is
+   what `latest` tracks) and "Default version" to `latest` (switch it to `stable` once a release
+   exists, if you'd rather the root URL redirect there). Don't separately activate a `main`
+   version — the branch setting already covers it.
+3. **Automation rule for tags:** Admin → Automation Rules → add a rule: match type "Custom
+   match", regex `^v0\.(7|[89]|[1-9]\d+)\.`, version type "Tag", action "Activate version".
+   `v0.7.0` is the first tag with `mkdocs.yml`/`.readthedocs.yaml` in its tree, so it's the
+   first one that can build at all — the regex just makes that explicit and keeps
+   `v0.1.0`–`v0.6.0` from being activated (they can't build; those files don't exist in their
+   trees). Widen the regex once a `v1.x` release ships. The regex also matches a prerelease tag
+   like `v0.7.0-rc.1` — harmless today since this repo doesn't tag prereleases, but worth
+   knowing if that changes.
+4. **`stable` needs no rule of its own.** Read the Docs creates it automatically once at least
+   one tag is active, pointing it at the highest activated version by version comparison — not
+   at "the newest tag by date," so a late-tagged patch to an older minor won't wrongly become
+   `stable`.
 5. Confirm unwanted branches (feature branches, `claude/*` worktree branches) and the
    pre-`v0.7.0` tags are **not** separately activated — only `main` and `v0.7.0`+ tags should
    build.
 
-After this, every `git push origin vX.Y.Z` (the existing [release step](#4-tag-and-release))
+**Versions are named by their literal git tag** (`v0.7.0`, `v0.7.1`, `v0.8.0`, …) — Read the
+Docs has no built-in way to collapse patch releases into a minor-only version (`0.7`) or strip
+the `v` prefix without Mike, which this project deliberately doesn't use. If the patch-version
+noise becomes a problem, hiding superseded patch versions (Admin → Versions → Hide) is the
+lower-effort option before reconsidering Mike.
+
+After this, every `git push origin vX.Y.Z` (the existing [release step](#3-tag-and-release))
 picks up a new numbered version and moves `stable` automatically; nothing in the release
 process above needs to change.
 

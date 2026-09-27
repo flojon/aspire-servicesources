@@ -13,9 +13,8 @@ repository's branches and Git tags, using Read the Docs' standard version semant
 
 ```text
 latest → main / development
-stable → latest released version
-0.7    → release v0.7.0
-...
+stable → latest released version (Read the Docs sets this automatically once tags exist)
+v0.7.0, v0.7.1, v0.8.0, ... → one Read the Docs version per pushed release tag
 ```
 
 Do not introduce Mike or a GitHub Pages deployment.
@@ -30,20 +29,20 @@ rule (see below) should only pick up `v0.7.0` and later.
 ```text
 latest
 stable
-0.6
-0.5
-0.4
+v0.7.0
+v0.7.1
+v0.8.0
 ...
 ```
 
 - **`latest`** represents the current `main` branch. Development documentation; may contain
   unreleased changes.
-- **`stable`** represents the latest released version. Must come from a release tag, never
-  from `main`.
-- **Numbered versions** are built from the corresponding Git release tag, e.g. `v0.7.0` → `0.7`.
-  This repo's tags are pre-1.0, so the numbered stream is minor-only (`0.7`, `0.8`, …) rather
-  than `X.Y`; that matches how the project's own CHANGELOG groups entries. `v0.7.0` is the
-  first tag Read the Docs builds — see the note above.
+- **`stable`** represents the latest released version. Read the Docs sets this automatically
+  once at least one tag is active — it points at the highest version by semver comparison, not
+  necessarily the most recently tagged.
+- **Numbered versions are named by their literal git tag** (`v0.7.0`, `v0.7.1`, …) — Read the
+  Docs has no built-in mechanism to strip the `v` prefix or collapse patch releases into a
+  minor-only version without Mike, which this project deliberately excludes.
 
 ## Repository structure
 
@@ -78,7 +77,7 @@ already exist under `docs/`.
 
 Read the Docs injects its own version flyout (the "addons" flyout menu) into every page it
 hosts, regardless of static-site generator or theme — this is the mechanism that gives users
-the `latest` / `stable` / `0.6` / `0.5` picker, and it needs no Mike and no extra MkDocs
+the `latest` / `stable` / `v0.7.0` / `v0.7.1` picker, and it needs no Mike and no extra MkDocs
 plugin. Material for MkDocs' own built-in version dropdown requires a `mike`-produced
 `versions.json`; since Mike is explicitly excluded, that dropdown is not used, and Read the
 Docs' flyout is the version selector instead. `mkdocs.yml` documents this with a comment so a
@@ -100,8 +99,9 @@ future maintainer does not "fix" the missing dropdown by installing Mike.
 
 - Read the Docs' project-level **Automation Rules** (not representable in `.readthedocs.yaml`)
   drive activation: `main` → active, "Set as default version"; a rule matching semver tags
-  (`v*`) → active, versioned as the tag with the `v` prefix stripped; a rule using Read the
-  Docs' "latest release" semantics designates the newest matching tag as `stable`.
+  (`v*`) → active, versioned by its literal tag name (Read the Docs does not strip the `v`
+  prefix or collapse patches); `stable` is set automatically once at least one tag is active,
+  pointing at the highest version by semver comparison.
   These are one-time maintainer setup steps in the Read the Docs project dashboard (or via the
   Read the Docs API), documented in `RELEASING.md` rather than committed as code, since the
   project doesn't exist on Read the Docs until imported.

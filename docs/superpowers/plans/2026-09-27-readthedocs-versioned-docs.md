@@ -26,11 +26,13 @@ site instead of duplicating content into `docs/index.md`.
   already exist under `docs/` (excluding `docs/superpowers/`, which is internal design
   history, not user-facing reference).
 - `latest` must track `main`; `stable` must come from a release tag, never from `main`.
-- Repo tags are `vMAJOR.MINOR.PATCH` (MinVer, prefix `v` — see `RELEASING.md`) and the project
-  is pre-1.0, so numbered doc versions are minor-only: `0.7`, `0.8`, … (strip the `v` and the
-  patch component). **`v0.7.0` is the first tag Read the Docs builds** — `v0.1.0`…`v0.6.0`
-  predate `mkdocs.yml`/`.readthedocs.yaml`, so those files don't exist in those tags' trees and
-  Read the Docs cannot build them; do not backfill them as numbered versions.
+- Repo tags are `vMAJOR.MINOR.PATCH` (MinVer, prefix `v` — see `RELEASING.md`). Read the Docs
+  names a version after its literal git tag (`v0.7.0`, `v0.7.1`, `v0.8.0`, …, one version per
+  pushed tag) — it has no built-in mechanism to strip the `v` prefix or collapse patches into a
+  minor-only version without Mike, which this project deliberately excludes. **`v0.7.0` is the
+  first tag Read the Docs builds** — `v0.1.0`…`v0.6.0` predate `mkdocs.yml`/`.readthedocs.yaml`,
+  so those files don't exist in those tags' trees and Read the Docs cannot build them; do not
+  backfill them as numbered versions.
 - Python 3.12 + pip are now installed on this machine (`winget install Python.Python.3.12`,
   confirmed working: `pip 25.0.1`/upgraded to `26.2.1`). The install added the interpreter to
   the user's `PATH` in the registry, but a shell process started before the install (this one)
