@@ -898,6 +898,11 @@ public class CheckoutPreparationTests
         Assert.Equal(
             [fixture.RepoRoot, elsewhere.RepoRoot],
             fixture.Runner.Runs.Select(run => run.WorkingDirectory));
+
+        // The reason names the directory move without naming 'local.path': a 'path'-sourced service
+        // reaches this same marker logic through a catalog path: or a path.path override.
+        Assert.Contains(fixture.Sink.Lines, line => line.Contains("resolves to a different directory", StringComparison.Ordinal));
+        Assert.DoesNotContain(fixture.Sink.Lines, line => line.Contains("local.path", StringComparison.Ordinal));
     }
 
     /// <remarks>

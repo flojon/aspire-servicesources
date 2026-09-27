@@ -689,19 +689,27 @@ was looked for under — there is nothing to clone, so a missing directory is th
 `"path"` service can fail on before its kind is even consulted.
 
 **No `ref`.** A directory that is not a separate checkout has no second commit for a ref to name:
-there's no `path.ref`, and setting `local.ref` on a `"path"`-sourced service is refused, naming
-the service.
+there's no `path.ref`. A `local.ref` is not read — `local` is the `"repository"` source's block, and
+like any block for a source that isn't selected it survives but nothing reads it, so one left in a
+lower configuration layer doesn't stop a higher layer switching the service to `"path"`.
 
-**`prepare` accepts `once`, `always` and `never` — never `oncePerCommit`, not even as the
-unwritten default.** There's no separate commit for this directory to move to on its own, so a
-`prepare:` block on a `"path"` service has to name `once` or `always` explicitly; leaving `mode`
-out is the same refusal an explicit `oncePerCommit` gets. Unlike a `local.path` override — whose
-catalog `prepare:` block is ignored, with a startup notice asking you to declare your own (see the
-`"repository"` source's `prepare` section above) — a catalog-declared `path:`'s own `prepare:`
-block runs normally: there's no "someone else's directory" here to protect. Two services sharing
-one resolved `path` serialize their step rather than run it concurrently. The marker lives where a
-`local.path` override's does, `<AppHostDirectory>/.servicesources/prepare/<service>.json`, keyed on
-the resolved path and the command.
+**`prepare` accepts `once`, `always` and `never` — never `oncePerCommit`.** There's no separate
+commit for this directory to move to on its own, so a `mode` left out means `once` here (re-run only
+when the command changes) rather than the `oncePerCommit` it means for `"repository"` — a catalog
+`prepare:` with no `mode`, the common shape, works for both sources on the same entry. A *written*
+`oncePerCommit` is refused, naming the block it was written in; if that's the catalog's (right for
+`"repository"`), set `path.prepare.mode` to `once` or `always` for this service in
+`servicesources.local.json`. Unlike a `local.path` override — whose catalog `prepare:` block is
+ignored, with a startup notice asking you to declare your own (see the `"repository"` source's
+`prepare` section above) — a catalog-declared `path:`'s own `prepare:` block runs normally: there's
+no "someone else's directory" here to protect. Two services sharing one resolved `path` serialize
+their step rather than run it concurrently. The marker lives where a `local.path` override's does,
+`<AppHostDirectory>/.servicesources/prepare/<service>.json`, keyed on the resolved path and the
+command.
+
+A service grouped into a `repositories:` entry doesn't inherit that repository's `prepare:` under
+`"path"`: the group's step is written to run once at the root of its shared checkout, not in one
+member's directory once per member. Only a `path.prepare` block the developer declares runs there.
 
 **`defaultSource: path` is close to free.** Unlike `defaultSource: repository`'s warning above —
 about the clone every developer and CI trigger by default — a `"path"` service with nothing in
@@ -723,8 +731,10 @@ launch-profile fidelity — there's no clone to defer, so no "Preparing" state e
 twice; a `"path"` service has nothing to clone, so there's no shared-checkout identity to opt into.
 Two services naming the same resolved `path` are just two entries pointing at one directory.
 
-**`local.path` is deprecated.** It's the identical mechanism — no clone, no ref — reachable a
-second, less discoverable way, nested under a source whose other machinery it never touches. It
-keeps working exactly as it does today, but sets `source: "path"` and `path:` instead, as a
-first-class source rather than a hidden mode of `"repository"`, and a startup notice says so once.
+**`local.path` is deprecated.** It resolves a directory the same way — no clone, no ref — reachable
+a second, less discoverable way, nested under a source whose other machinery it never touches. It
+keeps working exactly as it does today, and a startup notice says once to use
+`"source": "path"` with `"path": { "path": "..." }` instead. Two things differ, and the notice
+names each where it applies: `local.prepare` isn't read under `"path"` (move it to `path.prepare`),
+and the catalog's own `prepare:` step, which `local.path` ignores, runs there.
 

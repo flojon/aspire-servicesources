@@ -15,6 +15,13 @@ namespace Aspire.Hosting.ServiceSources.Tests.Prepare;
 [Trait("IO", "true")]
 public class PrepareEagerPathTests
 {
+    /// <summary>
+    /// Every <c>local.path</c> service now also gets the deprecation notice, which names
+    /// <c>prepare</c> where the service has one — these tests are about the prepare notices, not it.
+    /// </summary>
+    private static bool IsLocalPathDeprecation(string message) =>
+        message.Contains("'local.path' is deprecated", StringComparison.Ordinal);
+
     private const string KindName = "stand-in";
 
     /// <summary>
@@ -314,7 +321,7 @@ public class PrepareEagerPathTests
 
         var notices = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 
-        var notice = Assert.Single(notices, message => message.Contains("prepare"));
+        var notice = Assert.Single(notices, message => message.Contains("prepare") && !IsLocalPathDeprecation(message));
         Assert.Contains("'routing'", notice);
         Assert.Contains("\"./prepare.sh\", \"--full\"", notice);
     }
@@ -335,7 +342,7 @@ public class PrepareEagerPathTests
         Assert.Equal(checkout, Assert.Single(runner.RanIn));
 
         var notices = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
-        Assert.DoesNotContain(notices, message => message.Contains("prepare"));
+        Assert.DoesNotContain(notices, message => message.Contains("prepare") && !IsLocalPathDeprecation(message));
     }
 
     /// <remarks>
@@ -358,7 +365,7 @@ public class PrepareEagerPathTests
         Assert.Empty(runner.RanIn);
 
         var notices = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
-        Assert.DoesNotContain(notices, message => message.Contains("prepare"));
+        Assert.DoesNotContain(notices, message => message.Contains("prepare") && !IsLocalPathDeprecation(message));
     }
 
     /// <remarks>

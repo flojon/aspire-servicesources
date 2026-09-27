@@ -920,10 +920,61 @@ public class AddServiceTests
 
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 
-        Assert.Single(warnings, w =>
+        var notice = Assert.Single(warnings, w =>
             w.Contains("'local.path' is deprecated", StringComparison.Ordinal)
             && w.Contains("Service 'orders'", StringComparison.Ordinal)
             && w.Contains("'source': 'path'", StringComparison.Ordinal));
+
+        // 'path' is a block, so the remedy has to name path.path — a bare 'path': '...' would be
+        // refused by the config validator.
+        Assert.Contains("'path': { 'path': '", notice, StringComparison.Ordinal);
+
+        // Neither caveat applies: no local.prepare to move, and no catalog prepare that would start
+        // running under the 'path' source.
+        Assert.DoesNotContain("local.prepare", notice, StringComparison.Ordinal);
+        Assert.DoesNotContain("the catalog's 'prepare' step", notice, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The notice says what does not carry over to the 'path' source, where it applies: a
+    /// local.prepare block is not read there, and the catalog's prepare step — ignored under
+    /// local.path — runs.
+    /// </summary>
+    [Fact]
+    public async Task AddService_LocalPathOverrideWithPrepareBlocks_DeprecationNoticeNamesWhatDoesNotCarryOver()
+    {
+        var projectDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(projectDir, "Orders.csproj"), """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+              </PropertyGroup>
+            </Project>
+            """);
+
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+                prepare:
+                  command: ["./bootstrap.sh"]
+            """);
+        var escapedProjectDir = projectDir.Replace("\\", "\\\\");
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), $$"""
+            { "services": { "orders": { "source": "repository", "local": { "path": "{{escapedProjectDir}}", "prepare": { "mode": "never" } } } } }
+            """);
+
+        var builder = TestHelpers.CreateBuilderThatCanStart(appHostDir);
+
+        builder.AddService("orders");
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        var notice = Assert.Single(warnings, w => w.Contains("'local.path' is deprecated", StringComparison.Ordinal));
+        Assert.Contains("Move this service's 'local.prepare' block to 'path.prepare'", notice, StringComparison.Ordinal);
+        Assert.Contains("the catalog's 'prepare' step", notice, StringComparison.Ordinal);
     }
 
     /// <summary>

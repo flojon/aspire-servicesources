@@ -31,6 +31,12 @@ never existed. Check the tag of the last release before adding one.
   set), and `defaultSource: local`/`.WithDefaultSource("local")` to `"repository"` in the catalog,
   to migrate. `local.path`/`local.ref` — the developer's per-service override block nested under
   `source` — keep their name unchanged; only the `source` value itself renames.
+- **`path` is now a reserved `kind` name in `servicesources.yaml`.** The new `path:` catalog field
+  (see **Added**) makes `path` a well-known top-level property of a service entry, so a yaml service
+  declaring `kind: path` — a custom kind registered under that name — is now refused with "kind
+  'path' collides with a well-known property", the same rule `kind: repository` or `kind: url`
+  already hit: its options block would otherwise be read as the new field. Register the kind under
+  another name. A kind used only through `WithKind("path", …)` in code is unaffected.
 
 ### Added
 
@@ -59,9 +65,9 @@ never existed. Check the tag of the last release before adding one.
   catalog-declared `path:` is confined to inside the AppHost directory, the same rule `project:`
   follows; a developer's own override (`path.path` in `servicesources.local.json`) is unconfined,
   exactly like `local.path` today. `prepare` accepts `once`/`always`/`never` — never
-  `oncePerCommit`, since there's no separate commit for the directory to move to on its own — and,
-  unlike a `local.path` override, a catalog-declared `path:`'s own `prepare:` block runs normally
-  rather than being ignored. See [the `"path"` source](docs/local-source.md#path-source) for the
+  `oncePerCommit`, since there's no separate commit for the directory to move to on its own, so an
+  unwritten `mode` means `once` there — and, unlike a `local.path` override, a catalog-declared
+  `path:`'s own `prepare:` block runs normally rather than being ignored. See [the `"path"` source](docs/local-source.md#path-source) for the
   full behavior, including `defaultSource: path` and its (lack of) interaction with
   `UseDeferredCheckout()` and `repositories:` grouping.
 - **A `"disabled"` source for `AddService`.** Turns a service off — `AddService("orders")` still
@@ -75,17 +81,22 @@ never existed. Check the tag of the last release before adding one.
 
 ### Deprecated
 
-- **`local.path` is deprecated in favor of the new `"path"` source.** Same behavior — no clone, no
-  ref — but now a first-class source (`source: "path"`, `path: "..."`) rather than a hidden mode of
-  `"repository"`. `local.path` keeps working exactly as it does today; there is no removal planned.
-  A developer using it now gets a one-time startup notice naming the replacement:
+- **`local.path` is deprecated in favor of the new `"path"` source.** The `"path"` source resolves a
+  directory the same way — no clone, no ref — as a first-class source
+  (`"source": "path"`, `"path": { "path": "..." }`) rather than a hidden mode of `"repository"`.
+  `local.path` keeps working exactly as it does today; there is no removal planned. A developer
+  using it now gets a one-time startup notice naming the replacement:
 
   ```
   warn: Aspire.Hosting.ServiceSources
-        Service 'orders': 'local.path' is deprecated. Set 'source': 'path' and 'path':
-        '../services/orders' instead — same behavior (no clone, no ref), as a first-class source
-        rather than a hidden mode of 'repository'.
+        Service 'orders': 'local.path' is deprecated. Use the 'path' source instead — set
+        'source': 'path' and 'path': { 'path': '../services/orders' }, which also resolves the
+        directory with no clone and no ref.
   ```
+
+  Two things don't carry over, and the notice names each where it applies: a `local.prepare` block
+  isn't read under `"path"` (move it to `path.prepare`), and the catalog's own `prepare` step —
+  ignored under `local.path` — runs there (declare `path.prepare` with `mode: never` to keep it off).
 
 ## [0.6.0] - 2026-09-24
 

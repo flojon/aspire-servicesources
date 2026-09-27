@@ -295,12 +295,14 @@ picks `source: "repository"` to clone it, another picks `source: "path"` to use 
 have. The single top-level `project:`/`WithProject` field still applies to both: the project's path
 relative to the service's root is the same code either way, only how that root was reached differs.
 
-Two small, free consequences of adding `path:` as a plain property on `ServiceMetadata`, worth
-recording so they don't look like oversights later:
+Two consequences of adding `path:` as a plain property on `ServiceMetadata`, worth recording so
+they don't look like oversights later:
 - **`"path"` becomes a reserved kind name automatically.** `IsReservedKindName` derives its set from
   `ServiceMetadata`'s own properties by reflection (`Config/ServiceCatalogLoader.cs:17,39`), so a
   yaml `kind: path` collides with the new top-level field the same way `kind: repository`/`kind: url`
-  already collide with theirs — no separate registration needed, and nothing to remember to add.
+  already collide with theirs — no separate registration needed. *Revised after review:* this is a
+  breaking change for a yaml catalog that already used a custom kind named `path`, and is recorded
+  as one in the CHANGELOG.
 - **The "no source configured" error needs `path` added to its list of remedies.**
   `ServiceCatalogLoader.cs:288-299` currently reads "Expected a non-empty 'repository', a
   'repositoryRef', or a 'url'/'container'/'kubernetes' block" for a service with nothing resolvable
@@ -347,19 +349,29 @@ confined) next to `local.path` (developer, unconfined) is the same pattern alrea
 
 ### `ref` is not offered
 
-No `path.ref`, no `defaultRef` equivalent (F3). A developer's `servicesources.local.json` setting a
-ref on a `"path"` service is a configuration error naming the service, the same shape as the existing
-"grouped service, `local.ref` cannot be set" check (`Git/LocalGitCheckout.cs:308-312`) reuses for a
-different reason.
+No `path.ref`, no `defaultRef` equivalent (F3). *Revised after review:* an earlier draft made a
+`local.ref` on a `"path"` service an error. It is ignored instead — `local` is the `"repository"`
+source's block, and a block for a source that isn't selected survives but nothing reads it. Rejecting
+it would let a `local.ref` in a lower configuration layer break a higher layer that switches the
+service to `"path"`, which no other source switch does.
 
 ### `prepare`: `once`/`always`/`never` only, no `oncePerCommit`
 
 F4 rules out the default mode. `WithPrepare`/`prepare:` on a `path`-sourced service accepts
-`PrepareMode.Once`, `.Always`, `.Never` and rejects `.OncePerCommit` (yaml: `"oncePerCommit"`):
+`PrepareMode.Once`, `.Always`, `.Never` and rejects a *written* `.OncePerCommit` (yaml:
+`"oncePerCommit"`), naming the block it was written in:
 
-> Service 'orders': prepare.mode 'oncePerCommit' does not apply to a 'path' service — there is no
-> separate commit for this directory to move to on its own. Use 'once' (re-run only when the command
-> itself changes) or 'always' (an incremental script that decides its own work) instead.
+> Service 'orders': path.prepare.mode 'oncePerCommit' does not apply to a 'path' service — there is
+> no separate commit for this directory to move to on its own. Use 'once' (re-run only when the
+> command itself changes) or 'always' (an incremental script that decides its own work) instead.
+
+*Revised after review:* an *unwritten* mode means `once` for a `path` service rather than being
+refused. A catalog `prepare:` with no `mode` is the common shape and correct for the `"repository"`
+source the same entry may serve; refusing the default made the `"path"` source unusable on such an
+entry for a mode nobody wrote. A written catalog `oncePerCommit` is still refused, and that message
+offers `path.prepare.mode` as the developer's own override alongside changing the catalog. A grouped
+service does not inherit its shared repository's `prepare` under `"path"`: that step belongs at the
+root of the group's checkout, not in one member's directory once per member.
 
 The marker reuses the existing `local.path` home (F2): `<AppHostDirectory>/.servicesources/prepare/
 <service>.json`, keyed on the resolved path and the command. Unlike a developer's personal

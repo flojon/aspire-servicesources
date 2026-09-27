@@ -283,7 +283,8 @@ public class LocalProjectSourceTests
         Assert.Contains("Repository 'monorepo'", ex.Message);
         Assert.Contains("ServiceSources:Repositories:monorepo:path", ex.Message);
         Assert.Contains("reserved", ex.Message);
-        Assert.Contains("local.path", ex.Message);
+        Assert.Contains("'path' source", ex.Message);
+        Assert.DoesNotContain("local.path", ex.Message);
     }
 
     /// <summary>
@@ -1822,9 +1823,11 @@ public class LocalProjectSourceTests
         Assert.DoesNotContain("'container'", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("'kubernetes'", ex.Message, StringComparison.Ordinal);
 
-        // The one remedy that depends on nothing outside this guard: the exemption it checks itself.
+        // The one remedy that depends on nothing outside this guard: a directory the developer
+        // already has, through the 'path' source rather than the deprecated local.path exemption.
         Assert.Contains(
-            $"ServiceSources:Services:{ServiceName}:local:path", ex.Message, StringComparison.Ordinal);
+            $"ServiceSources:Services:{ServiceName}:path:path", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("local:path", ex.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -1879,7 +1882,7 @@ public class LocalProjectSourceTests
                 PlainBuilder(), ServiceName, RepositorylessDefinition(), DevConfig()));
 
         Assert.Contains($"ServiceSources:Services:{ServiceName}:source", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("which any configuration layer can set", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("can be set from any configuration layer", ex.Message, StringComparison.Ordinal);
         Assert.Contains("appsettings", ex.Message, StringComparison.Ordinal);
         Assert.Contains("user secrets", ex.Message, StringComparison.Ordinal);
         Assert.Contains("the command line", ex.Message, StringComparison.Ordinal);

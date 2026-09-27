@@ -207,8 +207,8 @@ internal static class CheckoutPreparation
         var markerPath = PrepareMarker.LocationFor(serviceName, repoRoot, appHostDirectory, managedCheckout);
 
         // The path a `path` marker is keyed on as well as the command and the commit: it is the one
-        // marker that does not live with the directory it describes, so re-pointing `local.path`
-        // elsewhere has to invalidate it, and two services sharing one directory have to keep
+        // marker that does not live with the directory it describes, so re-pointing `local.path` or
+        // a `path` service's directory elsewhere has to invalidate it, and two services sharing one directory have to keep
         // independent markers.
         var checkoutPath = managedCheckout ? null : PrepareMarker.NormalizeCheckoutPath(repoRoot);
 
@@ -264,7 +264,7 @@ internal static class CheckoutPreparation
 
         if (checkoutPath is not null && !string.Equals(marker.Path, checkoutPath, StringComparison.Ordinal))
         {
-            return Raw.Literal("its 'local.path' now points at a different checkout than the one it last prepared.");
+            return Raw.Literal("it now resolves to a different directory than the one it last prepared.");
         }
 
         return commit is null

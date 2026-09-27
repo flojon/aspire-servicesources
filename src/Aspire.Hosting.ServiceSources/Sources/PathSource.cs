@@ -42,8 +42,6 @@ internal sealed class PathSource(IGitClient? gitClient = null, IPrepareCommandRu
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
         ServiceDeveloperConfig config, RepositoryDeveloperConfig? repositoryConfig = null)
     {
-        RejectRefOnPathService(serviceName, config);
-
         var isDotnetKind = string.Equals(definition.Kind, LocalKinds.Dotnet, StringComparison.Ordinal);
 
         // Settled ahead of any filesystem work, exactly as LocalProjectSource settles it ahead of a
@@ -73,52 +71,22 @@ internal sealed class PathSource(IGitClient? gitClient = null, IPrepareCommandRu
     }
 
     /// <summary>
-    /// No <c>ref</c> concept exists for a <c>"path"</c> service (design "<c>ref</c> is not offered" —
-    /// finding 3): a directory that is not a separate checkout has no second commit for a ref to
-    /// name. The only field a developer could still have set that would mean one is
-    /// <c>local.ref</c>, most plausibly left over from an earlier <c>"repository"</c> configuration —
-    /// <see cref="ServiceDeveloperConfig.Local"/> is always bound regardless of the effective source
-    /// (see its own remarks), so nothing stops a developer from writing it. This is the same shape of
-    /// mistake <see cref="LocalGitCheckout.PrepareRepoRoot"/> refuses for a grouped service's
-    /// <c>local.ref</c>, applied here for a different reason.
-    /// </summary>
-    private static void RejectRefOnPathService(string serviceName, ServiceDeveloperConfig config)
-    {
-        if (config.Local.Ref is null)
-        {
-            return;
-        }
-
-        throw ServiceSourcesConfigurationException.For(
-            $"Service '{new Name(serviceName)}': 'local.ref' cannot be set — this service's source is 'path', which "
-            + $"names a directory that is already checked out beside the AppHost, with no separate commit for a "
-            + $"ref to move it onto. Remove 'local.ref', or give this developer a 'repository' source instead if "
-            + $"they need to select a ref.");
-    }
-
-    /// <summary>
     /// The directory this service resolves to: a developer's own override if they set one — unconfined,
     /// exactly like <c>local.path</c> today — or the catalog's own <c>path:</c>, confined to inside the
     /// AppHost directory.
     /// </summary>
+    /// <remarks>
+    /// There is no <c>ref</c> for a <c>"path"</c> service (design finding 3), and a leftover
+    /// <c>local.ref</c> is not read at all: <c>local</c> is the <c>"repository"</c> source's block, and a
+    /// block for a source that is not selected survives but nothing reads it — a lower layer's
+    /// <c>local.ref</c> must not break a higher layer that switches this service to <c>"path"</c>.
+    /// </remarks>
     private static string ResolveRepoRoot(
         string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config, string appHostDirectory)
     {
         if (config.Path.Path is { } overridePath)
         {
-            // Anchored to the AppHost directory, not the process's current working directory —
-            // matching local.path's own behavior. Path.GetFullPath is a no-op when overridePath is
-            // already absolute.
-            var overridden = Path.GetFullPath(overridePath, appHostDirectory);
-
-            if (!Directory.Exists(overridden))
-            {
-                throw ServiceSourcesConfigurationException.For(
-                    $"Service '{new Name(serviceName)}': the 'path.path' override points at '{Raw.Escaped(overridden)}', "
-                    + $"which does not exist. 'path.path' must name an existing local directory.");
-            }
-
-            return overridden;
+            return LocalGitCheckout.ResolveDeveloperDirectory(serviceName, "path.path", overridePath, appHostDirectory);
         }
 
         RequireCatalogPath(serviceName, definition);
@@ -173,43 +141,49 @@ internal sealed class PathSource(IGitClient? gitClient = null, IPrepareCommandRu
     /// </summary>
     private static void ValidateCatalogPath(string serviceName, string path)
     {
-        if (CheckoutRelativePath.IsAbsolute(path))
+        switch (CheckoutRelativePath.FirstBreach(path))
         {
-            throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': path '{Raw.Escaped(path)}' is an absolute path. A catalog-declared "
-                + $"'path' has to be relative to the AppHost directory — it names a directory the repository "
-                + $"commits, not one sitting elsewhere on a developer's machine. To point at a directory outside "
-                + $"the repository, use a developer override instead: 'path.path' in servicesources.local.json.");
-        }
+            case { Kind: ConfinementBreachKind.Absolute }:
+                throw ServiceSourcesConfigurationException.For(
+                    $"Service '{new Name(serviceName)}': path '{Raw.Escaped(path)}' is an absolute path. A catalog-declared "
+                    + $"'path' has to be relative to the AppHost directory — it names a directory the repository "
+                    + $"commits, not one sitting elsewhere on a developer's machine. To point at a directory outside "
+                    + $"the repository, use a developer override instead: 'path.path' in servicesources.local.json.");
 
-        if (CheckoutRelativePath.UnusableSegment(path) is { } unusable)
-        {
-            throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': path '{Raw.Escaped(path)}' has a path segment '{new Name(unusable)}' — "
-                + $"{CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy}");
-        }
+            case { Kind: ConfinementBreachKind.UnusableSegment, Segment: var unusable }:
+                throw ServiceSourcesConfigurationException.For(
+                    $"Service '{new Name(serviceName)}': path '{Raw.Escaped(path)}' has a path segment '{new Name(unusable)}' — "
+                    + $"{CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy}");
 
-        if (CheckoutRelativePath.EscapesRoot(path))
-        {
-            throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': path '{Raw.Escaped(path)}' points outside the AppHost directory. "
-                + $"It must stay within the repository.");
+            case { Kind: ConfinementBreachKind.EscapesRoot }:
+                throw ServiceSourcesConfigurationException.For(
+                    $"Service '{new Name(serviceName)}': path '{Raw.Escaped(path)}' points outside the AppHost directory. "
+                    + $"It must stay within the repository.");
         }
     }
 
     /// <summary>
     /// Runs this service's <c>prepare</c> step if one is due — the catalog's own block, merged with
-    /// the developer's <c>path.prepare</c> per field, rejecting <c>oncePerCommit</c> (design "prepare:
-    /// once/always/never only"). Two services sharing one resolved <paramref name="repoRoot"/>
-    /// serialize under <see cref="CheckoutNameLock"/>, keyed on the normalized absolute path, the same
-    /// discipline a managed checkout gets from <see cref="LocalProjectSource"/>.
+    /// the developer's <c>path.prepare</c> per field (design "prepare: once/always/never only"). Two
+    /// services sharing one resolved <paramref name="repoRoot"/> serialize under
+    /// <see cref="CheckoutNameLock"/>, keyed on the normalized absolute path, the same discipline a
+    /// managed checkout gets from <see cref="LocalProjectSource"/>.
     /// </summary>
+    /// <remarks>
+    /// Only an ungrouped service's own block is inherited. A grouped service's
+    /// <c>definition.Repository.Prepare</c> is the shared repository's step, written to run once at
+    /// the root of the group's shared checkout — not in one member's directory, once per member, which
+    /// is all a <c>"path"</c> service could offer it. So a grouped <c>"path"</c> service inherits
+    /// nothing, and runs only a <c>path.prepare</c> step its developer declares.
+    /// </remarks>
     private void RunPrepareIfDue(
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
         ServiceDeveloperConfig config, string repoRoot)
     {
+        var catalogPrepare = LocalGitCheckout.IsGrouped(definition, serviceName) ? null : definition.Repository.Prepare;
+
         var plan = PreparePlan.ForCatalogPath(
-            serviceName, definition.Repository.Prepare, config.Path.Prepare, OperatingSystem.IsWindows());
+            serviceName, catalogPrepare, config.Path.Prepare, OperatingSystem.IsWindows());
 
         if (plan.Step is not { } step)
         {

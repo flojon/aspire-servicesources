@@ -63,7 +63,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
             // is deprecated, not removed yet") — a soft deprecation, not a break: the mechanism keeps
             // working exactly as it does today, and only a one-time notice is owed. AddNotice dedupes
             // identical text, so a service resolved more than once in a run reports this only once.
-            ServiceSourcesWarnings.For(builder).AddNotice(LocalPathDeprecationNotice(serviceName, config.Local.Path!));
+            ServiceSourcesWarnings.For(builder).AddNotice(LocalPathDeprecationNotice(serviceName, definition, config));
         }
 
         // Whether this service is on its own repository or sharing one with others — the same test
@@ -249,13 +249,40 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
 
     /// <summary>
     /// The design "<c>local.path</c> is deprecated, not removed yet" notice — 'local.path' keeps
-    /// resolving exactly as it does today (no clone, no ref), but a first-class <c>"path"</c> source
-    /// now exists for the same behavior, discoverable rather than hidden inside <c>"repository"</c>.
+    /// resolving exactly as it does today, but the first-class <c>"path"</c> source now does the same
+    /// job (no clone, no ref), discoverable rather than hidden inside <c>"repository"</c>.
     /// </summary>
-    private static Raw LocalPathDeprecationNotice(string serviceName, string path) =>
-        Raw.Compose($"Service '{new Name(serviceName)}': 'local.path' is deprecated. Set 'source': 'path' and "
-            + $"'path': '{Raw.Escaped(path)}' instead — same behavior (no clone, no ref), as a first-class "
-            + $"source rather than a hidden mode of 'repository'.");
+    /// <remarks>
+    /// The remedy names <c>path.path</c> — <c>path</c> is a block, so a bare <c>'path': '...'</c> would
+    /// be refused by the config validator. It also says what does <em>not</em> carry over, only where
+    /// it applies to this service: a <c>local.prepare</c> block is not read under <c>"path"</c>, and the
+    /// catalog's own <c>prepare</c> step, which <c>local.path</c> ignores, does run there.
+    /// </remarks>
+    private static Raw LocalPathDeprecationNotice(
+        string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
+    {
+        var notice = Raw.Compose($"Service '{new Name(serviceName)}': 'local.path' is deprecated. Use the 'path' source "
+            + $"instead — set 'source': 'path' and 'path': {{ 'path': '{Raw.Escaped(config.Local.Path!)}' }}, which "
+            + $"also resolves the directory with no clone and no ref.");
+
+        if (config.Local.Prepare?.IsDeclared == true)
+        {
+            notice = Raw.Compose($"{notice} Move this service's 'local.prepare' block to 'path.prepare': it is not read "
+                + $"under the 'path' source.");
+        }
+
+        if (!LocalGitCheckout.IsGrouped(definition, serviceName)
+            && definition.Repository.Prepare is { } catalogPrepare
+            && (catalogPrepare.Command is not null || catalogPrepare.WindowsCommand is not null)
+            && !string.Equals(catalogPrepare.Mode, "never", StringComparison.OrdinalIgnoreCase))
+        {
+            notice = Raw.Compose($"{notice} One difference: the catalog's 'prepare' step, which 'local.path' ignores, "
+                + $"runs in that directory under the 'path' source — declare 'path.prepare' with mode 'never' to keep "
+                + $"it off.");
+        }
+
+        return notice;
+    }
 
     /// <summary>
     /// Refuses a <c>"repository"</c> service whose catalog entry declares no repository to clone.
@@ -267,8 +294,9 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// The message offers only remedies this guard itself can verify. Switching to <c>url</c>,
     /// <c>container</c> or <c>kubernetes</c> works only if that source's own preconditions hold —
     /// none of which is readable from here — so it is not offered; a declared block is not proof
-    /// those preconditions hold either. The only remedies offered are declaring a repository and the
-    /// <c>local.path</c> exemption above, and the configuration key is named in every layer that can
+    /// those preconditions hold either. The remedies offered are declaring a repository and the
+    /// <c>"path"</c> source with a <c>path.path</c> override — the non-deprecated form of the
+    /// <c>local.path</c> exemption above — and the configuration key is named in every layer that can
     /// set it.
     /// </para>
     /// </remarks>
@@ -285,11 +313,12 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
 
         throw ServiceSourcesConfigurationException.For(
             $"Service '{new Name(serviceName)}' source is 'repository' but {Raw.Origin(definition.Origin)} gives it no "
-            + $"repository to clone. Either {DeclareRepositoryRemedy(serviceName, definition)}, or set "
-            + $"'{serviceKey}:local:path' to a checkout you already have on disk, which needs no "
-            + $"repository. The key is '{serviceKey}:source', which any configuration layer can set: "
-            + $"{Raw.Literal(DeveloperConfiguration.FileName)}, appsettings, user secrets, the environment variable "
-            + $"{Raw.Escaped(DeveloperConfiguration.EnvironmentVariableFor(serviceName))}, or the command line.");
+            + $"repository to clone. Either {DeclareRepositoryRemedy(serviceName, definition)}, or switch it to the "
+            + $"'path' source — set '{serviceKey}:source' to 'path' and '{serviceKey}:path:path' to a checkout you "
+            + $"already have on disk, which needs no repository. '{serviceKey}:source' can be set from any "
+            + $"configuration layer: {Raw.Literal(DeveloperConfiguration.FileName)}, appsettings, user secrets, the "
+            + $"environment variable {Raw.Escaped(DeveloperConfiguration.EnvironmentVariableFor(serviceName))}, or "
+            + $"the command line.");
     }
 
     /// <summary>
@@ -580,26 +609,23 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
                 + $"'servicesources.local.json' chooses the source and carries no 'project'.");
         }
 
-        if (CheckoutRelativePath.IsAbsolute(project))
+        switch (CheckoutRelativePath.FirstBreach(project))
         {
-            throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': project '{Raw.Escaped(project)}' is an absolute path. 'project' has to be a path "
-                + $"relative to the service's checkout — it names a project the repository commits, not one "
-                + $"sitting elsewhere on a developer's machine.");
-        }
+            case { Kind: ConfinementBreachKind.Absolute }:
+                throw ServiceSourcesConfigurationException.For(
+                    $"Service '{new Name(serviceName)}': project '{Raw.Escaped(project)}' is an absolute path. 'project' has to be a path "
+                    + $"relative to the service's checkout — it names a project the repository commits, not one "
+                    + $"sitting elsewhere on a developer's machine.");
 
-        if (CheckoutRelativePath.UnusableSegment(project) is { } unusable)
-        {
-            throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': project '{Raw.Escaped(project)}' has a path segment '{new Name(unusable)}' — "
-                + $"{CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy}");
-        }
+            case { Kind: ConfinementBreachKind.UnusableSegment, Segment: var unusable }:
+                throw ServiceSourcesConfigurationException.For(
+                    $"Service '{new Name(serviceName)}': project '{Raw.Escaped(project)}' has a path segment '{new Name(unusable)}' — "
+                    + $"{CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy}");
 
-        if (CheckoutRelativePath.EscapesRoot(project))
-        {
-            throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': project '{Raw.Escaped(project)}' points outside the service's checkout. It must "
-                + $"stay within the repository.");
+            case { Kind: ConfinementBreachKind.EscapesRoot }:
+                throw ServiceSourcesConfigurationException.For(
+                    $"Service '{new Name(serviceName)}': project '{Raw.Escaped(project)}' points outside the service's checkout. It must "
+                    + $"stay within the repository.");
         }
     }
 }

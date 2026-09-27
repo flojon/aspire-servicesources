@@ -116,31 +116,28 @@ internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
         var developerMode = developer is null ? null : ParseOptional(label, developer.Mode, Raw.Literal(DeveloperBlock));
 
         return managedCheckout
-            ? ForManagedCheckout(label, catalog, developer, catalogMode, developerMode, windows)
+            ? Merge(label, catalog, developer, catalogMode, developerMode, Raw.Literal(DeveloperBlock), PrepareModes.Default, windows)
             : ForPathCheckout(serviceName, label, catalog, developer, catalogMode, developerMode, windows);
     }
 
     /// <summary>
-    /// The <c>"path"</c> source's own prepare merge — a <c>path</c>-sourced service is never
-    /// grouped (design finding 4), so this always takes an ungrouped <see cref="ServiceLabel"/>.
+    /// The <c>"path"</c> source's own prepare merge: the managed-checkout merge (<see cref="Merge"/>),
+    /// read against the developer's <c>path.prepare</c> block, with a different default and one
+    /// refusal.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Distinct from <see cref="ForManagedCheckout"/>, which this otherwise mirrors exactly (mode
-    /// resolution, the command pair merged as a unit, the "mode alone with nothing to run" no-op) —
-    /// with one addition: an effective mode of <see cref="PrepareMode.OncePerCommit"/> is rejected
-    /// rather than honoured, whether it was written explicitly or is simply what
-    /// <see cref="PrepareModes.Default"/> supplies when neither block names a mode at all. A catalog
-    /// <c>path:</c> entry's own <c>prepare:</c> block runs — unlike <c>local.path</c>'s, which a
-    /// <c>path</c>-sourced developer override ignores entirely (see <see cref="ForPathCheckout"/>) —
-    /// because there is no "someone else's directory" here to protect (design "prepare: once/always/
-    /// never only").
+    /// A <c>"path"</c> directory has no separate commit to move to on its own (design finding 4), so
+    /// <see cref="PrepareMode.OncePerCommit"/> means nothing there. An <em>unwritten</em> mode
+    /// therefore defaults to <see cref="PathDefaultMode"/> rather than to
+    /// <see cref="PrepareModes.Default"/>: a catalog block that leaves <c>mode</c> out — the common
+    /// shape, and correct for the <c>"repository"</c> source the same entry may also serve — must not
+    /// make the <c>"path"</c> source unusable for a mode nobody wrote.
     /// </para>
     /// <para>
-    /// The rejection is checked only once a command is actually about to run: a service that declares
-    /// no <c>prepare:</c> block at all — the overwhelming common case — must not be told to pick a
-    /// mode for a step it never asked for, so "nothing to run" is decided first, exactly as
-    /// <see cref="ForManagedCheckout"/> already decides it.
+    /// A <em>written</em> <c>oncePerCommit</c> is still refused, naming the block it was written in —
+    /// the developer's <c>path.prepare</c>, or the catalog's <c>prepare</c> — and only once a command
+    /// is actually about to run, so a service with no step at all is never told to pick a mode.
     /// </para>
     /// </remarks>
     public static PreparePlan ForCatalogPath(
@@ -154,41 +151,46 @@ internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
         var catalogMode = catalog is null ? null : ParseOptional(label, catalog.Mode, Raw.Literal(CatalogBlock));
         var developerMode = developer is null ? null : ParseOptional(label, developer.Mode, Raw.Literal(PathDeveloperBlock));
 
-        var mode = developerMode ?? catalogMode ?? PrepareModes.Default;
+        var plan = Merge(
+            label, catalog, developer, catalogMode, developerMode, Raw.Literal(PathDeveloperBlock), PathDefaultMode, windows);
 
-        if (mode == PrepareMode.Never)
+        // Only a written mode can be oncePerCommit here, since the default is not.
+        if (plan.Step?.Mode == PrepareMode.OncePerCommit)
         {
-            return Nothing;
+            throw ServiceSourcesConfigurationException.For(
+                $"{OncePerCommitNotAllowedForPath(label, writtenInCatalog: developerMode is null)}");
         }
 
-        var developerSuppliedThePair = developer?.Command is not null || developer?.WindowsCommand is not null;
-
-        var command = developerSuppliedThePair ? developer!.Command : catalog?.Command;
-        var windowsCommand = developerSuppliedThePair ? developer!.WindowsCommand : catalog?.WindowsCommand;
-        var writtenAt = developerSuppliedThePair ? Raw.Literal(PathDeveloperBlock) : Raw.Literal(CatalogBlock);
-
-        var selected = SelectPlatform(command, windowsCommand, windows);
-
-        if (selected is null)
-        {
-            return Nothing;
-        }
-
-        if (mode == PrepareMode.OncePerCommit)
-        {
-            throw ServiceSourcesConfigurationException.For($"{OncePerCommitNotAllowedForPath(label, writtenAt)}");
-        }
-
-        return new PreparePlan(
-            PrepareStep.Create(label, selected, mode, writtenAt, WindowsWithoutVariant(windowsCommand, windows)),
-            null);
+        return plan;
     }
 
-    /// <summary>The drafted rejection for design "<c>prepare</c>: <c>once</c>/<c>always</c>/<c>never</c> only".</summary>
-    private static Raw OncePerCommitNotAllowedForPath(Raw label, Raw writtenAt) =>
-        Raw.Compose($"{label}: {writtenAt}.mode 'oncePerCommit' does not apply to a 'path' service — there is no "
-            + $"separate commit for this directory to move to on its own. Use 'once' (re-run only when the "
-            + $"command itself changes) or 'always' (an incremental script that decides its own work) instead.");
+    /// <summary>
+    /// What an unwritten <c>mode</c> means for a <c>"path"</c> service: re-run only when the command
+    /// itself changes — the nearest meaning <see cref="PrepareModes.Default"/> has once there is no
+    /// commit for it to key on.
+    /// </summary>
+    internal const PrepareMode PathDefaultMode = PrepareMode.Once;
+
+    /// <summary>
+    /// The drafted rejection for design "<c>prepare</c>: <c>once</c>/<c>always</c>/<c>never</c> only",
+    /// naming the block the mode was written in. A catalog mode may be right for the
+    /// <c>"repository"</c> source the same entry also serves, so that case is offered the developer's
+    /// own override rather than only an edit to the shared catalog.
+    /// </summary>
+    private static Raw OncePerCommitNotAllowedForPath(Raw label, bool writtenInCatalog)
+    {
+        var block = writtenInCatalog ? Raw.Literal(CatalogBlock) : Raw.Literal(PathDeveloperBlock);
+
+        var remedy = writtenInCatalog
+            ? Raw.Compose($"Set {Raw.Literal(PathDeveloperBlock)}.mode to 'once' (re-run only when the command itself "
+                + $"changes) or 'always' (an incremental script that decides its own work) for this service in "
+                + $"{Raw.Literal(DeveloperConfiguration.FileName)}, or change the catalog's mode.")
+            : Raw.Literal("Use 'once' (re-run only when the command itself changes) or 'always' (an incremental "
+                + "script that decides its own work) instead.");
+
+        return Raw.Compose($"{label}: {block}.mode 'oncePerCommit' does not apply to a 'path' service — there is no "
+            + $"separate commit for this directory to move to on its own. {remedy}");
+    }
 
     /// <summary>How a message names an ungrouped service — the common case, unchanged from before #291.</summary>
     internal static Raw ServiceLabel(string serviceName) =>
@@ -202,15 +204,23 @@ internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
     internal static Raw RepositoryLabel(string checkoutName) =>
         Raw.Compose($"Repository '{new Name(checkoutName)}'");
 
-    private static PreparePlan ForManagedCheckout(
+    /// <summary>
+    /// The per-field merge a managed checkout and a <c>"path"</c> service share: the developer's mode
+    /// over the catalog's over <paramref name="defaultMode"/>, and the command pair taken as a unit
+    /// from whichever block supplied either half.
+    /// </summary>
+    /// <param name="developerBlock">How messages name the developer's block — <c>local.prepare</c> or <c>path.prepare</c>.</param>
+    private static PreparePlan Merge(
         Raw label,
         PrepareMetadata? catalog,
         PrepareDeveloperConfig? developer,
         PrepareMode? catalogMode,
         PrepareMode? developerMode,
+        Raw developerBlock,
+        PrepareMode defaultMode,
         bool windows)
     {
-        var mode = developerMode ?? catalogMode ?? PrepareModes.Default;
+        var mode = developerMode ?? catalogMode ?? defaultMode;
 
         if (mode == PrepareMode.Never)
         {
@@ -224,7 +234,7 @@ internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
 
         var command = developerSuppliedThePair ? developer!.Command : catalog?.Command;
         var windowsCommand = developerSuppliedThePair ? developer!.WindowsCommand : catalog?.WindowsCommand;
-        var writtenAt = developerSuppliedThePair ? Raw.Literal(DeveloperBlock) : Raw.Literal(CatalogBlock);
+        var writtenAt = developerSuppliedThePair ? developerBlock : Raw.Literal(CatalogBlock);
 
         var selected = SelectPlatform(command, windowsCommand, windows);
 

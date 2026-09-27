@@ -101,19 +101,13 @@ public static class ServiceSourcesBuilderExtensions
         if (!Sources.TryGetValue(developerConfig.Source, out var source))
         {
             // Retired, not unknown: "local" used to be this exact source under its old name, so a
-            // config still naming it deserves the specific migration this is rather than the generic
-            // "unknown source" complaint below, which would send a reader hunting for a typo they
-            // didn't make. Checked ahead of the generic branch, and case-insensitively to match how
-            // Sources itself is looked up.
-            if (string.Equals(developerConfig.Source, "local", StringComparison.OrdinalIgnoreCase))
-            {
-                throw ServiceSourcesConfigurationException.For(
-                    $"Service '{new Name(name)}': source 'local' was renamed to 'repository' — same behavior "
-                    + $"(clone the catalog's 'repository:' url, reconcile onto 'ref'), new name, so it doesn't "
-                    + $"read as the same word '{Raw.Literal(DeveloperConfiguration.FileName)}' uses for something "
-                    + $"else. Change 'source' to 'repository' in '{Raw.Literal(DeveloperConfiguration.FileName)}' "
-                    + $"(or wherever this is set).");
-            }
+            // config still naming it gets the specific migration rather than the generic "unknown
+            // source" complaint below, which would send a reader hunting for a typo they didn't make.
+            DeveloperConfigShape.ThrowIfRetiredSource(
+                Raw.Compose($"Service '{new Name(name)}': source '{new Name(developerConfig.Source)}'"),
+                developerConfig.Source,
+                Raw.Compose($"Change 'source' to 'repository' in '{Raw.Literal(DeveloperConfiguration.FileName)}' "
+                    + $"(or wherever this is set)."));
 
             // Names the alternatives rather than saying "not implemented yet": the lookup folds
             // case, so reaching here means the name itself is unknown — not that the source exists

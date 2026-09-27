@@ -200,26 +200,37 @@ internal sealed class DeveloperConfigShape
     /// </exception>
     public void ValidateSourceName(Raw label, string value)
     {
-        // Retired, not unknown (same rename as ServiceSourcesBuilderExtensions.AddService's dispatch
-        // miss, and owed here too: a catalog's defaultSource/WithDefaultSource("local") deserves the
-        // same named migration rather than falling through to the generic "not a valid source"
-        // message below). label already names which of the two callers this is — a yaml
-        // "defaultSource value 'local'" or a code "WithDefaultSource('local')" — so it reads
-        // naturally as the subject of this sentence too.
-        if (string.Equals(value, "local", StringComparison.OrdinalIgnoreCase))
-        {
-            throw ServiceSourcesConfigurationException.For(
-                $"{label} was renamed to 'repository' — same behavior (clone the catalog's 'repository:' url, "
-                + $"reconcile onto 'ref'), new name, so it doesn't read as the same word "
-                + $"'{Raw.Literal(DeveloperConfiguration.FileName)}' uses for something else. Change it to "
-                + $"'repository'.");
-        }
+        // Retired, not unknown: a catalog's defaultSource/WithDefaultSource("local") deserves the
+        // same named migration AddService's dispatch gives a developer's source: "local", rather than
+        // the generic "not a valid source" message below. label already names which caller this is.
+        ThrowIfRetiredSource(label, value, Raw.Literal("Change it to 'repository'."));
 
         if (!SourceNames.Contains(value))
         {
             throw ServiceSourcesConfigurationException.For(
                 $"{label} is not a valid source. Expected one of: {Raw.Join(", ", SourceNames.Select(Raw.Escaped))}.");
         }
+    }
+
+    /// <summary>
+    /// Throws the migration error for the retired source name <c>"local"</c>, now <c>"repository"</c>,
+    /// if <paramref name="value"/> is it (case-insensitively, as source names are matched); otherwise
+    /// returns. The one place the rename is explained, shared by a developer's <c>source</c> and a
+    /// catalog's <c>defaultSource</c>/<c>WithDefaultSource</c>.
+    /// </summary>
+    /// <param name="subject">What names the value, as the sentence's subject — e.g. <c>"Service 'orders': source 'local'"</c>.</param>
+    /// <param name="remedy">The fix, in the caller's terms.</param>
+    public static void ThrowIfRetiredSource(Raw subject, string value, Raw remedy)
+    {
+        if (!string.Equals(value, "local", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        throw ServiceSourcesConfigurationException.For(
+            $"{subject} was renamed to 'repository' — same behavior (clone the catalog's 'repository:' url, "
+            + $"reconcile onto 'ref'), new name, so it doesn't read as the same word "
+            + $"'{Raw.Literal(DeveloperConfiguration.FileName)}' uses for something else. {remedy}");
     }
 
     private static DeveloperConfigShape Of<TEntry>(

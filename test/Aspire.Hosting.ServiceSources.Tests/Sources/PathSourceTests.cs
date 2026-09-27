@@ -208,19 +208,21 @@ public class PathSourceTests
 
     // === ref is not offered ===
 
+    /// <summary>
+    /// <c>local</c> is the <c>"repository"</c> source's block, and a block for a source that is not
+    /// selected survives but nothing reads it — so a <c>local.ref</c> left in a lower configuration
+    /// layer must not break a higher layer that switches the service to <c>"path"</c>.
+    /// </summary>
     [Fact]
-    public void Resolve_LocalRefSet_IsRejectedNamingTheService()
+    public void Resolve_LeftoverLocalRef_IsIgnoredRatherThanRejected()
     {
         var appHostDir = CreateAppHostDirectoryWithService(out _);
         var builder = TestHelpers.CreateBuilder(appHostDir);
 
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            new PathSource(new GitCliClient()).Resolve(
-                builder, ServiceName, Definition(path: "services/orders"), DevConfig(@ref: "feature/x")));
+        var service = new PathSource(new GitCliClient()).Resolve(
+            builder, ServiceName, Definition(path: "services/orders"), DevConfig(@ref: "feature/x"));
 
-        Assert.Contains(ServiceName, ex.Message, StringComparison.Ordinal);
-        Assert.Contains("local.ref", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("cannot be set", ex.Message, StringComparison.Ordinal);
+        Assert.IsType<ServiceResource>(service.Resource);
     }
 
     // === prepare: once/always/never only ===
@@ -236,8 +238,34 @@ public class PathSourceTests
             new PathSource(new GitCliClient(), new CountingPrepareRunner()).Resolve(
                 builder, ServiceName, Definition(path: "services/orders", prepare: prepare), DevConfig()));
 
+        // Written in the catalog, which may be right for the 'repository' source the same entry
+        // serves, so the developer's own override is offered alongside editing the catalog.
         Assert.Equal(
             $"Service '{ServiceName}': prepare.mode 'oncePerCommit' does not apply to a 'path' service — " +
+            "there is no separate commit for this directory to move to on its own. Set path.prepare.mode to " +
+            "'once' (re-run only when the command itself changes) or 'always' (an incremental script that " +
+            "decides its own work) for this service in servicesources.local.json, or change the catalog's mode.",
+            ex.Message);
+    }
+
+    [Fact]
+    public void Resolve_PrepareModeOncePerCommitInTheDeveloperBlock_NamesThatBlockNotTheCatalogs()
+    {
+        var appHostDir = CreateAppHostDirectoryWithService(out _);
+        var builder = TestHelpers.CreateBuilder(appHostDir);
+
+        // The command comes from the catalog, the mode from the developer: the message names where
+        // the mode was written, not where the command was.
+        var prepare = new PrepareMetadata { Command = ["./prepare.sh"] };
+        var developerPrepare = new PrepareDeveloperConfig { Mode = "oncePerCommit" };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new PathSource(new GitCliClient(), new CountingPrepareRunner()).Resolve(
+                builder, ServiceName, Definition(path: "services/orders", prepare: prepare),
+                DevConfig(preparePath: developerPrepare)));
+
+        Assert.Equal(
+            $"Service '{ServiceName}': path.prepare.mode 'oncePerCommit' does not apply to a 'path' service — " +
             "there is no separate commit for this directory to move to on its own. Use 'once' (re-run only " +
             "when the command itself changes) or 'always' (an incremental script that decides its own work) " +
             "instead.",
@@ -245,23 +273,63 @@ public class PathSourceTests
     }
 
     /// <summary>
-    /// A command with no mode written at all defaults to <c>oncePerCommit</c>
-    /// (<see cref="Prepare.PrepareModes.Default"/>) exactly as a managed checkout's does — so it is
-    /// rejected too, not silently accepted. A <c>path</c> service's <c>prepare:</c> has to name
-    /// <c>once</c> or <c>always</c> explicitly.
+    /// A command with no mode written defaults to <c>once</c> for a <c>path</c> service, not to the
+    /// managed checkout's <c>oncePerCommit</c> — which has no commit to key on here. The common catalog
+    /// shape, a <c>prepare:</c> with no mode, must not make the <c>path</c> source unusable for a mode
+    /// nobody wrote.
     /// </summary>
     [Fact]
-    public void Resolve_PrepareCommandWithNoModeWritten_DefaultsToOncePerCommitAndIsRejected()
+    public void Resolve_PrepareCommandWithNoModeWritten_DefaultsToOnce()
     {
         var appHostDir = CreateAppHostDirectoryWithService(out _);
-        var builder = TestHelpers.CreateBuilder(appHostDir);
+        var runner = new CountingPrepareRunner();
+        var source = new PathSource(new GitCliClient(), runner);
         var prepare = new PrepareMetadata { Command = ["./prepare.sh"] };
+        var definition = Definition(path: "services/orders", prepare: prepare);
 
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            new PathSource(new GitCliClient(), new CountingPrepareRunner()).Resolve(
-                builder, ServiceName, Definition(path: "services/orders", prepare: prepare), DevConfig()));
+        source.Resolve(TestHelpers.CreateBuilder(appHostDir), ServiceName, definition, DevConfig());
+        Assert.Equal(1, runner.Runs);
 
-        Assert.Contains("oncePerCommit", ex.Message, StringComparison.Ordinal);
+        // 'once': the marker satisfies the unchanged command on the next start.
+        source.Resolve(TestHelpers.CreateBuilder(appHostDir), ServiceName, definition, DevConfig());
+        Assert.Equal(1, runner.Runs);
+    }
+
+    /// <summary>
+    /// A grouped service's catalog prepare is the shared repository's step, written to run once at the
+    /// root of the group's checkout — not in one member's directory, once per member. So a grouped
+    /// <c>path</c> service inherits it not at all.
+    /// </summary>
+    [Fact]
+    public void Resolve_GroupedServiceWithARepositoryPrepare_DoesNotRunItInTheServicesDirectory()
+    {
+        var appHostDir = CreateAppHostDirectoryWithService(out _);
+        var runner = new CountingPrepareRunner();
+
+        var repositories = new Dictionary<string, RepositoryDefinition>(StringComparer.Ordinal)
+        {
+            ["mono"] = new RepositoryDefinition
+            {
+                Url = "https://github.com/example/mono",
+                // No mode written — which, for the repository source, means oncePerCommit; inherited
+                // by a path service it would both run in the wrong directory and be refused.
+                Prepare = new PrepareMetadata { Command = ["npm", "ci"] },
+                CheckoutName = "mono",
+            },
+        };
+
+        var definition = new ServiceMetadata
+        {
+            RepositoryRef = "mono",
+            Path = "services/orders",
+            Project = "Orders.csproj",
+        }.ToDefinition("servicesources.yaml", ServiceName, repositories);
+
+        var service = new PathSource(new GitCliClient(), runner).Resolve(
+            TestHelpers.CreateBuilder(appHostDir), ServiceName, definition, DevConfig());
+
+        Assert.IsType<ServiceResource>(service.Resource);
+        Assert.Equal(0, runner.Runs);
     }
 
     [Fact]
@@ -333,8 +401,8 @@ public class PathSourceTests
 
     /// <summary>
     /// The developer's own <c>path.prepare</c> merges over the catalog's block per field, exactly as
-    /// <c>local.prepare</c> does for a managed checkout — here overriding just the mode so the
-    /// catalog's otherwise-rejected default becomes acceptable.
+    /// <c>local.prepare</c> does for a managed checkout — here overriding just the mode, with the
+    /// command still coming from the catalog.
     /// </summary>
     [Fact]
     public void Resolve_DeveloperPreparePathOverridesJustTheMode_MergesOverTheCatalogCommand()
