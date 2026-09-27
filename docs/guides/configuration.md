@@ -60,19 +60,21 @@ ServiceSources__Services__orders__Source=url dotnet run
 ```
 
 Overriding a *field* works the same way, but gains its source's block segment —
-`ServiceSources__Services__orders__Local__Ref`, `ServiceSources__Services__orders__Container__Tag`,
-and so on. (`__` is the .NET configuration separator for `:`, and is what you want on every
-platform.) Setting one of these to a blank value *unsets* the field, rather than setting it to an
-empty string — `ServiceSources__Services__orders__Local__Path=` leaves the service with no `path`
-at all, even one `servicesources.local.json` (or a layer in between) configured. It does not fall
-back to that lower layer's value: configuration merges the layers *before* this package sees them,
-so the blank is what arrives and the field ends up absent — which for `path` means the service gets
-its managed checkout, exactly as if no layer had ever named one.
+`ServiceSources__Services__orders__Repository__Ref`, `ServiceSources__Services__orders__Container__Tag`,
+and so on (`__Local__Ref` still works too — it's the deprecated alias for `__Repository__Ref`, same
+as the `local`/`repository` block in the JSON file). (`__` is the .NET configuration separator for
+`:`, and is what you want on every platform.) Setting one of these to a blank value *unsets* the
+field, rather than setting it to an empty string — `ServiceSources__Services__orders__Repository__Path=`
+leaves the service with no `path` at all, even one `servicesources.local.json` (or a layer in
+between) configured. It does not fall back to that lower layer's value: configuration merges the
+layers *before* this package sees them, so the blank is what arrives and the field ends up absent —
+which for `path` means the service gets its managed checkout, exactly as if no layer had ever named
+one.
 
 Blank means *empty*, exactly, whatever the field's type. A value of one or more spaces is refused
 rather than read as either an unset field or a value of its own:
 `ServiceSources__Services__orders__Kubernetes__Port=` drops the port, and
-`ServiceSources__Services__orders__Local__Path=" "` is an error naming the spelling that works
+`ServiceSources__Services__orders__Repository__Path=" "` is an error naming the spelling that works
 rather than an override silently discarded — which is what a stray space surviving a CI variable
 used to cost, leaving the service on its managed checkout with nothing said.
 
@@ -147,7 +149,7 @@ that happens to be first in the group:
 ```
 
 `ServiceSources__Repositories__monorepo__Ref` is the environment-variable spelling, the same
-pattern `ServiceSources__Services__<service>__Local__Ref` uses. `path` exists on the shape but is
+pattern `ServiceSources__Services__<service>__Repository__Ref` uses. `path` exists on the shape but is
 reserved rather than implemented — a group's shared checkout is not yet redirectable in one
 setting, so a non-null value is a configuration error naming the repository; switch one member to
 `"source": "path"` with its own `path.path` to split it out individually instead.

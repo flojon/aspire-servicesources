@@ -29,8 +29,9 @@ never existed. Check the tag of the last release before adding one.
   resolving as before or falling through to a generic "unrecognized source" message. Change
   `source: "local"` to `source: "repository"` in `servicesources.local.json` (or wherever it's
   set), and `defaultSource: local`/`.WithDefaultSource("local")` to `"repository"` in the catalog,
-  to migrate. `local.path`/`local.ref` — the developer's per-service override block nested under
-  `source` — keep their name unchanged; only the `source` value itself renames.
+  to migrate. The developer's per-service override block nested under `source` is renamed to match
+  — see **Deprecated** below; unlike the source value, the old block name keeps working as a
+  deprecated alias rather than being retired.
 - **`path` is now a reserved `kind` name in `servicesources.yaml`.** The new `path:` catalog field
   (see **Added**) makes `path` a well-known top-level property of a service entry, so a yaml service
   declaring `kind: path` — a custom kind registered under that name — is now refused with "kind
@@ -66,14 +67,14 @@ never existed. Check the tag of the last release before adding one.
   repository the AppHost lives in (the nearest directory holding `.git`), so `../Orders.Api` beside a
   `src/MyApp.AppHost/` works while an absolute path or one climbing out of the repository is refused;
   a developer's own override (`path.path` in `servicesources.local.json`) is unconfined, exactly like
-  `local.path` today. A copy with no `.git` — a source archive, or a container build context that
+  `repository.path` today. A copy with no `.git` — a source archive, or a container build context that
   leaves it out — names its root with the new `ServiceSources:RepositoryRoot` setting (e.g.
   `ServiceSources__RepositoryRoot=/src`, or `"repositoryRoot"` in `servicesources.local.json`),
   read only when no `.git` is found; with neither, the AppHost directory is the boundary. `prepare` runs as `once`/`always`/`never` — never `oncePerCommit`, since there's
   no separate commit for the directory to move to on its own, so an unwritten `mode`, or a catalog's
   `oncePerCommit` written for the `"repository"` source on the same entry, means `once` there. A
   catalog-declared `path:`'s own `prepare:` block runs normally; under a `path.path` override it is
-  not run, exactly as under `local.path`, and a startup notice shows the command to declare as your
+  not run, exactly as under `repository.path`, and a startup notice shows the command to declare as your
   own `path.prepare`. See [the `"path"` source](docs/sources/path.md) for the
   full behavior, including `defaultSource: path` and its (lack of) interaction with
   `UseDeferredCheckout()` and `repositories:` grouping.
@@ -119,22 +120,35 @@ never existed. Check the tag of the last release before adding one.
 
 ### Deprecated
 
-- **`local.path` is deprecated in favor of the new `"path"` source.** The `"path"` source resolves a
-  directory the same way — no clone, no ref — as a first-class source
+- **The developer's per-service block for the `"repository"` source is renamed from `local` to
+  `repository`, matching the source's own name.** `"local"` was the same spelling collision one
+  level down that motivated the source rename above — `"repository": { ... }` paired with a
+  `"local": { ... }` block for its settings read oddly next to each other, and, unlike every other
+  source, didn't match `servicesources.local.json`'s own use of "local" for something else. Unlike
+  the source value, `local` is a deprecated alias here, not a retired spelling: it keeps resolving
+  exactly as it does today (also as the environment-variable segment,
+  `ServiceSources__Services__<service>__Local__Ref`), behind a one-time startup notice naming the
+  new spelling. Setting both `local` and `repository` on the same entry is a configuration error —
+  there is no rule for which one would win. Migrate by renaming the key: `"local": { "path": "...",
+  "ref": "..." } }` becomes `"repository": { "path": "...", "ref": "..." } }`.
+- **`repository.path` is deprecated in favor of the new `"path"` source.** The `"path"` source
+  resolves a directory the same way — no clone, no ref — as a first-class source
   (`"source": "path"`, `"path": { "path": "..." }`) rather than a hidden mode of `"repository"`.
-  `local.path` keeps working exactly as it does today; there is no removal planned. A developer
-  using it now gets a one-time startup notice naming the replacement:
+  `repository.path` keeps working exactly as it does today; there is no removal planned. A
+  developer using it now gets a one-time startup notice naming the replacement:
 
   ```
   warn: Aspire.Hosting.ServiceSources
-        Service 'orders': 'local.path' is deprecated. Use the 'path' source instead:
+        Service 'orders': 'repository.path' is deprecated. Use the 'path' source instead:
         "source": "path", "path": { "path": "/home/dev/code/orders" } — which resolves the
         directory the same way, with no clone and no ref.
   ```
 
-  A `local.prepare` block doesn't carry over by itself — it isn't read under `"path"` — so when one
-  is declared the notice also says to move it to `path.prepare`. The catalog's own `prepare` step is
-  not run in the directory under either spelling.
+  A `repository.prepare` block doesn't carry over by itself — it isn't read under `"path"` — so
+  when one is declared the notice also says to move it to `path.prepare`. The catalog's own
+  `prepare` step is not run in the directory under either spelling. (The deprecated `local` alias
+  above behaves the same way here too: a service still written under `local` gets both notices,
+  independently.)
 
 ## [0.6.0] - 2026-09-24
 

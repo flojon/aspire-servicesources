@@ -97,9 +97,10 @@ was looked for under — there is nothing to clone, so a missing directory is th
 `"path"` service can fail on before its kind is even consulted.
 
 **No `ref`.** A directory that is not a separate checkout has no second commit for a ref to name:
-there's no `path.ref`. A `local.ref` is not read — `local` is the `"repository"` source's block, and
-like any block for a source that isn't selected it survives but nothing reads it, so one left in a
-lower configuration layer doesn't stop a higher layer switching the service to `"path"`.
+there's no `path.ref`. A `repository.ref` is not read — `repository` (or its deprecated alias,
+`local`) is the `"repository"` source's block, and like any block for a source that isn't selected
+it survives but nothing reads it, so one left in a lower configuration layer doesn't stop a higher
+layer switching the service to `"path"`.
 
 **`prepare` runs as `once`, `always` or `never` — never `oncePerCommit`.** There's no separate
 commit for this directory to move to on its own, so a `mode` left out means `once` here (re-run only
@@ -110,11 +111,12 @@ developer who picks `"path"`. A `path.prepare.mode: oncePerCommit` you write you
 naming `once` and `always` as the alternatives.
 
 A catalog-declared `path:`'s own `prepare:` block runs normally: there's no "someone else's
-directory" here to protect. A `path.path` override is the exception, exactly like `local.path`: it
-points at your own working tree, which nothing establishes is a checkout of what the catalog names,
-so the catalog's step is not run there — a startup notice shows the command, ready to paste into
-your own `path.prepare` block. Only a `path.prepare` you declare runs in that directory. Two services sharing one resolved `path` serialize
-their step rather than run it concurrently. The marker lives where a `local.path` override's does,
+directory" here to protect. A `path.path` override is the exception, exactly like `repository.path`:
+it points at your own working tree, which nothing establishes is a checkout of what the catalog
+names, so the catalog's step is not run there — a startup notice shows the command, ready to paste
+into your own `path.prepare` block. Only a `path.prepare` you declare runs in that directory. Two
+services sharing one resolved `path` serialize their step rather than run it concurrently. The
+marker lives where a `repository.path` override's does,
 `<AppHostDirectory>/.servicesources/prepare/<service>.json`, keyed on the resolved path and the
 command.
 
@@ -152,11 +154,14 @@ launch-profile fidelity — there's no clone to defer, so no "Preparing" state e
 twice; a `"path"` service has nothing to clone, so there's no shared-checkout identity to opt into.
 Two services naming the same resolved `path` are just two entries pointing at one directory.
 
-**`local.path` is deprecated.** It resolves a directory the same way — no clone, no ref — reachable
-a second, less discoverable way, nested under a source whose other machinery it never touches. It
-keeps working exactly as it does today, and a startup notice says once to use
+**`repository.path` is deprecated.** It resolves a directory the same way — no clone, no ref —
+reachable a second, less discoverable way, nested under a source whose other machinery it never
+touches. It keeps working exactly as it does today, and a startup notice says once to use
 `"source": "path"` with `"path": { "path": "..." }` instead — a JSON snippet with your own directory
-in it, ready to paste. The one thing that doesn't carry over by itself is a `local.prepare` block:
-it isn't read under `"path"`, so the notice says to move it to `path.prepare` when you have one. The
-catalog's own `prepare:` step still isn't run in your directory, under either spelling.
+in it, ready to paste. The one thing that doesn't carry over by itself is a `repository.prepare`
+block: it isn't read under `"path"`, so the notice says to move it to `path.prepare` when you have
+one. The catalog's own `prepare:` step still isn't run in your directory, under either spelling.
+(The deprecated `local` alias for the `repository` block behaves the same way here too — a
+service still written as `"local": { "path": "..." }` gets both notices: rename the block to
+`"repository"`, and separately, move off `.path` onto the `"path"` source.)
 

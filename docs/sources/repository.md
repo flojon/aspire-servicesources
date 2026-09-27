@@ -30,6 +30,13 @@ repository and, for a .NET service, the project inside it:
     with a specific error naming the rename and the fix, rather than a generic "unrecognized source"
     message.
 
+    The per-developer *block* was the same collision one level down — `"local": { ... }` for the
+    `"repository"` source's own settings — and is renamed the same way, to `"repository"`. Unlike
+    the source value, `"local"` still works there: it's a deprecated alias, not a retired spelling,
+    so a config written before this rename keeps resolving exactly as it does today, behind a
+    one-time startup notice asking you to rename it. Setting both `"local"` and `"repository"` on
+    one entry is a configuration error.
+
 Requires `git` (2.7 or newer) on `PATH` for a managed checkout — the same "a tool you already
 have" trade the `"kubernetes"` source makes with `kubectl`. Every git operation runs under your own
 git, so your credential helper, SSH agent, `~/.gitconfig` and proxy settings apply unchanged.
@@ -42,7 +49,7 @@ Each developer picks it in `servicesources.local.json`, optionally with their ow
     "orders": { "source": "repository" },
     "payments": {
       "source": "repository",
-      "local": { "ref": "feature/new-checkout" }
+      "repository": { "ref": "feature/new-checkout" }
     }
   }
 }
@@ -59,9 +66,9 @@ Each developer picks it in `servicesources.local.json`, optionally with their ow
 }
 ```
 
-That works for any catalog entry, including one with no `path:` of its own. (`local.path` under
-`"repository"` still does the same thing, but is deprecated: it logs a startup notice with the
-`"path"` spelling to paste instead.)
+That works for any catalog entry, including one with no `path:` of its own. (`repository.path`
+under `"repository"` still does the same thing, but is deprecated: it logs a startup notice with
+the `"path"` spelling to paste instead.)
 
 - A managed checkout is cloned once into
   `<AppHostDirectory>/.servicesources/checkouts/<serviceName>/`, and reconciled to the
@@ -260,7 +267,7 @@ commit couldn't be determined, or the mode is `always`. A decision to *skip* say
 the ordinary case, and the marker already records it.
 
 **Your own directory declares its own step.** A service pointed at your own directory — the
-[`"path"` source](path.md) with `path.path`, or the deprecated `local.path` — **never inherits the catalog's
+[`"path"` source](path.md) with `path.path`, or the deprecated `repository.path` — **never inherits the catalog's
 `prepare` block**. Nothing establishes that your directory is even a checkout
 of the repository the catalog names — `path` is validated by "does it exist" and nothing else — so a
 catalog command like `["npm", "ci"]` would run perfectly happily in a tree that has nothing to do
@@ -659,7 +666,7 @@ A grouped repository's own `ref` and `prepare` step (see [`prepare`](#prepare-a-
 one member — set them on the handle `AddRepository` returns (`WithPrepare`), or on the
 `repositories:` entry in yaml, and a developer overrides the ref for everyone under
 `ServiceSources:Repositories:<name>:ref` in `servicesources.local.json` rather than a member's own
-`local.ref`, which a grouped service can no longer set.
+`repository.ref`, which a grouped service can no longer set.
 
 Two services naming the same `repository:` URL **without** joining a `repositories:` entry are
 not grouped by that alone — each still gets its own checkout, cloned and reconciled separately,
