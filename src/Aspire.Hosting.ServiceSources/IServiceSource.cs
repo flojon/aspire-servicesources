@@ -17,7 +17,7 @@ internal interface IServiceSource
     /// <param name="repositoryConfig">
     /// This service's group-level developer-config entry (#291), or <see langword="null"/> for the
     /// common, ungrouped case. Only <see cref="Sources.LocalProjectSource"/> reads it — the other
-    /// three sources have no managed checkout for a group to share — but every implementation takes
+    /// four sources have no managed checkout for a group to share — but every implementation takes
     /// it, the same way every one already takes the whole of <paramref name="config"/> whether or not
     /// its own source block is the one populated.
     /// </param>

@@ -331,5 +331,9 @@ public class ServiceConfigurationExtensionsTests
 
         Assert.Contains("billing", ex.Message);
         Assert.Contains("'disabled'", ex.Message);
+
+        // "Configure the service where it actually runs" would be self-contradictory for a service
+        // that runs nowhere at all — pins that this message doesn't reuse url/kubernetes's wording.
+        Assert.DoesNotContain("configure the service where it actually runs", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 }

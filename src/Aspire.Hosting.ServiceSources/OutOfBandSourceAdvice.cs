@@ -69,6 +69,18 @@ internal static class OutOfBandSourceAdvice
     };
 
     /// <summary>
+    /// The lead-in <see cref="ServiceConfigurationExtensions.Unwrap{T}"/>'s failure message offers before the source switch, chosen
+    /// the same way <see cref="ExpectedConfiguredWhere"/> is: "configure it where it runs" is a real
+    /// option for <c>"url"</c>/<c>"kubernetes"</c> and a dead end for <c>"disabled"</c>, which runs
+    /// nowhere at all.
+    /// </summary>
+    internal static string ConfigureInsteadClause(string source) => source switch
+    {
+        "disabled" => "Drop the configuration",
+        _ => "Configure the service where it actually runs, drop the configuration",
+    };
+
+    /// <summary>
     /// Where the endpoint can still be redirected, for the reader whose endpoint write was undone.
     /// </summary>
     /// <remarks>

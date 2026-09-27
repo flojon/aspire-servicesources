@@ -135,7 +135,7 @@ public class ServiceDefinitionBuilderTests
     }
 
     [Fact]
-    public void WithDefaultSource_InvalidValue_ThrowsNamingTheFourValues()
+    public void WithDefaultSource_InvalidValue_ThrowsNamingTheFiveValues()
     {
         var chain = new ServiceCatalogBuilder().AddService("orders")
             .WithRepository("https://github.com/example/repo");
@@ -149,6 +149,22 @@ public class ServiceDefinitionBuilderTests
         Assert.Contains("url", ex.Message, StringComparison.Ordinal);
         Assert.Contains("kubernetes", ex.Message, StringComparison.Ordinal);
         Assert.Contains("container", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("disabled", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// "disabled" is a valid <c>WithDefaultSource</c> value like every other source — a service can
+    /// ship off by default until a developer's own <c>servicesources.local.json</c> opts it back in.
+    /// </summary>
+    [Fact]
+    public void WithDefaultSource_Disabled_SetsTheField()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("orders")
+            .WithRepository("https://github.com/example/repo")
+            .WithDefaultSource("disabled")
+            .Build();
+
+        Assert.Equal("disabled", definition.DefaultSource);
     }
 
     /// <summary>

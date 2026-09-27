@@ -145,8 +145,8 @@ public static class ServiceConfigurationExtensions
         if (IsUnreachable<T>(annotation.Source))
         {
             return Raw.Compose(
-                $"{opening} — {Raw.Escaped(OutOfBandSourceAdvice.SourceDetail(annotation.Source))}. Configure the "
-                + $"service where it actually runs, drop the configuration, or "
+                $"{opening} — {Raw.Escaped(OutOfBandSourceAdvice.SourceDetail(annotation.Source))}. "
+                + $"{Raw.Escaped(OutOfBandSourceAdvice.ConfigureInsteadClause(annotation.Source))}, or "
                 + $"{Raw.Literal(OutOfBandSourceAdvice.SwitchSource)}.");
         }
 
