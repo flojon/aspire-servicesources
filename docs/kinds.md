@@ -204,28 +204,29 @@ an endpoint named `https` instead of `http`, so `catalog.GetServiceEndpoint()` r
 `catalog.GetEndpoint("https")` works directly; see
 [naming a service's endpoint](configuration.md#naming-a-services-endpoint). Getting the app itself to actually
 serve TLS is a framework concern the `java:` block deliberately stays out of — reach it from the
-AppHost with `Unwrap<JavaAppExecutableResource>()`, most often paired with Aspire's own
+AppHost with `Unwrap<JavaAppExecutableResource>(...)`, most often paired with Aspire's own
 `WithHttpsCertificateConfiguration` to hand the service the developer certificate without
 hardcoding a path.
 
 **Reaching the rest of the Java integration.** The `java:` block covers how to start the app; it
 deliberately doesn't mirror every modifier the Community Toolkit offers. Anything else is reachable
-from the AppHost with `Unwrap<JavaAppExecutableResource>()`, which hands back the real resource
-builder:
+from the AppHost with `Unwrap<JavaAppExecutableResource>(...)`, which hands the delegate the real
+resource builder:
 
 ```csharp
 builder.AddService("catalog")
-    .Unwrap<JavaAppExecutableResource>()
-    .WithMavenBuild()                      // compile before starting
-    .WithJvmArgs(["-Xmx512m"])
-    .WithOtelAgent("/path/to/opentelemetry-javaagent.jar");
+    .Unwrap<JavaAppExecutableResource>(java => java
+        .WithMavenBuild()                  // compile before starting
+        .WithJvmArgs(["-Xmx512m"])
+        .WithOtelAgent("/path/to/opentelemetry-javaagent.jar"))
+    .WithEnvironment("CATALOG_MODE", "dev");
 ```
 
-Prefer the native vocabulary `ServiceResource` already exposes (`WithEnvironment`, `WithReference`,
-`WithArgs`, `WithEndpoint`/`WithHttpEndpoint`/`WithHttpsEndpoint`, `WaitFor`/`WaitForCompletion`) for anything that
-should survive a developer switching that service to a non-`local` source — `Unwrap<T>()` throws if
-the service no longer resolves to a Java resource, which is the point when the AppHost genuinely
-requires one.
+This survives a developer switching `catalog` to any other source in their own
+`servicesources.local.json`: when it no longer resolves to a Java resource, the delegate is skipped
+and the skip is logged at startup. The parameterless `Unwrap<JavaAppExecutableResource>()` returns
+the builder directly but throws in that case — use it only where the AppHost genuinely requires a
+Java resource. See [configuring a resolved service](configuration.md#configuring-a-resolved-service).
 
 `UseJava()`/`useJava()` (also exported to Aspire's Type System for a TypeScript AppHost) is
 **obsolete** — `java` resolves without it, and calling it registers an instance of the same
