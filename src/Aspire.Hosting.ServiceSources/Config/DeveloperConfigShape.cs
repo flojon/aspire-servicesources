@@ -200,17 +200,32 @@ internal sealed class DeveloperConfigShape
     /// </exception>
     public void ValidateSourceName(Raw label, string value)
     {
-        // Retired, not unknown: a catalog's defaultSource/WithDefaultSource("local") deserves the
-        // same named migration AddService's dispatch gives a developer's source: "local", rather than
-        // the generic "not a valid source" message below. label already names which caller this is.
-        ThrowIfRetiredSource(label, value, Raw.Literal("Change it to 'repository'."));
-
         if (!SourceNames.Contains(value))
         {
+            // Retired, not unknown: a catalog's defaultSource/WithDefaultSource("local") deserves the
+            // same named migration AddService's dispatch gives a developer's source: "local", rather
+            // than the generic message below. Only where the value is not a source of this shape —
+            // a backing service's "local" is its own, current, default source.
+            ThrowIfRetiredSource(label, value, Raw.Literal("Change it to 'repository'."));
+
             throw ServiceSourcesConfigurationException.For(
                 $"{label} is not a valid source. Expected one of: {Raw.Join(", ", SourceNames.Select(Raw.Escaped))}.");
         }
     }
+
+    /// <summary>
+    /// The source to suggest for a value written where a whole entry was expected: the value itself
+    /// if this shape has it, <c>"repository"</c> for the retired <c>"local"</c> this shape no longer
+    /// has, or <see langword="null"/> when it names no source.
+    /// </summary>
+    public string? SuggestedSourceFor(string value) =>
+        SourceNames.Contains(value) ? value
+        : string.Equals(value, RetiredSource, StringComparison.OrdinalIgnoreCase) ? RetiredSourceReplacement
+        : null;
+
+    private const string RetiredSource = "local";
+
+    private const string RetiredSourceReplacement = "repository";
 
     /// <summary>
     /// Throws the migration error for the retired source name <c>"local"</c>, now <c>"repository"</c>,
@@ -222,7 +237,7 @@ internal sealed class DeveloperConfigShape
     /// <param name="remedy">The fix, in the caller's terms.</param>
     public static void ThrowIfRetiredSource(Raw subject, string value, Raw remedy)
     {
-        if (!string.Equals(value, "local", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(value, RetiredSource, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }

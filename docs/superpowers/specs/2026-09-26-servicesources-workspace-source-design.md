@@ -337,7 +337,13 @@ they don't look like oversights later:
   (`CheckoutRelativePath`: no absolute path, no climbing out with `..`). The catalog is shared,
   cloned configuration; a committed field that could silently send every developer's build outside
   the repository is exactly what confinement exists to prevent elsewhere, and there's no reason
-  `path:` should be the exception.
+  `path:` should be the exception. *Revised after review:* the boundary is the **repository**, not
+  the AppHost directory. The value is still written relative to the AppHost directory, but the usual
+  Aspire layout puts the AppHost in its own project directory (`src/MyApp.AppHost/`) with services
+  beside it, so `../Orders.Api` has to work. The repository root is the nearest directory at or above
+  the AppHost holding a `.git` directory or file (a worktree or submodule has a file); the path is
+  rebased onto it and checked with the same `CheckoutRelativePath` rules. With no `.git` found, the
+  AppHost directory is the boundary.
 - **A developer's own override**, in their personal `servicesources.local.json`, stays **unconfined**
   — exactly like `local.path` today (F2), which can point anywhere on disk. This is what continues to
   serve the case `local.path` was originally built for: a developer's own out-of-tree clone of a
@@ -368,8 +374,10 @@ F4 rules out the default mode. `WithPrepare`/`prepare:` on a `path`-sourced serv
 *Revised after review:* an *unwritten* mode means `once` for a `path` service rather than being
 refused. A catalog `prepare:` with no `mode` is the common shape and correct for the `"repository"`
 source the same entry may serve; refusing the default made the `"path"` source unusable on such an
-entry for a mode nobody wrote. A written catalog `oncePerCommit` is still refused, and that message
-offers `path.prepare.mode` as the developer's own override alongside changing the catalog. A grouped
+entry for a mode nobody wrote. *Revised again:* a *written* catalog `oncePerCommit` is read as
+`once` too, for the same reason — it is right for the `"repository"` source on the same entry, and
+refusing it failed every developer who picked `"path"`. Only a developer's own
+`path.prepare.mode: oncePerCommit` is refused, with the message above. A grouped
 service does not inherit its shared repository's `prepare` under `"path"`: that step belongs at the
 root of the group's checkout, not in one member's directory once per member.
 
@@ -377,7 +385,10 @@ The marker reuses the existing `local.path` home (F2): `<AppHostDirectory>/.serv
 <service>.json`, keyed on the resolved path and the command. Unlike a developer's personal
 *override*, a **catalog-declared** `path:`'s own `prepare:` block is not ignored — there is no
 "someone else's directory" to protect, so it runs the same way `"repository"`'s catalog `prepare:`
-runs for a managed checkout. Two services sharing one resolved path serialize their `prepare` under a
+runs for a managed checkout. A developer's `path.path` override is the exception, exactly like
+`local.path`: it points at their own working tree, so the catalog's block is not inherited there and
+the same startup notice names the command to declare as `path.prepare` (naming `path.path`, not
+`local.path`, as the reason). Two services sharing one resolved path serialize their `prepare` under a
 lock keyed on that absolute path, the same discipline `CheckoutNameLock` gives managed checkouts
 today (`Git/LocalGitCheckout.cs:157`).
 
@@ -392,9 +403,12 @@ proposal exists to remove. So:
   change meaning under the old spelling, so it's safe to leave functional indefinitely, only a
   warning is owed:
 
-  > Service 'orders': 'local.path' is deprecated. Set 'source': 'path' and 'path':
-  > '../services/orders' instead — same behavior (no clone, no ref), as a first-class source rather
-  > than a hidden mode of 'repository'.
+  > Service 'orders': 'local.path' is deprecated. Use the 'path' source instead: "source": "path",
+  > "path": { "path": "../services/orders" } — which resolves the directory the same way, with no
+  > clone and no ref.
+
+  A JSON snippet, escaped the same way the file needs it, so it can be pasted as written. When a
+  `local.prepare` block is declared, the notice also says to move it to `path.prepare`.
 - Following this project's own precedent (F9): a CHANGELOG `### Deprecated` entry naming the
   replacement, no committed removal version. `UseJava()`/`UseJavaScript()` were deprecated the same
   way in 0.6.0 and are still present, still working, on `main` today — nothing here should promise a
@@ -538,7 +552,7 @@ own catalog block.
   all resolve against a `path` `repoRoot` unchanged from their existing checkout-based tests
   (parametrizing existing kind tests over the source rather than writing new ones).
 - `ref`/`local.ref`-equivalent rejected on a `path` service, naming why.
-- `prepare`: `oncePerCommit` rejected with the F4 message; `once`/`always` markers keyed on path
+- `prepare`: a developer's `oncePerCommit` rejected with the F4 message, a catalog's read as `once`; `once`/`always` markers keyed on path
   reused correctly; two services sharing one resolved path serialize their `prepare` under one lock.
 - `defaultSource: path` resolves with no `servicesources.local.json` entry at all.
 - `UseDeferredCheckout()` present has no effect on a `path` service (asserted so the exemption can't

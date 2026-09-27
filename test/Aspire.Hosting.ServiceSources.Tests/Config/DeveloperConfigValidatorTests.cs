@@ -1,6 +1,7 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Messages;
 using Microsoft.Extensions.Configuration;
 using System.Globalization;
 using System.Reflection;
@@ -900,6 +901,28 @@ public class DeveloperConfigValidatorTests
         // placeholder the developer has to fill in again.
         Assert.Contains("""{ "source": "repository" }""", ex.Message);
         Assert.DoesNotContain("configures no services", ex.Message);
+    }
+
+    /// <remarks>
+    /// The retired source name written as the whole entry: the suggestion is its replacement, not a
+    /// placeholder and not the name that would fail again on the next run.
+    /// </remarks>
+    [Fact]
+    public void Validate_ServiceEntryWrittenAsTheRetiredLocal_SuggestsRepository()
+    {
+        var ex = Load("""{ "services": { "orders": "local" } }""");
+
+        Assert.Contains("""{ "source": "repository" }""", ex.Message);
+    }
+
+    /// <remarks>
+    /// A backing service's <c>"local"</c> is its own, current source — nothing retired about it.
+    /// </remarks>
+    [Fact]
+    public void BackingServiceShape_Local_IsAValidSourceName()
+    {
+        DeveloperConfigShape.BackingService.ValidateSourceName(Raw.Literal("Backing service 'db': source 'local'"), "local");
+        Assert.Equal("local", DeveloperConfigShape.BackingService.SuggestedSourceFor("local"));
     }
 
     /// <remarks>

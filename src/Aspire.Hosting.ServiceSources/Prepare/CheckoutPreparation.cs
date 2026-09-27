@@ -58,6 +58,41 @@ internal static class CheckoutPreparation
     /// composition never reaches would never be read.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// Runs <paramref name="step"/> for a service being resolved now — in run mode only — or, outside
+    /// run mode, reports the skip where the step would actually have run. Shared by every source that
+    /// prepares a directory eagerly, so the gate and its notice stay one rule.
+    /// </summary>
+    /// <remarks>
+    /// Run mode only: publish composes the model and exits, and a bootstrap produces what a service
+    /// needs in order to run rather than anything a manifest depends on. The skip is reported only
+    /// where the step would have run — a warm checkout whose marker already satisfies it was not going
+    /// to run one anyway. Output is wrapped so the console keeps every line live and a capped copy also
+    /// lands in the service's own resource log (see <see cref="BufferingPrepareOutputSink"/>).
+    /// </remarks>
+    public static void RunOrReportSkip(
+        IDistributedApplicationBuilder builder,
+        string serviceName,
+        Raw label,
+        string checkoutName,
+        PrepareStep step,
+        string repoRoot,
+        bool managedCheckout,
+        IGitClient gitClient,
+        IPrepareCommandRunner runner)
+    {
+        if (builder.ExecutionContext.IsRunMode)
+        {
+            Run(
+                serviceName, label, checkoutName, step, repoRoot, builder.AppHostDirectory, managedCheckout,
+                gitClient, runner, BufferingPrepareOutputSink.Wrap(builder, serviceName, ConsolePrepareOutputSink.Instance));
+        }
+        else if (WouldRun(serviceName, step, repoRoot, builder.AppHostDirectory, managedCheckout, gitClient))
+        {
+            ConsolePrepareOutputSink.Instance.Report(SkippedOutsideRunModeNotice(serviceName, step));
+        }
+    }
+
     public static Raw SkippedOutsideRunModeNotice(string serviceName, PrepareStep step) =>
         Raw.Compose($"{Tag(serviceName)} Not running the prepare step '{RedactedDescribe(step)}': this AppHost is composing a "
             + $"manifest rather than running anything, and a bootstrap produces what the service needs in order to "
@@ -213,9 +248,11 @@ internal static class CheckoutPreparation
         var checkoutPath = managedCheckout ? null : PrepareMarker.NormalizeCheckoutPath(repoRoot);
 
         // Read after the checkout has been reconciled onto its configured ref, so this is the commit
-        // the step actually runs against. Not read at all under `always`, which consults no marker
-        // and writes none, so there is nothing for it to be compared with or recorded in.
-        var commit = step.Mode == PrepareMode.Always ? null : gitClient.GetHeadCommitSha(repoRoot);
+        // the step actually runs against. Read only under `oncePerCommit`, the one mode that compares
+        // it: `once` never does (see PrepareMarker.Satisfies), and `always` consults no marker at all.
+        // Reading it anyway would shell out to git for a value nothing uses — and fail outright on a
+        // machine with no git, which a 'path' service is documented not to need.
+        var commit = step.Mode == PrepareMode.OncePerCommit ? gitClient.GetHeadCommitSha(repoRoot) : null;
 
         return new Decision(
             ReasonToRun(step, markerPath, commit, checkoutPath), markerPath, checkoutPath, commit);

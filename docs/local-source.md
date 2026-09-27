@@ -671,10 +671,14 @@ in the other sources doc: one developer clones the service, another uses the cop
 have, same catalog entry either way.
 
 **Confinement depends on who wrote the value.** A catalog's own `path:` is committed, shared
-configuration, so it's confined to inside the AppHost directory — the same rule `project:` and
-`java.jarPath` already follow: no absolute path, no climbing out with `..`. Your own override, set
-in `servicesources.local.json`, is unconfined instead — it's your own machine and directory,
-exactly like `local.path` is today for a `"repository"` service:
+configuration, so it's confined to the repository the AppHost lives in: no absolute path, and no
+climbing out of that repository with `..`. It's still written relative to the AppHost directory, and
+may climb *out of that directory* — the usual layout, with the AppHost in `src/MyApp.AppHost/` and
+its services beside it, needs `path: ../Orders.Api`. The repository is the nearest directory at or
+above the AppHost holding a `.git` directory or file; with none (the AppHost isn't in a git
+repository at all), the AppHost directory itself is the boundary. Your own override, set in
+`servicesources.local.json`, is unconfined instead — it's your own machine and directory, exactly
+like `local.path` is today for a `"repository"` service:
 
 ```json
 {
@@ -693,16 +697,19 @@ there's no `path.ref`. A `local.ref` is not read — `local` is the `"repository
 like any block for a source that isn't selected it survives but nothing reads it, so one left in a
 lower configuration layer doesn't stop a higher layer switching the service to `"path"`.
 
-**`prepare` accepts `once`, `always` and `never` — never `oncePerCommit`.** There's no separate
+**`prepare` runs as `once`, `always` or `never` — never `oncePerCommit`.** There's no separate
 commit for this directory to move to on its own, so a `mode` left out means `once` here (re-run only
-when the command changes) rather than the `oncePerCommit` it means for `"repository"` — a catalog
-`prepare:` with no `mode`, the common shape, works for both sources on the same entry. A *written*
-`oncePerCommit` is refused, naming the block it was written in; if that's the catalog's (right for
-`"repository"`), set `path.prepare.mode` to `once` or `always` for this service in
-`servicesources.local.json`. Unlike a `local.path` override — whose catalog `prepare:` block is
-ignored, with a startup notice asking you to declare your own (see the `"repository"` source's
-`prepare` section above) — a catalog-declared `path:`'s own `prepare:` block runs normally: there's
-no "someone else's directory" here to protect. Two services sharing one resolved `path` serialize
+when the command changes) rather than the `oncePerCommit` it means for `"repository"`. A catalog
+`prepare:` that writes `mode: oncePerCommit` is read as `once` too: that mode is right for the
+`"repository"` source the same entry may also serve, so it isn't an error to reject for every
+developer who picks `"path"`. A `path.prepare.mode: oncePerCommit` you write yourself is refused,
+naming `once` and `always` as the alternatives.
+
+A catalog-declared `path:`'s own `prepare:` block runs normally: there's no "someone else's
+directory" here to protect. A `path.path` override is the exception, exactly like `local.path`: it
+points at your own working tree, which nothing establishes is a checkout of what the catalog names,
+so the catalog's step is not run there — a startup notice shows the command, ready to paste into
+your own `path.prepare` block. Only a `path.prepare` you declare runs in that directory. Two services sharing one resolved `path` serialize
 their step rather than run it concurrently. The marker lives where a `local.path` override's does,
 `<AppHostDirectory>/.servicesources/prepare/<service>.json`, keyed on the resolved path and the
 command.
@@ -734,7 +741,8 @@ Two services naming the same resolved `path` are just two entries pointing at on
 **`local.path` is deprecated.** It resolves a directory the same way — no clone, no ref — reachable
 a second, less discoverable way, nested under a source whose other machinery it never touches. It
 keeps working exactly as it does today, and a startup notice says once to use
-`"source": "path"` with `"path": { "path": "..." }` instead. Two things differ, and the notice
-names each where it applies: `local.prepare` isn't read under `"path"` (move it to `path.prepare`),
-and the catalog's own `prepare:` step, which `local.path` ignores, runs there.
+`"source": "path"` with `"path": { "path": "..." }` instead — a JSON snippet with your own directory
+in it, ready to paste. The one thing that doesn't carry over by itself is a `local.prepare` block:
+it isn't read under `"path"`, so the notice says to move it to `path.prepare` when you have one. The
+catalog's own `prepare:` step still isn't run in your directory, under either spelling.
 

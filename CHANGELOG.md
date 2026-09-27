@@ -62,12 +62,16 @@ never existed. Check the tag of the last release before adding one.
   freely with `repository:`/`url:`/`container:`/`kubernetes:` on one entry — see
   [Combining sources on one catalog entry](docs/other-sources.md#combining-sources-on-one-catalog-entry)
   — so one developer can clone the service while another uses the copy they already have. A
-  catalog-declared `path:` is confined to inside the AppHost directory, the same rule `project:`
-  follows; a developer's own override (`path.path` in `servicesources.local.json`) is unconfined,
-  exactly like `local.path` today. `prepare` accepts `once`/`always`/`never` — never
-  `oncePerCommit`, since there's no separate commit for the directory to move to on its own, so an
-  unwritten `mode` means `once` there — and, unlike a `local.path` override, a catalog-declared
-  `path:`'s own `prepare:` block runs normally rather than being ignored. See [the `"path"` source](docs/local-source.md#path-source) for the
+  catalog-declared `path:` is written relative to the AppHost directory and confined to the
+  repository the AppHost lives in (the nearest directory holding `.git`), so `../Orders.Api` beside a
+  `src/MyApp.AppHost/` works while an absolute path or one climbing out of the repository is refused;
+  a developer's own override (`path.path` in `servicesources.local.json`) is unconfined, exactly like
+  `local.path` today. `prepare` runs as `once`/`always`/`never` — never `oncePerCommit`, since there's
+  no separate commit for the directory to move to on its own, so an unwritten `mode`, or a catalog's
+  `oncePerCommit` written for the `"repository"` source on the same entry, means `once` there. A
+  catalog-declared `path:`'s own `prepare:` block runs normally; under a `path.path` override it is
+  not run, exactly as under `local.path`, and a startup notice shows the command to declare as your
+  own `path.prepare`. See [the `"path"` source](docs/local-source.md#path-source) for the
   full behavior, including `defaultSource: path` and its (lack of) interaction with
   `UseDeferredCheckout()` and `repositories:` grouping.
 - **A `"disabled"` source for `AddService`.** Turns a service off — `AddService("orders")` still
@@ -89,14 +93,14 @@ never existed. Check the tag of the last release before adding one.
 
   ```
   warn: Aspire.Hosting.ServiceSources
-        Service 'orders': 'local.path' is deprecated. Use the 'path' source instead — set
-        'source': 'path' and 'path': { 'path': '../services/orders' }, which also resolves the
-        directory with no clone and no ref.
+        Service 'orders': 'local.path' is deprecated. Use the 'path' source instead:
+        "source": "path", "path": { "path": "/home/dev/code/orders" } — which resolves the
+        directory the same way, with no clone and no ref.
   ```
 
-  Two things don't carry over, and the notice names each where it applies: a `local.prepare` block
-  isn't read under `"path"` (move it to `path.prepare`), and the catalog's own `prepare` step —
-  ignored under `local.path` — runs there (declare `path.prepare` with `mode: never` to keep it off).
+  A `local.prepare` block doesn't carry over by itself — it isn't read under `"path"` — so when one
+  is declared the notice also says to move it to `path.prepare`. The catalog's own `prepare` step is
+  not run in the directory under either spelling.
 
 ## [0.6.0] - 2026-09-24
 

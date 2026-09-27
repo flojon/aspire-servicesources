@@ -1890,6 +1890,41 @@ public class LocalProjectSourceTests
             $"ServiceSources__Services__{ServiceName}__Source", ex.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Without a catalog <c>path:</c>, the <c>"path"</c> remedy also needs the developer's own
+    /// directory; with one, switching the source is all it takes — asking for a <c>path.path</c>
+    /// there would send the developer to override a directory the catalog already names.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("services/orders")]
+    public void Resolve_LocalOnRepositorylessEntry_OffersThePathSourceInTheCatalogsTerms(string? catalogPath)
+    {
+        var definition = new ServiceMetadata
+        {
+            Repository = "",
+            Path = catalogPath,
+            Project = "Orders.csproj",
+            Kind = LocalKinds.Dotnet,
+            Url = new UrlMetadata { Url = "https://orders.example.com" },
+        }.ToDefinition("servicesources.yaml", ServiceName, TestHelpers.EmptyRepositories);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new FakeGitClient()).Resolve(
+                PlainBuilder(), ServiceName, definition, DevConfig()));
+
+        Assert.Contains($"ServiceSources:Services:{ServiceName}:source' to 'path'", ex.Message, StringComparison.Ordinal);
+        if (catalogPath is null)
+        {
+            Assert.Contains(":path:path", ex.Message, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.Contains("already gives it a 'path'", ex.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain(":path:path", ex.Message, StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     public void Resolve_LocalOnContainerOnlyEntry_ReportsTheMissingRepositoryRatherThanTheMissingProject()
     {

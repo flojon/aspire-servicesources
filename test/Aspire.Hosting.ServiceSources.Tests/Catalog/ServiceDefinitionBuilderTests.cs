@@ -156,7 +156,7 @@ public class ServiceDefinitionBuilderTests
     }
 
     [Fact]
-    public void WithDefaultSource_InvalidValue_ThrowsNamingTheFiveValues()
+    public void WithDefaultSource_InvalidValue_ThrowsNamingTheSixValues()
     {
         var chain = new ServiceCatalogBuilder().AddService("orders")
             .WithRepository("https://github.com/example/repo");
@@ -170,6 +170,7 @@ public class ServiceDefinitionBuilderTests
         Assert.Contains("url", ex.Message, StringComparison.Ordinal);
         Assert.Contains("kubernetes", ex.Message, StringComparison.Ordinal);
         Assert.Contains("container", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("path", ex.Message, StringComparison.Ordinal);
         Assert.Contains("disabled", ex.Message, StringComparison.Ordinal);
     }
 

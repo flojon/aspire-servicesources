@@ -922,26 +922,24 @@ public class AddServiceTests
 
         var notice = Assert.Single(warnings, w =>
             w.Contains("'local.path' is deprecated", StringComparison.Ordinal)
-            && w.Contains("Service 'orders'", StringComparison.Ordinal)
-            && w.Contains("'source': 'path'", StringComparison.Ordinal));
+            && w.Contains("Service 'orders'", StringComparison.Ordinal));
 
-        // 'path' is a block, so the remedy has to name path.path — a bare 'path': '...' would be
-        // refused by the config validator.
-        Assert.Contains("'path': { 'path': '", notice, StringComparison.Ordinal);
+        // A snippet meant to be pasted into servicesources.local.json: valid JSON, 'path' as a block
+        // (a bare "path": "..." is refused by the config validator), and the directory escaped the
+        // way JSON escapes it — so a Windows path's backslashes arrive intact.
+        Assert.Contains(
+            $"\"source\": \"path\", \"path\": {{ \"path\": \"{escapedProjectDir}\" }}", notice, StringComparison.Ordinal);
 
-        // Neither caveat applies: no local.prepare to move, and no catalog prepare that would start
-        // running under the 'path' source.
         Assert.DoesNotContain("local.prepare", notice, StringComparison.Ordinal);
-        Assert.DoesNotContain("the catalog's 'prepare' step", notice, StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// The notice says what does not carry over to the 'path' source, where it applies: a
-    /// local.prepare block is not read there, and the catalog's prepare step — ignored under
-    /// local.path — runs.
+    /// The one thing that does not carry over to a path.path override: a local.prepare block, which
+    /// is not read under the 'path' source. The catalog's own prepare step is ignored under both, so
+    /// the notice has nothing to say about it.
     /// </summary>
     [Fact]
-    public async Task AddService_LocalPathOverrideWithPrepareBlocks_DeprecationNoticeNamesWhatDoesNotCarryOver()
+    public async Task AddService_LocalPathOverrideWithPrepareBlocks_DeprecationNoticeNamesOnlyLocalPrepare()
     {
         var projectDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(projectDir, "Orders.csproj"), """
@@ -974,7 +972,7 @@ public class AddServiceTests
 
         var notice = Assert.Single(warnings, w => w.Contains("'local.path' is deprecated", StringComparison.Ordinal));
         Assert.Contains("Move this service's 'local.prepare' block to 'path.prepare'", notice, StringComparison.Ordinal);
-        Assert.Contains("the catalog's 'prepare' step", notice, StringComparison.Ordinal);
+        Assert.DoesNotContain("the catalog's 'prepare' step", notice, StringComparison.Ordinal);
     }
 
     /// <summary>

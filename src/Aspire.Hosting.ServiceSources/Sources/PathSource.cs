@@ -24,10 +24,12 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// reused unchanged through <see cref="LocalProjectSource"/>'s own internal helpers.
 /// </para>
 /// <para>
-/// A catalog-declared <c>path:</c> is confined to inside the AppHost directory, the same rule
-/// <c>project:</c>/<c>java.jarPath</c> already follow; a developer's own <c>path.path</c> override is
-/// unconfined, exactly like <c>local.path</c> today — it is the developer's own machine and directory
-/// (design "Confinement differs by who wrote the value").
+/// A catalog-declared <c>path:</c> is relative to the AppHost directory and confined to the repository
+/// that holds it — the nearest ancestor with a <c>.git</c> entry, or the AppHost directory itself
+/// outside any repository — so the usual layout, an AppHost project beside its services
+/// (<c>../Orders.Api</c>), can be declared. A developer's own <c>path.path</c> override is unconfined,
+/// exactly like <c>local.path</c> today — it is the developer's own machine and directory (design
+/// "Confinement differs by who wrote the value").
 /// </para>
 /// </remarks>
 internal sealed class PathSource(IGitClient? gitClient = null, IPrepareCommandRunner? prepareRunner = null)
@@ -72,8 +74,8 @@ internal sealed class PathSource(IGitClient? gitClient = null, IPrepareCommandRu
 
     /// <summary>
     /// The directory this service resolves to: a developer's own override if they set one — unconfined,
-    /// exactly like <c>local.path</c> today — or the catalog's own <c>path:</c>, confined to inside the
-    /// AppHost directory.
+    /// exactly like <c>local.path</c> today — or the catalog's own <c>path:</c>, relative to the AppHost
+    /// directory and confined to the repository around it.
     /// </summary>
     /// <remarks>
     /// There is no <c>ref</c> for a <c>"path"</c> service (design finding 3), and a leftover
@@ -91,7 +93,7 @@ internal sealed class PathSource(IGitClient? gitClient = null, IPrepareCommandRu
 
         RequireCatalogPath(serviceName, definition);
 
-        ValidateCatalogPath(serviceName, definition.Path!);
+        ValidateCatalogPath(serviceName, definition.Path!, appHostDirectory);
 
         var confined = Path.Combine(appHostDirectory, CheckoutRelativePath.NormalizeSeparators(definition.Path!));
 
@@ -127,39 +129,69 @@ internal sealed class PathSource(IGitClient? gitClient = null, IPrepareCommandRu
         throw ServiceSourcesConfigurationException.For(
             $"Service '{new Name(serviceName)}' source is 'path' but {Raw.Origin(definition.Origin)} gives it no "
             + $"directory to use. Either give its catalog entry a 'path' (or WithPath(...) in code), or set "
-            + $"'{serviceKey}:path:path' to a directory you already have on disk. The key is '{serviceKey}:source', "
-            + $"which any configuration layer can set: {Raw.Literal(DeveloperConfiguration.FileName)}, appsettings, "
-            + $"user secrets, the environment variable {Raw.Escaped(DeveloperConfiguration.EnvironmentVariableFor(serviceName))}, "
-            + $"or the command line.");
+            + $"'{serviceKey}:path:path' to a directory you already have on disk. "
+            + $"{LocalProjectSource.WhereTheSourceCanBeSet(serviceName)}");
     }
 
     /// <summary>
-    /// The confinement a catalog-declared <c>path:</c> gets — the same lexical rule
-    /// <see cref="LocalProjectSource.ValidateProject"/> applies to <c>project:</c>: no absolute path,
-    /// no climbing out with <c>..</c>. A developer's own <c>path.path</c> override never reaches this
-    /// — see <see cref="ResolveRepoRoot"/>.
+    /// The confinement a catalog-declared <c>path:</c> gets: never absolute, no segment made only of
+    /// dots and spaces, and — read from the AppHost directory — never climbing out of the repository
+    /// that holds it. A developer's own <c>path.path</c> override never reaches this — see
+    /// <see cref="ResolveRepoRoot"/>.
     /// </summary>
-    private static void ValidateCatalogPath(string serviceName, string path)
+    /// <remarks>
+    /// Still lexical, like every other confinement here: the value is judged by joining it to the
+    /// AppHost directory's own position inside the repository, so <c>../Orders.Api</c> from
+    /// <c>src/MyApp.AppHost</c> is <c>src/Orders.Api</c> — inside — while a climb past the repository
+    /// root is refused. The repository is only located, never resolved against.
+    /// </remarks>
+    private static void ValidateCatalogPath(string serviceName, string path, string appHostDirectory)
     {
-        switch (CheckoutRelativePath.FirstBreach(path))
+        var appHost = Path.TrimEndingDirectorySeparator(Path.GetFullPath(appHostDirectory));
+        var repositoryRoot = RepositoryRootOf(appHost);
+        var appHostWithinRepository = Path.GetRelativePath(repositoryRoot, appHost);
+
+        // Absolute and unusable-segment are facts about the value as written; only climbing out needs
+        // the AppHost's own depth inside the repository to judge.
+        var breach = CheckoutRelativePath.FirstBreach(path) is { Kind: not ConfinementBreachKind.EscapesRoot } asWritten
+            ? asWritten
+            : CheckoutRelativePath.FirstBreach(Path.Join(appHostWithinRepository, path));
+
+        var root = string.Equals(repositoryRoot, appHost, StringComparison.Ordinal)
+            ? Raw.Compose($"the AppHost directory '{Raw.Escaped(repositoryRoot)}'")
+            : Raw.Compose($"the repository at '{Raw.Escaped(repositoryRoot)}'");
+
+        LocalProjectSource.ThrowIfBreached(
+            serviceName, "path", path, breach,
+            outside: root,
+            inside: root,
+            absoluteReason: Raw.Literal("A catalog-declared 'path' has to be relative to the AppHost directory — it names "
+                + "a directory the repository commits, not one sitting elsewhere on a developer's machine. To point at a "
+                + "directory outside the repository, use a developer override instead: 'path.path' in "
+                + "servicesources.local.json."));
+    }
+
+    /// <summary>
+    /// The repository <paramref name="appHostDirectory"/> sits in: the nearest ancestor (itself
+    /// included) holding a <c>.git</c> entry — a directory, or the file a worktree or submodule has —
+    /// or <paramref name="appHostDirectory"/> itself when there is none, which keeps an AppHost outside
+    /// any repository confined to its own directory.
+    /// </summary>
+    internal static string RepositoryRootOf(string appHostDirectory)
+    {
+        var start = Path.TrimEndingDirectorySeparator(Path.GetFullPath(appHostDirectory));
+
+        for (var directory = new DirectoryInfo(start); directory is not null; directory = directory.Parent)
         {
-            case { Kind: ConfinementBreachKind.Absolute }:
-                throw ServiceSourcesConfigurationException.For(
-                    $"Service '{new Name(serviceName)}': path '{Raw.Escaped(path)}' is an absolute path. A catalog-declared "
-                    + $"'path' has to be relative to the AppHost directory — it names a directory the repository "
-                    + $"commits, not one sitting elsewhere on a developer's machine. To point at a directory outside "
-                    + $"the repository, use a developer override instead: 'path.path' in servicesources.local.json.");
+            var gitEntry = Path.Combine(directory.FullName, ".git");
 
-            case { Kind: ConfinementBreachKind.UnusableSegment, Segment: var unusable }:
-                throw ServiceSourcesConfigurationException.For(
-                    $"Service '{new Name(serviceName)}': path '{Raw.Escaped(path)}' has a path segment '{new Name(unusable)}' — "
-                    + $"{CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy}");
-
-            case { Kind: ConfinementBreachKind.EscapesRoot }:
-                throw ServiceSourcesConfigurationException.For(
-                    $"Service '{new Name(serviceName)}': path '{Raw.Escaped(path)}' points outside the AppHost directory. "
-                    + $"It must stay within the repository.");
+            if (Directory.Exists(gitEntry) || File.Exists(gitEntry))
+            {
+                return Path.TrimEndingDirectorySeparator(directory.FullName);
+            }
         }
+
+        return start;
     }
 
     /// <summary>
@@ -170,7 +202,8 @@ internal sealed class PathSource(IGitClient? gitClient = null, IPrepareCommandRu
     /// managed checkout gets from <see cref="LocalProjectSource"/>.
     /// </summary>
     /// <remarks>
-    /// Only an ungrouped service's own block is inherited. A grouped service's
+    /// Only a catalog-declared <c>path:</c> inherits the catalog's block; a <c>path.path</c> override
+    /// does not (see the body). And only an ungrouped service's own block is inherited. A grouped service's
     /// <c>definition.Repository.Prepare</c> is the shared repository's step, written to run once at
     /// the root of the group's shared checkout — not in one member's directory, once per member, which
     /// is all a <c>"path"</c> service could offer it. So a grouped <c>"path"</c> service inherits
@@ -182,34 +215,28 @@ internal sealed class PathSource(IGitClient? gitClient = null, IPrepareCommandRu
     {
         var catalogPrepare = LocalGitCheckout.IsGrouped(definition, serviceName) ? null : definition.Repository.Prepare;
 
-        var plan = PreparePlan.ForCatalogPath(
-            serviceName, catalogPrepare, config.Path.Prepare, OperatingSystem.IsWindows());
+        // A developer's own path.path points at their working tree, anywhere on disk, which nothing
+        // establishes is a checkout of the repository the catalog names — so, exactly as for
+        // local.path, the catalog's step is not run there; only one the developer declares is.
+        var plan = config.Path.Path is not null
+            ? PreparePlan.ForPathOverride(serviceName, catalogPrepare, config.Path.Prepare, OperatingSystem.IsWindows())
+            : PreparePlan.ForCatalogPath(serviceName, catalogPrepare, config.Path.Prepare, OperatingSystem.IsWindows());
+
+        if (plan.IgnoredCatalogNotice is { } ignored)
+        {
+            ServiceSourcesWarnings.For(builder).AddNotice(ignored);
+        }
 
         if (plan.Step is not { } step)
         {
             return;
         }
 
-        var lockKey = PrepareMarker.NormalizeCheckoutPath(repoRoot);
-
-        using (CheckoutNameLock.For(builder).Acquire(lockKey))
+        using (CheckoutNameLock.For(builder).Acquire(PrepareMarker.NormalizeCheckoutPath(repoRoot)))
         {
-            // Run mode only — same gate LocalProjectSource applies, and for the same reason: publish
-            // mode composes the model and exits, and a bootstrap produces what a service needs in
-            // order to run rather than anything a manifest depends on.
-            if (builder.ExecutionContext.IsRunMode)
-            {
-                CheckoutPreparation.Run(
-                    serviceName, PreparePlan.ServiceLabel(serviceName), serviceName, step, repoRoot,
-                    builder.AppHostDirectory, managedCheckout: false, _gitClient, _prepareRunner,
-                    BufferingPrepareOutputSink.Wrap(builder, serviceName, ConsolePrepareOutputSink.Instance));
-            }
-            else if (CheckoutPreparation.WouldRun(
-                serviceName, step, repoRoot, builder.AppHostDirectory, managedCheckout: false, _gitClient))
-            {
-                ConsolePrepareOutputSink.Instance.Report(
-                    CheckoutPreparation.SkippedOutsideRunModeNotice(serviceName, step));
-            }
+            CheckoutPreparation.RunOrReportSkip(
+                builder, serviceName, PreparePlan.ServiceLabel(serviceName), serviceName, step, repoRoot,
+                managedCheckout: false, _gitClient, _prepareRunner);
         }
     }
 }

@@ -67,7 +67,13 @@ public class CheckoutPreparationTests
     {
         public string? HeadCommitSha { get; set; } = "1111111111111111111111111111111111111111";
 
-        public string? GetHeadCommitSha(string repositoryPath) => HeadCommitSha;
+        public int HeadCommitReads { get; private set; }
+
+        public string? GetHeadCommitSha(string repositoryPath)
+        {
+            HeadCommitReads++;
+            return HeadCommitSha;
+        }
 
         public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null)
         {
@@ -881,6 +887,25 @@ public class CheckoutPreparationTests
         var ignore = Path.Combine(fixture.AppHostDirectory, ".servicesources", ".gitignore");
         Assert.True(File.Exists(ignore));
         Assert.Contains("*", File.ReadAllText(ignore));
+    }
+
+    /// <summary>
+    /// Only <c>oncePerCommit</c> compares the commit, so only it reads one: a <c>once</c> or
+    /// <c>always</c> step never shells out to git — which a <c>"path"</c> service, documented as
+    /// needing no git at all, may not have.
+    /// </summary>
+    [Theory]
+    [InlineData("once", 0)]
+    [InlineData("always", 0)]
+    [InlineData("oncePerCommit", 1)]
+    public void TheCommitIsReadOnlyWhenTheModeComparesIt(string mode, int expectedReads)
+    {
+        var fixture = NewFixture();
+
+        Run(fixture, Step(mode), managedCheckout: false);
+
+        Assert.Single(fixture.Runner.Runs);
+        Assert.Equal(expectedReads, fixture.Git.HeadCommitReads);
     }
 
     [Fact]

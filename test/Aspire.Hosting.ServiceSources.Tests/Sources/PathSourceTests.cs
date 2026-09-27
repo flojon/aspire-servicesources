@@ -44,6 +44,19 @@ public class PathSourceTests
             run(workingDirectory, command, cancellationToken, onLine);
     }
 
+    private sealed class DelegatePrepareRunnerRecordingCommands : IPrepareCommandRunner
+    {
+        public List<IReadOnlyList<string>> Commands { get; } = [];
+
+        public int Run(
+            string workingDirectory, IReadOnlyList<string> command, CancellationToken cancellationToken,
+            Action<string> onLine)
+        {
+            Commands.Add(command);
+            return 0;
+        }
+    }
+
     private static ServiceDefinition Definition(
         string? path = null, string project = "Orders.csproj", PrepareMetadata? prepare = null,
         string kind = LocalKinds.Dotnet, object? kindConfig = null, string serviceName = ServiceName) =>
@@ -172,6 +185,60 @@ public class PathSourceTests
         Assert.Contains("services/.../orders", ex.Message, StringComparison.Ordinal);
     }
 
+    // === Confinement is to the repository, not the AppHost directory ===
+
+    /// <summary>
+    /// A repository root (a directory holding <c>.git</c>) with the AppHost one level down in its own
+    /// project directory — the usual Aspire layout — and a service beside it.
+    /// </summary>
+    private static string CreateRepositoryWithAppHostBesideTheService(out string repositoryRoot)
+    {
+        repositoryRoot = TempDirectories.CreateSubdirectory().FullName;
+        Directory.CreateDirectory(Path.Combine(repositoryRoot, ".git"));
+        var appHostDir = Directory.CreateDirectory(Path.Combine(repositoryRoot, "src", "MyApp.AppHost")).FullName;
+        var serviceDir = Directory.CreateDirectory(Path.Combine(repositoryRoot, "src", "Orders.Api")).FullName;
+        File.WriteAllText(Path.Combine(serviceDir, "Orders.csproj"), "<Project />");
+        return appHostDir;
+    }
+
+    [Fact]
+    public void Resolve_CatalogPathBesideTheAppHostInsideTheRepository_Resolves()
+    {
+        var appHostDir = CreateRepositoryWithAppHostBesideTheService(out _);
+        var builder = TestHelpers.CreateBuilder(appHostDir);
+
+        var service = new PathSource(new GitCliClient()).Resolve(
+            builder, ServiceName, Definition(path: "../Orders.Api"), DevConfig());
+
+        Assert.IsType<ServiceResource>(service.Resource);
+        Assert.IsAssignableFrom<ProjectResource>(Assert.Single(builder.Resources, r => r.Name == ServiceName));
+    }
+
+    [Fact]
+    public void Resolve_CatalogPathClimbingOutOfTheRepository_IsRefusedNamingTheRepository()
+    {
+        var appHostDir = CreateRepositoryWithAppHostBesideTheService(out var repositoryRoot);
+        var builder = TestHelpers.CreateBuilder(appHostDir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new PathSource(new GitCliClient()).Resolve(
+                builder, ServiceName, Definition(path: "../../../elsewhere"), DevConfig()));
+
+        Assert.Contains("../../../elsewhere", ex.Message, StringComparison.Ordinal);
+        Assert.Contains($"points outside the repository at '{repositoryRoot}'", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RepositoryRootOf_FindsAGitFileAsWellAsAGitDirectory()
+    {
+        // A worktree or submodule has a .git file rather than a directory; it is still a repository root.
+        var repositoryRoot = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(repositoryRoot, ".git"), "gitdir: /elsewhere/.git/worktrees/x");
+        var appHostDir = Directory.CreateDirectory(Path.Combine(repositoryRoot, "src", "MyApp.AppHost")).FullName;
+
+        Assert.Equal(repositoryRoot, PathSource.RepositoryRootOf(appHostDir));
+    }
+
     // === Missing directory ===
 
     [Fact]
@@ -227,25 +294,25 @@ public class PathSourceTests
 
     // === prepare: once/always/never only ===
 
+    /// <summary>
+    /// A catalog <c>oncePerCommit</c> may be right for the <c>"repository"</c> source the same entry
+    /// serves, so under <c>"path"</c> it is read as <c>once</c> rather than failing every developer who
+    /// picks this source.
+    /// </summary>
     [Fact]
-    public void Resolve_PrepareModeOncePerCommitExplicit_IsRejectedWithTheDraftedMessage()
+    public void Resolve_CatalogModeOncePerCommit_IsReadAsOnce()
     {
         var appHostDir = CreateAppHostDirectoryWithService(out _);
-        var builder = TestHelpers.CreateBuilder(appHostDir);
+        var runner = new CountingPrepareRunner();
+        var source = new PathSource(new GitCliClient(), runner);
         var prepare = new PrepareMetadata { Command = ["./prepare.sh"], Mode = "oncePerCommit" };
+        var definition = Definition(path: "services/orders", prepare: prepare);
 
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            new PathSource(new GitCliClient(), new CountingPrepareRunner()).Resolve(
-                builder, ServiceName, Definition(path: "services/orders", prepare: prepare), DevConfig()));
+        source.Resolve(TestHelpers.CreateBuilder(appHostDir), ServiceName, definition, DevConfig());
+        Assert.Equal(1, runner.Runs);
 
-        // Written in the catalog, which may be right for the 'repository' source the same entry
-        // serves, so the developer's own override is offered alongside editing the catalog.
-        Assert.Equal(
-            $"Service '{ServiceName}': prepare.mode 'oncePerCommit' does not apply to a 'path' service — " +
-            "there is no separate commit for this directory to move to on its own. Set path.prepare.mode to " +
-            "'once' (re-run only when the command itself changes) or 'always' (an incremental script that " +
-            "decides its own work) for this service in servicesources.local.json, or change the catalog's mode.",
-            ex.Message);
+        source.Resolve(TestHelpers.CreateBuilder(appHostDir), ServiceName, definition, DevConfig());
+        Assert.Equal(1, runner.Runs);
     }
 
     [Fact]
@@ -293,6 +360,56 @@ public class PathSourceTests
         // 'once': the marker satisfies the unchanged command on the next start.
         source.Resolve(TestHelpers.CreateBuilder(appHostDir), ServiceName, definition, DevConfig());
         Assert.Equal(1, runner.Runs);
+    }
+
+    /// <summary>
+    /// A developer's own <c>path.path</c> points at their working tree, anywhere on disk: exactly as for
+    /// <c>local.path</c>, the catalog's step is not run there, and a notice names the command so they
+    /// can opt in.
+    /// </summary>
+    [Fact]
+    public void Resolve_DeveloperOverrideWithACatalogPrepare_DoesNotRunIt()
+    {
+        var elsewhere = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(elsewhere, "Orders.csproj"), "<Project />");
+        var runner = new CountingPrepareRunner();
+        var prepare = new PrepareMetadata { Command = ["./bootstrap.sh"] };
+
+        new PathSource(new GitCliClient(), runner).Resolve(
+            TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName), ServiceName,
+            Definition(path: "services/orders", prepare: prepare), DevConfig(path: elsewhere));
+
+        Assert.Equal(0, runner.Runs);
+    }
+
+    [Fact]
+    public void ForPathOverride_ACatalogPrepare_IsNotInheritedAndTheNoticeNamesPathPath()
+    {
+        var plan = PreparePlan.ForPathOverride(
+            ServiceName, new PrepareMetadata { Command = ["./bootstrap.sh"] }, developer: null, windows: false);
+
+        Assert.Null(plan.Step);
+        var notice = plan.IgnoredCatalogNotice!.Value.ToString();
+        Assert.Contains("'path.path'", notice, StringComparison.Ordinal);
+        Assert.Contains("\"./bootstrap.sh\"", notice, StringComparison.Ordinal);
+        Assert.DoesNotContain("local.path", notice, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Resolve_DeveloperOverrideWithItsOwnPrepare_RunsOnlyThat()
+    {
+        var elsewhere = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(elsewhere, "Orders.csproj"), "<Project />");
+        var runner = new DelegatePrepareRunnerRecordingCommands();
+        var catalogPrepare = new PrepareMetadata { Command = ["./bootstrap.sh"] };
+        var developerPrepare = new PrepareDeveloperConfig { Command = ["make", "dev"] };
+
+        new PathSource(new GitCliClient(), runner).Resolve(
+            TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName), ServiceName,
+            Definition(path: "services/orders", prepare: catalogPrepare),
+            DevConfig(path: elsewhere, preparePath: developerPrepare));
+
+        Assert.Equal(["make", "dev"], Assert.Single(runner.Commands));
     }
 
     /// <summary>

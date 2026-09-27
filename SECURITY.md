@@ -70,7 +70,7 @@ entirely (`{ "prepare": { "mode": "never" } }`).
 
 Everything above is about `"repository"`: a **second** repository, controlled by a different team,
 that this tool clones and builds on your machine. A catalog-declared
-[`"path"`](README.md#path-source) service has none of that shape. It names a directory that is
+[`"path"`](docs/local-source.md#path-source) service has none of that shape. It names a directory that is
 already part of this repository — same commit, same code review, same CI as the AppHost itself.
 There is no second repository to pin a ref against, because there is no second repository at all;
 the trust question this document exists to raise doesn't arise for it.
@@ -78,7 +78,9 @@ the trust question this document exists to raise doesn't arise for it.
 A developer's own `path.path` override is the one case that keeps the old story unchanged: it
 points at a directory that isn't necessarily part of this repository at all — your own out-of-tree
 clone of something else, managed however you already manage it. That's exactly what `local.path`
-is today, under a new, first-class name; nothing about the risk moved when the name did.
+is today, under a new, first-class name; nothing about the risk moved when the name did. As with
+`local.path`, the catalog's `prepare` step is never run in that directory — only a `path.prepare`
+step you declare yourself.
 
 ## Reporting a vulnerability
 

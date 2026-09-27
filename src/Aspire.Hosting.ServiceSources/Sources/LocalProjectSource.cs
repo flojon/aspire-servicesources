@@ -63,7 +63,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
             // is deprecated, not removed yet") — a soft deprecation, not a break: the mechanism keeps
             // working exactly as it does today, and only a one-time notice is owed. AddNotice dedupes
             // identical text, so a service resolved more than once in a run reports this only once.
-            ServiceSourcesWarnings.For(builder).AddNotice(LocalPathDeprecationNotice(serviceName, definition, config));
+            ServiceSourcesWarnings.For(builder).AddNotice(LocalPathDeprecationNotice(serviceName, config));
         }
 
         // Whether this service is on its own repository or sharing one with others — the same test
@@ -176,35 +176,14 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
             // precisely the files the step was about to produce. Neither kind knows this exists.
             if (prepare.Step is { } step)
             {
-                // Run mode only, which is the same gate DeferredCheckout.ShouldDefer applies and for
-                // a related reason: publish mode composes the model, writes the manifest and exits,
-                // and a bootstrap produces what a service needs in order to run. Without this,
-                // deferral being refused in publish mode means every "repository" service takes this path,
-                // so an `aspire publish` over a cold checkout pays the full download and import — for
-                // the motivating case, hundreds of megabytes and a multi-minute graph build — to emit
-                // a manifest that describes none of it.
-                if (builder.ExecutionContext.IsRunMode)
-                {
-                    // Wrapped rather than passed straight through: the console keeps every line live,
-                    // exactly as before, and a capped copy also lands in this service's own resource
-                    // log once BeforeStartEvent gives access to one — see
-                    // BufferingPrepareOutputSink for why the console alone is not enough under
-                    // `aspire run`.
-                    CheckoutPreparation.Run(
-                        serviceName, label, definition.Repository.CheckoutName, step, repoRoot,
-                        builder.AppHostDirectory, managedCheckout, gitClient, _prepareRunner,
-                        BufferingPrepareOutputSink.Wrap(builder, serviceName, ConsolePrepareOutputSink.Instance));
-                }
-                else if (CheckoutPreparation.WouldRun(
-                    serviceName, step, repoRoot, builder.AppHostDirectory, managedCheckout, gitClient))
-                {
-                    // Only where the step would actually have run. A warm checkout whose marker
-                    // already satisfies it was not going to run one anyway, and naming it there would
-                    // report a skip that costs nothing while advising a developer to materialize a
-                    // checkout they already have.
-                    ConsolePrepareOutputSink.Instance.Report(
-                        CheckoutPreparation.SkippedOutsideRunModeNotice(serviceName, step));
-                }
+                // Run mode only (see RunOrReportSkip). Without that gate, deferral being refused in
+                // publish mode means every "repository" service takes this path, so an `aspire
+                // publish` over a cold checkout would pay the full bootstrap — for the motivating
+                // case, hundreds of megabytes and a multi-minute graph build — to emit a manifest that
+                // describes none of it.
+                CheckoutPreparation.RunOrReportSkip(
+                    builder, serviceName, label, definition.Repository.CheckoutName, step, repoRoot,
+                    managedCheckout, gitClient, _prepareRunner);
             }
         }
 
@@ -253,32 +232,24 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// job (no clone, no ref), discoverable rather than hidden inside <c>"repository"</c>.
     /// </summary>
     /// <remarks>
-    /// The remedy names <c>path.path</c> — <c>path</c> is a block, so a bare <c>'path': '...'</c> would
-    /// be refused by the config validator. It also says what does <em>not</em> carry over, only where
-    /// it applies to this service: a <c>local.prepare</c> block is not read under <c>"path"</c>, and the
-    /// catalog's own <c>prepare</c> step, which <c>local.path</c> ignores, does run there.
+    /// The remedy names <c>path.path</c> — <c>path</c> is a block, so a bare <c>"path": "..."</c> would
+    /// be refused by the config validator. A developer's <c>path.path</c> behaves as <c>local.path</c>
+    /// does, catalog <c>prepare</c> step included (ignored, with its own notice); the one thing that
+    /// does not carry over is a <c>local.prepare</c> block, named only where there is one.
     /// </remarks>
-    private static Raw LocalPathDeprecationNotice(
-        string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
+    private static Raw LocalPathDeprecationNotice(string serviceName, ServiceDeveloperConfig config)
     {
+        // Double-quoted and escaped through Raw.Escaped (Name's JSON-compatible escaping), because
+        // this snippet is meant to be pasted into servicesources.local.json as it stands — a Windows
+        // path's backslashes quoted by hand would be invalid JSON, or silently a different string.
         var notice = Raw.Compose($"Service '{new Name(serviceName)}': 'local.path' is deprecated. Use the 'path' source "
-            + $"instead — set 'source': 'path' and 'path': {{ 'path': '{Raw.Escaped(config.Local.Path!)}' }}, which "
-            + $"also resolves the directory with no clone and no ref.");
+            + $"instead: \"source\": \"path\", \"path\": {{ \"path\": \"{Raw.Escaped(config.Local.Path)}\" }} — which "
+            + $"resolves the directory the same way, with no clone and no ref.");
 
         if (config.Local.Prepare?.IsDeclared == true)
         {
             notice = Raw.Compose($"{notice} Move this service's 'local.prepare' block to 'path.prepare': it is not read "
                 + $"under the 'path' source.");
-        }
-
-        if (!LocalGitCheckout.IsGrouped(definition, serviceName)
-            && definition.Repository.Prepare is { } catalogPrepare
-            && (catalogPrepare.Command is not null || catalogPrepare.WindowsCommand is not null)
-            && !string.Equals(catalogPrepare.Mode, "never", StringComparison.OrdinalIgnoreCase))
-        {
-            notice = Raw.Compose($"{notice} One difference: the catalog's 'prepare' step, which 'local.path' ignores, "
-                + $"runs in that directory under the 'path' source — declare 'path.prepare' with mode 'never' to keep "
-                + $"it off.");
         }
 
         return notice;
@@ -313,12 +284,34 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
 
         throw ServiceSourcesConfigurationException.For(
             $"Service '{new Name(serviceName)}' source is 'repository' but {Raw.Origin(definition.Origin)} gives it no "
-            + $"repository to clone. Either {DeclareRepositoryRemedy(serviceName, definition)}, or switch it to the "
-            + $"'path' source — set '{serviceKey}:source' to 'path' and '{serviceKey}:path:path' to a checkout you "
-            + $"already have on disk, which needs no repository. '{serviceKey}:source' can be set from any "
-            + $"configuration layer: {Raw.Literal(DeveloperConfiguration.FileName)}, appsettings, user secrets, the "
-            + $"environment variable {Raw.Escaped(DeveloperConfiguration.EnvironmentVariableFor(serviceName))}, or "
-            + $"the command line.");
+            + $"repository to clone. Either {DeclareRepositoryRemedy(serviceName, definition)}, or {PathSourceRemedy(serviceKey, definition)} "
+            + $"{WhereTheSourceCanBeSet(serviceName)}");
+    }
+
+    /// <summary>
+    /// The <c>"path"</c> source as the other remedy. Where the catalog already declares a
+    /// <c>path:</c>, switching the source is all it takes; only without one does the developer also
+    /// need a <c>path.path</c> naming a directory of their own.
+    /// </summary>
+    private static Raw PathSourceRemedy(Raw serviceKey, ServiceDefinition definition) =>
+        string.IsNullOrWhiteSpace(definition.Path)
+            ? Raw.Compose($"switch it to the 'path' source — set '{serviceKey}:source' to 'path' and "
+                + $"'{serviceKey}:path:path' to a checkout you already have on disk, which needs no repository.")
+            : Raw.Compose($"set '{serviceKey}:source' to 'path' — {Raw.Origin(definition.Origin)} already gives it a "
+                + $"'path', which needs no repository.");
+
+    /// <summary>
+    /// The sentence naming every configuration layer a service's <c>source</c> can come from, so a
+    /// reader whose source was set by the environment or a catalog default is not sent to edit a file
+    /// that holds nothing. Shared by every message that tells a developer to change the source.
+    /// </summary>
+    internal static Raw WhereTheSourceCanBeSet(string serviceName)
+    {
+        var serviceKey = Raw.Compose($"{Raw.Literal(DeveloperConfiguration.ServicesKey)}:{new Name(serviceName)}");
+
+        return Raw.Compose($"'{serviceKey}:source' can be set from any configuration layer: "
+            + $"{Raw.Literal(DeveloperConfiguration.FileName)}, appsettings, user secrets, the environment variable "
+            + $"{Raw.Escaped(DeveloperConfiguration.EnvironmentVariableFor(serviceName))}, or the command line.");
     }
 
     /// <summary>
@@ -433,7 +426,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         }
     }
 
-    internal static Raw HandlerFailedMessage(string serviceName, string kind) =>
+    private static Raw HandlerFailedMessage(string serviceName, string kind) =>
         Raw.Compose($"Service '{new Name(serviceName)}': the handler for kind '{new Name(kind)}' failed while creating its "
             + $"resource. If this is a configuration problem, report it from "
             + $"{Raw.Literal(nameof(ILocalResourceKind))}.{Raw.Literal(nameof(ILocalResourceKind.Validate))} instead, which core calls "
@@ -487,7 +480,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// core, not <see cref="LocalKindConfig"/> itself, has to re-render the advice, since only core
     /// knows <see cref="ServiceDefinition.Origin"/>. Every other exception is left as thrown.
     /// </summary>
-    internal static bool IsCodeOriginIndentationAdvice(ServiceDefinition definition, ServiceSourcesConfigurationException ex) =>
+    private static bool IsCodeOriginIndentationAdvice(ServiceDefinition definition, ServiceSourcesConfigurationException ex) =>
         definition.Origin.Kind == CatalogOriginKind.Code
         && ex.Message.Contains(LocalKindConfig.IndentationAdvice, StringComparison.Ordinal);
 
@@ -496,7 +489,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// something. Unlike <see cref="HandlerFailedMessage"/> it has nowhere better to point the
     /// author at: this <em>is</em> the place a configuration problem belongs.
     /// </summary>
-    internal static Raw ValidateFailedMessage(string serviceName, string kind) =>
+    private static Raw ValidateFailedMessage(string serviceName, string kind) =>
         Raw.Compose($"Service '{new Name(serviceName)}': the handler for kind '{new Name(kind)}' failed while checking the service's "
             + $"configuration against its checkout. A configuration problem should be reported from "
             + $"{Raw.Literal(nameof(ILocalResourceKind))}.{Raw.Literal(nameof(ILocalResourceKind.Validate))} as a "
@@ -609,23 +602,42 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
                 + $"'servicesources.local.json' chooses the source and carries no 'project'.");
         }
 
-        switch (CheckoutRelativePath.FirstBreach(project))
+        ThrowIfBreached(
+            serviceName, "project", project, CheckoutRelativePath.FirstBreach(project),
+            outside: Raw.Literal("the service's checkout"),
+            inside: Raw.Literal("the repository"),
+            absoluteReason: Raw.Literal("'project' has to be a path relative to the service's checkout — it names a "
+                + "project the repository commits, not one sitting elsewhere on a developer's machine."));
+    }
+
+    /// <summary>
+    /// The refusal for a catalog-written path that broke a confinement rule, phrased in the caller's
+    /// terms. One place for the three messages, so two fields confined the same way cannot drift in
+    /// how they report it. Returns when <paramref name="breach"/> is <see langword="null"/>.
+    /// </summary>
+    /// <param name="field">The catalog field, as the message names it — <c>project</c>, <c>path</c>.</param>
+    /// <param name="outside">What the path climbed out of.</param>
+    /// <param name="inside">Where it has to stay.</param>
+    /// <param name="absoluteReason">Why an absolute value is refused, and what to do instead.</param>
+    internal static void ThrowIfBreached(
+        string serviceName, string field, string value, ConfinementBreach? breach, Raw outside, Raw inside,
+        Raw absoluteReason)
+    {
+        switch (breach)
         {
             case { Kind: ConfinementBreachKind.Absolute }:
                 throw ServiceSourcesConfigurationException.For(
-                    $"Service '{new Name(serviceName)}': project '{Raw.Escaped(project)}' is an absolute path. 'project' has to be a path "
-                    + $"relative to the service's checkout — it names a project the repository commits, not one "
-                    + $"sitting elsewhere on a developer's machine.");
+                    $"Service '{new Name(serviceName)}': {Raw.Escaped(field)} '{Raw.Escaped(value)}' is an absolute path. {absoluteReason}");
 
             case { Kind: ConfinementBreachKind.UnusableSegment, Segment: var unusable }:
                 throw ServiceSourcesConfigurationException.For(
-                    $"Service '{new Name(serviceName)}': project '{Raw.Escaped(project)}' has a path segment '{new Name(unusable)}' — "
+                    $"Service '{new Name(serviceName)}': {Raw.Escaped(field)} '{Raw.Escaped(value)}' has a path segment '{new Name(unusable)}' — "
                     + $"{CheckoutRelativePath.OnlyDotsAndSpacesRuleAndRemedy}");
 
             case { Kind: ConfinementBreachKind.EscapesRoot }:
                 throw ServiceSourcesConfigurationException.For(
-                    $"Service '{new Name(serviceName)}': project '{Raw.Escaped(project)}' points outside the service's checkout. It must "
-                    + $"stay within the repository.");
+                    $"Service '{new Name(serviceName)}': {Raw.Escaped(field)} '{Raw.Escaped(value)}' points outside {outside}. It must "
+                    + $"stay within {inside}.");
         }
     }
 }
