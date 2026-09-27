@@ -211,6 +211,35 @@ public class CheckoutPreparationTests
         Assert.Single(fixture.Runner.Runs);
     }
 
+    /// <remarks>
+    /// A managed checkout is always a real clone, so reading the commit under <c>once</c> costs it
+    /// nothing — unlike a <c>path</c> checkout, which may have no git at all (see
+    /// <see cref="TheCommitIsReadOnlyWhenTheModeComparesIt"/>). Recording it is what lets a developer
+    /// who later switches the mode to <c>oncePerCommit</c> be matched against the commit the step
+    /// really ran on, rather than forced through one extra run to find out (see
+    /// <see cref="SwitchingToOncePerCommit_DoesNotForceARerunWhenTheCommitHasNotMoved"/>).
+    /// </remarks>
+    [Fact]
+    public void TheCommitIsReadForAManagedCheckoutEvenUnderOnce()
+    {
+        var fixture = NewFixture();
+
+        Run(fixture, Step("once"));
+
+        Assert.Equal(1, fixture.Git.HeadCommitReads);
+    }
+
+    [Fact]
+    public void SwitchingToOncePerCommit_DoesNotForceARerunWhenTheCommitHasNotMoved()
+    {
+        var fixture = NewFixture();
+        Run(fixture, Step("once"));
+
+        Run(fixture, Step("oncePerCommit"));
+
+        Assert.Single(fixture.Runner.Runs);
+    }
+
     /// <summary>
     /// The executor's own refusal to run a <c>never</c> step, which should never reach it.
     /// </summary>

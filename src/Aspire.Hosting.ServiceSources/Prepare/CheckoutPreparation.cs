@@ -248,11 +248,15 @@ internal static class CheckoutPreparation
         var checkoutPath = managedCheckout ? null : PrepareMarker.NormalizeCheckoutPath(repoRoot);
 
         // Read after the checkout has been reconciled onto its configured ref, so this is the commit
-        // the step actually runs against. Read only under `oncePerCommit`, the one mode that compares
-        // it: `once` never does (see PrepareMarker.Satisfies), and `always` consults no marker at all.
-        // Reading it anyway would shell out to git for a value nothing uses — and fail outright on a
-        // machine with no git, which a 'path' service is documented not to need.
-        var commit = step.Mode == PrepareMode.OncePerCommit ? gitClient.GetHeadCommitSha(repoRoot) : null;
+        // the step actually runs against. Skipped for `always`, which consults no marker at all, and
+        // for a `path` checkout under `once`: that mode never compares the commit (see
+        // PrepareMarker.Satisfies), and reading it anyway would shell out to git for a value nothing
+        // uses — failing outright on a machine with no git, which a `path` service is documented not
+        // to need. A managed checkout is always a real clone, so it reads it under `once` too — see
+        // the comment on PrepareMarker.Write below for why that is worth the extra call.
+        var commit = (managedCheckout || step.Mode == PrepareMode.OncePerCommit)
+            ? gitClient.GetHeadCommitSha(repoRoot)
+            : null;
 
         return new Decision(
             ReasonToRun(step, markerPath, commit, checkoutPath), markerPath, checkoutPath, commit);
