@@ -259,6 +259,36 @@ public class ServiceConfigurationExtensionsTests
         Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
     }
 
+    /// <summary>
+    /// This project references neither guest-language hosting package, so the real kinds' types
+    /// fail to load here exactly as they do in an AppHost that never installed them.
+    /// </summary>
+    [Theory]
+    [InlineData("java")]
+    [InlineData("javascript")]
+    public void Unwrap_Delegate_OnAContainerSourcedGuestKindWithoutItsPackage_SkipsWithAWarning(string kind)
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), $"""
+            services:
+              api:
+                repository: https://github.com/example/api
+                kind: {kind}
+                container:
+                  image: example/api
+                  port: 8080
+            """);
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.local.json"),
+            """{ "services": { "api": { "source": "container" } } }""");
+        var builder = TestHelpers.CreateBuilder(dir);
+
+        var ex = Record.Exception(() => builder.AddService("api").Unwrap<ProjectResource>(_ => { }));
+
+        Assert.Null(ex);
+        Assert.Contains("Unwrap<ProjectResource>", Assert.Single(ServiceSourcesWarnings.For(builder).Messages));
+    }
+
     [Fact]
     public void Unwrap_OnUrlSource_StillThrows_BecauseItMustReturnABuilder()
     {

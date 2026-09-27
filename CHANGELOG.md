@@ -86,26 +86,6 @@ never existed. Check the tag of the last release before adding one.
   on a disabled service resolves immediately instead of waiting, the same protection `"url"` has
   against #170. See [the `"disabled"` source](docs/other-sources.md#disabled-source).
 
-<<<<<<< HEAD
-### Deprecated
-
-- **`local.path` is deprecated in favor of the new `"path"` source.** The `"path"` source resolves a
-  directory the same way — no clone, no ref — as a first-class source
-  (`"source": "path"`, `"path": { "path": "..." }`) rather than a hidden mode of `"repository"`.
-  `local.path` keeps working exactly as it does today; there is no removal planned. A developer
-  using it now gets a one-time startup notice naming the replacement:
-
-  ```
-  warn: Aspire.Hosting.ServiceSources
-        Service 'orders': 'local.path' is deprecated. Use the 'path' source instead:
-        "source": "path", "path": { "path": "/home/dev/code/orders" } — which resolves the
-        directory the same way, with no clone and no ref.
-  ```
-
-  A `local.prepare` block doesn't carry over by itself — it isn't read under `"path"` — so when one
-  is declared the notice also says to move it to `path.prepare`. The catalog's own `prepare` step is
-  not run in the directory under either spelling.
-=======
 - **`Unwrap<T>` overload that takes a configuration delegate, and skips it instead of throwing
   when the service doesn't resolve to a `T`.** The existing `Unwrap<T>()` has to throw then, because
   it has to hand back a `T` builder and there is none to give; the new
@@ -124,7 +104,37 @@ never existed. Check the tag of the last release before adding one.
   `servicesources.local.json` — so a switch like that no longer breaks a `Program.cs` calling
   kind-specific vocabulary. `Unwrap<IResourceWithWaitSupport>(...)` on a `"kubernetes"` service
   still runs against the port-forward, matching `WaitFor`.
->>>>>>> origin/main
+
+  A call **no** source the catalog entry declares could ever satisfy — `Unwrap<ProjectResource>`
+  on a `kind: java` service with a `container:` block — throws at startup instead, naming each
+  declared source and the type it resolves to, since no source switch would ever make it apply.
+
+- **`ILocalResourceKind.ResourceType`**, an optional member naming the type every resource the
+  kind's `Resolve` returns is, or derives from. The built-in `java` and `javascript` kinds declare
+  theirs. It is what lets `Unwrap<T>(configure)` tell a call no source could satisfy apart from
+  one a source switch skipped; a kind that doesn't declare it is assumed to match anything, so it
+  never causes that throw. A kind that declares one is held to it: a resource from its `Resolve` or
+  `ResolveDeferred` that is not that type fails startup, as does a `ResourceType` that returns null
+  or throws, naming the service and kind.
+
+### Deprecated
+
+- **`local.path` is deprecated in favor of the new `"path"` source.** The `"path"` source resolves a
+  directory the same way — no clone, no ref — as a first-class source
+  (`"source": "path"`, `"path": { "path": "..." }`) rather than a hidden mode of `"repository"`.
+  `local.path` keeps working exactly as it does today; there is no removal planned. A developer
+  using it now gets a one-time startup notice naming the replacement:
+
+  ```
+  warn: Aspire.Hosting.ServiceSources
+        Service 'orders': 'local.path' is deprecated. Use the 'path' source instead:
+        "source": "path", "path": { "path": "/home/dev/code/orders" } — which resolves the
+        directory the same way, with no clone and no ref.
+  ```
+
+  A `local.prepare` block doesn't carry over by itself — it isn't read under `"path"` — so when one
+  is declared the notice also says to move it to `path.prepare`. The catalog's own `prepare` step is
+  not run in the directory under either spelling.
 
 ## [0.6.0] - 2026-09-24
 

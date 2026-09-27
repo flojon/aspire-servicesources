@@ -351,7 +351,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     {
         var registry = LocalKindRegistry.For(builder);
 
-        if (!registry.TryGet(definition.Kind, out var handler) || handler is null)
+        if (!registry.TryGet(definition.Kind, out var handler))
         {
             // "java"/"javascript" always resolve via LocalKindRegistry's own built-in fallback, so
             // reaching here means an unregistered third-party kind — there is no Use*() call to
@@ -400,6 +400,11 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
                 + $"{Raw.Literal(nameof(DeferredLocalResource))} with no resource. Return null to decline deferral instead.");
         }
 
+        if (registration is not null)
+        {
+            RequireDeclaredResourceType(serviceName, definition.Kind, handler, registration.Service.Resource);
+        }
+
         return registration;
     }
 
@@ -424,6 +429,96 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
                 + $"block it cannot judge should answer false and let the eager path report it.",
                 ex);
         }
+    }
+
+    /// <remarks>
+    /// Always answers: a developer's own <c>local.path</c> makes <c>"repository"</c> selectable even
+    /// for an entry with no repository.
+    /// </remarks>
+    public Type? DeclaredResourceType(
+        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition) =>
+        KindResourceType(builder, serviceName, definition);
+
+    /// <summary>
+    /// The type a directory-backed source resolves <paramref name="definition"/>'s kind to, shared
+    /// with <see cref="PathSource"/>, which dispatches kinds the same way.
+    /// </summary>
+    internal static Type KindResourceType(
+        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition)
+    {
+        if (string.Equals(definition.Kind, LocalKinds.Dotnet, StringComparison.Ordinal))
+        {
+            return typeof(ProjectResource);
+        }
+
+        if (!LocalKindRegistry.For(builder).TryGet(definition.Kind, out var handler))
+        {
+            return typeof(IResourceWithServiceDiscovery);
+        }
+
+        try
+        {
+            return ReadResourceType(serviceName, definition.Kind, handler);
+        }
+        catch (Exception ex) when (GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, definition.Kind) is not null)
+        {
+            // The type becomes reachable once the package is installed, so claim nothing.
+            return typeof(IResourceWithServiceDiscovery);
+        }
+    }
+
+    /// <summary>
+    /// Holds a kind to its <see cref="ILocalResourceKind.ResourceType"/>, since <c>Unwrap&lt;T&gt;</c>
+    /// throws for other sources' developers on the strength of it.
+    /// </summary>
+    internal static void RequireDeclaredResourceType(
+        string serviceName, string kind, ILocalResourceKind handler, IResource resource)
+    {
+        Type declared;
+        try
+        {
+            declared = ReadResourceType(serviceName, kind, handler);
+        }
+        catch (Exception ex) when (GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, kind) is { } missingPackage)
+        {
+            throw ServiceSourcesConfigurationException.For($"{Raw.Escaped(missingPackage)}", ex);
+        }
+
+        if (!declared.IsInstanceOfType(resource))
+        {
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': the handler for kind '{new Name(kind)}' returned "
+                + $"{Raw.Escaped(resource.GetType().Name)}, but its "
+                + $"{Raw.Literal(nameof(ILocalResourceKind))}.{Raw.Literal(nameof(ILocalResourceKind.ResourceType))} "
+                + $"is {Raw.Escaped(declared.Name)}. Declare a type every resource it returns is, or "
+                + $"derives from — or leave the member unimplemented.");
+        }
+    }
+
+    /// <summary>
+    /// Reads <see cref="ILocalResourceKind.ResourceType"/>, naming the service and kind when the
+    /// handler faults. A missing hosting package is left to the caller, which knows what it means.
+    /// </summary>
+    private static Type ReadResourceType(string serviceName, string kind, ILocalResourceKind handler)
+    {
+        Type? declared;
+        try
+        {
+            declared = handler.ResourceType;
+        }
+        catch (Exception ex) when (ex is not ServiceSourcesConfigurationException
+            && GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, kind) is null)
+        {
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': the handler for kind '{new Name(kind)}' failed while reporting its "
+                + $"{Raw.Literal(nameof(ILocalResourceKind))}.{Raw.Literal(nameof(ILocalResourceKind.ResourceType))}.",
+                ex);
+        }
+
+        return declared ?? throw ServiceSourcesConfigurationException.For(
+            $"Service '{new Name(serviceName)}': the handler for kind '{new Name(kind)}' returned null from "
+            + $"{Raw.Literal(nameof(ILocalResourceKind))}.{Raw.Literal(nameof(ILocalResourceKind.ResourceType))}. "
+            + $"Leave the member unimplemented to claim nothing.");
     }
 
     private static Raw HandlerFailedMessage(string serviceName, string kind) =>
@@ -529,6 +624,8 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
                 $"Service '{new Name(serviceName)}': the handler for kind '{new Name(definition.Kind)}' returned no resource. "
                 + $"{Raw.Literal(nameof(ILocalResourceKind))}.{Raw.Literal(nameof(ILocalResourceKind.Resolve))} must return the resource it created.");
         }
+
+        RequireDeclaredResourceType(serviceName, definition.Kind, handler, resourceBuilder.Resource);
 
         return ResolvedService.Bridge(resourceBuilder, serviceName, source);
     }

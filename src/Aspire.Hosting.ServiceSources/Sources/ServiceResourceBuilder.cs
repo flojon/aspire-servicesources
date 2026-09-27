@@ -127,6 +127,13 @@ internal sealed class ServiceResourceBuilder(
     // resource's own bookkeeping annotation silently un-gate every later endpoint call (#334 reopened).
     internal string Source => source;
 
+    /// <summary>
+    /// Each source the service's catalog entry declares, with the resource type it resolves to — or
+    /// <see langword="null"/> when this builder did not come from <c>AddService()</c> and the catalog
+    /// is unknown.
+    /// </summary>
+    internal Lazy<IReadOnlyList<(string Source, Type ResourceType)>>? DeclaredResolutions { get; set; }
+
     public IResourceBuilder<ServiceResource> WithAnnotation<TAnnotation>(
         TAnnotation annotation, ResourceAnnotationMutationBehavior behavior = ResourceAnnotationMutationBehavior.Append)
         where TAnnotation : IResourceAnnotation

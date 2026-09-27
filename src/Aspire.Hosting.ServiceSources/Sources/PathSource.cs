@@ -72,6 +72,14 @@ internal sealed class PathSource(IGitClient? gitClient = null, IPrepareCommandRu
         return LocalProjectSource.InvokeKindHandler(builder, serviceName, definition, repoRoot, handler!, Source);
     }
 
+    /// <remarks>
+    /// Always answers: a developer's own <c>path.path</c> makes <c>"path"</c> selectable even for an
+    /// entry with no catalog <c>path:</c>.
+    /// </remarks>
+    public Type? DeclaredResourceType(
+        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition) =>
+        LocalProjectSource.KindResourceType(builder, serviceName, definition);
+
     /// <summary>
     /// The directory this service resolves to: a developer's own override if they set one — unconfined,
     /// exactly like <c>local.path</c> today — or the catalog's own <c>path:</c>, relative to the AppHost

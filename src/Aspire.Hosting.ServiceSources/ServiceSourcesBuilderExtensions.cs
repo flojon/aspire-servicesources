@@ -141,8 +141,30 @@ public static class ServiceSourcesBuilderExtensions
         var repositoryConfig = ServiceSourcesConfigCache.LoadedFor(builder)
             .DeveloperConfig.Repositories.GetValueOrDefault(definition.Repository.CheckoutName);
 
-        return source.Resolve(builder, name, definition, developerConfig, repositoryConfig);
+        var service = source.Resolve(builder, name, definition, developerConfig, repositoryConfig);
+
+        if (service is ServiceResourceBuilder serviceBuilder)
+        {
+            // Lazy: only a mismatched Unwrap reads it, and a kind's type may live in an assembly
+            // this AppHost does not reference.
+            serviceBuilder.DeclaredResolutions = new(() => DeclaredResolutions(builder, name, definition));
+        }
+
+        return service;
     }
+
+    /// <summary>
+    /// What each source this catalog entry could be switched to would resolve to, for
+    /// <c>Unwrap&lt;T&gt;(configure)</c> to tell a call no source could satisfy from one a switch skipped.
+    /// </summary>
+    private static IReadOnlyList<(string Source, Type ResourceType)> DeclaredResolutions(
+        IDistributedApplicationBuilder builder, string name, Config.Catalog.ServiceDefinition definition) =>
+        // Sorted so the error message does not depend on dictionary enumeration order.
+        [.. Sources
+            .OrderBy(s => s.Key, StringComparer.Ordinal)
+            .Select(s => (Source: s.Key, ResourceType: s.Value.DeclaredResourceType(builder, name, definition)))
+            .Where(d => d.ResourceType is not null)
+            .Select(d => (d.Source, d.ResourceType!))];
 
     /// <summary>
     /// Opts this AppHost into deferring a <c>"repository"</c> service's <em>first</em> checkout past
