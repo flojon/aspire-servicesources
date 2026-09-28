@@ -47,7 +47,7 @@ await builder.addServiceCatalog(async (catalog) => {
 `AddServiceCatalog` must be called before the first `AddService(...)` call anywhere in the
 AppHost — yaml-based `AddService` calls included — since a service is resolved as soon as
 it's added; calling it after throws, naming the ordering problem. Call it near the top of
-the AppHost, next to `UseDeferredCheckout()`. It can be called more than once — a helper
+the AppHost, next to `SetCheckoutTiming()`. It can be called more than once — a helper
 method can contribute its own entries — and calls append rather than replace.
 
 **Which builder method enables which `source`**, since the method names are not the six

@@ -65,7 +65,7 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// <para>
 /// What is left in the set is the case that genuinely needs speculating over: a cold clone that
 /// <c>AddService()</c> will block on. That still costs a repository the AppHost may never add, for
-/// as long as deferral is opt-in and refused in publish mode.
+/// as long as an AppHost opts into <c>CheckoutTiming.Eager</c> or runs in publish mode.
 /// </para>
 /// <para>
 /// Free of waiting is not free of cost, and the difference matters. Resolving a checkout is not a
@@ -233,8 +233,9 @@ internal sealed class LocalCheckoutPrefetch
                 + $"adds are reconciled to their configured ref. Clear "
                 + $"'{Raw.Literal(DeveloperConfiguration.ServicesKey)}:<service>:source' for the ones you don't call "
                 + $"AddService() for — usually their entries in {Raw.Literal(DeveloperConfiguration.FileName)} — to stop "
-                + $"paying for them. builder.UseDeferredCheckout() also stops it: a service whose first checkout "
-                + $"is deferred past startup is cloned only when it is added.");
+                + $"paying for them. Deferred checkout also stops it: a service whose first checkout is deferred "
+                + $"past startup is cloned only when it is added, which is the default unless this AppHost calls "
+                + $"builder.SetCheckoutTiming(CheckoutTiming.Eager).");
         }
     }
 
@@ -731,7 +732,7 @@ internal sealed class LocalCheckoutPrefetch
     /// This mirrors the decision <c>LocalProjectSource</c> makes per service, and has to: a service
     /// dropped here that then takes the eager path would clone alone on the <c>AddService()</c>
     /// thread instead of alongside the others. Every input is available without demand —
-    /// <c>UseDeferredCheckout()</c> and <c>AddLocalKind</c> both run before the first
+    /// <c>SetCheckoutTiming()</c> and <c>AddLocalKind</c> both run before the first
     /// <c>AddService()</c>, the execution mode is fixed, and the kind is asked the deliberately
     /// speculative form of the question.
     /// </para>

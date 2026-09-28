@@ -24,10 +24,7 @@ It also carries a `catalog` service showing `kind: java` — a `"repository"` ch
 wrapper; `java` being a built-in kind, no `Program.cs` registration is needed. `AddService("catalog")`
 is commented out and the service is left out of `servicesources.local.json.example`, since unlike
 the three above it needs a JDK. To run it, do both: uncomment the call and add
-`"catalog": { "source": "repository" }` to your `servicesources.local.json`. Leaving it out of that file
-by default is what keeps the sample from cloning PetClinic on its first run: the sample does not
-call [`UseDeferredCheckout()`](../sources/repository.md#first-run-usedeferredcheckout), so the first
-`AddService` clones every `"repository"` entry there that has no checkout yet, whether or not you add it.
+`"catalog": { "source": "repository" }` to your `servicesources.local.json`.
 
 ## TypeScript AppHost: `samples/DemoAppHostTypeScript`
 

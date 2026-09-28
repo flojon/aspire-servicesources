@@ -99,14 +99,19 @@ internal sealed class DeferredCheckout
 
     private readonly List<Deferred> _deferred = [];
 
-    private bool _enabled;
+    /// <summary>
+    /// Deferred by default since 0.8.0 (#216) — a service that used to be running by the time
+    /// <c>Build()</c> returned is now started after it instead, which is the behaviour change an
+    /// AppHost opts out of with <c>SetCheckoutTiming(CheckoutTiming.Eager)</c>.
+    /// </summary>
+    private bool _enabled = true;
 
     /// <summary>
     /// Whether <see cref="ShouldDefer"/> — the decision point the doc comment on
-    /// <c>UseDeferredCheckout</c> means by "before the first AddService" — has run for any service
-    /// yet. Guards <see cref="Enable"/> the way <c>ServiceSourcesConfigCache</c>'s <c>_frozen</c>
-    /// guards <c>AddServiceCatalog</c>: past this point, <see cref="Enable"/> would only ever change
-    /// the answer for services nobody has asked about yet.
+    /// <c>SetCheckoutTiming</c> means by "before the first AddService" — has run for any service
+    /// yet. Guards <see cref="SetTiming"/> the way <c>ServiceSourcesConfigCache</c>'s <c>_frozen</c>
+    /// guards <c>AddServiceCatalog</c>: past this point, <see cref="SetTiming"/> would only ever
+    /// change the answer for services nobody has asked about yet.
     /// </summary>
     private bool _resolved;
 
@@ -148,29 +153,29 @@ internal sealed class DeferredCheckout
     }
 
     /// <summary>
-    /// Turns deferral on for this builder. Off by default: the behaviour is user-visible — a
-    /// service that used to be running by the time <c>Build()</c> returned is now started
-    /// afterwards — and the package already has consumers.
+    /// Sets whether this builder defers a cold managed checkout past startup. Deferred by default —
+    /// see <see cref="_enabled"/> — so the only timing an AppHost has to ask for explicitly is
+    /// <see cref="CheckoutTiming.Eager"/>.
     /// </summary>
     /// <exception cref="ServiceSourcesConfigurationException">
-    /// A service has already resolved on this builder — see <see cref="ShouldDefer"/> — so turning
-    /// deferral on now could only apply to services nobody has asked about yet.
+    /// A service has already resolved on this builder — see <see cref="ShouldDefer"/> — so changing
+    /// the timing now could only apply to services nobody has asked about yet.
     /// </exception>
-    public void Enable()
+    public void SetTiming(CheckoutTiming timing)
     {
         lock (_gate)
         {
             if (_resolved)
             {
                 throw ServiceSourcesConfigurationException.For(
-                    $"UseDeferredCheckout() was called after a service had already resolved through "
-                    + $"AddService(…), so that service's checkout could not be deferred. Because the decision "
-                    + $"is made as each service is added, UseDeferredCheckout() must be called before the "
-                    + $"first AddService(…) — near the top of the AppHost, next to AddServiceCatalog() and "
+                    $"SetCheckoutTiming(…) was called after a service had already resolved through "
+                    + $"AddService(…), so that service's checkout timing could not be changed. Because the "
+                    + $"decision is made as each service is added, SetCheckoutTiming(…) must be called before "
+                    + $"the first AddService(…) — near the top of the AppHost, next to AddServiceCatalog() and "
                     + $"AddLocalKind().");
             }
 
-            _enabled = true;
+            _enabled = timing == CheckoutTiming.Deferred;
         }
     }
 
@@ -180,7 +185,7 @@ internal sealed class DeferredCheckout
     /// launch-profile fidelity, so the blast radius is first-run-only.
     /// </summary>
     /// <remarks>
-    /// Two decisions layered, in this order: the policy this type owns — opted in, run mode — and
+    /// Two decisions layered, in this order: the policy this type owns — the timing setting, run mode — and
     /// then <see cref="LocalGitCheckout.IsColdManagedCheckout"/>, which is where "is there
     /// anything to clone here" is answered for every caller that needs it. The speculative
     /// prefetch is the other one, and it drops a candidate from its clone set on the strength of
@@ -194,7 +199,7 @@ internal sealed class DeferredCheckout
         lock (_gate)
         {
             // Latched unconditionally, whether or not deferral is enabled: this is the decision point
-            // itself, and a later Enable() call must be refused even for an AppHost where every
+            // itself, and a later SetTiming() call must be refused even for an AppHost where every
             // service so far happened to resolve warm.
             _resolved = true;
 

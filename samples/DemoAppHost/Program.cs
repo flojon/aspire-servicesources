@@ -3,6 +3,15 @@ using Aspire.Hosting.ServiceSources;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
+// Lets the smoke test exercise the eager fallback path deliberately (e.g. to check that a
+// prepare step's output reaches the AppHost's own stdout, which is only true on that path — see
+// scripts/smoketest-local-source.sh). Not something a real AppHost needs: deferred is the
+// default since 0.8.0, and this line has no effect when the variable is unset.
+if (Environment.GetEnvironmentVariable("SERVICESOURCES_DEMO_CHECKOUT_TIMING") is { } checkoutTiming)
+{
+    builder.SetCheckoutTiming(Enum.Parse<CheckoutTiming>(checkoutTiming, ignoreCase: true));
+}
+
 // "java" is a built-in local kind — a service whose catalog entry says `kind: java` clones and
 // runs via the Aspire Community Toolkit's Java integration with no registration call needed.
 
@@ -25,10 +34,9 @@ var payments = builder.AddService("payments");
 
 // The "catalog" service in servicesources.yaml is `kind: java`. To run it, uncomment below AND add
 //   "catalog": { "source": "repository" }
-// to servicesources.local.json. Both steps are needed, and deliberately: the first AddService call
-// clones every "repository" entry in that file up front, so listing catalog there by default would clone
-// Spring PetClinic on every run of this sample even with the line below commented out. Unlike the
-// services above it also needs a JDK, since it builds the checkout with the repo's Maven wrapper.
+// to servicesources.local.json. Both steps are needed: AddService is what actually resolves and
+// runs it. Unlike the services above it also needs a JDK, since it builds the checkout with the
+// repo's Maven wrapper.
 // var catalog = builder.AddService("catalog");
 
 builder.Build().Run();
