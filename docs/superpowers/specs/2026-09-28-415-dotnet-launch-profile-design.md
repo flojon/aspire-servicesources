@@ -1,7 +1,7 @@
 # Selecting a launch profile for the built-in `dotnet` kind (#415)
 
 **Date:** 2026-09-28
-**Status:** Draft
+**Status:** Approved (no open questions; answers recorded at the end)
 **Resolves:** #415 (`LocalProjectSource.Resolve` always calls the two-argument
 `builder.AddProject(name, path)`, so a `dotnet` service cannot select a launch profile other than
 the one Aspire picks by default, nor opt out of launch profiles).
@@ -311,7 +311,7 @@ catalog.AddService("worker")
 ## 9. Non-goals
 
 - No per-developer override in `servicesources.local.json` (java/javascript options are catalog-only
-  too). See Open Questions.
+  too), per the maintainer's answer.
 - No `ExcludeKestrelEndpoints` or other `ProjectResourceOptions` members.
 - No launch-profile option for other kinds (`java`, `javascript` have no launch profiles).
 - No change to default profile selection when neither option is set.
@@ -352,16 +352,12 @@ Each behavior is a test written first:
 
 ## Open Questions
 
-1. **Reading of the ticket.** The ticket says "developer-config yaml"; this spec reads that as the
-   yaml *catalog* (`servicesources.yaml`), since per-kind blocks live there and the developer-config
-   layer has none. If a per-machine setting was meant, see item 2.
-2. **Per-developer override.** Should `servicesources.local.json` be able to override
-   `launchProfileName`/`excludeLaunchProfile` for one machine? Proposed: no (mirrors java/javascript
-   being catalog-only); revisit on demand. It is a larger change (new developer-config block,
-   validator, precedence).
-3. **No-`launchSettings.json` strictness.** Proposed: a named profile with no file at all is an
-   error (the name can never resolve), which is stricter than Aspire's silent no-op. The alternative
-   is to match Aspire and error only when the file exists but lacks the name.
-4. **Naming.** `AsDotnet`/`WithLaunchProfileName`/`ExcludeLaunchProfile()` follow the sibling
-   `AsJava`/`With*` conventions; no strong preference if the maintainer wants a single
-   `WithLaunchProfile(string?)` instead.
+None. Resolved by the maintainer:
+
+1. **Reading of the ticket.** "developer-config yaml" means the yaml *catalog*. The `dotnet:` block
+   lives in the catalog only (`servicesources.yaml` and the code catalog API).
+2. **Per-developer override.** None. No `dotnet:` override in `servicesources.local.json`.
+3. **No-`launchSettings.json` strictness.** A named profile with no `launchSettings.json` at all is
+   an error (stricter than Aspire), as proposed in section 4.
+4. **Naming.** Keep `AsDotnet` / `WithLaunchProfileName` / `ExcludeLaunchProfile()`; no concrete
+   reason to change to a single `WithLaunchProfile`.
