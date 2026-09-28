@@ -132,8 +132,8 @@ public class LocalProjectSourceTests
 
     private static ServiceDefinition Definition(
         string repository = "https://github.com/company/orders", string project = "Orders.csproj",
-        string? defaultRef = null, string serviceName = ServiceName) =>
-        new ServiceMetadata { Repository = repository, Project = project, DefaultRef = defaultRef }
+        string? defaultRef = null, string serviceName = ServiceName, DotnetMetadata? dotnet = null) =>
+        new ServiceMetadata { Repository = repository, Project = project, DefaultRef = defaultRef, Dotnet = dotnet }
             .ToDefinition("servicesources.yaml", serviceName, TestHelpers.EmptyRepositories);
 
     private static ServiceDeveloperConfig DevConfig(string? path = null, string? @ref = null) =>
@@ -1410,6 +1410,83 @@ public class LocalProjectSourceTests
 
         var gitignorePath = Path.Combine(appHostDirectory, ".servicesources", ".gitignore");
         Assert.Equal("*\n!.gitignore\n", File.ReadAllText(gitignorePath));
+    }
+
+    private static ProjectResource ResolveWithLaunchSettings(
+        DotnetMetadata? dotnet, string? launchSettings, Action<IDistributedApplicationBuilder>? configure = null)
+    {
+        var repoDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(repoDir, "Orders.csproj"), "<Project />");
+        if (launchSettings is not null)
+        {
+            LaunchSettingsFixture.Write(repoDir, launchSettings);
+        }
+
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
+        configure?.Invoke(builder);
+
+        new LocalProjectSource(new FakeGitClient()).Resolve(
+            builder, ServiceName, Definition(dotnet: dotnet), DevConfig(path: repoDir));
+
+        return Assert.IsAssignableFrom<ProjectResource>(Assert.Single(builder.Resources, r => r.Name == ServiceName));
+    }
+
+    [Fact]
+    public void Resolve_NamedLaunchProfile_AddsLaunchProfileAnnotationWithThatName()
+    {
+        var resource = ResolveWithLaunchSettings(new() { LaunchProfileName = "http" }, LaunchSettingsFixture.HttpsThenHttp);
+
+        Assert.Equal("http", Assert.Single(resource.Annotations.OfType<LaunchProfileAnnotation>()).LaunchProfileName);
+        Assert.Equal(5100, Assert.Single(resource.Annotations.OfType<EndpointAnnotation>()).Port);
+    }
+
+    [Fact]
+    public void Resolve_NamedLaunchProfile_BeatsAppHostDefaultLaunchProfileName()
+    {
+        var resource = ResolveWithLaunchSettings(
+            new() { LaunchProfileName = "http" },
+            LaunchSettingsFixture.HttpsThenHttp,
+            builder => builder.Configuration["AppHost:DefaultLaunchProfileName"] = "https");
+
+        Assert.Equal("http", resource.Annotations.OfType<LaunchProfileAnnotation>().Last().LaunchProfileName);
+    }
+
+    [Fact]
+    public void Resolve_ExcludeLaunchProfile_AddsExcludeAnnotationAndNoProfileEndpoints()
+    {
+        var resource = ResolveWithLaunchSettings(new() { ExcludeLaunchProfile = true }, LaunchSettingsFixture.HttpsThenHttp);
+
+        Assert.Single(resource.Annotations.OfType<ExcludeLaunchProfileAnnotation>());
+        Assert.DoesNotContain(resource.Annotations.OfType<EndpointAnnotation>(), e => e.Port is 5100 or 7100);
+    }
+
+    [Fact]
+    public void Resolve_NamedProfileMissingFromFile_ThrowsListingProfiles()
+    {
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveWithLaunchSettings(new() { LaunchProfileName = "staging" }, LaunchSettingsFixture.HttpsThenHttp));
+
+        Assert.Contains("staging", ex.Message);
+        Assert.Contains("https", ex.Message);
+    }
+
+    [Fact]
+    public void Resolve_NamedProfileWithNoLaunchSettingsFile_Throws()
+    {
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveWithLaunchSettings(new() { LaunchProfileName = "http" }, launchSettings: null));
+
+        Assert.Contains("does not exist", ex.Message);
+    }
+
+    [Fact]
+    public void Resolve_NoDotnetBlock_IsUnchanged()
+    {
+        var resource = ResolveWithLaunchSettings(dotnet: null, LaunchSettingsFixture.HttpsThenHttp);
+
+        Assert.Empty(resource.Annotations.OfType<LaunchProfileAnnotation>());
+        Assert.Empty(resource.Annotations.OfType<ExcludeLaunchProfileAnnotation>());
+        Assert.Equal(7100, Assert.Single(resource.Annotations.OfType<EndpointAnnotation>()).Port);
     }
 
     [Fact]

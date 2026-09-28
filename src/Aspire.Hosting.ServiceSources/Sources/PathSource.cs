@@ -64,7 +64,8 @@ internal sealed class PathSource(IGitClient? gitClient = null, IPrepareCommandRu
         {
             var projectPath = LocalProjectSource.ResolveProjectFile(serviceName, repoRoot, definition.Project, Source);
 
-            return ResolvedService.Bridge(builder.AddProject(serviceName, projectPath), serviceName, Source);
+            return ResolvedService.Bridge(
+                LocalProjectSource.AddDotnetProject(builder, serviceName, projectPath, definition.Dotnet), serviceName, Source);
         }
 
         LocalProjectSource.ValidateWithKindHandler(serviceName, definition, repoRoot, handler!);
