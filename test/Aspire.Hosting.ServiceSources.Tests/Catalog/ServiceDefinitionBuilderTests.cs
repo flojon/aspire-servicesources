@@ -523,4 +523,88 @@ public class ServiceDefinitionBuilderTests
         Assert.Equal("company/orders", definition.Container!.Image);
         Assert.Equal("orders-svc", definition.Kubernetes!.Service);
     }
+
+    private static ServiceDefinitionBuilder Orders() =>
+        new ServiceCatalogBuilder().AddService("orders").WithRepository("https://github.com/example/repo");
+
+    [Fact]
+    public void AsDotnet_WithLaunchProfileName_SetsDefinitionDotnet()
+    {
+        var definition = Orders().AsDotnet(o => o.WithLaunchProfileName("http")).Build();
+
+        Assert.Equal("http", definition.Dotnet!.LaunchProfileName);
+        Assert.Equal("dotnet", definition.Kind);
+    }
+
+    [Fact]
+    public void AsDotnet_ExcludeLaunchProfile_SetsExcludeTrue()
+    {
+        var definition = Orders().AsDotnet(o => o.ExcludeLaunchProfile()).Build();
+
+        Assert.True(definition.Dotnet!.ExcludeLaunchProfile);
+    }
+
+    [Fact]
+    public void AsDotnet_CalledTwice_ThrowsAlreadyCalled()
+    {
+        var chain = Orders().AsDotnet(o => o.WithLaunchProfileName("http"));
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => chain.AsDotnet(o => o.ExcludeLaunchProfile()));
+
+        Assert.Contains("AsDotnet", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("already called", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AsDotnet_ThenWithKindJava_Build_Throws()
+    {
+        var chain = Orders().AsDotnet(o => o.WithLaunchProfileName("http")).WithKind("java");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => chain.Build());
+
+        Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("java", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithKindJava_ThenAsDotnet_Build_Throws()
+    {
+        var chain = Orders().WithKind("java").AsDotnet(o => o.WithLaunchProfileName("http"));
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => chain.Build());
+
+        Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("java", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AsDotnet_NameAndExclude_Build_ThrowsNamingBothFields()
+    {
+        var chain = Orders().AsDotnet(o => o.WithLaunchProfileName("http").ExcludeLaunchProfile());
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => chain.Build());
+
+        Assert.Contains("launchProfileName", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("excludeLaunchProfile", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("  ")]
+    public void WithLaunchProfileName_NullOrBlank_ThrowsImmediately(string? name)
+    {
+        var chain = Orders();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => chain.AsDotnet(o => o.WithLaunchProfileName(name!)));
+
+        Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("WithLaunchProfileName", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AsDotnet_NoCall_DotnetIsNull() =>
+        Assert.Null(Orders().Build().Dotnet);
 }

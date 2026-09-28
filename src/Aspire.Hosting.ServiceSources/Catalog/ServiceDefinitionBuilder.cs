@@ -31,6 +31,7 @@ public sealed class ServiceDefinitionBuilder
     private ContainerMetadata? _container;
     private KubernetesMetadata? _kubernetes;
     private PrepareMetadata? _prepare;
+    private DotnetMetadata? _dotnet;
     private string? _kind;
     private object? _kindOptions;
     private string? _defaultSource;
@@ -232,6 +233,13 @@ public sealed class ServiceDefinitionBuilder
         return this;
     }
 
+    internal ServiceDefinitionBuilder WithDotnet(DotnetMetadata dotnet)
+    {
+        RequireUnset(_dotnet, "AsDotnet");
+        _dotnet = dotnet;
+        return this;
+    }
+
     /// <summary>Declares this service's kind (language runtime) and optional kind-specific configuration.</summary>
     public ServiceDefinitionBuilder WithKind(string kind, object? options = null)
     {
@@ -256,30 +264,37 @@ public sealed class ServiceDefinitionBuilder
     }
 
     /// <summary>Builds the immutable <see cref="ServiceDefinition"/> this chain describes.</summary>
-    internal ServiceDefinition Build() => new()
+    internal ServiceDefinition Build()
     {
-        // Repository/Project default to "" (ServiceMetadata's own defaults) when unset — a service
-        // declared with no With* call at all is caught downstream by the same "no source configured"
-        // path an empty yaml entry hits today, not rejected here.
-        //
-        // A shared handle's RepositoryDefinition is built once and cached by RepositoryBuilder.Build
-        // — every service sharing this handle gets the identical instance back, which is the
-        // reference-equality identity mechanism design "The domain type" describes.
-        Repository = _sharedRepository?.Build() ?? new RepositoryDefinition
+        var kind = _kind ?? LocalKinds.Dotnet;
+        DotnetMetadata.Validate(_serviceName, kind, _dotnet);
+
+        return new()
         {
-            Url = _repository ?? "",
-            DefaultRef = _defaultRef,
-            Prepare = _prepare,
-            CheckoutName = _serviceName,
-        },
-        Project = _project ?? "",
-        Path = _path,
-        Url = _url,
-        Container = _container,
-        Kubernetes = _kubernetes,
-        Kind = _kind ?? LocalKinds.Dotnet,
-        KindOptions = _kindOptions,
-        Origin = CatalogOrigin.Code,
-        DefaultSource = _defaultSource,
-    };
+            // Repository/Project default to "" (ServiceMetadata's own defaults) when unset — a service
+            // declared with no With* call at all is caught downstream by the same "no source configured"
+            // path an empty yaml entry hits today, not rejected here.
+            //
+            // A shared handle's RepositoryDefinition is built once and cached by RepositoryBuilder.Build
+            // — every service sharing this handle gets the identical instance back, which is the
+            // reference-equality identity mechanism design "The domain type" describes.
+            Repository = _sharedRepository?.Build() ?? new RepositoryDefinition
+            {
+                Url = _repository ?? "",
+                DefaultRef = _defaultRef,
+                Prepare = _prepare,
+                CheckoutName = _serviceName,
+            },
+            Project = _project ?? "",
+            Path = _path,
+            Url = _url,
+            Container = _container,
+            Kubernetes = _kubernetes,
+            Dotnet = _dotnet,
+            Kind = kind,
+            KindOptions = _kindOptions,
+            Origin = CatalogOrigin.Code,
+            DefaultSource = _defaultSource,
+        };
+    }
 }
