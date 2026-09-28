@@ -116,29 +116,43 @@ The `dotnet` kind is resolved directly from top-level service metadata rather th
   inside it (`launchProfile:`, `runScript:`) is rejected **at catalog load** with the existing
   "unknown property 'x' inside 'dotnet'" message. That keeps the guarantee the existing stray-block
   test pins: an unknown key under `dotnet:` is still a load-time error naming the service and
-  `dotnet`. The test needs reworking only because a *valid* `dotnet:` block is no longer stray.
+  `dotnet`. That test (it uses `runScript: dev`) keeps passing unchanged; only its comment, which
+  says a `dotnet:` block is always stray, goes stale and is updated.
+- `DotnetMetadata` must live in namespace `Aspire.Hosting.ServiceSources.Config` (the loader's
+  `IsNestedBlock` requires the same namespace as `ServiceMetadata`); `bool?` and `string?` members
+  are scalars and are not treated as nested blocks.
 - `kindBlockKey` for `dotnet` stays null (there is still no opaque kind block).
   `IsReservedKindName("dotnet")` becoming true is harmless: `LocalKindRegistry.Register` already
-  refuses that name.
+  refuses that name. The loader comment above `kindBlockKey` ("a `dotnet:` block is always stray or
+  misspelled") becomes false and is rewritten. A scalar or list under `dotnet:`, or a non-bool
+  `excludeLaunchProfile`, fails in the typed YamlDotNet pass like every other typed block.
 
 Rejected alternative: route the block through `KindConfig` and `LocalKindConfig.Parse<T>` like
 `java`/`javascript`. It works, but it moves typo detection from catalog load to resolution time,
 reverses the loader's `dotnet` exemption and its explanatory comment, and gives a code-declared
 service two competing stores (`WithKind("dotnet", obj)` next to `WithProject`).
 
-### Cross-field checks (yaml at catalog load, code at `Build()`)
+### Cross-field checks (yaml in `ServiceCatalogLoader.Load`, code in `ServiceDefinitionBuilder.Build`)
+
+Both checks run at exactly one place per origin, share one implementation, and are not re-run at
+resolution:
 
 - `dotnet:` on a service whose `kind` is not `dotnet` is an error naming the service and the kind:
-  the block would otherwise be silently ignored. For code this is checked in
-  `ServiceDefinitionBuilder.Build`, so `AsDotnet` before or after `AsJava`/`WithKind` gives the same
-  answer.
+  the block would otherwise be silently ignored. For code, `Build()` is the only place that sees
+  both calls, so `AsDotnet` before or after `AsJava`/`WithKind` gives the same answer.
 - Contradiction: `excludeLaunchProfile: true` together with a non-blank `launchProfileName` is an
   error (section 4). `excludeLaunchProfile: false` with a name is fine.
 
+They apply to the catalog entry whatever source is eventually selected: a `dotnet:` block on an
+entry a developer currently runs through `url` or `container` is validated but otherwise unread
+(it takes effect the day they switch that service to `repository` or `path`), the same way a
+`java:` block survives under other sources today. The profile-must-exist check (section 4) needs a
+working tree and therefore only runs for the sources that have one.
+
 ## 4. Precedence and validation
 
-Resolved once by a shared static (`DotnetMetadata` to `{ Name?, Exclude }`), used by yaml and code
-alike:
+Resolved once by a shared static, `DotnetMetadata.Resolve(...)` returning `{ Name?, Exclude }`,
+used by the loader, `Build()` and both `AddProject` call sites:
 
 1. `excludeLaunchProfile: true` with a name: **configuration error** naming both fields, remedy
    "drop one". Rejected rather than "exclude wins" because Aspire's own precedence would make the
@@ -150,19 +164,33 @@ alike:
    profile means it.
 4. Neither: today's behavior, unchanged.
 
-Check 1 runs at catalog load for yaml, and for a code-declared service at resolution before any
-clone (next to `ValidateProject`), so it holds on the eager and deferred paths alike.
+Check 1 runs at catalog load for yaml and in `Build()` for code (section 3), so it is settled before
+any clone and holds on the eager, `path` and deferred paths alike.
+
+Blank handling is deliberately asymmetric. A blank yaml scalar (`launchProfileName:`) means "unset",
+the repo-wide rule for blank catalog scalars (`ServiceCatalogLoader` does the same for
+`defaultSource`). A code call `WithLaunchProfileName(null or blank)` throws immediately, because an
+explicit call with nothing to say is a mistake in the AppHost, not a cleared line in a file. A
+padded name such as `" http "` is non-blank, is used verbatim, and therefore fails the must-exist
+check below with the profiles the file does contain.
 
 ### Profile-must-exist check
 
 When a name is configured, the named profile must exist in
 `<project dir>/Properties/launchSettings.json`. Otherwise a `ServiceSourcesConfigurationException`
 names the service, the configured value, the file, and the profiles it does contain (or says the
-file is absent). This also covers the case Aspire is silent about (no file at all). The JSON read is
-the tolerant one `LandedLaunchProfile` already does (comments and trailing commas allowed); a file
-that cannot be parsed skips this check and leaves the outcome to Aspire, as `LandedLaunchProfile.Read`
-treats unreadable as absent. It needs the working tree, so it runs after the project file is
-resolved on the eager and `path` paths, and after the clone lands on the deferred path (section 6).
+file is absent). This also covers the case Aspire is silent about (no file at all).
+
+One shared reader owns the file read: `LandedLaunchProfile` gains
+`ProfileNames(string projectFile)` returning the profile names, or a distinct "absent" / "unreadable"
+result, using the tolerant parse it already has (comments and trailing commas allowed). The check
+consumes it from the eager path, `PathSource` and the deferred restore, and runs **before**
+`LandedLaunchProfile.Read`, which returns `Empty` for a missing named profile and would otherwise
+hide the problem. An unreadable (unparseable) file skips the check and leaves the outcome to Aspire,
+as `Read` treats unreadable as absent. The check needs the working tree, so it runs after the project
+file is resolved on the eager and `path` paths, and after the clone lands on the deferred path
+(section 6): the placeholder in section 6 is what lets composition pass, so on the deferred path a
+wrong name surfaces post-clone rather than at composition.
 
 ## 5. Eager path (`LocalProjectSource`, `PathSource`)
 
@@ -173,8 +201,10 @@ call otherwise, so an unconfigured service is exactly what it is today. The opti
 rather than `AddProject(name, path, launchProfileName)` because it expresses name and exclude
 independently and cannot turn a null name into an exclusion by accident.
 
-`PathSource` gets the same wiring through a shared helper: a developer flipping a service from
-`repository` to `path` must not silently change which profile runs. The `path` source has no
+`PathSource` gets the same wiring through one shared internal helper,
+`LocalProjectSource.AddDotnetProject(builder, serviceName, projectPath, definition.Dotnet)`, which
+owns the "options overload only when something is set" rule for both call sites: a developer
+flipping a service from `repository` to `path` must not silently change which profile runs. The `path` source has no
 deferral. The other sources (`url`, `container`, `kubernetes`, `disabled`) never read the block, like
 a `java:` block under those sources today.
 
@@ -191,19 +221,35 @@ The deferred `dotnet` service is assembled by hand, so the option is applied by 
   `LaunchProfile { CommandName = "Project" }`. That gets `throwIfNotFound` past composition. The
   profile carries no `applicationUrl`, so no endpoints are synthesised, which is exactly the
   existing cold-start cost `UseDeferredCheckout()` documents. Once the file exists it returns null
-  again and Aspire reads the real file at start time, as today.
+  again and Aspire reads the real file at start time, as today. A side effect worth knowing: with a
+  non-null effective profile at composition, Aspire's own `WithProjectDefaults` registers its
+  `DOTNET_LAUNCH_PROFILE` environment callback (`TryAdd`) on the deferred path too, using the
+  catalog's name before any file check. The existing `RestoreLaunchProfileEnvironment` only writes
+  that key when absent, so for a named profile it becomes a no-op for that variable and still
+  restores the profile's other variables. Today's null profile takes the early-return branch of
+  `WithProjectDefaults`; the placeholder takes the continuing one, which adds no endpoints because
+  the placeholder has no `applicationUrl`.
 - After the clone lands, `RestoreLaunchProfile` runs the section 4 profile-must-exist check first. A
-  configured profile that the landed repository does not have fails that service's start with the
-  same message as the eager path (the existing post-clone failure channel), rather than letting
-  Aspire fail later at executable creation.
+  configured profile that the landed repository does not have fails that service (`FailedToStart`
+  on every resource `AllResources` withholds) before it starts, rather than letting Aspire fail
+  later at executable creation. That failure goes through `ReportFailureAsync`, whose text is
+  written for a clone that did not complete ("its checkout was deferred past startup and did not
+  complete"); that is wrong for a checkout that did land, and equally wrong today for the existing
+  `ResolveProjectFile` throw in the same method. The prefix is reworded to cover a failed
+  post-clone check, and the profile message stays self-explanatory.
 - `excludeLaunchProfile: true`: annotation only. Cold and warm runs are identical (no endpoints, no
   profile environment, no `DOTNET_LAUNCH_PROFILE`) and no endpoint warning is issued, because
   `LandedLaunchProfile.Read` returns empty for an excluded resource. This is the trade
   `UseDeferredCheckout()` already documents, now chosen explicitly.
-- Named profile, cold run: environment and `DOTNET_LAUNCH_PROFILE=<name>` are restored after the
-  clone, and the endpoint warning fires if that profile has an `applicationUrl` the AppHost did not
-  declare, exactly as for the default profile today.
-- `SupportsDeferredCheckout` and the prefetch are unaffected: the `dotnet` kind already always defers.
+- Named profile, cold run: the profile's environment variables are restored after the clone, and
+  the endpoint warning fires if that profile has an `applicationUrl` the AppHost did not declare,
+  exactly as for the default profile today.
+- `SupportsDeferredCheckout` and the prefetch are unaffected: the `dotnet` branch of
+  `LocalProjectSource.Resolve` never consults `SupportsDeferredCheckout` (only non-dotnet kinds do),
+  and `Register` still calls `prefetch.StartCheckout` as before. Deferral itself remains opt-in
+  (`UseDeferredCheckout()`, run mode, cold managed checkout).
+- The stale `DeferredProjectMetadata` remark that `ExcludeLaunchProfile` is "worse" for the cold case
+  is rewritten: it is now the explicit, chosen behavior when the catalog asks for it.
 
 ## 7. Code catalog API
 
@@ -231,23 +277,30 @@ catalog.AddService("worker")
   guarded by `RequireUnset` so a second `AsDotnet` throws the same "already called" error as every
   other block.
 - The section 3 cross-field checks run in `Build()`. `WithLaunchProfileName` given null or blank
-  throws immediately, in the repo's usual message shape.
+  throws immediately, in the repo's usual message shape (section 4, blank handling).
+- `ServiceDefinition.Dotnet` is an optional `init` property, so no existing construction site
+  changes; only `ServiceMetadata.ToDefinition` and `ServiceDefinitionBuilder.Build` populate it.
 - Both new public types are ATS-exported; the Aspire CLI TypeScript SDK typecheck job (CI-only)
-  covers them.
+  covers them. The TypeScript sample (`samples/DemoAppHostTypeScriptCodeCatalog`) is not extended.
 
 ## 8. Attack surface and trust
 
 - The catalog is shared team configuration and the checkout is repository content. Selecting a
-  profile *name* adds no capability: the profile bodies (`commandLineArgs`, `environmentVariables`,
-  and `executablePath` for `commandName: Executable`, which Aspire allows) already come from the
-  checkout, and Aspire's default selection already picks one of them. The option only chooses
-  which; it cannot introduce a value the repository did not carry. A catalog author who can name a
-  profile could already commit a `launchSettings.json` whose first profile does the same.
+  profile *name* chooses among profiles the repository already carries; it cannot introduce one.
+  The trust boundary is the same as running that repository's default profile (its
+  `commandLineArgs` and `environmentVariables` are what runs), but the choice of *which* profile is
+  now the catalog author's, so a catalog can point at a non-default profile (a "Docker" or
+  "Debug-Seed" profile, say) that the default selection would never run. That is the feature, and
+  it is why the name is matched exactly and a nonexistent name is an error rather than a silent
+  fall-back to the default.
 - `excludeLaunchProfile` strictly reduces what is taken from the repository (no profile
   environment, arguments or endpoints).
-- The name is only compared with keys of the checkout's JSON. This package never uses it in a path
-  or command line; `DOTNET_LAUNCH_PROFILE` is set only in the deferred restore, and only to the name
-  of a profile that was found in the file.
+- The name is used as a key compared against the checkout's JSON and as the value of
+  `DOTNET_LAUNCH_PROFILE` (which Aspire itself sets from the selected profile name on the warm path
+  and, with the section 6 placeholder, at composition on the deferred path). This package never
+  puts it in a path or command line. On the deferred path that variable therefore briefly carries
+  the catalog string before the post-clone check has confirmed it exists; the check fails the start
+  before the process runs, so no process ever sees an unconfirmed name.
 - Error text embeds catalog- and repository-derived strings (the configured name, the profile names
   in the file, file paths). All go through the structural escaping (`Name`, `Raw.Escaped`,
   `Raw.Join`) so a hostile profile key cannot inject terminal control sequences or forge lines in an
@@ -280,9 +333,10 @@ catalog.AddService("worker")
 
 Each behavior is a test written first:
 
-- Loader: `dotnet:` fields bind; an unknown key inside `dotnet:` is rejected at load (rework
-  `Load_StrayDotnetBlock_...`); `dotnet:` on `kind: java` is rejected naming both; blank
-  `launchProfileName:` is absent.
+- Loader: `dotnet:` fields bind; an unknown key inside `dotnet:` is rejected at load
+  (`Load_StrayDotnetBlock_...` keeps passing; update its comment); `dotnet:` on `kind: java` is
+  rejected naming both; blank `launchProfileName:` is absent; exclude plus name is rejected; a
+  scalar under `dotnet:` and a non-bool `excludeLaunchProfile` fail.
 - Builder: `AsDotnet` sets the definition; repeated call throws; `AsDotnet` with `AsJava` throws in
   either order; blank name throws.
 - Resolution (`LocalProjectSourceTests`, `PathSourceTests`): name selected (assert the
@@ -291,12 +345,16 @@ Each behavior is a test written first:
   profile throws the escaped message listing available profiles; no `launchSettings.json` at all
   throws; an unconfigured service is unchanged.
 - Deferred (`DeferredCheckoutTests`): a named profile survives composition with the checkout absent,
-  restores `DOTNET_LAUNCH_PROFILE`/env after landing, and fails the start if the landed repo lacks
-  it; an exclude cold run restores nothing and warns nothing.
+  restores the profile's env after landing, and fails the start (all `AllResources` marked
+  `FailedToStart`, message not claiming the clone failed) if the landed repo lacks it; an exclude
+  cold run restores nothing and warns nothing.
 - Escaping: a profile key containing control characters is not reproduced raw in an error.
 
 ## Open Questions
 
+0. **Reading of the ticket.** The ticket says "developer-config yaml"; this spec reads that as the
+   yaml *catalog* (`servicesources.yaml`), since per-kind blocks live there and the developer-config
+   layer has none. If a per-machine setting was meant, see item 1.
 1. **Per-developer override.** Should `servicesources.local.json` be able to override
    `launchProfileName`/`excludeLaunchProfile` for one machine? Proposed: no (mirrors java/javascript
    being catalog-only); revisit on demand. It is a larger change (new developer-config block,
