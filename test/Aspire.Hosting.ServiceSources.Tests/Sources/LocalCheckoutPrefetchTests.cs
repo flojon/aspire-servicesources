@@ -249,13 +249,17 @@ public class LocalCheckoutPrefetchTests
         var dir = CreateAppHostDirectory("orders", "billing");
         var builder = TestHelpers.CreateBuilder(dir);
         var git = new FakeGitClient();
-        var gate = git.BlockFor("https://example.com/orders.git");
 
         new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
 
-        Assert.DoesNotContain("https://example.com/billing.git", git.Cloned);
+        // The candidate set is computed synchronously inside the first AddService, so a wrongly
+        // kept 'billing' shows up here without waiting on a clone thread.
+        Assert.Null(LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage);
 
-        gate.Set();
+        Assert.True(
+            SpinWait.SpinUntil(() => git.Cloned.Count > 0, TimeSpan.FromSeconds(30)),
+            "the deferred service's own checkout was never cloned.");
+        Assert.Equal(["https://example.com/orders.git"], git.Cloned.ToArray());
     }
 
     [Fact]
@@ -828,7 +832,7 @@ public class LocalCheckoutPrefetchTests
     /// it downloads a repository on the strength of a config entry alone.
     /// </summary>
     [Fact]
-    public void OptedIntoDeferral_ColdServiceTheAppHostNeverAdds_IsNotCloned()
+    public void DeferredTiming_ColdServiceTheAppHostNeverAdds_IsNotCloned()
     {
         var dir = CreateAppHostDirectory("orders", "billing");
         var builder = TestHelpers.CreateBuilder(dir);
@@ -856,7 +860,7 @@ public class LocalCheckoutPrefetchTests
     /// call still leaves them all running at once.
     /// </summary>
     [Fact]
-    public void OptedIntoDeferral_TwoColdServicesAdded_StillCloneInParallel()
+    public void DeferredTiming_TwoColdServicesAdded_StillCloneInParallel()
     {
         var dir = CreateAppHostDirectory("orders", "billing");
         var builder = TestHelpers.CreateBuilder(dir);

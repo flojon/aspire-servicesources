@@ -65,7 +65,7 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// <para>
 /// What is left in the set is the case that genuinely needs speculating over: a cold clone that
 /// <c>AddService()</c> will block on. That still costs a repository the AppHost may never add, for
-/// as long as deferral is opt-in and refused in publish mode.
+/// as long as an AppHost opts into <c>CheckoutTiming.Eager</c> or runs in publish mode.
 /// </para>
 /// <para>
 /// Free of waiting is not free of cost, and the difference matters. Resolving a checkout is not a

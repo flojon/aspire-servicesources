@@ -237,7 +237,7 @@ internal static class LocalGitCheckout
     /// clone set with it — everything it excludes resolves to the same answer in
     /// <c>GetRepoRoot</c> for a fraction of the code, and reaches nobody at all when the service is
     /// never added — and <see cref="Sources.DeferredCheckout.ShouldDefer"/> layers the deferral
-    /// policy (opted in, run mode) on top of it to decide for real.
+    /// policy (the timing setting, run mode) on top of it to decide for real.
     /// </para>
     /// <para>
     /// Those two have to agree. The prefetch drops a candidate on the strength of this predicate
