@@ -88,8 +88,8 @@ the `"path"` spelling to paste instead.)
   [`SECURITY.md`](https://github.com/flojon/aspire-servicesources/blob/main/SECURITY.md)). It costs a catalog edit per bump; that's the actual trade.
 - Keep the file to the services you actually add. By default, in run mode, an entry you never add
   is not cloned at all. The cost comes back under `builder.SetCheckoutTiming(CheckoutTiming.Eager)`
-  and in `aspire publish`, where the manifest needs the checkout on disk (and for a custom kind that
-  declines deferred checkout). There `AddService()` has to hand back the real resource, so it can't
+  and in `aspire publish`, where the manifest needs the checkout on disk (and for a kind that
+  declines deferred checkout: some javascript app types, or a custom kind). There `AddService()` has to hand back the real resource, so it can't
   wait until the AppHost has finished composing to find out which services it wants: an entry whose
   *first* checkout an `AddService()` call would have to block on is cloned on the first call, in
   parallel with the others, before the AppHost has said which ones it wants. Entries you never add

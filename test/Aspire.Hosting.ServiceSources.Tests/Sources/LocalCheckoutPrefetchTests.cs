@@ -915,6 +915,7 @@ public class LocalCheckoutPrefetchTests
         Assert.DoesNotContain("SetCheckoutTiming", message);
         Assert.DoesNotContain("Deferred checkout", message);
         Assert.Contains("aspire publish", message);
+        Assert.Contains("clearing the entry is the only remedy", message);
     }
 
     [Fact]
@@ -970,6 +971,7 @@ public class LocalCheckoutPrefetchTests
         Assert.NotNull(message);
         Assert.Contains("Deferred checkout", message);
         Assert.Contains("SetCheckoutTiming(CheckoutTiming.Eager)", message);
+        Assert.Contains("removing that call restores it", message);
     }
 
     /// <summary>

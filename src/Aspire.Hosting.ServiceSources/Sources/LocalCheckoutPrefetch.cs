@@ -228,9 +228,9 @@ internal sealed class LocalCheckoutPrefetch
             var remedyTail = _isRunMode
                 ? Raw.Literal(
                     "Deferred checkout also stops it: a service whose first checkout is deferred "
-                    + "past startup is cloned only when it is added. It is the default, but this AppHost may have "
-                    + "called builder.SetCheckoutTiming(CheckoutTiming.Eager), and a kind that declines deferred "
-                    + "checkout is cloned up front regardless, so for those clearing the entry is the only remedy.")
+                    + "past startup is cloned only when it is added. It is the default; if this AppHost calls "
+                    + "builder.SetCheckoutTiming(CheckoutTiming.Eager), removing that call restores it. A kind that "
+                    + "declines deferred checkout is cloned up front regardless, so for it clearing the entry is the only remedy.")
                 : Raw.Literal(
                     "Deferral does not apply to 'aspire publish', which composes the manifest from "
                     + "checkouts already on disk, so clearing the entry is the only remedy.");
