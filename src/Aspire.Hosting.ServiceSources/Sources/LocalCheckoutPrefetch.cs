@@ -65,7 +65,8 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// <para>
 /// What is left in the set is the case that genuinely needs speculating over: a cold clone that
 /// <c>AddService()</c> will block on. That still costs a repository the AppHost may never add, for
-/// as long as an AppHost opts into <c>CheckoutTiming.Eager</c> or runs in publish mode.
+/// as long as an AppHost opts into <c>CheckoutTiming.Eager</c>, runs in publish mode, or uses a kind
+/// that declines deferred checkout.
 /// </para>
 /// <para>
 /// Free of waiting is not free of cost, and the difference matters. Resolving a checkout is not a
@@ -227,8 +228,9 @@ internal sealed class LocalCheckoutPrefetch
             var remedyTail = _isRunMode
                 ? Raw.Literal(
                     "Deferred checkout also stops it: a service whose first checkout is deferred "
-                    + "past startup is cloned only when it is added, which is the default unless this AppHost calls "
-                    + "builder.SetCheckoutTiming(CheckoutTiming.Eager).")
+                    + "past startup is cloned only when it is added. It is the default, but this AppHost may have "
+                    + "called builder.SetCheckoutTiming(CheckoutTiming.Eager), and a kind that declines deferred "
+                    + "checkout is cloned up front regardless, so for those clearing the entry is the only remedy.")
                 : Raw.Literal(
                     "Deferral does not apply to 'aspire publish', which composes the manifest from "
                     + "checkouts already on disk, so clearing the entry is the only remedy.");

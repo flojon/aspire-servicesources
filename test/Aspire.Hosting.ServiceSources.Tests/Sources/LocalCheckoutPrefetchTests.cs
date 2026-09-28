@@ -930,6 +930,32 @@ public class LocalCheckoutPrefetchTests
     }
 
     [Fact]
+    public void RunModeDefaultTiming_DecliningKind_NoticeAdmitsClearingTheEntryIsTheRemedy()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.yaml"),
+            "services:\n"
+            + "  orders:\n    repository: https://example.com/orders.git\n    project: Service.csproj\n"
+            + "  billing:\n    repository: https://example.com/billing.git\n    kind: declining\n");
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.local.json"),
+            "{ \"services\": { \"orders\": { \"source\": \"repository\" }, \"billing\": { \"source\": \"repository\" } } }");
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.AddLocalKind("declining", new FakeLocalResourceKind());
+        var git = new FakeGitClient { StartBarrier = new Barrier(2) };
+
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
+
+        var message = LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage;
+
+        Assert.NotNull(message);
+        Assert.Contains("billing", message);
+        Assert.Contains("declines deferred checkout", message);
+        Assert.Contains("clearing the entry is the only remedy", message);
+    }
+
+    [Fact]
     public void RunModeEager_UnusedCheckoutNotice_StillNamesEagerAsHowDeferralIsLost()
     {
         var dir = CreateAppHostDirectory("orders", "billing");
