@@ -166,7 +166,7 @@ internal sealed class DotnetMetadata
 
 Add `public DotnetMetadata? Dotnet { get; set; }` (one-line summary) to `ServiceMetadata` and `public DotnetMetadata? Dotnet { get; init; }` to `ServiceDefinition`; add `Dotnet = Dotnet,` to `ToDefinition`. In `ServiceCatalogLoader.Load`, right after the `Kind` normalization and before `if (!raw.Services.TryGetValue(...))` (so it also runs when there is no raw entry), add `DotnetMetadata.Validate(name, metadata.Kind, metadata.Dotnet);`. Replace the comment block above `var kindBlockKey = ...` so it says: the built-in `dotnet` kind has no opaque options block; its typed `dotnet:` block is an ordinary `ServiceMetadata` property, validated like `kubernetes:` (delete "so a `dotnet:` block is always stray or misspelled ... silently ignored").
 
-- [ ] **Step 4: Run to verify pass.** Same filter, then `--filter "FullyQualifiedName~ServiceCatalogLoaderTests"` (the reserved-kind tests must still pass; adjust one only if it asserts the opposite of spec section 3). Expected: PASS.
+- [ ] **Step 4: Run to verify pass.** Same filter, then `--filter "FullyQualifiedName~ServiceCatalogLoaderTests"` (the reserved-kind tests must still pass; `IsReservedKindName("dotnet")` becomes true, which is harmless because its only production caller is guarded by `kindBlockKey is not null`, which is null for `dotnet`). Expected: PASS.
 
 - [ ] **Step 5: Commit.** `git add -A && git commit -m "Add the typed dotnet: catalog block and its cross-field checks (#415)"` with the Co-Authored-By trailer.
 
@@ -362,6 +362,7 @@ In `LocalProjectSource.Resolve` replace `builder.AddProject(serviceName, project
   - `Register`: `var (profileName, _) = DotnetMetadata.Resolve(definition.Dotnet);` pass `profileName` to `new DeferredProjectMetadata(projectPath, profileName)`; use `.WithProjectDefaults(LocalProjectSource.ToProjectResourceOptions(definition.Dotnet) ?? new ProjectResourceOptions())`; pass `profileName` into the `RestoreLaunchProfile` callback.
   - `RestoreLaunchProfile`: after `ResolveProjectFile`, call `LaunchProfileCheck.Verify(resource.Name, projectFile, launchProfileName)` before `LandedLaunchProfile.Read`.
   - `ReportFailureAsync`: replace "its checkout was deferred past startup and did not complete, so the service was never started." with wording covering both a failed clone and a failed post-clone check, e.g. "its deferred checkout could not be completed or checked, so the service was never started." Update any test asserting the old text.
+  - The post-clone callback's exceptions already reach `ReportFailureAsync` (the `catch (Exception ex)` in the start loop, as the existing `ResolveProjectFile` throw does), so no new plumbing is needed for the failure tests.
   - One-sentence comment in `Register`: `DOTNET_LAUNCH_PROFILE` is set at composition from the catalog name; the post-clone check confirms it before the process starts.
 
 - [ ] **Step 4: Run to verify pass**: the filter above, then the full `dotnet test -f net10.0`. Expected: PASS.
