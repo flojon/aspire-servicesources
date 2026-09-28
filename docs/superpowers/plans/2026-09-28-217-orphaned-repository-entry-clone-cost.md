@@ -94,26 +94,14 @@ Add to `LocalCheckoutPrefetchTests`:
         Assert.Contains("Deferred checkout", message);
         Assert.Contains("SetCheckoutTiming(CheckoutTiming.Eager)", message);
     }
-
-    [Fact]
-    public void RunModeDefaultTiming_ColdServiceTheAppHostNeverAdds_HasNoNotice()
-    {
-        var dir = CreateAppHostDirectory("orders", "billing");
-        var builder = TestHelpers.CreateBuilder(dir);
-        var git = new FakeGitClient();
-
-        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
-
-        Assert.Null(LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage);
-    }
 ```
 
 If the "no unused entry" or default-timing tests need a different `FakeGitClient` setup (a deferred registration may need the clone to be awaited), copy the shape of `DeferredTiming_ColdServiceTheAppHostNeverAdds_IsNotCloned` in the same file.
 
-- [ ] **Step 2: Run the tests to verify the publish-mode one fails and the others pass**
+- [ ] **Step 2: Run the tests to verify the publish-mode one fails and the others pass** (the Eager test may instead be folded as two extra asserts into `ServiceMarkedRepositoryButNeverAdded_IsReportedRatherThanClonedSilently`)
 
-Run: `dotnet test test/Aspire.Hosting.ServiceSources.Tests -f net10.0 --filter "FullyQualifiedName~LocalCheckoutPrefetchTests&(FullyQualifiedName~PublishMode_UnusedCheckoutNotice|FullyQualifiedName~PublishMode_EveryConfiguredServiceAdded|FullyQualifiedName~RunModeEager_UnusedCheckoutNotice|FullyQualifiedName~RunModeDefaultTiming_ColdService)"`
-Expected: `PublishMode_UnusedCheckoutNotice_DoesNotOfferDeferralAsARemedy` FAILS (message contains "Deferred checkout"); the other three PASS (they pin unchanged behaviour).
+Run: `dotnet test test/Aspire.Hosting.ServiceSources.Tests -f net10.0 --filter "FullyQualifiedName~LocalCheckoutPrefetchTests&(FullyQualifiedName~PublishMode_UnusedCheckoutNotice|FullyQualifiedName~PublishMode_EveryConfiguredServiceAdded|FullyQualifiedName~RunModeEager_UnusedCheckoutNotice)"`
+Expected: `PublishMode_UnusedCheckoutNotice_DoesNotOfferDeferralAsARemedy` FAILS (message contains "Deferred checkout"); the other two PASS (they pin unchanged behaviour).
 
 - [ ] **Step 3: Implement**
 
@@ -132,7 +120,7 @@ In `EnsureStarted`, right after `_started = true;`:
             _isRunMode = builder.ExecutionContext.IsRunMode;
 ```
 
-In `UnusedCheckoutsRaw`, replace the final two `+ $"..."` fragments (the "Deferred checkout also stops it..." sentence) with a tail chosen by mode:
+In `UnusedCheckoutsRaw`, replace everything from "Deferred checkout also stops it" (mid-line 236, so split that fragment after "to stop paying for them. ") through line 238 with a tail chosen by mode:
 
 ```csharp
             var remedyTail = _isRunMode
@@ -141,8 +129,8 @@ In `UnusedCheckoutsRaw`, replace the final two `+ $"..."` fragments (the "Deferr
                     + "past startup is cloned only when it is added, which is the default unless this AppHost calls "
                     + "builder.SetCheckoutTiming(CheckoutTiming.Eager).")
                 : Raw.Literal(
-                    "Deferred checkout does not apply to 'aspire publish', which composes the manifest from "
-                    + "checkouts that are already on disk, so clearing the entry is the only way to stop paying for it.");
+                    "Deferral does not apply to 'aspire publish', which composes the manifest from "
+                    + "checkouts that are already on disk, so clearing the entry is the only remedy.");
 ```
 
 and end the `Raw.Compose` with `+ $"{remedyTail}");` after `... to stop paying for them. `. Keep the preceding sentence text unchanged. If `Raw.Literal` rejects the string (check its signature), use `Raw.Compose($"...")` with the same text instead.
@@ -181,7 +169,7 @@ Expected today: one hit (line 90). After the change: no hits.
 
 - [ ] **Step 2: Rewrite the bullet**
 
-Replace lines 89-97 with text making these points, in the file's existing voice and without ticket numbers: entries you never add are, by default and in run mode, not cloned; the cost applies under `builder.SetCheckoutTiming(CheckoutTiming.Eager)` and in `aspire publish` (where the manifest needs the checkout on disk and `AddService()` blocks on it), and for a custom kind that declines deferred checkout; in those cases an entry whose first checkout an `AddService()` call would block on is cloned on the first call, in parallel, before the AppHost says which it wants; the AppHost logs which entries those were and warns if one failed; so drop entries you never add. Add one sentence: a checkout that already exists is never touched for a service you do not add (it is not moved to its configured ref either).
+Replace lines 89-97 with text making these points, in the file's existing voice and without ticket numbers: entries you never add are, by default and in run mode, not cloned; the cost applies under `builder.SetCheckoutTiming(CheckoutTiming.Eager)` and in `aspire publish` (where the manifest needs the checkout on disk and `AddService()` blocks on it), and for a custom kind that declines deferred checkout; in those cases an entry whose first checkout an `AddService()` call would block on is cloned on the first call, in parallel, before the AppHost says which it wants; the AppHost logs which entries those were and warns if one failed; so drop entries you never add. Do not add a new sentence about existing checkouts: the paragraph at lines 106-108 ("Either way ... never touched") already says it; keep it and make sure "Either way" still has a referent.
 
 - [ ] **Step 3: Verify**
 
