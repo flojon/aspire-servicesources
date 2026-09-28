@@ -358,6 +358,9 @@ next run rather than served from the previous ref's binaries. That last one is w
 outright, because the failure it *doesn't* have would be a quiet one: a service answering with
 code you moved away from.
 
+For `"path"` services, the build is the one place this package steps in: services that share a
+repository are built one at a time before they start. A managed checkout is not gated.
+
 Two things to know when it goes wrong:
 
 - **The compiler's output isn't in the AppHost's console.** It goes to that resource's console in
@@ -398,13 +401,15 @@ Two things to know when it goes wrong:
   reasoning already covers a clone that fails for a service nothing waits on; this is the step
   after it.
 
-- **Two `path` services in one repository can collide.** If both point into the same repository
-  and their projects share a `ProjectReference`, Aspire starts both at once, and two builds write
-  that shared project's `bin/`/`obj/` simultaneously — which fails intermittently, with an
-  `MSB4018` or `CS2012` naming a file "being used by another process"
-  ([microsoft/aspire#15190](https://github.com/microsoft/aspire/issues/15190)). Managed checkouts
-  can't hit this: each service gets its own clone under `.servicesources/checkouts/<serviceName>/`,
-  so there is no shared output directory even when two services come from one repository.
+- **Two `path` services in one repository are built one at a time.** If both point into the same
+  repository and their projects share a `ProjectReference`, Aspire would start both at once and two
+  builds would write that shared project's `bin/`/`obj/` simultaneously, failing intermittently
+  with an `MSB4018` or `CS2012`
+  ([microsoft/aspire#15190](https://github.com/microsoft/aspire/issues/15190)). The `"path"` source
+  serializes those builds; see [Several path services from one repository](path.md#several-path-services-from-one-repository).
+  A managed checkout is not gated. Ungrouped ones cannot collide, since each service gets its own
+  clone under `.servicesources/checkouts/<serviceName>/`; a `WithSharedRepository` group shares
+  one clone and is not gated.
 
 Launching the AppHost from an IDE is the one case this doesn't cover. An IDE that starts project
 resources itself, to attach a debugger, builds them the way it builds anything else — and a
@@ -678,6 +683,9 @@ catalog written this way keeps working, and the warning goes away the moment you
 `path.path`, the same override an ungrouped service has: point one developer's own working copy of
 one member at a directory you manage yourself. There is no repository-level equivalent — it
 redirects one service at a time, never a whole group's shared checkout in one setting.
+
+A `WithSharedRepository` group of managed checkouts shares one clone, so services in it build in the
+same working tree; unlike `"path"` services in one repository, they are not gated.
 
 **None of this applies to the [`"path"` source](path.md).** Grouping exists to avoid cloning
 one external repository twice, and a `"path"` service has nothing to clone — two of them naming

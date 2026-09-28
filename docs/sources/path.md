@@ -165,3 +165,47 @@ one. The catalog's own `prepare:` step still isn't run in your directory, under 
 service still written as `"local": { "path": "..." }` gets both notices: rename the block to
 `"repository"`, and separately, move off `.path` onto the `"path"` source.)
 
+## Several path services from one repository
+
+Two `"path"` services whose projects share a `ProjectReference` used to race when Aspire started
+them together: both builds wrote the shared project's `bin/` and `obj/` at once, and one failed
+intermittently with `MSB4018` or `CS2012`
+([microsoft/aspire#15190](https://github.com/microsoft/aspire/issues/15190)). They no longer do.
+`dotnet` services in the same group build one after another, then run concurrently as before. Only
+the build is serialized.
+
+**The group is the git repository the service directory sits in** — the nearest ancestor holding a
+`.git` entry, else the configured `ServiceSources:RepositoryRoot`, else the service directory
+itself. A service alone in its group is never held up. This is deliberately coarse: it serializes
+two builds that did not need it at the cost of a little startup time, and never the reverse. (The
+`prepare` lock groups differently, by resolved service directory: it guards a step that runs *in*
+that directory.)
+
+**`buildGroup` names a group explicitly** for what the repository rule cannot see, such as two
+repositories that share a project through a sibling path:
+
+=== "C#"
+
+    ```csharp
+    catalog.AddService("orders").WithPath("services/orders").WithBuildGroup("shared-lib");
+    catalog.AddService("payments").WithPath("services/payments").WithBuildGroup("shared-lib");
+    ```
+
+=== "YAML"
+
+    ```yaml
+    services:
+      orders:
+        path: services/orders
+        buildGroup: shared-lib
+    ```
+
+The name is case-sensitive, non-empty and has no surrounding whitespace, and `buildGroup` is not a
+valid `kind` name. It belongs to the catalog, not to `servicesources.local.json`, because it
+describes how the code is laid out. It has no effect unless the service resolves to `"path"`.
+
+**What is not covered.** A managed checkout (`"repository"`) is not gated: ungrouped ones each have
+their own clone, and services in a `WithSharedRepository` group share one clone and are not gated
+either. Launching from an IDE, where the debugger builds the project itself, and `dotnet watch`
+bypass the gate. A build that fails is logged to the service's own console and the service still
+starts, so its own `dotnet run` reports the real error.

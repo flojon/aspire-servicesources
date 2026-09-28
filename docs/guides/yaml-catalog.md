@@ -51,6 +51,7 @@ A developer picks a source in `servicesources.local.json` exactly as in the
 | `container:` | `WithContainer(image, port, defaultTag, scheme)` |
 | `kubernetes:` | `WithKubernetes(service, port, scheme)` |
 | `defaultSource:` | `WithDefaultSource(source)` |
+| `buildGroup:` | `WithBuildGroup(name)` |
 
 ## `defaultSource`
 
@@ -71,6 +72,15 @@ services:
     clone, CI must pin its own source (an environment variable, or its own configuration layer)
     rather than relying on the absence of a file. `defaultSource: path` carries no such cost —
     see [the `"path"` source](../sources/path.md).
+
+## `buildGroup`
+
+An optional name that makes `"path"` services build one at a time even when they sit in different
+repositories, for example when they share a project through a sibling directory. Services in one git
+repository are already grouped automatically. See
+[Several path services from one repository](../sources/path.md#several-path-services-from-one-repository).
+
+`buildGroup` is a reserved key: a custom `kind` cannot be named `buildGroup`.
 
 ## Grouping several services under one repository
 
