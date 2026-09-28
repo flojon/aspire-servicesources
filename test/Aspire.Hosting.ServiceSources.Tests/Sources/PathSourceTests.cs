@@ -4,6 +4,7 @@ using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
+using Aspire.Hosting.ServiceSources.Messages;
 using Aspire.Hosting.ServiceSources.Prepare;
 using Aspire.Hosting.ServiceSources.Sources;
 using Microsoft.Extensions.Configuration;
@@ -226,7 +227,8 @@ public class PathSourceTests
                 builder, ServiceName, Definition(path: "../../../elsewhere"), DevConfig()));
 
         Assert.Contains("../../../elsewhere", ex.Message, StringComparison.Ordinal);
-        Assert.Contains($"points outside the repository at '{repositoryRoot}'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            $"points outside the repository at '{Name.Escape(repositoryRoot)}'", ex.Message, StringComparison.Ordinal);
     }
 
     // === A copy with no .git: ServiceSources:RepositoryRoot ===
@@ -257,7 +259,8 @@ public class PathSourceTests
             new PathSource(new GitCliClient()).Resolve(
                 TestHelpers.CreateBuilder(appHostDir), ServiceName, Definition(path: "../Orders.Api"), DevConfig()));
 
-        Assert.Contains($"points outside the AppHost directory '{appHostDir}'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            $"points outside the AppHost directory '{Name.Escape(appHostDir)}'", ex.Message, StringComparison.Ordinal);
         Assert.Contains("No '.git' was found", ex.Message, StringComparison.Ordinal);
         Assert.Contains("'ServiceSources:RepositoryRoot'", ex.Message, StringComparison.Ordinal);
         Assert.Contains("ServiceSources__RepositoryRoot", ex.Message, StringComparison.Ordinal);
@@ -290,7 +293,7 @@ public class PathSourceTests
                 builder, ServiceName, Definition(path: "../../../elsewhere"), DevConfig()));
 
         Assert.Contains(
-            $"points outside the repository root '{copyRoot}' set by 'ServiceSources:RepositoryRoot'",
+            $"points outside the repository root '{Name.Escape(copyRoot)}' set by 'ServiceSources:RepositoryRoot'",
             ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("No '.git' was found", ex.Message, StringComparison.Ordinal);
     }
@@ -340,7 +343,8 @@ public class PathSourceTests
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             new PathSource(new GitCliClient()).Resolve(
                 builder, ServiceName, Definition(path: "../../../elsewhere"), DevConfig()));
-        Assert.Contains($"points outside the repository at '{repositoryRoot}'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            $"points outside the repository at '{Name.Escape(repositoryRoot)}'", ex.Message, StringComparison.Ordinal);
 
         SetRepositoryRoot(builder, "/no/such/root");
         new PathSource(new GitCliClient()).Resolve(builder, ServiceName, Definition(path: "../Orders.Api"), DevConfig());
@@ -372,7 +376,7 @@ public class PathSourceTests
                 builder, ServiceName, Definition(path: "services/orders"), DevConfig()));
 
         Assert.Equal(
-            $"Service '{ServiceName}': path 'services/orders' does not exist under '{appHostDir}'. A 'path' " +
+            $"Service '{ServiceName}': path 'services/orders' does not exist under '{Name.Escape(appHostDir)}'. A 'path' " +
             "service names a directory that should already be checked out beside the AppHost — there is " +
             "nothing here to clone. If this service actually lives in a separate repository, give it a " +
             "'repository:' instead (or add one alongside 'path:' so each developer can pick).",
