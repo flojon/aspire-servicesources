@@ -352,16 +352,16 @@ Each behavior is a test written first:
 
 ## Open Questions
 
-0. **Reading of the ticket.** The ticket says "developer-config yaml"; this spec reads that as the
+1. **Reading of the ticket.** The ticket says "developer-config yaml"; this spec reads that as the
    yaml *catalog* (`servicesources.yaml`), since per-kind blocks live there and the developer-config
-   layer has none. If a per-machine setting was meant, see item 1.
-1. **Per-developer override.** Should `servicesources.local.json` be able to override
+   layer has none. If a per-machine setting was meant, see item 2.
+2. **Per-developer override.** Should `servicesources.local.json` be able to override
    `launchProfileName`/`excludeLaunchProfile` for one machine? Proposed: no (mirrors java/javascript
    being catalog-only); revisit on demand. It is a larger change (new developer-config block,
    validator, precedence).
-2. **No-`launchSettings.json` strictness.** Proposed: a named profile with no file at all is an
+3. **No-`launchSettings.json` strictness.** Proposed: a named profile with no file at all is an
    error (the name can never resolve), which is stricter than Aspire's silent no-op. The alternative
    is to match Aspire and error only when the file exists but lacks the name.
-3. **Naming.** `AsDotnet`/`WithLaunchProfileName`/`ExcludeLaunchProfile()` follow the sibling
+4. **Naming.** `AsDotnet`/`WithLaunchProfileName`/`ExcludeLaunchProfile()` follow the sibling
    `AsJava`/`With*` conventions; no strong preference if the maintainer wants a single
    `WithLaunchProfile(string?)` instead.
