@@ -18,14 +18,15 @@ time over the same referenced project's `obj/` and `bin/`. The loser fails with 
 
 The `"repository"` source already serializes *its own* mutations per shared checkout
 (`CheckoutNameLock`: reconcile, prepare) but not the build, and this ticket is scoped to `"path"`
-only. Managed-checkout behaviour must not change.
+only. Managed-checkout behaviour must not change. (Ungrouped managed checkouts each get their own clone
+and cannot collide; only a `WithSharedRepository` group of managed checkouts shares one.)
 
 ## Findings that constrain the design
 
 1. **The build is not ours.** There is no call in this package to wrap in a lock. Any serialization
    has to be inserted between "Aspire decides to start the resource" and "`dotnet run` builds". The
-   package subscribes to no lifecycle event for that today (its only resource-event reader is
-   `ServiceStartupFailureNotices`, which reads state snapshots after the fact).
+   package uses no *per-resource start* event today (it subscribes to `BeforeStartEvent` in several
+   places and `ServiceStartupFailureNotices` reads state snapshots after the fact).
 2. **Composition-time work cannot serialize a start-time build.** `AddService` calls run one at a
    time on the composition thread, so a lock taken there protects nothing; the race is between the
    starts of two resources, well after composition.
@@ -38,10 +39,18 @@ only. Managed-checkout behaviour must not change.
 5. **A gate that mis-fires must be cheap.** Serializing two builds that did not need it costs
    startup time only; failing to serialize two that did costs a flaky start. The design errs on
    over-grouping.
-6. **`dotnet run` still builds afterwards.** After a gated `dotnet build` of the same project, the
-   run's own build is an incremental no-op. Whether concurrent no-op builds can still collide is
-   the residual risk the spike (see Testing) must measure; it decides whether a `--no-build`
-   argument is also needed.
+6. **`dotnet run` still builds afterwards.** Aspire launches `dotnet run --project <path>
+   [--configuration <AppHost option>] --no-launch-profile`; `--no-build` is added only for
+   `SuppressBuild`, which is false for `AddProject(path)`. After a gated build with the same
+   configuration, the run's build should be an incremental no-op, but a multi-targeted project
+   builds every TFM under `dotnet build` while `dotnet run` builds one, so it would not be. Whether
+   concurrent no-op builds can still collide is the residual risk the spike must measure; it
+   decides whether `--no-build` is also needed.
+7. **Aspire 13.5.2 supports the hook** (verified by decompiling the pinned package):
+   `BeforeResourceStartedEvent` is public; the orchestrator awaits it before creating the process;
+   different resources start concurrently; a handler exception fails that resource's start; it is
+   re-raised on every (re)start of the resource. `AspireVersion` is pinned in
+   `Directory.Build.props`. The spike only re-confirms this empirically.
 
 ## Alternatives weighed
 
@@ -68,11 +77,16 @@ first and the field can follow without breaking anything.
 For a `"path"` service of the built-in `dotnet` kind, the **build group key** is:
 
 1. `buildGroup`, if the catalog entry declares one (ordinal, case-sensitive); else
-2. the full, separator-trimmed path of the nearest ancestor of the resolved service directory
-   (`repoRoot` in `PathSource.Resolve`) that holds a `.git` entry (directory or file, as
-   `ConfinementRootOf` treats it); else
-3. the resolved service directory itself (a `.git`-less copy: two services in one directory share;
+2. the full, separator-trimmed result of `ConfinementRootOf(serviceDir, configured)` (the local named
+   `repoRoot` in `PathSource.Resolve` is the *service directory*, not the repository root): the
+   nearest ancestor holding a `.git` entry (directory or file), else the configured
+   `ServiceSources:RepositoryRoot` when it applies; else
+3. the service directory itself (a `.git`-less copy: two services in one directory share;
    unrelated directories do not).
+
+The key is lexical (no symlink/junction resolution; ordinal on macOS despite its default
+case-insensitive filesystem), like the package's other confinement checks; `buildGroup` is the
+escape hatch.
 
 Keys are namespaced so an explicit name can never equal a path: explicit `g:<name>`, derived
 `p:<full path>`, compared ordinal-ignore-case on Windows and ordinal elsewhere.
@@ -83,10 +97,14 @@ A group of one member is not gated.
 
 `PathSource` registers each `dotnet` path service's key in a per-builder registry
 (`ConditionalWeakTable<IDistributedApplicationBuilder, BuildGroups>`, same pattern as
-`CheckoutNameLock.For`) and subscribes the returned project resource to
-`BeforeResourceStartedEvent`. Membership is only complete once every service has been added, so the
-subscription is unconditional and the handler asks the registry, at start time, whether its key has
-more than one member; if not it returns at once. Otherwise it:
+`CheckoutNameLock.For`) and subscribes (`OnBeforeResourceStarted`) on the real `AddProject` builder,
+not on the `ServiceResource` facade `ResolvedService.Bridge` returns, which is never started.
+Membership is *registered `dotnet`-kind `path` resources in run mode*; it is only complete once every
+service has been added, so the subscription is unconditional and the handler asks the registry, at
+start time, whether its key has more than one member; if not it returns at once. A member that never
+starts (disabled later, fails, explicit start) holds nothing, since only the build is gated.
+The handler runs once per event, including on every dashboard restart and per replica; a restart's
+build is a cheap incremental one. Otherwise it:
 
 1. acquires the key's `SemaphoreSlim(1,1)` asynchronously, honouring the event's cancellation token;
 2. runs `dotnet build "<projectFile>"` (argument list, no shell) in the project's directory,
@@ -94,12 +112,23 @@ more than one member; if not it returns at once. Otherwise it:
    lands in the dashboard console where #150 already points the developer;
 3. releases the semaphore in `finally`, whatever the exit code.
 
-The handler **never fails the start**. A non-zero exit is logged against the resource and the
-resource proceeds; its own `dotnet run` rebuilds, fails identically, and reports through the
-existing `ServiceStartupFailureNotices` path. One source of truth for "does not compile".
+The handler **never fails the start**, because an escaped exception fails that resource's start. It
+catches everything except `OperationCanceledException`: a non-zero exit, `dotnet` not found or
+`Process.Start` failing, and output-capture errors are logged against the resource and the resource
+proceeds; its own `dotnet run` rebuilds, fails identically, and reports through the existing
+`ServiceStartupFailureNotices` path. One source of truth for "does not compile". On cancellation it
+kills the build's process tree, releases the semaphore only if acquired, and rethrows. Output
+appended to the resource log is capped (as `BufferingPrepareOutputSink` does) and treated as text.
+
+Ordering: `WaitFor` is itself a `BeforeResourceStartedEvent` subscriber registered by the
+orchestrator, so this handler (subscribed at composition) runs first and the gated build happens
+while the service still shows "Starting", before its dependencies are healthy. The design does not
+rely on that order and cannot deadlock either way, as the semaphore is released before any wait.
 
 The semaphore is released before the process runs, so runtimes stay concurrent (finding 3). The
-build uses the configuration `dotnet run` uses by default so the follow-up is a no-op. The gate is
+build passes `--configuration` when the AppHost option sets one, matching `dotnet run`.
+Limits, documented: under IDE launch (the debugger builds) and `dotnet watch` the gate is redundant
+or ineffective; the gate cannot make a multi-targeted project's follow-up a no-op (spike). The gate is
 registered only when `builder.ExecutionContext.IsRunMode`.
 
 ### Scope
@@ -115,7 +144,9 @@ registered only when `builder.ExecutionContext.IsRunMode`.
 - Catalog: optional `buildGroup: <string>` on a service entry (yaml), `WithBuildGroup(string)` on
   `ServiceDefinitionBuilder`. Non-empty and without surrounding whitespace, else
   `ServiceSourcesConfigurationException`. Read only when the resolved source is `"path"`; ignored,
-  like a leftover `repository.ref`, when another source is selected.
+  like a leftover `repository.ref`, when another source is selected. `buildGroup` becomes a
+  reserved well-known service key, so a custom kind of that name is refused like any other
+  collision (documented; loader test).
 - Developer config: **not** exposed. The group describes the code's structure, which the catalog
   owns (see Open Questions).
 - New public API surface: `WithBuildGroup` and `ServiceMetadata.BuildGroup`, reachable from the
@@ -125,10 +156,16 @@ registered only when `builder.ExecutionContext.IsRunMode`.
 ## Attack surface
 
 - The gate executes `dotnet build` on the project file `AddProject` was given, which
-  `LocalProjectSource.ResolveProjectFile`/`ConfineProject` already confine. `buildGroup` is only a
+  `LocalProjectSource.ResolveProjectFile`/`ConfineProject` already confine lexically. It runs the
+  same untrusted-repo build logic (imports, `Directory.Build.props` above the project, inline tasks)
+  `dotnet run` would run, but earlier in the lifecycle and again on every restart. It gets the
+  AppHost's environment, not the environment Aspire injects into the service, and its working
+  directory is the project's (for a `path.path` override, whatever directory the developer named). `buildGroup` is only a
   dictionary key and reaches no command line.
 - A developer's unconfined `path.path` override can point anywhere; building it is what `dotnet run`
   would do a moment later regardless, so the gate adds no new execution.
+- Build output goes to the resource log as capped text, never markup. The registry is bounded by
+  the catalog size.
 - A group name shared unintentionally by unrelated services costs serialized builds, never a
   deadlock: the semaphore is held around the build only.
 
@@ -156,9 +193,14 @@ Per repo convention (`PathSourceTests`; `dotnet test -f net10.0` per round, full
   rule, the `buildGroup` override, and that only the build is serialized.
 - `docs/sources/repository.md`: "Aspire builds a checkout, on every start" and "Several services
   from one repository" gain one sentence each: the gate is `path`-only, a managed checkout is not
-  gated. No existing claim becomes false.
-- `CHANGELOG.md` `[Unreleased]`: a **Fixed** entry only if the path source's collision shipped in a
-  released version; 0.7.0 introduced `path:`, so confirm against the tag; otherwise **Added**.
+  gated. **One existing claim does become false and is rewritten:** the `repository.md` bullet
+  "Two `path` services in one repository can collide" (cites microsoft/aspire#15190) and the
+  sentence after it that managed checkouts cannot hit this (true only for ungrouped ones; a
+  `WithSharedRepository` group shares one clone and is not gated). `path.md` also says the build gate
+  groups by git root while the existing prepare lock groups by service directory.
+- `CHANGELOG.md` `[Unreleased]`: a **Fixed** entry. `PathSource` first shipped in `v0.7.0` (verified
+  against the tag), so the collision is a bug in released behaviour; the entry also names the new
+  optional `buildGroup` field and the reserved key. Also note the IDE/watch limit in the docs.
 
 ## Sibling overlap
 
@@ -171,9 +213,13 @@ lands second rebases.
 
 ## Open Questions
 
-1. Should developer config be able to join or override a group (a `path.path` override making two
-   services share a directory the catalog does not know are related)? Design says no; the auto
-   rule already covers same-repository overrides.
-2. Changelog category (Added vs Fixed), pending the 0.7.0 tag check above.
-3. Should managed checkouts get the same gate in a follow-up issue? (Not filed by this run.)
-4. Does the spike show `--no-build` is needed? If so it is a plan task, not a design change.
+1. Resolved: developer config does not expose the group (the catalog owns code structure; the
+   auto rule covers same-repository overrides).
+2. Resolved: Fixed (see Documentation and release notes).
+3. Possible follow-up, not filed by this run: a gate for a `WithSharedRepository` managed-checkout
+   group ("managed-checkout gate").
+4. Does the spike show `--no-build` (or single-TFM `-f` handling) is needed? If so it is a plan
+   task, not a design change.
+
+Decision recorded (delegated by the human to this spec): auto-detect plus the explicit `buildGroup`
+override, as recommended above; developer config does not expose the group.
