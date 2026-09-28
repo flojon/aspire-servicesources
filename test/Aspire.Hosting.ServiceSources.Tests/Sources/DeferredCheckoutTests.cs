@@ -117,10 +117,11 @@ public class DeferredCheckoutTests
         return dir;
     }
 
-    private static ServiceDefinition Definition(string name, string project = "Service.csproj") =>
+    private static ServiceDefinition Definition(
+        string name, string project = "Service.csproj", DotnetMetadata? dotnet = null) =>
         new ServiceMetadata
         {
-            Repository = $"https://example.com/{name}.git", Project = project,
+            Repository = $"https://example.com/{name}.git", Project = project, Dotnet = dotnet,
         }.ToDefinition("servicesources.yaml", name, TestHelpers.EmptyRepositories);
 
     private static ServiceDeveloperConfig DevConfig(string? path = null) =>
@@ -1413,6 +1414,218 @@ public class DeferredCheckoutTests
             {
                 State = new ResourceStateSnapshot(KnownResourceStates.NotStarted, null),
             });
+
+    private const string OrdersUrl = "https://example.com/orders.git";
+
+    private static IResource RealResource(IDistributedApplicationBuilder builder, string name) =>
+        Assert.Single(builder.Resources, r => r.Name == name);
+
+    /// <summary>
+    /// Reads <paramref name="resource"/>'s log up to and including the first line containing
+    /// <paramref name="stopAt"/>, off the live stream (see BufferingPrepareOutputSinkTests).
+    /// </summary>
+    private static async Task<List<string>> ReadLogUntilAsync(IServiceProvider services, IResource resource, string stopAt)
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var lines = new List<string>();
+
+        try
+        {
+            await foreach (var batch in services.GetRequiredService<ResourceLoggerService>()
+                .WatchAsync(resource).WithCancellation(cts.Token))
+            {
+                lines.AddRange(batch.Select(log => log.Content));
+
+                if (lines.Any(line => line.Contains(stopAt, StringComparison.Ordinal)))
+                {
+                    break;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+
+        return lines;
+    }
+
+    private static async Task<string?> StateOfAsync(IServiceProvider services, IResource resource)
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        await foreach (var @event in services.GetRequiredService<ResourceNotificationService>().WatchAsync(deadline.Token))
+        {
+            if (ReferenceEquals(@event.Resource, resource))
+            {
+                return @event.Snapshot.State?.Text;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Runs the deferred start end to end for one service against the fake git client.</summary>
+    private static async Task<(IServiceProvider Services, IResource Real, IResourceBuilder<ServiceResource> Service)> RunColdAsync(
+        DotnetMetadata dotnet, FakeGitClient git)
+    {
+        var builder = TestHelpers.CreateBuilderThatCanStart(CreateAppHostDirectory("orders"));
+        builder.UseDeferredCheckout();
+
+        var service = new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders", dotnet: dotnet), DevConfig());
+        var real = RealResource(builder, "orders");
+
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+        await PublishNotStartedAsync(services, real);
+
+        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+        return (services, real, service);
+    }
+
+    [Fact]
+    public void Deferred_NamedProfile_SurvivesCompositionWithTheCheckoutAbsent()
+    {
+        var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory("orders"));
+        builder.UseDeferredCheckout();
+
+        var service = new LocalProjectSource(new FakeGitClient()).Resolve(
+            builder, "orders", Definition("orders", dotnet: new() { LaunchProfileName = "http" }), DevConfig());
+
+        Assert.True(IsDeferred(service.Resource));
+        var real = RealResource(builder, "orders");
+        Assert.Equal("http", Assert.Single(real.Annotations.OfType<LaunchProfileAnnotation>()).LaunchProfileName);
+    }
+
+    [Fact]
+    public void DeferredProjectMetadata_MissingProjectWithName_ReturnsPlaceholderContainingTheName()
+    {
+        var missing = Path.Combine(TempDirectories.CreateSubdirectory().FullName, "Service.csproj");
+
+        var launchSettings = new DeferredProjectMetadata(missing, "http").LaunchSettings;
+
+        Assert.Equal("Project", launchSettings!.Profiles["http"].CommandName);
+        Assert.Null(launchSettings.Profiles["http"].ApplicationUrl);
+    }
+
+    [Fact]
+    public void DeferredProjectMetadata_ProjectPresent_ReturnsNull()
+    {
+        var projectPath = Path.Combine(TempDirectories.CreateSubdirectory().FullName, "Service.csproj");
+        File.WriteAllText(projectPath, "<Project />");
+
+        Assert.Null(new DeferredProjectMetadata(projectPath, "http").LaunchSettings);
+    }
+
+    [Fact]
+    public void DeferredProjectMetadata_NoName_KeepsTheEmptyPlaceholder()
+    {
+        var missing = Path.Combine(TempDirectories.CreateSubdirectory().FullName, "Service.csproj");
+
+        Assert.Empty(new DeferredProjectMetadata(missing).LaunchSettings!.Profiles);
+    }
+
+    [Fact]
+    public async Task Deferred_NamedProfile_AfterLanding_RestoresThatProfilesEnvironment()
+    {
+        var git = new FakeGitClient();
+        git.WithLaunchSettings(OrdersUrl, LaunchSettingsFixture.HttpsThenHttp);
+
+        var (_, real, _) = await RunColdAsync(new() { LaunchProfileName = "http" }, git);
+
+        var restore = real.Annotations.OfType<EnvironmentCallbackAnnotation>().Last();
+        var context = new EnvironmentCallbackContext(
+            new DistributedApplicationExecutionContext(DistributedApplicationOperation.Run), real);
+        await restore.Callback(context);
+
+        Assert.Equal("Development", context.EnvironmentVariables["ASPNETCORE_ENVIRONMENT"]);
+        Assert.Equal("http", context.EnvironmentVariables["DOTNET_LAUNCH_PROFILE"]);
+    }
+
+    [Fact]
+    public async Task Deferred_NamedProfile_AppUrlNotDeclared_WarnsWithThatProfilesUrl()
+    {
+        var git = new FakeGitClient();
+        git.WithLaunchSettings(OrdersUrl, LaunchSettingsFixture.HttpsThenHttp);
+
+        var (services, real, _) = await RunColdAsync(new() { LaunchProfileName = "http" }, git);
+
+        var lines = await ReadLogUntilAsync(services, real, "Checkout ready");
+
+        var warning = Assert.Single(lines, l => l.Contains("applicationUrl", StringComparison.Ordinal));
+        Assert.Contains("5100", warning);
+        Assert.DoesNotContain("7100", warning);
+    }
+
+    [Fact]
+    public async Task Deferred_NamedProfileMissingFromLandedRepo_FailsAllResourcesAndDoesNotClaimTheCloneFailed()
+    {
+        var git = new FakeGitClient();
+        git.WithLaunchSettings(OrdersUrl, LaunchSettingsFixture.HttpsThenHttp);
+
+        var (services, real, _) = await RunColdAsync(new() { LaunchProfileName = "staging" }, git);
+
+        Assert.Equal(KnownResourceStates.FailedToStart, await StateOfAsync(services, real));
+
+        var lines = await ReadLogUntilAsync(services, real, "staging");
+        var failure = Assert.Single(lines, l => l.Contains("staging", StringComparison.Ordinal));
+        Assert.Contains("was not found", failure);
+        Assert.DoesNotContain("did not complete", failure);
+    }
+
+    [Fact]
+    public async Task Deferred_NamedProfileWithNoLaunchSettingsInLandedRepo_Fails()
+    {
+        var (services, real, _) = await RunColdAsync(new() { LaunchProfileName = "http" }, new FakeGitClient());
+
+        Assert.Equal(KnownResourceStates.FailedToStart, await StateOfAsync(services, real));
+    }
+
+    [Fact]
+    public void Deferred_ExcludeLaunchProfile_RegisterDoesNotThrow()
+    {
+        var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory("orders"));
+        builder.UseDeferredCheckout();
+
+        var service = new LocalProjectSource(new FakeGitClient()).Resolve(
+            builder, "orders", Definition("orders", dotnet: new() { ExcludeLaunchProfile = true }), DevConfig());
+
+        Assert.True(IsDeferred(service.Resource));
+        Assert.Single(RealResource(builder, "orders").Annotations.OfType<ExcludeLaunchProfileAnnotation>());
+    }
+
+    [Fact]
+    public async Task Deferred_ExcludeLaunchProfile_ColdRun_RestoresNothingAndWarnsNothing()
+    {
+        var git = new FakeGitClient();
+        git.WithLaunchSettings(OrdersUrl, LaunchSettingsFixture.HttpsThenHttp);
+
+        var (services, real, _) = await RunColdAsync(new() { ExcludeLaunchProfile = true }, git);
+
+        var lines = await ReadLogUntilAsync(services, real, "Checkout ready");
+        Assert.DoesNotContain(lines, l => l.Contains("applicationUrl", StringComparison.Ordinal));
+        Assert.DoesNotContain(lines, l => l.Contains("Applied", StringComparison.Ordinal));
+        Assert.Contains(lines, l => l.Contains("Checkout ready", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Deferred_NamedProfile_WarmCheckout_ResolvesEagerlyWithTheRealProfile()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var repoRoot = PlantExistingCheckout(dir, "orders");
+        LaunchSettingsFixture.Write(repoRoot, LaunchSettingsFixture.HttpsThenHttp);
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.UseDeferredCheckout();
+
+        var service = new LocalProjectSource(new FakeGitClient()).Resolve(
+            builder, "orders", Definition("orders", dotnet: new() { LaunchProfileName = "http" }), DevConfig());
+
+        Assert.False(IsDeferred(service.Resource));
+        var real = RealResource(builder, "orders");
+        Assert.Equal("http", Assert.Single(real.Annotations.OfType<LaunchProfileAnnotation>()).LaunchProfileName);
+        Assert.Equal(5100, Assert.Single(real.Annotations.OfType<EndpointAnnotation>()).Port);
+    }
 
     [Fact]
     public void DeferredProjectMetadata_MissingCheckout_ReportsEmptyLaunchSettingsRatherThanReadingTheFile()
