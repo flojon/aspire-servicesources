@@ -1,6 +1,7 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
+using Aspire.Hosting.ServiceSources.Messages;
 using Microsoft.Extensions.Configuration;
 using System.Globalization;
 using System.Reflection;
@@ -435,8 +436,8 @@ public class DeveloperConfigValidatorTests
     /// guarantees, so each is pinned.
     /// </remarks>
     [Theory]
-    [InlineData("""{ "services": { "orders": { "source": "local", "local": { "path": "/src/orders " } } } }""", "path", "/src/orders ")]
-    [InlineData("""{ "services": { "orders": { "source": "local", "local": { "path": "/src/o", "prepare": { "command": ["mvn", " -Pprod"] } } } } }""", "command", " -Pprod")]
+    [InlineData("""{ "services": { "orders": { "source": "repository", "local": { "path": "/src/orders " } } } }""", "path", "/src/orders ")]
+    [InlineData("""{ "services": { "orders": { "source": "repository", "local": { "path": "/src/o", "prepare": { "command": ["mvn", " -Pprod"] } } } } }""", "command", " -Pprod")]
     [InlineData("""{ "services": { "orders": { "source": "kubernetes", "kubernetes": { "context": "dev", "port": 8080, "scheme": " https" } } } }""", "scheme", " https")]
     [InlineData("""{ "services": { "orders": { "source": "kubernetes", "kubernetes": { "context": "dev", "port": " 8080" } } } }""", "port", "8080")]
     public void Validate_FieldThatDidNotOptIn_StillTakesASurroundedValue(
@@ -601,10 +602,33 @@ public class DeveloperConfigValidatorTests
     [Fact]
     public void Validate_FlatFieldAtEntryRoot_NamesTheBlockItBelongsUnder()
     {
-        var ex = Load("""{ "services": { "orders": { "source": "local", "path": "/src/orders" } } }""");
+        var ex = Load("""{ "services": { "orders": { "source": "container", "tag": "v2" } } }""");
 
-        Assert.Contains("'path' is not a valid key here", ex.Message);
-        Assert.Contains("'local' block", ex.Message);
+        Assert.Contains("'tag' is not a valid key here", ex.Message);
+        Assert.Contains("'container' block", ex.Message);
+    }
+
+    /// <summary>
+    /// 'ref' is declared by both 'local' (the deprecated alias for the "repository" source's own
+    /// block, <see cref="ServiceDeveloperConfig.ReconcileRepositoryAlias"/>) and 'repository' (its
+    /// current spelling) — the identical field on the identical type, bound under two names — so a
+    /// flat 'ref' at the entry root names both rather than picking one, exactly as 'path' names
+    /// both 'local'/'repository' and 'path' below.
+    /// </summary>
+    [Fact]
+    public void Validate_FlatFieldAtEntryRoot_SharedByLocalAndRepositoryAlias_NamesBoth()
+    {
+        var ex = Load("""{ "services": { "orders": { "source": "repository", "ref": "main" } } }""");
+
+        Assert.Contains("'ref' is not a valid key here", ex.Message);
+        Assert.Contains("'local', 'repository'", ex.Message);
+
+        // The paste-ready shape names 'repository', never the deprecated 'local' alias, even though
+        // 'local' sorts first alphabetically among the homes listed above — DeveloperConfigShape's
+        // DeprecatedBlockNames is what keeps a fix suggestion from recommending the spelling this
+        // package is trying to retire.
+        Assert.Contains("""..., "repository": { "ref": ... } }""", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("""..., "local": { "ref": ... } }""", ex.Message, StringComparison.Ordinal);
     }
 
     /// <remarks>
@@ -650,8 +674,8 @@ public class DeveloperConfigValidatorTests
     {
         var ex = Load("""
             { "services": {
-                "orders": { "source": "local" },
-                "unused": { "source": "local", "path": "/src/unused" } } }
+                "orders": { "source": "repository" },
+                "unused": { "source": "repository", "path": "/src/unused" } } }
             """);
 
         Assert.Contains("unused", ex.Message);
@@ -661,7 +685,7 @@ public class DeveloperConfigValidatorTests
     [Fact]
     public void Validate_UnknownKeyBelongingToNoBlock_ListsTheValidKeys()
     {
-        var ex = Load("""{ "services": { "orders": { "source": "local", "nonsense": "x" } } }""");
+        var ex = Load("""{ "services": { "orders": { "source": "repository", "nonsense": "x" } } }""");
 
         Assert.Contains("'nonsense' is not a valid key", ex.Message);
         Assert.Contains("'source'", ex.Message);
@@ -673,7 +697,7 @@ public class DeveloperConfigValidatorTests
     {
         var ex = Load("""
             { "services": { "orders": {
-                "source": "local",
+                "source": "repository",
                 "kubernetes": { "contxt": "dev-west" } } } }
             """);
 
@@ -712,7 +736,7 @@ public class DeveloperConfigValidatorTests
     public void Validate_AnyKeyCasing_IsAccepted(string block, string field)
     {
         var dir = CreateAppHostDirectory(
-            $$"""{ "services": { "orders": { "source": "local", "{{block}}": { "{{field}}": "/src/orders" } } } }""");
+            $$"""{ "services": { "orders": { "source": "repository", "{{block}}": { "{{field}}": "/src/orders" } } } }""");
 
         var builder = TestHelpers.CreateBuilder(dir);
 
@@ -731,7 +755,7 @@ public class DeveloperConfigValidatorTests
     {
         var ex = Load("""
             { "services": { "orders": {
-                "source": "local",
+                "source": "repository",
                 "local": { "path": { "a": "b" } } } } }
             """);
 
@@ -769,21 +793,47 @@ public class DeveloperConfigValidatorTests
 
     /// <remarks>
     /// HomeBlockOf turns "that key does not go there" into "here is where it goes" by finding the
-    /// block whose fields contain the name. That is a single answer only while no two blocks share
-    /// a field name; a shared one — 'port' on the container block, say, which the catalog side
-    /// already has — would make the answer depend on the order GetProperties() happens to return,
-    /// which the CLR does not guarantee.
+    /// block whose fields contain the name. That is usually a single answer, since two blocks sharing
+    /// a field name would make it ambiguous — except where the sharing is intentional and the
+    /// multi-home branch (<see cref="DeveloperConfigShape.HomeBlocksOf"/>) exists precisely to name
+    /// every one of them rather than guess. Two overlaps are intentional, for different reasons:
+    /// 'local' and 'repository' bind to the identical type — the deprecated alias
+    /// (<see cref="ServiceDeveloperConfig.ReconcileRepositoryAlias"/>) and its current spelling — so
+    /// every field they declare is the same field twice, not a collision. 'local'/'repository' (the
+    /// "repository" source's own developer override) and 'path' (the "path" source's, mirroring it —
+    /// design "local.path is deprecated, not removed yet") deliberately share 'path' and 'prepare',
+    /// the identical shape of override on two sources one service can combine but a developer
+    /// resolves through exactly one of at a time (<c>source</c> names only one). Every other pair
+    /// still shares nothing, which this test keeps guarding — an accidental collision anywhere else
+    /// would still make the near-miss answer depend on <c>GetProperties()</c>'s unspecified order.
     /// </remarks>
     [Fact]
-    public void Shape_NoFieldNameIsSharedByTwoBlocks()
+    public void Shape_NoFieldNameIsSharedByTwoBlocksExceptTheIntentionalOverlaps()
     {
         var blocks = DeveloperConfigShape.Service.BlockFields;
+
+        var aliasPairs = new HashSet<(string, string)> { ("Local", "Repository"), ("Repository", "Local") };
+
+        var repositoryPathPairs = new HashSet<(string, string)>
+        {
+            ("Local", "Path"), ("Path", "Local"), ("Repository", "Path"), ("Path", "Repository"),
+        };
+        var intentionallySharedWithPath = new HashSet<string>(StringComparer.Ordinal) { "Path", "Prepare" };
 
         foreach (var (name, fields) in blocks)
         {
             foreach (var (otherName, otherFields) in blocks.Where(other => other.Key != name))
             {
-                var shared = fields.Keys.Where(otherFields.ContainsKey).ToArray();
+                if (aliasPairs.Contains((name, otherName)))
+                {
+                    continue;
+                }
+
+                var shared = fields.Keys
+                    .Where(otherFields.ContainsKey)
+                    .Where(field => !(repositoryPathPairs.Contains((name, otherName))
+                        && intentionallySharedWithPath.Contains(field)))
+                    .ToArray();
 
                 Assert.True(
                     shared.Length == 0,
@@ -861,7 +911,7 @@ public class DeveloperConfigValidatorTests
     [Fact]
     public void Validate_AnyRejection_NamesTheKeyAndItsEnvironmentSpelling()
     {
-        var ex = Load("""{ "services": { "orders": { "source": "local", "path": "/src/orders" } } }""");
+        var ex = Load("""{ "services": { "orders": { "source": "repository", "path": "/src/orders" } } }""");
 
         Assert.Contains("'ServiceSources:Services:orders:path'", ex.Message);
         Assert.Contains("ServiceSources__Services__orders__path", ex.Message);
@@ -879,14 +929,36 @@ public class DeveloperConfigValidatorTests
     [Fact]
     public void Validate_ServiceEntryWrittenAsAValue_IsRejectedRatherThanDropped()
     {
-        var ex = Load("""{ "services": { "orders": "local" } }""");
+        var ex = Load("""{ "services": { "orders": "repository" } }""");
 
-        Assert.Contains("the entry takes a block of settings, not the value 'local'", ex.Message);
+        Assert.Contains("the entry takes a block of settings, not the value 'repository'", ex.Message);
 
         // The value names a source, so the suggestion is the key it belongs under rather than a
         // placeholder the developer has to fill in again.
-        Assert.Contains("""{ "source": "local" }""", ex.Message);
+        Assert.Contains("""{ "source": "repository" }""", ex.Message);
         Assert.DoesNotContain("configures no services", ex.Message);
+    }
+
+    /// <remarks>
+    /// The retired source name written as the whole entry: the suggestion is its replacement, not a
+    /// placeholder and not the name that would fail again on the next run.
+    /// </remarks>
+    [Fact]
+    public void Validate_ServiceEntryWrittenAsTheRetiredLocal_SuggestsRepository()
+    {
+        var ex = Load("""{ "services": { "orders": "local" } }""");
+
+        Assert.Contains("""{ "source": "repository" }""", ex.Message);
+    }
+
+    /// <remarks>
+    /// A backing service's <c>"local"</c> is its own, current source — nothing retired about it.
+    /// </remarks>
+    [Fact]
+    public void BackingServiceShape_Local_IsAValidSourceName()
+    {
+        DeveloperConfigShape.BackingService.ValidateSourceName(Raw.Literal("Backing service 'db': source 'local'"), "local");
+        Assert.Equal("local", DeveloperConfigShape.BackingService.SuggestedSourceFor("local"));
     }
 
     /// <remarks>
@@ -916,7 +988,7 @@ public class DeveloperConfigValidatorTests
     {
         var ex = Load("""
             { "services": { "orders": {
-                "source": "local",
+                "source": "repository",
                 "path": "/src/orders",
                 "ref": "main",
                 "context": "dev-west" } } }
@@ -940,7 +1012,7 @@ public class DeveloperConfigValidatorTests
     {
         var ex = Load("""
             { "services": { "orders": {
-                "source": "local",
+                "source": "repository",
                 "local": { "path": " " } } } }
             """);
 
@@ -965,7 +1037,7 @@ public class DeveloperConfigValidatorTests
         // A non-breaking space, the one a copy-paste out of a browser or a document leaves behind.
         var ex = Load("""
             { "services": { "orders": {
-                "source": "local",
+                "source": "repository",
                 "local": { "path": "\u00a0" } } } }
             """);
 
@@ -996,7 +1068,7 @@ public class DeveloperConfigValidatorTests
     [Fact]
     public void Validate_EntryRejection_NamesAFieldsEnvironmentSpellingNotTheEntrysOwn()
     {
-        var ex = Load("""{ "services": { "orders": "local" } }""");
+        var ex = Load("""{ "services": { "orders": "repository" } }""");
 
         Assert.Contains("ServiceSources__Services__orders__Source", ex.Message);
     }
@@ -1012,7 +1084,7 @@ public class DeveloperConfigValidatorTests
     public void Validate_EntryCarryingBothAValueAndKeys_ReportsBoth()
     {
         var dir = CreateAppHostDirectory("""
-            { "services": { "orders": { "source": "local", "path": "/src/orders" } } }
+            { "services": { "orders": { "source": "repository", "ref": "main" } } }
             """);
 
         var builder = TestHelpers.CreateBuilder(dir);
@@ -1020,14 +1092,14 @@ public class DeveloperConfigValidatorTests
         // A higher layer than the file, which the package registers lowest of all.
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["ServiceSources:Services:orders"] = "local",
+            ["ServiceSources:Services:orders"] = "repository",
         });
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
 
         Assert.Contains("2 problems with the entry", ex.Message);
-        Assert.Contains("'path' is not a valid key here", ex.Message);
+        Assert.Contains("'ref' is not a valid key here", ex.Message);
 
         // The entry does have its block of settings, and it binds: the binder finds no string
         // converter for the entry type and falls through to the children. So the fault is the
@@ -1062,14 +1134,14 @@ public class DeveloperConfigValidatorTests
     {
         var ex = Load("""
             { "services": {
-                "orders":   { "source": "local", "path": "/src/orders" },
-                "payments": { "source": "local", "ref": "main" } } }
+                "orders":   { "source": "repository", "tag": "v1" },
+                "payments": { "source": "repository", "ref": "main" } } }
             """);
 
         Assert.Contains("2 service entries", ex.Message);
         Assert.Contains("Service 'orders'", ex.Message);
         Assert.Contains("Service 'payments'", ex.Message);
-        Assert.Contains("'path' is not a valid key here", ex.Message);
+        Assert.Contains("'tag' is not a valid key here", ex.Message);
         Assert.Contains("'ref' is not a valid key here", ex.Message);
     }
 
@@ -1086,14 +1158,50 @@ public class DeveloperConfigValidatorTests
     [Fact]
     public void Validate_MisspelledFieldAtEntryRoot_NamesTheFieldAndItsBlock()
     {
-        var ex = Load("""{ "services": { "orders": { "source": "local", "pth": "/src/orders" } } }""");
+        var ex = Load("""{ "services": { "orders": { "source": "container", "tga": "v2" } } }""");
+
+        Assert.Contains("'tga' is not a valid key here", ex.Message);
+        Assert.Contains("Did you mean 'tag'", ex.Message);
+        Assert.Contains("'container' block", ex.Message);
+
+        // The shape to write, as the exact-match message gives it.
+        Assert.Contains("""{ "tag": ... }""", ex.Message);
+
+        // The old message, which listed keys that cannot contain the answer.
+        Assert.DoesNotContain("Valid keys are", ex.Message);
+    }
+
+    /// <summary>
+    /// The near-miss counterpart of <see cref="Validate_FlatFieldAtEntryRoot_SharedByLocalAndRepositoryAlias_NamesBoth"/>:
+    /// a misspelled 'ref' is nearest to the identical field on both 'local' (the deprecated alias)
+    /// and 'repository' (its current spelling), so it names both rather than picking one.
+    /// </summary>
+    [Fact]
+    public void Validate_MisspelledFieldAtEntryRoot_SharedByLocalAndRepositoryAlias_NamesBoth()
+    {
+        var ex = Load("""{ "services": { "orders": { "source": "repository", "raf": "main" } } }""");
+
+        Assert.Contains("'raf' is not a valid key here", ex.Message);
+        Assert.Contains("Did you mean 'ref', in the 'local' or 'repository' block", ex.Message);
+
+        // No single shape offered, exactly as the existing multi-home 'path' case above.
+        Assert.DoesNotContain("""{ "ref": ... }""", ex.Message);
+    }
+
+    /// <summary>
+    /// A field that three blocks now declare — 'path', on 'local' and 'repository' (the same
+    /// "repository" source's own developer override, current spelling and deprecated alias) and
+    /// 'path' (the "path" source's, mirroring it) — names all three rather than picking one, since
+    /// a misspelling gives no way to tell which the developer meant.
+    /// </summary>
+    [Fact]
+    public void Validate_MisspelledFieldAtEntryRoot_SharedByThreeBlocks_NamesAll()
+    {
+        var ex = Load("""{ "services": { "orders": { "source": "repository", "pth": "/src/orders" } } }""");
 
         Assert.Contains("'pth' is not a valid key here", ex.Message);
         Assert.Contains("Did you mean 'path'", ex.Message);
-        Assert.Contains("'local' block", ex.Message);
-
-        // The shape to write, as the exact-match message gives it.
-        Assert.Contains("""{ "path": ... }""", ex.Message);
+        Assert.Contains("'local' or 'path' or 'repository' block", ex.Message);
 
         // The old message, which listed keys that cannot contain the answer.
         Assert.DoesNotContain("Valid keys are", ex.Message);
@@ -1110,17 +1218,31 @@ public class DeveloperConfigValidatorTests
     /// explained the difference to whoever hit it.
     /// </remarks>
     [Theory]
-    [InlineData("paht", "path", "local")]
     [InlineData("prot", "port", "kubernetes")]
     [InlineData("tga", "tag", "container")]
     [InlineData("rul", "url", "url")]
     public void Validate_TransposedFieldAtEntryRoot_NamesTheFieldAndItsBlock(
         string written, string field, string block)
     {
-        var ex = Load($$"""{ "services": { "orders": { "source": "local", "{{written}}": "x" } } }""");
+        var ex = Load($$"""{ "services": { "orders": { "source": "repository", "{{written}}": "x" } } }""");
 
         Assert.Contains($"Did you mean '{field}'", ex.Message);
         Assert.Contains($"'{block}' block", ex.Message);
+    }
+
+    /// <summary>
+    /// The transposed counterpart of
+    /// <see cref="Validate_MisspelledFieldAtEntryRoot_SharedByThreeBlocks_NamesAll"/>: 'path' is
+    /// declared by three blocks now, so its own transposition is the other shape this theory's rows
+    /// no longer cover.
+    /// </summary>
+    [Fact]
+    public void Validate_TransposedFieldAtEntryRoot_SharedByThreeBlocks_NamesAll()
+    {
+        var ex = Load("""{ "services": { "orders": { "source": "repository", "paht": "x" } } }""");
+
+        Assert.Contains("Did you mean 'path'", ex.Message);
+        Assert.Contains("'local' or 'path' or 'repository' block", ex.Message);
     }
 
     /// <remarks>
@@ -1149,7 +1271,7 @@ public class DeveloperConfigValidatorTests
     [Fact]
     public void Validate_KeyTwoEditsFromAShortField_IsNotGuessedAt()
     {
-        var ex = Load("""{ "services": { "orders": { "source": "local", "rap": "x" } } }""");
+        var ex = Load("""{ "services": { "orders": { "source": "repository", "rap": "x" } } }""");
 
         Assert.Contains("'rap' is not a valid key", ex.Message);
         Assert.Contains("Valid keys are", ex.Message);
@@ -1163,7 +1285,7 @@ public class DeveloperConfigValidatorTests
     [Fact]
     public void Validate_MisspelledBlockNameAtEntryRoot_ListsTheValidKeys()
     {
-        var ex = Load("""{ "services": { "orders": { "source": "local", "locl": { "path": "/src" } } } }""");
+        var ex = Load("""{ "services": { "orders": { "source": "repository", "locl": { "path": "/src" } } } }""");
 
         Assert.Contains("'locl' is not a valid key", ex.Message);
         Assert.Contains("'local'", ex.Message);
@@ -1182,7 +1304,7 @@ public class DeveloperConfigValidatorTests
     [Fact]
     public void Validate_MisspelledFieldInsideItsBlock_ListsTheBlocksKeys()
     {
-        var ex = Load("""{ "services": { "orders": { "source": "local", "local": { "pth": "/src" } } } }""");
+        var ex = Load("""{ "services": { "orders": { "source": "repository", "local": { "pth": "/src" } } } }""");
 
         Assert.Contains("'pth' is not a valid key in the 'local' block", ex.Message);
         Assert.Contains("'path'", ex.Message);
@@ -1204,7 +1326,7 @@ public class DeveloperConfigValidatorTests
     public void Validate_PrepareBlockInsideLocal_Binds()
     {
         var config = Resolve("""
-            { "services": { "orders": { "source": "local", "local": {
+            { "services": { "orders": { "source": "repository", "local": {
                 "prepare": { "command": ["./prepare.sh", "--full"], "mode": "once" } } } } }
             """);
 
@@ -1225,7 +1347,7 @@ public class DeveloperConfigValidatorTests
     public void Validate_CommandList_IsNotReportedAsABlock()
     {
         var config = Resolve("""
-            { "services": { "orders": { "source": "local", "local": {
+            { "services": { "orders": { "source": "repository", "local": {
                 "prepare": { "command": ["make", "bootstrap"] } } } } }
             """);
 
@@ -1236,7 +1358,7 @@ public class DeveloperConfigValidatorTests
     public void Validate_UnknownKeyInsidePrepare_NamesTheNestedBlock()
     {
         var ex = Load("""
-            { "services": { "orders": { "source": "local", "local": {
+            { "services": { "orders": { "source": "repository", "local": {
                 "prepare": { "comand": ["./prepare.sh"] } } } } }
             """);
 
@@ -1255,7 +1377,7 @@ public class DeveloperConfigValidatorTests
     public void Validate_AComputedMemberOfABlock_IsNotAValidKey()
     {
         var ex = Load("""
-            { "services": { "orders": { "source": "local", "local": {
+            { "services": { "orders": { "source": "repository", "local": {
                 "prepare": { "command": ["./prepare.sh"], "isDeclared": true } } } } }
             """);
 
@@ -1277,7 +1399,7 @@ public class DeveloperConfigValidatorTests
     public void Validate_ANullElementInTheCommand_IsRejected()
     {
         var ex = Load("""
-            { "services": { "orders": { "source": "local", "local": {
+            { "services": { "orders": { "source": "repository", "local": {
                 "prepare": { "command": ["./prepare.sh", null, "--full"] } } } } }
             """);
 
@@ -1293,7 +1415,7 @@ public class DeveloperConfigValidatorTests
     public void Validate_AnEmptyElementInTheCommand_IsAccepted()
     {
         var config = Resolve("""
-            { "services": { "orders": { "source": "local", "local": {
+            { "services": { "orders": { "source": "repository", "local": {
                 "prepare": { "command": ["./prepare.sh", "", "--full"] } } } } }
             """);
 
@@ -1304,7 +1426,7 @@ public class DeveloperConfigValidatorTests
     public void Validate_CommandWrittenAsAScalar_IsRejected()
     {
         var ex = Load("""
-            { "services": { "orders": { "source": "local", "local": {
+            { "services": { "orders": { "source": "repository", "local": {
                 "prepare": { "command": "./prepare.sh" } } } } }
             """);
 
@@ -1318,7 +1440,7 @@ public class DeveloperConfigValidatorTests
     public void Validate_PrepareWrittenAsAValue_IsRejected()
     {
         var ex = Load("""
-            { "services": { "orders": { "source": "local", "local": { "prepare": "./prepare.sh" } } } }
+            { "services": { "orders": { "source": "repository", "local": { "prepare": "./prepare.sh" } } } }
             """);
 
         Assert.Contains("'prepare' takes a block of settings, not a value", ex.Message);
@@ -1329,7 +1451,7 @@ public class DeveloperConfigValidatorTests
     public void Validate_WhitespaceModeInsidePrepare_IsRejectedLikeAnyOtherField()
     {
         var ex = Load("""
-            { "services": { "orders": { "source": "local", "local": {
+            { "services": { "orders": { "source": "repository", "local": {
                 "prepare": { "mode": "   " } } } } }
             """);
 
@@ -1346,7 +1468,7 @@ public class DeveloperConfigValidatorTests
     public void Validate_EmptyModeInsidePrepare_ReadsAsAbsent()
     {
         var config = Resolve("""
-            { "services": { "orders": { "source": "local", "local": {
+            { "services": { "orders": { "source": "repository", "local": {
                 "prepare": { "command": ["./prepare.sh"], "mode": "" } } } } }
             """);
 
@@ -1377,11 +1499,21 @@ public class DeveloperConfigValidatorTests
     public void Validate_PrepareAtTheEntryRoot_NamesTheBlockItBelongsUnder()
     {
         var ex = Load("""
-            { "services": { "orders": { "source": "local", "prepare": { "command": ["./prepare.sh"] } } } }
+            { "services": { "orders": { "source": "repository", "prepare": { "command": ["./prepare.sh"] } } } }
             """);
 
         Assert.Contains("'prepare' is not a valid key here", ex.Message);
-        Assert.Contains("'local' block", ex.Message);
+
+        // 'prepare' is declared by three blocks now — 'local' and 'repository' (the same
+        // "repository" source's own developer override, current spelling and deprecated alias) and
+        // 'path' (the "path" source's, mirroring it) — so all three are named rather than one picked
+        // arbitrarily.
+        Assert.Contains("'local', 'path', 'repository'", ex.Message);
+
+        // The paste-ready shape never illustrates the deprecated 'local' alias, the same guarantee
+        // Validate_FlatFieldAtEntryRoot_SharedByLocalAndRepositoryAlias_NamesBoth checks for 'ref'.
+        Assert.Contains("""..., "path": { "prepare": ... } }""", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("""..., "local": { "prepare": ... } }""", ex.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -1415,7 +1547,7 @@ public class DeveloperConfigValidatorTests
     /// beside it and left the name raw.
     /// </remarks>
     [Theory]
-    [InlineData("""{ "services": { "ord\ners": { "source": "local", "local": "x" } } }""")]
+    [InlineData("""{ "services": { "ord\ners": { "source": "repository", "local": "x" } } }""")]
     [InlineData("""{ "services": { "ord\ners": { "source": { "a": "b" } } } }""")]
     public void Validate_ServiceNameCarryingANewline_IsEscapedInTheShapeAMessageShows(string json)
     {

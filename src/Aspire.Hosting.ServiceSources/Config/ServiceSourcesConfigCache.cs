@@ -88,7 +88,7 @@ internal static class ServiceSourcesConfigCache
 
     /// <summary>
     /// The whole loaded configuration, for callers that work across services rather than resolving
-    /// one — the parallel checkout prefetch, which needs the full set of <c>"local"</c> services
+    /// one — the parallel checkout prefetch, which needs the full set of <c>"repository"</c> services
     /// before any of them has been asked for by name.
     /// </summary>
     public static LoadedConfig LoadedFor(IDistributedApplicationBuilder builder) =>
@@ -459,7 +459,7 @@ internal static class ServiceSourcesConfigCache
 
                 // Read before this layer exists, so a blank or absent result can only mean nothing
                 // has claimed this key yet -- comparing the final merged value instead could not
-                // tell a developer's own "local" from a default that merely happens to agree with
+                // tell a developer's own "repository" from a default that merely happens to agree with
                 // it (design "Default-derived exclusion": value comparison cannot substitute for
                 // provenance).
                 var key = $"{DeveloperConfiguration.ServicesKey}:{name}:source";
@@ -525,7 +525,7 @@ internal static class ServiceSourcesConfigCache
                     // case-insensitively, since AddService resolves the source the same way.
                     .Where(entry =>
                         developerConfig.Services.TryGetValue(entry.Key, out var devConfig)
-                        && string.Equals(devConfig.Source, "local", StringComparison.OrdinalIgnoreCase))
+                        && string.Equals(devConfig.Source, "repository", StringComparison.OrdinalIgnoreCase))
                     .GroupBy(entry => entry.Value.Repository.Url, StringComparer.Ordinal)
                     .Where(group => group.Count() > 1))
                 {
@@ -533,7 +533,7 @@ internal static class ServiceSourcesConfigCache
                     var namedServices = serviceNames.Select(name => Raw.Compose($"'{new Name(name)}'"));
 
                     ServiceSourcesWarnings.For(builder).AddNotice(Raw.Compose(
-                        $"Services {Raw.Join(", ", namedServices)} are all 'local' and " +
+                        $"Services {Raw.Join(", ", namedServices)} are all 'repository' and " +
                         $"declare the same repository '{Raw.Escaped(GitUrl.Redact(sharedUrl.Key))}', but none of them are grouped " +
                         $"— each gets its own checkout, cloned and reconciled separately. To share one checkout " +
                         $"instead, group them: AddRepository(...)/WithSharedRepository(...) in code, or a " +

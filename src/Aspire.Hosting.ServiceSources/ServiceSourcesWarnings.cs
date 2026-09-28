@@ -321,8 +321,8 @@ internal sealed class ServiceSourcesWarnings
     /// </summary>
     private static string SkipReason(string serviceName, string source, IReadOnlyList<string> capabilities) =>
         $"Service '{new Name(serviceName)}': skipped {DescribeCalls(capabilities)} because its source is " +
-        $"'{new Name(source)}' — {OutOfBandSourceAdvice.SourceDetail(source)}. The service is expected to be configured wherever it actually " +
-        $"runs. {SwitchSourceRemedy}";
+        $"'{new Name(source)}' — {OutOfBandSourceAdvice.SourceDetail(source)}. {OutOfBandSourceAdvice.ExpectedConfiguredWhere(source)}. " +
+        $"{SwitchSourceRemedy}";
 
     /// <summary>
     /// How to bring the service back under this AppHost's control, for every warning that offers it.

@@ -217,7 +217,7 @@ public class PrepareDeferredTests
             $"  {name}:\n    repository: https://example.com/{name}.git\n    kind: {KindName}"));
         File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), $"services:\n{yaml}\n");
 
-        var json = string.Join(",", localServices.Select(name => $"\"{name}\": {{ \"source\": \"local\" }}"));
+        var json = string.Join(",", localServices.Select(name => $"\"{name}\": {{ \"source\": \"repository\" }}"));
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), $"{{ \"services\": {{ {json} }} }}");
 
         return dir;
@@ -232,7 +232,7 @@ public class PrepareDeferredTests
     private static PrepareMetadata Prepare(string? mode = null) =>
         new() { Command = ["./prepare.sh"], Mode = mode };
 
-    private static ServiceDeveloperConfig DevConfig() => new() { Source = "local", Local = new() };
+    private static ServiceDeveloperConfig DevConfig() => new() { Source = "repository", Repository = new() };
 
     /// <summary>
     /// Waits for something a background task is about to make true. Polled rather than signalled,
@@ -579,7 +579,7 @@ public class PrepareDeferredTests
             + "    project: Generated.csproj\n");
         File.WriteAllText(
             Path.Combine(dir, "servicesources.local.json"),
-            """{ "services": { "orders": { "source": "local" } } }""");
+            """{ "services": { "orders": { "source": "repository" } } }""");
 
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
         builder.SetCheckoutTiming(CheckoutTiming.Deferred);
@@ -635,7 +635,7 @@ public class PrepareDeferredTests
             + "    project: Generated.csproj\n");
         File.WriteAllText(
             Path.Combine(dir, "servicesources.local.json"),
-            """{ "services": { "orders": { "source": "local" } } }""");
+            """{ "services": { "orders": { "source": "repository" } } }""");
 
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
         builder.SetCheckoutTiming(CheckoutTiming.Deferred);

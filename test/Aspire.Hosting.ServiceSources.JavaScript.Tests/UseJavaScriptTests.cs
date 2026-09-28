@@ -27,7 +27,7 @@ public class UseJavaScriptTests
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), $$"""
             {
-              "services": { "frontend": { "source": "local", "local": { "path": {{System.Text.Json.JsonSerializer.Serialize(repoRoot)}} } } }
+              "services": { "frontend": { "source": "repository", "local": { "path": {{System.Text.Json.JsonSerializer.Serialize(repoRoot)}} } } }
             }
             """);
 
@@ -125,5 +125,43 @@ public class UseJavaScriptTests
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.UseJavaScript());
         Assert.Contains("already registered", ex.Message);
+    }
+
+    /// <summary>
+    /// The "path" source reuses the non-dotnet kind dispatch completely unchanged (design finding 1
+    /// — <c>ILocalResourceKind</c>/<c>LocalKindRegistry</c> never learn the directory wasn't cloned):
+    /// a <c>javascript</c>-kind service resolves through <c>"path"</c> exactly as it does through
+    /// <c>"repository"</c>, with no clone and no <c>repository.path</c> override involved.
+    /// </summary>
+    [Fact]
+    public void AddService_PathSourceJavaScriptKind_ResolvesTheRealRegisteredResource()
+    {
+        var appHostDir = TempDirectories.CreateSubdirectory("servicesources-js-path-").FullName;
+        var appDir = Path.Combine(appHostDir, "services", "frontend");
+        Directory.CreateDirectory(appDir);
+        File.WriteAllText(
+            Path.Combine(appDir, "package.json"),
+            """{ "name": "frontend", "scripts": { "dev": "node server.js", "start": "node server.js" } }""");
+        File.WriteAllText(Path.Combine(appDir, "server.js"), "");
+
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              frontend:
+                path: services/frontend
+                kind: javascript
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "frontend": { "source": "path" } } }
+            """);
+
+        var builder = TestHelpers.CreateBuilder(appHostDir);
+        builder.UseJavaScript();
+
+        var service = builder.AddService("frontend");
+
+        var resource = Assert.IsType<JavaScriptAppResource>(
+            Assert.Single(builder.Resources, r => r.Name == "frontend"));
+        Assert.Equal(appDir, resource.WorkingDirectory);
+        Assert.Equal("http", service.GetEndpoint("http").EndpointName);
     }
 }

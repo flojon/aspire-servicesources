@@ -15,7 +15,7 @@ public class AddServiceTests
         TestHelpers.CreateBuilder(appHostDirectory);
 
     [Fact]
-    public void AddService_LocalSourceWithPathOverride_ReturnsTheRealRegisteredProject()
+    public void AddService_RepositorySourceWithPathOverride_ReturnsTheRealRegisteredProject()
     {
         var projectDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(projectDir, "Orders.csproj"), """
@@ -34,7 +34,7 @@ public class AddServiceTests
                 project: Orders.csproj
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), $$"""
-            { "services": { "orders": { "source": "local", "local": { "path": "{{projectDir.Replace("\\", "\\\\")}}" } } } }
+            { "services": { "orders": { "source": "repository", "local": { "path": "{{projectDir.Replace("\\", "\\\\")}}" } } } }
             """);
 
         var builder = CreateBuilder(appHostDir);
@@ -72,7 +72,7 @@ public class AddServiceTests
                 project: Orders.csproj
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), $$"""
-            { "services": { "orders": { "source": "local", "local": { "path": "{{relativePath.Replace("\\", "\\\\")}}" } } } }
+            { "services": { "orders": { "source": "repository", "local": { "path": "{{relativePath.Replace("\\", "\\\\")}}" } } } }
             """);
 
         var builder = CreateBuilder(appHostDir);
@@ -108,7 +108,7 @@ public class AddServiceTests
                 project: Orders.csproj
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), $$"""
-            { "services": { "orders": { "source": "Local", "local": { "path": "{{projectDir.Replace("\\", "\\\\")}}" } } } }
+            { "services": { "orders": { "source": "Repository", "local": { "path": "{{projectDir.Replace("\\", "\\\\")}}" } } } }
             """);
 
         var builder = CreateBuilder(appHostDir);
@@ -194,15 +194,72 @@ public class AddServiceTests
         Assert.Contains("orders", ex.Message);
         Assert.Contains("docker", ex.Message);
         Assert.Contains("unknown source", ex.Message);
-        Assert.Contains("'local'", ex.Message);
+        Assert.Contains("'repository'", ex.Message);
         Assert.Contains("'kubernetes'", ex.Message);
         Assert.Contains("'url'", ex.Message);
         Assert.Contains("'container'", ex.Message);
+        Assert.Contains("'disabled'", ex.Message);
         Assert.DoesNotContain("not implemented yet", ex.Message);
 
         // The key as well as the file, since the file is only the lowest layer it can arrive from.
         Assert.Contains("'ServiceSources:Services:orders:source'", ex.Message);
         Assert.Contains("ServiceSources__Services__orders__source", ex.Message);
+    }
+
+    /// <summary>
+    /// "local" is retired, not aliased: a config still naming it gets the specific migration this
+    /// is, naming the rename and the fix, rather than either silently resolving as before or the
+    /// generic "unknown source" complaint <see cref="AddService_UnknownSource_ReportsItAsUnknownAndNamesTheSourcesThatDoExist"/>
+    /// covers.
+    /// </summary>
+    [Fact]
+    public void AddService_SourceLocal_ReportsTheRenameToRepository()
+    {
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "local" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
+
+        Assert.Contains("Service 'orders'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("renamed", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("'repository'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("source", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("servicesources.local.json", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("unknown source", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("not a valid source", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>Case-insensitive, like every other source-name comparison in this package.</summary>
+    [Fact]
+    public void AddService_SourceLOCALAnyCasing_StillReportsTheRename()
+    {
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "LOCAL" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
+
+        Assert.Contains("renamed", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("'repository'", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -293,6 +350,58 @@ public class AddServiceTests
         Assert.Equal("https://orders.example.com:443", endpoint.Url);
     }
 
+    /// <summary>
+    /// Parallel to <see cref="AddService_UrlSource_StaysUnregisteredAndResolvesToConfiguredUrl"/>:
+    /// "disabled" is the other source resolved through <c>ResolvedService.BridgeUnregistered</c>, but
+    /// unlike "url" it registers no endpoint at all — there is nothing to point a consumer at.
+    /// </summary>
+    [Fact]
+    public void AddService_DisabledSource_StaysUnregisteredAndExposesNoEndpoint()
+    {
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "disabled" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var service = builder.AddService("orders");
+
+        Assert.IsType<ServiceResource>(service.Resource);
+        Assert.DoesNotContain(builder.Resources, r => ReferenceEquals(r, service.Resource));
+        Assert.Empty(service.Resource.Annotations.OfType<EndpointAnnotation>());
+    }
+
+    /// <summary>
+    /// "disabled" needs no catalog block of its own — unlike every other source, there is nothing to
+    /// resolve, so a bare "source": "disabled" is enough for a service the catalog declares any other
+    /// way.
+    /// </summary>
+    [Fact]
+    public void AddService_DisabledSource_NeedsNoCatalogBlockOfItsOwn()
+    {
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                url:
+                  url: https://orders.example.com
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "disabled" } } }
+            """);
+
+        var service = CreateBuilder(appHostDir).AddService("orders");
+
+        Assert.Equal("orders", service.Resource.Name);
+    }
+
     [Fact]
     public void AddService_UrlOnlyEntryUnderItsOwnSource_LoadsAndResolves()
     {
@@ -315,10 +424,10 @@ public class AddServiceTests
     }
 
     [Fact]
-    public void AddService_UrlOnlyEntrySelectedAsLocal_ReportsTheMissingRepositoryNamingTheCatalogThatDeclaresIt()
+    public void AddService_UrlOnlyEntrySelectedAsRepository_ReportsTheMissingRepositoryNamingTheCatalogThatDeclaresIt()
     {
         // The end-to-end shape of #362: the catalog declares a source that is not a repository, and
-        // servicesources.local.json picks 'local' for it anyway.
+        // servicesources.local.json picks 'repository' for it anyway.
         var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
             services:
@@ -328,7 +437,7 @@ public class AddServiceTests
                   url: https://orders.example.com
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
-            { "services": { "orders": { "source": "local" } } }
+            { "services": { "orders": { "source": "repository" } } }
             """);
 
         var builder = CreateBuilder(appHostDir);
@@ -643,7 +752,7 @@ public class AddServiceTests
                 project: Orders.csproj
             """);
         File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
-            { "services": { "orders": { "source": "local",
+            { "services": { "orders": { "source": "repository",
                 "local": { "path": "/tmp/orders", "scheme": "https" } } } }
             """);
 
@@ -740,5 +849,195 @@ public class AddServiceTests
         var service = builder.AddService("inventory");
 
         Assert.Equal("inventory", service.Resource.Name);
+    }
+
+    /// <summary>
+    /// The "path" source end to end, via AddService — catalog-declared, confined to the AppHost
+    /// directory. See design "New source: path".
+    /// </summary>
+    [Fact]
+    public void AddService_PathSource_ResolvesTheRealRegisteredProject()
+    {
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        var serviceDir = Directory.CreateDirectory(Path.Combine(appHostDir, "services", "orders")).FullName;
+        File.WriteAllText(Path.Combine(serviceDir, "Orders.csproj"), """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+              </PropertyGroup>
+            </Project>
+            """);
+
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                path: services/orders
+                project: Orders.csproj
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "path" } } }
+            """);
+
+        var builder = CreateBuilder(appHostDir);
+
+        var service = builder.AddService("orders");
+
+        Assert.IsType<ServiceResource>(service.Resource);
+        Assert.IsAssignableFrom<ProjectResource>(Assert.Single(builder.Resources, r => r.Name == "orders"));
+    }
+
+    /// <summary>
+    /// Design "local.path is deprecated, not removed yet": the mechanism keeps working exactly as it
+    /// does today, but a developer using it gets a one-time startup notice naming the replacement.
+    /// </summary>
+    [Fact]
+    public async Task AddService_LocalPathOverride_EmitsTheDeprecationNoticeOnce()
+    {
+        var projectDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(projectDir, "Orders.csproj"), """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+              </PropertyGroup>
+            </Project>
+            """);
+
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+            """);
+        var escapedProjectDir = projectDir.Replace("\\", "\\\\");
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), $$"""
+            { "services": { "orders": { "source": "repository", "local": { "path": "{{escapedProjectDir}}" } } } }
+            """);
+
+        var builder = TestHelpers.CreateBuilderThatCanStart(appHostDir);
+
+        builder.AddService("orders");
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        var notice = Assert.Single(warnings, w =>
+            w.Contains("'repository.path' is deprecated", StringComparison.Ordinal)
+            && w.Contains("Service 'orders'", StringComparison.Ordinal));
+
+        // A snippet meant to be pasted into servicesources.local.json: valid JSON, 'path' as a block
+        // (a bare "path": "..." is refused by the config validator), and the directory escaped the
+        // way JSON escapes it — so a Windows path's backslashes arrive intact.
+        Assert.Contains(
+            $"\"source\": \"path\", \"path\": {{ \"path\": \"{escapedProjectDir}\" }}", notice, StringComparison.Ordinal);
+
+        Assert.DoesNotContain("repository.prepare", notice, StringComparison.Ordinal);
+
+        // The config was written under the deprecated 'local' block, so the alias notice fires too
+        // — independently of the 'repository.path' one asserted above.
+        Assert.Contains(warnings, w => w.Contains("the 'local' block is deprecated", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The one thing that does not carry over to a path.path override: a repository.prepare block,
+    /// which is not read under the 'path' source. The catalog's own prepare step is ignored under
+    /// both, so the notice has nothing to say about it.
+    /// </summary>
+    [Fact]
+    public async Task AddService_LocalPathOverrideWithPrepareBlocks_DeprecationNoticeNamesOnlyLocalPrepare()
+    {
+        var projectDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(projectDir, "Orders.csproj"), """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+              </PropertyGroup>
+            </Project>
+            """);
+
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+                prepare:
+                  command: ["./bootstrap.sh"]
+            """);
+        var escapedProjectDir = projectDir.Replace("\\", "\\\\");
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), $$"""
+            { "services": { "orders": { "source": "repository", "local": { "path": "{{escapedProjectDir}}", "prepare": { "mode": "never" } } } } }
+            """);
+
+        var builder = TestHelpers.CreateBuilderThatCanStart(appHostDir);
+
+        builder.AddService("orders");
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        var notice = Assert.Single(warnings, w => w.Contains("'repository.path' is deprecated", StringComparison.Ordinal));
+        Assert.Contains("Move this service's 'repository.prepare' block to 'path.prepare'", notice, StringComparison.Ordinal);
+        Assert.DoesNotContain("the catalog's 'prepare' step", notice, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The rename's own counterpart: a "repository"-sourced service with no repository.path override
+    /// at all must never see the deprecation notice — it has done nothing this notice is about.
+    /// </summary>
+    [Fact]
+    public async Task AddService_RepositorySourceWithNoPathOverride_NeverEmitsTheDeprecationNotice()
+    {
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                path: services/orders
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+            """);
+        Directory.CreateDirectory(Path.Combine(appHostDir, "services", "orders"));
+        File.WriteAllText(Path.Combine(appHostDir, "services", "orders", "Orders.csproj"), "<Project />");
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "path" } } }
+            """);
+
+        var builder = TestHelpers.CreateBuilderThatCanStart(appHostDir);
+
+        builder.AddService("orders");
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.DoesNotContain(warnings, w => w.Contains("'repository.path' is deprecated", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The block-rename notice's own counterpart: a stray 'local' block left on an entry this
+    /// service is not actually resolved through must never earn the "the 'local' block is
+    /// deprecated" notice — the block is unread, so nothing about it is this developer's problem to
+    /// hear about. Mirrors <see cref="AddService_RepositorySourceWithNoPathOverride_NeverEmitsTheDeprecationNotice"/>
+    /// for the repository.path notice.
+    /// </summary>
+    [Fact]
+    public async Task AddService_LocalBlockOnAServiceSourcedElsewhere_NeverEmitsTheRenameNotice()
+    {
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+                url:
+                  url: https://orders.example
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "url", "local": { "ref": "feature/x" } } } }
+            """);
+
+        var builder = TestHelpers.CreateBuilderThatCanStart(appHostDir);
+
+        builder.AddService("orders");
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.DoesNotContain(warnings, w => w.Contains("the 'local' block is deprecated", StringComparison.Ordinal));
     }
 }

@@ -94,7 +94,7 @@ public class ServiceEndpointTests
     [Fact]
     public void GetServiceEndpoint_ServiceExposingBothSchemes_PrefersHttps()
     {
-        // What a "local" dotnet service looks like when its launch profile declares both. Aspire's
+        // What a "repository" dotnet service looks like when its launch profile declares both. Aspire's
         // own service discovery resolves "https+http://" in the same order, so preferring https
         // here hands a consumer the same endpoint it would have picked itself.
         var service = ContainerService(Builder());
@@ -117,6 +117,27 @@ public class ServiceEndpointTests
 
         Assert.Equal("https", endpoint.EndpointName);
         Assert.Equal("https://orders.example.com:443", endpoint.Url);
+    }
+
+    /// <summary>
+    /// "disabled" registers no endpoint at all, so this reaches the same "no endpoints" branch a
+    /// container/kubernetes service with its endpoints stripped does — but the advice has to differ:
+    /// there is no scheme/port entry or launch profile that would give a disabled service one back.
+    /// </summary>
+    [Fact]
+    public void GetServiceEndpoint_DisabledSource_ThrowsWithDisabledSpecificAdvice()
+    {
+        var service = new DisabledSource().Resolve(
+            Builder(),
+            "orders",
+            new ServiceMetadata().ToDefinition("servicesources.yaml", "orders", TestHelpers.EmptyRepositories),
+            new ServiceDeveloperConfig { Source = "disabled" });
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => service.GetServiceEndpoint());
+
+        Assert.Contains("orders", ex.Message);
+        Assert.Contains("'disabled'", ex.Message);
+        Assert.DoesNotContain("Give the service an endpoint", ex.Message);
     }
 
     [Fact]

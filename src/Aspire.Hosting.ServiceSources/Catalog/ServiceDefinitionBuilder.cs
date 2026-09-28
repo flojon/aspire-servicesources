@@ -26,6 +26,7 @@ public sealed class ServiceDefinitionBuilder
     private string? _defaultRef;
     private RepositoryBuilder? _sharedRepository;
     private string? _project;
+    private string? _path;
     private UrlMetadata? _url;
     private ContainerMetadata? _container;
     private KubernetesMetadata? _kubernetes;
@@ -42,7 +43,7 @@ public sealed class ServiceDefinitionBuilder
     internal string ServiceName => _serviceName;
 
     /// <summary>
-    /// Declares this service's own repository — the "local" source, ungrouped. See design "The
+    /// Declares this service's own repository — the "repository" source, ungrouped. See design "The
     /// authoring API". For several services sharing one repository, see
     /// <see cref="WithSharedRepository"/>.
     /// </summary>
@@ -75,10 +76,34 @@ public sealed class ServiceDefinitionBuilder
     }
 
     /// <summary>
-    /// Declares which source (<c>"local"</c>/<c>"url"</c>/<c>"kubernetes"</c>/<c>"container"</c>) a
-    /// developer gets for this service when nothing configures it explicitly — the code-authoring
-    /// equivalent of yaml's <c>defaultSource:</c> field. See design "Projection: a config layer, not
-    /// a resolver branch".
+    /// Declares this service's own directory, already checked out beside the AppHost — the
+    /// <c>"path"</c> source. See design "New source: <c>path</c>". Combines freely with
+    /// <see cref="WithRepository"/>/<see cref="WithSharedRepository"/> (and <see cref="WithUrl"/>,
+    /// <see cref="WithContainer"/>, <see cref="WithKubernetes"/>) on the same service — it has its own
+    /// field and its own <see cref="RequireUnset"/> guard rather than sharing
+    /// <see cref="_repositorySource"/>, because <c>path</c> and <c>repository</c> are not two
+    /// spellings of one block the way <see cref="WithRepository"/> and <see cref="WithSharedRepository"/>
+    /// are: one developer can clone this service while another uses the copy they already have.
+    /// </summary>
+    public ServiceDefinitionBuilder WithPath(string path)
+    {
+        RequireUnset(_path, nameof(WithPath));
+
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(_serviceName)}': {Raw.Literal(nameof(WithPath))} - a path is required and cannot be empty or whitespace.");
+        }
+
+        _path = path;
+        return this;
+    }
+
+    /// <summary>
+    /// Declares which source (<c>"repository"</c>/<c>"url"</c>/<c>"kubernetes"</c>/<c>"container"</c>/
+    /// <c>"path"</c>/<c>"disabled"</c>) a developer gets for this service when nothing configures it
+    /// explicitly — the code-authoring equivalent of yaml's <c>defaultSource:</c> field. See design
+    /// "Projection: a config layer, not a resolver branch".
     /// </summary>
     public ServiceDefinitionBuilder WithDefaultSource(string source)
     {
@@ -156,7 +181,7 @@ public sealed class ServiceDefinitionBuilder
     }
 
     /// <summary>
-    /// Declares a bootstrap command the <c>"local"</c> source runs inside the materialized checkout
+    /// Declares a bootstrap command the <c>"repository"</c> source runs inside the materialized checkout
     /// before the kind is allowed to judge it — the code-authoring equivalent of yaml's
     /// <c>prepare:</c> block. See the "prepare" step design
     /// (<c>docs/superpowers/specs/2026-08-28-servicesources-prepare-step-design.md</c>) for what it
@@ -248,6 +273,7 @@ public sealed class ServiceDefinitionBuilder
             CheckoutName = _serviceName,
         },
         Project = _project ?? "",
+        Path = _path,
         Url = _url,
         Container = _container,
         Kubernetes = _kubernetes,

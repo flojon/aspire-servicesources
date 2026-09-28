@@ -57,7 +57,7 @@ public class EndpointCallbackDualWriteTests
     {
         var builder = Builder();
         var real = builder.AddResource(new ProjectResource("orders"));
-        var service = ResolvedService.Bridge(real, "orders", "local");
+        var service = ResolvedService.Bridge(real, "orders", "repository");
 
         service.WithEndpoint("admin", endpoint => endpoint.Port = 9200);
 

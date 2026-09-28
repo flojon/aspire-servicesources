@@ -1,0 +1,88 @@
+site_name: Aspire.Hosting.ServiceSources
+site_description: Resolve Aspire AppHost services from a per-developer source — a git checkout, a local path, a Kubernetes dev cluster, a URL or a container image.
+site_url: !ENV [READTHEDOCS_CANONICAL_URL, "https://aspire-servicesources.readthedocs.io/en/latest/"]
+repo_url: https://github.com/flojon/aspire-servicesources
+repo_name: flojon/aspire-servicesources
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.footer
+    - navigation.top
+    - content.code.copy
+    - content.tabs.link
+    - search.suggest
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+# No `extra.version` / mike provider here: Material's built-in version dropdown needs a
+# mike-produced versions.json, and this project deliberately doesn't use mike. Read the Docs
+# injects its own version flyout (latest/stable/numbered tags) into every hosted page
+# regardless of theme — that flyout is the version selector.
+
+plugins:
+  - search
+  # Pages published before the restructure keep resolving.
+  - redirects:
+      redirect_maps:
+        authoring-in-code.md: guides/catalog-in-code.md
+        kinds.md: guides/non-dotnet-services.md
+        configuration.md: guides/configuration.md
+        backing-services.md: guides/backing-services.md
+        local-source.md: sources/repository.md
+        other-sources.md: sources/index.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - toc:
+      permalink: true
+
+exclude_docs: |
+  superpowers/
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - getting-started/installation.md
+      - getting-started/quickstart.md
+      - getting-started/samples.md
+  - Sources:
+      - sources/index.md
+      - Repository: sources/repository.md
+      - Path: sources/path.md
+      - Kubernetes: sources/kubernetes.md
+      - URL: sources/url.md
+      - Container: sources/container.md
+      - Disabled: sources/disabled.md
+  - Guides:
+      - Catalog in code: guides/catalog-in-code.md
+      - YAML catalog (advanced): guides/yaml-catalog.md
+      - Non-.NET services: guides/non-dotnet-services.md
+      - Configuration: guides/configuration.md
+      - Backing services: guides/backing-services.md
+  - Troubleshooting: troubleshooting.md
+  - Changelog: https://github.com/flojon/aspire-servicesources/blob/main/CHANGELOG.md
+
+validation:
+  links:
+    anchors: warn

@@ -15,6 +15,13 @@ namespace Aspire.Hosting.ServiceSources.Tests.Prepare;
 [Trait("IO", "true")]
 public class PrepareEagerPathTests
 {
+    /// <summary>
+    /// Every <c>repository.path</c> service now also gets the deprecation notice, which names
+    /// <c>prepare</c> where the service has one — these tests are about the prepare notices, not it.
+    /// </summary>
+    private static bool IsLocalPathDeprecation(string message) =>
+        message.Contains("'repository.path' is deprecated", StringComparison.Ordinal);
+
     private const string KindName = "stand-in";
 
     /// <summary>
@@ -111,7 +118,7 @@ public class PrepareEagerPathTests
         : ExecutableResource(name, "run", workingDirectory), IResourceWithServiceDiscovery;
 
     /// <param name="checkoutPath">
-    /// A <c>local.path</c> override to write into the developer config. It has to be in the file and
+    /// A <c>repository.path</c> override to write into the developer config. It has to be in the file and
     /// not only in the entry handed to <c>Resolve</c>, because the speculative prefetch reads the
     /// file: a service the file leaves managed is cloned there before this call, and the checkout it
     /// started is the one resolution then uses.
@@ -128,11 +135,11 @@ public class PrepareEagerPathTests
 
         var local = checkoutPath is null
             ? ""
-            : $", \"local\": {{ \"path\": {System.Text.Json.JsonSerializer.Serialize(checkoutPath)} }}";
+            : $", \"repository\": {{ \"path\": {System.Text.Json.JsonSerializer.Serialize(checkoutPath)} }}";
 
         File.WriteAllText(
             Path.Combine(dir, "servicesources.local.json"),
-            $"{{ \"services\": {{ \"{serviceName}\": {{ \"source\": \"local\"{local} }} }} }}");
+            $"{{ \"services\": {{ \"{serviceName}\": {{ \"source\": \"repository\"{local} }} }} }}");
 
         return dir;
     }
@@ -152,7 +159,7 @@ public class PrepareEagerPathTests
 
     private static ServiceDeveloperConfig DevConfig(
         string? path = null, PrepareDeveloperConfig? prepare = null) =>
-        new() { Source = "local", Local = new() { Path = path, Prepare = prepare } };
+        new() { Source = "repository", Repository = new() { Path = path, Prepare = prepare } };
 
     [Fact]
     public void TheStepRunsInTheResolvedCheckout_AfterTheCloneLanded()
@@ -247,7 +254,7 @@ public class PrepareEagerPathTests
     /// </summary>
     /// <remarks>
     /// The two facts that made this matter compose badly: deferral is refused outside run mode, so
-    /// <em>every</em> <c>"local"</c> service takes this path there — which for the motivating case
+    /// <em>every</em> <c>"repository"</c> service takes this path there — which for the motivating case
     /// meant an <c>aspire publish</c> over a cold checkout downloading hundreds of megabytes and
     /// importing a country-sized graph to emit a manifest that describes none of it.
     /// </remarks>
@@ -314,7 +321,7 @@ public class PrepareEagerPathTests
 
         var notices = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 
-        var notice = Assert.Single(notices, message => message.Contains("prepare"));
+        var notice = Assert.Single(notices, message => message.Contains("prepare") && !IsLocalPathDeprecation(message));
         Assert.Contains("'routing'", notice);
         Assert.Contains("\"./prepare.sh\", \"--full\"", notice);
     }
@@ -335,7 +342,7 @@ public class PrepareEagerPathTests
         Assert.Equal(checkout, Assert.Single(runner.RanIn));
 
         var notices = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
-        Assert.DoesNotContain(notices, message => message.Contains("prepare"));
+        Assert.DoesNotContain(notices, message => message.Contains("prepare") && !IsLocalPathDeprecation(message));
     }
 
     /// <remarks>
@@ -358,7 +365,7 @@ public class PrepareEagerPathTests
         Assert.Empty(runner.RanIn);
 
         var notices = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
-        Assert.DoesNotContain(notices, message => message.Contains("prepare"));
+        Assert.DoesNotContain(notices, message => message.Contains("prepare") && !IsLocalPathDeprecation(message));
     }
 
     /// <remarks>

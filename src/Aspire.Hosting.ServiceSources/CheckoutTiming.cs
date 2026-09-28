@@ -1,7 +1,7 @@
 namespace Aspire.Hosting.ServiceSources;
 
 /// <summary>
-/// When a <c>"local"</c> service's first checkout happens, relative to <c>Build()</c>. See
+/// When a <c>"repository"</c> service's first checkout happens, relative to <c>Build()</c>. See
 /// <see cref="ServiceSourcesBuilderExtensions.SetCheckoutTiming"/>.
 /// </summary>
 public enum CheckoutTiming
@@ -15,7 +15,7 @@ public enum CheckoutTiming
 
     /// <summary>
     /// <c>AddService()</c> blocks until the checkout it needs is on disk, with full launch-profile
-    /// fidelity and no resource started after <c>Build()</c> returns. The pre-0.7.0 default, for an
+    /// fidelity and no resource started after <c>Build()</c> returns. The pre-0.8.0 default, for an
     /// AppHost that needs every service running by the time <c>Build()</c> returns.
     /// </summary>
     Eager,

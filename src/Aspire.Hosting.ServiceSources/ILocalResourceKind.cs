@@ -22,6 +22,18 @@ public interface ILocalResourceKind
         object? rawConfig);
 
     /// <summary>
+    /// The type every resource <see cref="Resolve"/> and <see cref="ResolveDeferred"/> return is, or
+    /// derives from.
+    /// </summary>
+    /// <remarks>
+    /// Lets <c>Unwrap&lt;T&gt;(configure)</c> reject a call that no source of the service could ever
+    /// satisfy, instead of skipping it with only a warning. The default claims nothing, so a kind that
+    /// does not override it never has a call rejected. Core checks each resource the kind returns
+    /// against it, and fails startup when one is not a <see cref="ResourceType"/>.
+    /// </remarks>
+    Type ResourceType => typeof(IResourceWithServiceDiscovery);
+
+    /// <summary>
     /// Optional pre-flight check, called for a service immediately before <see cref="Resolve"/>,
     /// against the very same <paramref name="repoRoot"/> and <paramref name="rawConfig"/>, and
     /// before that service has added anything to the app model. Throw
@@ -45,7 +57,7 @@ public interface ILocalResourceKind
     /// well, and hand the working-tree checks back as
     /// <see cref="DeferredLocalResource.ValidateCheckout"/>, which core runs once the clone has
     /// landed. Validating only here leaves that service unvalidated under deferred checkout —
-    /// the default since 0.7.0 — silently: nothing reports the gap, because a kind that
+    /// the default since 0.8.0 — silently: nothing reports the gap, because a kind that
     /// implements both members is the ordinary case rather than a mistake.
     /// </para>
     /// <para>

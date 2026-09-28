@@ -97,7 +97,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             EnvOverrideCatalog,
-            """{ "services": { "envoverride": { "source": "local" } } }""");
+            """{ "services": { "envoverride": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
@@ -179,6 +179,13 @@ public class DeveloperConfigurationTests
         Assert.Equal("kubernetes", config.Source);
         Assert.Equal("/home/dev/code/orders", config.Local.Path);
         Assert.Equal("feature/new-checkout", config.Local.Ref);
+
+        // The deprecated 'local' spelling reconciles into 'repository' — see
+        // ReconcileRepositoryAlias_LocalAliasBlock_ResolvesTheSameAsRepositoryAndEmitsTheNotice
+        // below for the notice this also triggers.
+        Assert.Equal("/home/dev/code/orders", config.Repository.Path);
+        Assert.Equal("feature/new-checkout", config.Repository.Ref);
+
         Assert.Equal("dev-west", config.Kubernetes.Context);
         Assert.Equal("orders-ns", config.Kubernetes.Namespace);
         Assert.Equal(8080, config.Kubernetes.Port);
@@ -191,20 +198,189 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
-            """{ "services": { "orders": { "source": "local" } } }""");
+            """{ "services": { "orders": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
         var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
 
-        Assert.Equal("local", config.Source);
+        Assert.Equal("repository", config.Source);
         Assert.Null(config.Local.Path);
         Assert.Null(config.Local.Ref);
+        Assert.Null(config.Repository.Path);
+        Assert.Null(config.Repository.Ref);
         Assert.Null(config.Kubernetes.Context);
         Assert.Null(config.Kubernetes.Namespace);
         Assert.Null(config.Kubernetes.Port);
         Assert.Null(config.Url.Url);
         Assert.Null(config.Container.Tag);
+    }
+
+    /// <summary>
+    /// The current spelling, written directly: resolves exactly as <c>local</c> always did.
+    /// </summary>
+    [Fact]
+    public void ResolveService_RepositoryBlock_PopulatesRepository()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """
+            { "services": { "orders": { "source": "repository",
+                "repository": { "path": "/home/dev/code/orders", "ref": "feature/new-checkout" } } } }
+            """);
+
+        var builder = CreateBuilder(dir);
+
+        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+
+        Assert.Equal("/home/dev/code/orders", config.Repository.Path);
+        Assert.Equal("feature/new-checkout", config.Repository.Ref);
+        Assert.Null(config.Local.Path);
+        Assert.Null(config.Local.Ref);
+    }
+
+    /// <summary>
+    /// The deprecated alias resolves the same way as the current spelling — reconciled by
+    /// <see cref="ServiceDeveloperConfig.ReconcileRepositoryAlias"/>, from
+    /// <see cref="DeveloperConfiguration.ReadFrom"/>. Its own deprecation notice is a separate,
+    /// resolve-time concern (<c>LocalProjectSource.RepositoryAliasDeprecationNotice</c>, tested in
+    /// <c>AddServiceTests</c>) rather than something <see cref="ServiceSourcesConfigCache.ResolveService"/>
+    /// alone can show: reading configuration must not, by itself, be what a service is warned for
+    /// doing — only actually resolving through <c>"repository"</c> earns that.
+    /// </summary>
+    [Fact]
+    public void ResolveService_LocalAliasBlock_ResolvesTheSameAsRepository()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """
+            { "services": { "orders": { "source": "repository",
+                "local": { "path": "/home/dev/code/orders", "ref": "feature/new-checkout" } } } }
+            """);
+
+        var builder = CreateBuilder(dir);
+
+        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+
+        Assert.Equal("/home/dev/code/orders", config.Repository.Path);
+        Assert.Equal("feature/new-checkout", config.Repository.Ref);
+    }
+
+    /// <summary>
+    /// Two spellings of the same block, both written: there is no rule for which one would win, so
+    /// this is a configuration error rather than a silent pick. Names the catalog's own spelling of
+    /// the service, not however the developer happened to case the key they wrote — the
+    /// reconciliation runs after canonicalization for exactly this reason.
+    /// </summary>
+    [Fact]
+    public void ResolveService_BothLocalAndRepositoryDeclared_ThrowsNamingBothKeys()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """
+            { "services": { "Orders": { "source": "repository",
+                "local": { "path": "/home/dev/code/orders" },
+                "repository": { "ref": "feature/new-checkout" } } } }
+            """);
+
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.Contains("Service 'orders'", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("Service 'Orders'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("sets both 'local' and 'repository'", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The same conflict on two services at once reports both in one exception rather than failing
+    /// startup on the first, fixing one and restarting to find the second — the same
+    /// collect-then-report shape <see cref="DeveloperConfigValidator"/> already uses for its own
+    /// faulted entries.
+    /// </summary>
+    [Fact]
+    public void ResolveService_SeveralServicesBothLocalAndRepositoryDeclared_ThrowsNamingAllOfThem()
+    {
+        var dir = CreateAppHostDirectory(
+            """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: src/Orders.Api/Orders.Api.csproj
+              payments:
+                repository: https://github.com/company/payments
+                project: src/Payments.Api/Payments.Api.csproj
+            """,
+            """
+            { "services": {
+                "orders": { "source": "repository", "local": { "path": "/a" }, "repository": { "ref": "x" } },
+                "payments": { "source": "repository", "local": { "path": "/b" }, "repository": { "ref": "y" } }
+            } }
+            """);
+
+        var builder = CreateBuilder(dir);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.ResolveService(builder, "orders"));
+
+        Assert.Contains("2 services", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Service 'orders'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Service 'payments'", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// An entry the catalog does not declare is dead configuration for this AppHost — tracked as
+    /// <see cref="DeveloperConfiguration.UndeclaredNames"/> and only ever warned about, by
+    /// <c>ServiceConfigAudit</c> — so a conflict inside it is not this AppHost's problem to fail
+    /// startup over. A shared <c>servicesources.local.json</c> carrying this entry for a different
+    /// AppHost must not take this one down at its very first <c>AddService</c> call.
+    /// </summary>
+    [Fact]
+    public void ResolveService_UndeclaredEntryBothLocalAndRepositoryDeclared_DoesNotThrow()
+    {
+        var dir = CreateAppHostDirectory(
+            OrdersCatalog,
+            """
+            { "services": {
+                "orders": { "source": "repository" },
+                "reporting": { "source": "repository", "local": { "path": "/a" }, "repository": { "ref": "x" } }
+            } }
+            """);
+
+        var builder = CreateBuilder(dir);
+
+        // Resolving at all is the assertion: "reporting" names no service this AppHost's catalog
+        // declares (OrdersCatalog has only "orders"), so its conflicting blocks must not stop
+        // "orders" from resolving.
+        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+
+        Assert.Equal("repository", config.Source);
+    }
+
+    /// <remarks>
+    /// The env-var counterpart of <see cref="ResolveService_LocalAliasBlock_ResolvesTheSameAsRepository"/>:
+    /// the alias resolves the identical way whichever layer sets it, since binding — not the file
+    /// reader — is what turns <c>Local</c> into a key. Arranged as an in-memory configuration
+    /// source rather than a real environment variable, for the reason given on
+    /// <see cref="ResolveService_EnvironmentVariableOverridesTheFile"/>.
+    /// </remarks>
+    [Fact]
+    public void ResolveService_EnvironmentVariableUsingLocalAlias_ResolvesAsRepository()
+    {
+        var dir = CreateAppHostDirectory(
+            EnvOverrideCatalog,
+            """{ "services": { "envoverride": { "source": "repository" } } }""");
+
+        var builder = CreateBuilder(dir);
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ServiceSources:Services:envoverride:Local:Ref"] = "feature/from-env",
+        });
+
+        var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "envoverride");
+
+        Assert.Equal("feature/from-env", config.Repository.Ref);
     }
 
     /// <remarks>
@@ -240,7 +416,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
-            """{ "services": { "orders": { "source": "local" } } }""");
+            """{ "services": { "orders": { "source": "repository" } } }""");
         File.WriteAllText(
             Path.Combine(dir, "appsettings.json"),
             """{ "ServiceSources": { "Services": { "orders": { "source": "url" } } } }""");
@@ -265,7 +441,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
-            """{ "services": { "orders": { "source": "local" } } }""");
+            """{ "services": { "orders": { "source": "repository" } } }""");
         File.WriteAllText(
             Path.Combine(dir, "appsettings.json"),
             """{ "ServiceSources": { "Services": { "orders": { "source": "url" } } } }""");
@@ -294,7 +470,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             EnvOverrideCatalog,
-            """{ "services": { "envoverride": { "source": "local" } } }""");
+            """{ "services": { "envoverride": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
         // A higher layer than the file, spelled with different casing — an in-memory source rather
@@ -320,7 +496,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
-            """{ "services": { "Orders": { "source": "local" } } }""");
+            """{ "services": { "Orders": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
@@ -348,7 +524,7 @@ public class DeveloperConfigurationTests
                 repository: https://github.com/company/orders-two
                 project: src/Orders.Two/Orders.Two.csproj
             """,
-            """{ "services": { "orders": { "source": "local" } } }""");
+            """{ "services": { "orders": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
@@ -381,7 +557,7 @@ public class DeveloperConfigurationTests
                 repository: https://github.com/company/payments
                 project: src/Payments.Api/Payments.Api.csproj
             """,
-            """{ "services": { "payments": { "source": "local" } } }""");
+            """{ "services": { "payments": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
@@ -420,7 +596,7 @@ public class DeveloperConfigurationTests
             OrdersCatalog,
             """
             {
-              "services": { "orders": { "source": "local" } },
+              "services": { "orders": { "source": "repository" } },
               "ConnectionStrings": { "db": "Server=somewhere" }
             }
             """);
@@ -429,7 +605,7 @@ public class DeveloperConfigurationTests
 
         var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
 
-        Assert.Equal("local", config.Source);
+        Assert.Equal("repository", config.Source);
         Assert.Null(builder.Configuration["ServiceSources:ConnectionStrings:db"]);
     }
 
@@ -487,17 +663,17 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["ServiceSources:Services:switcher:Source"] = "local",
+            ["ServiceSources:Services:switcher:Source"] = "repository",
             ["ServiceSources:Services:switcher:Local:Path"] = checkout,
         });
 
         var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "switcher");
 
-        Assert.Equal("local", config.Source);
+        Assert.Equal("repository", config.Source);
         Assert.Equal(checkout, config.Local.Path);
 
         // Still bound, and that is the point: the entry it came from is untouched, and nothing
-        // reads it while the effective source is "local".
+        // reads it while the effective source is "repository".
         Assert.Equal("http://from-local-json.invalid", config.Url.Url);
     }
 
@@ -528,7 +704,7 @@ public class DeveloperConfigurationTests
         var dir = CreateAppHostDirectory(
             BlankingCatalog,
             $$"""
-            { "services": { "blanking": { "source": "local",
+            { "services": { "blanking": { "source": "repository",
                 "local": { "path": "{{configured.Replace("\\", "\\\\")}}" } } } }
             """);
 
@@ -540,7 +716,7 @@ public class DeveloperConfigurationTests
 
         // Source comes only from the file, so it proves the file layer bound at all — without it a
         // null Path could as easily mean the file's value never arrived as that the blank dropped it.
-        Assert.Equal("local", config.Source);
+        Assert.Equal("repository", config.Source);
         Assert.Null(config.Local.Path);
 
         // The bug this closes: with the path left as "", PrepareRepoRoot takes its override branch
@@ -608,7 +784,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
-            $$"""{ "{{rootKey}}": { "orders": { "source": "local" } } }""");
+            $$"""{ "{{rootKey}}": { "orders": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
@@ -639,7 +815,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
-            """{ "serivces": { "orders": { "source": "local" } } }""");
+            """{ "serivces": { "orders": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
@@ -666,13 +842,13 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
-            """{ "Services": { "orders": { "source": "local" } } }""");
+            """{ "Services": { "orders": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
         var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
 
-        Assert.Equal("local", config.Source);
+        Assert.Equal("repository", config.Source);
     }
 
     /// <remarks>
@@ -706,7 +882,7 @@ public class DeveloperConfigurationTests
             OrdersCatalog,
             """
             {
-              "services": { "orders": { "source": "local" } },
+              "services": { "orders": { "source": "repository" } },
               "service": { "orders": { "source": "url" } }
             }
             """);
@@ -715,7 +891,7 @@ public class DeveloperConfigurationTests
 
         var (_, config) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
 
-        Assert.Equal("local", config.Source);
+        Assert.Equal("repository", config.Source);
     }
 
     /// <summary>
@@ -749,7 +925,7 @@ public class DeveloperConfigurationTests
             """
             {
               "services": { },
-              "service": { "orders": { "source": "local" } }
+              "service": { "orders": { "source": "repository" } }
             }
             """);
 
@@ -827,7 +1003,7 @@ public class DeveloperConfigurationTests
             """
             {
               "servcs": { "orders": { "source": "url" } },
-              "service": { "orders": { "source": "local" } }
+              "service": { "orders": { "source": "repository" } }
             }
             """);
 
@@ -859,7 +1035,7 @@ public class DeveloperConfigurationTests
             """
             {
               "serivces": { "orders": { "source": "url" } },
-              "service": { "orders": { "source": "local" } }
+              "service": { "orders": { "source": "repository" } }
             }
             """);
 
@@ -886,7 +1062,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
-            """{ "services": { "order": { "source": "local" } } }""");
+            """{ "services": { "order": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
@@ -922,7 +1098,7 @@ public class DeveloperConfigurationTests
                 repository: https://github.com/company/order
                 project: src/Order.Api/Order.Api.csproj
             """,
-            """{ "services": { "order": { "source": "local" } } }""");
+            """{ "services": { "order": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
@@ -945,7 +1121,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
-            """{ "services": { "billing": { "source": "local" } } }""");
+            """{ "services": { "billing": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
@@ -1009,7 +1185,7 @@ public class DeveloperConfigurationTests
             {
               "services": {
                 "ordrs": { "source": "url" },
-                "orderr": { "source": "local" }
+                "orderr": { "source": "repository" }
               }
             }
             """);
@@ -1031,7 +1207,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             CartCatalog,
-            """{ "services": { "crat": { "source": "local" } } }""");
+            """{ "services": { "crat": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
@@ -1064,7 +1240,7 @@ public class DeveloperConfigurationTests
         var builder = CreateBuilder(dir);
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["ServiceSources:Services:nearmisenv:Source"] = "local",
+            ["ServiceSources:Services:nearmisenv:Source"] = "repository",
         });
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
@@ -1094,7 +1270,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             NeighbouringCartCatalog,
-            """{ "services": { "crat": { "source": "local" } } }""");
+            """{ "services": { "crat": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
@@ -1116,7 +1292,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             NeighbouringCartCatalog,
-            """{ "services": { "crat": { "source": "local" } } }""");
+            """{ "services": { "crat": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
@@ -1147,7 +1323,7 @@ public class DeveloperConfigurationTests
             {
               "services": {
                 "orders": { "local": { "path": "/tmp/orders" } },
-                "order": { "source": "local", "local": { "path": "/tmp/order" } }
+                "order": { "source": "repository", "local": { "path": "/tmp/order" } }
               }
             }
             """);
@@ -1184,7 +1360,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
-            """{ "serivces": { "orders": { "source": "local" } } }""");
+            """{ "serivces": { "orders": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
@@ -1218,7 +1394,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             CartCatalog,
-            """{ "services": { "carted": { "source": "local" } } }""");
+            """{ "services": { "carted": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 

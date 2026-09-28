@@ -16,8 +16,10 @@ internal static class Reachability
     /// here is not the service itself — shared with
     /// <see cref="ServiceConfigurationExtensions.Unwrap{T}"/>'s own out-of-band check, since both are
     /// the same policy re-expressed at a different key (annotation type here, capability type there).
+    /// <c>"disabled"</c> belongs here too — nothing is running at all, deliberately, so every call is
+    /// configuration for a resource that no longer exists.
     /// </summary>
-    internal static readonly HashSet<string> OutOfBandSources = new(StringComparer.Ordinal) { "url", "kubernetes" };
+    internal static readonly HashSet<string> OutOfBandSources = new(StringComparer.Ordinal) { "url", "kubernetes", "disabled" };
 
     /// <summary>
     /// Annotation types Aspire attaches as decoration alongside a capability call — never something
@@ -124,6 +126,13 @@ internal sealed class ServiceResourceBuilder(
     // ServiceSourcesBuilderExtensions.GateEndpointCall once did — lets any code that strips the
     // resource's own bookkeeping annotation silently un-gate every later endpoint call (#334 reopened).
     internal string Source => source;
+
+    /// <summary>
+    /// Each source the service's catalog entry declares, with the resource type it resolves to — or
+    /// <see langword="null"/> when this builder did not come from <c>AddService()</c> and the catalog
+    /// is unknown.
+    /// </summary>
+    internal Lazy<IReadOnlyList<(string Source, Type ResourceType)>>? DeclaredResolutions { get; set; }
 
     public IResourceBuilder<ServiceResource> WithAnnotation<TAnnotation>(
         TAnnotation annotation, ResourceAnnotationMutationBehavior behavior = ResourceAnnotationMutationBehavior.Append)

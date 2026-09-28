@@ -256,6 +256,10 @@ off.
 
 Then [watch the publish](#4-watch-the-publish); that part is unchanged.
 
+Once the docs build for the new tag is up, hide the patch it supersedes: Read the Docs
+dashboard → Admin → Versions → find `vX.Y.(Z-1)` → Hide. This keeps only the newest patch of
+each minor listed in the flyout — see [Documentation site](#documentation-site).
+
 ### 5. Record the release on `main`
 
 The patch is out, but `main`'s changelog does not know it happened. Open a PR to `main` that
@@ -286,6 +290,94 @@ unlist. The way out is a patch release carrying the fix, which is what `0.3.1` w
 
 **Do not delete or move a tag that has published anything.** The packages it produced are
 permanent; the tag is the only record of what commit they were built from.
+
+## Documentation site
+
+Docs are built by [Read the Docs] from `mkdocs.yml`/`.readthedocs.yaml`, not by any GitHub
+Actions workflow. One-time setup, done once in the Read the Docs dashboard after importing
+this repository from GitHub, project slug `aspire-servicesources` (hardcoded into the README
+badge, `mkdocs.yml`'s `site_url`, and the docs it links to — keep the slug in sync if it ever
+changes):
+
+1. **Import the project** at https://app.readthedocs.org/dashboard/, pointing at
+   `flojon/aspire-servicesources`.
+2. **Default branch and version:** Admin → Settings → set "Default branch" to `main` (this is
+   what `latest` tracks). `stable` doesn't exist as a selectable version until at least one tag
+   is active, so "Default version" starts as `latest`; once the first release lands (making
+   `stable` exist — see step 4 below), switch "Default version" to `stable` so the root URL
+   serves the newest release instead of `main`'s in-development docs. Don't separately activate
+   a `main` version — the branch setting already covers it.
+3. **Automation rule for tags:** Admin → Automation Rules → add a rule: match type "Custom
+   match", regex `^v0\.(7|[89]|[1-9]\d+)\.`, version type "Tag", action "Activate version".
+   `v0.7.0` is the first tag with `mkdocs.yml`/`.readthedocs.yaml` in its tree, so it's the
+   first one that can build at all — the regex just makes that explicit and keeps
+   `v0.1.0`–`v0.6.0` from being activated (they can't build; those files don't exist in their
+   trees). Widen the regex once a `v1.x` release ships. The regex also matches a prerelease tag
+   like `v0.7.0-rc.1` — harmless today since this repo doesn't tag prereleases, but worth
+   knowing if that changes.
+4. **`stable` needs no rule of its own.** Read the Docs creates it automatically once at least
+   one tag is active, pointing it at the highest activated version by version comparison — not
+   at "the newest tag by date," so a late-tagged patch to an older minor won't wrongly become
+   `stable`.
+5. Confirm unwanted branches (feature branches, `claude/*` worktree branches) and the
+   pre-`v0.7.0` tags are **not** separately activated — only `main` and `v0.7.0`+ tags should
+   build.
+
+**Versions are named by their literal git tag** (`v0.7.0`, `v0.7.1`, `v0.8.0`, …) — Read the
+Docs has no built-in way to collapse patch releases into a minor-only version (`0.7`) or strip
+the `v` prefix without [Mike], which this project deliberately doesn't use. Instead, each patch
+release hides the tag it supersedes (Admin → Versions → Hide — see [step 4](#4-tag-and-release)
+of [Patch releases](#patch-releases)), so the flyout only ever lists the newest patch per minor.
+A hidden version stays built and reachable by direct link; it just drops out of the flyout and
+`stable` never points at it again.
+
+After this, every `git push origin vX.Y.Z` (the existing [release step](#3-tag-and-release))
+picks up a new numbered version and moves `stable` automatically; nothing in the release
+process above needs to change.
+
+### Correcting docs without a release
+
+A docs-only fix (typo, broken link) doesn't need a package release: push the tag but skip
+`gh release create`.
+
+```bash
+git tag -a vX.Y.Z -m "Docs correction, no code change"
+git push origin vX.Y.Z
+```
+
+The annotated message is what marks the tag as docs-only in git history — a suffix like
+`-fix1` would do that too, but semver ranks a suffixed tag as a *prerelease* of `vX.Y.Z`, so
+Read the Docs would exclude it from `stable`. `git tag -a`'s message doesn't affect version
+ordering, so `stable` still moves to it normally.
+
+`release.yml` triggers on `release: published`, not on the tag push, so nothing is packed or
+published to nuget.org — Read the Docs still activates `vX.Y.Z` as a new version and moves
+`stable` to it, same as a real release. This doesn't fix the *previous* tag's page (tags are
+immutable), so anyone deep-linked to it still sees the error; it only moves the `stable`/newest
+pointer forward.
+
+Two consequences of using a real tag for this: it's the nearest reachable tag for any commit
+after it, so `main`'s prereleases version off it until the next real release; and the tag name
+is spent — the next actual release can't reuse `vX.Y.Z` and must pick the following number.
+
+**`vX.Y.Z` will exist on Read the Docs with no matching package on nuget.org.** Every other
+version tag in this repo's history has a published package behind it; this one doesn't, and
+nothing marks that in the flyout itself — only the tag's own annotation says so. Mention it in
+the docs-fix PR description so it isn't mistaken for a missed publish later.
+
+### Local preview
+
+```bash
+pip install -r requirements-docs.txt
+mkdocs serve
+```
+
+Serves the site at <http://127.0.0.1:8000/> with live reload. `mkdocs build --strict` is the
+same check Read the Docs runs — a broken internal link or a nav entry pointing at a missing
+file fails the build instead of shipping a 404.
+
+[Read the Docs]: https://readthedocs.org/
+[Mike]: https://github.com/jimporter/mike
 
 ## Prereleases
 

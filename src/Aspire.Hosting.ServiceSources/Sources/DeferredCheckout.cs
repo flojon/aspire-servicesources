@@ -13,12 +13,12 @@ using Microsoft.Extensions.Logging;
 namespace Aspire.Hosting.ServiceSources.Sources;
 
 /// <summary>
-/// Registers a <c>"local"</c> <c>dotnet</c> service whose managed checkout does not exist yet as a
+/// Registers a <c>"repository"</c> <c>dotnet</c> service whose managed checkout does not exist yet as a
 /// project resource that is held back at startup, and starts it once the clone has landed.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Without this, the first <c>AddService()</c> call blocks composition until every <c>"local"</c>
+/// Without this, the first <c>AddService()</c> call blocks composition until every <c>"repository"</c>
 /// service's checkout has resolved. On a cold clone the AppHost never reaches the dashboard —
 /// there is nothing to look at while several repositories clone — and one checkout failure throws
 /// out of composition, taking the whole AppHost with it including the services that were fine.
@@ -100,7 +100,7 @@ internal sealed class DeferredCheckout
     private readonly List<Deferred> _deferred = [];
 
     /// <summary>
-    /// Deferred by default since 0.7.0 (#216) — a service that used to be running by the time
+    /// Deferred by default since 0.8.0 (#216) — a service that used to be running by the time
     /// <c>Build()</c> returned is now started after it instead, which is the behaviour change an
     /// AppHost opts out of with <c>SetCheckoutTiming(CheckoutTiming.Eager)</c>.
     /// </summary>
@@ -278,7 +278,7 @@ internal sealed class DeferredCheckout
         // RestoreLaunchProfile writes an annotation directly to `resource` well after this method has
         // returned — bypassing ServiceResourceBuilder.WithAnnotation entirely — and closing over the
         // facade here is what lets that late write reach it too.
-        var bridged = ResolvedService.Bridge(resourceBuilder, serviceName, "local");
+        var bridged = ResolvedService.Bridge(resourceBuilder, serviceName, "repository");
 
         Add(
             builder, serviceName, resource, [], repoRoot, definition, config, repositoryConfig, prefetch, gitClient,
@@ -396,7 +396,7 @@ internal sealed class DeferredCheckout
             (_, checkoutRoot, logger) =>
                 RunCheckoutValidation(registration, serviceName, definition.Kind, checkoutRoot, logger));
 
-        return ResolvedService.Bridge(registration.Service, serviceName, "local");
+        return ResolvedService.Bridge(registration.Service, serviceName, "repository");
     }
 
     /// <summary>

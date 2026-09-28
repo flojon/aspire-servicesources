@@ -30,6 +30,10 @@ public class ServiceConfigurationExtensionsTests
         Url = new UrlMetadata { Url = "https://orders.example.com" },
     }.ToDefinition("servicesources.yaml", "inventory", TestHelpers.EmptyRepositories);
 
+    // No block of its own — unlike every other source, "disabled" needs nothing from the catalog.
+    private static readonly ServiceDefinition DisabledDefinition =
+        new ServiceMetadata().ToDefinition("servicesources.yaml", "billing", TestHelpers.EmptyRepositories);
+
     private sealed class FixedPortAllocator : IPortAllocator
     {
         public bool IsAvailable(int port) => true;
@@ -51,6 +55,14 @@ public class ServiceConfigurationExtensionsTests
 
     private static IResourceBuilder<ServiceResource> AddUrlService(IDistributedApplicationBuilder builder) =>
         new UrlSource().Resolve(builder, "inventory", UrlDefinition, new ServiceDeveloperConfig { Source = "url" });
+
+    private static IResourceBuilder<ServiceResource> AddKubernetesService(IDistributedApplicationBuilder builder) =>
+        new KubernetesSource(new FixedPortAllocator()).Resolve(
+            builder, "orders", KubernetesDefinition,
+            new ServiceDeveloperConfig { Source = "kubernetes", Kubernetes = new() { Context = "dev" } });
+
+    private static IResourceBuilder<ServiceResource> AddDisabledService(IDistributedApplicationBuilder builder) =>
+        new DisabledSource().Resolve(builder, "billing", DisabledDefinition, new ServiceDeveloperConfig { Source = "disabled" });
 
     [Fact]
     public void WithEnvironment_AppliesToTheRealResource()
@@ -247,6 +259,36 @@ public class ServiceConfigurationExtensionsTests
         Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
     }
 
+    /// <summary>
+    /// This project references neither guest-language hosting package, so the real kinds' types
+    /// fail to load here exactly as they do in an AppHost that never installed them.
+    /// </summary>
+    [Theory]
+    [InlineData("java")]
+    [InlineData("javascript")]
+    public void Unwrap_Delegate_OnAContainerSourcedGuestKindWithoutItsPackage_SkipsWithAWarning(string kind)
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), $"""
+            services:
+              api:
+                repository: https://github.com/example/api
+                kind: {kind}
+                container:
+                  image: example/api
+                  port: 8080
+            """);
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.local.json"),
+            """{ "services": { "api": { "source": "container" } } }""");
+        var builder = TestHelpers.CreateBuilder(dir);
+
+        var ex = Record.Exception(() => builder.AddService("api").Unwrap<ProjectResource>(_ => { }));
+
+        Assert.Null(ex);
+        Assert.Contains("Unwrap<ProjectResource>", Assert.Single(ServiceSourcesWarnings.For(builder).Messages));
+    }
+
     [Fact]
     public void Unwrap_OnUrlSource_StillThrows_BecauseItMustReturnABuilder()
     {
@@ -257,5 +299,253 @@ public class ServiceConfigurationExtensionsTests
 
         Assert.Contains("inventory", ex.Message);
         Assert.Contains("'url'", ex.Message);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_OnReachableSource_InvokesConfigureAndReturnsTheService()
+    {
+        var builder = Builder();
+        var service = AddContainerService(builder);
+        ContainerResource? configured = null;
+
+        var returned = service.Unwrap<ContainerResource>(typed => configured = typed.Resource);
+
+        Assert.Same(service.Resource, returned.Resource);
+        Assert.NotNull(configured);
+        Assert.Equal("payments", configured!.Name);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_OnUrlSource_SkipsWithoutThrowing_SoSourceSwitchingKeepsWorking()
+    {
+        var builder = Builder();
+        var callbackRan = false;
+
+        // A developer switching this service to "url" in their own servicesources.local.json must
+        // not break a Program.cs they don't own.
+        var service = AddUrlService(builder).Unwrap<IResourceWithEnvironment>(_ => callbackRan = true);
+
+        Assert.False(callbackRan);
+        Assert.NotNull(service);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_OnUrlSource_ReportsTheSkip()
+    {
+        var builder = Builder();
+
+        AddUrlService(builder).Unwrap<IResourceWithEnvironment>(_ => { });
+
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+        Assert.Contains("inventory", message);
+        Assert.Contains("'url'", message);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_ReturnsTheFacade_SoNativeCallsChainAfterIt()
+    {
+        var builder = Builder();
+
+        var service = AddContainerService(builder)
+            .Unwrap<ContainerResource>(_ => { })
+            .WithEnvironment("A", "B")
+            .WithArgs("--verbose");
+
+        Assert.NotEmpty(service.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>());
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_OnKubernetesSource_SkipsRatherThanConfiguringThePortForward()
+    {
+        var builder = Builder();
+        var callbackRan = false;
+
+        AddKubernetesService(builder).Unwrap<ExecutableResource>(_ => callbackRan = true);
+
+        Assert.False(callbackRan);
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+        Assert.Contains("Unwrap<ExecutableResource>", message);
+        Assert.Contains("port-forward", message);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_ForWaitSupportOnKubernetesSource_StillRuns_LikeWaitFor()
+    {
+        var builder = Builder();
+        var callbackRan = false;
+
+        AddKubernetesService(builder).Unwrap<IResourceWithWaitSupport>(_ => callbackRan = true);
+
+        Assert.True(callbackRan);
+        Assert.Empty(ServiceSourcesWarnings.For(builder).Messages);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_OnDisabledSource_SkipsAndReportsTheSkip()
+    {
+        var builder = Builder();
+        var callbackRan = false;
+
+        AddDisabledService(builder).Unwrap<IResourceWithEnvironment>(_ => callbackRan = true);
+
+        Assert.False(callbackRan);
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+        Assert.Contains("billing", message);
+        Assert.Contains("'disabled'", message);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_MismatchedType_SkipsAndReportsWhatItResolvedTo()
+    {
+        var builder = Builder();
+        var callbackRan = false;
+
+        // The same mismatch a developer produces by switching a java service to "container", which
+        // must not break a Program.cs they don't own.
+        var ex = Record.Exception(
+            () => AddContainerService(builder).Unwrap<ProjectResource>(_ => callbackRan = true));
+
+        Assert.Null(ex);
+        Assert.False(callbackRan);
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+        Assert.Contains("payments", message);
+        Assert.Contains("Unwrap<ProjectResource>", message);
+        Assert.Contains("'container'", message);
+        Assert.Contains(nameof(ContainerResource), message);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_OnKubernetesSource_StillSkips_WhenTheSourceAnnotationWasStripped()
+    {
+        var builder = Builder();
+        var service = AddKubernetesService(builder);
+        var callbackRan = false;
+
+        // The annotation collection is public and mutable; the gate must not depend on it.
+        service.Resource.Annotations.Clear();
+        service.Unwrap<ExecutableResource>(_ => callbackRan = true);
+
+        Assert.False(callbackRan);
+        Assert.Contains("port-forward", Assert.Single(ServiceSourcesWarnings.For(builder).Messages));
+    }
+
+    [Fact]
+    public void Unwrap_OnKubernetesSource_StillThrows_WhenTheSourceAnnotationWasStripped()
+    {
+        var builder = Builder();
+        var service = AddKubernetesService(builder);
+
+        service.Resource.Annotations.Clear();
+
+        Assert.Throws<ServiceSourcesConfigurationException>(() => service.Unwrap<ExecutableResource>());
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_OnABuilderHeldAsServiceDiscovery_StillSkips()
+    {
+        var builder = Builder();
+        IResourceBuilder<IResourceWithServiceDiscovery> service = AddUrlService(builder);
+        var callbackRan = false;
+
+        var returned = service.Unwrap<IResourceWithEnvironment>(_ => callbackRan = true);
+
+        Assert.Same(service, returned);
+        Assert.False(callbackRan);
+        Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_MismatchedInterface_UsesTheRightArticle()
+    {
+        var builder = Builder();
+
+        AddContainerService(builder).Unwrap<IResourceWithConnectionString>(_ => { });
+
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+        Assert.Contains("not an IResourceWithConnectionString", message);
+        Assert.Contains($"resolves to a {nameof(ServiceContainerResource)}", message);
+    }
+
+    [Fact]
+    public void Unwrap_Delegate_MismatchedType_ReportsOnce_HoweverManyTimesItIsCalled()
+    {
+        var builder = Builder();
+        var service = AddContainerService(builder);
+
+        service.Unwrap<ProjectResource>(_ => { });
+        service.Unwrap<ProjectResource>(_ => { });
+
+        Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+    }
+
+    /// <summary>
+    /// Parallel to <see cref="WithEnvironment_OnUrlSource_SkipsWithoutThrowing_SoSourceSwitchingKeepsWorking"/>:
+    /// a developer who switches a service to "disabled" in their own servicesources.local.json must
+    /// not break a Program.cs they don't own either.
+    /// </summary>
+    [Fact]
+    public void WithEnvironment_OnDisabledSource_SkipsWithoutThrowing()
+    {
+        var builder = Builder();
+        var callbackRan = false;
+
+        var service = AddDisabledService(builder).WithEnvironment("A", () =>
+        {
+            callbackRan = true;
+            return "B";
+        });
+
+        Assert.False(callbackRan);
+        Assert.NotNull(service);
+    }
+
+    [Fact]
+    public void WithEnvironment_OnDisabledSource_ReportsTheSkip()
+    {
+        var builder = Builder();
+
+        AddDisabledService(builder).WithEnvironment("A", "B");
+
+        var message = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+        Assert.Contains("billing", message);
+        Assert.Contains("'disabled'", message);
+        Assert.Contains("servicesources.local.json", message);
+
+        // "wherever it actually runs" would be a lie for a service that runs nowhere at all —
+        // pins that the skip message doesn't reuse url/kubernetes's wording verbatim.
+        Assert.DoesNotContain("wherever it actually runs", message);
+    }
+
+    /// <summary>
+    /// Unlike "kubernetes", "disabled" has no local process at all — nothing corresponds to
+    /// "kubectl" here — so it gets no wait-ordering exception: this is the assertion that pins the
+    /// absence of that carve-out, matching <see cref="WaitFor_OnUrlSource_StillSkips_BecauseNothingIsRegisteredToOrder"/>.
+    /// </summary>
+    [Fact]
+    public void WaitFor_OnDisabledSource_StillSkips_BecauseNothingIsRegisteredToOrder()
+    {
+        var builder = Builder();
+        var migrations = builder.AddResource(new ServiceContainerResource("migrations")).WithImage("migrate");
+
+        var service = AddDisabledService(builder).WaitForCompletion(migrations);
+
+        Assert.Empty(service.Resource.Annotations.OfType<WaitAnnotation>());
+        Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+    }
+
+    [Fact]
+    public void Unwrap_OnDisabledSource_StillThrows_BecauseItMustReturnABuilder()
+    {
+        var builder = Builder();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => AddDisabledService(builder).Unwrap<IResourceWithEnvironment>());
+
+        Assert.Contains("billing", ex.Message);
+        Assert.Contains("'disabled'", ex.Message);
+
+        // "Configure the service where it actually runs" would be self-contradictory for a service
+        // that runs nowhere at all — pins that this message doesn't reuse url/kubernetes's wording.
+        Assert.DoesNotContain("configure the service where it actually runs", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 }

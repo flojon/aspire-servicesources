@@ -23,7 +23,13 @@ internal sealed class DeveloperConfigShape
 {
     /// <summary>A service entry, keyed under <see cref="DeveloperConfiguration.ServicesKey"/>.</summary>
     public static DeveloperConfigShape Service { get; } =
-        Of<ServiceDeveloperConfig>("Service", "service", ["local", "url", "kubernetes", "container"]);
+        Of<ServiceDeveloperConfig>(
+            "Service", "service", ["repository", "url", "kubernetes", "container", "path", "disabled"],
+            // The block-name counterpart of the retired source value "local": kept working as
+            // ServiceDeveloperConfig.Repository's deprecated alias (see
+            // ServiceDeveloperConfig.ReconcileRepositoryAlias), so it is still a home HomeBlocksOf
+            // has to report — just never the one a message picks to illustrate.
+            deprecatedBlockNames: ["local"]);
 
     /// <summary>
     /// A backing-service entry, keyed under <see cref="DeveloperConfiguration.BackingServicesKey"/>.
@@ -45,12 +51,14 @@ internal sealed class DeveloperConfigShape
         Type entry,
         string kind,
         string noun,
-        IEnumerable<string> sourceNames)
+        IEnumerable<string> sourceNames,
+        IEnumerable<string> deprecatedBlockNames)
     {
         Entry = entry;
         Kind = kind;
         Noun = noun;
         SourceNames = sourceNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        DeprecatedBlockNames = deprecatedBlockNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         Blocks = entry.GetProperties()
             .Where(p => DeveloperConfigField.BlockFieldsOf(p.PropertyType) is not null)
@@ -99,6 +107,20 @@ internal sealed class DeveloperConfigShape
     /// </remarks>
     public IReadOnlySet<string> SourceNames { get; }
 
+    /// <summary>
+    /// Block names on this shape that are deprecated aliases of another block — <c>local</c> for
+    /// <c>repository</c>, see <see cref="ServiceDeveloperConfig.ReconcileRepositoryAlias"/>.
+    /// </summary>
+    /// <remarks>
+    /// Never changes whether a block is valid, or which homes <see cref="HomeBlocksOf"/> reports for
+    /// a field — a deprecated block still binds and is still named alongside its current spelling.
+    /// It changes only which single home <see cref="HomeBlocksOf"/> orders first, which is what a
+    /// message picks when it has to illustrate one paste-ready fix rather than list every valid
+    /// answer: recommending the spelling this shape means to retire would undo the deprecation for
+    /// anyone who follows the message's own advice.
+    /// </remarks>
+    public IReadOnlySet<string> DeprecatedBlockNames { get; }
+
     /// <summary>The block properties — every property whose value is a nested settings object.</summary>
     /// <remarks>
     /// Tested for positively rather than by excluding <see cref="string"/> alone, so that a scalar
@@ -130,8 +152,9 @@ internal sealed class DeveloperConfigShape
     public IReadOnlyDictionary<string, IReadOnlyDictionary<string, PropertyInfo>> BlockFields { get; }
 
     /// <summary>
-    /// The blocks that declare a field named <paramref name="field"/>, in name order, or empty when
-    /// none does. Used to turn "that key does not go there" into "here is where it goes".
+    /// The blocks that declare a field named <paramref name="field"/>, current spellings before any
+    /// deprecated alias and in name order within each group, or empty when none does. Used to turn
+    /// "that key does not go there" into "here is where it goes".
     /// </summary>
     /// <remarks>
     /// A list rather than a single answer, because a field name can be declared by more than one
@@ -139,12 +162,20 @@ internal sealed class DeveloperConfigShape
     /// <c>kubernetes</c>, since each source wants its own template — the <c>kubernetes</c> one
     /// carries a <c>${port}</c> placeholder that <c>direct</c> has nothing to resolve. Naming only
     /// the first would send a developer to the block they are not using.
+    /// <para>
+    /// A deprecated alias sorts after every current spelling rather than joining the plain
+    /// alphabetical order, because the caller most likely to look only at the first entry
+    /// (<see cref="DeveloperConfigValidator"/>'s exact-match illustration) has to land on a spelling
+    /// this shape isn't trying to retire. <c>local</c> sorting ahead of <c>repository</c> is exactly
+    /// the ordering that bug looks like: alphabetically first, and deprecated.
+    /// </para>
     /// </remarks>
     public IReadOnlyList<string> HomeBlocksOf(string field) =>
         BlockFields
             .Where(block => block.Value.ContainsKey(field))
             .Select(block => block.Key)
-            .Order(StringComparer.Ordinal)
+            .OrderBy(block => DeprecatedBlockNames.Contains(block))
+            .ThenBy(block => block, StringComparer.Ordinal)
             .ToArray();
 
     /// <summary>
@@ -201,12 +232,54 @@ internal sealed class DeveloperConfigShape
     {
         if (!SourceNames.Contains(value))
         {
+            // Retired, not unknown: a catalog's defaultSource/WithDefaultSource("local") deserves the
+            // same named migration AddService's dispatch gives a developer's source: "local", rather
+            // than the generic message below. Only where the value is not a source of this shape —
+            // a backing service's "local" is its own, current, default source.
+            ThrowIfRetiredSource(label, value, Raw.Literal("Change it to 'repository'."));
+
             throw ServiceSourcesConfigurationException.For(
                 $"{label} is not a valid source. Expected one of: {Raw.Join(", ", SourceNames.Select(Raw.Escaped))}.");
         }
     }
 
+    /// <summary>
+    /// The source to suggest for a value written where a whole entry was expected: the value itself
+    /// if this shape has it, <c>"repository"</c> for the retired <c>"local"</c> this shape no longer
+    /// has, or <see langword="null"/> when it names no source.
+    /// </summary>
+    public string? SuggestedSourceFor(string value) =>
+        SourceNames.Contains(value) ? value
+        : string.Equals(value, RetiredSource, StringComparison.OrdinalIgnoreCase) ? RetiredSourceReplacement
+        : null;
+
+    private const string RetiredSource = "local";
+
+    private const string RetiredSourceReplacement = "repository";
+
+    /// <summary>
+    /// Throws the migration error for the retired source name <c>"local"</c>, now <c>"repository"</c>,
+    /// if <paramref name="value"/> is it (case-insensitively, as source names are matched); otherwise
+    /// returns. The one place the rename is explained, shared by a developer's <c>source</c> and a
+    /// catalog's <c>defaultSource</c>/<c>WithDefaultSource</c>.
+    /// </summary>
+    /// <param name="subject">What names the value, as the sentence's subject — e.g. <c>"Service 'orders': source 'local'"</c>.</param>
+    /// <param name="remedy">The fix, in the caller's terms.</param>
+    public static void ThrowIfRetiredSource(Raw subject, string value, Raw remedy)
+    {
+        if (!string.Equals(value, RetiredSource, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        throw ServiceSourcesConfigurationException.For(
+            $"{subject} was renamed to 'repository' — same behavior (clone the catalog's 'repository:' url, "
+            + $"reconcile onto 'ref'), new name, so it doesn't read as the same word "
+            + $"'{Raw.Literal(DeveloperConfiguration.FileName)}' uses for something else. {remedy}");
+    }
+
     private static DeveloperConfigShape Of<TEntry>(
-        string kind, string noun, IEnumerable<string> sourceNames) =>
-        new(typeof(TEntry), kind, noun, sourceNames);
+        string kind, string noun, IEnumerable<string> sourceNames,
+        IEnumerable<string>? deprecatedBlockNames = null) =>
+        new(typeof(TEntry), kind, noun, sourceNames, deprecatedBlockNames ?? []);
 }

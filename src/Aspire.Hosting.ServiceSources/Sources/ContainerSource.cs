@@ -33,6 +33,10 @@ internal sealed class ContainerSource : IServiceSource
         return ResolvedService.Bridge(containerBuilder, serviceName, "container");
     }
 
+    public Type? DeclaredResourceType(
+        IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition) =>
+        definition.Container is null ? null : typeof(ServiceContainerResource);
+
     internal static (string Image, string? Tag, int Port) ResolveContainerConfig(
         string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
     {

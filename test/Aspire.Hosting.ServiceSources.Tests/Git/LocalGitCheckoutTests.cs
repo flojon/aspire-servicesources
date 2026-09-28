@@ -16,10 +16,10 @@ namespace Aspire.Hosting.ServiceSources.Tests.Git;
 public class LocalGitCheckoutTests
 {
     private static ServiceDeveloperConfig Managed() =>
-        new() { Source = "local" };
+        new() { Source = "repository" };
 
     private static ServiceDeveloperConfig WithPathOverride(string path) =>
-        new() { Source = "local", Local = new LocalDeveloperConfig { Path = path } };
+        new() { Source = "repository", Repository = new LocalDeveloperConfig { Path = path } };
 
     private static string NewAppHostDirectory() => TempDirectories.CreateSubdirectory().FullName;
 

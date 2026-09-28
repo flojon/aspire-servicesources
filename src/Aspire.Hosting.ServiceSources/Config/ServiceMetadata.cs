@@ -7,12 +7,22 @@ internal sealed class ServiceMetadata
 {
     public string Repository { get; set; } = "";
 
+    /// <summary>
+    /// A directory, relative to the AppHost directory, that is already checked out beside it — the
+    /// <c>"path"</c> source's catalog field. A plain scalar like <see cref="Repository"/>, since —
+    /// unlike <c>url:</c>/<c>container:</c>/<c>kubernetes:</c> — it has no sibling options of its own
+    /// to hold. Confined to inside the AppHost directory at resolution time
+    /// (<see cref="Sources.PathSource"/>) — unlike a developer's own <c>path.path</c> override, which
+    /// is unconfined for the same reason <c>repository.path</c> is today.
+    /// </summary>
+    public string? Path { get; set; }
+
     public string Project { get; set; } = "";
 
     public string? DefaultRef { get; set; }
 
     /// <summary>
-    /// The source (<c>"local"</c>/<c>"url"</c>/<c>"kubernetes"</c>/<c>"container"</c>) a developer
+    /// The source (<c>"repository"</c>/<c>"url"</c>/<c>"kubernetes"</c>/<c>"container"</c>) a developer
     /// gets when nothing configures this service's source explicitly, projected as the
     /// lowest-precedence configuration layer by
     /// <see cref="ServiceSourcesConfigCache.LoadedConfig.Load"/>. Validated against the same closed
@@ -40,7 +50,7 @@ internal sealed class ServiceMetadata
     public ContainerMetadata? Container { get; set; }
 
     /// <summary>
-    /// A bootstrap command the <c>"local"</c> source runs inside the materialized checkout, before
+    /// A bootstrap command the <c>"repository"</c> source runs inside the materialized checkout, before
     /// the kind is allowed to judge it. Absent for the services — most of them — whose checkout is
     /// runnable the moment it is cloned.
     /// </summary>
@@ -88,6 +98,7 @@ internal sealed class ServiceMetadata
                 CheckoutName = serviceName,
             },
         Project = Project,
+        Path = Path,
         Kubernetes = Kubernetes,
         Url = Url,
         Container = Container,

@@ -168,10 +168,10 @@ public class LocalKindValidationTests
     }.ToDefinition("servicesources.yaml", ServiceName, TestHelpers.EmptyRepositories);
 
     private static ServiceDeveloperConfig DevConfig(string path) =>
-        new() { Source = "local", Local = new() { Path = path } };
+        new() { Source = "repository", Repository = new() { Path = path } };
 
     /// <summary>
-    /// The service resolves through a <c>local.path</c> override, so nothing here should be called.
+    /// The service resolves through a <c>repository.path</c> override, so nothing here should be called.
     /// </summary>
     private sealed class UnusedGitClient : IGitClient
     {

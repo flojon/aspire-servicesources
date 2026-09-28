@@ -83,8 +83,11 @@ public class DeferredKindCheckoutTests
         bool deferralReturnsNull = false,
         bool helperWaitsForService = false,
         bool declineAfterAdding = false,
-        bool withParameter = false) : ILocalResourceKind
+        bool withParameter = false,
+        Type? declaredType = null) : ILocalResourceKind
     {
+        public Type ResourceType => declaredType ?? typeof(IResourceWithServiceDiscovery);
+
         public string? DeferredRepoRoot { get; private set; }
 
         public int SupportsDeferredCheckoutCalls { get; private set; }
@@ -190,7 +193,7 @@ public class DeferredKindCheckoutTests
             $"  {name}:\n    repository: https://example.com/{name}.git\n    kind: {KindName}"));
         File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), $"services:\n{yaml}\n");
 
-        var json = string.Join(",", localServices.Select(name => $"\"{name}\": {{ \"source\": \"local\" }}"));
+        var json = string.Join(",", localServices.Select(name => $"\"{name}\": {{ \"source\": \"repository\" }}"));
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), $"{{ \"services\": {{ {json} }} }}");
 
         return dir;
@@ -200,7 +203,7 @@ public class DeferredKindCheckoutTests
         new ServiceMetadata { Repository = $"https://example.com/{name}.git", Kind = KindName }
             .ToDefinition("servicesources.yaml", name, TestHelpers.EmptyRepositories);
 
-    private static ServiceDeveloperConfig DevConfig(string? path = null) => new() { Source = "local", Local = new() { Path = path } };
+    private static ServiceDeveloperConfig DevConfig(string? path = null) => new() { Source = "repository", Repository = new() { Path = path } };
 
     private static string ExpectedRepoRoot(string appHostDirectory, string serviceName) =>
         Path.Combine(appHostDirectory, ".servicesources", "checkouts", serviceName);
@@ -257,6 +260,29 @@ public class DeferredKindCheckoutTests
         // deferral costs them nothing and a consumer's WithReference still resolves.
         var endpoint = Assert.Single(service.Resource.Annotations.OfType<EndpointAnnotation>());
         Assert.Equal(8080, endpoint.TargetPort);
+
+        gate.Set();
+    }
+
+    [Fact]
+    public void DeferredKind_WhoseResourceIsNotItsDeclaredType_Throws()
+    {
+        var dir = CreateAppHostDirectory("frontend");
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.UseDeferredCheckout();
+        var kind = new StandInKind(declaredType: typeof(ContainerResource));
+        builder.AddLocalKind(KindName, kind);
+
+        var git = new FakeGitClient();
+        var gate = git.BlockFor("https://example.com/frontend.git");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(git).Resolve(builder, "frontend", Definition("frontend"), DevConfig()));
+
+        Assert.Equal(1, kind.ResolveDeferredCalls);
+        Assert.False(kind.ResolvedEagerly);
+        Assert.Contains(nameof(ILocalResourceKind.ResourceType), ex.Message);
+        Assert.Contains(nameof(ContainerResource), ex.Message);
 
         gate.Set();
     }
@@ -345,7 +371,7 @@ public class DeferredKindCheckoutTests
         var service = new LocalProjectSource(new FakeGitClient())
             .Resolve(builder, "frontend", Definition("frontend"), DevConfig());
 
-        // Deferred by default since 0.7.0 (#216) — no call needed, for every kind that supports it.
+        // Deferred by default since 0.8.0 (#216) — no call needed, for every kind that supports it.
         Assert.False(kind.ResolvedEagerly);
         Assert.True(IsHeldBack(service.Resource));
     }

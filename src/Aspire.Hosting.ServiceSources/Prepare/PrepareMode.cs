@@ -76,7 +76,7 @@ internal static class PrepareModes
     /// </summary>
     /// <param name="writtenAt">
     /// Where the value came from, as the message shows it — <c>prepare.mode</c> for the catalog,
-    /// <c>local.prepare.mode</c> for the developer's file — so a reader knows which of the two files
+    /// <c>repository.prepare.mode</c> for the developer's file — so a reader knows which of the two files
     /// to open.
     /// </param>
     /// <exception cref="ServiceSourcesConfigurationException">

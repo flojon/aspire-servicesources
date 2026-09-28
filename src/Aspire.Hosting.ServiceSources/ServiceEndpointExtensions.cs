@@ -25,7 +25,7 @@ public static class ServiceEndpointExtensions
     /// <remarks>
     /// <para>
     /// <c>GetEndpoint("https")</c> is the non-portable spelling: the endpoint <i>name</i> a resolved
-    /// service exposes is decided by the source that resolved it — a <c>"local"</c> dotnet project
+    /// service exposes is decided by the source that resolved it — a <c>"repository"</c> dotnet project
     /// takes its endpoints from its launch profile, a <c>"url"</c> service is named for the URL's
     /// scheme, and <c>"kubernetes"</c> and <c>"container"</c> are named for their configured
     /// <c>scheme</c> (<c>http</c> unless set). So a consumer naming a scheme resolves only while the
@@ -99,10 +99,20 @@ public static class ServiceEndpointExtensions
 
         if (names.Count == 0)
         {
+            // "disabled" gets its own advice: no scheme/port entry or endpoint call can give it one
+            // back — the only way is switching the source itself.
+            if (string.Equals(annotation?.Source, "disabled", StringComparison.Ordinal))
+            {
+                return Raw.Compose(
+                    $"Service '{name}' exposes no endpoint, so there is none to reference.{source} A "
+                    + $"'disabled' service has nothing running for it, deliberately, so there is no endpoint "
+                    + $"to declare one for. {Raw.Literal(OutOfBandSourceAdvice.SwitchSource)}.");
+            }
+
             return Raw.Compose(
                 $"Service '{name}' exposes no endpoint, so there is none to reference.{source} "
                 + $"Give the service an endpoint — a 'scheme'/'port' entry for a 'kubernetes' or "
-                + $"'container' source, a launch profile for a 'local' one, or declare one explicitly: "
+                + $"'container' source, a launch profile for a 'repository' one, or declare one explicitly: "
                 + $"withHttpEndpoint()/withHttpsEndpoint() in TypeScript, or "
                 + $"WithHttpEndpoint()/WithHttpsEndpoint() in C#.");
         }

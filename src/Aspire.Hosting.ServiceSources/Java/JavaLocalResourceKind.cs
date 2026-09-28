@@ -4,7 +4,7 @@ using Aspire.Hosting.ServiceSources.Messages;
 namespace Aspire.Hosting.ServiceSources.Java;
 
 /// <summary>
-/// Runs a <c>"local"</c>-sourced service written in Java, by handing its checkout to the Aspire
+/// Runs a <c>"repository"</c>-sourced service written in Java, by handing its checkout to the Aspire
 /// Community Toolkit's Java integration (<c>AddJavaApp</c> + <c>WithMavenGoal</c>/
 /// <c>WithGradleTask</c>). Registered for the <c>java</c> kind by
 /// <see cref="JavaServiceSourcesBuilderExtensions.UseJava"/>.
@@ -13,6 +13,8 @@ internal sealed class JavaLocalResourceKind : ILocalResourceKind
 {
     /// <summary>The <c>kind:</c> value in <c>servicesources.yaml</c> this handler is registered for.</summary>
     public const string KindName = "java";
+
+    public Type ResourceType => typeof(JavaAppExecutableResource);
 
     // What the Community Toolkit's integration execs when no wrapper override is annotated, and the
     // extension Windows spells that same wrapper with. Mirrored here rather than read from it (they're

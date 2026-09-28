@@ -137,7 +137,7 @@ public class LocalProjectSourceTests
             .ToDefinition("servicesources.yaml", serviceName, TestHelpers.EmptyRepositories);
 
     private static ServiceDeveloperConfig DevConfig(string? path = null, string? @ref = null) =>
-        new() { Source = "local", Local = new() { Path = path, Ref = @ref } };
+        new() { Source = "repository", Repository = new() { Path = path, Ref = @ref } };
 
     private static string UnusedAppHostDirectory => TempDirectories.CreateSubdirectory().FullName;
 
@@ -247,7 +247,7 @@ public class LocalProjectSourceTests
                 UnusedManagedAppHostDirectory, new FakeGitClient()));
 
         Assert.Contains($"Service '{ServiceName}'", ex.Message);
-        Assert.Contains("'local.ref' cannot be set", ex.Message);
+        Assert.Contains("'repository.ref' cannot be set", ex.Message);
         Assert.Contains("monorepo", ex.Message);
         Assert.Contains("ServiceSources:Repositories:monorepo:ref", ex.Message);
     }
@@ -283,7 +283,8 @@ public class LocalProjectSourceTests
         Assert.Contains("Repository 'monorepo'", ex.Message);
         Assert.Contains("ServiceSources:Repositories:monorepo:path", ex.Message);
         Assert.Contains("reserved", ex.Message);
-        Assert.Contains("local.path", ex.Message);
+        Assert.Contains("'path' source", ex.Message);
+        Assert.DoesNotContain("repository.path", ex.Message);
     }
 
     /// <summary>
@@ -1824,9 +1825,11 @@ public class LocalProjectSourceTests
         Assert.DoesNotContain("'container'", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("'kubernetes'", ex.Message, StringComparison.Ordinal);
 
-        // The one remedy that depends on nothing outside this guard: the exemption it checks itself.
+        // The one remedy that depends on nothing outside this guard: a directory the developer
+        // already has, through the 'path' source rather than the deprecated repository.path exemption.
         Assert.Contains(
-            $"ServiceSources:Services:{ServiceName}:local:path", ex.Message, StringComparison.Ordinal);
+            $"ServiceSources:Services:{ServiceName}:path:path", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("local:path", ex.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -1881,12 +1884,47 @@ public class LocalProjectSourceTests
                 PlainBuilder(), ServiceName, RepositorylessDefinition(), DevConfig()));
 
         Assert.Contains($"ServiceSources:Services:{ServiceName}:source", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("which any configuration layer can set", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("can be set from any configuration layer", ex.Message, StringComparison.Ordinal);
         Assert.Contains("appsettings", ex.Message, StringComparison.Ordinal);
         Assert.Contains("user secrets", ex.Message, StringComparison.Ordinal);
         Assert.Contains("the command line", ex.Message, StringComparison.Ordinal);
         Assert.Contains(
             $"ServiceSources__Services__{ServiceName}__Source", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Without a catalog <c>path:</c>, the <c>"path"</c> remedy also needs the developer's own
+    /// directory; with one, switching the source is all it takes — asking for a <c>path.path</c>
+    /// there would send the developer to override a directory the catalog already names.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("services/orders")]
+    public void Resolve_LocalOnRepositorylessEntry_OffersThePathSourceInTheCatalogsTerms(string? catalogPath)
+    {
+        var definition = new ServiceMetadata
+        {
+            Repository = "",
+            Path = catalogPath,
+            Project = "Orders.csproj",
+            Kind = LocalKinds.Dotnet,
+            Url = new UrlMetadata { Url = "https://orders.example.com" },
+        }.ToDefinition("servicesources.yaml", ServiceName, TestHelpers.EmptyRepositories);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new FakeGitClient()).Resolve(
+                PlainBuilder(), ServiceName, definition, DevConfig()));
+
+        Assert.Contains($"ServiceSources:Services:{ServiceName}:source' to 'path'", ex.Message, StringComparison.Ordinal);
+        if (catalogPath is null)
+        {
+            Assert.Contains(":path:path", ex.Message, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.Contains("already gives it a 'path'", ex.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain(":path:path", ex.Message, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
@@ -1929,9 +1967,12 @@ public class LocalProjectSourceTests
             new LocalProjectSource(gitClient).Resolve(PlainBuilder(), ServiceName, definition, DevConfig()));
 
         Assert.Contains($"Service '{ServiceName}'", ex.Message);
-        Assert.DoesNotContain("'repository'", ex.Message, StringComparison.Ordinal);
+        // Not the bare word — the source is now named 'repository' too (F7), so the yaml-specific
+        // phrase is what must not leak into a code-declared service's remedy.
+        Assert.DoesNotContain("'repository' url", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("repositoryRef", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("servicesources.yaml", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("WithRepository", ex.Message, StringComparison.Ordinal);
         Assert.False(gitClient.EnsureAvailableCalled);
     }
 
@@ -1971,7 +2012,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void Resolve_LocalOnEntryDeclaringOnlyUrlWithLocalPath_IsUnaffected()
     {
-        // 'local.path' names a checkout the developer already has, so nothing is ever cloned and the
+        // 'repository.path' names a checkout the developer already has, so nothing is ever cloned and the
         // absent 'repository' costs nothing — the guard must stay off this shipped configuration.
         var checkout = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient();

@@ -40,7 +40,7 @@ public static class JavaScriptServiceSourcesBuilderExtensions
         builder.AddLocalKind(JavaScriptLocalKind.KindName, new JavaScriptLocalKind());
 
     /// <summary>
-    /// Configures this code-declared service to run as a <c>javascript</c>-kind <c>"local"</c>
+    /// Configures this code-declared service to run as a <c>javascript</c>-kind <c>"repository"</c>
     /// service, through a typed options handle instead of a raw dictionary. Sugar over
     /// <c>WithKind("javascript", …)</c> — calling this after <c>WithKind</c> (on either) throws the
     /// same "already called" error <c>WithKind</c> itself would, since this <em>is</em> that call.

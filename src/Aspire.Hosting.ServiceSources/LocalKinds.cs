@@ -3,7 +3,7 @@ namespace Aspire.Hosting.ServiceSources;
 public static class LocalKinds
 {
     /// <summary>
-    /// The built-in local kind, resolved directly by the <c>"local"</c> source rather than through
+    /// The built-in local kind, resolved directly by the <c>"repository"</c> source rather than through
     /// an <see cref="ILocalResourceKind"/> handler: it needs the service's top-level
     /// <c>project</c> metadata, which the handler interface deliberately doesn't expose.
     /// </summary>

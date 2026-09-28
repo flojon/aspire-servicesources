@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using Aspire.Hosting.ServiceSources.Java;
 using Aspire.Hosting.ServiceSources.Messages;
@@ -7,7 +8,7 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// <summary>
 /// Per-builder registry of <see cref="ILocalResourceKind"/> handlers, keyed by the <c>kind</c>
 /// name a service's <c>servicesources.yaml</c> entry declares. Populated via
-/// <see cref="ServiceSourcesBuilderExtensions.AddLocalKind"/>, consulted by the <c>"local"</c>
+/// <see cref="ServiceSourcesBuilderExtensions.AddLocalKind"/>, consulted by the <c>"repository"</c>
 /// source for any kind other than the built-in <c>"dotnet"</c>.
 /// </summary>
 /// <remarks>
@@ -55,7 +56,7 @@ internal sealed class LocalKindRegistry
         }
     }
 
-    public bool TryGet(string kind, out ILocalResourceKind? handler)
+    public bool TryGet(string kind, [NotNullWhen(true)] out ILocalResourceKind? handler)
     {
         if (_handlers.TryGetValue(kind, out handler))
         {

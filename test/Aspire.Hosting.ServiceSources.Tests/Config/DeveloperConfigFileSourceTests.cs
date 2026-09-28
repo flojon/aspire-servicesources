@@ -40,7 +40,7 @@ public class DeveloperConfigFileSourceTests
             throw new NotSupportedException("Not exercised by these tests.");
     }
 
-    private static string CreateAppHostDirectory(string? yaml = OrdersCatalog, string source = "local")
+    private static string CreateAppHostDirectory(string? yaml = OrdersCatalog, string source = "repository")
     {
         var dir = TempDirectories.CreateSubdirectory().FullName;
         if (yaml is not null)
@@ -60,7 +60,7 @@ public class DeveloperConfigFileSourceTests
 
         builder.AddLocalKind(KindUnderTest, new FakeKind());
 
-        Assert.Equal("local", builder.Configuration[SourceKey]);
+        Assert.Equal("repository", builder.Configuration[SourceKey]);
     }
 
     /// <summary>
@@ -75,7 +75,7 @@ public class DeveloperConfigFileSourceTests
 
         builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
-        Assert.Equal("local", builder.Configuration[SourceKey]);
+        Assert.Equal("repository", builder.Configuration[SourceKey]);
     }
 
     /// <summary>
@@ -90,7 +90,7 @@ public class DeveloperConfigFileSourceTests
 
         builder.AddServiceCatalog(c => c.AddService("orders"));
 
-        Assert.Equal("local", builder.Configuration[SourceKey]);
+        Assert.Equal("repository", builder.Configuration[SourceKey]);
     }
 
     /// <summary>
@@ -109,7 +109,7 @@ public class DeveloperConfigFileSourceTests
         // Named after the backing service, as a "local" factory has to be — see #200.
         builder.AddBackingService("orders-db", () => builder.AddConnectionString("orders-db"));
 
-        Assert.Equal("local", builder.Configuration[SourceKey]);
+        Assert.Equal("repository", builder.Configuration[SourceKey]);
     }
 
     /// <summary>
@@ -138,6 +138,26 @@ public class DeveloperConfigFileSourceTests
     }
 
     /// <summary>
+    /// The file's one root-level value crosses over as itself, under the key the <c>"path"</c>
+    /// source reads it by — not as a subtree, which is how every other root key crosses.
+    /// </summary>
+    [Fact]
+    public void RepositoryRoot_AtTheFilesRoot_IsReadableUnderItsConfigurationKey()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), OrdersCatalog);
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.local.json"),
+            """{ "repositoryRoot": "../..", "services": { "orders": { "source": "repository" } } }""");
+        var builder = TestHelpers.CreateBuilder(dir);
+
+        builder.UseDeferredCheckout();
+
+        Assert.Equal("../..", builder.Configuration[DeveloperConfiguration.RepositoryRootKey]);
+        Assert.Equal("repository", builder.Configuration[SourceKey]);
+    }
+
+    /// <summary>
     /// Registration is the one thing every entry point does before anything else, so it happens even
     /// on the paths that then fail — a missing catalog is reported by <c>AddService()</c>, and the
     /// configuration the AppHost reads is complete either way.
@@ -149,7 +169,7 @@ public class DeveloperConfigFileSourceTests
 
         Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
 
-        Assert.Equal("local", builder.Configuration[SourceKey]);
+        Assert.Equal("repository", builder.Configuration[SourceKey]);
     }
 
     /// <summary>
@@ -168,7 +188,7 @@ public class DeveloperConfigFileSourceTests
         ServiceSourcesConfigCache.ResolveService(builder, "orders");
 
         Assert.Equal(sourcesAfterTheFirstRegistration, builder.Configuration.Sources.Count);
-        Assert.Equal("local", builder.Configuration[SourceKey]);
+        Assert.Equal("repository", builder.Configuration[SourceKey]);
     }
 
     /// <summary>

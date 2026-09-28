@@ -114,10 +114,10 @@ public class ServiceDefinitionBuilderTests
     {
         var definition = new ServiceCatalogBuilder().AddService("orders")
             .WithRepository("https://github.com/example/repo")
-            .WithDefaultSource("local")
+            .WithDefaultSource("repository")
             .Build();
 
-        Assert.Equal("local", definition.DefaultSource);
+        Assert.Equal("repository", definition.DefaultSource);
     }
 
     [Fact]
@@ -125,7 +125,7 @@ public class ServiceDefinitionBuilderTests
     {
         var chain = new ServiceCatalogBuilder().AddService("orders")
             .WithRepository("https://github.com/example/repo")
-            .WithDefaultSource("local");
+            .WithDefaultSource("repository");
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => chain.WithDefaultSource("url"));
@@ -134,8 +134,29 @@ public class ServiceDefinitionBuilderTests
         Assert.Contains("WithDefaultSource", ex.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// "local" is retired, not aliased: <c>WithDefaultSource("local")</c> gets the same named
+    /// migration a yaml <c>defaultSource: local</c> does, rather than falling through to the generic
+    /// "not a valid source" message.
+    /// </summary>
     [Fact]
-    public void WithDefaultSource_InvalidValue_ThrowsNamingTheFourValues()
+    public void WithDefaultSource_Local_ReportsTheRenameToRepository()
+    {
+        var chain = new ServiceCatalogBuilder().AddService("orders")
+            .WithRepository("https://github.com/example/repo");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => chain.WithDefaultSource("local"));
+
+        Assert.Contains("Service 'orders'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("WithDefaultSource", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("renamed", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("'repository'", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("not a valid source", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithDefaultSource_InvalidValue_ThrowsNamingTheSixValues()
     {
         var chain = new ServiceCatalogBuilder().AddService("orders")
             .WithRepository("https://github.com/example/repo");
@@ -145,10 +166,27 @@ public class ServiceDefinitionBuilderTests
 
         Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
         Assert.Contains("bogus", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("local", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("repository", ex.Message, StringComparison.Ordinal);
         Assert.Contains("url", ex.Message, StringComparison.Ordinal);
         Assert.Contains("kubernetes", ex.Message, StringComparison.Ordinal);
         Assert.Contains("container", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("path", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("disabled", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// "disabled" is a valid <c>WithDefaultSource</c> value like every other source — a service can
+    /// ship off by default until a developer's own <c>servicesources.local.json</c> opts it back in.
+    /// </summary>
+    [Fact]
+    public void WithDefaultSource_Disabled_SetsTheField()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("orders")
+            .WithRepository("https://github.com/example/repo")
+            .WithDefaultSource("disabled")
+            .Build();
+
+        Assert.Equal("disabled", definition.DefaultSource);
     }
 
     /// <summary>
@@ -404,5 +442,85 @@ public class ServiceDefinitionBuilderTests
             .Build();
 
         Assert.Null(definition.Repository.Prepare);
+    }
+
+    [Fact]
+    public void WithPath_SetsPath()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("orders")
+            .WithPath("services/orders")
+            .WithProject("src/Api.csproj")
+            .Build();
+
+        Assert.Equal("services/orders", definition.Path);
+        Assert.Equal("src/Api.csproj", definition.Project);
+    }
+
+    [Fact]
+    public void WithPath_CalledTwice_ThrowsNamingServiceAndBlock()
+    {
+        var chain = new ServiceCatalogBuilder().AddService("orders")
+            .WithPath("services/orders");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => chain.WithPath("services/orders-again"));
+
+        Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("WithPath", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithPath_BlankValue_Throws()
+    {
+        var chain = new ServiceCatalogBuilder().AddService("orders");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => chain.WithPath("   "));
+
+        Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithPath_NotCalled_PathStaysNull()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("orders")
+            .WithRepository("https://github.com/example/orders")
+            .Build();
+
+        Assert.Null(definition.Path);
+    }
+
+    /// <summary>
+    /// Design finding 8: <c>WithPath</c> does not share <c>WithRepository</c>'s
+    /// <c>_repositorySource</c> guard — a service naming both is the "combining sources" pattern, not
+    /// a repeated-block error. This was a real modeling mistake in an earlier draft of the design.
+    /// </summary>
+    [Fact]
+    public void WithPath_CombinedWithWithRepository_BothResolve()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("orders")
+            .WithRepository("https://github.com/example/orders")
+            .WithPath("services/orders")
+            .WithProject("src/Api.csproj")
+            .Build();
+
+        Assert.Equal("https://github.com/example/orders", definition.Repository.Url);
+        Assert.Equal("services/orders", definition.Path);
+    }
+
+    [Fact]
+    public void WithPath_CombinedWithWithUrlAndWithContainerAndWithKubernetes_AllResolve()
+    {
+        var definition = new ServiceCatalogBuilder().AddService("orders")
+            .WithPath("services/orders")
+            .WithProject("src/Api.csproj")
+            .WithUrl("https://orders.example.com")
+            .WithContainer("company/orders", 8080)
+            .WithKubernetes("orders-svc")
+            .Build();
+
+        Assert.Equal("services/orders", definition.Path);
+        Assert.Equal("https://orders.example.com", definition.Url!.Url);
+        Assert.Equal("company/orders", definition.Container!.Image);
+        Assert.Equal("orders-svc", definition.Kubernetes!.Service);
     }
 }

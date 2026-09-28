@@ -403,7 +403,7 @@ public class GitCliClientTests
     /// <remarks>
     /// <c>-C</c> changes directory without stopping repository discovery, so the tool walks up from
     /// there and reports whichever repository encloses it. That answer is about a repository nobody
-    /// named: a <c>local.path</c> pointed at an unpacked directory which happens to sit inside some
+    /// named: a <c>repository.path</c> pointed at an unpacked directory which happens to sit inside some
     /// checkout would re-run its bootstrap for every commit made anywhere in that checkout, and
     /// record it as "once per commit". The test above passes with or without the fix, because a
     /// temporary directory has no enclosing repository to find — which is what made it a weak test.

@@ -54,6 +54,60 @@ public class CatalogCompositionTests
         Assert.Contains("inventory", ServiceSourcesConfigCache.LoadedFor(builder).DefaultedServiceNames);
     }
 
+    /// <summary>
+    /// Design "defaultSource: path is close to free": unlike 'repository', resolving a 'path'
+    /// service costs a developer or CI nothing extra when the path is in-repo, so no
+    /// servicesources.local.json entry at all is needed for it to work — the same shape #158 settled
+    /// for the other sources.
+    /// </summary>
+    [Fact]
+    public void YamlCatalogDefaultSourcePath_NoExplicitEntryAnywhere_ResolvesService()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        Directory.CreateDirectory(Path.Combine(dir, "services", "orders"));
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              orders:
+                path: services/orders
+                defaultSource: path
+            """);
+        // No servicesources.local.json at all -- the whole point of the "close to free" claim.
+        var builder = CreateBuilder(dir);
+
+        var (definition, devConfig) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+
+        Assert.Equal("services/orders", definition.Path);
+        Assert.Equal("path", devConfig.Source);
+        Assert.Contains("orders", ServiceSourcesConfigCache.LoadedFor(builder).DefaultedServiceNames);
+    }
+
+    /// <summary>
+    /// README "Combining sources on one catalog entry" (design finding 8): a 'path:' block sits
+    /// beside a 'repository:' block on one entry, and each developer's own
+    /// servicesources.local.json picks which one actually applies to them.
+    /// </summary>
+    [Fact]
+    public void PathCombinedWithRepository_EachDeveloperPicksTheirOwn()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                path: services/orders
+                project: src/Orders.Api/Orders.Api.csproj
+            """);
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"),
+            """{ "services": { "orders": { "source": "path" } } }""");
+        var builder = CreateBuilder(dir);
+
+        var (definition, devConfig) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
+
+        Assert.Equal("path", devConfig.Source);
+        Assert.Equal("https://github.com/company/orders", definition.Repository.Url);
+        Assert.Equal("services/orders", definition.Path);
+    }
+
     [Fact]
     public void ExplicitEntry_SameValueAsCatalogDefault_IsNotMarkedAsDefaultDerived()
     {
@@ -181,8 +235,8 @@ public class CatalogCompositionTests
 
     /// <summary>
     /// The ungrouped-collision warning (design question 5) fires when two ungrouped services really
-    /// do share a repository URL and both actually resolve through the "local" source — the case its
-    /// own text describes ("are all 'local' ... each gets its own checkout").
+    /// do share a repository URL and both actually resolve through the "repository" source — the case its
+    /// own text describes ("are all 'repository' ... each gets its own checkout").
     /// </summary>
     [Fact]
     public async Task TwoUngroupedServicesShareUrlAndBothResolveLocally_WarnsToGroupThem()
@@ -198,7 +252,7 @@ public class CatalogCompositionTests
                 project: src/Billing.Api/Billing.Api.csproj
             """);
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), """
-            { "services": { "orders": { "source": "local" }, "billing": { "source": "local" } } }
+            { "services": { "orders": { "source": "repository" }, "billing": { "source": "repository" } } }
             """);
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
         ServiceSourcesConfigCache.ResolveService(builder, "orders");
@@ -206,7 +260,7 @@ public class CatalogCompositionTests
 
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 
-        Assert.Contains(warnings, w => w.Contains("are all 'local'", StringComparison.Ordinal));
+        Assert.Contains(warnings, w => w.Contains("are all 'repository'", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -215,7 +269,7 @@ public class CatalogCompositionTests
     /// <c>repository:</c> block alongside a <c>kubernetes:</c>/<c>url:</c>/<c>container:</c> one, with
     /// <c>servicesources.local.json</c> picking which applies. The ungrouped-collision warning must
     /// not fire for that shape: its advice ("share one checkout ... AddRepository/WithSharedRepository")
-    /// describes work that never happens when nothing resolves through "local" at all.
+    /// describes work that never happens when nothing resolves through "repository" at all.
     /// </summary>
     [Fact]
     public async Task TwoServicesShareUrlButResolveThroughKubernetes_NoUngroupedCollisionWarning()
@@ -245,7 +299,7 @@ public class CatalogCompositionTests
 
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 
-        Assert.DoesNotContain(warnings, w => w.Contains("are all 'local'", StringComparison.Ordinal));
+        Assert.DoesNotContain(warnings, w => w.Contains("are all 'repository'", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -617,9 +671,9 @@ public class CatalogCompositionTests
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"),
             """
             { "services": {
-                "orders": { "source": "local" },
-                "payments": { "source": "local" },
-                "billing": { "source": "local" }
+                "orders": { "source": "repository" },
+                "payments": { "source": "repository" },
+                "billing": { "source": "repository" }
             } }
             """);
         var builder = CreateBuilder(dir);
@@ -663,7 +717,7 @@ public class CatalogCompositionTests
                 project: Billing.csproj
             """);
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"),
-            """{ "services": { "orders": { "source": "local" }, "billing": { "source": "local" } } }""");
+            """{ "services": { "orders": { "source": "repository" }, "billing": { "source": "repository" } } }""");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
 
         // Any resolution reaches LoadedConfig.Load, where the notice is buffered.
@@ -714,7 +768,7 @@ public class CatalogCompositionTests
                   port: 8080
             """);
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), """
-            { "services": { "orders": { "source": "local" }, "billing": { "source": "local" } } }
+            { "services": { "orders": { "source": "repository" }, "billing": { "source": "repository" } } }
             """);
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
         ServiceSourcesConfigCache.ResolveService(builder, "orders");
@@ -722,6 +776,6 @@ public class CatalogCompositionTests
 
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 
-        Assert.DoesNotContain(warnings, w => w.Contains("are all 'local'", StringComparison.Ordinal));
+        Assert.DoesNotContain(warnings, w => w.Contains("are all 'repository'", StringComparison.Ordinal));
     }
 }

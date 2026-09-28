@@ -88,7 +88,7 @@ public class JavaPrepareStepTests
 
         File.WriteAllText(
             Path.Combine(dir, "servicesources.local.json"),
-            $"{{ \"services\": {{ \"{ServiceName}\": {{ \"source\": \"local\" }} }} }}");
+            $"{{ \"services\": {{ \"{ServiceName}\": {{ \"source\": \"repository\" }} }} }}");
 
         return dir;
     }
@@ -104,7 +104,7 @@ public class JavaPrepareStepTests
 
     private static PrepareMetadata Prepare() => new() { Command = ["./prepare.sh"] };
 
-    private static ServiceDeveloperConfig DevConfig() => new() { Source = "local", Local = new() };
+    private static ServiceDeveloperConfig DevConfig() => new() { Source = "repository", Local = new() };
 
     /// <summary>
     /// The catalog entry from #118, near enough: a jar the repository does not commit, run with the

@@ -37,14 +37,14 @@ public class ServiceSourcesConfigCacheTests
                 repository: https://github.com/company/orders
                 project: src/Orders.Api/Orders.Api.csproj
             """,
-            """{ "services": { "orders": { "source": "local" } } }""");
+            """{ "services": { "orders": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
         var (metadata, developerConfig) = ServiceSourcesConfigCache.ResolveService(builder, "orders");
 
         Assert.Equal("https://github.com/company/orders", metadata.Repository.Url);
-        Assert.Equal("local", developerConfig.Source);
+        Assert.Equal("repository", developerConfig.Source);
     }
 
     [Fact]
@@ -52,7 +52,7 @@ public class ServiceSourcesConfigCacheTests
     {
         var dir = CreateAppHostDirectory(
             "services: {}",
-            """{ "services": { "orders": { "source": "local" } } }""");
+            """{ "services": { "orders": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 
@@ -97,7 +97,7 @@ public class ServiceSourcesConfigCacheTests
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
-            """{ "services": { "orders": { "source": "local" }, "payments": { "source": "url" } } }""");
+            """{ "services": { "orders": { "source": "repository" }, "payments": { "source": "url" } } }""");
 
         var builder = CreateBuilder(dir);
         builder.AddServiceCatalog(c => c.AddService("payments").WithUrl("https://payments.example"));
@@ -161,7 +161,7 @@ public class ServiceSourcesConfigCacheTests
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
-            """{ "services": { "orders": { "source": "local" } } }""");
+            """{ "services": { "orders": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
         var sourcesBeforeLoading = builder.Configuration.Sources.Count;
@@ -183,7 +183,7 @@ public class ServiceSourcesConfigCacheTests
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
-            """{ "services": { "orders": { "source": "local" } } }""");
+            """{ "services": { "orders": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
         var sourcesBeforeLoading = builder.Configuration.Sources.Count;
@@ -230,7 +230,7 @@ public class ServiceSourcesConfigCacheTests
     {
         var dir = CreateAppHostDirectory(
             OrdersCatalog,
-            """{ "services": { "orders": { "source": "local", "path": "/src/orders" } } }""");
+            """{ "services": { "orders": { "source": "repository", "path": "/src/orders" } } }""");
 
         var builder = CreateBuilder(dir);
         var sourcesBeforeLoading = builder.Configuration.Sources.Count;
@@ -262,7 +262,7 @@ public class ServiceSourcesConfigCacheTests
     {
         var dir = CreateAppHostDirectory(
             "services: [ unterminated flow sequence",
-            """{ "services": { "orders": { "source": "local" } } }""");
+            """{ "services": { "orders": { "source": "repository" } } }""");
 
         var builder = CreateBuilder(dir);
 

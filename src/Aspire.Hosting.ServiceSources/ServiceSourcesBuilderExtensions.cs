@@ -29,15 +29,17 @@ public static class ServiceSourcesBuilderExtensions
     /// That is the opposite of the deliberate case-sensitivity of <c>kind</c> names (see
     /// <see cref="Sources.LocalKindRegistry.DescribeNearMatch"/>), and for a reason: kinds are an
     /// open registry that anything may contribute names to, where folding case could collide two
-    /// independent registrations, while these four names are a closed set this package owns and
+    /// independent registrations, while these six names are a closed set this package owns and
     /// nothing else can add to.
     /// </remarks>
     private static readonly Dictionary<string, IServiceSource> Sources = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["local"] = new LocalProjectSource(new GitCliClient()),
+        ["repository"] = new LocalProjectSource(new GitCliClient()),
         ["kubernetes"] = new KubernetesSource(new SocketPortAllocator()),
         ["url"] = new UrlSource(),
         ["container"] = new ContainerSource(),
+        ["path"] = new PathSource(new GitCliClient()),
+        ["disabled"] = new DisabledSource(),
     };
 
     /// <summary>
@@ -47,18 +49,20 @@ public static class ServiceSourcesBuilderExtensions
     /// <c>servicesources.local.json</c>) or a package-managed git clone under
     /// <c>.servicesources/checkouts/&lt;serviceName&gt;</c> beneath the AppHost directory —
     /// added via Aspire's own <c>AddProject(name, path)</c> without ever
-    /// touching this AppHost's own <c>.csproj</c>/<c>.sln</c> (the <c>"local"</c> source); or a
+    /// touching this AppHost's own <c>.csproj</c>/<c>.sln</c> (the <c>"repository"</c> source); or a
     /// <c>kubectl port-forward</c> process against an already-running service in a Kubernetes
     /// dev cluster, added via Aspire's own <c>AddExecutable(...)</c> (the <c>"kubernetes"</c>
     /// source); or a fixed, already-known URL — e.g. a Kubernetes ingress or any other reachable
     /// HTTP endpoint — with no underlying resource for Aspire to run (the <c>"url"</c> source);
     /// or a published container image run locally via Aspire's own <c>AddContainer(...)</c>,
     /// with image pull and lifecycle managed entirely by Aspire's own container-runtime
-    /// integration (the <c>"container"</c> source).
+    /// integration (the <c>"container"</c> source); or nothing at all, deliberately — a service a
+    /// developer has switched off without removing its <c>AddService</c> call or its catalog entry
+    /// (the <c>"disabled"</c> source, see <see cref="Sources.DisabledSource"/>).
     /// </summary>
     /// <returns>
     /// An <see cref="IResourceBuilder{T}"/> over a <see cref="ServiceResource"/> facade — never the
-    /// resource DCP actually runs, which is a <see cref="ProjectResource"/> for <c>"local"</c>, a
+    /// resource DCP actually runs, which is a <see cref="ProjectResource"/> for <c>"repository"</c>, a
     /// container or executable resource for <c>"container"</c> and <c>"kubernetes"</c>, or whatever
     /// an <see cref="ILocalResourceKind"/> returns. Configuration applied through the returned
     /// builder — <c>WithEnvironment</c>, <c>WithReference</c>, <c>WithArgs</c>,
@@ -69,12 +73,12 @@ public static class ServiceSourcesBuilderExtensions
     /// </returns>
     /// <remarks>
     /// <para>
-    /// Which configuration applies depends on the resolved source: <c>"url"</c> and
-    /// <c>"kubernetes"</c> run out of band — one is a fixed remote URL, the other a
-    /// <c>kubectl port-forward</c> in front of something already running — so most configuration is
-    /// skipped with a warning rather than applied. Wait ordering survives for <c>"kubernetes"</c>,
-    /// whose port-forward is a real local process to order against; <c>"url"</c> registers no
-    /// resource at all, so nothing applies to it.
+    /// Which configuration applies depends on the resolved source: <c>"url"</c>, <c>"kubernetes"</c>
+    /// and <c>"disabled"</c> run out of band, so most configuration is skipped with a warning rather
+    /// than applied. Wait ordering survives only for <c>"kubernetes"</c>, whose port-forward is a
+    /// real local process to order against; <c>"url"</c> and <c>"disabled"</c> register no resource,
+    /// so a consumer's own <c>WaitFor</c> is dropped too rather than left to hang (see
+    /// <see cref="Sources.UnregisteredServiceStartupGuard"/>).
     /// </para>
     /// </remarks>
     [AspireExport]
@@ -96,6 +100,15 @@ public static class ServiceSourcesBuilderExtensions
 
         if (!Sources.TryGetValue(developerConfig.Source, out var source))
         {
+            // Retired, not unknown: "local" used to be this exact source under its old name, so a
+            // config still naming it gets the specific migration rather than the generic "unknown
+            // source" complaint below, which would send a reader hunting for a typo they didn't make.
+            DeveloperConfigShape.ThrowIfRetiredSource(
+                Raw.Compose($"Service '{new Name(name)}': source '{new Name(developerConfig.Source)}'"),
+                developerConfig.Source,
+                Raw.Compose($"Change 'source' to 'repository' in '{Raw.Literal(DeveloperConfiguration.FileName)}' "
+                    + $"(or wherever this is set)."));
+
             // Names the alternatives rather than saying "not implemented yet": the lookup folds
             // case, so reaching here means the name itself is unknown — not that the source exists
             // under a different spelling, which is what the old wording sent readers looking for.
@@ -128,11 +141,33 @@ public static class ServiceSourcesBuilderExtensions
         var repositoryConfig = ServiceSourcesConfigCache.LoadedFor(builder)
             .DeveloperConfig.Repositories.GetValueOrDefault(definition.Repository.CheckoutName);
 
-        return source.Resolve(builder, name, definition, developerConfig, repositoryConfig);
+        var service = source.Resolve(builder, name, definition, developerConfig, repositoryConfig);
+
+        if (service is ServiceResourceBuilder serviceBuilder)
+        {
+            // Lazy: only a mismatched Unwrap reads it, and a kind's type may live in an assembly
+            // this AppHost does not reference.
+            serviceBuilder.DeclaredResolutions = new(() => DeclaredResolutions(builder, name, definition));
+        }
+
+        return service;
     }
 
     /// <summary>
-    /// Sets when a <c>"local"</c> service's <em>first</em> checkout happens, relative to
+    /// What each source this catalog entry could be switched to would resolve to, for
+    /// <c>Unwrap&lt;T&gt;(configure)</c> to tell a call no source could satisfy from one a switch skipped.
+    /// </summary>
+    private static IReadOnlyList<(string Source, Type ResourceType)> DeclaredResolutions(
+        IDistributedApplicationBuilder builder, string name, Config.Catalog.ServiceDefinition definition) =>
+        // Sorted so the error message does not depend on dictionary enumeration order.
+        [.. Sources
+            .OrderBy(s => s.Key, StringComparer.Ordinal)
+            .Select(s => (Source: s.Key, ResourceType: s.Value.DeclaredResourceType(builder, name, definition)))
+            .Where(d => d.ResourceType is not null)
+            .Select(d => (d.Source, d.ResourceType!))];
+
+    /// <summary>
+    /// Sets when a <c>"repository"</c> service's <em>first</em> checkout happens, relative to
     /// <c>Build()</c>. Deferred is the default: a service whose package-managed clone does not exist
     /// yet is registered stopped, cloned while the AppHost runs, and started when its checkout lands
     /// — so the dashboard comes up immediately, checkout progress and failure show as resource
@@ -155,11 +190,11 @@ public static class ServiceSourcesBuilderExtensions
     /// <see cref="AddService"/> call and still overlaps the ones around it — but it no longer has to
     /// be started ahead of demand to do that, which is what let the speculative prefetch stop
     /// cloning services this AppHost never adds (#76). Under <see cref="CheckoutTiming.Eager"/> the
-    /// clones must start before the AppHost has said what it wants, so every <c>"local"</c> entry
+    /// clones must start before the AppHost has said what it wants, so every <c>"repository"</c> entry
     /// with no checkout yet is cloned.
     /// </para>
     /// <para>
-    /// Applies to the <c>"local"</c> kinds that own a managed checkout — <c>dotnet</c>, <c>java</c>
+    /// Applies to the <c>"repository"</c> kinds that own a managed checkout — <c>dotnet</c>, <c>java</c>
     /// and <c>javascript</c>. The latter two pay none of the cost below: neither has a launch
     /// profile, and both take their endpoints from the committed catalog, so a deferred one is
     /// identical to a warm one and only their post-clone checks move. <c>url</c>, <c>kubernetes</c>
@@ -173,7 +208,7 @@ public static class ServiceSourcesBuilderExtensions
     /// <para>
     /// A deferred <c>dotnet</c> service should declare its own endpoints in the AppHost, because a
     /// project's endpoints come from its launch profile and Aspire reads that while composing —
-    /// before the repository is on disk. Since 0.7.0 this needs no call at all — deferred is the
+    /// before the repository is on disk. Since 0.8.0 this needs no call at all — deferred is the
     /// default — but an AppHost migrating from an explicit opt-in loses nothing by keeping the shape:
     /// </para>
     /// <code lang="csharp">
@@ -189,11 +224,11 @@ public static class ServiceSourcesBuilderExtensions
     /// never reported. See <c>DeferredCheckout.LaunchProfileEndpointWarning</c>.
     /// </para>
     /// <para>
-    /// Deferred by default since 0.7.0 (#216): a service that used to be running by the time
+    /// Deferred by default since 0.8.0 (#216): a service that used to be running by the time
     /// <c>Build()</c> returned is now started after it instead, which is visible to anything in the
     /// AppHost that assumed otherwise. An AppHost that needs every service running by the time
     /// <c>Build()</c> returns calls <c>builder.SetCheckoutTiming(CheckoutTiming.Eager)</c> to keep
-    /// the pre-0.7.0 behaviour, permanently rather than as a migration window — there is no way for
+    /// the pre-0.8.0 behaviour, permanently rather than as a migration window — there is no way for
     /// the package to detect that an AppHost relies on the old ordering, so the opt-out is not
     /// scheduled for removal.
     /// </para>
@@ -217,10 +252,10 @@ public static class ServiceSourcesBuilderExtensions
     }
 
     /// <summary>
-    /// No longer needed: deferred is the default since 0.7.0 (#216), so this call is a no-op.
+    /// No longer needed: deferred is the default since 0.8.0 (#216), so this call is a no-op.
     /// </summary>
     [Obsolete(
-        "UseDeferredCheckout() is a no-op: deferred is the default since 0.7.0. Delete the call, or " +
+        "UseDeferredCheckout() is a no-op: deferred is the default since 0.8.0. Delete the call, or " +
         "call SetCheckoutTiming(CheckoutTiming.Eager) if this AppHost needs every service running by " +
         "the time Build() returns.")]
     [AspireExportIgnore]

@@ -17,20 +17,20 @@ internal static class OutOfBandSourceAdvice
     /// </summary>
     /// <remarks>
     /// Conditional rather than an instruction, because the switch is only available where the
-    /// catalog already declares that source: <c>'local'</c> without a <c>repository</c>, or
+    /// catalog already declares that source: <c>'repository'</c> without a <c>repository</c>, or
     /// <c>'container'</c> without a <c>container</c> block, throws
     /// <see cref="ServiceSourcesConfigurationException"/> at the next resolve.
     /// <para>
     /// The block, not the individual field, because what a block has to carry varies with the
-    /// service: <c>'local'</c> needs a <c>project</c> for the built-in <c>dotnet</c> kind and that
+    /// service: <c>'repository'</c> needs a <c>project</c> for the built-in <c>dotnet</c> kind and that
     /// kind's own options for any other, and the error the catalog raises names whichever one is
     /// missing. Naming fields here would be right for the common service and wrong for the rest.
     /// </para>
     /// </remarks>
     internal const string SwitchSource =
-        "give it a 'local' or 'container' source in servicesources.local.json — which works only " +
+        "give it a 'repository' or 'container' source in servicesources.local.json — which works only " +
         "where its 'servicesources.yaml' entry already declares that source: a 'repository' or " +
-        "'repositoryRef' for 'local', a 'container' block for 'container'";
+        "'repositoryRef' for 'repository', a 'container' block for 'container'";
 
     /// <summary>
     /// Why a source runs out of band, in the clause each message builds its sentence around.
@@ -47,7 +47,27 @@ internal static class OutOfBandSourceAdvice
         "kubernetes" =>
             "it resolves to a 'kubectl port-forward' in front of an already-running service, so the " +
             "configuration would reach kubectl rather than the service",
+        "disabled" =>
+            "a developer has switched it off in servicesources.local.json, so there is nothing local to configure",
         _ => "it runs out of band",
+    };
+
+    /// <summary>Where a skipped <c>Configure</c> call should go instead.</summary>
+    /// <remarks>
+    /// "Wherever it actually runs" is true for <c>"url"</c>/<c>"kubernetes"</c> but not
+    /// <c>"disabled"</c>, which runs nowhere at all.
+    /// </remarks>
+    internal static string ExpectedConfiguredWhere(string source) => source switch
+    {
+        "disabled" => "There is nowhere else to configure it while it stays disabled",
+        _ => "The service is expected to be configured wherever it actually runs",
+    };
+
+    /// <summary>The lead-in <see cref="ServiceConfigurationExtensions.Unwrap{T}"/>'s error offers before the source switch.</summary>
+    internal static string ConfigureInsteadClause(string source) => source switch
+    {
+        "disabled" => "Drop the configuration",
+        _ => "Configure the service where it actually runs, drop the configuration",
     };
 
     /// <summary>

@@ -18,7 +18,7 @@ never existed. Check the tag of the last release before adding one.
 
 ### Breaking
 
-- **Deferred checkout is now the default for a cold `"local"` service; `UseDeferredCheckout()` is
+- **Deferred checkout is now the default for a cold `"repository"` service; `UseDeferredCheckout()` is
   obsolete** ([#216]). A service whose managed clone does not exist yet used to block
   `AddService()` until the checkout landed; it now registers stopped and starts once the clone
   finishes, so the dashboard comes up immediately and one failed clone costs one service rather
@@ -43,6 +43,142 @@ never existed. Check the tag of the last release before adding one.
   thrown at composition on the eager path (a missing wrapper, a bad `workingDirectory`) — now
   surfaces later, as that service's own resource state, rather than failing the AppHost synchronously
   at `AddService()`.
+
+## [0.7.0] - 2026-09-28
+
+### Breaking
+
+- **The `"local"` source is renamed to `"repository"`.** Same behavior — clone the catalog's
+  `repository:` url, reconcile onto `ref` — new name: `"local"` was the only source whose value
+  didn't match its own catalog block (`url`↔`url:`, `container`↔`container:`,
+  `kubernetes`↔`kubernetes:`, but `local`↔`repository:`), and it collided in spelling, though not
+  in meaning, with `servicesources.local.json` — a different "local" (per-developer settings)
+  entirely. `"local"` is retired, not aliased: a `source: "local"` entry, a `defaultSource: local`
+  catalog field, or a `.WithDefaultSource("local")` call now throws
+  `ServiceSourcesConfigurationException` naming the rename and the fix, rather than silently
+  resolving as before or falling through to a generic "unrecognized source" message. Change
+  `source: "local"` to `source: "repository"` in `servicesources.local.json` (or wherever it's
+  set), and `defaultSource: local`/`.WithDefaultSource("local")` to `"repository"` in the catalog,
+  to migrate. The developer's per-service override block nested under `source` is renamed to match
+  — see **Deprecated** below; unlike the source value, the old block name keeps working as a
+  deprecated alias rather than being retired.
+- **`path` is now a reserved `kind` name in `servicesources.yaml`.** The new `path:` catalog field
+  (see **Added**) makes `path` a well-known top-level property of a service entry, so a yaml service
+  declaring `kind: path` — a custom kind registered under that name — is now refused with "kind
+  'path' collides with a well-known property", the same rule `kind: repository` or `kind: url`
+  already hit: its options block would otherwise be read as the new field. Register the kind under
+  another name. A kind used only through `WithKind("path", …)` in code is unaffected.
+
+### Added
+
+- **New source: `"path"`.** Points a service at a directory that's already checked out beside the
+  AppHost — the shape a genuine monorepo has, with no clone, no `ref`, and no reconciliation ever
+  involved:
+
+  ```yaml
+  services:
+    orders:
+      path: services/orders
+      project: src/Orders.Api/Orders.Api.csproj
+  ```
+
+  ```json
+  { "services": { "orders": { "source": "path" } } }
+  ```
+
+  It's the existing `local.path` mechanism (see **Deprecated** below) promoted to a first-class
+  source, so a service already checked out next to the AppHost no longer needs a `repository:` url
+  it has nothing to clone from, and every developer no longer has to write the same personal
+  `local.path` override for a path that's actually a fact about the shared catalog. `path:` combines
+  freely with `repository:`/`url:`/`container:`/`kubernetes:` on one entry — see
+  [Combining sources on one catalog entry](docs/sources/index.md#combining-sources-on-one-catalog-entry)
+  — so one developer can clone the service while another uses the copy they already have. A
+  catalog-declared `path:` is written relative to the AppHost directory and confined to the
+  repository the AppHost lives in (the nearest directory holding `.git`), so `../Orders.Api` beside a
+  `src/MyApp.AppHost/` works while an absolute path or one climbing out of the repository is refused;
+  a developer's own override (`path.path` in `servicesources.local.json`) is unconfined, exactly like
+  `repository.path` today. A copy with no `.git` — a source archive, or a container build context that
+  leaves it out — names its root with the new `ServiceSources:RepositoryRoot` setting (e.g.
+  `ServiceSources__RepositoryRoot=/src`, or `"repositoryRoot"` in `servicesources.local.json`),
+  read only when no `.git` is found; with neither, the AppHost directory is the boundary. `prepare` runs as `once`/`always`/`never` — never `oncePerCommit`, since there's
+  no separate commit for the directory to move to on its own, so an unwritten `mode`, or a catalog's
+  `oncePerCommit` written for the `"repository"` source on the same entry, means `once` there. A
+  catalog-declared `path:`'s own `prepare:` block runs normally; under a `path.path` override it is
+  not run, exactly as under `repository.path`, and a startup notice shows the command to declare as your
+  own `path.prepare`. See [the `"path"` source](docs/sources/path.md) for the
+  full behavior, including `defaultSource: path` and its (lack of) interaction with
+  `UseDeferredCheckout()` and `repositories:` grouping.
+- **A `"disabled"` source for `AddService`.** Turns a service off — `AddService("orders")` still
+  returns a valid resource builder, but nothing runs and nothing is reachable — without deleting
+  the `AddService` call or the catalog entry. Needs no catalog block: set
+  `"source": "disabled"` in `servicesources.local.json` for a service declared any other way.
+  Configuration calls (`WithEnvironment`, `WithReference`, endpoints, commands, …) are skipped and
+  logged exactly as they are for `"url"`/`"kubernetes"`, and a consumer's `WaitFor`/`WaitForCompletion`
+  on a disabled service resolves immediately instead of waiting, the same protection `"url"` has
+  against #170. See [the `"disabled"` source](docs/sources/disabled.md).
+
+- **`Unwrap<T>` overload that takes a configuration delegate, and skips it instead of throwing
+  when the service doesn't resolve to a `T`.** The existing `Unwrap<T>()` has to throw then, because
+  it has to hand back a `T` builder and there is none to give; the new
+  `Unwrap<T>(Action<IResourceBuilder<T>> configure)` returns the service itself instead, so
+  `configure` is simply skipped and the skip is logged at startup, the same way `WithEnvironment`
+  and every other native method already behave:
+
+  ```csharp
+  service
+      .Unwrap<JavaScriptAppResource>(js => js.WithRunScript("dev"))
+      .WithEnvironment("MODE", "dev");
+  ```
+
+  That covers the `"url"`, `"kubernetes"` and `"disabled"` sources, and a reachable source that
+  resolves to a different resource type — a `java` service switched to `"container"` in
+  `servicesources.local.json` — so a switch like that no longer breaks a `Program.cs` calling
+  kind-specific vocabulary. `Unwrap<IResourceWithWaitSupport>(...)` on a `"kubernetes"` service
+  still runs against the port-forward, matching `WaitFor`.
+
+  A call **no** source the catalog entry declares could ever satisfy — `Unwrap<ProjectResource>`
+  on a `kind: java` service with a `container:` block — throws at startup instead, naming each
+  declared source and the type it resolves to, since no source switch would ever make it apply.
+
+- **`ILocalResourceKind.ResourceType`**, an optional member naming the type every resource the
+  kind's `Resolve` returns is, or derives from. The built-in `java` and `javascript` kinds declare
+  theirs. It is what lets `Unwrap<T>(configure)` tell a call no source could satisfy apart from
+  one a source switch skipped; a kind that doesn't declare it is assumed to match anything, so it
+  never causes that throw. A kind that declares one is held to it: a resource from its `Resolve` or
+  `ResolveDeferred` that is not that type fails startup, as does a `ResourceType` that returns null
+  or throws, naming the service and kind.
+
+### Deprecated
+
+- **The developer's per-service block for the `"repository"` source is renamed from `local` to
+  `repository`, matching the source's own name.** `"local"` was the same spelling collision one
+  level down that motivated the source rename above — `"repository": { ... }` paired with a
+  `"local": { ... }` block for its settings read oddly next to each other, and, unlike every other
+  source, didn't match `servicesources.local.json`'s own use of "local" for something else. Unlike
+  the source value, `local` is a deprecated alias here, not a retired spelling: it keeps resolving
+  exactly as it does today (also as the environment-variable segment,
+  `ServiceSources__Services__<service>__Local__Ref`), behind a one-time startup notice naming the
+  new spelling. Setting both `local` and `repository` on the same entry is a configuration error —
+  there is no rule for which one would win. Migrate by renaming the key: `"local": { "path": "...",
+  "ref": "..." } }` becomes `"repository": { "path": "...", "ref": "..." } }`.
+- **`repository.path` is deprecated in favor of the new `"path"` source.** The `"path"` source
+  resolves a directory the same way — no clone, no ref — as a first-class source
+  (`"source": "path"`, `"path": { "path": "..." }`) rather than a hidden mode of `"repository"`.
+  `repository.path` keeps working exactly as it does today; there is no removal planned. A
+  developer using it now gets a one-time startup notice naming the replacement:
+
+  ```
+  warn: Aspire.Hosting.ServiceSources
+        Service 'orders': 'repository.path' is deprecated. Use the 'path' source instead:
+        "source": "path", "path": { "path": "/home/dev/code/orders" } — which resolves the
+        directory the same way, with no clone and no ref.
+  ```
+
+  A `repository.prepare` block doesn't carry over by itself — it isn't read under `"path"` — so
+  when one is declared the notice also says to move it to `path.prepare`. The catalog's own
+  `prepare` step is not run in the directory under either spelling. (The deprecated `local` alias
+  above behaves the same way here too: a service still written under `local` gets both notices,
+  independently.)
 
 ## [0.6.0] - 2026-09-24
 
@@ -353,7 +489,7 @@ protection then blocked reusing the name, so this version carries what would hav
   **A second silent change, and this one has no registration-time refusal to catch it: `Validate`
   is no longer called for a service on the deferred path.** It is paired with `Resolve`, which core
   does not call there either — under
-  [`UseDeferredCheckout()`](README.md#first-run-usedeferredcheckout) there is no checkout for it to
+  [`UseDeferredCheckout()`](docs/sources/repository.md#first-run-usedeferredcheckout) there is no checkout for it to
   judge the service against, so `ResolveDeferred` is called instead. **If your kind can answer
   `true` from `SupportsDeferredCheckout` and validates its options block only in `Validate`, that
   block stops being validated at all for a deferred service.** Parse and reject it from
@@ -655,7 +791,7 @@ protection then blocked reusing the name, so this version carries what would hav
   Not included, deliberately: no task runner, no ordering between steps, no cross-developer caching
   of what a step produced, no timeout, and no injected environment variables. One command, one
   marker, per service. See the
-  [`prepare` section](README.md#prepare-a-checkout-that-has-to-bootstrap-itself).
+  [`prepare` section](docs/sources/repository.md#prepare-a-checkout-that-has-to-bootstrap-itself).
 
 - **`AddBackingService()` — the database, broker or cache a service connects to, source-switched
   the same way the service is** ([#144]). A service usually depends on a database, and a developer
@@ -1705,7 +1841,8 @@ Targets `net10.0`.
 - Fail-fast configuration validation with `ServiceSourcesConfigurationException`.
 - MIT license, README, symbol packages, and Trusted Publishing (OIDC) to nuget.org.
 
-[Unreleased]: https://github.com/flojon/aspire-servicesources/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/flojon/aspire-servicesources/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/flojon/aspire-servicesources/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/flojon/aspire-servicesources/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/flojon/aspire-servicesources/compare/v0.4.1...v0.5.1
 [0.4.1]: https://github.com/flojon/aspire-servicesources/compare/v0.4.0...v0.4.1

@@ -67,7 +67,13 @@ public class CheckoutPreparationTests
     {
         public string? HeadCommitSha { get; set; } = "1111111111111111111111111111111111111111";
 
-        public string? GetHeadCommitSha(string repositoryPath) => HeadCommitSha;
+        public int HeadCommitReads { get; private set; }
+
+        public string? GetHeadCommitSha(string repositoryPath)
+        {
+            HeadCommitReads++;
+            return HeadCommitSha;
+        }
 
         public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null)
         {
@@ -201,6 +207,35 @@ public class CheckoutPreparationTests
 
         fixture.Git.HeadCommitSha = "2222222222222222222222222222222222222222";
         Run(fixture, Step("once"));
+
+        Assert.Single(fixture.Runner.Runs);
+    }
+
+    /// <remarks>
+    /// A managed checkout is always a real clone, so reading the commit under <c>once</c> costs it
+    /// nothing — unlike a <c>path</c> checkout, which may have no git at all (see
+    /// <see cref="TheCommitIsReadOnlyWhenTheModeComparesIt"/>). Recording it is what lets a developer
+    /// who later switches the mode to <c>oncePerCommit</c> be matched against the commit the step
+    /// really ran on, rather than forced through one extra run to find out (see
+    /// <see cref="SwitchingToOncePerCommit_DoesNotForceARerunWhenTheCommitHasNotMoved"/>).
+    /// </remarks>
+    [Fact]
+    public void TheCommitIsReadForAManagedCheckoutEvenUnderOnce()
+    {
+        var fixture = NewFixture();
+
+        Run(fixture, Step("once"));
+
+        Assert.Equal(1, fixture.Git.HeadCommitReads);
+    }
+
+    [Fact]
+    public void SwitchingToOncePerCommit_DoesNotForceARerunWhenTheCommitHasNotMoved()
+    {
+        var fixture = NewFixture();
+        Run(fixture, Step("once"));
+
+        Run(fixture, Step("oncePerCommit"));
 
         Assert.Single(fixture.Runner.Runs);
     }
@@ -492,7 +527,7 @@ public class CheckoutPreparationTests
 
     /// <remarks>
     /// #270 redacted the command's <em>output</em>; the command a decision-to-run announces is its
-    /// own line into the same sink, and a `local.prepare.command` can carry a credential just as
+    /// own line into the same sink, and a `repository.prepare.command` can carry a credential just as
     /// legitimately as anything the command later prints (#286).
     /// </remarks>
     [Fact]
@@ -883,6 +918,25 @@ public class CheckoutPreparationTests
         Assert.Contains("*", File.ReadAllText(ignore));
     }
 
+    /// <summary>
+    /// Only <c>oncePerCommit</c> compares the commit, so only it reads one: a <c>once</c> or
+    /// <c>always</c> step never shells out to git — which a <c>"path"</c> service, documented as
+    /// needing no git at all, may not have.
+    /// </summary>
+    [Theory]
+    [InlineData("once", 0)]
+    [InlineData("always", 0)]
+    [InlineData("oncePerCommit", 1)]
+    public void TheCommitIsReadOnlyWhenTheModeComparesIt(string mode, int expectedReads)
+    {
+        var fixture = NewFixture();
+
+        Run(fixture, Step(mode), managedCheckout: false);
+
+        Assert.Single(fixture.Runner.Runs);
+        Assert.Equal(expectedReads, fixture.Git.HeadCommitReads);
+    }
+
     [Fact]
     public void APathCheckoutRepointedElsewhere_Reruns()
     {
@@ -898,6 +952,11 @@ public class CheckoutPreparationTests
         Assert.Equal(
             [fixture.RepoRoot, elsewhere.RepoRoot],
             fixture.Runner.Runs.Select(run => run.WorkingDirectory));
+
+        // The reason names the directory move without naming 'repository.path': a 'path'-sourced
+        // service reaches this same marker logic through a catalog path: or a path.path override.
+        Assert.Contains(fixture.Sink.Lines, line => line.Contains("resolves to a different directory", StringComparison.Ordinal));
+        Assert.DoesNotContain(fixture.Sink.Lines, line => line.Contains("repository.path", StringComparison.Ordinal));
     }
 
     /// <remarks>
