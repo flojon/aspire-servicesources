@@ -34,6 +34,7 @@ public sealed class ServiceDefinitionBuilder
     private string? _kind;
     private object? _kindOptions;
     private string? _defaultSource;
+    private string? _buildGroup;
 
     internal ServiceDefinitionBuilder(string serviceName)
     {
@@ -114,6 +115,23 @@ public sealed class ServiceDefinitionBuilder
             source);
 
         _defaultSource = source;
+        return this;
+    }
+
+    /// <summary>
+    /// Names the group of <c>"path"</c> services whose builds are serialized with this one, overriding the
+    /// repository the service directory sits in — for services that share a project through a directory
+    /// outside their own repository. The name must be non-empty and have no surrounding whitespace. It
+    /// has no effect unless the service resolves to the <c>"path"</c> source.
+    /// </summary>
+    public ServiceDefinitionBuilder WithBuildGroup(string name)
+    {
+        RequireUnset(_buildGroup, nameof(WithBuildGroup));
+
+        Sources.BuildGroupKey.ValidateName(
+            Raw.Compose($"Service '{new Name(_serviceName)}': {Raw.Literal(nameof(WithBuildGroup))}"), name);
+
+        _buildGroup = name;
         return this;
     }
 
@@ -281,5 +299,6 @@ public sealed class ServiceDefinitionBuilder
         KindOptions = _kindOptions,
         Origin = CatalogOrigin.Code,
         DefaultSource = _defaultSource,
+        BuildGroup = _buildGroup,
     };
 }

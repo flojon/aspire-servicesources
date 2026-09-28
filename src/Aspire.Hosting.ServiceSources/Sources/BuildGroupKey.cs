@@ -1,3 +1,5 @@
+using Aspire.Hosting.ServiceSources.Messages;
+
 namespace Aspire.Hosting.ServiceSources.Sources;
 
 /// <summary>
@@ -12,6 +14,16 @@ internal static class BuildGroupKey
 {
     private const string GroupPrefix = "g:";
     private const string PathPrefix = "p:";
+
+    /// <summary>Refuses a name that is empty or padded: a stray space would silently make two services differ.</summary>
+    public static void ValidateName(Raw subject, string name)
+    {
+        if (name.Length == 0 || name.Trim().Length != name.Length)
+        {
+            throw ServiceSourcesConfigurationException.For(
+                $"{subject} '{new Name(name)}' is not a valid build group name. It has to be non-empty, with no leading or trailing whitespace.");
+        }
+    }
 
     public static IEqualityComparer<string> Comparer { get; } = new KeyComparer();
 
