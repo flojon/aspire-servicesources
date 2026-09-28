@@ -1,7 +1,7 @@
 # An orphaned `"repository"` entry still costs a clone: what is left after the deferred default (#217)
 
 **Date:** 2026-09-28
-**Status:** Draft
+**Status:** Approved
 **Resolves:** #217 (a `services:` entry that the catalog declares, that no `AddService()` call adds,
 and whose checkout is cold, is cloned speculatively and reported only once the clone is paid for).
 **Relates to:** #216/#404 (deferred checkout is now the default), #76 (the first narrowing of the
@@ -181,14 +181,10 @@ alongside service names that are already escaped through `Name`. The change does
 repositories are cloned, so it cannot widen what an untrusted configuration source can make the
 package download (that surface, and its `SECURITY.md` treatment, is unchanged).
 
-## 6. Open Questions
+## 6. Open Questions (resolved)
 
-1. **Is "documented decision, no narrowing" the outcome the maintainer wants** for publish mode and
-   Eager, or is there a concrete complaint that would justify O5 (an opt-out for speculation)? This
-   document recommends not; nothing found in the code or the ticket supports building it.
-2. **CHANGELOG:** recommended no entry (docs correction and a log sentence, under the repo's rule that
-   cosmetic changes usually get none). If the maintainer counts the corrected notice as a **Changed**
-   item, add one line under `[Unreleased]`.
-3. **Ticket closure:** the PR would say `Closes #217` on the basis that its scope was the decision;
-   confirm that nothing is meant to stay open (for example a wish to revisit publish-mode cost with
-   real timings).
+1. **Outcome:** resolved. Documented decision, no further narrowing, no prefetch opt-out (O5), plus the
+   small corrections in section 3 (publish-mode notice text, the inverted Eager bullet in
+   `docs/sources/repository.md`, the `LocalCheckoutPrefetch` class remarks).
+2. **CHANGELOG:** resolved. No entry.
+3. **Ticket closure:** resolved. The PR says `Closes #217`.
