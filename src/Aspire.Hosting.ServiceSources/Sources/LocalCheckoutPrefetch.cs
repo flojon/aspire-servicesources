@@ -133,6 +133,9 @@ internal sealed class LocalCheckoutPrefetch
 
     private bool _started;
 
+    // Deferral never applies to publish, so the notice's remedy differs by mode.
+    private bool _isRunMode;
+
     public static LocalCheckoutPrefetch For(
         IDistributedApplicationBuilder builder, IGitClient gitClient)
     {
@@ -171,6 +174,7 @@ internal sealed class LocalCheckoutPrefetch
             }
 
             _started = true;
+            _isRunMode = builder.ExecutionContext.IsRunMode;
 
             // Buffered to BeforeStartEvent for the same reason ServiceSourcesWarnings is:
             // AddService() runs while the AppHost is still being composed, before there is an
@@ -220,6 +224,15 @@ internal sealed class LocalCheckoutPrefetch
             // the first.
             var names = Raw.Join(", ", unused.Select(name => Raw.Compose($"{new Name(name)}")));
 
+            var remedyTail = _isRunMode
+                ? Raw.Literal(
+                    "Deferred checkout also stops it: a service whose first checkout is deferred "
+                    + "past startup is cloned only when it is added, which is the default unless this AppHost calls "
+                    + "builder.SetCheckoutTiming(CheckoutTiming.Eager).")
+                : Raw.Literal(
+                    "Deferral does not apply to 'aspire publish', which composes the manifest from "
+                    + "checkouts already on disk, so clearing the entry is the only remedy.");
+
             // Named by configuration key rather than by file: the entry can equally have arrived
             // from appsettings, user secrets, an environment variable or the command line, and
             // sending a developer to a file that holds nothing — or doesn't exist — leaves them
@@ -233,9 +246,7 @@ internal sealed class LocalCheckoutPrefetch
                 + $"adds are reconciled to their configured ref. Clear "
                 + $"'{Raw.Literal(DeveloperConfiguration.ServicesKey)}:<service>:source' for the ones you don't call "
                 + $"AddService() for — usually their entries in {Raw.Literal(DeveloperConfiguration.FileName)} — to stop "
-                + $"paying for them. Deferred checkout also stops it: a service whose first checkout is deferred "
-                + $"past startup is cloned only when it is added, which is the default unless this AppHost calls "
-                + $"builder.SetCheckoutTiming(CheckoutTiming.Eager).");
+                + $"paying for them. {remedyTail}");
         }
     }
 

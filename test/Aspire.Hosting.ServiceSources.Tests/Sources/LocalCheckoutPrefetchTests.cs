@@ -898,6 +898,54 @@ public class LocalCheckoutPrefetchTests
         Assert.Equal(2, git.Cloned.Count);
     }
 
+    [Fact]
+    public void PublishMode_UnusedCheckoutNotice_DoesNotOfferDeferralAsARemedy()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var builder = TestHelpers.CreatePublishingBuilder(dir);
+        var git = new FakeGitClient { StartBarrier = new Barrier(2) };
+
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
+
+        var message = LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage;
+
+        Assert.NotNull(message);
+        Assert.Contains("billing", message);
+        Assert.Contains("1 service", message);
+        Assert.DoesNotContain("SetCheckoutTiming", message);
+        Assert.DoesNotContain("Deferred checkout", message);
+        Assert.Contains("aspire publish", message);
+    }
+
+    [Fact]
+    public void PublishMode_EveryConfiguredServiceAdded_HasNoUnusedCheckoutNotice()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreatePublishingBuilder(dir);
+        var git = new FakeGitClient();
+
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
+
+        Assert.Null(LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage);
+    }
+
+    [Fact]
+    public void RunModeEager_UnusedCheckoutNotice_StillNamesEagerAsHowDeferralIsLost()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
+        var git = new FakeGitClient { StartBarrier = new Barrier(2) };
+
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
+
+        var message = LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage;
+
+        Assert.NotNull(message);
+        Assert.Contains("Deferred checkout", message);
+        Assert.Contains("SetCheckoutTiming(CheckoutTiming.Eager)", message);
+    }
+
     /// <summary>
     /// The notice's remedy is "stop paying for clones you do not use", so it has to be about clones
     /// that were actually paid for. A checkout already on disk costs the prefetch a
