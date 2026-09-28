@@ -51,6 +51,8 @@ public class LaunchProfileCheckTests
             () => LaunchProfileCheck.Verify("orders", ProjectWith(null), "http"));
 
         Assert.Contains("does not exist", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Add that file", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("remove 'launchProfileName'", ex.Message, StringComparison.Ordinal);
         Assert.Contains("launchSettings.json", ex.Message, StringComparison.Ordinal);
     }
 

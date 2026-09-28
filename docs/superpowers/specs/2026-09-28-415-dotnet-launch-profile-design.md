@@ -220,7 +220,8 @@ The deferred `dotnet` service is assembled by hand, so the option is applied by 
   missing**, returns a `LaunchSettings` whose `Profiles` maps that name to an empty
   `LaunchProfile { CommandName = "Project" }`. That gets `throwIfNotFound` past composition. The
   profile carries no `applicationUrl`, so no endpoints are synthesised, which is exactly the
-  existing cold-start cost `UseDeferredCheckout()` documents. Once the file exists it returns null
+  existing cold-start cost of a deferred checkout (the default for a cold managed checkout;
+  `SetCheckoutTiming(CheckoutTiming.Eager)` opts out). Once the file exists it returns null
   again and Aspire reads the real file at start time, as today. A side effect worth knowing: with a
   non-null effective profile at composition, Aspire's own `WithProjectDefaults` registers its
   `DOTNET_LAUNCH_PROFILE` environment callback (`TryAdd`) on the deferred path too, using the
@@ -239,15 +240,16 @@ The deferred `dotnet` service is assembled by hand, so the option is applied by 
   post-clone check, and the profile message stays self-explanatory.
 - `excludeLaunchProfile: true`: annotation only. Cold and warm runs are identical (no endpoints, no
   profile environment, no `DOTNET_LAUNCH_PROFILE`) and no endpoint warning is issued, because
-  `LandedLaunchProfile.Read` returns empty for an excluded resource. This is the trade
-  `UseDeferredCheckout()` already documents, now chosen explicitly.
+  `LandedLaunchProfile.Read` returns empty for an excluded resource. This is the deferred-checkout trade,
+  now chosen explicitly.
 - Named profile, cold run: the profile's environment variables are restored after the clone, and
   the endpoint warning fires if that profile has an `applicationUrl` the AppHost did not declare,
   exactly as for the default profile today.
 - `SupportsDeferredCheckout` and the prefetch are unaffected: the `dotnet` branch of
   `LocalProjectSource.Resolve` never consults `SupportsDeferredCheckout` (only non-dotnet kinds do),
-  and `Register` still calls `prefetch.StartCheckout` as before. Deferral itself remains opt-in
-  (`UseDeferredCheckout()`, run mode, cold managed checkout).
+  and `Register` still calls `prefetch.StartCheckout` as before. Deferral itself is unchanged: the
+  default for a cold managed checkout in run mode, and `SetCheckoutTiming(CheckoutTiming.Eager)`
+  opts out (`UseDeferredCheckout()` is obsolete and redundant).
 - The stale `DeferredProjectMetadata` remark that `ExcludeLaunchProfile` is "worse" for the cold case
   is rewritten: it is now the explicit, chosen behavior when the catalog asks for it.
 

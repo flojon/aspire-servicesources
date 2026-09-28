@@ -20,7 +20,7 @@ internal static class LaunchProfileCheck
 
         if (found.State == LaunchSettingsState.Absent)
             throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': launch profile '{new Name(profileName)}' was requested but '{Raw.Escaped(settingsFile)}' does not exist. {FixHint}");
+                $"Service '{new Name(serviceName)}': launch profile '{new Name(profileName)}' was requested but '{Raw.Escaped(settingsFile)}' does not exist. {AbsentHint}");
 
         if (found.Names.Contains(profileName, StringComparer.Ordinal)) return;
 
@@ -31,6 +31,10 @@ internal static class LaunchProfileCheck
         throw ServiceSourcesConfigurationException.For(
             $"Service '{new Name(serviceName)}': launch profile '{new Name(profileName)}' was not found in '{Raw.Escaped(settingsFile)}'. {available} {FixHint}");
     }
+
+    // Editing the profile name cannot help when there is no file to hold any profile.
+    private static Raw AbsentHint { get; } = Raw.Literal(
+        "Add that file to the project, or remove 'launchProfileName' from the service's 'dotnet' block (or the WithLaunchProfileName(...) call).");
 
     private static Raw FixHint { get; } = Raw.Literal(
         "Fix 'launchProfileName' under the service's 'dotnet' block (or the AsDotnet(o => o.WithLaunchProfileName(...)) call).");
