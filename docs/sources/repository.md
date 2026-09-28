@@ -347,7 +347,7 @@ entirely, with no repository and so nothing to bootstrap.
 
 ## Aspire builds a checkout, on every start
 
-Nothing in this package compiles a checkout, and nothing needs to. A `dotnet` service is
+Nothing in this package compiles a managed checkout, and nothing needs to. A `dotnet` service is
 registered with Aspire's own `AddProject`, and Aspire launches that resource with `dotnet run`,
 whose working directory is the checkout itself. The build you would otherwise have to arrange is
 that command's own implicit incremental build.

@@ -57,19 +57,23 @@ internal sealed class ProcessBuildRunner(
         process.ErrorDataReceived += (_, e) => Forward(e.Data, output, stderrEnded);
 
         process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-
-        // A build that asks a question must see the end of input, not wait for a human.
-        process.StandardInput.Close();
 
         try
         {
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
+            // A build that asks a question must see the end of input, not wait for a human.
+            process.StandardInput.Close();
+
             await exited.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch
         {
             Kill(process);
+
+            // The gate frees the next build on return; the killed tree must be done with obj/ first.
+            await WaitBrieflyForExitAsync(process).ConfigureAwait(false);
             throw;
         }
 
@@ -82,6 +86,18 @@ internal sealed class ProcessBuildRunner(
         return process.ExitCode;
     }
 
+    private static async Task WaitBrieflyForExitAsync(Process process)
+    {
+        try
+        {
+            await process.WaitForExitAsync(CancellationToken.None).WaitAsync(StreamDrainTimeout).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is TimeoutException or InvalidOperationException)
+        {
+            // Never started or still dying; nothing more to wait for.
+        }
+    }
+
     private static void Forward(string? data, CappedOutput output, TaskCompletionSource ended)
     {
         if (data is null)
@@ -90,7 +106,14 @@ internal sealed class ProcessBuildRunner(
             return;
         }
 
-        output.Add(data);
+        try
+        {
+            output.Add(data);
+        }
+        catch (Exception)
+        {
+            // A throwing log sink on a pipe callback would take the AppHost down.
+        }
     }
 
     private static void Kill(Process process)
@@ -101,7 +124,7 @@ internal sealed class ProcessBuildRunner(
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
-            // Already gone.
+            // Already exited.
         }
     }
 
