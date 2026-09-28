@@ -151,7 +151,7 @@ public class DeveloperConfigFileSourceTests
             """{ "repositoryRoot": "../..", "services": { "orders": { "source": "repository" } } }""");
         var builder = TestHelpers.CreateBuilder(dir);
 
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         Assert.Equal("../..", builder.Configuration[DeveloperConfiguration.RepositoryRootKey]);
         Assert.Equal("repository", builder.Configuration[SourceKey]);

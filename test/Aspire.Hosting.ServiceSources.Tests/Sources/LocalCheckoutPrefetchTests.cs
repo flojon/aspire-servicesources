@@ -244,6 +244,21 @@ public class LocalCheckoutPrefetchTests
     private static ServiceDeveloperConfig DevConfig() => new() { Source = "repository" };
 
     [Fact]
+    public void FirstAddService_UnderTheDefaultTiming_DoesNotCloneServicesTheAppHostNeverAdds()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var builder = TestHelpers.CreateBuilder(dir);
+        var git = new FakeGitClient();
+        var gate = git.BlockFor("https://example.com/orders.git");
+
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
+
+        Assert.DoesNotContain("https://example.com/billing.git", git.Cloned);
+
+        gate.Set();
+    }
+
+    [Fact]
     public void FirstAddService_ClonesEveryLocalServiceInParallel()
     {
         var dir = CreateAppHostDirectory("orders", "billing");

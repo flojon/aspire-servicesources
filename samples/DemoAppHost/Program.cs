@@ -7,10 +7,9 @@ var builder = DistributedApplication.CreateBuilder(args);
 // prepare step's output reaches the AppHost's own stdout, which is only true on that path — see
 // scripts/smoketest-local-source.sh). Not something a real AppHost needs: deferred is the
 // default since 0.8.0, and this line has no effect when the variable is unset.
-if (Environment.GetEnvironmentVariable("SERVICESOURCES_DEMO_CHECKOUT_TIMING") is { } checkoutTiming
-    && Enum.TryParse<CheckoutTiming>(checkoutTiming, ignoreCase: true, out var timing))
+if (Environment.GetEnvironmentVariable("SERVICESOURCES_DEMO_CHECKOUT_TIMING") is { } checkoutTiming)
 {
-    builder.SetCheckoutTiming(timing);
+    builder.SetCheckoutTiming(Enum.Parse<CheckoutTiming>(checkoutTiming, ignoreCase: true));
 }
 
 // "java" is a built-in local kind — a service whose catalog entry says `kind: java` clones and

@@ -718,7 +718,7 @@ public class PathSourceTests
 
         // A deferred registration would not yet be the real ProjectResource carrying its final
         // ProjectPath — deferral has nothing to buy a 'path' service (design finding 5), so this must
-        // be the same eager resolution UseDeferredCheckout()'s absence would produce.
+        // be the same eager resolution deferral being off would produce.
         Assert.IsAssignableFrom<ProjectResource>(Assert.Single(builder.Resources, r => r.Name == ServiceName));
         Assert.IsType<ServiceResource>(service.Resource);
     }

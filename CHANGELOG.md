@@ -25,7 +25,7 @@ never existed. Check the tag of the last release before adding one.
   than the whole AppHost. This is the behaviour `UseDeferredCheckout()` used to opt into — nothing
   changes for a warm checkout, a `path` override, or `aspire publish`.
 
-  `UseDeferredCheckout()` is now a no-op — deferred is what it always asked for, and that is
+  `UseDeferredCheckout()` is now redundant — deferred is what it always asked for, and that is
   already the default — so it is `[Obsolete]`; delete the call. The new
   `builder.SetCheckoutTiming(CheckoutTiming.Eager)` is the opt-out for an AppHost that needs every
   service running by the time `Build()` returns, kept permanently rather than as a migration
@@ -489,7 +489,7 @@ protection then blocked reusing the name, so this version carries what would hav
   **A second silent change, and this one has no registration-time refusal to catch it: `Validate`
   is no longer called for a service on the deferred path.** It is paired with `Resolve`, which core
   does not call there either — under
-  [`UseDeferredCheckout()`](docs/sources/repository.md#first-run-usedeferredcheckout) there is no checkout for it to
+  [`UseDeferredCheckout()`](docs/sources/repository.md#first-run-deferred-checkout) there is no checkout for it to
   judge the service against, so `ResolveDeferred` is called instead. **If your kind can answer
   `true` from `SupportsDeferredCheckout` and validates its options block only in `Validate`, that
   block stops being validated at all for a deferred service.** Parse and reject it from

@@ -238,7 +238,7 @@ public static class ServiceSourcesBuilderExtensions
     /// can no longer change what already happened, so it is refused instead of silently leaving
     /// those already-added services on the wrong timing.
     /// </exception>
-    [AspireExportIgnore]
+    [AspireExport]
     public static IDistributedApplicationBuilder SetCheckoutTiming(
         this IDistributedApplicationBuilder builder, CheckoutTiming timing)
     {
@@ -252,10 +252,12 @@ public static class ServiceSourcesBuilderExtensions
     }
 
     /// <summary>
-    /// No longer needed: deferred is the default since 0.8.0 (#216), so this call is a no-op.
+    /// No longer needed: deferred is the default since 0.8.0 (#216). Equivalent to
+    /// <c>SetCheckoutTiming(CheckoutTiming.Deferred)</c>, so it also overrides an earlier
+    /// <see cref="CheckoutTiming.Eager"/>.
     /// </summary>
     [Obsolete(
-        "UseDeferredCheckout() is a no-op: deferred is the default since 0.8.0. Delete the call, or " +
+        "UseDeferredCheckout() is redundant: deferred is the default since 0.8.0. Delete the call, or " +
         "call SetCheckoutTiming(CheckoutTiming.Eager) if this AppHost needs every service running by " +
         "the time Build() returns.")]
     [AspireExportIgnore]

@@ -530,7 +530,7 @@ permanently with `builder.SetCheckoutTiming(CheckoutTiming.Eager)`, called befor
 `AddService()`, which is where the decision is made — the same ordering `AddServiceCatalog()`
 requires. A call made after any service has already resolved throws
 `ServiceSourcesConfigurationException` naming the service, rather than silently having no effect
-on it. `UseDeferredCheckout()` is obsolete — it is a no-op now that deferred is the default.
+on it. `UseDeferredCheckout()` is obsolete — it is redundant now that deferred is the default (it still overrides an earlier `SetCheckoutTiming(CheckoutTiming.Eager)`).
 
 ## Managed checkouts don't inherit your AppHost repository's build settings
 

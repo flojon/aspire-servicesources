@@ -269,7 +269,7 @@ public class DeferredKindCheckoutTests
     {
         var dir = CreateAppHostDirectory("frontend");
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
         var kind = new StandInKind(declaredType: typeof(ContainerResource));
         builder.AddLocalKind(KindName, kind);
 

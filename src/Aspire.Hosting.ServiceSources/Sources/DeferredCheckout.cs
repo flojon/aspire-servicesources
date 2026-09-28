@@ -185,7 +185,7 @@ internal sealed class DeferredCheckout
     /// launch-profile fidelity, so the blast radius is first-run-only.
     /// </summary>
     /// <remarks>
-    /// Two decisions layered, in this order: the policy this type owns — opted in, run mode — and
+    /// Two decisions layered, in this order: the policy this type owns — the timing setting, run mode — and
     /// then <see cref="LocalGitCheckout.IsColdManagedCheckout"/>, which is where "is there
     /// anything to clone here" is answered for every caller that needs it. The speculative
     /// prefetch is the other one, and it drops a candidate from its clone set on the strength of
@@ -199,7 +199,7 @@ internal sealed class DeferredCheckout
         lock (_gate)
         {
             // Latched unconditionally, whether or not deferral is enabled: this is the decision point
-            // itself, and a later Enable() call must be refused even for an AppHost where every
+            // itself, and a later SetTiming() call must be refused even for an AppHost where every
             // service so far happened to resolve warm.
             _resolved = true;
 
