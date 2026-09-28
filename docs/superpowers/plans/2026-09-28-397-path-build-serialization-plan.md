@@ -137,3 +137,18 @@ Observation and injection: there is no public introspection of subscriptions, so
 - [ ] Run the Release `-warnaserror` build before the first push too (new files can trip analyzers), not only here.
 - [ ] Full `dotnet test` matrix once, after the final pre-land rebase and before marking ready, not before the draft PR (CLAUDE.md).
 - [ ] Record the CI-only legs as not run locally.
+
+---
+
+## Spike findings (executed)
+
+Harness: scratch AppHost (Aspire.AppHost.Sdk 13.5.2, `Aspire.Hosting.AppHost` 13.5.2, .NET SDK 10.0.401, Windows) with two `AddProject` resources (`ApiA`, `ApiB`, single-TFM `net10.0`) sharing a `ProjectReference` to a multi-targeted (`net9.0;net10.0`) `Lib` whose 200 MB embedded resource widens the copy window. Cold tree (bin/obj deleted) before every run. Not committed.
+
+- **(a) Holds the launch: confirmed.** Both resources raised `BeforeResourceStartedEvent` concurrently (timestamps within 1 ms). A handler that blocked for the duration of a build kept the resource in `Starting`; `Running` and the app's own first line appeared only after the handler returned (gated runs 1-3: ~4 s handler, `Running` 0.15 s after it). Re-raise on restart was not measured empirically (restart not driven); it rests on the decompile finding in the spec.
+- **(b) Collision and fix: confirmed.** Ungated control: 3/3 Aspire runs, one of the two resources ended `Finished exit=1` (`error CS2012` reproduced with plain concurrent `dotnet run` 4/4). Gated (semaphore around `dotnet build "<proj>"` in the handler): 3/3 runs both resources built and started, exit 0, no `MSB4018`/`CS2012`.
+- **(c) Follow-up `dotnet run` build: no `--no-build` needed.** After a gated build with the same configuration, `dotnet run`'s implicit build is a no-op. In every gated run the first resource's `dotnet run` overlapped the second resource's gated build (over the shared multi-targeted `Lib`), and neither collided. A multi-targeted *startup* project fails with `exit=1` in both gated and ungated runs (`dotnet run` needs a framework), so it is out of reach of this gate. Decision: no `--no-build`, no `-f`; the design's build arguments stand (`dotnet build "<project>" [--configuration <c>]`).
+- **(d) Configuration parity: confirmed.** With the AppHost built and run as Release, the gated `dotnet build` needs `--configuration Release` to match: an AppHost run as Debug yields `bin/Debug` only; as Release yields `bin/Release` only from Aspire's `dotnet run`. Passing a matching `--configuration` from the gate gave one configuration on disk; a mismatched one leaves two.
+- **(e) Order relative to `WaitFor`:** not measured; the design does not rely on it.
+- **(f) Where the configuration comes from:** the AppHost's entry assembly `AssemblyConfigurationAttribute.Configuration` (`Release`/`Debug`), which Aspire.Hosting itself references. It is not exposed in `builder.Configuration` (a `--configuration` command-line argument to the AppHost lands there under the key `configuration` but Aspire does not use it for the child). Task 6 reads `Assembly.GetEntryAssembly()`'s `AssemblyConfigurationAttribute` and passes it only when non-empty.
+
+Decision gate: (a) holds and (c) shows no collision, so the plan proceeds unchanged; Task 4/6 assertion "per the spike" = no `--no-build`.
