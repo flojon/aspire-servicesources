@@ -1,8 +1,12 @@
 // TypeScript AppHost demonstrating AddService(), exported via Aspire's Type System (ATS) so it's
 // callable from a guest-language AppHost. See servicesources.local.json.example.
-import { createBuilder } from './.aspire/modules/aspire.mjs';
+import { CheckoutTiming, createBuilder } from './.aspire/modules/aspire.mjs';
 
 const builder = await createBuilder();
+
+// Deferred is the default; this opt-out is a no-op here (both services are containers) and is
+// present so the typecheck-typescript CI job compiles a real call to the exported setCheckoutTiming().
+await builder.setCheckoutTiming(CheckoutTiming.Eager);
 
 // Both services resolve through the "container" source: a published image run locally. Because
 // they actually run here, the AppHost can configure them directly — addService() returns

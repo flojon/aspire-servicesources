@@ -1,8 +1,10 @@
+using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Prepare;
 using Aspire.Hosting.ServiceSources.Sources;
+using Microsoft.Extensions.DependencyInjection;
 using static Aspire.Hosting.ServiceSources.JavaScript.Tests.TestHelpers;
 using Xunit;
 
@@ -118,6 +120,7 @@ public class JavaScriptPrepareStepTests
     {
         var builder = CreateBuilder(CreateAppHostDirectory());
         builder.UseJavaScript();
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => new LocalProjectSource(new FakeGitClient(), new FakePrepareRunner())
@@ -126,12 +129,61 @@ public class JavaScriptPrepareStepTests
         Assert.Contains("package.json", ex.Message);
     }
 
+    /// <summary>
+    /// #216: deferred is the default now, and the built-in javascript kind already supported it
+    /// before that flip — so a cold checkout with a prepare step, resolved with no call at all, has
+    /// to run the same bootstrap the eager path does, just moved past <c>BeforeStartEvent</c>.
+    /// </summary>
+    [Fact]
+    public async Task Deferred_WithAStepThatGeneratesIt_ResolvesAfterTheClone()
+    {
+        var dir = CreateAppHostDirectory();
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.UseJavaScript();
+
+        var runner = new FakePrepareRunner();
+
+        var service = new LocalProjectSource(new FakeGitClient(), runner).Resolve(
+            builder, ServiceName, Definition(new PrepareMetadata { Command = ["./prepare.sh"] }), DevConfig());
+
+        // Registered stopped immediately: nothing has cloned or run yet.
+        Assert.Equal(0, runner.Runs);
+
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+
+        // Stands in for DCP, which publishes NotStarted when it withholds an explicit-start
+        // resource — the state each deferred task waits for before it touches the resource. The
+        // javascript kind holds back its own "npm install" installer resource alongside the app, so
+        // both need it, not only the resource this call returned.
+        foreach (var withheld in builder.Resources.Where(r => r.Annotations.OfType<ExplicitStartupAnnotation>().Any()))
+        {
+            await PublishNotStartedAsync(services, withheld);
+        }
+
+        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Equal(1, runner.Runs);
+        Assert.Equal(ServiceName, service.Resource.Name);
+        Assert.True(File.Exists(
+            Path.Combine(dir, ".servicesources", "checkouts", ServiceName, "package.json")));
+    }
+
+    private static Task PublishNotStartedAsync(IServiceProvider services, IResource resource) =>
+        services.GetRequiredService<ResourceNotificationService>()
+            .PublishUpdateAsync(resource, snapshot => snapshot with
+            {
+                State = new ResourceStateSnapshot(KnownResourceStates.NotStarted, null),
+            });
+
     [Fact]
     public void WithAStepThatGeneratesIt_TheSameServiceResolves()
     {
         var dir = CreateAppHostDirectory();
         var builder = CreateBuilder(dir);
         builder.UseJavaScript();
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
 
         var runner = new FakePrepareRunner();
 

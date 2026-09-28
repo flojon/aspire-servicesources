@@ -1,4 +1,5 @@
 using Aspire.Hosting.ServiceSources.Config.Catalog;
+using Microsoft.Extensions.Configuration;
 
 namespace Aspire.Hosting.ServiceSources.Java.Tests;
 
@@ -19,6 +20,21 @@ internal static class TestHelpers
         });
 
     public static IDistributedApplicationBuilder CreateBuilder() => CreateBuilder(CreateTempDirectory());
+
+    /// <summary>
+    /// A builder whose <c>BeforeStartEvent</c> can actually be published — needed to drive a
+    /// deferred registration's background clone-and-prepare task to completion in a test.
+    /// </summary>
+    public static IDistributedApplicationBuilder CreateBuilderThatCanStart(string appHostDirectory)
+    {
+        var builder = CreateBuilder(appHostDirectory);
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["DcpPublisher:CliPath"] = "unused-dcp-path",
+            ["DcpPublisher:DashboardPath"] = "unused-dcp-path",
+        });
+        return builder;
+    }
 
     public static string CreateTempDirectory() => TempDirectories.CreateSubdirectory().FullName;
 

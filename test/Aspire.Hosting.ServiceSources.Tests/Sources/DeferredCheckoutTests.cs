@@ -157,7 +157,7 @@ public class DeferredCheckoutTests
     {
         var dir = TempDirectories.CreateSubdirectory().FullName;
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var repository = new RepositoryDefinition
         {
@@ -184,24 +184,69 @@ public class DeferredCheckoutTests
     }
 
     [Fact]
-    public void WithoutOptIn_ColdCheckout_StillResolvesEagerly()
+    public void WithoutAnyCall_ColdCheckout_DefersByDefault()
     {
         var dir = CreateAppHostDirectory("orders");
         var builder = TestHelpers.CreateBuilder(dir);
 
+        var git = new FakeGitClient();
+        var gate = git.BlockFor("https://example.com/orders.git");
+
+        // Deferred by default since 0.8.0 (#216) — no call needed. Composition runs to completion
+        // with the clone deliberately wedged open, same as OptedIn_ColdCheckout_ReturnsWhileTheCloneIsStillRunning.
+        var service = new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
+
+        Assert.True(IsDeferred(service.Resource));
+        Assert.False(Directory.Exists(ExpectedRepoRoot(dir, "orders")), "the checkout should not exist yet");
+
+        gate.Set();
+    }
+
+    [Fact]
+    public void EagerOptOut_ColdCheckout_ResolvesEagerly()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
+
         var service = new LocalProjectSource(new FakeGitClient()).Resolve(builder, "orders", Definition("orders"), DevConfig());
 
-        // Default off: the behaviour change is user-visible, so nobody gets it without asking.
+        // Explicit opt-out: the pre-0.8.0 default, kept permanently for an AppHost that needs every
+        // service running by the time Build() returns.
         Assert.False(IsDeferred(service.Resource));
         Assert.True(File.Exists(Path.Combine(ExpectedRepoRoot(dir, "orders"), "Service.csproj")));
     }
+
+    /// <summary>
+    /// #216: <c>UseDeferredCheckout()</c> is obsolete but still functional, delegating to
+    /// <c>SetCheckoutTiming(CheckoutTiming.Deferred)</c> — the same outcome as calling nothing at
+    /// all, now that deferred is the default.
+    /// </summary>
+    [Fact]
+#pragma warning disable CS0618 // testing the obsolete member itself
+    public void UseDeferredCheckout_StillEnablesDeferral()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreateBuilder(dir);
+
+        var git = new FakeGitClient();
+        var gate = git.BlockFor("https://example.com/orders.git");
+
+        builder.UseDeferredCheckout();
+        var service = new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
+
+        Assert.True(IsDeferred(service.Resource));
+
+        gate.Set();
+    }
+#pragma warning restore CS0618
 
     [Fact]
     public void OptedIn_ColdCheckout_ReturnsWhileTheCloneIsStillRunning()
     {
         var dir = CreateAppHostDirectory("orders");
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var git = new FakeGitClient();
         var gate = git.BlockFor("https://example.com/orders.git");
@@ -232,7 +277,7 @@ public class DeferredCheckoutTests
     {
         var dir = CreateAppHostDirectory("orders");
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var client = new FakeGitClient();
 
@@ -257,7 +302,7 @@ public class DeferredCheckoutTests
     {
         var dir = CreateAppHostDirectory("orders");
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var client = new FakeGitClient();
         var gate = client.BlockFor("https://example.com/orders.git");
@@ -280,7 +325,7 @@ public class DeferredCheckoutTests
     {
         var dir = CreateAppHostDirectory("orders");
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var client = new FakeGitClient();
 
@@ -303,7 +348,7 @@ public class DeferredCheckoutTests
         var dir = CreateAppHostDirectory("orders");
         PlantExistingCheckout(dir, "orders");
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var git = new FakeGitClient();
         var service = new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
@@ -317,23 +362,24 @@ public class DeferredCheckoutTests
     /// <summary>
     /// #345: a late <c>UseDeferredCheckout()</c> call used to silently no-op instead of erroring —
     /// the service resolved above it never got deferred, and nothing said why. Mirrors
-    /// <c>AddServiceCatalog</c>'s own too-late freeze (<see cref="ServiceSourcesConfigCache"/>).
+    /// <c>AddServiceCatalog</c>'s own too-late freeze (<see cref="ServiceSourcesConfigCache"/>). Now
+    /// carried by <c>SetCheckoutTiming</c>, the call that replaced it (#216).
     /// </summary>
     [Fact]
-    public void UseDeferredCheckout_CalledAfterAServiceHasAlreadyResolved_Throws()
+    public void SetCheckoutTiming_CalledAfterAServiceHasAlreadyResolved_Throws()
     {
         var dir = CreateAppHostDirectory("orders");
         PlantExistingCheckout(dir, "orders");
         var builder = TestHelpers.CreateBuilder(dir);
 
-        // Resolved before UseDeferredCheckout() is ever called — the ordering mistake this test is
+        // Resolved before SetCheckoutTiming() is ever called — the ordering mistake this test is
         // about. Warm on purpose: the bug is about the decision being made too early, not about
         // whether a clone was actually in play.
         new LocalProjectSource(new FakeGitClient()).Resolve(builder, "orders", Definition("orders"), DevConfig());
 
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.UseDeferredCheckout());
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.SetCheckoutTiming(CheckoutTiming.Eager));
 
-        Assert.Contains("UseDeferredCheckout", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("SetCheckoutTiming", ex.Message, StringComparison.Ordinal);
         Assert.Contains("already resolved", ex.Message, StringComparison.Ordinal);
         Assert.Contains("before the first AddService", ex.Message, StringComparison.Ordinal);
     }
@@ -345,7 +391,7 @@ public class DeferredCheckoutTests
         var checkout = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(checkout, "Service.csproj"), "<Project />");
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var service = new LocalProjectSource(new FakeGitClient())
             .Resolve(builder, "orders", Definition("orders"), DevConfig(path: checkout));
@@ -360,7 +406,7 @@ public class DeferredCheckoutTests
     {
         var dir = CreateAppHostDirectory("orders");
         var builder = TestHelpers.CreatePublishingBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var git = new FakeGitClient();
         var service = new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
@@ -393,7 +439,7 @@ public class DeferredCheckoutTests
     {
         var dir = CreateAppHostDirectory("orders");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var git = new FakeGitClient();
         var gate = git.BlockFor("https://example.com/orders.git");
@@ -416,7 +462,7 @@ public class DeferredCheckoutTests
     {
         var dir = CreateAppHostDirectory("orders");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var git = new FakeGitClient();
         var gate = git.BlockFor("https://example.com/orders.git");
@@ -723,7 +769,7 @@ public class DeferredCheckoutTests
     {
         var dir = CreateAppHostDirectory("orders");
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var git = new FakeGitClient();
         var gate = git.BlockFor("https://example.com/orders.git");
@@ -745,7 +791,7 @@ public class DeferredCheckoutTests
     {
         var dir = CreateAppHostDirectory("orders");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var git = new FakeGitClient();
         var gate = git.BlockFor("https://example.com/orders.git");
@@ -775,7 +821,7 @@ public class DeferredCheckoutTests
     {
         var dir = CreateAppHostDirectory("orders");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var git = new FakeGitClient();
         var orders = new LocalProjectSource(git)
@@ -804,7 +850,7 @@ public class DeferredCheckoutTests
     {
         var dir = CreateAppHostDirectory("orders");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var git = new FakeGitClient();
         git.FailFor("https://example.com/orders.git", new InvalidOperationException("no such repo"));
@@ -828,7 +874,7 @@ public class DeferredCheckoutTests
     {
         var dir = CreateAppHostDirectory("orders");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var notices = TestHelpers.StreamServiceSourcesWarnings(builder);
 
@@ -862,7 +908,7 @@ public class DeferredCheckoutTests
     {
         var dir = CreateAppHostDirectory("orders");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var git = new FakeGitClient();
         new LocalProjectSource(git)
@@ -890,7 +936,7 @@ public class DeferredCheckoutTests
     {
         var dir = CreateAppHostDirectory("orders");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         // A real variable to expand against, named uniquely so parallel tests cannot collide on it.
         var marker = "SERVICESOURCES_TEST_" + Guid.NewGuid().ToString("N");
@@ -958,7 +1004,7 @@ public class DeferredCheckoutTests
     {
         var dir = CreateAppHostDirectory("orders");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var git = new FakeGitClient();
         git.WithLaunchSettings(
@@ -1005,7 +1051,7 @@ public class DeferredCheckoutTests
     {
         var dir = CreateAppHostDirectory("orders");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var git = new FakeGitClient();
         git.WithLaunchSettings(
@@ -1050,7 +1096,7 @@ public class DeferredCheckoutTests
     {
         var dir = CreateAppHostDirectory("orders");
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var git = new FakeGitClient();
         git.ReportProgress(
@@ -1170,7 +1216,7 @@ public class DeferredCheckoutTests
             """{ "services": { "orders": { "source": "repository" } } }""");
 
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         // The real client, so what reaches the dashboard is what git actually wrote rather than what
         // a double says it would have.
@@ -1269,7 +1315,7 @@ public class DeferredCheckoutTests
         File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), """{ "services": { } }""");
 
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
-        builder.UseDeferredCheckout();
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
 
         var git = new FakeGitClient();
         git.ReportProgress(
@@ -1469,7 +1515,6 @@ public class DeferredCheckoutTests
         DotnetMetadata dotnet, FakeGitClient git)
     {
         var builder = TestHelpers.CreateBuilderThatCanStart(CreateAppHostDirectory("orders"));
-        builder.UseDeferredCheckout();
 
         var service = new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders", dotnet: dotnet), DevConfig());
         var real = RealResource(builder, "orders");
@@ -1488,7 +1533,6 @@ public class DeferredCheckoutTests
     public void Deferred_NamedProfile_SurvivesCompositionWithTheCheckoutAbsent()
     {
         var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory("orders"));
-        builder.UseDeferredCheckout();
 
         var service = new LocalProjectSource(new FakeGitClient()).Resolve(
             builder, "orders", Definition("orders", dotnet: new() { LaunchProfileName = "http" }), DevConfig());
@@ -1583,10 +1627,26 @@ public class DeferredCheckoutTests
     }
 
     [Fact]
+    public void Eager_NamedProfile_ColdCheckout_ClonesAtCompositionAndAppliesTheProfile()
+    {
+        var git = new FakeGitClient();
+        git.WithLaunchSettings(OrdersUrl, LaunchSettingsFixture.HttpsThenHttp);
+        var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory("orders"));
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
+
+        var service = new LocalProjectSource(git).Resolve(
+            builder, "orders", Definition("orders", dotnet: new() { LaunchProfileName = "http" }), DevConfig());
+
+        Assert.False(IsDeferred(service.Resource));
+        var real = RealResource(builder, "orders");
+        Assert.Equal("http", Assert.Single(real.Annotations.OfType<LaunchProfileAnnotation>()).LaunchProfileName);
+        Assert.Equal(5100, Assert.Single(real.Annotations.OfType<EndpointAnnotation>()).Port);
+    }
+
+    [Fact]
     public void Deferred_ExcludeLaunchProfile_RegisterDoesNotThrow()
     {
         var builder = TestHelpers.CreateBuilder(CreateAppHostDirectory("orders"));
-        builder.UseDeferredCheckout();
 
         var service = new LocalProjectSource(new FakeGitClient()).Resolve(
             builder, "orders", Definition("orders", dotnet: new() { ExcludeLaunchProfile = true }), DevConfig());
@@ -1616,7 +1676,6 @@ public class DeferredCheckoutTests
         var repoRoot = PlantExistingCheckout(dir, "orders");
         LaunchSettingsFixture.Write(repoRoot, LaunchSettingsFixture.HttpsThenHttp);
         var builder = TestHelpers.CreateBuilder(dir);
-        builder.UseDeferredCheckout();
 
         var service = new LocalProjectSource(new FakeGitClient()).Resolve(
             builder, "orders", Definition("orders", dotnet: new() { LaunchProfileName = "http" }), DevConfig());

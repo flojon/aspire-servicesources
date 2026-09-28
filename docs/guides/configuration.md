@@ -33,7 +33,7 @@ even this file — see the row above the base:
 > **The `ServiceSources:*` keys reach the AppHost's own `IConfiguration` on its first ServiceSources
 > call, not before.** `servicesources.local.json` is a file of ours, read from the AppHost directory
 > and re-keyed into the chain by whichever ServiceSources method the AppHost calls first — a call
-> like `UseDeferredCheckout()` or `AddLocalKind()`, or the first `AddService()`. A read placed
+> like `SetCheckoutTiming()` or `AddLocalKind()`, or the first `AddService()`. A read placed
 > *above* all of them sees the chain without that layer, so a selection written only in the file
 > comes back `null`, silently, since a missing key is not an error:
 >
@@ -41,7 +41,7 @@ even this file — see the row above the base:
 > // null — nothing of ours has been called yet, so the file is not in the chain.
 > var source = builder.Configuration["ServiceSources:Services:orders:source"];
 >
-> builder.UseDeferredCheckout();
+> builder.SetCheckoutTiming(CheckoutTiming.Eager);
 >
 > // "repository" — the file joined the chain on the line above.
 > source = builder.Configuration["ServiceSources:Services:orders:source"];

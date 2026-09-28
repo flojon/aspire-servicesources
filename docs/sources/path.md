@@ -151,7 +151,7 @@ by construction.
         defaultSource: path
     ```
 
-**No interaction with [`UseDeferredCheckout()`](repository.md#first-run-usedeferredcheckout).** Like `url`,
+**No interaction with [deferred checkout](repository.md#first-run-deferred-checkout).** Like `url`,
 `kubernetes` and `container`, a `"path"` service is always resolved eagerly, with full
 launch-profile fidelity — there's no clone to defer, so no "Preparing" state ever appears for one.
 

@@ -41,6 +41,7 @@ public class AddServiceIntegrationTests
             """);
 
         var builder = CreateBuilder(appHostDir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
 
         var service = builder.AddService("orders");
 
@@ -81,6 +82,7 @@ public class AddServiceIntegrationTests
             """);
 
         var builder = CreateBuilder(appHostDir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
 
         builder.AddService("orders-main");
         builder.AddService("orders-v2");
@@ -114,6 +116,7 @@ public class AddServiceIntegrationTests
             """);
 
         var builder = CreateBuilder(appHostDir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
 
         builder.AddService("orders-a");
         builder.AddService("orders-b");

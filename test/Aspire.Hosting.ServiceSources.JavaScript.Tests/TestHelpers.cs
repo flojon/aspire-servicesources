@@ -1,6 +1,7 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using YamlDotNet.Serialization;
 
@@ -23,6 +24,21 @@ internal static class TestHelpers
             ProjectDirectory = appHostDirectory,
             Args = [TestBuilderDefaults.DisableConfigReloadArg],
         });
+
+    /// <summary>
+    /// A builder whose <c>BeforeStartEvent</c> can actually be published — needed to drive a
+    /// deferred registration's background clone-and-prepare task to completion in a test.
+    /// </summary>
+    public static IDistributedApplicationBuilder CreateBuilderThatCanStart(string appHostDirectory)
+    {
+        var builder = CreateBuilder(appHostDirectory);
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["DcpPublisher:CliPath"] = "unused-dcp-path",
+            ["DcpPublisher:DashboardPath"] = "unused-dcp-path",
+        });
+        return builder;
+    }
 
     /// <summary>
     /// Produces the same untyped object the catalog loader hands a kind handler: whatever

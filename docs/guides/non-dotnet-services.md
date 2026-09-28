@@ -216,7 +216,7 @@ unsupported `scheme`, no run mode or more than one, a `workingDirectory`, `wrapp
 that isn't in the checkout, a wrapper script that isn't there — is reported by the
 `AddService("catalog")` call itself, before the service has added anything to the app model. The
 last two are read against the checkout, so under
-[`UseDeferredCheckout()`](../sources/repository.md#first-run-usedeferredcheckout), where there isn't one yet, they are
+[deferred checkout](../sources/repository.md#first-run-deferred-checkout), where there isn't one yet, they are
 reported after the clone lands as this service's resource state instead — the same two checks
 saying the same two things.
 
@@ -355,7 +355,7 @@ your own is left alone unless it looks like that attempt: a private helper, one 
 options type, and one like `Validate(string message)` that carries no options block at all all
 register exactly as they did before.
 
-**Supporting [`UseDeferredCheckout()`](../sources/repository.md#first-run-usedeferredcheckout).** Two more members, both
+**Supporting [deferred checkout](../sources/repository.md#first-run-deferred-checkout).** Two more members, both
 optional and both defaulting to "no", decide whether a service of your kind can start before its
 checkout lands. Leave them alone and your kind keeps working exactly as it does now, always on the
 eager path:
@@ -395,7 +395,7 @@ adds to the app model, not just the one returned as `Service`.
 > neither for a service it defers — there is no checkout for `Validate` to judge the service
 > against, so `ResolveDeferred` runs in their place. A kind that can answer `true` from
 > `SupportsDeferredCheckout` and rejects a bad block only in `Validate` has arranged for that block
-> never to be checked at all under `UseDeferredCheckout()`. Parse it here as well and throw
+> never to be checked at all under deferred checkout. Parse it here as well and throw
 > `ServiceSourcesConfigurationException`. Nothing warns you: implementing both `Validate` and
 > `ResolveDeferred` is the ordinary, correct arrangement — the built-in `java` kind does — so
 > there is no signal to refuse the way a mismatched `Validate` signature is refused.

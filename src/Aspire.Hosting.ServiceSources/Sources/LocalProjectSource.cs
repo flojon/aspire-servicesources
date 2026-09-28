@@ -109,9 +109,8 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         // The dotnet kind's equivalent of the check above, and here for the same reason: confining
         // 'project' to the checkout is lexical, so it needs no working tree and belongs in front of
         // the clone rather than after it. Both paths below combine the value with a repo root — the
-        // eager one only once GetRepoRoot has materialized the checkout — and without this the
-        // commonest configuration, deferral being off by default, would pay for a cold clone before
-        // being told the value was wrong before any of it started.
+        // eager one only once GetRepoRoot has materialized the checkout — and without this the eager
+        // path would pay for a cold clone before learning the value was wrong.
         if (isDotnetKind)
         {
             ValidateProject(serviceName, definition.Project);

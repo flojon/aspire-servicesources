@@ -16,15 +16,44 @@ never existed. Check the tag of the last release before adding one.
 
 ## [Unreleased]
 
+### Breaking
+
+- **Deferred checkout is now the default for a cold `"repository"` service; `UseDeferredCheckout()` is
+  obsolete** ([#216]). A service whose managed clone does not exist yet used to block
+  `AddService()` until the checkout landed; it now registers stopped and starts once the clone
+  finishes, so the dashboard comes up immediately and one failed clone costs one service rather
+  than the whole AppHost. This is the behaviour `UseDeferredCheckout()` used to opt into — nothing
+  changes for a warm checkout, a `path` override, or `aspire publish`.
+
+  `UseDeferredCheckout()` is now redundant — deferred is what it always asked for, and that is
+  already the default — so it is `[Obsolete]`; delete the call. The new
+  `builder.SetCheckoutTiming(CheckoutTiming.Eager)` is the opt-out for an AppHost that needs every
+  service running by the time `Build()` returns, kept permanently rather than as a migration
+  window, since the package cannot detect an AppHost relying on the old ordering. A deferred
+  `dotnet` service should still declare its own endpoints — `Configure<IResourceWithEndpoints>` in
+  C#, or `withServiceHttpsEndpoint()`/`withServiceHttpEndpoint()` in a guest language ([#208]) —
+  since a deferred checkout has no launch profile for Aspire to read endpoints from while
+  composing.
+
+  **`java` and `javascript` are affected too**, not only `dotnet`: both built-in kinds already
+  supported deferral, so a cold checkout of either now defers by default as well, with no endpoint
+  caveat (`java.port` and `javascript`'s allocated `http` endpoint are already fully known from the
+  catalog, not synthesised from a launch profile). One consequence worth calling out: a `prepare`
+  step's post-clone validation — and any `ServiceSourcesConfigurationException` the kind would have
+  thrown at composition on the eager path (a missing wrapper, a bad `workingDirectory`) — now
+  surfaces later, as that service's own resource state, rather than failing the AppHost synchronously
+  at `AddService()`.
+
 ### Added
 
-- **A `dotnet` service can select its launch profile.** A new `dotnet:` block in the yaml
+- **A `dotnet` service can select its launch profile** ([#415]). A new `dotnet:` block in the yaml
   catalog takes `launchProfileName` (run under that `launchSettings.json` profile) and
   `excludeLaunchProfile` (run with none), and `AsDotnet(o => o.WithLaunchProfileName(...))` /
   `ExcludeLaunchProfile()` is the code-catalog equivalent. It works on the `repository`
-  source (including a deferred first checkout) and the `path` source. Two new configuration
-  errors come with it: naming a profile while excluding launch profiles, and naming a profile
-  the project's `launchSettings.json` does not contain.
+  source (including a deferred first checkout) and the `path` source. Three configuration
+  errors come with it: naming a profile while excluding launch profiles, naming a profile the
+  project's `launchSettings.json` does not contain, and a `dotnet:` block on a service whose
+  kind is not `dotnet`.
 
 ## [0.7.0] - 2026-09-28
 
@@ -471,7 +500,7 @@ protection then blocked reusing the name, so this version carries what would hav
   **A second silent change, and this one has no registration-time refusal to catch it: `Validate`
   is no longer called for a service on the deferred path.** It is paired with `Resolve`, which core
   does not call there either — under
-  [`UseDeferredCheckout()`](docs/sources/repository.md#first-run-usedeferredcheckout) there is no checkout for it to
+  [`UseDeferredCheckout()`](docs/sources/repository.md#first-run-deferred-checkout) there is no checkout for it to
   judge the service against, so `ResolveDeferred` is called instead. **If your kind can answer
   `true` from `SupportsDeferredCheckout` and validates its options block only in `Validate`, that
   block stops being validated at all for a deferred service.** Parse and reject it from
@@ -1897,6 +1926,7 @@ Targets `net10.0`.
 [#209]: https://github.com/flojon/aspire-servicesources/issues/209
 [#214]: https://github.com/flojon/aspire-servicesources/issues/214
 [#215]: https://github.com/flojon/aspire-servicesources/issues/215
+[#216]: https://github.com/flojon/aspire-servicesources/issues/216
 [#217]: https://github.com/flojon/aspire-servicesources/issues/217
 [#220]: https://github.com/flojon/aspire-servicesources/issues/220
 [#222]: https://github.com/flojon/aspire-servicesources/issues/222
@@ -1922,6 +1952,7 @@ Targets `net10.0`.
 [#372]: https://github.com/flojon/aspire-servicesources/issues/372
 [#375]: https://github.com/flojon/aspire-servicesources/issues/375
 [#385]: https://github.com/flojon/aspire-servicesources/issues/385
+[#415]: https://github.com/flojon/aspire-servicesources/issues/415
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
