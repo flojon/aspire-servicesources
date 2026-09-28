@@ -622,6 +622,13 @@ public class DeveloperConfigValidatorTests
 
         Assert.Contains("'ref' is not a valid key here", ex.Message);
         Assert.Contains("'local', 'repository'", ex.Message);
+
+        // The paste-ready shape names 'repository', never the deprecated 'local' alias, even though
+        // 'local' sorts first alphabetically among the homes listed above — DeveloperConfigShape's
+        // DeprecatedBlockNames is what keeps a fix suggestion from recommending the spelling this
+        // package is trying to retire.
+        Assert.Contains("""..., "repository": { "ref": ... } }""", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("""..., "local": { "ref": ... } }""", ex.Message, StringComparison.Ordinal);
     }
 
     /// <remarks>
@@ -1502,6 +1509,11 @@ public class DeveloperConfigValidatorTests
         // 'path' (the "path" source's, mirroring it) — so all three are named rather than one picked
         // arbitrarily.
         Assert.Contains("'local', 'path', 'repository'", ex.Message);
+
+        // The paste-ready shape never illustrates the deprecated 'local' alias, the same guarantee
+        // Validate_FlatFieldAtEntryRoot_SharedByLocalAndRepositoryAlias_NamesBoth checks for 'ref'.
+        Assert.Contains("""..., "path": { "prepare": ... } }""", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("""..., "local": { "prepare": ... } }""", ex.Message, StringComparison.Ordinal);
     }
 
     /// <summary>

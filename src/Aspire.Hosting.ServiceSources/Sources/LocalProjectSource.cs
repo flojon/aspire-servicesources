@@ -57,6 +57,18 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         // inherits the catalog's prepare block at all and where its completion marker goes.
         var managedCheckout = LocalGitCheckout.IsManagedCheckout(config);
 
+        if (config.Local.IsDeclared)
+        {
+            // The deprecated 'local' spelling — already merged into config.Repository by
+            // ServiceDeveloperConfig.ReconcileRepositoryAlias — earns its rename notice only once a
+            // service actually resolves through "repository", the same rule the repository.path
+            // notice below follows: a stray 'local' block on an entry nothing resolves this way
+            // (a different source, or a service this AppHost never adds) is not this developer's
+            // problem to hear about. Local.IsDeclared still answers correctly here because the
+            // reconciliation merge never clears it.
+            ServiceSourcesWarnings.For(builder).AddNotice(RepositoryAliasDeprecationNotice(serviceName));
+        }
+
         if (!managedCheckout)
         {
             // 'repository.path' is deprecated in favor of the first-class 'path' source (design
@@ -226,6 +238,21 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
 
         return InvokeKindHandler(builder, serviceName, definition, repoRoot, handler!, "repository");
     }
+
+    /// <summary>
+    /// The one-time notice for a service resolved through the deprecated <c>local</c> block —
+    /// <see cref="ServiceDeveloperConfig.ReconcileRepositoryAlias"/> already merged it into
+    /// <see cref="ServiceDeveloperConfig.Repository"/> by the time this runs, so this only decides
+    /// when the notice is owed: once a service actually resolves through <c>"repository"</c>, never
+    /// merely because some configuration layer still writes <c>local</c> for an entry nothing reads
+    /// that way.
+    /// </summary>
+    private static Raw RepositoryAliasDeprecationNotice(string serviceName) =>
+        Raw.Compose(
+            $"Service '{new Name(serviceName)}': the 'local' block is deprecated — renamed to 'repository' so "
+            + $"it reads as the source's own name rather than colliding in spelling with "
+            + $"'{Raw.Literal(DeveloperConfiguration.FileName)}'. Same fields ('path', 'ref', 'prepare'); it "
+            + $"keeps working exactly as written, so this notice is only the nudge to rename it.");
 
     /// <summary>
     /// The design "<c>local.path</c> is deprecated, not removed yet" notice — <c>repository.path</c>

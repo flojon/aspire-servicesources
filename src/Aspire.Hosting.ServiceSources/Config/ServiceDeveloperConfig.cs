@@ -54,45 +54,45 @@ internal sealed class ServiceDeveloperConfig
     public ContainerDeveloperConfig Container { get; set; } = new();
 
     /// <summary>
-    /// Settles <see cref="Local"/> (deprecated) against <see cref="Repository"/> (current), right
-    /// after binding and before anything else reads either — see <see cref="DeveloperConfiguration.ReadFrom"/>,
-    /// the one caller.
+    /// Settles <see cref="Local"/> (deprecated) against <see cref="Repository"/> (current), so every
+    /// consumer past this point reads only <see cref="Repository"/> whichever key the developer
+    /// actually wrote. See <see cref="DeveloperConfiguration.ReadFrom"/>, the one caller — scoped
+    /// there to the services this AppHost's catalog actually declares, and collected across every
+    /// such entry so a conflict is reported once for the whole file rather than one failed startup
+    /// per faulted service.
     /// </summary>
     /// <remarks>
-    /// Mirrors how the retired source value <c>"local"</c> and the deprecated <c>repository.path</c>
-    /// are handled elsewhere in this file's neighbourhood (<see cref="DeveloperConfigShape.ThrowIfRetiredSource"/>,
-    /// <c>LocalProjectSource.LocalPathDeprecationNotice</c>): the old spelling keeps working, exactly
-    /// as written, behind a one-time notice rather than a break.
+    /// Deliberately does not throw, and does not compose the alias's own deprecation notice —
+    /// unlike the retired source value <c>"local"</c> (<see cref="DeveloperConfigShape.ThrowIfRetiredSource"/>),
+    /// which is a hard, unconditional error, or the deprecated <c>repository.path</c> notice
+    /// (<c>LocalProjectSource.LocalPathDeprecationNotice</c>), whose call site already decides the
+    /// notice separately. This block-name alias earns the identical treatment as that neighbour:
+    /// <c>LocalProjectSource.RepositoryAliasDeprecationNotice</c> fires only once a service is
+    /// actually resolved through <c>"repository"</c>, reading <see cref="Local"/>.IsDeclared (still
+    /// true after the merge below, since it is never cleared) rather than anything returned here.
     /// </remarks>
     /// <returns>
-    /// The one-time deprecation notice to report when <see cref="Local"/> is the one the developer
-    /// wrote; <see langword="null"/> when only <see cref="Repository"/> was written, or neither.
+    /// The conflict reason when both <see cref="Local"/> and <see cref="Repository"/> are declared —
+    /// two spellings of the same block, with no rule for which one would win — so the caller can
+    /// collect it rather than fail immediately; <see langword="null"/> otherwise, after merging
+    /// <see cref="Local"/> into <see cref="Repository"/> when <see cref="Local"/> is the one the
+    /// developer wrote.
     /// </returns>
-    /// <exception cref="ServiceSourcesConfigurationException">
-    /// Both <see cref="Local"/> and <see cref="Repository"/> are declared — two spellings of the same
-    /// block, and there is no rule for which one would win.
-    /// </exception>
     public Raw? ReconcileRepositoryAlias(string serviceName)
     {
         if (Local.IsDeclared && Repository.IsDeclared)
         {
-            throw ServiceSourcesConfigurationException.For(
+            return Raw.Compose(
                 $"Service '{new Name(serviceName)}': sets both 'local' and 'repository' — 'local' is the "
                 + $"deprecated alias for 'repository', the same per-developer block under its old name, so "
                 + $"only one of them may be written on this entry. Keep 'repository' and remove 'local'.");
         }
 
-        if (!Local.IsDeclared)
+        if (Local.IsDeclared)
         {
-            return null;
+            Repository = Local;
         }
 
-        Repository = Local;
-
-        return Raw.Compose(
-            $"Service '{new Name(serviceName)}': the 'local' block is deprecated — renamed to 'repository' so "
-            + $"it reads as the source's own name rather than colliding in spelling with "
-            + $"'{Raw.Literal(DeveloperConfiguration.FileName)}'. Same fields ('path', 'ref', 'prepare'); it "
-            + $"keeps working exactly as written, so this notice is only the nudge to rename it.");
+        return null;
     }
 }
