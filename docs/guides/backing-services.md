@@ -44,7 +44,7 @@ Configured under a new `backingServices:` section of `servicesources.local.json`
 
 ```jsonc
 {
-  "services": { "orders": { "source": "local" } },
+  "services": { "orders": { "source": "repository" } },
   "backingServices": {
     "orders-db": {
       "source": "direct",

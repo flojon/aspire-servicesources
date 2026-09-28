@@ -335,10 +335,15 @@ public static IDistributedApplicationBuilder UseCustomJavaScriptKind(this IDistr
 unknown property or a block that isn't a mapping with a `ServiceSourcesConfigurationException`
 naming the service. `AddLocalKind` must be called before the `AddService()` call for a service of
 that kind — resolution is eager, so registering later is too late — accepts each kind name at most
-once, and cannot re-register `"dotnet"` or use a
-name that collides with a well-known service property (`repository`, `project`, `defaultRef`,
-`kind`, `kubernetes`, `url`, `container`) — a block by one of those names would be read as that
-property rather than as the kind's options.
+once, and cannot re-register `"dotnet"`.
+
+A name that collides with a well-known service property (`repository`, `path`, `project`,
+`defaultRef`, `defaultSource`, `repositoryRef`, `kind`, `kubernetes`, `url`, `container`,
+`prepare`) can still be registered with `AddLocalKind` — the collision only matters for a **yaml**
+service that actually names this kind: its `<kind>:` block sits at the same nesting level as those
+properties, so it would be read as the matching property instead of the kind's options. That check
+happens per-service, in the yaml loader, not at registration time — a code-declared catalog never
+hits it.
 
 It also refuses a handler that declares a public `Validate` taking a service name first and an
 options block somewhere, which doesn't match the interface member — the pre-`repoRoot`
