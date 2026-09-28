@@ -50,7 +50,42 @@ A developer picks a source in `servicesources.local.json` exactly as in the
 | `url:` | `WithUrl(url)` |
 | `container:` | `WithContainer(image, port, defaultTag, scheme)` |
 | `kubernetes:` | `WithKubernetes(service, port, scheme)` |
+| `dotnet:` | `AsDotnet(o => o.WithLaunchProfileName(name))` / `o.ExcludeLaunchProfile()` |
 | `defaultSource:` | `WithDefaultSource(source)` |
+
+## `dotnet`: choosing a launch profile
+
+A `dotnet` service runs under the launch profile Aspire selects on its own: the profile the AppHost
+was launched under when the project has one by that name, otherwise the first launchable profile in
+`Properties/launchSettings.json`. The `dotnet:` block overrides that choice.
+
+```yaml
+services:
+  orders:
+    repository: https://github.com/company/orders
+    project: src/Orders.Api/Orders.Api.csproj
+    dotnet:
+      launchProfileName: http      # run under this profile
+```
+
+| Key | Meaning |
+| --- | --- |
+| `launchProfileName` | Run the project under this profile. Matched exactly against the keys in the project's `Properties/launchSettings.json`: case-sensitive, no trimming. A blank value means "not set". |
+| `excludeLaunchProfile` | `true` runs the project with no launch profile at all, so it loses the endpoints and environment variables a profile would supply. `false` is the same as leaving it out. |
+
+A named profile outranks `AppHost:DefaultLaunchProfileName`.
+
+These are configuration errors, reported when the catalog loads or, for the profile check, when the
+service resolves:
+
+- `excludeLaunchProfile: true` together with a non-blank `launchProfileName` contradict each other.
+- A `dotnet:` block on a service whose `kind` is not `dotnet`.
+- A `launchProfileName` that is not in the project's `launchSettings.json`, or a project with no
+  `launchSettings.json` at all. Aspire would otherwise start the project with no profile and say
+  nothing. An unreadable `launchSettings.json` skips this check.
+
+The block is catalog-only: there is no `servicesources.local.json` override. It applies to the
+`repository` and `path` sources, and is ignored by the sources that run no project.
 
 ## `defaultSource`
 
