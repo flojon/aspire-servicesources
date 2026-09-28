@@ -16,6 +16,8 @@ never existed. Check the tag of the last release before adding one.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-28
+
 ### Breaking
 
 - **The `"local"` source is renamed to `"repository"`.** Same behavior — clone the catalog's
@@ -1811,7 +1813,8 @@ Targets `net10.0`.
 - Fail-fast configuration validation with `ServiceSourcesConfigurationException`.
 - MIT license, README, symbol packages, and Trusted Publishing (OIDC) to nuget.org.
 
-[Unreleased]: https://github.com/flojon/aspire-servicesources/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/flojon/aspire-servicesources/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/flojon/aspire-servicesources/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/flojon/aspire-servicesources/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/flojon/aspire-servicesources/compare/v0.4.1...v0.5.1
 [0.4.1]: https://github.com/flojon/aspire-servicesources/compare/v0.4.0...v0.4.1
