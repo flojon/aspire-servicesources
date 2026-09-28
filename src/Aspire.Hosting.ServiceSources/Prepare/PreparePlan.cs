@@ -39,7 +39,7 @@ internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
     private const string CatalogBlock = "prepare";
 
     /// <summary>How a message names the developer's.</summary>
-    private const string DeveloperBlock = "local.prepare";
+    private const string DeveloperBlock = "repository.prepare";
 
     /// <summary>How a message names a "path"-sourced service's own developer block.</summary>
     private const string PathDeveloperBlock = "path.prepare";
@@ -87,7 +87,7 @@ internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
     /// </exception>
     /// <param name="serviceName">
     /// The service's own name, used only where a message has to embed it literally rather than
-    /// through <paramref name="label"/> — the <c>local.path</c> notice's JSON snippet, which a
+    /// through <paramref name="label"/> — the <c>repository.path</c> notice's JSON snippet, which a
     /// developer pastes into a file keyed by service name regardless of grouping. A <c>path</c>
     /// checkout is never grouped (design finding 4), so this and <paramref name="label"/> always name
     /// the same service there; a managed checkout never reaches the branch that uses it.
@@ -118,7 +118,7 @@ internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
         return managedCheckout
             ? Merge(label, catalog, developer, catalogMode, developerMode, Raw.Literal(DeveloperBlock), PrepareModes.Default, windows)
             : ForPathCheckout(
-                serviceName, label, catalog, developer, catalogMode, developerMode, LocalPathOverride,
+                serviceName, label, catalog, developer, catalogMode, developerMode, RepositoryPathOverride,
                 PrepareModes.Default, windows);
     }
 
@@ -131,7 +131,7 @@ internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
         public string PrepareBlock => $"{Block}.prepare";
     }
 
-    private static readonly DirectoryOverride LocalPathOverride = new("local.path", "local");
+    private static readonly DirectoryOverride RepositoryPathOverride = new("repository.path", "repository");
 
     private static readonly DirectoryOverride PathPathOverride = new("path.path", "path");
 
@@ -176,7 +176,7 @@ internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
 
     /// <summary>
     /// The <c>"path"</c> source's prepare merge for a developer's own <c>path.path</c> override: the
-    /// same rule a <c>local.path</c> override follows (<see cref="ForPathCheckout"/>) — the catalog's
+    /// same rule a <c>repository.path</c> override follows (<see cref="ForPathCheckout"/>) — the catalog's
     /// block is never inherited, since nothing establishes the developer's directory is a checkout of
     /// the repository the catalog names, and it is their working tree — with the <c>"path"</c>
     /// source's default mode and refusal.
@@ -238,7 +238,7 @@ internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
     /// over the catalog's over <paramref name="defaultMode"/>, and the command pair taken as a unit
     /// from whichever block supplied either half.
     /// </summary>
-    /// <param name="developerBlock">How messages name the developer's block — <c>local.prepare</c> or <c>path.prepare</c>.</param>
+    /// <param name="developerBlock">How messages name the developer's block — <c>repository.prepare</c> or <c>path.prepare</c>.</param>
     private static PreparePlan Merge(
         Raw label,
         PrepareMetadata? catalog,
@@ -278,7 +278,7 @@ internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
                 null);
     }
 
-    /// <param name="directoryOverride">Which override put the service here — <c>local.path</c> or <c>path.path</c> — for the messages.</param>
+    /// <param name="directoryOverride">Which override put the service here — <c>repository.path</c> or <c>path.path</c> — for the messages.</param>
     /// <param name="defaultMode">What an unwritten mode in the developer's block means.</param>
     private static PreparePlan ForPathCheckout(
         string serviceName,

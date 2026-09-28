@@ -602,10 +602,33 @@ public class DeveloperConfigValidatorTests
     [Fact]
     public void Validate_FlatFieldAtEntryRoot_NamesTheBlockItBelongsUnder()
     {
+        var ex = Load("""{ "services": { "orders": { "source": "container", "tag": "v2" } } }""");
+
+        Assert.Contains("'tag' is not a valid key here", ex.Message);
+        Assert.Contains("'container' block", ex.Message);
+    }
+
+    /// <summary>
+    /// 'ref' is declared by both 'local' (the deprecated alias for the "repository" source's own
+    /// block, <see cref="ServiceDeveloperConfig.ReconcileRepositoryAlias"/>) and 'repository' (its
+    /// current spelling) — the identical field on the identical type, bound under two names — so a
+    /// flat 'ref' at the entry root names both rather than picking one, exactly as 'path' names
+    /// both 'local'/'repository' and 'path' below.
+    /// </summary>
+    [Fact]
+    public void Validate_FlatFieldAtEntryRoot_SharedByLocalAndRepositoryAlias_NamesBoth()
+    {
         var ex = Load("""{ "services": { "orders": { "source": "repository", "ref": "main" } } }""");
 
         Assert.Contains("'ref' is not a valid key here", ex.Message);
-        Assert.Contains("'local' block", ex.Message);
+        Assert.Contains("'local', 'repository'", ex.Message);
+
+        // The paste-ready shape names 'repository', never the deprecated 'local' alias, even though
+        // 'local' sorts first alphabetically among the homes listed above — DeveloperConfigShape's
+        // DeprecatedBlockNames is what keeps a fix suggestion from recommending the spelling this
+        // package is trying to retire.
+        Assert.Contains("""..., "repository": { "ref": ... } }""", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("""..., "local": { "ref": ... } }""", ex.Message, StringComparison.Ordinal);
     }
 
     /// <remarks>
@@ -773,30 +796,43 @@ public class DeveloperConfigValidatorTests
     /// block whose fields contain the name. That is usually a single answer, since two blocks sharing
     /// a field name would make it ambiguous — except where the sharing is intentional and the
     /// multi-home branch (<see cref="DeveloperConfigShape.HomeBlocksOf"/>) exists precisely to name
-    /// every one of them rather than guess: 'local' (the "repository" source's own developer
-    /// override) and 'path' (the "path" source's, mirroring it — design "local.path is deprecated,
-    /// not removed yet") deliberately share 'path' and 'prepare', the identical shape of override on
-    /// two sources one service can combine but a developer resolves through exactly one of at a time
-    /// (<c>source</c> names only one). Every other pair still shares nothing, which this test keeps
-    /// guarding — an accidental collision anywhere else would still make the near-miss answer depend
-    /// on <c>GetProperties()</c>'s unspecified order.
+    /// every one of them rather than guess. Two overlaps are intentional, for different reasons:
+    /// 'local' and 'repository' bind to the identical type — the deprecated alias
+    /// (<see cref="ServiceDeveloperConfig.ReconcileRepositoryAlias"/>) and its current spelling — so
+    /// every field they declare is the same field twice, not a collision. 'local'/'repository' (the
+    /// "repository" source's own developer override) and 'path' (the "path" source's, mirroring it —
+    /// design "local.path is deprecated, not removed yet") deliberately share 'path' and 'prepare',
+    /// the identical shape of override on two sources one service can combine but a developer
+    /// resolves through exactly one of at a time (<c>source</c> names only one). Every other pair
+    /// still shares nothing, which this test keeps guarding — an accidental collision anywhere else
+    /// would still make the near-miss answer depend on <c>GetProperties()</c>'s unspecified order.
     /// </remarks>
     [Fact]
-    public void Shape_NoFieldNameIsSharedByTwoBlocksExceptTheIntentionalLocalPathOverlap()
+    public void Shape_NoFieldNameIsSharedByTwoBlocksExceptTheIntentionalOverlaps()
     {
         var blocks = DeveloperConfigShape.Service.BlockFields;
-        var intentionallyShared = new HashSet<string>(StringComparer.Ordinal) { "Path", "Prepare" };
+
+        var aliasPairs = new HashSet<(string, string)> { ("Local", "Repository"), ("Repository", "Local") };
+
+        var repositoryPathPairs = new HashSet<(string, string)>
+        {
+            ("Local", "Path"), ("Path", "Local"), ("Repository", "Path"), ("Path", "Repository"),
+        };
+        var intentionallySharedWithPath = new HashSet<string>(StringComparer.Ordinal) { "Path", "Prepare" };
 
         foreach (var (name, fields) in blocks)
         {
             foreach (var (otherName, otherFields) in blocks.Where(other => other.Key != name))
             {
-                var isLocalPathPair =
-                    (name == "Local" && otherName == "Path") || (name == "Path" && otherName == "Local");
+                if (aliasPairs.Contains((name, otherName)))
+                {
+                    continue;
+                }
 
                 var shared = fields.Keys
                     .Where(otherFields.ContainsKey)
-                    .Where(field => !(isLocalPathPair && intentionallyShared.Contains(field)))
+                    .Where(field => !(repositoryPathPairs.Contains((name, otherName))
+                        && intentionallySharedWithPath.Contains(field)))
                     .ToArray();
 
                 Assert.True(
@@ -1122,32 +1158,50 @@ public class DeveloperConfigValidatorTests
     [Fact]
     public void Validate_MisspelledFieldAtEntryRoot_NamesTheFieldAndItsBlock()
     {
-        var ex = Load("""{ "services": { "orders": { "source": "repository", "raf": "main" } } }""");
+        var ex = Load("""{ "services": { "orders": { "source": "container", "tga": "v2" } } }""");
 
-        Assert.Contains("'raf' is not a valid key here", ex.Message);
-        Assert.Contains("Did you mean 'ref'", ex.Message);
-        Assert.Contains("'local' block", ex.Message);
+        Assert.Contains("'tga' is not a valid key here", ex.Message);
+        Assert.Contains("Did you mean 'tag'", ex.Message);
+        Assert.Contains("'container' block", ex.Message);
 
         // The shape to write, as the exact-match message gives it.
-        Assert.Contains("""{ "ref": ... }""", ex.Message);
+        Assert.Contains("""{ "tag": ... }""", ex.Message);
 
         // The old message, which listed keys that cannot contain the answer.
         Assert.DoesNotContain("Valid keys are", ex.Message);
     }
 
     /// <summary>
-    /// A field that two blocks now declare — 'path', on both 'local' (the "repository" source's own
-    /// developer override) and 'path' (the "path" source's, mirroring it) — names both rather than
-    /// picking one, since a misspelling gives no way to tell which the developer meant.
+    /// The near-miss counterpart of <see cref="Validate_FlatFieldAtEntryRoot_SharedByLocalAndRepositoryAlias_NamesBoth"/>:
+    /// a misspelled 'ref' is nearest to the identical field on both 'local' (the deprecated alias)
+    /// and 'repository' (its current spelling), so it names both rather than picking one.
     /// </summary>
     [Fact]
-    public void Validate_MisspelledFieldAtEntryRoot_SharedByTwoBlocks_NamesBoth()
+    public void Validate_MisspelledFieldAtEntryRoot_SharedByLocalAndRepositoryAlias_NamesBoth()
+    {
+        var ex = Load("""{ "services": { "orders": { "source": "repository", "raf": "main" } } }""");
+
+        Assert.Contains("'raf' is not a valid key here", ex.Message);
+        Assert.Contains("Did you mean 'ref', in the 'local' or 'repository' block", ex.Message);
+
+        // No single shape offered, exactly as the existing multi-home 'path' case above.
+        Assert.DoesNotContain("""{ "ref": ... }""", ex.Message);
+    }
+
+    /// <summary>
+    /// A field that three blocks now declare — 'path', on 'local' and 'repository' (the same
+    /// "repository" source's own developer override, current spelling and deprecated alias) and
+    /// 'path' (the "path" source's, mirroring it) — names all three rather than picking one, since
+    /// a misspelling gives no way to tell which the developer meant.
+    /// </summary>
+    [Fact]
+    public void Validate_MisspelledFieldAtEntryRoot_SharedByThreeBlocks_NamesAll()
     {
         var ex = Load("""{ "services": { "orders": { "source": "repository", "pth": "/src/orders" } } }""");
 
         Assert.Contains("'pth' is not a valid key here", ex.Message);
         Assert.Contains("Did you mean 'path'", ex.Message);
-        Assert.Contains("'local' or 'path' block", ex.Message);
+        Assert.Contains("'local' or 'path' or 'repository' block", ex.Message);
 
         // The old message, which listed keys that cannot contain the answer.
         Assert.DoesNotContain("Valid keys are", ex.Message);
@@ -1178,17 +1232,17 @@ public class DeveloperConfigValidatorTests
 
     /// <summary>
     /// The transposed counterpart of
-    /// <see cref="Validate_MisspelledFieldAtEntryRoot_SharedByTwoBlocks_NamesBoth"/>: 'path' is
-    /// declared by two blocks now, so its own transposition is the other shape this theory's rows
+    /// <see cref="Validate_MisspelledFieldAtEntryRoot_SharedByThreeBlocks_NamesAll"/>: 'path' is
+    /// declared by three blocks now, so its own transposition is the other shape this theory's rows
     /// no longer cover.
     /// </summary>
     [Fact]
-    public void Validate_TransposedFieldAtEntryRoot_SharedByTwoBlocks_NamesBoth()
+    public void Validate_TransposedFieldAtEntryRoot_SharedByThreeBlocks_NamesAll()
     {
         var ex = Load("""{ "services": { "orders": { "source": "repository", "paht": "x" } } }""");
 
         Assert.Contains("Did you mean 'path'", ex.Message);
-        Assert.Contains("'local' or 'path' block", ex.Message);
+        Assert.Contains("'local' or 'path' or 'repository' block", ex.Message);
     }
 
     /// <remarks>
@@ -1450,10 +1504,16 @@ public class DeveloperConfigValidatorTests
 
         Assert.Contains("'prepare' is not a valid key here", ex.Message);
 
-        // 'prepare' is declared by two blocks now — 'local' (the "repository" source's own developer
-        // override) and 'path' (the "path" source's, mirroring it) — so both are named rather than
-        // one picked arbitrarily.
-        Assert.Contains("'local', 'path'", ex.Message);
+        // 'prepare' is declared by three blocks now — 'local' and 'repository' (the same
+        // "repository" source's own developer override, current spelling and deprecated alias) and
+        // 'path' (the "path" source's, mirroring it) — so all three are named rather than one picked
+        // arbitrarily.
+        Assert.Contains("'local', 'path', 'repository'", ex.Message);
+
+        // The paste-ready shape never illustrates the deprecated 'local' alias, the same guarantee
+        // Validate_FlatFieldAtEntryRoot_SharedByLocalAndRepositoryAlias_NamesBoth checks for 'ref'.
+        Assert.Contains("""..., "path": { "prepare": ... } }""", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("""..., "local": { "prepare": ... } }""", ex.Message, StringComparison.Ordinal);
     }
 
     /// <summary>

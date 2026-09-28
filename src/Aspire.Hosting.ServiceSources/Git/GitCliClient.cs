@@ -221,7 +221,7 @@ internal sealed partial class GitCliClient(
         // Verified rather than assumed: a plain subdirectory of a clone came back with the clone's
         // own HEAD, where this method's contract says null.
         //
-        // What that would cost is a marker keyed on an unrelated repository: a `local.path` pointed
+        // What that would cost is a marker keyed on an unrelated repository: a `repository.path` pointed
         // at an unpacked directory that happens to sit inside some checkout would re-run its
         // bootstrap for every commit made anywhere in that checkout, and call it "once per commit".
         //

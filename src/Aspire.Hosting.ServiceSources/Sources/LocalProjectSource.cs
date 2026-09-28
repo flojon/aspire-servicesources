@@ -57,12 +57,25 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         // inherits the catalog's prepare block at all and where its completion marker goes.
         var managedCheckout = LocalGitCheckout.IsManagedCheckout(config);
 
+        if (config.Local.IsDeclared)
+        {
+            // The deprecated 'local' spelling — already merged into config.Repository by
+            // ServiceDeveloperConfig.ReconcileRepositoryAlias — earns its rename notice only once a
+            // service actually resolves through "repository", the same rule the repository.path
+            // notice below follows: a stray 'local' block on an entry nothing resolves this way
+            // (a different source, or a service this AppHost never adds) is not this developer's
+            // problem to hear about. Local.IsDeclared still answers correctly here because the
+            // reconciliation merge never clears it.
+            ServiceSourcesWarnings.For(builder).AddNotice(RepositoryAliasDeprecationNotice(serviceName));
+        }
+
         if (!managedCheckout)
         {
-            // 'local.path' is deprecated in favor of the first-class 'path' source (design "local.path
-            // is deprecated, not removed yet") — a soft deprecation, not a break: the mechanism keeps
-            // working exactly as it does today, and only a one-time notice is owed. AddNotice dedupes
-            // identical text, so a service resolved more than once in a run reports this only once.
+            // 'repository.path' is deprecated in favor of the first-class 'path' source (design
+            // "local.path is deprecated, not removed yet") — a soft deprecation, not a break: the
+            // mechanism keeps working exactly as it does today, and only a one-time notice is owed.
+            // AddNotice dedupes identical text, so a service resolved more than once in a run
+            // reports this only once.
             ServiceSourcesWarnings.For(builder).AddNotice(LocalPathDeprecationNotice(serviceName, config));
         }
 
@@ -81,15 +94,15 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         // before anything is registered against a directory that does not exist yet. Only what needs
         // the working tree waits for one, which is the division ValidateCheckout draws for a kind.
         var prepare = PreparePlan.For(
-            serviceName, label, definition.Repository.Prepare, config.Local.Prepare, managedCheckout,
+            serviceName, label, definition.Repository.Prepare, config.Repository.Prepare, managedCheckout,
             OperatingSystem.IsWindows());
 
         if (prepare.IgnoredCatalogNotice is { } ignored)
         {
-            // A catalog block on a service resolved through 'local.path' is ignored rather than
-            // rejected: it is the team's, and applies correctly to every developer on a managed
-            // checkout, so one developer's override must not turn a shared catalog field into a
-            // failure. Buffered because there is no logger yet.
+            // A catalog block on a service resolved through 'repository.path' is ignored rather
+            // than rejected: it is the team's, and applies correctly to every developer on a
+            // managed checkout, so one developer's override must not turn a shared catalog field
+            // into a failure. Buffered because there is no logger yet.
             ServiceSourcesWarnings.For(builder).AddNotice(ignored);
         }
 
@@ -227,29 +240,53 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     }
 
     /// <summary>
-    /// The design "<c>local.path</c> is deprecated, not removed yet" notice — 'local.path' keeps
-    /// resolving exactly as it does today, but the first-class <c>"path"</c> source now does the same
-    /// job (no clone, no ref), discoverable rather than hidden inside <c>"repository"</c>.
+    /// The one-time notice for a service resolved through the deprecated <c>local</c> block —
+    /// <see cref="ServiceDeveloperConfig.ReconcileRepositoryAlias"/> already merged it into
+    /// <see cref="ServiceDeveloperConfig.Repository"/> by the time this runs, so this only decides
+    /// when the notice is owed: once a service actually resolves through <c>"repository"</c>, never
+    /// merely because some configuration layer still writes <c>local</c> for an entry nothing reads
+    /// that way.
+    /// </summary>
+    private static Raw RepositoryAliasDeprecationNotice(string serviceName) =>
+        Raw.Compose(
+            $"Service '{new Name(serviceName)}': the 'local' block is deprecated — renamed to 'repository' so "
+            + $"it reads as the source's own name rather than colliding in spelling with "
+            + $"'{Raw.Literal(DeveloperConfiguration.FileName)}'. Same fields ('path', 'ref', 'prepare'); it "
+            + $"keeps working exactly as written, so this notice is only the nudge to rename it.");
+
+    /// <summary>
+    /// The design "<c>local.path</c> is deprecated, not removed yet" notice — <c>repository.path</c>
+    /// keeps resolving exactly as it does today, but the first-class <c>"path"</c> source now does the
+    /// same job (no clone, no ref), discoverable rather than hidden inside <c>"repository"</c>.
     /// </summary>
     /// <remarks>
     /// The remedy names <c>path.path</c> — <c>path</c> is a block, so a bare <c>"path": "..."</c> would
-    /// be refused by the config validator. A developer's <c>path.path</c> behaves as <c>local.path</c>
-    /// does, catalog <c>prepare</c> step included (ignored, with its own notice); the one thing that
-    /// does not carry over is a <c>local.prepare</c> block, named only where there is one.
+    /// be refused by the config validator. A developer's <c>path.path</c> behaves as
+    /// <c>repository.path</c> does, catalog <c>prepare</c> step included (ignored, with its own
+    /// notice); the one thing that does not carry over is a <c>repository.prepare</c> block, named
+    /// only where there is one.
+    /// <para>
+    /// Named for the field, not the block spelling: <paramref name="config"/> has already been
+    /// through <see cref="ServiceDeveloperConfig.ReconcileRepositoryAlias"/> by the time this runs, so
+    /// <see cref="ServiceDeveloperConfig.Repository"/> holds the effective value whether the developer
+    /// wrote it under <c>repository</c> or the deprecated <c>local</c> — and the remedy always names
+    /// the current spelling, same as <see cref="DeveloperConfigShape.ThrowIfRetiredSource"/> does for
+    /// the source rename.
+    /// </para>
     /// </remarks>
     private static Raw LocalPathDeprecationNotice(string serviceName, ServiceDeveloperConfig config)
     {
         // Double-quoted and escaped through Raw.Escaped (Name's JSON-compatible escaping), because
         // this snippet is meant to be pasted into servicesources.local.json as it stands — a Windows
         // path's backslashes quoted by hand would be invalid JSON, or silently a different string.
-        var notice = Raw.Compose($"Service '{new Name(serviceName)}': 'local.path' is deprecated. Use the 'path' source "
-            + $"instead: \"source\": \"path\", \"path\": {{ \"path\": \"{Raw.Escaped(config.Local.Path)}\" }} — which "
-            + $"resolves the directory the same way, with no clone and no ref.");
+        var notice = Raw.Compose($"Service '{new Name(serviceName)}': 'repository.path' is deprecated. Use the 'path' "
+            + $"source instead: \"source\": \"path\", \"path\": {{ \"path\": \"{Raw.Escaped(config.Repository.Path)}\" }} "
+            + $"— which resolves the directory the same way, with no clone and no ref.");
 
-        if (config.Local.Prepare?.IsDeclared == true)
+        if (config.Repository.Prepare?.IsDeclared == true)
         {
-            notice = Raw.Compose($"{notice} Move this service's 'local.prepare' block to 'path.prepare': it is not read "
-                + $"under the 'path' source.");
+            notice = Raw.Compose($"{notice} Move this service's 'repository.prepare' block to 'path.prepare': it is "
+                + $"not read under the 'path' source.");
         }
 
         return notice;
@@ -259,16 +296,17 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// Refuses a <c>"repository"</c> service whose catalog entry declares no repository to clone.
     /// </summary>
     /// <remarks>
-    /// A <c>local.path</c> override is exempt: it points at a checkout the developer already has, so
-    /// nothing is ever cloned and the absent <c>repository</c> costs that configuration nothing.
+    /// A <c>repository.path</c> override is exempt: it points at a checkout the developer already
+    /// has, so nothing is ever cloned and the absent <c>repository</c> costs that configuration
+    /// nothing.
     /// <para>
     /// The message offers only remedies this guard itself can verify. Switching to <c>url</c>,
     /// <c>container</c> or <c>kubernetes</c> works only if that source's own preconditions hold —
     /// none of which is readable from here — so it is not offered; a declared block is not proof
     /// those preconditions hold either. The remedies offered are declaring a repository and the
     /// <c>"path"</c> source with a <c>path.path</c> override — the non-deprecated form of the
-    /// <c>local.path</c> exemption above — and the configuration key is named in every layer that can
-    /// set it.
+    /// <c>repository.path</c> exemption above — and the configuration key is named in every layer
+    /// that can set it.
     /// </para>
     /// </remarks>
     private static void RequireRepositoryToCheckOut(
@@ -432,8 +470,8 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     }
 
     /// <remarks>
-    /// Always answers: a developer's own <c>local.path</c> makes <c>"repository"</c> selectable even
-    /// for an entry with no repository.
+    /// Always answers: a developer's own <c>repository.path</c> makes <c>"repository"</c> selectable
+    /// even for an entry with no repository.
     /// </remarks>
     public Type? DeclaredResourceType(
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition) =>

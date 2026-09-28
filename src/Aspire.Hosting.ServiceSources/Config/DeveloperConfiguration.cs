@@ -146,6 +146,42 @@ internal sealed class DeveloperConfiguration
 
         var (services, undeclaredNames) = CanonicalizeToCatalog(bound, declaredNames);
 
+        // Settles the deprecated 'local' block against 'repository' before anything past this point
+        // reads either — see ServiceDeveloperConfig.ReconcileRepositoryAlias. After canonicalization
+        // so a conflict names the catalog's own spelling of the service rather than however a
+        // developer happened to case it, and so an undeclared entry (tracked above and only ever
+        // warned about, by ServiceConfigAudit) can be skipped: it is dead configuration for this
+        // AppHost, so a conflict or a deprecated spelling inside it is not this AppHost's problem to
+        // fail startup over. Collected across every declared entry rather than thrown at the first
+        // one, so a file touched by a blanket rename that leaves both blocks on several services
+        // reports every one of them in a single run — the same reason
+        // DeveloperConfigValidator.ValidateAll collects its own faulted entries instead of throwing
+        // per service. Only the conflict is decided here; the alias's own deprecation notice is owed
+        // only once a service actually resolves through "repository" (LocalProjectSource.Resolve),
+        // not merely because some layer still writes 'local'.
+        var undeclaredNameSet = undeclaredNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        List<(string Service, Raw Reason)>? aliasConflicts = null;
+
+        foreach (var (name, config) in services)
+        {
+            if (undeclaredNameSet.Contains(name))
+            {
+                continue;
+            }
+
+            if (config.ReconcileRepositoryAlias(name) is { } reason)
+            {
+                (aliasConflicts ??= []).Add((name, reason));
+            }
+        }
+
+        if (aliasConflicts is { Count: > 0 })
+        {
+            throw aliasConflicts.Count == 1
+                ? ServiceSourcesConfigurationException.For($"{aliasConflicts[0].Reason}")
+                : CombinedRepositoryAliasConflictError(aliasConflicts);
+        }
+
         var repositorySection = builder.Configuration.GetSection(RepositoriesKey);
 
         DeveloperConfigValidator.ValidateAll(repositorySection.GetChildren(), DeveloperConfigShape.Repository);
@@ -247,7 +283,7 @@ internal sealed class DeveloperConfiguration
     /// gesture to be someone reaching for it, and far enough to be a typed value that lost its
     /// text, so <see cref="DeveloperConfigValidator"/> refuses it outright and names the
     /// spelling that works. Treating it as absent here instead is what made a whitespace
-    /// <c>local.path</c> run the service from its managed checkout without a word.
+    /// <c>repository.path</c> run the service from its managed checkout without a word.
     /// </remarks>
     private static void NormalizeBlankToAbsent(object config, DeveloperConfigShape shape)
     {
@@ -264,9 +300,9 @@ internal sealed class DeveloperConfiguration
     /// <see cref="NormalizeBlankToAbsent"/> for one block, and for any block nested inside it.
     /// </summary>
     /// <remarks>
-    /// Recursive because <c>local.prepare</c> is a block inside a block, and the gesture has to mean
-    /// the same thing at every depth: a higher layer blanking <c>local:prepare:mode</c> is dropping
-    /// the mode the file below set, exactly as blanking <c>local:path</c> drops the path. A walk that
+    /// Recursive because <c>repository.prepare</c> is a block inside a block, and the gesture has to mean
+    /// the same thing at every depth: a higher layer blanking <c>repository:prepare:mode</c> is dropping
+    /// the mode the file below set, exactly as blanking <c>repository:path</c> drops the path. A walk that
     /// stopped at the first level would leave that as the empty string, which the mode parse would
     /// then have to treat as a value nobody wrote.
     /// </remarks>
@@ -381,6 +417,18 @@ internal sealed class DeveloperConfiguration
             $"case-insensitive, so there is no key that reaches one of them and not the other — rename them in " +
             $"'servicesources.yaml' so they differ by more than case.");
     }
+
+    /// <summary>
+    /// One exception naming every declared service that sets both 'local' and 'repository' —
+    /// mirrors <see cref="DeveloperConfigValidator"/>'s own single-vs-combined shape, so a file
+    /// touched by a blanket rename that leaves both blocks on several services reports every one of
+    /// them in one run rather than one failed startup at a time.
+    /// </summary>
+    private static ServiceSourcesConfigurationException CombinedRepositoryAliasConflictError(
+        IReadOnlyList<(string Service, Raw Reason)> conflicts) =>
+        ServiceSourcesConfigurationException.For(
+            $"{conflicts.Count} services set both 'local' and 'repository':" +
+            $"{Raw.Join("", conflicts.Select(c => Raw.Compose($"{Raw.NewLine}  - {c.Reason}")))}");
 
     /// <summary>
     /// The error for "this service has no source", which is a different problem from the one below

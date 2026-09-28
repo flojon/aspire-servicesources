@@ -116,7 +116,7 @@ public class PreparePlanTests
     {
         var ex = Rejects(Catalog(["./prepare.sh"]), Developer(mode: "sometimes"));
 
-        Assert.Contains("local.prepare.mode is 'sometimes'", ex.Message);
+        Assert.Contains("repository.prepare.mode is 'sometimes'", ex.Message);
     }
 
     [Fact]
@@ -350,14 +350,14 @@ public class PreparePlanTests
         Assert.Contains($"'{ServiceName}'", notice);
         // Carried verbatim (it has no credential in it), so it can be copied into the local file.
         Assert.Contains("\"./prepare.sh\"", notice);
-        Assert.Contains("local.path", notice);
+        Assert.Contains("repository.path", notice);
     }
 
     /// <remarks>
     /// The one #286 originally left unredacted, on the grounds that a redacted command is not
     /// paste-able — the notice's whole reason to exist. Revisited after the fix shipped: the
     /// catalog command here can legitimately carry a credential the same way an argument to curl
-    /// or git can (<c>local.prepare.command</c> is where a real token would live), so the
+    /// or git can (<c>repository.prepare.command</c> is where a real token would live), so the
     /// credential is now stripped the same way the other four sites strip theirs. What survives is
     /// still copy-pasteable JSON — the developer just fills the token back in from their own
     /// secret once it is in <c>servicesources.local.json</c>, which is where it belongs anyway.
@@ -472,8 +472,8 @@ public class PreparePlanTests
         var ex = Rejects(Catalog(["./prepare.sh"]), Developer(mode: "always"), managedCheckout: false);
 
         Assert.Contains($"'{ServiceName}'", ex.Message);
-        Assert.Contains("local.prepare.mode", ex.Message);
-        Assert.Contains("local.path", ex.Message);
+        Assert.Contains("repository.prepare.mode", ex.Message);
+        Assert.Contains("repository.path", ex.Message);
         Assert.Contains("'never'", ex.Message);
     }
 

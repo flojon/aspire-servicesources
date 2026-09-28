@@ -161,10 +161,10 @@ internal static class DeveloperConfigValidator
     /// </summary>
     /// <param name="blockPath">
     /// How the block is named in a message, dotted for a nested one: <c>local</c>,
-    /// <c>local.prepare</c>.
+    /// <c>repository.prepare</c>.
     /// </param>
     /// <remarks>
-    /// Recursive because <c>local.prepare</c> is the first block inside a block this file has held.
+    /// Recursive because <c>repository.prepare</c> is the first block inside a block this file has held.
     /// Nothing about the walk is specific to that depth, so it is the same code rather than a second
     /// copy for level two — which is also what keeps a nested block's diagnostics identical to a
     /// top-level one's rather than a thinner version of them.
@@ -232,7 +232,7 @@ internal static class DeveloperConfigValidator
             // A value of one or more spaces, whatever type the field takes. Refused rather than
             // read as absent — which is what a string field would otherwise become, since it
             // binds and the blank-to-absent walk in DeveloperConfiguration then drops it, so a
-            // whitespace `local.path` sent the service to its managed checkout instead of the
+            // whitespace `repository.path` sent the service to its managed checkout instead of the
             // developer's directory and said nothing about it.
             if (field.Value is { Length: > 0 } spaces && string.IsNullOrWhiteSpace(spaces))
             {

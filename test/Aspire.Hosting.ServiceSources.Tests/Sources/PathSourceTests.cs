@@ -4,6 +4,7 @@ using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
+using Aspire.Hosting.ServiceSources.Messages;
 using Aspire.Hosting.ServiceSources.Prepare;
 using Aspire.Hosting.ServiceSources.Sources;
 using Microsoft.Extensions.Configuration;
@@ -72,7 +73,7 @@ public class PathSourceTests
 
     private static ServiceDeveloperConfig DevConfig(
         string? path = null, string? @ref = null, PrepareDeveloperConfig? preparePath = null) =>
-        new() { Source = "path", Local = new() { Ref = @ref }, Path = new() { Path = path, Prepare = preparePath } };
+        new() { Source = "path", Repository = new() { Ref = @ref }, Path = new() { Path = path, Prepare = preparePath } };
 
     private static string CreateAppHostDirectoryWithService(out string serviceDir, string relativePath = "services/orders")
     {
@@ -118,7 +119,7 @@ public class PathSourceTests
     {
         // The whole point of the developer-vs-catalog asymmetry (design "Confinement differs by who
         // wrote the value"): a catalog path: could never be this, but path.path can, exactly like
-        // local.path today.
+        // repository.path today.
         var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         var elsewhere = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(elsewhere, "Orders.csproj"), "<Project />");
@@ -226,7 +227,8 @@ public class PathSourceTests
                 builder, ServiceName, Definition(path: "../../../elsewhere"), DevConfig()));
 
         Assert.Contains("../../../elsewhere", ex.Message, StringComparison.Ordinal);
-        Assert.Contains($"points outside the repository at '{repositoryRoot}'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            $"points outside the repository at '{Name.Escape(repositoryRoot)}'", ex.Message, StringComparison.Ordinal);
     }
 
     // === A copy with no .git: ServiceSources:RepositoryRoot ===
@@ -257,7 +259,8 @@ public class PathSourceTests
             new PathSource(new GitCliClient()).Resolve(
                 TestHelpers.CreateBuilder(appHostDir), ServiceName, Definition(path: "../Orders.Api"), DevConfig()));
 
-        Assert.Contains($"points outside the AppHost directory '{appHostDir}'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            $"points outside the AppHost directory '{Name.Escape(appHostDir)}'", ex.Message, StringComparison.Ordinal);
         Assert.Contains("No '.git' was found", ex.Message, StringComparison.Ordinal);
         Assert.Contains("'ServiceSources:RepositoryRoot'", ex.Message, StringComparison.Ordinal);
         Assert.Contains("ServiceSources__RepositoryRoot", ex.Message, StringComparison.Ordinal);
@@ -290,7 +293,7 @@ public class PathSourceTests
                 builder, ServiceName, Definition(path: "../../../elsewhere"), DevConfig()));
 
         Assert.Contains(
-            $"points outside the repository root '{copyRoot}' set by 'ServiceSources:RepositoryRoot'",
+            $"points outside the repository root '{Name.Escape(copyRoot)}' set by 'ServiceSources:RepositoryRoot'",
             ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("No '.git' was found", ex.Message, StringComparison.Ordinal);
     }
@@ -340,7 +343,8 @@ public class PathSourceTests
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             new PathSource(new GitCliClient()).Resolve(
                 builder, ServiceName, Definition(path: "../../../elsewhere"), DevConfig()));
-        Assert.Contains($"points outside the repository at '{repositoryRoot}'", ex.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            $"points outside the repository at '{Name.Escape(repositoryRoot)}'", ex.Message, StringComparison.Ordinal);
 
         SetRepositoryRoot(builder, "/no/such/root");
         new PathSource(new GitCliClient()).Resolve(builder, ServiceName, Definition(path: "../Orders.Api"), DevConfig());
@@ -372,7 +376,7 @@ public class PathSourceTests
                 builder, ServiceName, Definition(path: "services/orders"), DevConfig()));
 
         Assert.Equal(
-            $"Service '{ServiceName}': path 'services/orders' does not exist under '{appHostDir}'. A 'path' " +
+            $"Service '{ServiceName}': path 'services/orders' does not exist under '{Name.Escape(appHostDir)}'. A 'path' " +
             "service names a directory that should already be checked out beside the AppHost — there is " +
             "nothing here to clone. If this service actually lives in a separate repository, give it a " +
             "'repository:' instead (or add one alongside 'path:' so each developer can pick).",
@@ -396,9 +400,9 @@ public class PathSourceTests
     // === ref is not offered ===
 
     /// <summary>
-    /// <c>local</c> is the <c>"repository"</c> source's block, and a block for a source that is not
-    /// selected survives but nothing reads it — so a <c>local.ref</c> left in a lower configuration
-    /// layer must not break a higher layer that switches the service to <c>"path"</c>.
+    /// <c>repository</c> is the <c>"repository"</c> source's block, and a block for a source that is
+    /// not selected survives but nothing reads it — so a <c>repository.ref</c> left in a lower
+    /// configuration layer must not break a higher layer that switches the service to <c>"path"</c>.
     /// </summary>
     [Fact]
     public void Resolve_LeftoverLocalRef_IsIgnoredRatherThanRejected()
@@ -484,8 +488,8 @@ public class PathSourceTests
 
     /// <summary>
     /// A developer's own <c>path.path</c> points at their working tree, anywhere on disk: exactly as for
-    /// <c>local.path</c>, the catalog's step is not run there, and a notice names the command so they
-    /// can opt in.
+    /// <c>repository.path</c>, the catalog's step is not run there, and a notice names the command so
+    /// they can opt in.
     /// </summary>
     [Fact]
     public void Resolve_DeveloperOverrideWithACatalogPrepare_DoesNotRunIt()
@@ -512,7 +516,7 @@ public class PathSourceTests
         var notice = plan.IgnoredCatalogNotice!.Value.ToString();
         Assert.Contains("'path.path'", notice, StringComparison.Ordinal);
         Assert.Contains("\"./bootstrap.sh\"", notice, StringComparison.Ordinal);
-        Assert.DoesNotContain("local.path", notice, StringComparison.Ordinal);
+        Assert.DoesNotContain("repository.path", notice, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -598,7 +602,7 @@ public class PathSourceTests
     }
 
     /// <summary>
-    /// Unlike a developer's <c>local.path</c> override — whose catalog <c>prepare:</c> block is
+    /// Unlike a developer's <c>repository.path</c> override — whose catalog <c>prepare:</c> block is
     /// ignored, not run (design finding 4) — a catalog-declared <c>path:</c>'s own step runs
     /// normally, since there is no "someone else's directory" here to protect.
     /// </summary>
@@ -638,8 +642,8 @@ public class PathSourceTests
 
     /// <summary>
     /// The developer's own <c>path.prepare</c> merges over the catalog's block per field, exactly as
-    /// <c>local.prepare</c> does for a managed checkout — here overriding just the mode, with the
-    /// command still coming from the catalog.
+    /// <c>repository.prepare</c> does for a managed checkout — here overriding just the mode, with
+    /// the command still coming from the catalog.
     /// </summary>
     [Fact]
     public void Resolve_DeveloperPreparePathOverridesJustTheMode_MergesOverTheCatalogCommand()

@@ -921,7 +921,7 @@ public class AddServiceTests
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 
         var notice = Assert.Single(warnings, w =>
-            w.Contains("'local.path' is deprecated", StringComparison.Ordinal)
+            w.Contains("'repository.path' is deprecated", StringComparison.Ordinal)
             && w.Contains("Service 'orders'", StringComparison.Ordinal));
 
         // A snippet meant to be pasted into servicesources.local.json: valid JSON, 'path' as a block
@@ -930,13 +930,17 @@ public class AddServiceTests
         Assert.Contains(
             $"\"source\": \"path\", \"path\": {{ \"path\": \"{escapedProjectDir}\" }}", notice, StringComparison.Ordinal);
 
-        Assert.DoesNotContain("local.prepare", notice, StringComparison.Ordinal);
+        Assert.DoesNotContain("repository.prepare", notice, StringComparison.Ordinal);
+
+        // The config was written under the deprecated 'local' block, so the alias notice fires too
+        // — independently of the 'repository.path' one asserted above.
+        Assert.Contains(warnings, w => w.Contains("the 'local' block is deprecated", StringComparison.Ordinal));
     }
 
     /// <summary>
-    /// The one thing that does not carry over to a path.path override: a local.prepare block, which
-    /// is not read under the 'path' source. The catalog's own prepare step is ignored under both, so
-    /// the notice has nothing to say about it.
+    /// The one thing that does not carry over to a path.path override: a repository.prepare block,
+    /// which is not read under the 'path' source. The catalog's own prepare step is ignored under
+    /// both, so the notice has nothing to say about it.
     /// </summary>
     [Fact]
     public async Task AddService_LocalPathOverrideWithPrepareBlocks_DeprecationNoticeNamesOnlyLocalPrepare()
@@ -970,14 +974,14 @@ public class AddServiceTests
 
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 
-        var notice = Assert.Single(warnings, w => w.Contains("'local.path' is deprecated", StringComparison.Ordinal));
-        Assert.Contains("Move this service's 'local.prepare' block to 'path.prepare'", notice, StringComparison.Ordinal);
+        var notice = Assert.Single(warnings, w => w.Contains("'repository.path' is deprecated", StringComparison.Ordinal));
+        Assert.Contains("Move this service's 'repository.prepare' block to 'path.prepare'", notice, StringComparison.Ordinal);
         Assert.DoesNotContain("the catalog's 'prepare' step", notice, StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// The rename's own counterpart: a "repository"-sourced service with no local.path override at
-    /// all must never see the deprecation notice — it has done nothing this notice is about.
+    /// The rename's own counterpart: a "repository"-sourced service with no repository.path override
+    /// at all must never see the deprecation notice — it has done nothing this notice is about.
     /// </summary>
     [Fact]
     public async Task AddService_RepositorySourceWithNoPathOverride_NeverEmitsTheDeprecationNotice()
@@ -1002,6 +1006,38 @@ public class AddServiceTests
 
         var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
 
-        Assert.DoesNotContain(warnings, w => w.Contains("'local.path' is deprecated", StringComparison.Ordinal));
+        Assert.DoesNotContain(warnings, w => w.Contains("'repository.path' is deprecated", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The block-rename notice's own counterpart: a stray 'local' block left on an entry this
+    /// service is not actually resolved through must never earn the "the 'local' block is
+    /// deprecated" notice — the block is unread, so nothing about it is this developer's problem to
+    /// hear about. Mirrors <see cref="AddService_RepositorySourceWithNoPathOverride_NeverEmitsTheDeprecationNotice"/>
+    /// for the repository.path notice.
+    /// </summary>
+    [Fact]
+    public async Task AddService_LocalBlockOnAServiceSourcedElsewhere_NeverEmitsTheRenameNotice()
+    {
+        var appHostDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://github.com/company/orders
+                project: Orders.csproj
+                url:
+                  url: https://orders.example
+            """);
+        File.WriteAllText(Path.Combine(appHostDir, "servicesources.local.json"), """
+            { "services": { "orders": { "source": "url", "local": { "ref": "feature/x" } } } }
+            """);
+
+        var builder = TestHelpers.CreateBuilderThatCanStart(appHostDir);
+
+        builder.AddService("orders");
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.DoesNotContain(warnings, w => w.Contains("the 'local' block is deprecated", StringComparison.Ordinal));
     }
 }

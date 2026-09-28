@@ -19,7 +19,7 @@ public class LocalGitCheckoutTests
         new() { Source = "repository" };
 
     private static ServiceDeveloperConfig WithPathOverride(string path) =>
-        new() { Source = "repository", Local = new LocalDeveloperConfig { Path = path } };
+        new() { Source = "repository", Repository = new LocalDeveloperConfig { Path = path } };
 
     private static string NewAppHostDirectory() => TempDirectories.CreateSubdirectory().FullName;
 

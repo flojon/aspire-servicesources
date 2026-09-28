@@ -242,7 +242,7 @@ internal static class CheckoutPreparation
         var markerPath = PrepareMarker.LocationFor(serviceName, repoRoot, appHostDirectory, managedCheckout);
 
         // The path a `path` marker is keyed on as well as the command and the commit: it is the one
-        // marker that does not live with the directory it describes, so re-pointing `local.path` or
+        // marker that does not live with the directory it describes, so re-pointing `repository.path` or
         // a `path` service's directory elsewhere has to invalidate it, and two services sharing one directory have to keep
         // independent markers.
         var checkoutPath = managedCheckout ? null : PrepareMarker.NormalizeCheckoutPath(repoRoot);
@@ -375,7 +375,7 @@ internal static class CheckoutPreparation
     /// </summary>
     /// <remarks>
     /// The command comes from the same untrusted-by-default source its own output does — the catalog,
-    /// or a developer's <c>local.prepare.command</c>, which can legitimately carry a token the same
+    /// or a developer's <c>repository.prepare.command</c>, which can legitimately carry a token the same
     /// way an argument to <c>curl</c> or <c>git</c> can — so every message that names the command
     /// gets the same redaction #270 already gives its output, rather than only the lines it prints
     /// (#286).

@@ -6,7 +6,7 @@ namespace Aspire.Hosting.ServiceSources.Config;
 /// </summary>
 /// <remarks>
 /// An opt-in rather than a rule for the whole file, because this file deliberately passes values
-/// through as the developer wrote them: whitespace may be real in a <c>local.path</c> or in an
+/// through as the developer wrote them: whitespace may be real in a <c>repository.path</c> or in an
 /// argument of a <c>prepare.command</c>, and trimming those would be rewriting what someone meant.
 /// It is only for a value that names a thing on the other side of a CLI, where a surrounding space
 /// cannot be part of the name in practice.
