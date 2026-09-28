@@ -674,7 +674,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     internal static IResourceBuilder<ProjectResource> AddDotnetProject(
         IDistributedApplicationBuilder builder, string serviceName, string projectPath, DotnetMetadata? dotnet)
     {
-        // Aspire silently starts with no profile when a named one is missing, so it is checked first.
+        // Aspire's error for a missing profile is generic (or absent without launchSettings.json), so check first.
         LaunchProfileCheck.Verify(serviceName, projectPath, DotnetMetadata.Resolve(dotnet).Name);
 
         var options = ToProjectResourceOptions(dotnet);

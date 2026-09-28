@@ -24,7 +24,8 @@ the resulting directory changes:
           runScript: dev
     ```
 
-`kind: dotnet` (the default) uses the entry's `project` property and needs no options block.
+`kind: dotnet` (the default) uses the entry's `project` property and needs no options block; an optional `dotnet:` block
+chooses its launch profile ([details](yaml-catalog.md#dotnet-choosing-a-launch-profile)).
 `project` is required for that kind, and is a path relative to the service's checkout that must
 stay inside it — the rule `java.jarPath` and `java.workingDirectory` follow below, and for the same
 reason: the catalog is shared configuration you clone rather than write, so it does not get to name

@@ -3,8 +3,8 @@ using Aspire.Hosting.ServiceSources.Messages;
 namespace Aspire.Hosting.ServiceSources.Sources;
 
 /// <summary>
-/// Confirms a configured launch profile exists, because Aspire silently starts the project with no
-/// profile at all when a named one is missing.
+/// Confirms a configured launch profile exists, so the error names the service, file and available
+/// profiles. Aspire's own failure is a generic exception, or none at all when the file is absent.
 /// </summary>
 internal static class LaunchProfileCheck
 {

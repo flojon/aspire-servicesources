@@ -70,7 +70,7 @@ services:
 
 | Key | Meaning |
 | --- | --- |
-| `launchProfileName` | Run the project under this profile. Matched exactly against the keys in the project's `Properties/launchSettings.json`: case-sensitive, no trimming. A blank value means "not set". |
+| `launchProfileName` | Run the project under this profile. Matched exactly against the keys in the project's `Properties/launchSettings.json`: case-sensitive, no trimming. A blank value means "not set" here, whereas the code builder's `WithLaunchProfileName` throws on one. |
 | `excludeLaunchProfile` | `true` runs the project with no launch profile at all, so it loses the endpoints and environment variables a profile would supply. `false` is the same as leaving it out. |
 
 A named profile outranks `AppHost:DefaultLaunchProfileName`.
@@ -81,8 +81,8 @@ service resolves:
 - `excludeLaunchProfile: true` together with a non-blank `launchProfileName` contradict each other.
 - A `dotnet:` block on a service whose `kind` is not `dotnet`.
 - A `launchProfileName` that is not in the project's `launchSettings.json`, or a project with no
-  `launchSettings.json` at all. Aspire would otherwise start the project with no profile and say
-  nothing. An unreadable `launchSettings.json` skips this check.
+  `launchSettings.json` at all. Aspire's own failure for these is a generic exception, or none
+  when the file is absent, so this names the service, the file and the profiles it has. An unreadable `launchSettings.json` skips this check.
 
 The block is catalog-only: there is no `servicesources.local.json` override. It applies to the
 `repository` and `path` sources, and is ignored by the sources that run no project.

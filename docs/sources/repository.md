@@ -480,7 +480,7 @@ If the catalog names a profile with `dotnet: { launchProfileName: ... }`, that p
 restored, and it outranks `AppHost:DefaultLaunchProfileName`. The name is checked against the
 repository's `launchSettings.json` once the clone lands; a missing profile marks the service as
 failed to start instead of running it with no profile. `excludeLaunchProfile: true` is the explicit
-form of the trade a cold checkout otherwise makes on its own: no profile environment is restored and
+form of the trade a deferred first checkout otherwise makes on its own: no profile environment is restored and
 no endpoint warning is given, because the profile was discarded on purpose. See
 [the `dotnet:` block](../guides/yaml-catalog.md#dotnet-choosing-a-launch-profile).
 
