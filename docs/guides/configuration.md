@@ -1,8 +1,6 @@
 # Configuring and consuming a resolved service
 
-[← Back to README](https://github.com/flojon/aspire-servicesources/blob/main/README.md)
-
-### Overriding `servicesources.local.json`
+## Overriding `servicesources.local.json`
 
 The file is read through the AppHost's own `IConfiguration`, as the **lowest**-precedence source in
 the standard provider chain, under the key `ServiceSources:Services:<service>`. It is still the
@@ -62,19 +60,21 @@ ServiceSources__Services__orders__Source=url dotnet run
 ```
 
 Overriding a *field* works the same way, but gains its source's block segment —
-`ServiceSources__Services__orders__Local__Ref`, `ServiceSources__Services__orders__Container__Tag`,
-and so on. (`__` is the .NET configuration separator for `:`, and is what you want on every
-platform.) Setting one of these to a blank value *unsets* the field, rather than setting it to an
-empty string — `ServiceSources__Services__orders__Local__Path=` leaves the service with no `path`
-at all, even one `servicesources.local.json` (or a layer in between) configured. It does not fall
-back to that lower layer's value: configuration merges the layers *before* this package sees them,
-so the blank is what arrives and the field ends up absent — which for `path` means the service gets
-its managed checkout, exactly as if no layer had ever named one.
+`ServiceSources__Services__orders__Repository__Ref`, `ServiceSources__Services__orders__Container__Tag`,
+and so on (`__Local__Ref` still works too — it's the deprecated alias for `__Repository__Ref`, same
+as the `local`/`repository` block in the JSON file). (`__` is the .NET configuration separator for
+`:`, and is what you want on every platform.) Setting one of these to a blank value *unsets* the
+field, rather than setting it to an empty string — `ServiceSources__Services__orders__Repository__Path=`
+leaves the service with no `path` at all, even one `servicesources.local.json` (or a layer in
+between) configured. It does not fall back to that lower layer's value: configuration merges the
+layers *before* this package sees them, so the blank is what arrives and the field ends up absent —
+which for `path` means the service gets its managed checkout, exactly as if no layer had ever named
+one.
 
 Blank means *empty*, exactly, whatever the field's type. A value of one or more spaces is refused
 rather than read as either an unset field or a value of its own:
 `ServiceSources__Services__orders__Kubernetes__Port=` drops the port, and
-`ServiceSources__Services__orders__Local__Path=" "` is an error naming the spelling that works
+`ServiceSources__Services__orders__Repository__Path=" "` is an error naming the spelling that works
 rather than an override silently discarded — which is what a stray space surviving a CI variable
 used to cost, leaving the service on its managed checkout with nothing said.
 
@@ -135,7 +135,7 @@ Note the extra `ServiceSources` root: inside the AppHost's shared configuration 
 `services` root because it is a file of ours, read from the AppHost directory and re-keyed as it
 joins the chain.
 
-**A grouped repository ([above](local-source.md#several-services-from-one-repository)) has its own sibling root,
+**A grouped repository ([above](../sources/repository.md#several-services-from-one-repository)) has its own sibling root,
 `repositories`**, keyed by the repository's name rather than by any one member service — a
 developer overriding a group's ref writes it once, for every member, instead of naming the service
 that happens to be first in the group:
@@ -149,11 +149,10 @@ that happens to be first in the group:
 ```
 
 `ServiceSources__Repositories__monorepo__Ref` is the environment-variable spelling, the same
-pattern `ServiceSources__Services__<service>__Repository__Ref` uses (`__Local__Ref` still works too
-— see [`local` is deprecated, in favour of `repository`](local-source.md#repository-source-options)).
-`path` exists on the shape but is reserved rather than implemented — a group's shared checkout is
-not yet redirectable in one setting, so a non-null value is a configuration error naming the
-repository; use a member's own `repository.path` to split it out individually instead (see above).
+pattern `ServiceSources__Services__<service>__Repository__Ref` uses. `path` exists on the shape but is
+reserved rather than implemented — a group's shared checkout is not yet redirectable in one
+setting, so a non-null value is a configuration error naming the repository; switch one member to
+`"source": "path"` with its own `path.path` to split it out individually instead.
 
 Two failures are reported differently on purpose, because a typo in a configuration key produces an
 empty section rather than an error:
@@ -220,8 +219,8 @@ skips wait ordering too, since neither has a registered resource for Aspire to h
 That is this service waiting for something else. The other direction — something else waiting for
 *this* service, `consumer.WaitFor(service)` — is dropped for `"url"` and `"disabled"` and honoured
 for every other source, including `"kubernetes"`. That drop is reported in the same message as the
-service's skipped calls. See [the `"url"` source](other-sources.md#url-source) and
-[the `"disabled"` source](other-sources.md#disabled-source).
+service's skipped calls. See [the `"url"` source](../sources/url.md) and
+[the `"disabled"` source](../sources/disabled.md).
 
 Skipping rather than failing is deliberate: a developer switching a service to a remote source in
 their own `servicesources.local.json` must not break a `Program.cs` they don't own. You'll see:
@@ -244,7 +243,7 @@ That skip is only for a mismatch some source switch could undo. When **no** sour
 catalog entry declares could ever resolve to a `T` — `Unwrap<ProjectResource>(...)` on a
 `kind: java` service with a `container:` block, say — the call can never apply for anyone, so it
 throws at startup, naming each declared source and the type it resolves to. A local kind that
-doesn't declare its resource type (see [implementing a kind](kinds.md#implementing-a-kind)) is
+doesn't declare its resource type (see [implementing a kind](non-dotnet-services.md#implementing-a-kind)) is
 assumed to match anything, so it never causes this throw.
 
 The parameterless `Unwrap<T>()` **throws** in every one of those cases instead — it has to return
@@ -310,7 +309,7 @@ survives a source switch:
 ```csharp
 var commonAuth = builder.AddService("common-auth");
 
-builder.AddProject<Projects.Web>("web")
+builder.AddService("web")
     .WithEnvironment("Services__CommonAuth", commonAuth.GetServiceEndpoint());
 ```
 

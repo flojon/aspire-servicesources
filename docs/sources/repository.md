@@ -1,30 +1,47 @@
-# The `"repository"` and `"path"` sources
+# The `"repository"` source
 
-[← Back to README](https://github.com/flojon/aspire-servicesources/blob/main/README.md)
+Clone the service's own git repository, keep it on a ref, and run it. The catalog names the
+repository and, for a .NET service, the project inside it:
 
-### `"repository"` source options
+=== "C#"
 
-> Renamed from `"local"`, which used to collide in spelling (though not in meaning) with
-> `servicesources.local.json` — a different "local" (per-developer settings) entirely, and was the
-> only source whose value didn't match its own catalog block (`url`↔`url:`, `container`↔`container:`,
-> `kubernetes`↔`kubernetes:`, but `local`↔`repository:`). Same behavior either way — clone the
-> catalog's `repository:` url, reconcile onto `ref`. A config still naming `source: "local"` fails
-> with a specific error naming the rename and the fix, rather than a generic "unrecognized source"
-> message.
->
-> The per-developer *block* was the same collision one level down — `"source": "repository"` paired
-> with a `"local": { ... }` block for its settings — and is renamed the same way, to `"repository"`.
-> Unlike the source value, `"local"` still works there: it's a deprecated alias for `"repository"`,
-> not a retired spelling, so a config written before this rename keeps resolving exactly as it does
-> today, behind a one-time startup notice asking you to rename it. Setting both `"local"` and
-> `"repository"` on one entry is a configuration error — write one or the other, not both.
+    ```csharp
+    catalog.AddService("orders")
+        .WithRepository("https://github.com/example/orders", defaultRef: "main")
+        .WithProject("src/Orders.Api/Orders.Api.csproj");
+    ```
+
+=== "YAML"
+
+    ```yaml
+    services:
+      orders:
+        repository: https://github.com/example/orders
+        project: src/Orders.Api/Orders.Api.csproj
+        defaultRef: main
+    ```
+
+??? note "Renamed from `\"local\"`"
+    `"local"` used to collide in spelling (though not in meaning) with
+    `servicesources.local.json` — a different "local" (per-developer settings) entirely, and was the
+    only source whose value didn't match its own catalog block (`url`↔`url:`, `container`↔`container:`,
+    `kubernetes`↔`kubernetes:`, but `local`↔`repository:`). Same behavior either way — clone the
+    catalog's `repository:` url, reconcile onto `ref`. A config still naming `source: "local"` fails
+    with a specific error naming the rename and the fix, rather than a generic "unrecognized source"
+    message.
+
+    The per-developer *block* was the same collision one level down — `"local": { ... }` for the
+    `"repository"` source's own settings — and is renamed the same way, to `"repository"`. Unlike
+    the source value, `"local"` still works there: it's a deprecated alias, not a retired spelling,
+    so a config written before this rename keeps resolving exactly as it does today, behind a
+    one-time startup notice asking you to rename it. Setting both `"local"` and `"repository"` on
+    one entry is a configuration error.
 
 Requires `git` (2.7 or newer) on `PATH` for a managed checkout — the same "a tool you already
 have" trade the `"kubernetes"` source makes with `kubectl`. Every git operation runs under your own
-git, so your credential helper, SSH agent, `~/.gitconfig` and proxy settings apply unchanged. A
-service pointed at your own directory with `repository.path` needs no git at all — and if that's
-true for every developer, because it's a fact about the repository rather than about any one of
-them, the [`"path"` source](#path-source) below skips git entirely instead.
+git, so your credential helper, SSH agent, `~/.gitconfig` and proxy settings apply unchanged.
+
+Each developer picks it in `servicesources.local.json`, optionally with their own `ref`:
 
 ```json
 {
@@ -32,21 +49,36 @@ them, the [`"path"` source](#path-source) below skips git entirely instead.
     "orders": { "source": "repository" },
     "payments": {
       "source": "repository",
-      "repository": { "path": "/home/dev/code/payments", "ref": "feature/new-checkout" }
+      "repository": { "ref": "feature/new-checkout" }
     }
   }
 }
 ```
 
-- Omit `path` for a managed checkout: cloned once into
+**Already have a clone?** Don't point `"repository"` at it — switch that service to the
+[`"path"` source](path.md) with your own directory, which needs no git at all:
+
+```json
+{
+  "services": {
+    "payments": { "source": "path", "path": { "path": "/home/dev/code/payments" } }
+  }
+}
+```
+
+That works for any catalog entry, including one with no `path:` of its own. (`repository.path`
+under `"repository"` still does the same thing, but is deprecated: it logs a startup notice with
+the `"path"` spelling to paste instead.)
+
+- A managed checkout is cloned once into
   `<AppHostDirectory>/.servicesources/checkouts/<serviceName>/`, and reconciled to the
   configured `ref` (or the catalog's `defaultRef`) on every run. Uncommitted edits are never
   discarded — if the checkout is dirty and the ref changed, resolution fails loudly instead of
   overwriting your work. Anything you put at that path yourself that isn't a plain clone — a linked
   `git worktree`, or a clone made with `--separate-git-dir` — is refused with an explanation rather
-  than replaced; point at it with `path` instead. A directory there with no `.git` entry at all is
-  treated as debris from an interrupted clone and **deleted**, so don't hand-place a plain directory
-  as a quick override — use `path` for that too. The `.servicesources/` directory gitignores itself
+  than replaced; point at it with the [`"path"` source](path.md) instead. A directory there with no
+  `.git` entry at all is treated as debris from an interrupted clone and **deleted**, so don't
+  hand-place a plain directory as a quick override — use `"path"` for that too. The `.servicesources/` directory gitignores itself
   on first use — no need to add it to your own `.gitignore` — and shields what it holds from your
   AppHost repository's build settings (see below).
 
@@ -54,10 +86,6 @@ them, the [`"path"` source](#path-source) below skips git entirely instead.
   "whatever's at the tip the first time each developer clones" into a reviewed checkout, since a
   resolved service can build and run code the checkout's own repository controls (see
   [`SECURITY.md`](https://github.com/flojon/aspire-servicesources/blob/main/SECURITY.md)). It costs a catalog edit per bump; that's the actual trade.
-- Set `path` to point at a checkout you manage yourself (e.g. an existing local clone). It's
-  used as-is — no clone, no checkout, no fetch, ever. A relative `path` is anchored to the
-  AppHost directory, and must name a directory that already exists. `ref` cannot be combined
-  with `path`.
 - Keep the file to the services you actually add — unless you use
   [`UseDeferredCheckout()`](#first-run-usedeferredcheckout), which removes the reason to.
   `AddService()` has to hand back the real resource, so it can't wait until the AppHost has finished
@@ -78,7 +106,7 @@ them, the [`"path"` source](#path-source) below skips git entirely instead.
   checkout that already exists is never touched on behalf of an entry you don't `AddService()`, so
   work in progress on a branch there is safe.
 
-#### `prepare`: a checkout that has to bootstrap itself
+## `prepare`: a checkout that has to bootstrap itself
 
 A managed checkout is assumed to be runnable the moment it is cloned. That holds for a `dotnet`
 project, and for a Maven/Gradle service whose wrapper builds it as part of running — but not for a
@@ -89,20 +117,37 @@ names isn't there.
 `prepare` is a command run **inside the materialized checkout, before the kind is allowed to judge
 it**:
 
-```yaml
-services:
-  routing:
-    repository: https://github.com/example/routing
-    kind: java
-    prepare:
-      command: ["./prepare.sh"]
-      windowsCommand: ["pwsh", "-File", "prepare.ps1"]   # optional; replaces command on Windows
-      mode: oncePerCommit                                # the default | once | always | never
-    java:
-      jarPath: graphhopper-web-11.0.jar
-      args: ["server", "gh-config-local.yml"]
-      port: 8989
-```
+=== "C#"
+
+    ```csharp
+    catalog.AddService("routing")
+        .WithRepository("https://github.com/example/routing")
+        .AsJava(o => o
+            .WithJarPath("graphhopper-web-11.0.jar")
+            .WithArgs(["server", "gh-config-local.yml"])
+            .WithPort(8989))
+        .WithPrepare(
+            ["./prepare.sh"],
+            windowsCommand: ["pwsh", "-File", "prepare.ps1"], // optional; replaces command on Windows
+            mode: PrepareMode.OncePerCommit);                 // the default | Once | Always | Never
+    ```
+
+=== "YAML"
+
+    ```yaml
+    services:
+      routing:
+        repository: https://github.com/example/routing
+        kind: java
+        prepare:
+          command: ["./prepare.sh"]
+          windowsCommand: ["pwsh", "-File", "prepare.ps1"]   # optional; replaces command on Windows
+          mode: oncePerCommit                                # the default | once | always | never
+        java:
+          jarPath: graphhopper-web-11.0.jar
+          args: ["server", "gh-config-local.yml"]
+          port: 8989
+    ```
 
 - `command` is a **list, not a string**. There is no shell, so there are no quoting or
   word-splitting rules to get wrong and an argument containing spaces needs no escaping. The first
@@ -221,8 +266,9 @@ Every decision to run says why — no completion recorded, the command changed, 
 commit couldn't be determined, or the mode is `always`. A decision to *skip* says nothing: that's
 the ordinary case, and the marker already records it.
 
-**A `path` checkout declares its own step.** A service resolved through `repository.path` **never
-inherits the catalog's `prepare` block**. Nothing establishes that your directory is even a checkout
+**Your own directory declares its own step.** A service pointed at your own directory — the
+[`"path"` source](path.md) with `path.path`, or the deprecated `repository.path` — **never inherits the catalog's
+`prepare` block**. Nothing establishes that your directory is even a checkout
 of the repository the catalog names — `path` is validated by "does it exist" and nothing else — so a
 catalog command like `["npm", "ci"]` would run perfectly happily in a tree that has nothing to do
 with it. And it's your working tree, holding your in-flight work, where a repository's own bootstrap
@@ -232,8 +278,8 @@ script is entitled to run `git clean`. So the command that runs there has to be 
 {
   "services": {
     "routing": {
-      "source": "repository",
-      "repository": {
+      "source": "path",
+      "path": {
         "path": "/home/dev/code/routing",
         "prepare": { "command": ["./prepare.sh"] }
       }
@@ -295,10 +341,10 @@ between steps, no caching of produced artifacts across developers, no timeout (C
 deferred first run, and a country-sized routing graph has no defensible default) and no injected
 environment variables.
 `prepare` also belongs to the `"repository"` *service* source; the `"local"` source a
-[backing service](backing-services.md) can have means something else
+[backing service](../guides/backing-services.md) can have means something else
 entirely, with no repository and so nothing to bootstrap.
 
-#### Aspire builds a checkout, on every start
+## Aspire builds a checkout, on every start
 
 Nothing in this package compiles a checkout, and nothing needs to. A `dotnet` service is
 registered with Aspire's own `AddProject`, and Aspire launches that resource with `dotnet run`,
@@ -364,7 +410,7 @@ resources itself, to attach a debugger, builds them the way it builds anything e
 project reached by a path isn't in your solution, so it may not be built at all
 ([microsoft/aspire#2154](https://github.com/microsoft/aspire/issues/2154), open upstream).
 
-#### First run: `UseDeferredCheckout()`
+## First run: `UseDeferredCheckout()`
 
 On a cold clone, `AddService()` blocks until the checkout it needs is on disk. Composition
 hasn't finished, so the AppHost hasn't started, so there is no dashboard to look at while
@@ -390,7 +436,7 @@ service's clone starts at its own `AddService()` call and blocks nobody, so seve
 run at once — the wall-clock is the slowest clone, not the sum. The one thing that still clones in
 turn is a third-party `kind` handler that declares deferral support and then declines it for a
 particular service; the built-in `dotnet`, `java` and `javascript` kinds never do. If you maintain
-a kind of your own, [Implementing a kind](kinds.md#implementing-a-kind) covers the two members that opt into
+a kind of your own, [Implementing a kind](../guides/non-dotnet-services.md#implementing-a-kind) covers the two members that opt into
 this and what declining late costs.
 
 It also stops the AppHost downloading repositories it doesn't use. Without deferral the clones have
@@ -452,10 +498,10 @@ Scoped deliberately narrowly, so the blast radius is first-run-only:
 
 - Only a checkout that doesn't exist yet. A warm checkout — every run after the first — takes
   the existing eager path unchanged, with full launch-profile fidelity.
-- Only managed checkouts. A `repository.path` override is your own directory; there is nothing to clone.
+- Only managed checkouts. Your own directory (the [`"path"` source](path.md)) has nothing to clone.
 - Only the `"repository"` source, and within it only the kinds that own a managed checkout: `dotnet`,
   `java` and `javascript`. The other sources — `url`, `kubernetes`, `container` and
-  [`path`](#path-source) — never clone a repository, so they have nothing to defer.
+  [`path`](path.md) — never clone a repository, so they have nothing to defer.
 - Only run mode. `aspire publish` and manifest generation clone first as they always have; a
   manifest written from a repository that isn't on disk would describe a project without its
   endpoints or its profile environment.
@@ -485,7 +531,7 @@ before your first `AddService()`, which is where the decision is made — the sa
 `ServiceSourcesConfigurationException` naming the service, rather than silently having no effect
 on it.
 
-#### Managed checkouts don't inherit your AppHost repository's build settings
+## Managed checkouts don't inherit your AppHost repository's build settings
 
 A managed checkout is cloned *inside* your AppHost's repository, and MSBuild, NuGet, the .NET SDK
 host and the compiler's analyzer configuration all find their settings by walking **up** from each
@@ -559,7 +605,7 @@ also a decision: `Directory.Build.rsp` (MSBuild takes the first one found walkin
 project, so your repository's response-file arguments still apply) and `.config/dotnet-tools.json`
 (which affects `dotnet tool` run inside a checkout). Open an issue if either bites you.
 
-#### Some JavaScript and Gradle leaks can't be barriered
+## Some JavaScript and Gradle leaks can't be barriered
 
 The barrier pattern above only works for a tool that **stops at the nearest file it finds while
 walking up**. Several of the JavaScript and Gradle mechanisms a `javascript` or `java` service
@@ -580,43 +626,45 @@ error at all; `node_modules` silently resolves a dependency the checkout never d
 all — a full install that reports success while installing nothing. Open an issue if one of them
 costs you real time.
 
-#### Several services from one repository
+## Several services from one repository
 
 Group them: declare the repository once and have each service join it, and every member shares
 one managed checkout automatically — cloned once, reconciled onto one ref, at
 `.servicesources/checkouts/<repository name>/`.
 
-```yaml
-repositories:
-  monorepo:
-    repository: https://github.com/example/monorepo
-    defaultRef: main
-services:
-  orders:
-    repositoryRef: monorepo
-    project: src/Orders.Api/Orders.Api.csproj
-  payments:
-    repositoryRef: monorepo
-    project: src/Payments.Api/Payments.Api.csproj
-```
+=== "C#"
 
-In code, the equivalent is `AddRepository` and `WithSharedRepository`:
+    ```csharp
+    var monorepo = catalog.AddRepository("monorepo", "https://github.com/example/monorepo", defaultRef: "main");
 
-```csharp
-var monorepo = catalog.AddRepository("monorepo", "https://github.com/example/monorepo", defaultRef: "main");
+    catalog.AddService("orders")
+        .WithSharedRepository(monorepo)
+        .WithProject("src/Orders.Api/Orders.Api.csproj");
 
-catalog.AddService("orders")
-    .WithSharedRepository(monorepo)
-    .WithProject("src/Orders.Api/Orders.Api.csproj");
+    catalog.AddService("payments")
+        .WithSharedRepository(monorepo)
+        .WithProject("src/Payments.Api/Payments.Api.csproj");
+    ```
 
-catalog.AddService("payments")
-    .WithSharedRepository(monorepo)
-    .WithProject("src/Payments.Api/Payments.Api.csproj");
-```
+=== "YAML"
 
-A grouped repository's own `ref` and `prepare` step (see below) belong to the group, not to any
-one member — set them on the `repositories:` entry itself (or `WithPrepare` on the handle
-`AddRepository` returns), and a developer overrides the ref for everyone under
+    ```yaml
+    repositories:
+      monorepo:
+        repository: https://github.com/example/monorepo
+        defaultRef: main
+    services:
+      orders:
+        repositoryRef: monorepo
+        project: src/Orders.Api/Orders.Api.csproj
+      payments:
+        repositoryRef: monorepo
+        project: src/Payments.Api/Payments.Api.csproj
+    ```
+
+A grouped repository's own `ref` and `prepare` step (see [`prepare`](#prepare-a-checkout-that-has-to-bootstrap-itself)) belong to the group, not to any
+one member — set them on the handle `AddRepository` returns (`WithPrepare`), or on the
+`repositories:` entry in yaml, and a developer overrides the ref for everyone under
 `ServiceSources:Repositories:<name>:ref` in `servicesources.local.json` rather than a member's own
 `repository.ref`, which a grouped service can no longer set.
 
@@ -625,150 +673,12 @@ not grouped by that alone — each still gets its own checkout, cloned and recon
 and ServiceSources warns about it at startup. That is a suggestion, not an error: an existing
 catalog written this way keeps working, and the warning goes away the moment you group them.
 
-**The per-service escape from a group** is `repository.path`, the same override an ungrouped
-service has: point one developer's own working copy of one member at a directory you manage
-yourself. There is no repository-level equivalent — `repository.path` redirects one service at a
-time, never a whole group's shared checkout in one setting.
+**The per-service escape from a group** is the [`"path"` source](path.md) with your own
+`path.path`, the same override an ungrouped service has: point one developer's own working copy of
+one member at a directory you manage yourself. There is no repository-level equivalent — it
+redirects one service at a time, never a whole group's shared checkout in one setting.
 
-**None of this applies to the [`"path"` source](#path-source).** Grouping exists to avoid cloning
+**None of this applies to the [`"path"` source](path.md).** Grouping exists to avoid cloning
 one external repository twice, and a `"path"` service has nothing to clone — two of them naming
 the same resolved directory are just two entries pointing at it, no `repositories:` entry needed.
-
-### `"path"` source
-
-Point a service at a directory that's already checked out beside the AppHost — the shape a
-genuine monorepo has, where the AppHost and the services it depends on live in one repository, on
-one commit, by construction. There's nothing to clone: the directory is already there.
-
-`servicesources.yaml`:
-```yaml
-services:
-  orders:
-    path: services/orders                     # relative to the AppHost directory
-    project: src/Orders.Api/Orders.Api.csproj  # same field, same rules, as every other source
-```
-
-`servicesources.local.json`:
-```json
-{
-  "services": {
-    "orders": { "source": "path" }
-  }
-}
-```
-
-— or nothing in `servicesources.local.json` at all: see `defaultSource: path` below.
-
-Non-.NET kinds work exactly as they do for `"repository"` — the `kind`/`project` machinery never
-learns the directory wasn't cloned:
-
-```yaml
-services:
-  frontend:
-    path: services/frontend
-    kind: javascript
-    javascript:
-      appDirectory: .
-      runScript: dev
-```
-
-`path:` combines freely with `repository:`/`url:`/`container:`/`kubernetes:` on the same entry —
-see [Combining sources on one catalog entry](other-sources.md#combining-sources-on-one-catalog-entry)
-in the other sources doc: one developer clones the service, another uses the copy they already
-have, same catalog entry either way.
-
-**Confinement depends on who wrote the value.** A catalog's own `path:` is committed, shared
-configuration, so it's confined to the repository the AppHost lives in: no absolute path, and no
-climbing out of that repository with `..`. It's still written relative to the AppHost directory, and
-may climb *out of that directory* — the usual layout, with the AppHost in `src/MyApp.AppHost/` and
-its services beside it, needs `path: ../Orders.Api`. The repository is the nearest directory at or
-above the AppHost holding a `.git` directory or file. Your own override, set in
-`servicesources.local.json`, is unconfined instead — it's your own machine and directory, exactly
-like `repository.path` is today for a `"repository"` service:
-
-```json
-{
-  "services": {
-    "orders": { "source": "path", "path": { "path": "/home/dev/code/orders" } }
-  }
-}
-```
-
-**A copy with no `.git`.** A source archive, or a container build context whose `.dockerignore`
-leaves `.git` out, has nothing to find the repository by. There, set `ServiceSources:RepositoryRoot`
-to the repository's root directory — absolute, or relative to the AppHost directory — from any
-configuration layer:
-
-```dockerfile
-ENV ServiceSources__RepositoryRoot=/src
-```
-
-or `"repositoryRoot": "../.."` at the root of `servicesources.local.json`, or appsettings, user
-secrets or the command line. It has to be the AppHost directory or one of the directories above it.
-It is read only when no `.git` is found — a `.git` always wins, so the setting can never widen the
-boundary a repository draws. With neither, the AppHost directory itself is the boundary, and a
-`path:` that climbs out of it is refused with an error saying so and naming this setting.
-
-If the resolved directory doesn't exist, resolution fails naming it and the AppHost directory it
-was looked for under — there is nothing to clone, so a missing directory is the only thing a
-`"path"` service can fail on before its kind is even consulted.
-
-**No `ref`.** A directory that is not a separate checkout has no second commit for a ref to name:
-there's no `path.ref`. A `repository.ref` is not read — `repository` (or its deprecated alias,
-`local`) is the `"repository"` source's block, and like any block for a source that isn't selected
-it survives but nothing reads it, so one left in a lower configuration layer doesn't stop a higher
-layer switching the service to `"path"`.
-
-**`prepare` runs as `once`, `always` or `never` — never `oncePerCommit`.** There's no separate
-commit for this directory to move to on its own, so a `mode` left out means `once` here (re-run only
-when the command changes) rather than the `oncePerCommit` it means for `"repository"`. A catalog
-`prepare:` that writes `mode: oncePerCommit` is read as `once` too: that mode is right for the
-`"repository"` source the same entry may also serve, so it isn't an error to reject for every
-developer who picks `"path"`. A `path.prepare.mode: oncePerCommit` you write yourself is refused,
-naming `once` and `always` as the alternatives.
-
-A catalog-declared `path:`'s own `prepare:` block runs normally: there's no "someone else's
-directory" here to protect. A `path.path` override is the exception, exactly like `repository.path`:
-it points at your own working tree, which nothing establishes is a checkout of what the catalog
-names, so the catalog's step is not run there — a startup notice shows the command, ready to paste
-into your own `path.prepare` block. Only a `path.prepare` you declare runs in that directory. Two
-services sharing one resolved `path` serialize their step rather than run it concurrently. The
-marker lives where a `repository.path` override's does,
-`<AppHostDirectory>/.servicesources/prepare/<service>.json`, keyed on the resolved path and the
-command.
-
-A service grouped into a `repositories:` entry doesn't inherit that repository's `prepare:` under
-`"path"`: the group's step is written to run once at the root of its shared checkout, not in one
-member's directory once per member. Only a `path.prepare` block the developer declares runs there.
-
-**`defaultSource: path` is close to free.** Unlike `defaultSource: repository`'s warning above —
-about the clone every developer and CI trigger by default — a `"path"` service with nothing in
-`servicesources.local.json` costs nothing extra when the directory is in-repo: it's already there,
-by construction.
-
-```yaml
-services:
-  orders:
-    path: services/orders
-    defaultSource: path
-```
-
-**No interaction with [`UseDeferredCheckout()`](#first-run-usedeferredcheckout).** Like `url`,
-`kubernetes` and `container`, a `"path"` service is always resolved eagerly, with full
-launch-profile fidelity — there's no clone to defer, so no "Preparing" state ever appears for one.
-
-**No `repositories:` grouping either.** Grouping exists to avoid cloning one external repository
-twice; a `"path"` service has nothing to clone, so there's no shared-checkout identity to opt into.
-Two services naming the same resolved `path` are just two entries pointing at one directory.
-
-**`repository.path` is deprecated.** It resolves a directory the same way — no clone, no ref —
-reachable a second, less discoverable way, nested under a source whose other machinery it never
-touches. It keeps working exactly as it does today, and a startup notice says once to use
-`"source": "path"` with `"path": { "path": "..." }` instead — a JSON snippet with your own directory
-in it, ready to paste. The one thing that doesn't carry over by itself is a `repository.prepare`
-block: it isn't read under `"path"`, so the notice says to move it to `path.prepare` when you have
-one. The catalog's own `prepare:` step still isn't run in your directory, under either spelling.
-(The deprecated `local` alias for the `repository` block behaves the same way here too — a
-service still written as `"local": { "path": "..." }` gets both notices: rename the block to
-`"repository"`, and separately, move off `.path` onto the `"path"` source.)
 

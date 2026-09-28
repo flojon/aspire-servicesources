@@ -1,22 +1,28 @@
-# Local services via a non-`dotnet` `kind`
+# Non-.NET services (`kind`)
 
-[← Back to README](https://github.com/flojon/aspire-servicesources/blob/main/README.md)
-
-### Non-.NET local services: `kind`
-
-A `"local"` service is resolved as a .NET project by default. Set `kind` in the catalog to run
+A `"repository"` or `"path"` service is resolved as a .NET project by default. Set `kind` in the catalog to run
 the checkout some other way — the git clone/checkout is identical, only what gets built out of
 the resulting directory changes:
 
-```yaml
-services:
-  frontend:
-    repository: https://github.com/example/frontend
-    kind: javascript          # optional; defaults to "dotnet"
-    javascript:               # per-kind options block, named after the kind
-      appDirectory: .
-      runScript: dev
-```
+=== "C#"
+
+    ```csharp
+    catalog.AddService("frontend")
+        .WithRepository("https://github.com/example/frontend")
+        .AsJavaScript(o => o.WithAppDirectory(".").WithRunScript("dev"));
+    ```
+
+=== "YAML"
+
+    ```yaml
+    services:
+      frontend:
+        repository: https://github.com/example/frontend
+        kind: javascript          # optional; defaults to "dotnet"
+        javascript:               # per-kind options block, named after the kind
+          appDirectory: .
+          runScript: dev
+    ```
 
 `kind: dotnet` (the default) uses the entry's `project` property and needs no options block.
 `project` is required for that kind, and is a path relative to the service's checkout that must
@@ -31,34 +37,44 @@ Any other kind is resolved by a registered handler, and its options live in a bl
 the kind. Kind names are matched case-sensitively, and a kind with no registered handler fails
 at that service's `AddService()` call, before its checkout is used.
 
-#### JavaScript: `kind: javascript`
+## JavaScript: `kind: javascript`
 
 Runs the checkout through
 [`Aspire.Hosting.JavaScript`](https://www.nuget.org/packages/Aspire.Hosting.JavaScript), which
-your AppHost references itself (13.5.2 or newer — see [Installation](https://github.com/flojon/aspire-servicesources/blob/main/README.md#install)). `javascript` is a
+your AppHost references itself (13.5.2 or newer — see [Installation](../getting-started/installation.md#non-net-services)). `javascript` is a
 built-in kind, resolved the same way `dotnet` always has been — reference the package and declare
-`kind: javascript`, no registration call needed:
+the kind, no registration call needed:
 
-```csharp
-using Aspire.Hosting.ServiceSources;
+=== "C#"
 
-var builder = DistributedApplication.CreateBuilder(args);
+    ```csharp
+    builder.AddServiceCatalog(catalog =>
+        catalog.AddService("frontend")
+            .WithRepository("https://github.com/example/frontend")
+            .AsJavaScript(o => o
+                .WithAppType("vite")          // javascript (default) | vite | nextjs | node | bun
+                .WithAppDirectory("web")      // directory holding package.json, relative to the repo root
+                .WithRunScript("dev")         // package.json script to run
+                .WithPackageManager("pnpm")   // npm | yarn | pnpm | bun
+                .WithPort(4321)));            // the port consumers reach the service on
 
-var frontend = builder.AddService("frontend");
-```
+    var frontend = builder.AddService("frontend");
+    ```
 
-```yaml
-services:
-  frontend:
-    repository: https://github.com/example/frontend
-    kind: javascript
-    javascript:
-      appType: vite         # javascript (default) | vite | nextjs | node | bun
-      appDirectory: web     # directory holding package.json, relative to the repo root
-      runScript: dev        # package.json script to run
-      packageManager: pnpm  # npm | yarn | pnpm | bun
-      port: 4321            # the port consumers reach the service on
-```
+=== "YAML"
+
+    ```yaml
+    services:
+      frontend:
+        repository: https://github.com/example/frontend
+        kind: javascript
+        javascript:
+          appType: vite         # javascript (default) | vite | nextjs | node | bun
+          appDirectory: web     # directory holding package.json, relative to the repo root
+          runScript: dev        # package.json script to run
+          packageManager: pnpm  # npm | yarn | pnpm | bun
+          port: 4321            # the port consumers reach the service on
+    ```
 
 > **Keep `Aspire.Hosting.JavaScript` on the same version as `Aspire.Hosting`.** Aspire releases
 > the two together and tests them that way. They were also coupled across a friend-assembly
@@ -105,34 +121,38 @@ consumer names that endpoint without knowing which source produced it
 ([naming a service's endpoint](configuration.md#naming-a-services-endpoint)). Node and Bun must be on `PATH` for the app types
 that use them.
 
-#### Java: `kind: java`
+## Java: `kind: java`
 
 Runs the checkout through the Aspire Community Toolkit's
 [Java integration](https://github.com/CommunityToolkit/Aspire), which your AppHost references
 itself as `CommunityToolkit.Aspire.Hosting.Java` (13.3.0 or newer — see
-[Installation](https://github.com/flojon/aspire-servicesources/blob/main/README.md#install)). `java` is a built-in kind, resolved the same way `dotnet` always has
-been — reference the package and declare `kind: java`, no registration call needed:
+[Installation](../getting-started/installation.md#non-net-services)). `java` is a built-in kind, resolved the same way `dotnet` always has
+been — reference the package and declare the kind, no registration call needed:
 
-```csharp
-using Aspire.Hosting.ServiceSources;
+=== "C#"
 
-var builder = DistributedApplication.CreateBuilder(args);
+    ```csharp
+    builder.AddServiceCatalog(services =>
+        services.AddService("catalog")
+            .WithRepository("https://github.com/example/catalog")
+            .AsJava(o => o.WithMavenGoal("spring-boot:run").WithPort(8080)));
 
-var catalog = builder.AddService("catalog");
-```
+    var catalog = builder.AddService("catalog");
+    ```
 
-`servicesources.yaml`:
-```yaml
-services:
-  catalog:
-    repository: https://github.com/example/catalog
-    kind: java
-    java:
-      mavenGoal: spring-boot:run
-      port: 8080
-```
+=== "YAML"
 
-The checkout is cloned exactly as for any other `"local"` service (`path`, `ref`, and
+    ```yaml
+    services:
+      catalog:
+        repository: https://github.com/example/catalog
+        kind: java
+        java:
+          mavenGoal: spring-boot:run
+          port: 8080
+    ```
+
+The checkout is cloned exactly as for any other `"repository"` service (`path`, `ref`, and
 `defaultRef` all behave identically), then handed to that integration to run.
 
 **`java:` block options**
@@ -151,18 +171,33 @@ The checkout is cloned exactly as for any other `"local"` service (`path`, `ref`
 `mavenGoal`, `gradleTask`, and `jarPath` are mutually exclusive: exactly one must be set. A
 monorepo service, running a Gradle task with an extra argument:
 
-```yaml
-services:
-  catalog:
-    repository: https://github.com/example/monorepo
-    kind: java
-    java:
-      workingDirectory: services/catalog
-      gradleTask: bootRun
-      wrapperPath: gradlew
-      args: ["--args=--spring.profiles.active=dev"]
-      port: 8080
-```
+=== "C#"
+
+    ```csharp
+    catalog.AddService("catalog")
+        .WithRepository("https://github.com/example/monorepo")
+        .AsJava(o => o
+            .WithWorkingDirectory("services/catalog")
+            .WithGradleTask("bootRun")
+            .WithWrapperPath("gradlew")
+            .WithArgs(["--args=--spring.profiles.active=dev"])
+            .WithPort(8080));
+    ```
+
+=== "YAML"
+
+    ```yaml
+    services:
+      catalog:
+        repository: https://github.com/example/monorepo
+        kind: java
+        java:
+          workingDirectory: services/catalog
+          gradleTask: bootRun
+          wrapperPath: gradlew
+          args: ["--args=--spring.profiles.active=dev"]
+          port: 8080
+    ```
 
 A multi-project Gradle repository (like a multi-module Maven one) commits a single wrapper at its
 root rather than one per project, which is what `wrapperPath: gradlew` names here — without it the
@@ -181,22 +216,32 @@ unsupported `scheme`, no run mode or more than one, a `workingDirectory`, `wrapp
 that isn't in the checkout, a wrapper script that isn't there — is reported by the
 `AddService("catalog")` call itself, before the service has added anything to the app model. The
 last two are read against the checkout, so under
-[`UseDeferredCheckout()`](local-source.md#first-run-usedeferredcheckout), where there isn't one yet, they are
+[`UseDeferredCheckout()`](../sources/repository.md#first-run-usedeferredcheckout), where there isn't one yet, they are
 reported after the clone lands as this service's resource state instead — the same two checks
 saying the same two things.
 
 Add `scheme: https` if the app serves TLS on `port`:
 
-```yaml
-services:
-  catalog:
-    repository: https://github.com/example/catalog
-    kind: java
-    java:
-      mavenGoal: quarkus:run
-      port: 8443
-      scheme: https
-```
+=== "C#"
+
+    ```csharp
+    catalog.AddService("catalog")
+        .WithRepository("https://github.com/example/catalog")
+        .AsJava(o => o.WithMavenGoal("quarkus:run").WithPort(8443).WithScheme("https"));
+    ```
+
+=== "YAML"
+
+    ```yaml
+    services:
+      catalog:
+        repository: https://github.com/example/catalog
+        kind: java
+        java:
+          mavenGoal: quarkus:run
+          port: 8443
+          scheme: https
+    ```
 
 Like `port`, it's catalog-only — the app decides what it serves, so there's nothing
 per-developer to override — and it defaults to `http`. With `scheme: https` the service exposes
@@ -237,7 +282,7 @@ for the same name throws. To substitute a *different* `ILocalResourceKind` for `
 double), call `AddLocalKind("java", yourKind)` directly — `UseJava()` cannot take a handler
 argument, so it was never able to do that.
 
-#### Implementing a kind
+## Implementing a kind
 
 A kind implements `ILocalResourceKind` and registers it from an extension
 method:
@@ -290,10 +335,15 @@ public static IDistributedApplicationBuilder UseCustomJavaScriptKind(this IDistr
 unknown property or a block that isn't a mapping with a `ServiceSourcesConfigurationException`
 naming the service. `AddLocalKind` must be called before the `AddService()` call for a service of
 that kind — resolution is eager, so registering later is too late — accepts each kind name at most
-once, and cannot re-register `"dotnet"` or use a
-name that collides with a well-known service property (`repository`, `project`, `defaultRef`,
-`kind`, `kubernetes`, `url`, `container`) — a block by one of those names would be read as that
-property rather than as the kind's options.
+once, and cannot re-register `"dotnet"`.
+
+A name that collides with a well-known service property (`repository`, `path`, `project`,
+`defaultRef`, `defaultSource`, `repositoryRef`, `kind`, `kubernetes`, `url`, `container`,
+`prepare`) can still be registered with `AddLocalKind` — the collision only matters for a **yaml**
+service that actually names this kind: its `<kind>:` block sits at the same nesting level as those
+properties, so it would be read as the matching property instead of the kind's options. That check
+happens per-service, in the yaml loader, not at registration time — a code-declared catalog never
+hits it.
 
 It also refuses a handler that declares a public `Validate` taking a service name first and an
 options block somewhere, which doesn't match the interface member — the pre-`repoRoot`
@@ -305,7 +355,7 @@ your own is left alone unless it looks like that attempt: a private helper, one 
 options type, and one like `Validate(string message)` that carries no options block at all all
 register exactly as they did before.
 
-**Supporting [`UseDeferredCheckout()`](local-source.md#first-run-usedeferredcheckout).** Two more members, both
+**Supporting [`UseDeferredCheckout()`](../sources/repository.md#first-run-usedeferredcheckout).** Two more members, both
 optional and both defaulting to "no", decide whether a service of your kind can start before its
 checkout lands. Leave them alone and your kind keeps working exactly as it does now, always on the
 eager path:
@@ -359,7 +409,7 @@ others. Decide in `SupportsDeferredCheckout` wherever you can, where the answer 
 malformed to answer for is `false`, which routes it to the eager path where `Validate` reports it
 properly.
 
-#### Private repositories
+## Private repositories
 
 Clone and fetch for a managed checkout (no `path` override) authenticate the same way, in order:
 

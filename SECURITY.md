@@ -62,7 +62,7 @@ what causes its `prepare` step to run again on the next AppHost start.** Pulling
 ordinary, frequent action that nobody reads as "approve a script to run on my machine" — worth
 knowing, since it's the actual trigger rather than anything more deliberate.
 
-See [`prepare`](docs/local-source.md#prepare-a-checkout-that-has-to-bootstrap-itself) for the
+See [`prepare`](docs/sources/repository.md#prepare-a-checkout-that-has-to-bootstrap-itself) for the
 full behaviour of that step, including how a developer overrides or disables a catalog's block
 entirely (`{ "prepare": { "mode": "never" } }`).
 
@@ -70,7 +70,7 @@ entirely (`{ "prepare": { "mode": "never" } }`).
 
 Everything above is about `"repository"`: a **second** repository, controlled by a different team,
 that this tool clones and builds on your machine. A catalog-declared
-[`"path"`](docs/local-source.md#path-source) service has none of that shape. It names a directory that is
+[`"path"`](docs/sources/path.md) service has none of that shape. It names a directory that is
 already part of this repository — same commit, same code review, same CI as the AppHost itself.
 There is no second repository to pin a ref against, because there is no second repository at all;
 the trust question this document exists to raise doesn't arise for it.
