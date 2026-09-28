@@ -66,8 +66,7 @@ internal sealed record LandedLaunchProfile(
             return Empty;
         }
 
-        var settingsPath = Path.Combine(
-            Path.GetDirectoryName(projectFile) ?? ".", "Properties", "launchSettings.json");
+        var settingsPath = SettingsPath(projectFile);
 
         if (!File.Exists(settingsPath))
         {
@@ -76,9 +75,7 @@ internal sealed record LandedLaunchProfile(
 
         try
         {
-            using var document = JsonDocument.Parse(
-                File.ReadAllBytes(settingsPath),
-                new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
+            using var document = JsonDocument.Parse(File.ReadAllBytes(settingsPath), ParseOptions);
 
             if (!document.RootElement.TryGetProperty("profiles", out var profiles)
                 || profiles.ValueKind != JsonValueKind.Object)
@@ -104,6 +101,46 @@ internal sealed record LandedLaunchProfile(
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             return Empty;
+        }
+    }
+
+    private static readonly JsonDocumentOptions ParseOptions =
+        new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
+
+    internal static string SettingsPath(string projectFile) =>
+        Path.Combine(Path.GetDirectoryName(projectFile) ?? ".", "Properties", "launchSettings.json");
+
+    /// <summary>
+    /// The profile names declared in the <c>launchSettings.json</c> beside <paramref name="projectFile"/>,
+    /// in file order, with the same tolerant parse <see cref="Read"/> uses.
+    /// </summary>
+    public static LaunchProfileNames ProfileNames(string projectFile)
+    {
+        var settingsPath = SettingsPath(projectFile);
+
+        if (!File.Exists(settingsPath))
+        {
+            return new(LaunchSettingsState.Absent, []);
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllBytes(settingsPath), ParseOptions);
+
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("profiles", out var profiles)
+                || profiles.ValueKind != JsonValueKind.Object)
+            {
+                return new(LaunchSettingsState.Read, []);
+            }
+
+            return new(
+                LaunchSettingsState.Read,
+                [.. profiles.EnumerateObject().Where(p => p.Value.ValueKind == JsonValueKind.Object).Select(p => p.Name)]);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return new(LaunchSettingsState.Unreadable, []);
         }
     }
 
@@ -208,3 +245,7 @@ internal sealed record LandedLaunchProfile(
         return variables;
     }
 }
+
+internal enum LaunchSettingsState { Absent, Unreadable, Read }
+
+internal readonly record struct LaunchProfileNames(LaunchSettingsState State, IReadOnlyList<string> Names);
