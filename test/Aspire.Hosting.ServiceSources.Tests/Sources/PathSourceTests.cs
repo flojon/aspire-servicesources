@@ -73,7 +73,7 @@ public class PathSourceTests
 
     private static ServiceDeveloperConfig DevConfig(
         string? path = null, string? @ref = null, PrepareDeveloperConfig? preparePath = null) =>
-        new() { Source = "path", Local = new() { Ref = @ref }, Path = new() { Path = path, Prepare = preparePath } };
+        new() { Source = "path", Repository = new() { Ref = @ref }, Path = new() { Path = path, Prepare = preparePath } };
 
     private static string CreateAppHostDirectoryWithService(out string serviceDir, string relativePath = "services/orders")
     {
@@ -119,7 +119,7 @@ public class PathSourceTests
     {
         // The whole point of the developer-vs-catalog asymmetry (design "Confinement differs by who
         // wrote the value"): a catalog path: could never be this, but path.path can, exactly like
-        // local.path today.
+        // repository.path today.
         var appHostDir = TempDirectories.CreateSubdirectory().FullName;
         var elsewhere = TempDirectories.CreateSubdirectory().FullName;
         File.WriteAllText(Path.Combine(elsewhere, "Orders.csproj"), "<Project />");
@@ -400,9 +400,9 @@ public class PathSourceTests
     // === ref is not offered ===
 
     /// <summary>
-    /// <c>local</c> is the <c>"repository"</c> source's block, and a block for a source that is not
-    /// selected survives but nothing reads it — so a <c>local.ref</c> left in a lower configuration
-    /// layer must not break a higher layer that switches the service to <c>"path"</c>.
+    /// <c>repository</c> is the <c>"repository"</c> source's block, and a block for a source that is
+    /// not selected survives but nothing reads it — so a <c>repository.ref</c> left in a lower
+    /// configuration layer must not break a higher layer that switches the service to <c>"path"</c>.
     /// </summary>
     [Fact]
     public void Resolve_LeftoverLocalRef_IsIgnoredRatherThanRejected()
@@ -488,8 +488,8 @@ public class PathSourceTests
 
     /// <summary>
     /// A developer's own <c>path.path</c> points at their working tree, anywhere on disk: exactly as for
-    /// <c>local.path</c>, the catalog's step is not run there, and a notice names the command so they
-    /// can opt in.
+    /// <c>repository.path</c>, the catalog's step is not run there, and a notice names the command so
+    /// they can opt in.
     /// </summary>
     [Fact]
     public void Resolve_DeveloperOverrideWithACatalogPrepare_DoesNotRunIt()
@@ -516,7 +516,7 @@ public class PathSourceTests
         var notice = plan.IgnoredCatalogNotice!.Value.ToString();
         Assert.Contains("'path.path'", notice, StringComparison.Ordinal);
         Assert.Contains("\"./bootstrap.sh\"", notice, StringComparison.Ordinal);
-        Assert.DoesNotContain("local.path", notice, StringComparison.Ordinal);
+        Assert.DoesNotContain("repository.path", notice, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -602,7 +602,7 @@ public class PathSourceTests
     }
 
     /// <summary>
-    /// Unlike a developer's <c>local.path</c> override — whose catalog <c>prepare:</c> block is
+    /// Unlike a developer's <c>repository.path</c> override — whose catalog <c>prepare:</c> block is
     /// ignored, not run (design finding 4) — a catalog-declared <c>path:</c>'s own step runs
     /// normally, since there is no "someone else's directory" here to protect.
     /// </summary>
@@ -642,8 +642,8 @@ public class PathSourceTests
 
     /// <summary>
     /// The developer's own <c>path.prepare</c> merges over the catalog's block per field, exactly as
-    /// <c>local.prepare</c> does for a managed checkout — here overriding just the mode, with the
-    /// command still coming from the catalog.
+    /// <c>repository.prepare</c> does for a managed checkout — here overriding just the mode, with
+    /// the command still coming from the catalog.
     /// </summary>
     [Fact]
     public void Resolve_DeveloperPreparePathOverridesJustTheMode_MergesOverTheCatalogCommand()

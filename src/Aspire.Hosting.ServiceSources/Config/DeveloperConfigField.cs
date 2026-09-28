@@ -9,7 +9,7 @@ namespace Aspire.Hosting.ServiceSources.Config;
 /// block of settings of its own.
 /// </summary>
 /// <remarks>
-/// Every field in this file was a scalar until <c>local.prepare</c>, so the question had one answer
+/// Every field in this file was a scalar until <c>repository.prepare</c>, so the question had one answer
 /// and nobody had to ask it. It now has four, and the order they are asked in is load-bearing:
 /// <see cref="string"/><c>[]</c> is a class, so a list asked about as a block is classified as one
 /// and reported with precisely the message this type exists to stop producing — "takes a value, not

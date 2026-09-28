@@ -16,11 +16,11 @@ namespace Aspire.Hosting.ServiceSources.Tests.Prepare;
 public class PrepareEagerPathTests
 {
     /// <summary>
-    /// Every <c>local.path</c> service now also gets the deprecation notice, which names
+    /// Every <c>repository.path</c> service now also gets the deprecation notice, which names
     /// <c>prepare</c> where the service has one — these tests are about the prepare notices, not it.
     /// </summary>
     private static bool IsLocalPathDeprecation(string message) =>
-        message.Contains("'local.path' is deprecated", StringComparison.Ordinal);
+        message.Contains("'repository.path' is deprecated", StringComparison.Ordinal);
 
     private const string KindName = "stand-in";
 
@@ -118,7 +118,7 @@ public class PrepareEagerPathTests
         : ExecutableResource(name, "run", workingDirectory), IResourceWithServiceDiscovery;
 
     /// <param name="checkoutPath">
-    /// A <c>local.path</c> override to write into the developer config. It has to be in the file and
+    /// A <c>repository.path</c> override to write into the developer config. It has to be in the file and
     /// not only in the entry handed to <c>Resolve</c>, because the speculative prefetch reads the
     /// file: a service the file leaves managed is cloned there before this call, and the checkout it
     /// started is the one resolution then uses.
@@ -135,7 +135,7 @@ public class PrepareEagerPathTests
 
         var local = checkoutPath is null
             ? ""
-            : $", \"local\": {{ \"path\": {System.Text.Json.JsonSerializer.Serialize(checkoutPath)} }}";
+            : $", \"repository\": {{ \"path\": {System.Text.Json.JsonSerializer.Serialize(checkoutPath)} }}";
 
         File.WriteAllText(
             Path.Combine(dir, "servicesources.local.json"),
@@ -159,7 +159,7 @@ public class PrepareEagerPathTests
 
     private static ServiceDeveloperConfig DevConfig(
         string? path = null, PrepareDeveloperConfig? prepare = null) =>
-        new() { Source = "repository", Local = new() { Path = path, Prepare = prepare } };
+        new() { Source = "repository", Repository = new() { Path = path, Prepare = prepare } };
 
     [Fact]
     public void TheStepRunsInTheResolvedCheckout_AfterTheCloneLanded()

@@ -1,8 +1,10 @@
 namespace Aspire.Hosting.ServiceSources.Config;
 
 /// <summary>
-/// The developer's settings for the <c>"repository"</c> source, read from the <c>local</c> block of a
-/// service's entry. Bound only when that is the entry's effective source.
+/// The developer's settings for the <c>"repository"</c> source, read from a service entry's
+/// <c>repository</c> block — or its deprecated alias, <c>local</c> (<see
+/// cref="ServiceDeveloperConfig.ReconcileRepositoryAlias"/>). Bound only when that is the entry's
+/// effective source.
 /// </summary>
 internal sealed class LocalDeveloperConfig
 {
@@ -23,4 +25,13 @@ internal sealed class LocalDeveloperConfig
     /// them to.
     /// </remarks>
     public PrepareDeveloperConfig? Prepare { get; set; }
+
+    /// <summary>
+    /// Whether the developer wrote anything in this block at all — the same question
+    /// <see cref="PrepareDeveloperConfig.IsDeclared"/> answers for the block nested inside it, asked
+    /// here so <see cref="ServiceDeveloperConfig.ReconcileRepositoryAlias"/> can tell "wrote nothing
+    /// under 'repository' or 'local'" from "wrote one of them", which decides whether the alias
+    /// notice fires and whether writing both is a conflict.
+    /// </summary>
+    public bool IsDeclared => Path is not null || Ref is not null || Prepare?.IsDeclared == true;
 }

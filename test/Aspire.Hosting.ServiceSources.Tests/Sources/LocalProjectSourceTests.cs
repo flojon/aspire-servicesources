@@ -137,7 +137,7 @@ public class LocalProjectSourceTests
             .ToDefinition("servicesources.yaml", serviceName, TestHelpers.EmptyRepositories);
 
     private static ServiceDeveloperConfig DevConfig(string? path = null, string? @ref = null) =>
-        new() { Source = "repository", Local = new() { Path = path, Ref = @ref } };
+        new() { Source = "repository", Repository = new() { Path = path, Ref = @ref } };
 
     private static string UnusedAppHostDirectory => TempDirectories.CreateSubdirectory().FullName;
 
@@ -247,7 +247,7 @@ public class LocalProjectSourceTests
                 UnusedManagedAppHostDirectory, new FakeGitClient()));
 
         Assert.Contains($"Service '{ServiceName}'", ex.Message);
-        Assert.Contains("'local.ref' cannot be set", ex.Message);
+        Assert.Contains("'repository.ref' cannot be set", ex.Message);
         Assert.Contains("monorepo", ex.Message);
         Assert.Contains("ServiceSources:Repositories:monorepo:ref", ex.Message);
     }
@@ -284,7 +284,7 @@ public class LocalProjectSourceTests
         Assert.Contains("ServiceSources:Repositories:monorepo:path", ex.Message);
         Assert.Contains("reserved", ex.Message);
         Assert.Contains("'path' source", ex.Message);
-        Assert.DoesNotContain("local.path", ex.Message);
+        Assert.DoesNotContain("repository.path", ex.Message);
     }
 
     /// <summary>
@@ -1824,7 +1824,7 @@ public class LocalProjectSourceTests
         Assert.DoesNotContain("'kubernetes'", ex.Message, StringComparison.Ordinal);
 
         // The one remedy that depends on nothing outside this guard: a directory the developer
-        // already has, through the 'path' source rather than the deprecated local.path exemption.
+        // already has, through the 'path' source rather than the deprecated repository.path exemption.
         Assert.Contains(
             $"ServiceSources:Services:{ServiceName}:path:path", ex.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("local:path", ex.Message, StringComparison.Ordinal);
@@ -2010,7 +2010,7 @@ public class LocalProjectSourceTests
     [Fact]
     public void Resolve_LocalOnEntryDeclaringOnlyUrlWithLocalPath_IsUnaffected()
     {
-        // 'local.path' names a checkout the developer already has, so nothing is ever cloned and the
+        // 'repository.path' names a checkout the developer already has, so nothing is ever cloned and the
         // absent 'repository' costs nothing — the guard must stay off this shipped configuration.
         var checkout = TempDirectories.CreateSubdirectory().FullName;
         var gitClient = new FakeGitClient();

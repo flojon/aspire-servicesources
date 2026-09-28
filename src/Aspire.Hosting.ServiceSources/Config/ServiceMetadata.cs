@@ -13,7 +13,7 @@ internal sealed class ServiceMetadata
     /// unlike <c>url:</c>/<c>container:</c>/<c>kubernetes:</c> — it has no sibling options of its own
     /// to hold. Confined to inside the AppHost directory at resolution time
     /// (<see cref="Sources.PathSource"/>) — unlike a developer's own <c>path.path</c> override, which
-    /// is unconfined for the same reason <c>local.path</c> is today.
+    /// is unconfined for the same reason <c>repository.path</c> is today.
     /// </summary>
     public string? Path { get; set; }
 

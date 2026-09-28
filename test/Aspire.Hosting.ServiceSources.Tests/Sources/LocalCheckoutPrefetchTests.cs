@@ -878,7 +878,7 @@ public class LocalCheckoutPrefetchTests
     }
 
     /// <summary>
-    /// A <c>local.path</c> override names a checkout the developer manages, so there is nothing for
+    /// A <c>repository.path</c> override names a checkout the developer manages, so there is nothing for
     /// the prefetch to clone and nothing for it to keep parallel. Speculating over one only found
     /// ways to fail: a stale override for a service this AppHost never adds was reported as a
     /// checkout that failed, about a repository nobody was ever going to download.

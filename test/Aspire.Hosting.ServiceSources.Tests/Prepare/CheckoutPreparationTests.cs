@@ -527,7 +527,7 @@ public class CheckoutPreparationTests
 
     /// <remarks>
     /// #270 redacted the command's <em>output</em>; the command a decision-to-run announces is its
-    /// own line into the same sink, and a `local.prepare.command` can carry a credential just as
+    /// own line into the same sink, and a `repository.prepare.command` can carry a credential just as
     /// legitimately as anything the command later prints (#286).
     /// </remarks>
     [Fact]
@@ -953,10 +953,10 @@ public class CheckoutPreparationTests
             [fixture.RepoRoot, elsewhere.RepoRoot],
             fixture.Runner.Runs.Select(run => run.WorkingDirectory));
 
-        // The reason names the directory move without naming 'local.path': a 'path'-sourced service
-        // reaches this same marker logic through a catalog path: or a path.path override.
+        // The reason names the directory move without naming 'repository.path': a 'path'-sourced
+        // service reaches this same marker logic through a catalog path: or a path.path override.
         Assert.Contains(fixture.Sink.Lines, line => line.Contains("resolves to a different directory", StringComparison.Ordinal));
-        Assert.DoesNotContain(fixture.Sink.Lines, line => line.Contains("local.path", StringComparison.Ordinal));
+        Assert.DoesNotContain(fixture.Sink.Lines, line => line.Contains("repository.path", StringComparison.Ordinal));
     }
 
     /// <remarks>

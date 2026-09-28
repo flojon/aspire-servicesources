@@ -62,7 +62,7 @@ internal sealed class PrepareStep
     /// </summary>
     /// <param name="writtenAt">
     /// Which file's block this came from, as a message names it — <c>prepare</c> or
-    /// <c>local.prepare</c>.
+    /// <c>repository.prepare</c>.
     /// </param>
     /// <exception cref="ServiceSourcesConfigurationException">
     /// The command is empty, holds a blank first element, or names something outside the checkout.
