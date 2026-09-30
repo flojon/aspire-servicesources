@@ -714,8 +714,9 @@ stays confined to it. The environment-variable spelling is `ServiceSources__Repo
   applies where this tool manages the clone. A catalog `defaultRef` is ignored silently.
 - It applies only to grouped services; an ungrouped service of the same name ignores it.
 - A catalog `prepare` step is not run in a directory you manage, and a startup notice says so; a
-  service's own `repository.prepare` block still applies. Builds sharing the directory are not
-  serialized.
+  service's own `repository.prepare` block still applies. A group-path directory is not subject to
+  the `path` source's build gate, so builds of services sharing it are not serialized; only their
+  prepare steps run one at a time, under the same per-checkout lock as a managed clone.
 - A `repositories` entry naming no declared repository is reported at startup, with a
   did-you-mean, since otherwise its members would quietly keep cloning into the managed checkout.
 

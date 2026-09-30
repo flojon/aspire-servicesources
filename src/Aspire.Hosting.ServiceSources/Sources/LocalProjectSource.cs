@@ -71,11 +71,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
 
         if (config.Repository.Path is not null)
         {
-            // A service's own 'repository.path' — not a group's — is deprecated in favor of the
-            // first-class 'path' source (design "local.path is deprecated, not removed yet") — a soft deprecation, not a break: the
-            // mechanism keeps working exactly as it does today, and only a one-time notice is owed.
-            // AddNotice dedupes identical text, so a service resolved more than once in a run
-            // reports this only once.
+            // Only a service's own repository.path is deprecated; a group's path is not.
             ServiceSourcesWarnings.For(builder).AddNotice(LocalPathDeprecationNotice(serviceName, config));
         }
 
