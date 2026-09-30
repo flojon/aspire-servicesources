@@ -149,10 +149,11 @@ that happens to be first in the group:
 ```
 
 `ServiceSources__Repositories__monorepo__Ref` is the environment-variable spelling, the same
-pattern `ServiceSources__Services__<service>__Repository__Ref` uses. `path` exists on the shape but is
-reserved rather than implemented — a group's shared checkout is not yet redirectable in one
-setting, so a non-null value is a configuration error naming the repository; switch one member to
-`"source": "path"` with its own `path.path` to split it out individually instead.
+pattern `ServiceSources__Services__<service>__Repository__Ref` uses. `path` points every member of the
+group at one directory you already have checked out, written once —
+`ServiceSources__Repositories__monorepo__Path` in the environment. A member's own `repository.path`
+still wins, and it cannot be combined with the group's `ref`. See
+[Pointing a whole group at a checkout you already have](../sources/repository.md#several-services-from-one-repository).
 
 Two failures are reported differently on purpose, because a typo in a configuration key produces an
 empty section rather than an error:

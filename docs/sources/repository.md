@@ -689,10 +689,39 @@ not grouped by that alone — each still gets its own checkout, cloned and recon
 and ServiceSources warns about it at startup. That is a suggestion, not an error: an existing
 catalog written this way keeps working, and the warning goes away the moment you group them.
 
+**Pointing a whole group at a checkout you already have** takes one setting, the group's `path`
+in `servicesources.local.json`:
+
+```json
+{
+  "repositories": {
+    "eshop": { "path": "../eShop" }
+  }
+}
+```
+
+With the catalog's `repositoryRef: eshop` and `project: src/Basket.API/Basket.API.csproj`, every
+member of `eshop` uses that directory as its repository root, and `project:` resolves against it and
+stays confined to it. The environment-variable spelling is `ServiceSources__Repositories__eshop__Path`.
+
+- Nothing is cloned, fetched, reconciled or deferred for a member that resolves to a path.
+- A relative value resolves against the AppHost directory, not the json file, and the directory must
+  exist; a missing one is an error naming the repository and `ServiceSources:Repositories:eshop:path`.
+- Precedence, first set wins: a member's own `repository.path`, then the group's `path`, then the
+  managed checkout (the group's `ref`, else the catalog's `defaultRef`). So one member can still point
+  elsewhere while its siblings share the group's directory.
+- It cannot be combined with the group's `ref`: the path is an existing checkout, and a ref only
+  applies where this tool manages the clone. A catalog `defaultRef` is ignored silently.
+- It applies only to grouped services; an ungrouped service of the same name ignores it.
+- A catalog `prepare` step is not run in a directory you manage, and a startup notice says so; a
+  service's own `repository.prepare` block still applies. Builds sharing the directory are not
+  serialized.
+- A `repositories` entry naming no declared repository is reported at startup, with a
+  did-you-mean, since otherwise its members would quietly keep cloning into the managed checkout.
+
 **The per-service escape from a group** is the [`"path"` source](path.md) with your own
 `path.path`, the same override an ungrouped service has: point one developer's own working copy of
-one member at a directory you manage yourself. There is no repository-level equivalent — it
-redirects one service at a time, never a whole group's shared checkout in one setting.
+one member at a directory you manage yourself.
 
 A `WithSharedRepository` group of managed checkouts shares one clone, so services in it build in the
 same working tree; unlike `"path"` services in one repository, they are not gated.

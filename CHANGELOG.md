@@ -56,6 +56,13 @@ never existed. Check the tag of the last release before adding one.
   not contain (or a project with no `launchSettings.json` at all), and a `dotnet:` block, or
   the code-catalog calls, on a service whose kind is not `dotnet`.
 
+- **`repositories.<name>.path` points a whole `repositoryRef` group at an existing checkout**
+  ([#416]). One setting in `servicesources.local.json` (or
+  `ServiceSources__Repositories__<name>__Path`) redirects every member of the group, so a monorepo
+  AppHost keeps its grouping without repeating a `repository.path` per service. A service's own
+  `repository.path` still wins, and the group's `path` cannot be combined with the group's `ref`.
+  A `repositories` entry naming no declared repository is now reported at startup.
+
 ### Fixed
 
 - **Two `"path"` services in one repository no longer race on a shared project's `bin/` and
@@ -1968,6 +1975,7 @@ Targets `net10.0`.
 [#375]: https://github.com/flojon/aspire-servicesources/issues/375
 [#385]: https://github.com/flojon/aspire-servicesources/issues/385
 [#415]: https://github.com/flojon/aspire-servicesources/issues/415
+[#416]: https://github.com/flojon/aspire-servicesources/issues/416
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
