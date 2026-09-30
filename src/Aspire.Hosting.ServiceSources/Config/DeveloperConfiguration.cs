@@ -96,6 +96,17 @@ internal sealed class DeveloperConfiguration
     public required IReadOnlyList<string> CatalogNames { get; init; }
 
     /// <summary>
+    /// Keys under <c>repositories</c> that name no repository the catalog declares, as the developer
+    /// spelled them. A case-variant of a declared name is not among them: it binds to the declared
+    /// one. Exists so a typo'd repository name is reported rather than silently leaving the group on
+    /// its managed checkout.
+    /// </summary>
+    public required IReadOnlyList<string> UndeclaredRepositoryNames { get; init; }
+
+    /// <summary>The repository names the catalog declares, for offering a near miss.</summary>
+    public required IReadOnlyList<string> RepositoryNames { get; init; }
+
+    /// <summary>
     /// Reads the developer's selection out of <paramref name="builder"/>'s configuration. Whichever
     /// entry point the AppHost called first has already put <c>servicesources.local.json</c> into
     /// that chain; the call below covers the internal paths that reach a read without one, and is a
@@ -193,12 +204,7 @@ internal sealed class DeveloperConfiguration
             NormalizeBlankToAbsent(config, DeveloperConfigShape.Repository);
         }
 
-        // The undeclared-repository-names half is discarded: nothing today offers a near-miss
-        // suggestion for a repository entry the way NotConfiguredError does for a service, so there
-        // is nothing yet that would read it. CanonicalizeToCatalog<T> still computes it, being the
-        // one walk that also decides the canonical keying — recomputing it separately would be a
-        // second pass over the same entries to throw the answer away differently.
-        var (repositories, _) = CanonicalizeToCatalog(boundRepositories, declaredRepositoryNames);
+        var (repositories, undeclaredRepositoryNames) = CanonicalizeToCatalog(boundRepositories, declaredRepositoryNames);
 
         return new DeveloperConfiguration
         {
@@ -206,6 +212,8 @@ internal sealed class DeveloperConfiguration
             Repositories = repositories,
             UndeclaredNames = undeclaredNames,
             CatalogNames = declaredNames,
+            UndeclaredRepositoryNames = undeclaredRepositoryNames,
+            RepositoryNames = declaredRepositoryNames,
             FilePath = path,
             FileFound = File.Exists(path),
             // Asked unconditionally, and not gated on nothing being configured — which reads as the

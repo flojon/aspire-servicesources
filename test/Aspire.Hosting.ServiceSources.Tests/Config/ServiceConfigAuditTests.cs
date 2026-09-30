@@ -292,4 +292,46 @@ public class ServiceConfigAuditTests
 
         Assert.Empty(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
     }
+
+    private const string MonorepoCatalog = """
+        repositories:
+          monorepo:
+            repository: https://github.com/company/monorepo
+        services:
+          orders:
+            repositoryRef: monorepo
+            project: src/Orders/Orders.csproj
+            container:
+              image: ghcr.io/company/orders
+              port: 8080
+        """;
+
+    [Fact]
+    public async Task RepositoryEntryMatchingNoDeclaredRepository_IsReportedWithDidYouMean()
+    {
+        var builder = CreateBuilder(MonorepoCatalog, """
+            { "services": { "orders": { "source": "container" } },
+              "repositories": { "monorpeo": { "path": "/src/monorepo" } } }
+            """);
+        builder.AddService("orders");
+
+        var warning = Assert.Single(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+
+        Assert.Contains("monorpeo", warning);
+        Assert.Contains("(did you mean 'monorepo'?)", warning);
+        Assert.Contains("repositories", warning);
+        Assert.DoesNotContain("Service configuration that nothing read", warning);
+    }
+
+    [Fact]
+    public async Task RepositoryEntryInAnotherCasing_IsNotReported()
+    {
+        var builder = CreateBuilder(MonorepoCatalog, """
+            { "services": { "orders": { "source": "container" } },
+              "repositories": { "MonoRepo": { "path": "/src/monorepo" } } }
+            """);
+        builder.AddService("orders");
+
+        Assert.Empty(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+    }
 }

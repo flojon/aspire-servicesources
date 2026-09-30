@@ -6,7 +6,8 @@ namespace Aspire.Hosting.ServiceSources.Config;
 
 /// <summary>
 /// Reports <c>services</c> configuration that nothing reads — an entry naming no service
-/// <c>servicesources.yaml</c> declares, or a misspelled <c>services</c> root key (#215).
+/// <c>servicesources.yaml</c> declares, or a misspelled <c>services</c> root key (#215) — and
+/// <c>repositories</c> entries naming no declared repository.
 /// </summary>
 /// <remarks>
 /// The narrower of the two gaps #215 raised: an entry whose name is in the catalog but that no
@@ -109,6 +110,15 @@ internal static class ServiceConfigAudit
             reasons.Add(OrphanedEntriesReason(orphans, config.CatalogNames));
         }
 
+        var repositoryOrphans = config.UndeclaredRepositoryNames
+            .OrderBy(key => key, StringComparer.Ordinal)
+            .ToArray();
+
+        if (repositoryOrphans.Length > 0)
+        {
+            reasons.Add(OrphanedRepositoryEntriesReason(repositoryOrphans, config.RepositoryNames));
+        }
+
         return reasons;
     }
 
@@ -149,6 +159,37 @@ internal static class ServiceConfigAudit
             + $"{(orphans.Count == 1 ? Raw.Literal("the entry configures") : Raw.Literal("the entries configure"))} nothing. This AppHost's "
             + $"catalog declares: {Raw.Join(", ", declared)}. Correct the key "
             + $"under \"{Raw.Literal(DeveloperConfigFileSource.FileServicesKey)}\" in '{Raw.Literal(DeveloperConfiguration.FileName)}', or "
+            + $"wherever a higher layer set it, or remove the entry if it is deliberately unused.");
+    }
+
+    /// <summary>
+    /// The <c>repositories</c> counterpart of <see cref="OrphanedEntriesReason"/>. The cost it names
+    /// differs: a typo'd repository name leaves the group cloning into its managed checkout rather
+    /// than using the directory the developer meant.
+    /// </summary>
+    private static Raw OrphanedRepositoryEntriesReason(
+        IReadOnlyList<string> orphans, IReadOnlyList<string> repositoryNames)
+    {
+        var candidates = repositoryNames.OrderBy(name => name, StringComparer.Ordinal).ToArray();
+
+        var described = orphans.Select(orphan =>
+        {
+            var closest = NearMiss.Nearest(orphan, candidates, spelling: name => name).FirstOrDefault();
+
+            return closest is null
+                ? Raw.Compose($"'{new Name(orphan)}'")
+                : Raw.Compose($"'{new Name(orphan)}' (did you mean '{new Name(closest)}'?)");
+        });
+
+        var declared = candidates.Select(name => Raw.Compose($"'{new Name(name)}'"));
+
+        return Raw.Compose(
+            $"Repository configuration that nothing read: {Raw.Join(", ", described)}. No repository in "
+            + $"this AppHost's catalog is named {(orphans.Count == 1 ? Raw.Literal("it") : Raw.Literal("any of them"))}, so "
+            + $"{(orphans.Count == 1 ? Raw.Literal("the entry configures") : Raw.Literal("the entries configure"))} nothing, and the services "
+            + $"of the repository it was meant for use their managed checkout instead. This AppHost's "
+            + $"catalog declares: {Raw.Join(", ", declared)}. Correct the key "
+            + $"under \"{Raw.Literal(DeveloperConfigFileSource.FileRepositoriesKey)}\" in '{Raw.Literal(DeveloperConfiguration.FileName)}', or "
             + $"wherever a higher layer set it, or remove the entry if it is deliberately unused.");
     }
 
