@@ -315,11 +315,7 @@ public sealed class ServiceDefinitionBuilder
             Url = _url,
             Container = _container,
             Kubernetes = _kubernetes,
-            Dotnet = _dotnet is null ? null : new()
-            {
-                LaunchProfileName = _dotnet.LaunchProfileName,
-                ExcludeLaunchProfile = _dotnet.ExcludeLaunchProfile,
-            },
+            Dotnet = _dotnet?.Clone(),
             Kind = kind,
             KindOptions = _kindOptions,
             Origin = CatalogOrigin.Code,

@@ -12,6 +12,12 @@ internal sealed class DotnetMetadata
 
     public bool? ExcludeLaunchProfile { get; set; }
 
+    internal DotnetMetadata Clone() => new()
+    {
+        LaunchProfileName = LaunchProfileName,
+        ExcludeLaunchProfile = ExcludeLaunchProfile,
+    };
+
     internal static (string? Name, bool Exclude) Resolve(DotnetMetadata? metadata)
     {
         var name = string.IsNullOrWhiteSpace(metadata?.LaunchProfileName) ? null : metadata!.LaunchProfileName;
@@ -28,6 +34,6 @@ internal sealed class DotnetMetadata
 
         if (metadata.ExcludeLaunchProfile == true && !string.IsNullOrWhiteSpace(metadata.LaunchProfileName))
             throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': 'launchProfileName' and 'excludeLaunchProfile: true' contradict each other (excluding launch profiles ignores any named profile). Drop one of the two (or the WithLaunchProfile/ExcludeLaunchProfile call).");
+                $"Service '{new Name(serviceName)}': 'launchProfileName' and 'excludeLaunchProfile: true' contradict each other (excluding launch profiles ignores any named profile). Drop one of the two, or one of the WithLaunchProfile/ExcludeLaunchProfile calls.");
     }
 }
