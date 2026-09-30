@@ -142,7 +142,7 @@ internal sealed class PathSource(
     {
         if (config.Path.Path is { } overridePath)
         {
-            return LocalGitCheckout.ResolveDeveloperDirectory(serviceName, "path.path", overridePath, appHostDirectory);
+            return LocalGitCheckout.ResolveDeveloperDirectory(PreparePlan.ServiceLabel(serviceName), "path.path", overridePath, appHostDirectory);
         }
 
         RequireCatalogPath(serviceName, definition);

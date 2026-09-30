@@ -9,13 +9,9 @@ namespace Aspire.Hosting.ServiceSources.Config;
 internal sealed class RepositoryDeveloperConfig
 {
     /// <summary>
-    /// Reserved rather than implemented as a whole-group redirect: a non-null value is rejected as a
-    /// configuration error naming the repository. Design finding 4 is explicit that the per-service
-    /// <c>repository.path</c> escape is the only one ("No new field, no repository-level list of
-    /// exceptions") — a developer who needs to redirect one member's checkout still does it on that
-    /// service's own entry, not here. The field exists on the type because the design names the
-    /// triple literally, and because a future repository-level redirect, if one is ever added, has
-    /// somewhere to land without another config-shape change.
+    /// An existing directory every grouped member uses as its repository root, so nothing is cloned,
+    /// fetched or reconciled. A member's own <c>repository.path</c> still wins, and it cannot be
+    /// combined with <see cref="Ref"/>.
     /// </summary>
     public string? Path { get; set; }
 

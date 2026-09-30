@@ -233,7 +233,7 @@ public class LocalProjectSourceTests
 
     /// <summary>
     /// The grouped-service checks in <see cref="LocalGitCheckout.PrepareRepoRoot"/> (criterion 4, and
-    /// the reserved <c>path</c> field) run before anything touches the filesystem or git, so a
+    /// the group <c>path</c>/<c>ref</c> conflict) run before anything touches the filesystem or git, so a
     /// managed checkout — never created here — is enough to reach them.
     /// </summary>
     private static string UnusedManagedAppHostDirectory => TempDirectories.CreateSubdirectory().FullName;
@@ -271,20 +271,161 @@ public class LocalProjectSourceTests
     }
 
     [Fact]
-    public void PrepareRepoRoot_RepositoryPathOnGroupedService_ThrowsReservedError()
+    public void PrepareRepoRoot_GroupPathOnGroupedService_UsesItWithoutTouchingGit()
     {
-        var repositoryConfig = new RepositoryDeveloperConfig { Path = "/some/where" };
+        var groupDir = TempDirectories.CreateSubdirectory().FullName;
+        var gitClient = new FakeGitClient();
+
+        var prepared = LocalGitCheckout.PrepareRepoRoot(
+            ServiceName, GroupedDefinition(), DevConfig(), new RepositoryDeveloperConfig { Path = groupDir },
+            UnusedManagedAppHostDirectory, gitClient);
+
+        Assert.Equal(groupDir, prepared.RepoRoot);
+        Assert.False(prepared.NeedsReconciliation);
+        Assert.Empty(gitClient.ClonedRepos);
+        Assert.Empty(gitClient.CheckedOutRefs);
+    }
+
+    [Fact]
+    public void PrepareRepoRoot_RelativeGroupPath_AnchorsToAppHostDirectory()
+    {
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
+        var groupDir = TempDirectories.CreateSubdirectory().FullName;
+        var relative = Path.GetRelativePath(appHostDirectory, groupDir);
+
+        var prepared = LocalGitCheckout.PrepareRepoRoot(
+            ServiceName, GroupedDefinition(), DevConfig(), new RepositoryDeveloperConfig { Path = relative },
+            appHostDirectory, new FakeGitClient());
+
+        Assert.Equal(groupDir, prepared.RepoRoot);
+    }
+
+    [Fact]
+    public void PrepareRepoRoot_GroupPathMissing_NamesTheRepositoryAndTheKeyNotTheMember()
+    {
+        var missing = Path.Combine(TempDirectories.CreateSubdirectory().FullName, "nope");
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
             LocalGitCheckout.PrepareRepoRoot(
-                ServiceName, GroupedDefinition(), DevConfig(), repositoryConfig,
+                ServiceName, GroupedDefinition(), DevConfig(), new RepositoryDeveloperConfig { Path = missing },
                 UnusedManagedAppHostDirectory, new FakeGitClient()));
 
         Assert.Contains("Repository 'monorepo'", ex.Message);
         Assert.Contains("ServiceSources:Repositories:monorepo:path", ex.Message);
-        Assert.Contains("reserved", ex.Message);
-        Assert.Contains("'path' source", ex.Message);
-        Assert.DoesNotContain("repository.path", ex.Message);
+        Assert.DoesNotContain($"Service '{ServiceName}'", ex.Message);
+    }
+
+    [Fact]
+    public void PrepareRepoRoot_MemberPathBeatsGroupPath_AndSiblingStillGetsGroupPath()
+    {
+        var groupDir = TempDirectories.CreateSubdirectory().FullName;
+        var ownDir = TempDirectories.CreateSubdirectory().FullName;
+        var repositoryConfig = new RepositoryDeveloperConfig { Path = groupDir };
+
+        var own = LocalGitCheckout.PrepareRepoRoot(
+            ServiceName, GroupedDefinition(), DevConfig(path: ownDir), repositoryConfig,
+            UnusedManagedAppHostDirectory, new FakeGitClient());
+        var sibling = LocalGitCheckout.PrepareRepoRoot(
+            "basket", GroupedDefinition(serviceName: "basket"), DevConfig(), repositoryConfig,
+            UnusedManagedAppHostDirectory, new FakeGitClient());
+
+        Assert.Equal(ownDir, own.RepoRoot);
+        Assert.Equal(groupDir, sibling.RepoRoot);
+    }
+
+    [Fact]
+    public void PrepareRepoRoot_LocalAliasPathBeatsGroupPath()
+    {
+        var groupDir = TempDirectories.CreateSubdirectory().FullName;
+        var ownDir = TempDirectories.CreateSubdirectory().FullName;
+        // 'local' is folded into 'repository' by ReconcileRepositoryAlias; go through that real fold.
+        var config = new ServiceDeveloperConfig { Source = "repository", Local = new() { Path = ownDir } };
+        Assert.Null(config.ReconcileRepositoryAlias(ServiceName));
+
+        var prepared = LocalGitCheckout.PrepareRepoRoot(
+            ServiceName, GroupedDefinition(), config, new RepositoryDeveloperConfig { Path = groupDir },
+            UnusedManagedAppHostDirectory, new FakeGitClient());
+
+        Assert.Equal(ownDir, prepared.RepoRoot);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PrepareRepoRoot_GroupPathWithGroupRef_ThrowsNamingRepositoryAndBothKeys(bool memberHasOwnPath)
+    {
+        var groupDir = TempDirectories.CreateSubdirectory().FullName;
+        var config = memberHasOwnPath ? DevConfig(path: TempDirectories.CreateSubdirectory().FullName) : DevConfig();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            LocalGitCheckout.PrepareRepoRoot(
+                ServiceName, GroupedDefinition(), config,
+                new RepositoryDeveloperConfig { Path = groupDir, Ref = "feature/x" },
+                UnusedManagedAppHostDirectory, new FakeGitClient()));
+
+        Assert.Contains("Repository 'monorepo'", ex.Message);
+        Assert.Contains("ServiceSources:Repositories:monorepo:path", ex.Message);
+        Assert.Contains("ServiceSources:Repositories:monorepo:ref", ex.Message);
+    }
+
+    [Fact]
+    public void PrepareRepoRoot_GroupPathWithCatalogDefaultRef_IsNotAnError()
+    {
+        var groupDir = TempDirectories.CreateSubdirectory().FullName;
+        var gitClient = new FakeGitClient();
+
+        var prepared = LocalGitCheckout.PrepareRepoRoot(
+            ServiceName, GroupedDefinition(defaultRef: "main"), DevConfig(), new RepositoryDeveloperConfig { Path = groupDir },
+            UnusedManagedAppHostDirectory, gitClient);
+
+        Assert.Equal(groupDir, prepared.RepoRoot);
+        Assert.Empty(gitClient.CheckedOutRefs);
+    }
+
+    [Fact]
+    public void PrepareRepoRoot_GroupRefAlone_StillWorks()
+    {
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
+        var repoRoot = LocalGitCheckout.ManagedRepoRoot(appHostDirectory, "monorepo");
+        Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
+
+        var prepared = LocalGitCheckout.PrepareRepoRoot(
+            ServiceName, GroupedDefinition(), DevConfig(), new RepositoryDeveloperConfig { Ref = "feature/x" },
+            appHostDirectory, new FakeGitClient());
+
+        Assert.Equal(repoRoot, prepared.RepoRoot);
+    }
+
+    [Fact]
+    public void PrepareRepoRoot_GroupPathIgnoredForUngroupedServiceOfTheSameName()
+    {
+        var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
+        var groupDir = TempDirectories.CreateSubdirectory().FullName;
+        var repoRoot = LocalGitCheckout.ManagedRepoRoot(appHostDirectory, ServiceName);
+        Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
+
+        var prepared = LocalGitCheckout.PrepareRepoRoot(
+            ServiceName, Definition(), DevConfig(), new RepositoryDeveloperConfig { Path = groupDir },
+            appHostDirectory, new FakeGitClient());
+
+        Assert.Equal(repoRoot, prepared.RepoRoot);
+    }
+
+    [Fact]
+    public void GroupPath_DotnetMemberProjectResolvesAgainstGroupDirectoryAndStaysConfined()
+    {
+        var groupDir = TempDirectories.CreateSubdirectory().FullName;
+        Directory.CreateDirectory(Path.Combine(groupDir, "src", "Orders"));
+        File.WriteAllText(Path.Combine(groupDir, "src", "Orders", "Orders.csproj"), "<Project />");
+        var definition = GroupedDefinition(project: "src/Orders/Orders.csproj");
+
+        var project = ResolveProjectPath(
+            ServiceName, definition, DevConfig(), UnusedAppHostDirectory, new FakeGitClient(),
+            new RepositoryDeveloperConfig { Path = groupDir });
+
+        Assert.Equal(Path.Combine(groupDir, "src", "Orders", "Orders.csproj"), Path.GetFullPath(project));
+        Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            LocalProjectSource.ResolveProjectFile(ServiceName, groupDir, "../escape/Orders.csproj"));
     }
 
     /// <summary>
