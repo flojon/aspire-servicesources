@@ -101,7 +101,7 @@ builder.SetCheckoutTiming(CheckoutTiming.Eager)."* In publish mode, the notice i
 nothing the developer sets in the AppHost changes it.
 
 Change: `LocalCheckoutPrefetch` records `builder.ExecutionContext.IsRunMode` when it starts (under
-the existing `_gate`, alongside `_started`). In run mode the notice is unchanged. In publish mode it
+the existing `_gate`, alongside `_started`). In run mode the notice keeps its deferral remedy and gains the cases where it does not help (Eager, a declining kind). In publish mode it
 replaces the deferred-checkout sentence with one that says deferral does not apply to `aspire publish`,
 which composes the manifest from checkouts that are on disk, so removing the entry is the only remedy.
 No new state beyond one `bool`; the strings are literals composed through the existing `Raw` seam, so
@@ -116,7 +116,7 @@ types, or a custom kind) is cloned up front, so clearing the entry is the only r
 `docs/sources/repository.md` says: *"Keep the file to the services you actually add — unless you opt
 out with `builder.SetCheckoutTiming(CheckoutTiming.Eager)`, which removes the reason to."* This is
 backwards. Under the default timing an unused cold entry costs nothing in run mode; **`Eager` is what
-brings the reason back.** The bullet also says nothing about publish mode, the one place the default
+brings the reason back.** The bullet also says nothing about publish mode or a kind that declines deferral, where the default
 does not help.
 
 Change: rewrite the bullet: by default, in run mode, an entry you never add is not cloned; the cost
@@ -128,7 +128,7 @@ answered), which the following paragraph partly says already; keep it to a sente
 ### 3.3 The class remarks
 
 `LocalCheckoutPrefetch` remarks already say the speculative set survives "for as long as an AppHost
-opts into `CheckoutTiming.Eager` or runs in publish mode". Add the *decision*, so the next reader does
+opts into `CheckoutTiming.Eager` or runs in publish mode" (the final remarks also name a kind that declines deferral). Add the *decision*, so the next reader does
 not re-open it: why the set is not narrowed further in those modes (O2/O3 above, in two sentences). Do
 not add ticket references or history (repo comment rule); state the constraint.
 

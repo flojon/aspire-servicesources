@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Superseded in detail by the merged code.** Review rounds reworded both notice tails, added the declining-kind case (four new tests, field `_isRunMode`) and widened the docs to "some javascript app types, or a custom kind". Where this plan quotes notice wording or a test list, the code and tests are authoritative.
+
 **Goal:** Record the decision that a config entry alone stays warrant to clone where `AddService()` must block on the clone, and correct the three places that give wrong or missing advice about it.
 
 **Architecture:** No cloning behaviour changes. `LocalCheckoutPrefetch` remembers whether the builder is in run mode and picks the tail sentence of the unused-checkouts notice accordingly. The user doc bullet and the class remarks are rewritten to match the measured behaviour.
