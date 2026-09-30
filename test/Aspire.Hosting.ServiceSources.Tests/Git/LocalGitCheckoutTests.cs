@@ -21,6 +21,22 @@ public class LocalGitCheckoutTests
     private static ServiceDeveloperConfig WithPathOverride(string path) =>
         new() { Source = "repository", Repository = new LocalDeveloperConfig { Path = path } };
 
+    private static ServiceDefinition Definition(string checkoutName) =>
+        new()
+        {
+            Repository = new RepositoryDefinition
+            {
+                Url = "https://github.com/company/" + checkoutName, CheckoutName = checkoutName,
+            },
+            Project = "Orders.csproj",
+            Kind = LocalKinds.Dotnet,
+            Origin = CatalogOrigin.FromYaml("servicesources.yaml"),
+        };
+
+    private static ServiceDefinition GroupedDefinition() => Definition("monorepo");
+
+    private static RepositoryDeveloperConfig GroupPath(string path) => new() { Path = path };
+
     private static string NewAppHostDirectory() => TempDirectories.CreateSubdirectory().FullName;
 
     /// <summary>
@@ -32,11 +48,11 @@ public class LocalGitCheckoutTests
 
     [Fact]
     public void IsManagedCheckout_NoPathOverride_IsTrue() =>
-        Assert.True(LocalGitCheckout.IsManagedCheckout(Managed()));
+        Assert.True(LocalGitCheckout.IsManagedCheckout(Definition("orders"), "orders", Managed(), null));
 
     [Fact]
     public void IsManagedCheckout_PathOverride_IsFalse() =>
-        Assert.False(LocalGitCheckout.IsManagedCheckout(WithPathOverride("/somewhere/of/their/own")));
+        Assert.False(LocalGitCheckout.IsManagedCheckout(Definition("orders"), "orders", WithPathOverride("/somewhere/of/their/own"), null));
 
     /// <summary>
     /// The single definition of "is there anything to clone for this service", pinned where it is
@@ -70,7 +86,8 @@ public class LocalGitCheckoutTests
     {
         var appHostDirectory = NewAppHostDirectory();
 
-        Assert.True(LocalGitCheckout.IsColdManagedCheckout(appHostDirectory, "orders", Managed()));
+        Assert.True(LocalGitCheckout.IsColdManagedCheckout(
+            appHostDirectory, "orders", Definition("orders"), Managed(), null));
     }
 
     [Fact]
@@ -80,7 +97,8 @@ public class LocalGitCheckoutTests
         var repoRoot = LocalGitCheckout.ManagedRepoRoot(appHostDirectory, "orders");
         Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
 
-        Assert.False(LocalGitCheckout.IsColdManagedCheckout(appHostDirectory, "orders", Managed()));
+        Assert.False(LocalGitCheckout.IsColdManagedCheckout(
+            appHostDirectory, "orders", Definition("orders"), Managed(), null));
     }
 
     [Fact]
@@ -92,7 +110,8 @@ public class LocalGitCheckoutTests
         var appHostDirectory = NewAppHostDirectory();
         Directory.CreateDirectory(LocalGitCheckout.ManagedRepoRoot(appHostDirectory, "orders"));
 
-        Assert.False(LocalGitCheckout.IsColdManagedCheckout(appHostDirectory, "orders", Managed()));
+        Assert.False(LocalGitCheckout.IsColdManagedCheckout(
+            appHostDirectory, "orders", Definition("orders"), Managed(), null));
     }
 
     [Fact]
@@ -104,7 +123,30 @@ public class LocalGitCheckoutTests
         var appHostDirectory = NewAppHostDirectory();
         var theirs = TempDirectories.CreateSubdirectory().FullName;
 
-        Assert.False(LocalGitCheckout.IsColdManagedCheckout(appHostDirectory, "orders", WithPathOverride(theirs)));
+        Assert.False(LocalGitCheckout.IsColdManagedCheckout(
+            appHostDirectory, "orders", Definition("orders"), WithPathOverride(theirs), null));
+    }
+
+    [Fact]
+    public void IsColdManagedCheckout_GroupedMemberWithGroupPath_IsNotCold()
+    {
+        var appHost = NewAppHostDirectory();
+        var group = GroupPath(TempDirectories.CreateSubdirectory().FullName);
+
+        Assert.False(LocalGitCheckout.IsColdManagedCheckout(appHost, "orders", GroupedDefinition(), Managed(), group));
+        Assert.True(LocalGitCheckout.IsColdManagedCheckout(appHost, "orders", GroupedDefinition(), Managed(), null));
+    }
+
+    [Fact]
+    public void IsManagedCheckout_FollowsEffectivePath()
+    {
+        var group = GroupPath("/x");
+
+        Assert.False(LocalGitCheckout.IsManagedCheckout(GroupedDefinition(), "orders", Managed(), group));
+        Assert.False(LocalGitCheckout.IsManagedCheckout(GroupedDefinition(), "orders", WithPathOverride("/own"), null));
+        Assert.True(LocalGitCheckout.IsManagedCheckout(GroupedDefinition(), "orders", Managed(), null));
+        // An ungrouped service of the same name never picks the group entry up.
+        Assert.True(LocalGitCheckout.IsManagedCheckout(Definition("orders"), "orders", Managed(), group));
     }
 
     [Fact]
@@ -116,7 +158,8 @@ public class LocalGitCheckoutTests
         var appHostDirectory = NewAppHostDirectory();
         var missing = Path.Combine(appHostDirectory, "gone");
 
-        Assert.False(LocalGitCheckout.IsColdManagedCheckout(appHostDirectory, "orders", WithPathOverride(missing)));
+        Assert.False(LocalGitCheckout.IsColdManagedCheckout(
+            appHostDirectory, "orders", Definition("orders"), WithPathOverride(missing), null));
     }
 
     /// <summary>

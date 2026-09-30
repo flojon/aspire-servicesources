@@ -161,9 +161,10 @@ internal static class LocalGitCheckout
 
     /// <summary>
     /// Whether this package owns the checkout directory, and so has a
-    /// <see cref="ManagedRepoRoot"/> to say anything about at all. No <c>repository.path</c> means it
-    /// does; a <c>repository.path</c> override means it does not, because that names the developer's
-    /// own directory, which this package neither creates, clones into, nor writes to.
+    /// <see cref="ManagedRepoRoot"/> to say anything about at all. No <see cref="EffectivePath"/>
+    /// means it does; a <c>repository.path</c> or a group <c>path</c> means it does not, because that
+    /// names the developer's own directory, which this package neither creates, clones into, nor
+    /// writes to.
     /// </summary>
     /// <remarks>
     /// The shared first half of every question answered about a service's checkout from its path
@@ -172,7 +173,10 @@ internal static class LocalGitCheckout
     /// them, because a caller that answers it differently answers a different question while
     /// looking like it asks this one.
     /// </remarks>
-    public static bool IsManagedCheckout(ServiceDeveloperConfig config) => config.Repository.Path is null;
+    public static bool IsManagedCheckout(
+        ServiceDefinition definition, string serviceName, ServiceDeveloperConfig config,
+        RepositoryDeveloperConfig? repositoryConfig) =>
+        EffectivePath(definition, serviceName, config, repositoryConfig) is null;
 
     /// <summary>
     /// The developer-supplied directory for this member, if any: its own <c>repository.path</c>,
@@ -248,9 +252,6 @@ internal static class LocalGitCheckout
     /// <see cref="ManagedRepoRoot"/> yet. Configuration plus one <c>Directory.Exists</c>, so it is
     /// answerable about a service nobody has added.
     /// </summary>
-    /// <param name="checkoutName">
-    /// <see cref="Config.Catalog.RepositoryDefinition.CheckoutName"/> — see <see cref="ManagedRepoRoot"/>.
-    /// </param>
     /// <remarks>
     /// <para>
     /// The single rule two independent decisions are built on, which is why it lives here rather
@@ -275,9 +276,10 @@ internal static class LocalGitCheckout
     /// </para>
     /// </remarks>
     public static bool IsColdManagedCheckout(
-        string appHostDirectory, string checkoutName, ServiceDeveloperConfig config) =>
-        IsManagedCheckout(config)
-        && !Directory.Exists(ManagedRepoRoot(appHostDirectory, checkoutName));
+        string appHostDirectory, string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config,
+        RepositoryDeveloperConfig? repositoryConfig) =>
+        IsManagedCheckout(definition, serviceName, config, repositoryConfig)
+        && !Directory.Exists(ManagedRepoRoot(appHostDirectory, definition.Repository.CheckoutName));
 
     /// <summary>
     /// The fully resolved checkout directory: prepared, then reconciled. For callers already

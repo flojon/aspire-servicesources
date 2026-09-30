@@ -174,13 +174,53 @@ public class DeferredCheckoutTests
         var deferred = DeferredCheckout.For(builder);
 
         // Nothing at the shared directory yet: cold, so it defers.
-        Assert.True(deferred.ShouldDefer(builder, "orders", ordersDefinition, DevConfig()));
+        Assert.True(deferred.ShouldDefer(builder, "orders", ordersDefinition, DevConfig(), null));
 
         // A co-grouped service's checkout has already landed at "monorepo" — "orders" itself was
         // never cloned into and never will be, but the group's directory exists, so there is nothing
         // left to defer.
         Directory.CreateDirectory(Path.Combine(ExpectedRepoRoot(dir, "monorepo"), ".git"));
-        Assert.False(deferred.ShouldDefer(builder, "orders", ordersDefinition, DevConfig()));
+        Assert.False(deferred.ShouldDefer(builder, "orders", ordersDefinition, DevConfig(), null));
+    }
+
+    private static ServiceDefinition GroupedDefinition(string groupName) =>
+        new()
+        {
+            Repository = new RepositoryDefinition
+            {
+                Url = $"https://example.com/{groupName}.git", CheckoutName = groupName,
+            },
+            Project = "Orders/Orders.csproj",
+            Kind = LocalKinds.Dotnet,
+            Origin = CatalogOrigin.FromYaml("servicesources.yaml"),
+        };
+
+    [Fact]
+    public void ShouldDefer_GroupedMemberWithGroupPath_DoesNotDefer()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+        var deferred = DeferredCheckout.For(builder);
+        var group = new RepositoryDeveloperConfig { Path = TempDirectories.CreateSubdirectory().FullName };
+
+        Assert.False(deferred.ShouldDefer(builder, "orders", GroupedDefinition("monorepo"), DevConfig(), group));
+        Assert.True(deferred.ShouldDefer(builder, "orders", GroupedDefinition("monorepo"), DevConfig(), null));
+    }
+
+    [Fact]
+    public void ShouldDefer_MixedGroup_OnlyMembersWithoutAPathDefer()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+        var deferred = DeferredCheckout.For(builder);
+        var ownPath = TempDirectories.CreateSubdirectory().FullName;
+        var group = new RepositoryDeveloperConfig { Path = TempDirectories.CreateSubdirectory().FullName };
+
+        Assert.False(deferred.ShouldDefer(builder, "orders", GroupedDefinition("monorepo"), DevConfig(path: ownPath), group));
+        Assert.False(deferred.ShouldDefer(builder, "basket", GroupedDefinition("monorepo"), DevConfig(), group));
+        Assert.True(deferred.ShouldDefer(builder, "billing", GroupedDefinition("other"), DevConfig(), null));
     }
 
     [Fact]

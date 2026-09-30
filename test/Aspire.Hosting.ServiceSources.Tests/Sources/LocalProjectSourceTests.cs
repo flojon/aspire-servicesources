@@ -2249,6 +2249,33 @@ public class LocalProjectSourceTests
         Assert.Empty(gitClient.ClonedRepos);
     }
 
+    [Fact]
+    public void Resolve_GroupedMemberWithGroupPathAndNoRepositoryUrl_IsNotRefused()
+    {
+        var groupDir = TempDirectories.CreateSubdirectory().FullName;
+        var definition = new ServiceDefinition
+        {
+            Repository = new RepositoryDefinition { Url = "", CheckoutName = "monorepo" },
+            Project = "Orders.csproj",
+            Kind = LocalKinds.Dotnet,
+            Origin = CatalogOrigin.FromYaml("servicesources.yaml"),
+        };
+        var withoutGroupPath = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(new FakeGitClient()).Resolve(
+                PlainBuilder(), ServiceName, definition, DevConfig()));
+        Assert.Contains("gives it no repository to clone", withoutGroupPath.Message, StringComparison.Ordinal);
+
+        var gitClient = new FakeGitClient();
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            new LocalProjectSource(gitClient).Resolve(
+                PlainBuilder(), ServiceName, definition, DevConfig(), new RepositoryDeveloperConfig { Path = groupDir }));
+
+        // Got past the guard and into the group directory, where the empty checkout has no project.
+        Assert.Contains("project file 'Orders.csproj' was not found", ex.Message, StringComparison.Ordinal);
+        Assert.True(gitClient.EnsureAvailableCalled);
+        Assert.Empty(gitClient.ClonedRepos);
+    }
+
     /// <summary>
     /// Defence in depth for the route <see cref="LocalCheckoutPrefetch"/> re-opened once: the
     /// invariant sits where the clone is decided, so a call site that never passes through

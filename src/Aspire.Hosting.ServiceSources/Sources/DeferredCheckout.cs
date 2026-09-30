@@ -194,7 +194,7 @@ internal sealed class DeferredCheckout
     /// </remarks>
     public bool ShouldDefer(
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
-        ServiceDeveloperConfig config)
+        ServiceDeveloperConfig config, RepositoryDeveloperConfig? repositoryConfig)
     {
         lock (_gate)
         {
@@ -234,7 +234,7 @@ internal sealed class DeferredCheckout
         // eager path, which is the one that knows how to tell those apart and what to do about
         // each.
         return LocalGitCheckout.IsColdManagedCheckout(
-            builder.AppHostDirectory, definition.Repository.CheckoutName, config);
+            builder.AppHostDirectory, serviceName, definition, config, repositoryConfig);
     }
 
     /// <summary>

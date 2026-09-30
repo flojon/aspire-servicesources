@@ -709,10 +709,11 @@ internal sealed class LocalCheckoutPrefetch
             // service's own name would launch a redundant speculative clone task for it — harmless
             // (PrepareRepoRoot no-ops against an existing '.git'), but wasted background work.
             .Where(candidate => LocalGitCheckout.IsColdManagedCheckout(
-                appHostDirectory, candidate.Definition.Repository.CheckoutName, candidate.Config))
+                appHostDirectory, candidate.Name, candidate.Definition, candidate.Config, candidate.RepositoryConfig))
             // ...minus the ones a deferred registration would clone for itself.
             .Where(candidate => !WouldBeDeferredIfAdded(
-                builder, deferred, kinds, candidate.Name, candidate.Definition, candidate.Config))
+                builder, deferred, kinds, candidate.Name, candidate.Definition, candidate.Config,
+                candidate.RepositoryConfig))
             .ToArray();
 
         if (candidates.Length == 0)
@@ -775,9 +776,10 @@ internal sealed class LocalCheckoutPrefetch
         LocalKindRegistry kinds,
         string serviceName,
         ServiceDefinition definition,
-        ServiceDeveloperConfig config)
+        ServiceDeveloperConfig config,
+        RepositoryDeveloperConfig? repositoryConfig)
     {
-        if (!deferred.ShouldDefer(builder, serviceName, definition, config))
+        if (!deferred.ShouldDefer(builder, serviceName, definition, config, repositoryConfig))
         {
             return false;
         }

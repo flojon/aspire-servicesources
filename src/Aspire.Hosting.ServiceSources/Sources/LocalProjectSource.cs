@@ -25,7 +25,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     {
         // Ahead of everything below, EnsureAvailable included, because it is the one check that can
         // say this service has nothing to clone at all — and a cold clone is what the answer saves.
-        RequireRepositoryToCheckOut(serviceName, definition, config);
+        RequireRepositoryToCheckOut(serviceName, definition, config, repositoryConfig);
 
         // Before any network work: a machine without a usable git can't clone anything, and
         // finding that out once here beats finding it out as an identical clone failure on every
@@ -55,7 +55,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
 
         // Whether this package owns the checkout directory, which decides whether the service
         // inherits the catalog's prepare block at all and where its completion marker goes.
-        var managedCheckout = LocalGitCheckout.IsManagedCheckout(config);
+        var managedCheckout = LocalGitCheckout.IsManagedCheckout(definition, serviceName, config, repositoryConfig);
 
         if (config.Local.IsDeclared)
         {
@@ -123,7 +123,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
 
         var deferred = DeferredCheckout.For(builder);
 
-        if (deferred.ShouldDefer(builder, serviceName, definition, config))
+        if (deferred.ShouldDefer(builder, serviceName, definition, config, repositoryConfig))
         {
             // Nothing is on disk for this service yet, so registering the resource against the path
             // its checkout will have — and starting it once the clone lands — costs the AppHost
@@ -313,9 +313,10 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// </para>
     /// </remarks>
     private static void RequireRepositoryToCheckOut(
-        string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
+        string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config,
+        RepositoryDeveloperConfig? repositoryConfig)
     {
-        if (!LocalGitCheckout.IsManagedCheckout(config)
+        if (!LocalGitCheckout.IsManagedCheckout(definition, serviceName, config, repositoryConfig)
             || LocalGitCheckout.HasRepositoryToClone(definition))
         {
             return;
