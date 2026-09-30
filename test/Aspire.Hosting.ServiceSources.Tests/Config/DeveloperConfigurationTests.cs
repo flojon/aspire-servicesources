@@ -1403,4 +1403,56 @@ public class DeveloperConfigurationTests
 
         Assert.DoesNotContain("Did you mean", ex.Message);
     }
+
+    private const string MonorepoCatalog = """
+        repositories:
+          monorepo:
+            repository: https://github.com/company/monorepo
+        services:
+          orders:
+            repositoryRef: monorepo
+            project: src/Orders/Orders.csproj
+        """;
+
+    [Fact]
+    public void ReadFrom_UndeclaredRepositoryEntry_IsExposedAndDeclaredOneIsNot()
+    {
+        var dir = CreateAppHostDirectory(
+            MonorepoCatalog,
+            """{ "repositories": { "monorpeo": { "path": "/a" }, "monorepo": { "path": "/b" } } }""");
+
+        var loaded = ServiceSourcesConfigCache.LoadedFor(CreateBuilder(dir)).DeveloperConfig;
+
+        Assert.Equal(["monorpeo"], loaded.UndeclaredRepositoryNames.ToArray());
+        Assert.Equal(["monorepo"], loaded.RepositoryNames.ToArray());
+    }
+
+    [Fact]
+    public void ReadFrom_RepositoryPathInJsonFile_BindsToTheDeclaredName()
+    {
+        var dir = CreateAppHostDirectory(
+            MonorepoCatalog,
+            """{ "repositories": { "Monorepo": { "path": "/src/mono" } } }""");
+
+        var loaded = ServiceSourcesConfigCache.LoadedFor(CreateBuilder(dir)).DeveloperConfig;
+
+        Assert.Equal("/src/mono", loaded.Repositories["monorepo"].Path);
+        Assert.Empty(loaded.UndeclaredRepositoryNames);
+    }
+
+    [Fact]
+    public void ReadFrom_RepositoryPathFromEnvironmentVariable_BindsCaseInsensitively()
+    {
+        var dir = CreateAppHostDirectory(MonorepoCatalog, "{}");
+        var builder = CreateBuilder(dir);
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ServiceSources:Repositories:MONOREPO:Path"] = "/src/mono",
+        });
+
+        var loaded = ServiceSourcesConfigCache.LoadedFor(builder).DeveloperConfig;
+
+        Assert.Equal("/src/mono", loaded.Repositories["monorepo"].Path);
+        Assert.Empty(loaded.UndeclaredRepositoryNames);
+    }
 }

@@ -275,4 +275,83 @@ public class ServiceSourcesConfigCacheTests
 
         Assert.Contains("orders", loaded.Catalog.Services.Keys);
     }
+
+    private const string GroupedLocalJson = """
+        { "services": { "orders": { "source": "repository" }, "basket": { "source": "repository" } },
+          "repositories": { "monorepo": { "path": "GROUPDIR" } } }
+        """;
+
+    private const string UngroupedLocalJson = """
+        { "services": { "orders": { "source": "repository" }, "basket": { "source": "repository" } } }
+        """;
+
+    private static string JsonWithGroupDir(string json, string groupDir) =>
+        json.Replace("GROUPDIR", groupDir.Replace("\\", "\\\\"), StringComparison.Ordinal);
+
+    [Fact]
+    public async Task GroupedMembersWithGroupPath_YamlCatalog_EmitNoStartupNotices()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        var groupDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            repositories:
+              monorepo:
+                repository: https://example.com/monorepo.git
+            services:
+              orders:
+                repositoryRef: monorepo
+                project: src/Orders/Orders.csproj
+              basket:
+                repositoryRef: monorepo
+                project: src/Basket/Basket.csproj
+            """);
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), JsonWithGroupDir(GroupedLocalJson, groupDir));
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        ServiceSourcesConfigCache.ResolveService(builder, "basket");
+
+        Assert.Empty(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+    }
+
+    [Fact]
+    public async Task GroupedMembersWithGroupPath_CodeCatalog_EmitNoStartupNotices()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        var groupDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), JsonWithGroupDir(GroupedLocalJson, groupDir));
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.AddServiceCatalog(c =>
+        {
+            var repository = c.AddRepository("monorepo", "https://example.com/monorepo.git");
+            c.AddService("orders").WithSharedRepository(repository).WithProject("src/Orders/Orders.csproj");
+            c.AddService("basket").WithSharedRepository(repository).WithProject("src/Basket/Basket.csproj");
+        });
+        ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        ServiceSourcesConfigCache.ResolveService(builder, "basket");
+
+        Assert.Empty(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+    }
+
+    [Fact]
+    public async Task UngroupedMembersOfOneUrl_StillGetTheNoneGroupedNotice()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(dir, "servicesources.yaml"), """
+            services:
+              orders:
+                repository: https://example.com/monorepo.git
+                project: src/Orders/Orders.csproj
+              basket:
+                repository: https://example.com/monorepo.git
+                project: src/Basket/Basket.csproj
+            """);
+        File.WriteAllText(Path.Combine(dir, "servicesources.local.json"), UngroupedLocalJson);
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        ServiceSourcesConfigCache.ResolveService(builder, "orders");
+        ServiceSourcesConfigCache.ResolveService(builder, "basket");
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.Contains(warnings, w => w.Contains("none of them are grouped", StringComparison.Ordinal));
+    }
 }
