@@ -86,10 +86,12 @@ the `"path"` spelling to paste instead.)
   "whatever's at the tip the first time each developer clones" into a reviewed checkout, since a
   resolved service can build and run code the checkout's own repository controls (see
   [`SECURITY.md`](https://github.com/flojon/aspire-servicesources/blob/main/SECURITY.md)). It costs a catalog edit per bump; that's the actual trade.
-- Keep the file to the services you actually add — unless you opt out with
-  `builder.SetCheckoutTiming(CheckoutTiming.Eager)`, which removes the reason to.
-  `AddService()` has to hand back the real resource, so under `CheckoutTiming.Eager` it can't wait
-  until the AppHost has finished composing to find out which services it wants: an entry whose
+- Keep the file to the services you actually add. By default, in run mode, an entry you never add
+  is not cloned at all. The cost comes back under `builder.SetCheckoutTiming(CheckoutTiming.Eager)`,
+  in `aspire publish` (where the manifest needs the checkout on disk), and for a kind that declines
+  deferred checkout: some javascript app types, or a custom kind. In each of those cases
+  `AddService()` has to hand back the real resource, so it can't wait until the AppHost has
+  finished composing to find out which services it wants: an entry whose
   *first* checkout an `AddService()` call would have to block on is cloned on the first call, in
   parallel with the others, before the AppHost has said which ones it wants. Entries you never add
   cost network and disk for that first clone. The AppHost logs which ones those were at startup —

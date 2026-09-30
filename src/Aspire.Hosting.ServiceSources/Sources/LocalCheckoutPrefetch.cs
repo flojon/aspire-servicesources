@@ -65,7 +65,11 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// <para>
 /// What is left in the set is the case that genuinely needs speculating over: a cold clone that
 /// <c>AddService()</c> will block on. That still costs a repository the AppHost may never add, for
-/// as long as an AppHost opts into <c>CheckoutTiming.Eager</c> or runs in publish mode.
+/// as long as an AppHost opts into <c>CheckoutTiming.Eager</c>, runs in publish mode, or uses a kind
+/// that declines deferred checkout.
+/// That is accepted rather than narrowed further: in those modes <c>AddService()</c> blocks on its
+/// own clone, so cloning on demand would turn the parallel cold clones (wall clock: the slowest)
+/// into serial ones (the sum), and nothing signals demand before the calls that would produce it.
 /// </para>
 /// <para>
 /// Free of waiting is not free of cost, and the difference matters. Resolving a checkout is not a
@@ -133,6 +137,9 @@ internal sealed class LocalCheckoutPrefetch
 
     private bool _started;
 
+    // Deferral never applies to publish, so the notice's remedy differs by mode.
+    private bool _isRunMode;
+
     public static LocalCheckoutPrefetch For(
         IDistributedApplicationBuilder builder, IGitClient gitClient)
     {
@@ -171,6 +178,7 @@ internal sealed class LocalCheckoutPrefetch
             }
 
             _started = true;
+            _isRunMode = builder.ExecutionContext.IsRunMode;
 
             // Buffered to BeforeStartEvent for the same reason ServiceSourcesWarnings is:
             // AddService() runs while the AppHost is still being composed, before there is an
@@ -220,6 +228,16 @@ internal sealed class LocalCheckoutPrefetch
             // the first.
             var names = Raw.Join(", ", unused.Select(name => Raw.Compose($"{new Name(name)}")));
 
+            var remedyTail = _isRunMode
+                ? Raw.Literal(
+                    "Deferred checkout also stops it, and is the default: a service whose first checkout is "
+                    + "deferred past startup is cloned only when it is added. Deferral does not help if this AppHost calls "
+                    + "builder.SetCheckoutTiming(CheckoutTiming.Eager) (removing that call restores it) or if the "
+                    + "service's kind declines deferred checkout, in which case clearing the entry is the only remedy.")
+                : Raw.Literal(
+                    "'aspire publish' clones before it composes the manifest, so deferred checkout does not "
+                    + "apply and clearing the entry is the only remedy.");
+
             // Named by configuration key rather than by file: the entry can equally have arrived
             // from appsettings, user secrets, an environment variable or the command line, and
             // sending a developer to a file that holds nothing — or doesn't exist — leaves them
@@ -233,9 +251,7 @@ internal sealed class LocalCheckoutPrefetch
                 + $"adds are reconciled to their configured ref. Clear "
                 + $"'{Raw.Literal(DeveloperConfiguration.ServicesKey)}:<service>:source' for the ones you don't call "
                 + $"AddService() for — usually their entries in {Raw.Literal(DeveloperConfiguration.FileName)} — to stop "
-                + $"paying for them. Deferred checkout also stops it: a service whose first checkout is deferred "
-                + $"past startup is cloned only when it is added, which is the default unless this AppHost calls "
-                + $"builder.SetCheckoutTiming(CheckoutTiming.Eager).");
+                + $"paying for them. {remedyTail}");
         }
     }
 
