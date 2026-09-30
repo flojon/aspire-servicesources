@@ -31,7 +31,7 @@ prefetch starts a `git clone` for an entry the AppHost never adds.
 | Warm checkout, `repository.path` override, `defaultSource`-derived entry, entry absent from the catalog, catalog service with no repository url, key unusable as a directory name | **No**, on every mode and timing | The candidate filters in `Run` (`IsColdManagedCheckout`, `DefaultedServiceNames`, `Catalog.Services`, `HasRepositoryToClone`, `IsContainedCheckoutDirectoryName`). Not #217's concern. |
 | Run mode, `SetCheckoutTiming(CheckoutTiming.Eager)`, cold entry | **Yes** | `ShouldDefer` returns false. Test `ServiceMarkedRepositoryButNeverAdded_IsReportedRatherThanClonedSilently`. |
 | **Publish mode** (`aspire publish`, manifest generation), any timing, cold entry | **Yes** | `ShouldDefer` returns false when `!builder.ExecutionContext.IsRunMode`, by design (the manifest would otherwise describe a project with no endpoints or profile environment). Test `PublishMode_ColdServiceTheAppHostNeverAdds_IsStillCloned`. |
-| Run mode, default timing, cold entry whose custom kind answers `SupportsDeferredCheckout` false | **Yes** | `WouldBeDeferredIfAdded` falls through to the handler. Same cost as Eager, for a kind that opted out of deferral; not a mode of its own worth designing for. |
+| Run mode, default timing, cold entry whose custom kind answers `SupportsDeferredCheckout` false | **Yes** | `WouldBeDeferredIfAdded` falls through to the handler. Same cost as Eager, for a kind that opted out of deferral; the run-mode notice names it. |
 
 So the ticket's prediction holds exactly: the flip removed the run-mode default case and left
 **publish mode** and **explicit Eager** (plus custom kinds that decline deferral).
@@ -107,10 +107,9 @@ which composes the manifest from checkouts that are on disk, so removing the ent
 No new state beyond one `bool`; the strings are literals composed through the existing `Raw` seam, so
 no user-controlled text enters the notice that does not already.
 
-The residual imprecision for a custom kind that declines deferral in run mode (the sentence says
-"the default" and it is not, for that kind) is accepted and not designed for: the sentence already
-names `Eager` as the way it is lost, and the kind author's contract documents the cost
-(`ILocalResourceKind.ResolveDeferred`).
+The run-mode tail is written so it stays true for a kind that declines deferral: it says deferral
+is the default, names `Eager` as one way it is lost, and says a declining kind (some javascript app
+types, or a custom kind) is cloned up front, so clearing the entry is the only remedy for it.
 
 ### 3.2 The user docs invert the truth about Eager
 
@@ -151,7 +150,9 @@ not add ticket references or history (repo comment rule); state the constraint.
    deferral is lost. (Guards the unchanged branch; the existing
    `ServiceMarkedRepositoryButNeverAdded_IsReportedRatherThanClonedSilently` keeps asserting the name
    and the count.)
-3. Existing `PublishMode_ColdServiceTheAppHostNeverAdds_IsStillCloned` and
+3. Publish mode with every configured service added: no notice. Run mode, default timing, with a
+   kind that declines deferral: the notice names the entry and says clearing it is the remedy.
+4. Existing `PublishMode_ColdServiceTheAppHostNeverAdds_IsStillCloned` and
    `ExistingCheckoutForAServiceNeverAdded_IsLeftOnTheRefItWasFoundOn` stay as they are: they are the
    regression pins for the two surviving claims in section 1.
 

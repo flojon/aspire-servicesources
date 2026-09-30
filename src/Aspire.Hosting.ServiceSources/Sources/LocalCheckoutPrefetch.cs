@@ -67,6 +67,9 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// <c>AddService()</c> will block on. That still costs a repository the AppHost may never add, for
 /// as long as an AppHost opts into <c>CheckoutTiming.Eager</c>, runs in publish mode, or uses a kind
 /// that declines deferred checkout.
+//// That is accepted rather than narrowed further: in those modes <c>AddService()</c> blocks on its
+/// own clone, so cloning on demand would turn the parallel cold clones (wall clock: the slowest)
+/// into serial ones (the sum), and nothing signals demand before the calls that would produce it.
 /// </para>
 /// <para>
 /// Free of waiting is not free of cost, and the difference matters. Resolving a checkout is not a
@@ -227,13 +230,13 @@ internal sealed class LocalCheckoutPrefetch
 
             var remedyTail = _isRunMode
                 ? Raw.Literal(
-                    "Deferred checkout also stops it: a service whose first checkout is deferred "
-                    + "past startup is cloned only when it is added. It is the default; if this AppHost calls "
-                    + "builder.SetCheckoutTiming(CheckoutTiming.Eager), removing that call restores it. A kind that "
-                    + "declines deferred checkout is cloned up front regardless, so for it clearing the entry is the only remedy.")
+                    "Deferred checkout also stops it, and is the default: a service whose first checkout is "
+                    + "deferred past startup is cloned only when it is added. It does not help if this AppHost calls "
+                    + "builder.SetCheckoutTiming(CheckoutTiming.Eager) (removing that call restores it) or if the "
+                    + "service's kind declines deferred checkout, in which case clearing the entry is the only remedy.")
                 : Raw.Literal(
-                    "Deferral does not apply to 'aspire publish', which composes the manifest from "
-                    + "checkouts already on disk, so clearing the entry is the only remedy.");
+                    "'aspire publish' clones before it composes the manifest, so deferred checkout does not "
+                    + "apply and clearing the entry is the only remedy.");
 
             // Named by configuration key rather than by file: the entry can equally have arrived
             // from appsettings, user secrets, an environment variable or the command line, and

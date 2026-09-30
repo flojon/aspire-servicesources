@@ -969,6 +969,7 @@ public class LocalCheckoutPrefetchTests
         var message = LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage;
 
         Assert.NotNull(message);
+        Assert.Contains("billing", message);
         Assert.Contains("Deferred checkout", message);
         Assert.Contains("SetCheckoutTiming(CheckoutTiming.Eager)", message);
         Assert.Contains("removing that call restores it", message);
