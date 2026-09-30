@@ -294,6 +294,12 @@ internal sealed class PathSource(
             : new(start, ConfinementRootKind.AppHost);
     }
 
+    /// <summary>Whether a <see cref="Path.GetRelativePath"/> result climbs out of, or sits on another root than, its base.</summary>
+    internal static bool IsOutside(string relativePath)
+        => Path.IsPathRooted(relativePath)
+            || relativePath == ".."
+            || relativePath.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+
     /// <summary>
     /// <see cref="DeveloperConfiguration.RepositoryRootKey"/> as a full path — relative to the AppHost
     /// directory, like every other path a developer writes — or <see langword="null"/> when unset.
@@ -327,9 +333,7 @@ internal sealed class PathSource(
 
         var appHostWithinRoot = Path.GetRelativePath(resolved, appHost);
 
-        if (Path.IsPathRooted(appHostWithinRoot)
-            || appHostWithinRoot == ".."
-            || appHostWithinRoot.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+        if (IsOutside(appHostWithinRoot))
         {
             throw ServiceSourcesConfigurationException.For(
                 $"'{key}' is '{Raw.Escaped(value)}', which resolves to '{Raw.Escaped(resolved)}' — that does not contain "

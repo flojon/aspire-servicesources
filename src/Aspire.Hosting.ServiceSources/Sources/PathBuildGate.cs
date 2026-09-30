@@ -69,6 +69,9 @@ internal sealed class PathBuildGate
 
         try
         {
+            ServiceSourcesLog.Information(
+                logger, $"Building service '{new Name(resourceName)}' before it starts, one build at a time with the other services in its build group.");
+
             var exitCode = await runner.RunAsync(
                 projectFile, configuration,
                 line => ServiceSourcesLog.Information(logger, $"{Raw.Escaped(line)}"),

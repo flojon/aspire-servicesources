@@ -80,7 +80,7 @@ repositories, for example when they share a project through a sibling directory.
 repository are already grouped automatically. See
 [Several path services from one repository](../sources/path.md#several-path-services-from-one-repository).
 
-`buildGroup` is a reserved key: a custom `kind` cannot be named `buildGroup`.
+`buildGroup` is a reserved key: a yaml service cannot use a custom `kind` named `buildGroup`.
 
 ## Grouping several services under one repository
 

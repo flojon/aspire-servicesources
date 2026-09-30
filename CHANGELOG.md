@@ -54,7 +54,7 @@ never existed. Check the tag of the last release before adding one.
   one at a time, before the processes start; the processes still run concurrently. The group is the
   git repository the service directory sits in, and a new optional `buildGroup` catalog field
   (`WithBuildGroup` in code) names one explicitly for projects shared across repositories.
-  `buildGroup` is now a reserved key, so a custom `kind` of that name is refused. Managed
+  `buildGroup` is now a reserved key, so a yaml service cannot use a custom `kind` of that name. Managed
   checkouts are unchanged, and the gate does not apply when an IDE or `dotnet watch` builds the
   project.
 

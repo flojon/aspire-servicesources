@@ -201,7 +201,7 @@ repositories that share a project through a sibling path:
     ```
 
 The name is case-sensitive, non-empty and has no surrounding whitespace, and `buildGroup` is not a
-valid `kind` name. It belongs to the catalog, not to `servicesources.local.json`, because it
+valid `kind` name in yaml. It belongs to the catalog, not to `servicesources.local.json`, because it
 describes how the code is laid out. It has no effect unless the service resolves to `"path"`.
 
 **What is not covered.** A managed checkout (`"repository"`) is not gated: ungrouped ones each have

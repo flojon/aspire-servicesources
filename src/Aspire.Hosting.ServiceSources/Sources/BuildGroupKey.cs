@@ -50,12 +50,7 @@ internal static class BuildGroupKey
                 return null;
             }
 
-            var relative = Path.GetRelativePath(root, directory);
-            var outside = Path.IsPathRooted(relative)
-                || relative == ".."
-                || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal);
-
-            return outside ? null : root;
+            return PathSource.IsOutside(Path.GetRelativePath(root, directory)) ? null : root;
         }
         catch (ServiceSourcesConfigurationException)
         {
