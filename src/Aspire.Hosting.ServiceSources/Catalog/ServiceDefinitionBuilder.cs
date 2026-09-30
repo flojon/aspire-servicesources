@@ -233,10 +233,35 @@ public sealed class ServiceDefinitionBuilder
         return this;
     }
 
-    internal ServiceDefinitionBuilder WithDotnet(DotnetMetadata dotnet)
+    /// <summary>
+    /// Runs this <c>dotnet</c> project under the named <c>launchSettings.json</c> profile instead of
+    /// Aspire's default choice — the counterpart of yaml's <c>dotnet: { launchProfileName }</c>.
+    /// Applies to the <c>repository</c> and <c>path</c> sources; other sources ignore it. The name
+    /// must exist in the project's <c>Properties/launchSettings.json</c>.
+    /// </summary>
+    public ServiceDefinitionBuilder WithLaunchProfile(string launchProfileName)
     {
-        RequireUnset(_dotnet, "AsDotnet");
-        _dotnet = dotnet;
+        RequireUnset(_dotnet?.LaunchProfileName, nameof(WithLaunchProfile));
+
+        if (string.IsNullOrWhiteSpace(launchProfileName))
+        {
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(_serviceName)}': {Raw.Literal(nameof(WithLaunchProfile))} - a launch profile name is required and cannot be empty or whitespace.");
+        }
+
+        (_dotnet ??= new()).LaunchProfileName = launchProfileName;
+        return this;
+    }
+
+    /// <summary>
+    /// Runs this <c>dotnet</c> project without any launch profile, so no profile-derived endpoints
+    /// or environment variables are applied — the counterpart of yaml's
+    /// <c>dotnet: { excludeLaunchProfile: true }</c>. Contradicts <see cref="WithLaunchProfile"/>.
+    /// </summary>
+    public ServiceDefinitionBuilder ExcludeLaunchProfile()
+    {
+        RequireUnset(_dotnet?.ExcludeLaunchProfile, nameof(ExcludeLaunchProfile));
+        (_dotnet ??= new()).ExcludeLaunchProfile = true;
         return this;
     }
 

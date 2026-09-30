@@ -50,7 +50,7 @@ A developer picks a source in `servicesources.local.json` exactly as in the
 | `url:` | `WithUrl(url)` |
 | `container:` | `WithContainer(image, port, defaultTag, scheme)` |
 | `kubernetes:` | `WithKubernetes(service, port, scheme)` |
-| `dotnet:` | `AsDotnet(o => o.WithLaunchProfileName(name))` / `o.ExcludeLaunchProfile()` |
+| `dotnet:` | `WithLaunchProfile(name)` / `ExcludeLaunchProfile()` |
 | `defaultSource:` | `WithDefaultSource(source)` |
 
 ## `dotnet`: choosing a launch profile
@@ -70,7 +70,7 @@ services:
 
 | Key | Meaning |
 | --- | --- |
-| `launchProfileName` | Run the project under this profile. Matched exactly against the keys in the project's `Properties/launchSettings.json`: case-sensitive, no trimming. A blank value means "not set" here, whereas the code builder's `WithLaunchProfileName` throws on one. |
+| `launchProfileName` | Run the project under this profile. Matched exactly against the keys in the project's `Properties/launchSettings.json`: case-sensitive, no trimming. A blank value means "not set" here, whereas the code builder's `WithLaunchProfile` throws on one. |
 | `excludeLaunchProfile` | `true` runs the project with no launch profile at all, so it loses the endpoints and environment variables a profile would supply. `false` is the same as leaving it out. |
 
 A named profile outranks `AppHost:DefaultLaunchProfileName`.

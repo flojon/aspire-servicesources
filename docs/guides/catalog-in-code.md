@@ -163,17 +163,17 @@ catalog.AddService("catalog")
 `WithKind` call for the same service, throws the same "already called" error `WithKind`
 itself would.
 
-The `dotnet` kind has its own typed handle for launch profile selection, `AsDotnet`. Unlike
-`AsJava` it does not call `WithKind`, because `dotnet` is already the default kind:
+A `dotnet` service picks its launch profile with `WithLaunchProfile`, or opts out of profiles with
+`ExcludeLaunchProfile()`, the way `AddProject` does:
 
 ```csharp
 catalog.AddService("orders")
     .WithRepository("https://github.com/company/orders")
     .WithProject("src/Orders.Api/Orders.Api.csproj")
-    .AsDotnet(o => o.WithLaunchProfileName("http"));   // or o.ExcludeLaunchProfile()
+    .WithLaunchProfile("http");   // or .ExcludeLaunchProfile()
 ```
 
-`WithLaunchProfileName` rejects a null or blank name immediately, and naming a profile while also
+`WithLaunchProfile` rejects a null or blank name immediately, and naming a profile while also
 calling `ExcludeLaunchProfile()` throws when the catalog is built. See
 [the yaml `dotnet:` block](yaml-catalog.md#dotnet-choosing-a-launch-profile) for the rules.
 

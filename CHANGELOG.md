@@ -48,8 +48,8 @@ never existed. Check the tag of the last release before adding one.
 
 - **A `dotnet` service can select its launch profile** ([#415]). A new `dotnet:` block in the yaml
   catalog takes `launchProfileName` (run under that `launchSettings.json` profile) and
-  `excludeLaunchProfile` (run with none), and `AsDotnet(o => o.WithLaunchProfileName(...))` /
-  `ExcludeLaunchProfile()` is the code-catalog equivalent. It works on the `repository`
+  `excludeLaunchProfile` (run with none), and `WithLaunchProfile(...)` /
+  `ExcludeLaunchProfile()` are the code-catalog equivalents. It works on the `repository`
   source (including a deferred first checkout) and the `path` source. Three configuration
   errors come with it: naming a profile while excluding launch profiles, naming a profile the
   project's `launchSettings.json` does not contain, and a `dotnet:` block on a service whose

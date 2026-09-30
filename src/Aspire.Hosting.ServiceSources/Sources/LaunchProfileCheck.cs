@@ -34,8 +34,8 @@ internal static class LaunchProfileCheck
 
     // Editing the profile name cannot help when there is no file to hold any profile.
     private static Raw AbsentHint { get; } = Raw.Literal(
-        "Add that file to the project, or remove 'launchProfileName' from the service's 'dotnet' block (or the WithLaunchProfileName(...) call).");
+        "Add that file to the project, or remove 'launchProfileName' from the service's 'dotnet' block (or the WithLaunchProfile(...) call).");
 
     private static Raw FixHint { get; } = Raw.Literal(
-        "Fix 'launchProfileName' under the service's 'dotnet' block (or the AsDotnet(o => o.WithLaunchProfileName(...)) call).");
+        "Fix 'launchProfileName' under the service's 'dotnet' block (or the WithLaunchProfile(...) call).");
 }
