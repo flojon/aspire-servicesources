@@ -1,9 +1,11 @@
+using System.Reflection;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Messages;
 using Aspire.Hosting.ServiceSources.Prepare;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
 
@@ -32,11 +34,13 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// "Confinement differs by who wrote the value").
 /// </para>
 /// </remarks>
-internal sealed class PathSource(IGitClient? gitClient = null, IPrepareCommandRunner? prepareRunner = null)
+internal sealed class PathSource(
+    IGitClient? gitClient = null, IPrepareCommandRunner? prepareRunner = null, IBuildRunner? buildRunner = null)
     : IServiceSource
 {
     private readonly IGitClient _gitClient = gitClient ?? new GitCliClient();
     private readonly IPrepareCommandRunner _prepareRunner = prepareRunner ?? ProcessPrepareCommandRunner.Instance;
+    private readonly IBuildRunner _buildRunner = buildRunner ?? new ProcessBuildRunner();
 
     private const string Source = "path";
 
@@ -64,13 +68,53 @@ internal sealed class PathSource(IGitClient? gitClient = null, IPrepareCommandRu
         {
             var projectPath = LocalProjectSource.ResolveProjectFile(serviceName, repoRoot, definition.Project, Source);
 
-            return ResolvedService.Bridge(builder.AddProject(serviceName, projectPath), serviceName, Source);
+            var project = builder.AddProject(serviceName, projectPath);
+
+            if (builder.ExecutionContext.IsRunMode)
+            {
+                SerializeBuild(builder, project, serviceName, repoRoot, projectPath, definition);
+            }
+
+            return ResolvedService.Bridge(project, serviceName, Source);
         }
 
         LocalProjectSource.ValidateWithKindHandler(serviceName, definition, repoRoot, handler!);
 
         return LocalProjectSource.InvokeKindHandler(builder, serviceName, definition, repoRoot, handler!, Source);
     }
+
+    /// <summary>
+    /// Registers this project in its build group and, once Aspire is about to start it, builds it under the
+    /// group's gate so services sharing a <c>ProjectReference</c> do not race on <c>bin/</c> and <c>obj/</c>.
+    /// Membership is only complete after every service is added, so the handler asks at start time.
+    /// </summary>
+    private void SerializeBuild(
+        IDistributedApplicationBuilder builder, IResourceBuilder<ProjectResource> project, string serviceName,
+        string serviceDirectory, string projectPath, ServiceDefinition definition)
+    {
+        var key = BuildGroupKey.For(serviceDirectory, definition.BuildGroup, () => ConfiguredRepositoryRoot(builder));
+        var gate = PathBuildGate.For(builder);
+        var runner = _buildRunner;
+
+        gate.Register(serviceName, key);
+
+        project.OnBeforeResourceStarted((resource, @event, cancellationToken) =>
+        {
+            var logger = @event.Services.GetRequiredService<ResourceLoggerService>().GetLogger(resource);
+
+            return gate.RunGatedBuildAsync(
+                runner, serviceName, key, Path.GetFullPath(projectPath), ConfigurationOf(Assembly.GetEntryAssembly()), logger, cancellationToken);
+        });
+    }
+
+    /// <summary>
+    /// The configuration the AppHost was built in — what Aspire passes to <c>dotnet run</c> — so the gated
+    /// build lands in the same <c>bin/</c> folder that run will use.
+    /// </summary>
+    internal static string? ConfigurationOf(Assembly? assembly) =>
+        assembly?.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration is { Length: > 0 } configuration
+            ? configuration
+            : null;
 
     /// <remarks>
     /// Always answers: a developer's own <c>path.path</c> makes <c>"path"</c> selectable even for an
@@ -250,6 +294,12 @@ internal sealed class PathSource(IGitClient? gitClient = null, IPrepareCommandRu
             : new(start, ConfinementRootKind.AppHost);
     }
 
+    /// <summary>Whether a <see cref="Path.GetRelativePath"/> result climbs out of, or sits on another root than, its base.</summary>
+    internal static bool IsOutside(string relativePath)
+        => Path.IsPathRooted(relativePath)
+            || relativePath == ".."
+            || relativePath.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+
     /// <summary>
     /// <see cref="DeveloperConfiguration.RepositoryRootKey"/> as a full path — relative to the AppHost
     /// directory, like every other path a developer writes — or <see langword="null"/> when unset.
@@ -283,9 +333,7 @@ internal sealed class PathSource(IGitClient? gitClient = null, IPrepareCommandRu
 
         var appHostWithinRoot = Path.GetRelativePath(resolved, appHost);
 
-        if (Path.IsPathRooted(appHostWithinRoot)
-            || appHostWithinRoot == ".."
-            || appHostWithinRoot.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+        if (IsOutside(appHostWithinRoot))
         {
             throw ServiceSourcesConfigurationException.For(
                 $"'{key}' is '{Raw.Escaped(value)}', which resolves to '{Raw.Escaped(resolved)}' — that does not contain "

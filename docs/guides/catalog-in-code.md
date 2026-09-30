@@ -98,6 +98,10 @@ The same caveat as the yaml field applies: `WithDefaultSource("repository")` mea
 CI, clones by default unless CI pins its own source. `WithDefaultSource("path")` carries no such
 caveat — see [`defaultSource: path` is close to free](../sources/path.md).
 
+`WithBuildGroup(name)` is the code-authoring equivalent of yaml's `buildGroup:`: it names the group of
+`"path"` services whose builds are serialized together, for services that share a project across
+repositories. See [Several path services from one repository](../sources/path.md#several-path-services-from-one-repository).
+
 `WithContainer`/`WithKubernetes` both take a `scheme` parameter — the code-authoring
 equivalent of yaml's `container.scheme`/`kubernetes.scheme` (see the
 [`"container"`](../sources/container.md) and [`"kubernetes"`](../sources/kubernetes.md) sources). A service declaring both sources

@@ -33,6 +33,13 @@ internal sealed class ServiceMetadata
     public string? DefaultSource { get; set; }
 
     /// <summary>
+    /// A name shared by <c>"path"</c> services whose builds must not overlap, overriding the repository
+    /// the service directory sits in. Validated in <see cref="ServiceCatalogLoader.Load"/> whatever source
+    /// ends up selected; it has no effect unless the service resolves to <c>"path"</c>.
+    /// </summary>
+    public string? BuildGroup { get; set; }
+
+    /// <summary>
     /// The key of a <c>repositories:</c> entry this service joins, sharing its checkout with every
     /// other service naming the same one — the yaml counterpart of
     /// <see cref="Aspire.Hosting.ServiceSources.Catalog.ServiceDefinitionBuilder.WithSharedRepository"/>.
@@ -106,5 +113,6 @@ internal sealed class ServiceMetadata
         KindOptions = KindConfig,
         Origin = CatalogOrigin.FromYaml(yamlPath),
         DefaultSource = DefaultSource,
+        BuildGroup = BuildGroup,
     };
 }

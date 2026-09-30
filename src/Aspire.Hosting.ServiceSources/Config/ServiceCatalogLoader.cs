@@ -189,6 +189,12 @@ internal static class ServiceCatalogLoader
                     metadata.DefaultSource);
             }
 
+            if (metadata.BuildGroup is { } buildGroup)
+            {
+                Sources.BuildGroupKey.ValidateName(
+                    Raw.Compose($"Service '{new Name(name)}': buildGroup"), buildGroup);
+            }
+
             if (!raw.Services.TryGetValue(name, out var rawService))
             {
                 continue;
