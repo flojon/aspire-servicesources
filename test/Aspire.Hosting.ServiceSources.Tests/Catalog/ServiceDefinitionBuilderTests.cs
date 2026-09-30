@@ -537,6 +537,17 @@ public class ServiceDefinitionBuilderTests
     }
 
     [Fact]
+    public void WithLaunchProfile_AfterBuild_DoesNotChangeBuiltDefinition()
+    {
+        var chain = Orders().WithLaunchProfile("http");
+        var definition = chain.Build();
+
+        chain.ExcludeLaunchProfile();
+
+        Assert.Null(definition.Dotnet!.ExcludeLaunchProfile);
+    }
+
+    [Fact]
     public void ExcludeLaunchProfile_SetsExcludeTrue()
     {
         var definition = Orders().ExcludeLaunchProfile().Build();

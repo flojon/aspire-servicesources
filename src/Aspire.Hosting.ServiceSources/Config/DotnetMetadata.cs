@@ -24,10 +24,10 @@ internal sealed class DotnetMetadata
 
         if (kind != LocalKinds.Dotnet)
             throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': a 'dotnet' block only applies to services of kind 'dotnet', but this service's kind is '{new Name(kind)}'. Remove the 'dotnet' block or change the kind.");
+                $"Service '{new Name(serviceName)}': a 'dotnet' block only applies to services of kind 'dotnet', but this service's kind is '{new Name(kind)}'. Remove the 'dotnet' block (or the WithLaunchProfile/ExcludeLaunchProfile calls) or change the kind.");
 
         if (metadata.ExcludeLaunchProfile == true && !string.IsNullOrWhiteSpace(metadata.LaunchProfileName))
             throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': 'launchProfileName' and 'excludeLaunchProfile: true' contradict each other (excluding launch profiles ignores any named profile). Drop one of the two.");
+                $"Service '{new Name(serviceName)}': 'launchProfileName' and 'excludeLaunchProfile: true' contradict each other (excluding launch profiles ignores any named profile). Drop one of the two (or the WithLaunchProfile/ExcludeLaunchProfile call).");
     }
 }

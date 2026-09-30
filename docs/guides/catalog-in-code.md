@@ -173,6 +173,9 @@ catalog.AddService("orders")
     .WithLaunchProfile("http");   // or .ExcludeLaunchProfile()
 ```
 
+These are kind options, not source selectors, so they appear in no row of the method table
+above. From TypeScript they are `withLaunchProfile` and `excludeLaunchProfile`.
+
 `WithLaunchProfile` rejects a null or blank name immediately, and naming a profile while also
 calling `ExcludeLaunchProfile()` throws when the catalog is built. See
 [the yaml `dotnet:` block](yaml-catalog.md#dotnet-choosing-a-launch-profile) for the rules.
