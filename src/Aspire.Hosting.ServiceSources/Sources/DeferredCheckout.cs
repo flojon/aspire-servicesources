@@ -261,6 +261,8 @@ internal sealed class DeferredCheckout
         var projectPath = LocalProjectSource.ConfineProject(serviceName, repoRoot, definition.Project);
 
         var resource = new ProjectResource(serviceName);
+        // DOTNET_LAUNCH_PROFILE is set at composition from this name; the post-clone check confirms it.
+        var (profileName, _) = DotnetMetadata.Resolve(definition.Dotnet);
 
         // Aspire's own AddProject, taken apart into the two steps it is made of, because the path
         // this one is given does not exist yet: AddProject would attach its internal ProjectMetadata,
@@ -269,8 +271,8 @@ internal sealed class DeferredCheckout
         // debugging support, and it is public from 13.5.0 precisely so it can be reached like this.
 #pragma warning disable ASPIREPROJECTS001 // WithProjectDefaults is [Experimental]; it is the only public route to the project defaults an out-of-tree project resource needs.
         var resourceBuilder = builder.AddResource(resource)
-            .WithAnnotation<IProjectMetadata>(new DeferredProjectMetadata(projectPath))
-            .WithProjectDefaults(new ProjectResourceOptions())
+            .WithAnnotation<IProjectMetadata>(new DeferredProjectMetadata(projectPath, profileName))
+            .WithProjectDefaults(LocalProjectSource.ToProjectResourceOptions(definition.Dotnet) ?? new ProjectResourceOptions())
             .WithExplicitStart();
 #pragma warning restore ASPIREPROJECTS001
 
@@ -284,7 +286,8 @@ internal sealed class DeferredCheckout
             builder, serviceName, resource, [], repoRoot, definition, config, repositoryConfig, prefetch, gitClient,
             prepareStep, prepareRunner,
             (deferredResource, checkoutRoot, logger) =>
-                RestoreLaunchProfile(deferredResource, bridged.Resource, definition.Project, checkoutRoot, logger));
+                RestoreLaunchProfile(
+                    deferredResource, bridged.Resource, definition.Project, checkoutRoot, profileName, logger));
 
         return bridged;
     }
@@ -454,12 +457,15 @@ internal sealed class DeferredCheckout
 
     /// <summary>The dotnet kind's post-clone work: everything the missing launch profile cost it.</summary>
     private static void RestoreLaunchProfile(
-        IResource resource, ServiceResource facade, string relativeProject, string repoRoot, ILogger logger)
+        IResource resource, ServiceResource facade, string relativeProject, string repoRoot,
+        string? launchProfileName, ILogger logger)
     {
         // The repository is on disk now, so everything Aspire read from the launch profile while
         // composing — and got nothing for — is finally readable. ResolveProjectFile is the same
         // check the eager path makes; it is what reports a 'project' that names nothing.
         var projectFile = LocalProjectSource.ResolveProjectFile(resource.Name, repoRoot, relativeProject);
+
+        LaunchProfileCheck.Verify(resource.Name, projectFile, launchProfileName);
 
         var profile = LandedLaunchProfile.Read(projectFile, resource);
 
@@ -1055,8 +1061,8 @@ internal sealed class DeferredCheckout
             ServiceSourcesLog.Error(
                 logger,
                 exception,
-                $"Service '{new Name(deferred.ServiceName)}': its checkout was deferred past startup and did not "
-                + $"complete, so the service was never started. {Raw.Cause(exception)}");
+                $"Service '{new Name(deferred.ServiceName)}': its deferred checkout could not be completed or "
+                + $"checked, so the service was never started. {Raw.Cause(exception)}");
 
             // Every resource withheld for this service, not just the service's own: a held-back
             // helper left sitting in NotStarted reads as "still waiting" rather than as the casualty

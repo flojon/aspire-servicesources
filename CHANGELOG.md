@@ -44,6 +44,18 @@ never existed. Check the tag of the last release before adding one.
   surfaces later, as that service's own resource state, rather than failing the AppHost synchronously
   at `AddService()`.
 
+### Added
+
+- **A `dotnet` service can select its launch profile** ([#415]). A new `dotnet:` block in the yaml
+  catalog takes `launchProfileName` (run under that `launchSettings.json` profile) and
+  `excludeLaunchProfile` (run with none), and `WithLaunchProfile(...)` /
+  `ExcludeLaunchProfile()` (`withLaunchProfile` / `excludeLaunchProfile` from TypeScript) are
+  the code-catalog equivalents. It works on the `repository` source (including a deferred first
+  checkout) and the `path` source. Three configuration errors come with it: naming a profile
+  while excluding launch profiles, naming a profile the project's `launchSettings.json` does
+  not contain (or a project with no `launchSettings.json` at all), and a `dotnet:` block, or
+  the code-catalog calls, on a service whose kind is not `dotnet`.
+
 ### Fixed
 
 - **Two `"path"` services in one repository no longer race on a shared project's `bin/` and
@@ -1955,6 +1967,7 @@ Targets `net10.0`.
 [#372]: https://github.com/flojon/aspire-servicesources/issues/372
 [#375]: https://github.com/flojon/aspire-servicesources/issues/375
 [#385]: https://github.com/flojon/aspire-servicesources/issues/385
+[#415]: https://github.com/flojon/aspire-servicesources/issues/415
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

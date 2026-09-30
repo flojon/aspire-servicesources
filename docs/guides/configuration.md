@@ -283,7 +283,7 @@ exposes is decided by whichever source resolved it:
 
 | Source | Endpoint name |
 |---|---|
-| `"repository"`/`"path"`, `kind: dotnet` | whatever the launch profile's `applicationUrl` declares (`http`, `https`, or both) |
+| `"repository"`/`"path"`, `kind: dotnet` | whatever the launch profile's `applicationUrl` declares (`http`, `https`, or both); none with `excludeLaunchProfile: true` |
 | `"repository"`/`"path"`, `kind: javascript` | `http` |
 | `"repository"`/`"path"`, `kind: java` | the configured `java.scheme`, `http` unless set |
 | `"url"` | the configured URL's scheme |

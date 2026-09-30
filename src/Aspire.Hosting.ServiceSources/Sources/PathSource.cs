@@ -68,7 +68,7 @@ internal sealed class PathSource(
         {
             var projectPath = LocalProjectSource.ResolveProjectFile(serviceName, repoRoot, definition.Project, Source);
 
-            var project = builder.AddProject(serviceName, projectPath);
+            var project = LocalProjectSource.AddDotnetProject(builder, serviceName, projectPath, definition.Dotnet);
 
             if (builder.ExecutionContext.IsRunMode)
             {

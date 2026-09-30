@@ -9,9 +9,10 @@ public class UrlSourceTests
 {
     private const string ServiceName = "orders";
 
-    private static ServiceDefinition Definition(string? url = "https://orders.example.com") =>
+    private static ServiceDefinition Definition(string? url = "https://orders.example.com", DotnetMetadata? dotnet = null) =>
         new ServiceMetadata
         {
+            Dotnet = dotnet,
             Repository = "https://github.com/company/orders",
             Project = "Orders.csproj",
             Url = url is null ? null : new UrlMetadata { Url = url },
@@ -19,6 +20,17 @@ public class UrlSourceTests
 
     private static ServiceDeveloperConfig DevConfig(string? urlOverride = null) =>
         new() { Source = "url", Url = new() { Url = urlOverride } };
+
+    [Fact]
+    public void Resolve_DotnetBlockPresent_IsIgnored()
+    {
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
+        var definition = Definition(dotnet: new() { LaunchProfileName = "http" });
+
+        var service = new UrlSource().Resolve(builder, ServiceName, definition, DevConfig());
+
+        Assert.Equal(ServiceName, service.Resource.Name);
+    }
 
     [Fact]
     public void ResolveUrl_NoOverride_FallsBackToMetadataUrl()

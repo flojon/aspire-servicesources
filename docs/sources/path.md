@@ -32,6 +32,11 @@ one commit, by construction. There's nothing to clone: the directory is already 
 
 — or nothing in `servicesources.local.json` at all: see `defaultSource: path` below.
 
+A `dotnet` service can pick its launch profile here the same way it can for `"repository"`, with
+`dotnet: { launchProfileName: http }` in yaml or `WithLaunchProfile("http")` in
+code. The name is checked against the directory's `Properties/launchSettings.json` when the service
+resolves. See [the `dotnet:` block](../guides/yaml-catalog.md#dotnet-choosing-a-launch-profile).
+
 Non-.NET kinds work exactly as they do for `"repository"` — the `kind`/`project` machinery never
 learns the directory wasn't cloned:
 

@@ -483,6 +483,14 @@ once the checkout has landed: the profile your AppHost was launched under, when 
 one by that name, and otherwise the first launchable profile in the file. So the process never
 ends up with one profile's environment and another's arguments.
 
+If the catalog names a profile with `dotnet: { launchProfileName: ... }`, that profile is the one
+restored, and it outranks `AppHost:DefaultLaunchProfileName`. The name is checked against the
+repository's `launchSettings.json` once the clone lands; a missing profile marks the service as
+failed to start instead of running it with no profile. `excludeLaunchProfile: true` is the explicit
+form of the trade a deferred first checkout otherwise makes on its own: no profile environment is restored and
+no endpoint warning is given, because the profile was discarded on purpose. See
+[the `dotnet:` block](../guides/yaml-catalog.md#dotnet-choosing-a-launch-profile).
+
 Endpoints can't be, because ports are allocated during composition and the spec is frozen. So a
 deferred service carries only the endpoints you declare:
 

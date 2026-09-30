@@ -56,6 +56,9 @@ internal sealed class ServiceMetadata
 
     public ContainerMetadata? Container { get; set; }
 
+    /// <summary>Launch profile selection for a <c>dotnet</c>-kind service; see <see cref="DotnetMetadata"/>.</summary>
+    public DotnetMetadata? Dotnet { get; set; }
+
     /// <summary>
     /// A bootstrap command the <c>"repository"</c> source runs inside the materialized checkout, before
     /// the kind is allowed to judge it. Absent for the services — most of them — whose checkout is
@@ -109,6 +112,7 @@ internal sealed class ServiceMetadata
         Kubernetes = Kubernetes,
         Url = Url,
         Container = Container,
+        Dotnet = Dotnet,
         Kind = Kind,
         KindOptions = KindConfig,
         Origin = CatalogOrigin.FromYaml(yamlPath),

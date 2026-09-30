@@ -167,6 +167,23 @@ catalog.AddService("catalog")
 `WithKind` call for the same service, throws the same "already called" error `WithKind`
 itself would.
 
+A `dotnet` service picks its launch profile with `WithLaunchProfile`, or opts out of profiles with
+`ExcludeLaunchProfile()`, the way `AddProject` does:
+
+```csharp
+catalog.AddService("orders")
+    .WithRepository("https://github.com/company/orders")
+    .WithProject("src/Orders.Api/Orders.Api.csproj")
+    .WithLaunchProfile("http");   // or .ExcludeLaunchProfile()
+```
+
+These are kind options, not source selectors, so they appear in no row of the method table
+above. From TypeScript they are `withLaunchProfile` and `excludeLaunchProfile`.
+
+`WithLaunchProfile` rejects a null or blank name immediately, and naming a profile while also
+calling `ExcludeLaunchProfile()` throws when the catalog is built. See
+[the yaml `dotnet:` block](yaml-catalog.md#dotnet-choosing-a-launch-profile) for the rules.
+
 **A code-declared catalog still needs `servicesources.local.json`.** `AddServiceCatalog`
 says what a service *is* — its repository, its URL, its container image — the same job
 `servicesources.yaml` does. It does not decide how to resolve it for you personally: that

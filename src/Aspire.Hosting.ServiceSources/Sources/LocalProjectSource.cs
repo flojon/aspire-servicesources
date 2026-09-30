@@ -225,7 +225,11 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
             // directory and its "--project" argument while preparing the model, which happens
             // before the dashboard is up. Mutating ProjectPath afterwards changes nothing, so the
             // absolute path has to be settled before Build() whatever the launch profile does.
-            return ResolvedService.Bridge(builder.AddProject(serviceName, projectPath), serviceName, "repository");
+            //
+            // The options overload is used when the catalog sets a profile, because it sets the name and
+            // the exclusion independently.
+            return ResolvedService.Bridge(
+                AddDotnetProject(builder, serviceName, projectPath, definition.Dotnet), serviceName, "repository");
         }
 
         // The handler's verdict on the service's configuration, now that there is a checkout to
@@ -666,6 +670,37 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
 
         return ResolvedService.Bridge(resourceBuilder, serviceName, source);
     }
+
+    internal static IResourceBuilder<ProjectResource> AddDotnetProject(
+        IDistributedApplicationBuilder builder, string serviceName, string projectPath, DotnetMetadata? dotnet)
+    {
+        // Aspire's error for a missing profile is generic (or absent without launchSettings.json), so check first.
+        LaunchProfileCheck.Verify(serviceName, projectPath, DotnetMetadata.Resolve(dotnet).Name);
+
+        var options = ToProjectResourceOptions(dotnet);
+        if (options is null)
+        {
+            return builder.AddProject(serviceName, projectPath);
+        }
+
+#pragma warning disable ASPIREPROJECTS001 // ProjectResourceOptions is [Experimental]; the options overload sets name and exclude independently.
+        return builder.AddProject(serviceName, projectPath, project =>
+        {
+            project.LaunchProfileName = options.LaunchProfileName;
+            project.ExcludeLaunchProfile = options.ExcludeLaunchProfile;
+        });
+#pragma warning restore ASPIREPROJECTS001
+    }
+
+#pragma warning disable ASPIREPROJECTS001 // ProjectResourceOptions is [Experimental]; the options overload sets name and exclude independently.
+    internal static ProjectResourceOptions? ToProjectResourceOptions(DotnetMetadata? dotnet)
+    {
+        var (name, exclude) = DotnetMetadata.Resolve(dotnet);
+        return name is null && !exclude
+            ? null
+            : new ProjectResourceOptions { LaunchProfileName = name, ExcludeLaunchProfile = exclude };
+    }
+#pragma warning restore ASPIREPROJECTS001
 
     /// <summary>
     /// Resolves and validates the project file path for a "dotnet"-kind service whose repo root has

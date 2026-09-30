@@ -736,9 +736,7 @@ public class ServiceCatalogLoaderTests
     [InlineData("    kind: dotnet\n")]
     public void Load_StrayDotnetBlock_ThrowsNamingServiceAndProperty(string kindLine)
     {
-        // 'dotnet' is resolved from the top-level repository/project metadata and never reads
-        // KindConfig, and LocalKindRegistry.Register refuses to register it — so a 'dotnet:' block
-        // is always stray or misspelled and must be rejected rather than captured and ignored.
+        // An unknown key inside 'dotnet:' is still rejected at load, naming the service and block.
         var path = Path.GetTempFileName();
         File.WriteAllText(path,
             "services:\n" +
@@ -755,6 +753,128 @@ public class ServiceCatalogLoaderTests
 
             Assert.Contains("orders", ex.Message);
             Assert.Contains("dotnet", ex.Message);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    private const string DotnetServiceHead =
+        "services:\n" +
+        "  orders:\n" +
+        "    repository: https://github.com/company/orders\n" +
+        "    project: src/Orders.Api/Orders.Api.csproj\n";
+
+    private static ServiceMetadata LoadOrders(string yaml)
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, yaml);
+        try
+        {
+            return ServiceCatalogLoader.Load(path).Catalog.Services["orders"];
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    private static ServiceSourcesConfigurationException LoadOrdersThrows(string yaml)
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, yaml);
+        try
+        {
+            return Assert.Throws<ServiceSourcesConfigurationException>(() => ServiceCatalogLoader.Load(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    // Malformed typed blocks surface as the yaml binder's own exception, like every other typed block.
+    private static void LoadOrdersFailsToBind(string yaml)
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, yaml);
+        try
+        {
+            Assert.Throws<YamlDotNet.Core.YamlException>(() => ServiceCatalogLoader.Load(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_DotnetBlock_BindsBothFields()
+    {
+        var service = LoadOrders(DotnetServiceHead + "    dotnet:\n      launchProfileName: http\n      excludeLaunchProfile: false\n");
+
+        Assert.Equal("http", service.Dotnet!.LaunchProfileName);
+        Assert.False(service.Dotnet.ExcludeLaunchProfile);
+    }
+
+    [Fact]
+    public void Load_DotnetBlockBlankLaunchProfileName_LoadsAsAbsent()
+    {
+        var service = LoadOrders(DotnetServiceHead + "    dotnet:\n      launchProfileName:\n");
+
+        Assert.Null(DotnetMetadata.Resolve(service.Dotnet).Name);
+    }
+
+    [Fact]
+    public void Load_DotnetBlockUnknownKey_ThrowsNamingServiceAndDotnet()
+    {
+        var ex = LoadOrdersThrows(DotnetServiceHead + "    dotnet:\n      launchProfile: http\n");
+
+        Assert.Contains("orders", ex.Message);
+        Assert.Contains("launchProfile", ex.Message);
+        Assert.Contains("dotnet", ex.Message);
+    }
+
+    [Fact]
+    public void Load_DotnetBlockOnJavaKind_ThrowsNamingServiceAndKind()
+    {
+        var ex = LoadOrdersThrows(DotnetServiceHead + "    kind: java\n    dotnet:\n      launchProfileName: http\n");
+
+        Assert.Contains("orders", ex.Message);
+        Assert.Contains("java", ex.Message);
+    }
+
+    [Fact]
+    public void Load_DotnetBlockExcludeWithName_Throws()
+    {
+        var ex = LoadOrdersThrows(DotnetServiceHead + "    dotnet:\n      launchProfileName: http\n      excludeLaunchProfile: true\n");
+
+        Assert.Contains("orders", ex.Message);
+    }
+
+    [Fact]
+    public void Load_DotnetBlockScalar_Throws() =>
+        LoadOrdersFailsToBind(DotnetServiceHead + "    dotnet: http\n");
+
+    [Fact]
+    public void Load_DotnetBlockExcludeNotBool_Throws() =>
+        LoadOrdersFailsToBind(DotnetServiceHead + "    dotnet:\n      excludeLaunchProfile: maybe\n");
+
+    [Fact]
+    public void Load_DotnetBlockOnServiceWithUrlDefaultSource_LoadsAndIsIgnored()
+    {
+        var path = Path.GetTempFileName();
+        File.WriteAllText(path, DotnetServiceHead +
+            "    defaultSource: url\n" +
+            "    url:\n      url: https://orders.example.com\n" +
+            "    dotnet:\n      launchProfileName: http\n");
+        try
+        {
+            var (catalog, repositories) = ServiceCatalogLoader.Load(path);
+            var definition = catalog.Services["orders"].ToDefinition("f.yaml", "orders", repositories);
+
+            Assert.Equal("http", definition.Dotnet!.LaunchProfileName);
         }
         finally
         {

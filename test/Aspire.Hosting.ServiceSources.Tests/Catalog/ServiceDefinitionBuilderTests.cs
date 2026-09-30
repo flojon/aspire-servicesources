@@ -523,4 +523,108 @@ public class ServiceDefinitionBuilderTests
         Assert.Equal("company/orders", definition.Container!.Image);
         Assert.Equal("orders-svc", definition.Kubernetes!.Service);
     }
+
+    private static ServiceDefinitionBuilder Orders() =>
+        new ServiceCatalogBuilder().AddService("orders").WithRepository("https://github.com/example/repo");
+
+    [Fact]
+    public void WithLaunchProfile_SetsDefinitionDotnet()
+    {
+        var definition = Orders().WithLaunchProfile("http").Build();
+
+        Assert.Equal("http", definition.Dotnet!.LaunchProfileName);
+        Assert.Equal("dotnet", definition.Kind);
+    }
+
+    [Fact]
+    public void WithLaunchProfile_AfterBuild_DoesNotChangeBuiltDefinition()
+    {
+        var chain = Orders().WithLaunchProfile("http");
+        var definition = chain.Build();
+
+        chain.ExcludeLaunchProfile();
+
+        Assert.Null(definition.Dotnet!.ExcludeLaunchProfile);
+    }
+
+    [Fact]
+    public void ExcludeLaunchProfile_SetsExcludeTrue()
+    {
+        var definition = Orders().ExcludeLaunchProfile().Build();
+
+        Assert.True(definition.Dotnet!.ExcludeLaunchProfile);
+    }
+
+    [Fact]
+    public void WithLaunchProfile_CalledTwice_ThrowsAlreadyCalled()
+    {
+        var chain = Orders().WithLaunchProfile("http");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => chain.WithLaunchProfile("https"));
+
+        Assert.Contains("WithLaunchProfile", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("already called", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ExcludeLaunchProfile_CalledTwice_ThrowsAlreadyCalled()
+    {
+        var chain = Orders().ExcludeLaunchProfile();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => chain.ExcludeLaunchProfile());
+
+        Assert.Contains("ExcludeLaunchProfile", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("already called", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithLaunchProfile_ThenWithKindJava_Build_Throws()
+    {
+        var chain = Orders().WithLaunchProfile("http").WithKind("java");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => chain.Build());
+
+        Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("java", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithKindJava_ThenWithLaunchProfile_Build_Throws()
+    {
+        var chain = Orders().WithKind("java").WithLaunchProfile("http");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => chain.Build());
+
+        Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("java", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithLaunchProfile_AndExclude_Build_ThrowsNamingBothFields()
+    {
+        var chain = Orders().WithLaunchProfile("http").ExcludeLaunchProfile();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => chain.Build());
+
+        Assert.Contains("launchProfileName", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("excludeLaunchProfile", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("  ")]
+    public void WithLaunchProfile_NullOrBlank_ThrowsImmediately(string? name)
+    {
+        var chain = Orders();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => chain.WithLaunchProfile(name!));
+
+        Assert.Contains("orders", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("WithLaunchProfile", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NoLaunchProfileCall_DotnetIsNull() =>
+        Assert.Null(Orders().Build().Dotnet);
 }

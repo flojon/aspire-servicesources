@@ -175,6 +175,8 @@ internal static class ServiceCatalogLoader
                 metadata.Kind = LocalKinds.Dotnet;
             }
 
+            DotnetMetadata.Validate(name, metadata.Kind, metadata.Dotnet);
+
             // A blank scalar means "no default" — a catalog author clearing a default they no
             // longer want should not have to delete the line (matches
             // DeveloperConfiguration.NormalizeBlankToAbsent's rule for a developer's own fields).
@@ -206,11 +208,8 @@ internal static class ServiceCatalogLoader
             // typed block (e.g. "kubernetes: { servicee: ... }"). Catch both here instead: any
             // top-level key that's neither a known ServiceMetadata property nor this service's own
             // kind block is an error, and so is any unknown key nested inside a typed block.
-            // Only a non-dotnet kind has an options block to exempt from the checks below. The
-            // built-in "dotnet" kind is resolved from the service's top-level repository/project
-            // metadata and never reads KindConfig, and LocalKindRegistry.Register refuses to
-            // register "dotnet" at all — so a `dotnet:` block is always stray or misspelled.
-            // Exempting it would have it silently accepted here and then silently ignored.
+            // The built-in "dotnet" kind has no opaque options block; its typed 'dotnet:' block is an
+            // ordinary ServiceMetadata property, validated like 'kubernetes:'.
             var kindBlockKey = metadata.Kind == LocalKinds.Dotnet ? null : metadata.Kind;
 
             // A kind named after a well-known ServiceMetadata property can never be expressed in

@@ -61,9 +61,11 @@ public class PathSourceTests
 
     private static ServiceDefinition Definition(
         string? path = null, string project = "Orders.csproj", PrepareMetadata? prepare = null,
-        string kind = LocalKinds.Dotnet, object? kindConfig = null, string serviceName = ServiceName) =>
+        string kind = LocalKinds.Dotnet, object? kindConfig = null, string serviceName = ServiceName,
+        DotnetMetadata? dotnet = null) =>
         new ServiceMetadata
         {
+            Dotnet = dotnet,
             Path = path,
             Project = project,
             Prepare = prepare,
@@ -97,6 +99,82 @@ public class PathSourceTests
 
         Assert.IsType<ServiceResource>(service.Resource);
         Assert.IsAssignableFrom<ProjectResource>(Assert.Single(builder.Resources, r => r.Name == ServiceName));
+    }
+
+    private static ProjectResource ResolveWithLaunchSettings(
+        DotnetMetadata? dotnet, string? launchSettings, Action<IDistributedApplicationBuilder>? configure = null)
+    {
+        var appHostDir = CreateAppHostDirectoryWithService(out var serviceDir);
+        if (launchSettings is not null)
+        {
+            LaunchSettingsFixture.Write(serviceDir, launchSettings);
+        }
+
+        var builder = TestHelpers.CreateBuilder(appHostDir);
+        configure?.Invoke(builder);
+
+        new PathSource(new GitCliClient()).Resolve(
+            builder, ServiceName, Definition(path: "services/orders", dotnet: dotnet), DevConfig());
+
+        return Assert.IsAssignableFrom<ProjectResource>(Assert.Single(builder.Resources, r => r.Name == ServiceName));
+    }
+
+    [Fact]
+    public void Resolve_NamedLaunchProfile_AddsLaunchProfileAnnotationWithThatName()
+    {
+        var resource = ResolveWithLaunchSettings(new() { LaunchProfileName = "http" }, LaunchSettingsFixture.HttpsThenHttp);
+
+        Assert.Equal("http", Assert.Single(resource.Annotations.OfType<LaunchProfileAnnotation>()).LaunchProfileName);
+        Assert.Equal(5100, Assert.Single(resource.Annotations.OfType<EndpointAnnotation>()).Port);
+    }
+
+    [Fact]
+    public void Resolve_NamedLaunchProfile_BeatsAppHostDefaultLaunchProfileName()
+    {
+        var resource = ResolveWithLaunchSettings(
+            new() { LaunchProfileName = "http" },
+            LaunchSettingsFixture.HttpsThenHttp,
+            builder => builder.Configuration["AppHost:DefaultLaunchProfileName"] = "https");
+
+        Assert.Equal("http", resource.Annotations.OfType<LaunchProfileAnnotation>().Last().LaunchProfileName);
+    }
+
+    [Fact]
+    public void Resolve_ExcludeLaunchProfile_AddsExcludeAnnotationAndNoProfileEndpoints()
+    {
+        var resource = ResolveWithLaunchSettings(new() { ExcludeLaunchProfile = true }, LaunchSettingsFixture.HttpsThenHttp);
+
+        Assert.Single(resource.Annotations.OfType<ExcludeLaunchProfileAnnotation>());
+        Assert.DoesNotContain(resource.Annotations.OfType<EndpointAnnotation>(), e => e.Port is 5100 or 7100);
+    }
+
+    [Fact]
+    public void Resolve_NamedProfileMissingFromFile_ThrowsListingProfiles()
+    {
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveWithLaunchSettings(new() { LaunchProfileName = "staging" }, LaunchSettingsFixture.HttpsThenHttp));
+
+        Assert.Contains("staging", ex.Message);
+        Assert.Contains("https", ex.Message);
+    }
+
+    [Fact]
+    public void Resolve_NamedProfileWithNoLaunchSettingsFile_Throws()
+    {
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveWithLaunchSettings(new() { LaunchProfileName = "http" }, launchSettings: null));
+
+        Assert.Contains("does not exist", ex.Message);
+    }
+
+    [Fact]
+    public void Resolve_NoDotnetBlock_IsUnchanged()
+    {
+        var resource = ResolveWithLaunchSettings(dotnet: null, LaunchSettingsFixture.HttpsThenHttp);
+
+        Assert.Empty(resource.Annotations.OfType<LaunchProfileAnnotation>());
+        Assert.Empty(resource.Annotations.OfType<ExcludeLaunchProfileAnnotation>());
+        Assert.Equal(7100, Assert.Single(resource.Annotations.OfType<EndpointAnnotation>()).Port);
     }
 
     [Fact]

@@ -23,10 +23,11 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// back by <c>WithExplicitStart()</c>.
 /// </para>
 /// <para>
-/// The alternative — <c>ProjectResourceOptions.ExcludeLaunchProfile</c>, which also survives
-/// composition — is worse for the same case: it stamps an <c>ExcludeLaunchProfileAnnotation</c> on
-/// the resource, so the launch profile stays discarded at start too, and the service loses its
-/// profile arguments and environment permanently rather than for the cold run only.
+/// <c>ProjectResourceOptions.ExcludeLaunchProfile</c> also survives composition, but it stamps an
+/// <c>ExcludeLaunchProfileAnnotation</c> on the resource, so the profile stays discarded at start
+/// too. That is the explicit, chosen behavior when the catalog asks for it. A named profile is
+/// instead backed by a placeholder entry carrying just its name, so composition passes and the real
+/// name is verified against the repository once the clone has landed.
 /// </para>
 /// <para>
 /// What is lost either way is endpoints. Those are synthesised from <c>applicationUrl</c> during
@@ -36,7 +37,7 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// none.
 /// </para>
 /// </remarks>
-internal sealed class DeferredProjectMetadata(string projectPath) : IProjectMetadata
+internal sealed class DeferredProjectMetadata(string projectPath, string? launchProfileName = null) : IProjectMetadata
 {
     public string ProjectPath { get; } = projectPath;
 
@@ -51,5 +52,16 @@ internal sealed class DeferredProjectMetadata(string projectPath) : IProjectMeta
     /// placeholder, because <see cref="Aspire.Hosting.LaunchSettings.Profiles"/> is a mutable
     /// dictionary on a type this package does not own.
     /// </remarks>
-    public LaunchSettings? LaunchSettings => File.Exists(ProjectPath) ? null : new LaunchSettings();
+    public LaunchSettings? LaunchSettings => File.Exists(ProjectPath) ? null : Placeholder();
+
+    private LaunchSettings Placeholder()
+    {
+        var settings = new LaunchSettings();
+        if (launchProfileName is not null)
+        {
+            settings.Profiles[launchProfileName] = new LaunchProfile { CommandName = "Project" };
+        }
+
+        return settings;
+    }
 }

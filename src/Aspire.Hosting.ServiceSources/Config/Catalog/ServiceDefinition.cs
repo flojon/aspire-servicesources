@@ -24,6 +24,9 @@ internal sealed class ServiceDefinition
 
     public KubernetesMetadata? Kubernetes { get; init; }
 
+    /// <summary>Launch profile selection for a <c>dotnet</c>-kind service; null when unconfigured.</summary>
+    public DotnetMetadata? Dotnet { get; init; }
+
     public UrlMetadata? Url { get; init; }
 
     public ContainerMetadata? Container { get; init; }
