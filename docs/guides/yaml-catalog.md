@@ -52,6 +52,7 @@ A developer picks a source in `servicesources.local.json` exactly as in the
 | `kubernetes:` | `WithKubernetes(service, port, scheme)` |
 | `dotnet:` | `WithLaunchProfile(name)` / `ExcludeLaunchProfile()` |
 | `defaultSource:` | `WithDefaultSource(source)` |
+| `buildGroup:` | `WithBuildGroup(name)` |
 
 ## `dotnet`: choosing a launch profile
 
@@ -106,6 +107,15 @@ services:
     clone, CI must pin its own source (an environment variable, or its own configuration layer)
     rather than relying on the absence of a file. `defaultSource: path` carries no such cost —
     see [the `"path"` source](../sources/path.md).
+
+## `buildGroup`
+
+An optional name that makes `"path"` services build one at a time even when they sit in different
+repositories, for example when they share a project through a sibling directory. Services in one git
+repository are already grouped automatically. See
+[Several path services from one repository](../sources/path.md#several-path-services-from-one-repository).
+
+`buildGroup` is a reserved key: a yaml service cannot use a custom `kind` named `buildGroup`.
 
 ## Grouping several services under one repository
 

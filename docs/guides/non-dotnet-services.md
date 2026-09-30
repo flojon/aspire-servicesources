@@ -339,7 +339,7 @@ that kind — resolution is eager, so registering later is too late — accepts 
 once, and cannot re-register `"dotnet"`.
 
 A name that collides with a well-known service property (`repository`, `path`, `project`,
-`defaultRef`, `defaultSource`, `repositoryRef`, `kind`, `kubernetes`, `url`, `container`,
+`defaultRef`, `defaultSource`, `buildGroup`, `repositoryRef`, `kind`, `kubernetes`, `url`, `container`,
 `prepare`) can still be registered with `AddLocalKind` — the collision only matters for a **yaml**
 service that actually names this kind: its `<kind>:` block sits at the same nesting level as those
 properties, so it would be read as the matching property instead of the kind's options. That check

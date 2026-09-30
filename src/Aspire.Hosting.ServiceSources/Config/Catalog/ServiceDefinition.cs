@@ -42,6 +42,12 @@ internal sealed class ServiceDefinition
     public string? DefaultSource { get; init; }
 
     /// <summary>
+    /// Fed from <see cref="ServiceMetadata.BuildGroup"/> (yaml) or
+    /// <see cref="Catalog.ServiceDefinitionBuilder.WithBuildGroup"/> (code).
+    /// </summary>
+    public string? BuildGroup { get; init; }
+
+    /// <summary>
     /// The raw yaml block (round-tripped through <see cref="LocalKindConfig.Parse{T}"/>) for a
     /// yaml-declared kind, or an already-typed options object for a code-declared one — see design
     /// finding 6's three-branch <see cref="LocalKindConfig.Parse{T}"/> change (Task 7).

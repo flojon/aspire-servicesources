@@ -56,6 +56,20 @@ never existed. Check the tag of the last release before adding one.
   not contain (or a project with no `launchSettings.json` at all), and a `dotnet:` block, or
   the code-catalog calls, on a service whose kind is not `dotnet`.
 
+### Fixed
+
+- **Two `"path"` services in one repository no longer race on a shared project's `bin/` and
+  `obj/`** ([#397]). Aspire starts independent resources at once, so two services whose projects
+  share a `ProjectReference` ran two builds over the same output directory and one failed
+  intermittently with `MSB4018` or `CS2012`
+  ([microsoft/aspire#15190](https://github.com/microsoft/aspire/issues/15190)). Their builds now run
+  one at a time, before the processes start; the processes still run concurrently. The group is the
+  git repository the service directory sits in, and a new optional `buildGroup` catalog field
+  (`WithBuildGroup` in code) names one explicitly for projects shared across repositories.
+  `buildGroup` is now a reserved key, so a yaml service cannot use a custom `kind` of that name. Managed
+  checkouts are unchanged, and the gate does not apply when an IDE or `dotnet watch` builds the
+  project.
+
 ## [0.7.0] - 2026-09-28
 
 ### Breaking
@@ -1957,3 +1971,4 @@ Targets `net10.0`.
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
+[#397]: https://github.com/flojon/aspire-servicesources/issues/397

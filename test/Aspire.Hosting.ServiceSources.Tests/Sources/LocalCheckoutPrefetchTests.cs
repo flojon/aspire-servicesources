@@ -898,6 +898,83 @@ public class LocalCheckoutPrefetchTests
         Assert.Equal(2, git.Cloned.Count);
     }
 
+    [Fact]
+    public void PublishMode_UnusedCheckoutNotice_DoesNotOfferDeferralAsARemedy()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var builder = TestHelpers.CreatePublishingBuilder(dir);
+        var git = new FakeGitClient { StartBarrier = new Barrier(2) };
+
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
+
+        var message = LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage;
+
+        Assert.NotNull(message);
+        Assert.Contains("billing", message);
+        Assert.Contains("1 service", message);
+        Assert.DoesNotContain("SetCheckoutTiming", message);
+        Assert.DoesNotContain("Deferred checkout", message);
+        Assert.Contains("aspire publish", message);
+        Assert.Contains("clearing the entry is the only remedy", message);
+    }
+
+    [Fact]
+    public void PublishMode_EveryConfiguredServiceAdded_HasNoUnusedCheckoutNotice()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreatePublishingBuilder(dir);
+        var git = new FakeGitClient();
+
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
+
+        Assert.Null(LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage);
+    }
+
+    [Fact]
+    public void RunModeDefaultTiming_DecliningKind_NoticeAdmitsClearingTheEntryIsTheRemedy()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.yaml"),
+            "services:\n"
+            + "  orders:\n    repository: https://example.com/orders.git\n    project: Service.csproj\n"
+            + "  billing:\n    repository: https://example.com/billing.git\n    kind: declining\n");
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.local.json"),
+            "{ \"services\": { \"orders\": { \"source\": \"repository\" }, \"billing\": { \"source\": \"repository\" } } }");
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.AddLocalKind("declining", new FakeLocalResourceKind());
+        var git = new FakeGitClient { StartBarrier = new Barrier(2) };
+
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
+
+        var message = LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage;
+
+        Assert.NotNull(message);
+        Assert.Contains("billing", message);
+        Assert.Contains("declines deferred checkout", message);
+        Assert.Contains("clearing the entry is the only remedy", message);
+    }
+
+    [Fact]
+    public void RunModeEager_UnusedCheckoutNotice_StillNamesEagerAsHowDeferralIsLost()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
+        var git = new FakeGitClient { StartBarrier = new Barrier(2) };
+
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
+
+        var message = LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage;
+
+        Assert.NotNull(message);
+        Assert.Contains("billing", message);
+        Assert.Contains("Deferred checkout", message);
+        Assert.Contains("SetCheckoutTiming(CheckoutTiming.Eager)", message);
+        Assert.Contains("removing that call restores it", message);
+    }
+
     /// <summary>
     /// The notice's remedy is "stop paying for clones you do not use", so it has to be about clones
     /// that were actually paid for. A checkout already on disk costs the prefetch a

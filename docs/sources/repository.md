@@ -86,10 +86,12 @@ the `"path"` spelling to paste instead.)
   "whatever's at the tip the first time each developer clones" into a reviewed checkout, since a
   resolved service can build and run code the checkout's own repository controls (see
   [`SECURITY.md`](https://github.com/flojon/aspire-servicesources/blob/main/SECURITY.md)). It costs a catalog edit per bump; that's the actual trade.
-- Keep the file to the services you actually add — unless you opt out with
-  `builder.SetCheckoutTiming(CheckoutTiming.Eager)`, which removes the reason to.
-  `AddService()` has to hand back the real resource, so under `CheckoutTiming.Eager` it can't wait
-  until the AppHost has finished composing to find out which services it wants: an entry whose
+- Keep the file to the services you actually add. By default, in run mode, an entry you never add
+  is not cloned at all. The cost comes back under `builder.SetCheckoutTiming(CheckoutTiming.Eager)`,
+  in `aspire publish` (where the manifest needs the checkout on disk), and for a kind that declines
+  deferred checkout: some javascript app types, or a custom kind. In each of those cases
+  `AddService()` has to hand back the real resource, so it can't wait until the AppHost has
+  finished composing to find out which services it wants: an entry whose
   *first* checkout an `AddService()` call would have to block on is cloned on the first call, in
   parallel with the others, before the AppHost has said which ones it wants. Entries you never add
   cost network and disk for that first clone. The AppHost logs which ones those were at startup —
@@ -347,7 +349,7 @@ entirely, with no repository and so nothing to bootstrap.
 
 ## Aspire builds a checkout, on every start
 
-Nothing in this package compiles a checkout, and nothing needs to. A `dotnet` service is
+Nothing in this package compiles a managed checkout, and nothing needs to. A `dotnet` service is
 registered with Aspire's own `AddProject`, and Aspire launches that resource with `dotnet run`,
 whose working directory is the checkout itself. The build you would otherwise have to arrange is
 that command's own implicit incremental build.
@@ -357,6 +359,9 @@ So a checkout cloned for the first time compiles when the resource starts — a 
 next run rather than served from the previous ref's binaries. That last one is worth stating
 outright, because the failure it *doesn't* have would be a quiet one: a service answering with
 code you moved away from.
+
+For `"path"` services, the build is the one place this package steps in: services that share a
+repository are built one at a time before they start. A managed checkout is not gated.
 
 Two things to know when it goes wrong:
 
@@ -398,13 +403,15 @@ Two things to know when it goes wrong:
   reasoning already covers a clone that fails for a service nothing waits on; this is the step
   after it.
 
-- **Two `path` services in one repository can collide.** If both point into the same repository
-  and their projects share a `ProjectReference`, Aspire starts both at once, and two builds write
-  that shared project's `bin/`/`obj/` simultaneously — which fails intermittently, with an
-  `MSB4018` or `CS2012` naming a file "being used by another process"
-  ([microsoft/aspire#15190](https://github.com/microsoft/aspire/issues/15190)). Managed checkouts
-  can't hit this: each service gets its own clone under `.servicesources/checkouts/<serviceName>/`,
-  so there is no shared output directory even when two services come from one repository.
+- **Two `path` services in one repository are built one at a time.** If both point into the same
+  repository and their projects share a `ProjectReference`, Aspire would start both at once and two
+  builds would write that shared project's `bin/`/`obj/` simultaneously, failing intermittently
+  with an `MSB4018` or `CS2012`
+  ([microsoft/aspire#15190](https://github.com/microsoft/aspire/issues/15190)). The `"path"` source
+  serializes those builds; see [Several path services from one repository](path.md#several-path-services-from-one-repository).
+  A managed checkout is not gated. Ungrouped ones cannot collide, since each service gets its own
+  clone under `.servicesources/checkouts/<serviceName>/`; a `WithSharedRepository` group shares
+  one clone and is not gated.
 
 Launching the AppHost from an IDE is the one case this doesn't cover. An IDE that starts project
 resources itself, to attach a debugger, builds them the way it builds anything else — and a
@@ -686,6 +693,9 @@ catalog written this way keeps working, and the warning goes away the moment you
 `path.path`, the same override an ungrouped service has: point one developer's own working copy of
 one member at a directory you manage yourself. There is no repository-level equivalent — it
 redirects one service at a time, never a whole group's shared checkout in one setting.
+
+A `WithSharedRepository` group of managed checkouts shares one clone, so services in it build in the
+same working tree; unlike `"path"` services in one repository, they are not gated.
 
 **None of this applies to the [`"path"` source](path.md).** Grouping exists to avoid cloning
 one external repository twice, and a `"path"` service has nothing to clone — two of them naming
