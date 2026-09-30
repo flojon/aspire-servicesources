@@ -69,10 +69,10 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
             ServiceSourcesWarnings.For(builder).AddNotice(RepositoryAliasDeprecationNotice(serviceName));
         }
 
-        if (!managedCheckout)
+        if (config.Repository.Path is not null)
         {
-            // 'repository.path' is deprecated in favor of the first-class 'path' source (design
-            // "local.path is deprecated, not removed yet") — a soft deprecation, not a break: the
+            // A service's own 'repository.path' — not a group's — is deprecated in favor of the
+            // first-class 'path' source (design "local.path is deprecated, not removed yet") — a soft deprecation, not a break: the
             // mechanism keeps working exactly as it does today, and only a one-time notice is owed.
             // AddNotice dedupes identical text, so a service resolved more than once in a run
             // reports this only once.
@@ -87,6 +87,10 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
             ? PreparePlan.ServiceLabel(serviceName)
             : PreparePlan.RepositoryLabel(definition.Repository.CheckoutName);
 
+        var groupPathKey = LocalGitCheckout.PathComesFromGroup(definition, serviceName, config, repositoryConfig)
+            ? LocalGitCheckout.GroupPathKey(definition.Repository.CheckoutName)
+            : null;
+
         // The other configuration check that needs no working tree, and the last one standing in
         // front of the clone now that a kind's own Validate has moved below it. Being core's own it
         // also runs ahead of ShouldDefer, so it covers both paths — a typo'd mode, or a command
@@ -95,7 +99,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         // the working tree waits for one, which is the division ValidateCheckout draws for a kind.
         var prepare = PreparePlan.For(
             serviceName, label, definition.Repository.Prepare, config.Repository.Prepare, managedCheckout,
-            OperatingSystem.IsWindows());
+            OperatingSystem.IsWindows(), groupPathKey);
 
         if (prepare.IgnoredCatalogNotice is { } ignored)
         {

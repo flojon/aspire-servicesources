@@ -2249,6 +2249,69 @@ public class LocalProjectSourceTests
         Assert.Empty(gitClient.ClonedRepos);
     }
 
+    private static (IDistributedApplicationBuilder Builder, string GroupDir) GroupPathSetup()
+    {
+        var groupDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(groupDir, "Orders.csproj"), "<Project />");
+        return (PlainBuilder(), groupDir);
+    }
+
+    [Fact]
+    public void Resolve_GroupPathOnly_EmitsNoLocalPathDeprecationNotice()
+    {
+        var (builder, groupDir) = GroupPathSetup();
+
+        new LocalProjectSource(new FakeGitClient()).Resolve(
+            builder, ServiceName, GroupedDefinition(project: "Orders.csproj"), DevConfig(),
+            new RepositoryDeveloperConfig { Path = groupDir });
+
+        Assert.DoesNotContain(
+            ServiceSourcesWarnings.For(builder).Messages,
+            message => message.Contains("deprecated", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Resolve_MemberOwnPathInsideGroupWithGroupPath_StillEmitsDeprecationNotice()
+    {
+        var (builder, groupDir) = GroupPathSetup();
+        var ownDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(ownDir, "Orders.csproj"), "<Project />");
+
+        new LocalProjectSource(new FakeGitClient()).Resolve(
+            builder, ServiceName, GroupedDefinition(project: "Orders.csproj"), DevConfig(path: ownDir),
+            new RepositoryDeveloperConfig { Path = groupDir });
+
+        Assert.Contains(
+            ServiceSourcesWarnings.For(builder).Messages,
+            message => message.Contains("'repository.path' is deprecated", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Resolve_GroupPathAndCatalogPrepare_IgnoredNoticeNamesGroupKey()
+    {
+        var (builder, groupDir) = GroupPathSetup();
+        var definition = new ServiceDefinition
+        {
+            Repository = new RepositoryDefinition
+            {
+                Url = "https://github.com/company/monorepo", CheckoutName = "monorepo",
+                Prepare = new PrepareMetadata { Command = ["npm", "ci"] },
+            },
+            Project = "Orders.csproj",
+            Kind = LocalKinds.Dotnet,
+            Origin = CatalogOrigin.FromYaml("servicesources.yaml"),
+        };
+
+        new LocalProjectSource(new FakeGitClient()).Resolve(
+            builder, ServiceName, definition, DevConfig(), new RepositoryDeveloperConfig { Path = groupDir });
+
+        var notice = Assert.Single(
+            ServiceSourcesWarnings.For(builder).Messages,
+            message => message.Contains("was not run", StringComparison.Ordinal));
+        Assert.Contains("ServiceSources:Repositories:monorepo:path", notice, StringComparison.Ordinal);
+        Assert.DoesNotContain("repository.path", notice, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Resolve_GroupedMemberWithGroupPathAndNoRepositoryUrl_IsNotRefused()
     {
