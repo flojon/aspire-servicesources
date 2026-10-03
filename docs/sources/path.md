@@ -161,9 +161,10 @@ by construction.
 `kubernetes` and `container`, a `"path"` service is always resolved eagerly, with full
 launch-profile fidelity — there's no clone to defer, so no "Preparing" state ever appears for one.
 
-**No `repositories:` grouping either.** Grouping exists to avoid cloning one external repository
-twice; a `"path"` service has nothing to clone, so there's no shared-checkout identity to opt into.
-Two services naming the same resolved `path` are just two entries pointing at one directory.
+**A `"path"` service needs no `repositories:` entry to share a directory.** Grouping exists to avoid
+cloning one external repository twice; a `"path"` service has nothing to clone. Two services naming
+the same resolved `path` are just two entries pointing at one directory. A `repositories:` entry is
+only for redirecting a `repositoryRef` group to one directory in a single setting, as described above.
 
 **`repository.path` is deprecated.** It resolves a directory the same way — no clone, no ref —
 reachable a second, less discoverable way, nested under a source whose other machinery it never

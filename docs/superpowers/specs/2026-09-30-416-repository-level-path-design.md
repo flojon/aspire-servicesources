@@ -147,7 +147,8 @@ per service `{ "source": "path", "path": { "path": ... } }`; for a whole group, 
 `repositories.<name>`. The one thing that does not carry over by itself is a `repository.prepare`
 block (per service: move to `path.prepare`). The group form never existed before, and no
 `repositories.<name>.path` string ever worked, so nothing is migrated for it. CHANGELOG `[Unreleased]`
-**Added** gets one entry (#416); **Deprecated** gains a clause pointing grouped users at the group form.
+**Added** gets one entry (#416). The **Deprecated** entry lives in a released section, so the pointer
+at the group form lives in the deprecation notice text and the Added entry instead.
 
 ## 6. Documentation
 

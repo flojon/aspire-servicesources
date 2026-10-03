@@ -717,8 +717,13 @@ it. The environment spelling is `ServiceSources__Repositories__eshop__Source=pat
 - `source` is `path` or `repository`; `"source": "repository"` is the explicit managed clone, which
   lets a higher configuration layer cancel a lower layer's `path`. A `path` block without
   `"source": "path"` is not read, and a group `ref` is ignored while the group is on `path`.
-- A catalog `prepare` step is not run in a directory you manage, and a startup notice says so. A
-  `prepare` on the group entry is refused; set `path.prepare` on each member instead.
+- The group's catalog `prepare` step is not run in a directory you manage, and nothing is printed
+  about it: a redirected member inherits no catalog `prepare`, only a `path.prepare` you declare on
+  it. A `prepare` on the group entry is refused; set `path.prepare` on each member instead. For the
+  same reason a member's own `repository.prepare` is dropped silently once the group redirects it, so
+  move it to that member's `path.prepare`.
+- A member's own `repository.ref` is still refused, as for any grouped member: a group's ref is
+  shared, and the group's own `ref` is ignored while it is on `path`.
 - The reached members are `"path"` services in one repository, so their `dotnet` builds run one after
   another rather than racing (see [Several path services from one repository](path.md#several-path-services-from-one-repository)).
 - A `repositories` entry naming no declared repository is reported at startup, with a
@@ -731,7 +736,9 @@ one member at a directory you manage yourself.
 A `WithSharedRepository` group of managed checkouts shares one clone, so services in it build in the
 same working tree; unlike `"path"` services in one repository, they are not gated.
 
-**None of this applies to the [`"path"` source](path.md).** Grouping exists to avoid cloning
-one external repository twice, and a `"path"` service has nothing to clone — two of them naming
-the same resolved directory are just two entries pointing at it, no `repositories:` entry needed.
+**None of this applies to the [`"path"` source](path.md), with one exception.** Grouping exists to avoid
+cloning one external repository twice, and a `"path"` service has nothing to clone — two of them naming
+the same resolved directory are just two entries pointing at it, no `repositories:` entry needed. The
+exception is a group-level `"source": "path"` entry, which supplies the directory to a grouped
+`"path"` service that sets none.
 
