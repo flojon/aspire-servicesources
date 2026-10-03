@@ -87,6 +87,13 @@ internal sealed class DeferredCheckout
     private const string PreparingState = "Preparing";
 
     /// <summary>
+    /// What the State column says for a service the developer chose not to clone. A custom text
+    /// rather than <c>NotStarted</c>, which leaves the dashboard's Start command enabled against a
+    /// project that is not on disk.
+    /// </summary>
+    private const string SkippedState = "Skipped";
+
+    /// <summary>
     /// The shortest gap between two published progress updates within one phase. See
     /// <see cref="ReportCloneProgressAsync"/>.
     /// </summary>
@@ -686,15 +693,75 @@ internal sealed class DeferredCheckout
 
     private readonly List<Task> _startTasks = [];
 
-    private void StartAll(IServiceProvider services, CheckoutNameLock checkoutNameLock, CancellationToken cancellationToken)
+    private void StartAll(IServiceProvider services, CheckoutNameLock checkoutNameLock, CancellationToken cancellationToken) =>
+        Apply(Snapshot(), [], services, checkoutNameLock, cancellationToken);
+
+    internal IReadOnlyList<Deferred> Snapshot()
     {
-        Deferred[] snapshot;
         lock (_gate)
         {
-            snapshot = [.. _deferred];
+            return [.. _deferred];
         }
+    }
 
-        StartPicked(snapshot, services, checkoutNameLock, cancellationToken);
+    /// <summary>Starts the picked services and marks the others <c>Skipped</c>, all in the background.</summary>
+    internal void Apply(
+        IReadOnlyList<Deferred> picked, IReadOnlyList<Deferred> skipped, IServiceProvider services,
+        CheckoutNameLock checkoutNameLock, CancellationToken cancellationToken)
+    {
+        StartPicked(picked, services, checkoutNameLock, cancellationToken);
+
+        foreach (var deferred in skipped)
+        {
+            var task = Task.Run(() => SkipAsync(deferred, services, cancellationToken), CancellationToken.None);
+
+            lock (_gate)
+            {
+                _startTasks.Add(task);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Marks one unpicked service <c>Skipped</c> once DCP has withheld its resources. Never throws:
+    /// it runs on a task nobody awaits.
+    /// </summary>
+    private static async Task SkipAsync(Deferred deferred, IServiceProvider services, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var notifications = services.GetRequiredService<ResourceNotificationService>();
+            var logger = services.GetRequiredService<ResourceLoggerService>().GetLogger(deferred.Resource);
+
+            using var shutdown = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken,
+                services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping);
+
+            // DCP publishes NotStarted for each withheld resource after the handler returns; a state
+            // published before that would be overwritten by it.
+            foreach (var withheld in deferred.AllResources)
+            {
+                await notifications.WaitForResourceAsync(
+                    withheld.Name, KnownResourceStates.NotStarted, shutdown.Token)
+                    .ConfigureAwait(false);
+            }
+
+            foreach (var withheld in deferred.AllResources)
+            {
+                await PublishStateAsync(notifications, withheld, SkippedState).ConfigureAwait(false);
+            }
+
+            ServiceSourcesLog.Information(
+                logger, $"Skipped: it was not selected, so it is not cloned or started this run.");
+        }
+        catch (OperationCanceledException)
+        {
+            // The host is stopping; there is nothing left to mark.
+        }
+        catch (Exception)
+        {
+            // Marking a skip is best effort and must not fault a task nobody awaits.
+        }
     }
 
     /// <summary>

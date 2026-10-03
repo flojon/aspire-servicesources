@@ -887,6 +887,105 @@ public class DeferredCheckoutTests
         await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
     }
 
+    private static string? CurrentState(IServiceProvider services, IResource resource) =>
+        services.GetRequiredService<ResourceNotificationService>()
+            .TryGetCurrentState(resource.Name, out var current) ? current.Snapshot.State?.Text : null;
+
+    [Fact]
+    public async Task Skipped_IsPublishedAfterNotStarted_SoDcpDoesNotOverwriteIt()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+
+        var git = new FakeGitClient();
+        var orders = new LocalProjectSource(git)
+            .Resolve(builder, "orders", Definition("orders"), DevConfig())
+            .WithHttpEndpoint();
+
+        var services = builder.Services.BuildServiceProvider();
+        var deferred = DeferredCheckout.For(builder);
+        deferred.Apply([], deferred.Snapshot(), services, CheckoutNameLock.For(builder), CancellationToken.None);
+
+        // Nothing is published until DCP's own NotStarted arrives.
+        await Task.Delay(200);
+        Assert.Null(CurrentState(services, RealResource(builder, "orders")));
+
+        await PublishNotStartedAsync(services, RealResource(builder, "orders"));
+        await Task.WhenAll(deferred.StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Equal("Skipped", CurrentState(services, RealResource(builder, "orders")));
+
+        var log = await ReadLogUntilAsync(services, RealResource(builder, "orders"), "Skipped");
+        Assert.Contains(log, line => line.Contains("Skipped", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Skipped_NeverClonesPreparesOrStarts()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+
+        var git = new FakeGitClient();
+        var orders = new LocalProjectSource(git)
+            .Resolve(builder, "orders", Definition("orders"), DevConfig())
+            .WithHttpEndpoint();
+
+        var services = builder.Services.BuildServiceProvider();
+        var deferred = DeferredCheckout.For(builder);
+        deferred.Apply([], deferred.Snapshot(), services, CheckoutNameLock.For(builder), CancellationToken.None);
+        await PublishNotStartedAsync(services, RealResource(builder, "orders"));
+        await Task.WhenAll(deferred.StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+        await Task.Delay(200);
+
+        Assert.Empty(git.Cloned);
+        Assert.False(Directory.Exists(ExpectedRepoRoot(dir, "orders")));
+        Assert.Equal("Skipped", CurrentState(services, RealResource(builder, "orders")));
+    }
+
+    [Fact]
+    public async Task Skipped_HostStoppingBeforeNotStarted_EndsTheTaskWithoutPublishing()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+
+        var orders = new LocalProjectSource(new FakeGitClient())
+            .Resolve(builder, "orders", Definition("orders"), DevConfig())
+            .WithHttpEndpoint();
+
+        var services = builder.Services.BuildServiceProvider();
+        var deferred = DeferredCheckout.For(builder);
+        deferred.Apply([], deferred.Snapshot(), services, CheckoutNameLock.For(builder), CancellationToken.None);
+
+        services.GetRequiredService<IHostApplicationLifetime>().StopApplication();
+        await Task.WhenAll(deferred.StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Null(CurrentState(services, RealResource(builder, "orders")));
+    }
+
+    [Fact]
+    public async Task UnusedCheckoutsMessage_StaysNull_ForASkippedService()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+
+        var git = new FakeGitClient();
+        var orders = new LocalProjectSource(git)
+            .Resolve(builder, "orders", Definition("orders"), DevConfig())
+            .WithHttpEndpoint();
+
+        var services = builder.Services.BuildServiceProvider();
+        var deferred = DeferredCheckout.For(builder);
+        deferred.Apply([], deferred.Snapshot(), services, CheckoutNameLock.For(builder), CancellationToken.None);
+        await PublishNotStartedAsync(services, RealResource(builder, "orders"));
+        await Task.WhenAll(deferred.StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Null(LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage);
+    }
+
     [Fact]
     public async Task StartPath_DoesNotDependOnAfterResourcesCreated()
     {

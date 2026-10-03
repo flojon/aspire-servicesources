@@ -211,6 +211,10 @@ public class DeferredKindCheckoutTests
     private static bool IsHeldBack(IResource resource) =>
         resource.Annotations.OfType<ExplicitStartupAnnotation>().Any();
 
+    private static string? CurrentState(IServiceProvider services, IResource resource) =>
+        services.GetRequiredService<ResourceNotificationService>()
+            .TryGetCurrentState(resource.Name, out var current) ? current.Snapshot.State?.Text : null;
+
     private static IResource Named(IDistributedApplicationBuilder builder, string name) =>
         Assert.Single(builder.Resources, r => r.Name == name);
 
@@ -514,6 +518,34 @@ public class DeferredKindCheckoutTests
         await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
 
         Assert.True(Directory.Exists(Path.Combine(ExpectedRepoRoot(dir, "frontend"), "app")));
+    }
+
+    [Fact]
+    public async Task Skipped_IsPublishedOnTheHeldBackHelperToo_OnlyAfterEveryResourceReachedNotStarted()
+    {
+        var dir = CreateAppHostDirectory("frontend");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+        builder.AddLocalKind(KindName, new StandInKind(withHelper: true));
+
+        var git = new FakeGitClient();
+        var service = new LocalProjectSource(git).Resolve(builder, "frontend", Definition("frontend"), DevConfig());
+        var helper = Named(builder, "frontend-helper");
+
+        var services = builder.Services.BuildServiceProvider();
+        var deferred = DeferredCheckout.For(builder);
+        deferred.Apply([], deferred.Snapshot(), services, CheckoutNameLock.For(builder), CancellationToken.None);
+
+        await PublishNotStartedAsync(services, helper);
+        await Task.Delay(200);
+        Assert.NotEqual("Skipped", CurrentState(services, helper));
+
+        await PublishNotStartedAsync(services, Named(builder, "frontend"));
+        await Task.WhenAll(deferred.StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Equal("Skipped", CurrentState(services, helper));
+        Assert.Equal("Skipped", CurrentState(services, Named(builder, "frontend")));
+        Assert.Empty(git.Cloned);
     }
 
     [Fact]
