@@ -202,7 +202,7 @@ internal sealed record PrepareMarker(
     /// scratch write just created. Neither is a reason to drop a completed step's record: the hold
     /// is measured in milliseconds, not the seconds a retry loop this short can burn through.
     /// </remarks>
-    private static void MoveOntoMarker(string scratch, string markerPath)
+    internal static void MoveOntoMarker(string scratch, string markerPath)
     {
         for (var attempt = 1; ; attempt++)
         {
@@ -218,7 +218,7 @@ internal sealed record PrepareMarker(
         }
     }
 
-    private static void TryDelete(string path)
+    internal static void TryDelete(string path)
     {
         try
         {

@@ -186,10 +186,10 @@ public static class ServiceSourcesBuilderExtensions
     /// </para>
     /// <para>
     /// The clones stay parallel and get narrower under <see cref="CheckoutTiming.Deferred"/>. A
-    /// deferred registration blocks on nothing, so its clone starts at its own
-    /// <see cref="AddService"/> call and still overlaps the ones around it — but it no longer has to
-    /// be started ahead of demand to do that, which is what let the speculative prefetch stop
-    /// cloning services this AppHost never adds (#76). Under <see cref="CheckoutTiming.Eager"/> the
+    /// deferred registration blocks on nothing, so its clone starts once the AppHost is about to run,
+    /// together with the other picked clones and without waiting on the pick for the services a saved
+    /// selection already decides. It no longer has to be started ahead of demand to do that, which
+    /// is what let the speculative prefetch stop cloning services this AppHost never adds. Under <see cref="CheckoutTiming.Eager"/> the
     /// clones must start before the AppHost has said what it wants, so every <c>"repository"</c> entry
     /// with no checkout yet is cloned.
     /// </para>
@@ -231,6 +231,11 @@ public static class ServiceSourcesBuilderExtensions
     /// the pre-0.8.0 behaviour, permanently rather than as a migration window — there is no way for
     /// the package to detect that an AppHost relies on the old ordering, so the opt-out is not
     /// scheduled for removal.
+    /// </para>
+    /// <para>
+    /// With a dashboard to ask through, deferred timing also asks once which cold services to clone
+    /// and start; the others show a <c>Skipped</c> state, and the answer is saved in
+    /// <c>.servicesources/selection.json</c>. <see cref="CheckoutTiming.Eager"/> never asks.
     /// </para>
     /// </remarks>
     /// <exception cref="ServiceSourcesConfigurationException">

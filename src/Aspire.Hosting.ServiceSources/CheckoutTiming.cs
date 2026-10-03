@@ -9,7 +9,8 @@ public enum CheckoutTiming
     /// <summary>
     /// A service whose managed checkout does not exist yet is registered stopped and started once
     /// its clone lands, so the dashboard comes up immediately and checkout progress and failure show
-    /// as resource state. The default.
+    /// as resource state. The default. With a dashboard to ask through, the developer is also asked once
+    /// which of those services to clone, and the answer is saved in <c>.servicesources/selection.json</c>.
     /// </summary>
     Deferred,
 

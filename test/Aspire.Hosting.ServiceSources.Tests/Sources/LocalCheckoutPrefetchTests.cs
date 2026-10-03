@@ -3,6 +3,8 @@ using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Sources;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Sources;
@@ -256,10 +258,24 @@ public class LocalCheckoutPrefetchTests
         // kept 'billing' shows up here without waiting on a clone thread.
         Assert.Null(LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage);
 
-        Assert.True(
-            SpinWait.SpinUntil(() => git.Cloned.Count > 0, TimeSpan.FromSeconds(30)),
-            "the deferred service's own checkout was never cloned.");
-        Assert.Equal(["https://example.com/orders.git"], git.Cloned.ToArray());
+        // Nor is the added service cloned from AddService(): that waits for BeforeStartEvent.
+        Thread.Sleep(300);
+        Assert.Empty(git.Cloned);
+    }
+
+    [Fact]
+    public void MarkRequested_StartsNoClone_AndCountsAsRequested()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
+        var git = new FakeGitClient();
+        var prefetch = LocalCheckoutPrefetch.For(builder, git);
+
+        prefetch.MarkRequested("orders", Definition("orders"));
+
+        Assert.Empty(git.Cloned);
+        Assert.Null(prefetch.UnusedCheckoutsMessage);
     }
 
     [Fact]
@@ -846,24 +862,21 @@ public class LocalCheckoutPrefetchTests
         // no waiting for a clone that is not coming.
         Assert.Null(LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage);
 
-        // 'orders' is still cloned: deferral moves the clone off the composition thread, it does not
-        // skip it. So this waits for a clone that is on its way rather than for one that never runs.
-        Assert.True(
-            SpinWait.SpinUntil(() => git.Cloned.Count > 0, TimeSpan.FromSeconds(30)),
-            "the deferred service's own checkout was never cloned.");
-        Assert.Equal(["https://example.com/orders.git"], git.Cloned);
+        // Nor is 'orders': a deferred service is cloned when BeforeStartEvent starts it, not when
+        // it is added.
+        Thread.Sleep(300);
+        Assert.Empty(git.Cloned);
     }
 
     /// <summary>
-    /// Why issue #76's "lazy per-service clone" was rejected, and why it is affordable now: a
-    /// deferred service's clone blocks nobody, so starting each one at its own <c>AddService()</c>
-    /// call still leaves them all running at once.
+    /// Why issue #76's "lazy per-service clone" was rejected: a deferred service's clone blocks
+    /// nobody, so the checkouts started together at <c>BeforeStartEvent</c> still run at once.
     /// </summary>
     [Fact]
-    public void DeferredTiming_TwoColdServicesAdded_StillCloneInParallel()
+    public async Task DeferredTiming_TwoColdServicesAdded_StillCloneInParallel()
     {
         var dir = CreateAppHostDirectory("orders", "billing");
-        var builder = TestHelpers.CreateBuilder(dir);
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
         builder.SetCheckoutTiming(CheckoutTiming.Deferred);
         // Barrier(2): neither clone may return until both have started. Had the per-service starts
         // serialised them, the first would wedge here and the second would never be reached.
@@ -873,9 +886,16 @@ public class LocalCheckoutPrefetchTests
         source.Resolve(builder, "orders", Definition("orders"), DevConfig());
         source.Resolve(builder, "billing", Definition("billing"), DevConfig());
 
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+
         Assert.True(
             SpinWait.SpinUntil(() => git.Cloned.Count == 2, TimeSpan.FromSeconds(30)),
             "the two deferred checkouts did not overlap.");
+
+        services.GetRequiredService<IHostApplicationLifetime>().StopApplication();
+        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
     }
 
     /// <summary>
@@ -954,6 +974,11 @@ public class LocalCheckoutPrefetchTests
         Assert.Contains("billing", message);
         Assert.Contains("declines deferred checkout", message);
         Assert.Contains("clearing the entry is the only remedy", message);
+
+        // The deferred service the AppHost added is requested, so it is never named here even though
+        // it is no longer cloned from AddService().
+        Assert.DoesNotContain("orders", message);
+        Assert.Contains("cloned only when it is added and picked", message);
     }
 
     [Fact]
