@@ -40,6 +40,7 @@ origin_repo="$cache_dir/local-source-origin.git"
 seed_tree="$cache_dir/local-source-seed"
 self_managed="$cache_dir/local-source-self-managed"
 checkout_dir="$apphost_dir/.servicesources/checkouts/orders"
+selection_file="$apphost_dir/.servicesources/selection.json"
 
 log() { printf '\n==> %s\n' "$*"; }
 fail() { printf '\nFAIL: %s\n' "$*" >&2; exit 1; }
@@ -79,6 +80,7 @@ cleanup() {
   # in there are generated, but its .gitignore un-ignores itself on purpose, so a leftover
   # directory shows up as an untracked file in this repository after every run.
   rm -rf "$checkout_dir"
+  rm -f "$selection_file"
   if [[ $had_service_sources -eq 0 ]]; then
     rm -rf "$service_sources_dir"
   fi
@@ -87,6 +89,8 @@ cleanup() {
 trap cleanup EXIT
 
 [[ -d "$service_sources_dir" ]] && had_service_sources=1
+# A developer's own saved picks would change which runs prompt; the test owns this file for its run.
+[[ ! -f "$selection_file" ]] || fail "$selection_file exists; delete it before running this test"
 
 cp "$apphost_dir/servicesources.yaml" "$yaml_backup"
 if [[ -f "$apphost_dir/servicesources.local.json" ]]; then
@@ -280,6 +284,20 @@ run_until_marker() {
   tr -d '\r\n' < "$found"
 }
 
+# A cold deferred checkout with no saved pick prompts in the dashboard and waits for an answer,
+# which nothing answers here. A saved pick is honoured without one, so cold runs seed it.
+seed_selection() {
+  mkdir -p "$service_sources_dir"
+  cat > "$selection_file" <<'SELECTION_EOF'
+{
+  "version": 1,
+  "services": {
+    "orders": { "start": true }
+  }
+}
+SELECTION_EOF
+}
+
 log "building DemoAppHost"
 dotnet build "$apphost_dir/DemoAppHost.csproj" -c Debug -v quiet
 
@@ -289,6 +307,7 @@ dotnet build "$apphost_dir/DemoAppHost.csproj" -c Debug -v quiet
 log "1. cold run: the checkout does not exist yet"
 rm -rf "$checkout_dir"
 write_local_json ""
+seed_selection
 [[ ! -d "$checkout_dir" ]] || fail "the checkout directory should not exist before the cold run"
 
 marker="$(run_until_marker "cold run" "$checkout_dir")"
@@ -438,6 +457,8 @@ cat > "$apphost_dir/servicesources.local.json" <<'EOF'
   }
 }
 EOF
+
+seed_selection
 
 marker="$(run_until_marker "defaultSource" "$checkout_dir")"
 [[ "$marker" == "$MAIN_MARKER" ]] \
