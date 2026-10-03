@@ -149,10 +149,23 @@ that happens to be first in the group:
 ```
 
 `ServiceSources__Repositories__monorepo__Ref` is the environment-variable spelling, the same
-pattern `ServiceSources__Services__<service>__Repository__Ref` uses. `path` points every member of the
-group at one directory you already have checked out, written once —
-`ServiceSources__Repositories__monorepo__Path` in the environment. A member's own `repository.path`
-still wins, and it cannot be combined with the group's `ref`. See
+pattern `ServiceSources__Services__<service>__Repository__Ref` uses.
+
+The entry takes the same `source` and `path` block a service does, to point every member of the group
+at one directory you already have checked out, written once:
+
+```json
+{
+  "repositories": {
+    "monorepo": { "source": "path", "path": { "path": "../monorepo" } }
+  }
+}
+```
+
+The environment spelling is `ServiceSources__Repositories__monorepo__Source=path` and
+`ServiceSources__Repositories__monorepo__Path__Path=../monorepo`. `source` is `path` or `repository`
+(the managed checkout, which lets a higher layer cancel a lower layer's `path`). Only `path.path` is
+accepted in the block; a `prepare` belongs on each member's own `path` block. See
 [Pointing a whole group at a checkout you already have](../sources/repository.md#several-services-from-one-repository).
 
 Two failures are reported differently on purpose, because a typo in a configuration key produces an

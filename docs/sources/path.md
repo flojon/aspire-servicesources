@@ -125,12 +125,15 @@ marker lives where a `repository.path` override's does,
 `<AppHostDirectory>/.servicesources/prepare/<service>.json`, keyed on the resolved path and the
 command.
 
-To point several services of one repository at the same tree, set `repositories.<name>.path` once
-instead of a `path.path` per service.
-
 A service grouped into a `repositories:` entry doesn't inherit that repository's `prepare:` under
 `"path"`: the group's step is written to run once at the root of its shared checkout, not in one
 member's directory once per member. Only a `path.prepare` block the developer declares runs there.
+
+**A group can be pointed at one tree.** A `path` service still has nothing to clone, but setting
+`repositories.<name>` to `{ "source": "path", "path": { "path": "..." } }` in
+`servicesources.local.json` makes every grouped member of that repository use the directory as its
+root instead of a `path.path` per service; see
+[Pointing a whole group at a checkout you already have](repository.md#several-services-from-one-repository).
 
 **`defaultSource: path` is close to free.** Unlike [`defaultSource: repository`'s warning](../getting-started/quickstart.md#defaulting-a-source) —
 about the clone every developer and CI trigger by default — a `"path"` service with nothing in
@@ -214,6 +217,7 @@ describes how the code is laid out. It has no effect unless the service resolves
 
 **What is not covered.** A managed checkout (`"repository"`) is not gated: ungrouped ones each have
 their own clone, and services in a `WithSharedRepository` group share one clone and are not gated
-either. Launching from an IDE, where the debugger builds the project itself, and `dotnet watch`
+either. The members of a group pointed at one directory are `"path"` services in one repository, so
+they are gated. Launching from an IDE, where the debugger builds the project itself, and `dotnet watch`
 bypass the gate. A build that fails is logged to the service's own console and the service still
 starts, so its own `dotnet run` reports the real error.

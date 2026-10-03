@@ -689,34 +689,38 @@ not grouped by that alone — each still gets its own checkout, cloned and recon
 and ServiceSources warns about it at startup. That is a suggestion, not an error: an existing
 catalog written this way keeps working, and the warning goes away the moment you group them.
 
-**Pointing a whole group at a checkout you already have** takes one setting, the group's `path`
-in `servicesources.local.json`:
+**Pointing a whole group at a checkout you already have** takes one entry, the group's `source` and
+`path` block in `servicesources.local.json`, the same vocabulary a service uses:
 
 ```json
 {
   "repositories": {
-    "eshop": { "path": "../eShop" }
+    "eshop": { "source": "path", "path": { "path": "../eShop" } }
   }
 }
 ```
 
 With the catalog's `repositoryRef: eshop` and `project: src/Basket.API/Basket.API.csproj`, every
-member of `eshop` uses that directory as its repository root, and `project:` resolves against it and
-stays confined to it. The environment-variable spelling is `ServiceSources__Repositories__eshop__Path`.
+member of `eshop` that is set to `repository` (or `path`) is resolved by the [`"path"` source](path.md)
+with that directory as its repository root, and `project:` resolves against it and stays confined to
+it. The environment spelling is `ServiceSources__Repositories__eshop__Source=path` and
+`ServiceSources__Repositories__eshop__Path__Path=../eShop`.
 
-- Nothing is cloned, fetched, reconciled or deferred for a member that resolves to a path.
+- Nothing is cloned, fetched, reconciled or deferred for a member it reaches.
 - A relative value resolves against the AppHost directory, not the json file, and the directory must
-  exist; a missing one is an error naming the repository and `ServiceSources:Repositories:eshop:path`.
-- Precedence, first set wins: a member's own `repository.path`, then the group's `path`, then the
-  managed checkout (the group's `ref`, else the catalog's `defaultRef`). So one member can still point
-  elsewhere while its siblings share the group's directory.
-- It cannot be combined with the group's `ref`: the path is an existing checkout, and a ref only
-  applies where this tool manages the clone. A catalog `defaultRef` is ignored silently.
-- It applies only to grouped services; an ungrouped service of the same name ignores it.
-- A catalog `prepare` step is not run in a directory you manage, and a startup notice says so; a
-  service's own `repository.prepare` block still applies. A group-path directory is not subject to
-  the `path` source's build gate, so builds of services sharing it are not serialized; only their
-  prepare steps run one at a time, under the same per-checkout lock as a managed clone.
+  exist; a missing one is an error naming the repository and `ServiceSources:Repositories:eshop:path:path`.
+- Precedence, first that applies: a member's own `path.path` (or the deprecated `repository.path`),
+  then the group's directory, then the managed checkout. So one member can still point elsewhere
+  while its siblings share the group's directory.
+- A member set to `url`, `container` or `kubernetes` is left alone, so running one dependency from an
+  image keeps working. An ungrouped service of the same name as the repository is not reached either.
+- `source` is `path` or `repository`; `"source": "repository"` is the explicit managed clone, which
+  lets a higher configuration layer cancel a lower layer's `path`. A `path` block without
+  `"source": "path"` is not read, and a group `ref` is ignored while the group is on `path`.
+- A catalog `prepare` step is not run in a directory you manage, and a startup notice says so. A
+  `prepare` on the group entry is refused; set `path.prepare` on each member instead.
+- The reached members are `"path"` services in one repository, so their `dotnet` builds run one after
+  another rather than racing (see [Several path services from one repository](path.md#several-path-services-from-one-repository)).
 - A `repositories` entry naming no declared repository is reported at startup, with a
   did-you-mean, since otherwise its members would quietly keep cloning into the managed checkout.
 

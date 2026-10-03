@@ -56,12 +56,14 @@ never existed. Check the tag of the last release before adding one.
   not contain (or a project with no `launchSettings.json` at all), and a `dotnet:` block, or
   the code-catalog calls, on a service whose kind is not `dotnet`.
 
-- **`repositories.<name>.path` points a whole `repositoryRef` group at an existing checkout**
-  ([#416]). One setting in `servicesources.local.json` (or
-  `ServiceSources__Repositories__<name>__Path`) redirects every member of the group, so a monorepo
-  AppHost keeps its grouping without repeating a `repository.path` per service. A service's own
-  `repository.path` still wins, and the group's `path` cannot be combined with the group's `ref`.
-  A `repositories` entry naming no declared repository is now reported at startup.
+- **A `repositories.<name>` entry can use the `"path"` source to point a whole `repositoryRef` group
+  at an existing checkout** ([#416]). `{ "source": "path", "path": { "path": "../eShop" } }` (or
+  `ServiceSources__Repositories__<name>__Source` and `__Path__Path`) redirects every grouped member
+  whose source is `repository` or `path`, so a monorepo AppHost keeps its grouping without repeating
+  a `path.path` per service. A member's own `path.path` still wins, members on `url`, `container` or
+  `kubernetes` are left alone, a group `ref` is ignored while the group is on `path`, and the
+  builds of the members are serialized like any other `"path"` services in one repository. A
+  `repositories` entry naming no declared repository is now reported at startup.
 
 ### Fixed
 
