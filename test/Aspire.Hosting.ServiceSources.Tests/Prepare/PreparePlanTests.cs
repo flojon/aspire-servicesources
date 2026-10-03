@@ -340,30 +340,6 @@ public class PreparePlanTests
     // ---- path checkouts -----------------------------------------------------
 
     [Fact]
-    public void For_UnmanagedFromGroupPath_NoticeNamesTheGroupKeyNotRepositoryPath()
-    {
-        const string Key = "ServiceSources:Repositories:monorepo:path";
-
-        var plan = PreparePlan.For(
-            ServiceName, PreparePlan.RepositoryLabel("monorepo"), Catalog(["npm", "ci"]), developer: null,
-            managedCheckout: false, windows: false, groupPathKey: Key);
-
-        var notice = plan.IgnoredCatalogNotice!.Value.ToString();
-        Assert.Contains(Key, notice);
-        Assert.DoesNotContain("repository.path", notice);
-        // The remedy is still the per-service block, which is what applies under a group path.
-        Assert.Contains("\"repository\": { \"prepare\"", notice);
-    }
-
-    [Fact]
-    public void For_UnmanagedFromMemberPath_NoticeStillNamesRepositoryPath()
-    {
-        var plan = Plan(Catalog(["npm", "ci"]), managedCheckout: false);
-
-        Assert.Contains("repository.path", plan.IgnoredCatalogNotice!.Value.ToString());
-    }
-
-    [Fact]
     public void PathCheckout_DoesNotInheritTheCatalogsStep()
     {
         var plan = Plan(Catalog(["./prepare.sh"]), managedCheckout: false);

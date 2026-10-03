@@ -361,7 +361,7 @@ public class LocalCheckoutPrefetchTests
     }
 
     [Fact]
-    public void GroupPath_StartsNoSpeculativeCloneForTheGroup_WhileAnotherRepositoryStillClones()
+    public void GroupOnPath_StartsNoSpeculativeCloneForTheGroup_WhileAnotherRepositoryStillClones()
     {
         var dir = TempDirectories.CreateSubdirectory().FullName;
         var groupDir = TempDirectories.CreateSubdirectory().FullName;
@@ -395,18 +395,18 @@ public class LocalCheckoutPrefetchTests
                 },
                 ["repositories"] = new System.Text.Json.Nodes.JsonObject
                 {
-                    ["monorepo"] = new System.Text.Json.Nodes.JsonObject { ["path"] = groupDir },
+                    ["monorepo"] = new System.Text.Json.Nodes.JsonObject
+                    {
+                        ["source"] = "path",
+                        ["path"] = new System.Text.Json.Nodes.JsonObject { ["path"] = groupDir },
+                    },
                 },
             }.ToJsonString());
         var builder = TestHelpers.CreateBuilder(dir);
         builder.SetCheckoutTiming(CheckoutTiming.Eager);
         var git = new FakeGitClient();
         var source = new LocalProjectSource(git);
-        var repository = new RepositoryDefinition { Url = "https://example.com/monorepo.git", CheckoutName = "monorepo" };
-        var group = new RepositoryDeveloperConfig { Path = groupDir };
 
-        source.Resolve(builder, "orders", GroupedDefinition(repository), DevConfig(), group);
-        source.Resolve(builder, "basket", GroupedDefinition(repository), DevConfig(), group);
         source.Resolve(builder, "payments", Definition("payments"), DevConfig());
 
         Assert.Equal(["https://example.com/payments.git"], git.Cloned);

@@ -161,10 +161,9 @@ internal static class LocalGitCheckout
 
     /// <summary>
     /// Whether this package owns the checkout directory, and so has a
-    /// <see cref="ManagedRepoRoot"/> to say anything about at all. No <see cref="EffectivePath"/>
-    /// means it does; a <c>repository.path</c> or a group <c>path</c> means it does not, because that
-    /// names the developer's own directory, which this package neither creates, clones into, nor
-    /// writes to.
+    /// <see cref="ManagedRepoRoot"/> to say anything about at all. No <c>repository.path</c> means it
+    /// does; a <c>repository.path</c> override means it does not, because that names the developer's
+    /// own directory, which this package neither creates, clones into, nor writes to.
     /// </summary>
     /// <remarks>
     /// The shared first half of every question answered about a service's checkout from its path
@@ -173,30 +172,7 @@ internal static class LocalGitCheckout
     /// them, because a caller that answers it differently answers a different question while
     /// looking like it asks this one.
     /// </remarks>
-    public static bool IsManagedCheckout(
-        ServiceDefinition definition, string serviceName, ServiceDeveloperConfig config,
-        RepositoryDeveloperConfig? repositoryConfig) =>
-        EffectivePath(definition, serviceName, config, repositoryConfig) is null;
-
-    /// <summary>
-    /// The developer-supplied directory for this member, if any: its own <c>repository.path</c>,
-    /// otherwise its group's <c>repositories.&lt;name&gt;.path</c> when it is grouped. The one place
-    /// that precedence lives.
-    /// </summary>
-    public static string? EffectivePath(
-        ServiceDefinition definition, string serviceName, ServiceDeveloperConfig config,
-        RepositoryDeveloperConfig? repositoryConfig) =>
-        config.Repository.Path ?? (IsGrouped(definition, serviceName) ? repositoryConfig?.Path : null);
-
-    /// <summary>Whether <see cref="EffectivePath"/> came from the group rather than the member.</summary>
-    public static bool PathComesFromGroup(
-        ServiceDefinition definition, string serviceName, ServiceDeveloperConfig config,
-        RepositoryDeveloperConfig? repositoryConfig) =>
-        config.Repository.Path is null && IsGrouped(definition, serviceName) && repositoryConfig?.Path is not null;
-
-    /// <summary>The configuration key a group's <c>path</c> is written under, for messages.</summary>
-    public static string GroupPathKey(string checkoutName) =>
-        $"{DeveloperConfiguration.RepositoriesKey}:{checkoutName}:path";
+    public static bool IsManagedCheckout(ServiceDeveloperConfig config) => config.Repository.Path is null;
 
     /// <summary>
     /// A developer's own directory override — <c>repository.path</c> for a <c>"repository"</c>
@@ -252,6 +228,9 @@ internal static class LocalGitCheckout
     /// <see cref="ManagedRepoRoot"/> yet. Configuration plus one <c>Directory.Exists</c>, so it is
     /// answerable about a service nobody has added.
     /// </summary>
+    /// <param name="checkoutName">
+    /// <see cref="Config.Catalog.RepositoryDefinition.CheckoutName"/> — see <see cref="ManagedRepoRoot"/>.
+    /// </param>
     /// <remarks>
     /// <para>
     /// The single rule two independent decisions are built on, which is why it lives here rather
@@ -276,10 +255,9 @@ internal static class LocalGitCheckout
     /// </para>
     /// </remarks>
     public static bool IsColdManagedCheckout(
-        string appHostDirectory, string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config,
-        RepositoryDeveloperConfig? repositoryConfig) =>
-        IsManagedCheckout(definition, serviceName, config, repositoryConfig)
-        && !Directory.Exists(ManagedRepoRoot(appHostDirectory, definition.Repository.CheckoutName));
+        string appHostDirectory, string checkoutName, ServiceDeveloperConfig config) =>
+        IsManagedCheckout(config)
+        && !Directory.Exists(ManagedRepoRoot(appHostDirectory, checkoutName));
 
     /// <summary>
     /// The fully resolved checkout directory: prepared, then reconciled. For callers already
@@ -320,16 +298,13 @@ internal static class LocalGitCheckout
     /// </param>
     /// <param name="repositoryConfig">
     /// This service's group-level developer-config entry (#291) — <see langword="null"/> for an
-    /// ungrouped service, the overwhelming common case, which never has one. Its
-    /// <see cref="RepositoryDeveloperConfig.Ref"/> is read here, and <see cref="RepositoryDeveloperConfig.Path"/>
-    /// redirects the whole group to an existing directory and <see cref="RepositoryDeveloperConfig.Prepare"/> is a
-    /// caller's concern, not this method's.
+    /// ungrouped service, the overwhelming common case, which never has one. Only its
+    /// <see cref="RepositoryDeveloperConfig.Ref"/> is read here.
     /// </param>
     /// <exception cref="ServiceSourcesConfigurationException">
     /// <paramref name="config"/> sets <c>repository.path</c> alongside <c>repository.ref</c>; a
     /// grouped service sets <c>repository.ref</c> at all (criterion 4 — its repository's ref is
-    /// shared, not per-member); or <paramref name="repositoryConfig"/> sets both <c>path</c> and
-    /// <c>ref</c> for a grouped service.
+    /// shared, not per-member).
     /// </exception>
     public static PreparedCheckout PrepareRepoRoot(
         string serviceName,
@@ -361,12 +336,6 @@ internal static class LocalGitCheckout
                 $"Service '{new Name(serviceName)}': 'repository.ref' cannot be set — this service is grouped into the shared repository '{new Name(definition.Repository.CheckoutName)}', whose ref applies to every member alike rather than to any one of them. Set '{Raw.Literal(DeveloperConfiguration.RepositoriesKey, default)}:{new Name(definition.Repository.CheckoutName)}:ref' instead.");
         }
 
-        if (grouped && repositoryConfig?.Path is not null && repositoryConfig.Ref is not null)
-        {
-            throw ServiceSourcesConfigurationException.For(
-                $"Repository '{new Name(definition.Repository.CheckoutName)}': '{Raw.Escaped(GroupPathKey(definition.Repository.CheckoutName))}' cannot be combined with '{Raw.Literal(DeveloperConfiguration.RepositoriesKey, default)}:{new Name(definition.Repository.CheckoutName)}:ref' — the path points directly at an existing checkout, and the ref only applies when this tool manages the clone.");
-        }
-
         if (config.Repository.Path is not null)
         {
             if (config.Repository.Ref is not null)
@@ -377,16 +346,7 @@ internal static class LocalGitCheckout
 
             // Used as-is: no clone, no checkout, no fetch, ever.
             return new PreparedCheckout(
-                ResolveDeveloperDirectory(
-                    PreparePlan.ServiceLabel(serviceName), "repository.path", config.Repository.Path, appHostDirectory),
-                NeedsReconciliation: false);
-        }
-
-        if (PathComesFromGroup(definition, serviceName, config, repositoryConfig))
-        {
-            return new PreparedCheckout(
-                ResolveDeveloperDirectory(
-                    label, GroupPathKey(definition.Repository.CheckoutName), repositoryConfig!.Path!, appHostDirectory),
+                ResolveDeveloperDirectory(PreparePlan.ServiceLabel(serviceName), "repository.path", config.Repository.Path, appHostDirectory),
                 NeedsReconciliation: false);
         }
 

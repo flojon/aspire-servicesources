@@ -100,19 +100,13 @@ internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
     /// apart on its own, since both a lone service and a repository's shared entry carry the same
     /// <see cref="PrepareMetadata"/> shape.
     /// </param>
-    /// <param name="groupPathKey">
-    /// The configuration key of the group <c>path</c> that put this service on a directory of its
-    /// own, when that is what did; the ignored-step notice then names it instead of
-    /// <c>repository.path</c>, which the developer did not write.
-    /// </param>
     public static PreparePlan For(
         string serviceName,
         Raw label,
         PrepareMetadata? catalog,
         PrepareDeveloperConfig? developer,
         bool managedCheckout,
-        bool windows,
-        string? groupPathKey = null)
+        bool windows)
     {
         // Parsed even where the value is about to be discarded — a mode on a block whose command
         // turns out to be absent, a catalog mode a `path` service ignores — because a value that
@@ -124,8 +118,7 @@ internal sealed record PreparePlan(PrepareStep? Step, Raw? IgnoredCatalogNotice)
         return managedCheckout
             ? Merge(label, catalog, developer, catalogMode, developerMode, Raw.Literal(DeveloperBlock), PrepareModes.Default, windows)
             : ForPathCheckout(
-                serviceName, label, catalog, developer, catalogMode, developerMode,
-                groupPathKey is null ? RepositoryPathOverride : new DirectoryOverride(groupPathKey, "repository"),
+                serviceName, label, catalog, developer, catalogMode, developerMode, RepositoryPathOverride,
                 PrepareModes.Default, windows);
     }
 

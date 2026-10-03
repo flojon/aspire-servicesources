@@ -311,7 +311,7 @@ public class ServiceConfigAuditTests
     {
         var builder = CreateBuilder(MonorepoCatalog, """
             { "services": { "orders": { "source": "container" } },
-              "repositories": { "monorpeo": { "path": "/src/monorepo" } } }
+              "repositories": { "monorpeo": { "source": "path", "path": { "path": "/src/monorepo" } } } }
             """);
         builder.AddService("orders");
 
@@ -328,7 +328,7 @@ public class ServiceConfigAuditTests
     {
         var builder = CreateBuilder(MonorepoCatalog, """
             { "services": { "orders": { "source": "container" } },
-              "repositories": { "MonoRepo": { "path": "/src/monorepo" } } }
+              "repositories": { "MonoRepo": { "source": "path", "path": { "path": "/src/monorepo" } } } }
             """);
         builder.AddService("orders");
 

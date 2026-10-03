@@ -278,7 +278,7 @@ public class ServiceSourcesConfigCacheTests
 
     private const string GroupedLocalJson = """
         { "services": { "orders": { "source": "repository" }, "basket": { "source": "repository" } },
-          "repositories": { "monorepo": { "path": "GROUPDIR" } } }
+          "repositories": { "monorepo": { "source": "path", "path": { "path": "GROUPDIR" } } } }
         """;
 
     private const string UngroupedLocalJson = """

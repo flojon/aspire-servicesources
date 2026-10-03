@@ -694,6 +694,10 @@ internal sealed class LocalCheckoutPrefetch
                 Config: entry.Value,
                 RepositoryConfig: config.DeveloperConfig.Repositories.GetValueOrDefault(
                     config.Catalog.Services[entry.Key].Repository.CheckoutName)))
+            // A member its group redirects to a directory of its own is never cloned: AddService resolves
+            // it through the path source, so a speculative clone would be work nothing uses.
+            .Where(candidate => !GroupPathSource.Redirects(
+                candidate.Name, candidate.Definition, candidate.Config, candidate.RepositoryConfig))
             // Only candidates with a repository to clone at all — checked first since it is a plain
             // string test, ahead of the filter below that has to stat the disk. Without this,
             // resolving one well-formed "repository" service would sweep a repositoryless sibling into
@@ -709,11 +713,10 @@ internal sealed class LocalCheckoutPrefetch
             // service's own name would launch a redundant speculative clone task for it — harmless
             // (PrepareRepoRoot no-ops against an existing '.git'), but wasted background work.
             .Where(candidate => LocalGitCheckout.IsColdManagedCheckout(
-                appHostDirectory, candidate.Name, candidate.Definition, candidate.Config, candidate.RepositoryConfig))
+                appHostDirectory, candidate.Definition.Repository.CheckoutName, candidate.Config))
             // ...minus the ones a deferred registration would clone for itself.
             .Where(candidate => !WouldBeDeferredIfAdded(
-                builder, deferred, kinds, candidate.Name, candidate.Definition, candidate.Config,
-                candidate.RepositoryConfig))
+                builder, deferred, kinds, candidate.Name, candidate.Definition, candidate.Config))
             .ToArray();
 
         if (candidates.Length == 0)
@@ -776,10 +779,9 @@ internal sealed class LocalCheckoutPrefetch
         LocalKindRegistry kinds,
         string serviceName,
         ServiceDefinition definition,
-        ServiceDeveloperConfig config,
-        RepositoryDeveloperConfig? repositoryConfig)
+        ServiceDeveloperConfig config)
     {
-        if (!deferred.ShouldDefer(builder, serviceName, definition, config, repositoryConfig))
+        if (!deferred.ShouldDefer(builder, serviceName, definition, config))
         {
             return false;
         }

@@ -25,7 +25,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     {
         // Ahead of everything below, EnsureAvailable included, because it is the one check that can
         // say this service has nothing to clone at all — and a cold clone is what the answer saves.
-        RequireRepositoryToCheckOut(serviceName, definition, config, repositoryConfig);
+        RequireRepositoryToCheckOut(serviceName, definition, config);
 
         // Before any network work: a machine without a usable git can't clone anything, and
         // finding that out once here beats finding it out as an identical clone failure on every
@@ -55,7 +55,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
 
         // Whether this package owns the checkout directory, which decides whether the service
         // inherits the catalog's prepare block at all and where its completion marker goes.
-        var managedCheckout = LocalGitCheckout.IsManagedCheckout(definition, serviceName, config, repositoryConfig);
+        var managedCheckout = LocalGitCheckout.IsManagedCheckout(config);
 
         if (config.Local.IsDeclared)
         {
@@ -69,10 +69,14 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
             ServiceSourcesWarnings.For(builder).AddNotice(RepositoryAliasDeprecationNotice(serviceName));
         }
 
-        if (config.Repository.Path is not null)
+        if (!managedCheckout)
         {
-            // Only a service's own repository.path is deprecated; a group's path is not.
-            ServiceSourcesWarnings.For(builder).AddNotice(LocalPathDeprecationNotice(serviceName, config));
+            // 'repository.path' is deprecated in favor of the first-class 'path' source (design
+            // "local.path is deprecated, not removed yet") — a soft deprecation, not a break: the
+            // mechanism keeps working exactly as it does today, and only a one-time notice is owed.
+            // AddNotice dedupes identical text, so a service resolved more than once in a run
+            // reports this only once.
+            ServiceSourcesWarnings.For(builder).AddNotice(LocalPathDeprecationNotice(serviceName, definition, config));
         }
 
         // Whether this service is on its own repository or sharing one with others — the same test
@@ -83,10 +87,6 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
             ? PreparePlan.ServiceLabel(serviceName)
             : PreparePlan.RepositoryLabel(definition.Repository.CheckoutName);
 
-        var groupPathKey = LocalGitCheckout.PathComesFromGroup(definition, serviceName, config, repositoryConfig)
-            ? LocalGitCheckout.GroupPathKey(definition.Repository.CheckoutName)
-            : null;
-
         // The other configuration check that needs no working tree, and the last one standing in
         // front of the clone now that a kind's own Validate has moved below it. Being core's own it
         // also runs ahead of ShouldDefer, so it covers both paths — a typo'd mode, or a command
@@ -95,7 +95,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         // the working tree waits for one, which is the division ValidateCheckout draws for a kind.
         var prepare = PreparePlan.For(
             serviceName, label, definition.Repository.Prepare, config.Repository.Prepare, managedCheckout,
-            OperatingSystem.IsWindows(), groupPathKey);
+            OperatingSystem.IsWindows());
 
         if (prepare.IgnoredCatalogNotice is { } ignored)
         {
@@ -123,7 +123,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
 
         var deferred = DeferredCheckout.For(builder);
 
-        if (deferred.ShouldDefer(builder, serviceName, definition, config, repositoryConfig))
+        if (deferred.ShouldDefer(builder, serviceName, definition, config))
         {
             // Nothing is on disk for this service yet, so registering the resource against the path
             // its checkout will have — and starting it once the clone lands — costs the AppHost
@@ -277,7 +277,8 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// the source rename.
     /// </para>
     /// </remarks>
-    private static Raw LocalPathDeprecationNotice(string serviceName, ServiceDeveloperConfig config)
+    private static Raw LocalPathDeprecationNotice(
+        string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
     {
         // Double-quoted and escaped through Raw.Escaped (Name's JSON-compatible escaping), because
         // this snippet is meant to be pasted into servicesources.local.json as it stands — a Windows
@@ -290,6 +291,13 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         {
             notice = Raw.Compose($"{notice} Move this service's 'repository.prepare' block to 'path.prepare': it is "
                 + $"not read under the 'path' source.");
+        }
+
+        if (LocalGitCheckout.IsGrouped(definition, serviceName))
+        {
+            notice = Raw.Compose($"{notice} To redirect the whole '{new Name(definition.Repository.CheckoutName)}' repository at once, "
+                + $"set '{Raw.Literal(DeveloperConfigFileSource.FileRepositoriesKey)}.{new Name(definition.Repository.CheckoutName)}' to "
+                + $"{{ \"source\": \"path\", \"path\": {{ \"path\": \"...\" }} }}.");
         }
 
         return notice;
@@ -313,10 +321,9 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// </para>
     /// </remarks>
     private static void RequireRepositoryToCheckOut(
-        string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config,
-        RepositoryDeveloperConfig? repositoryConfig)
+        string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
     {
-        if (!LocalGitCheckout.IsManagedCheckout(definition, serviceName, config, repositoryConfig)
+        if (!LocalGitCheckout.IsManagedCheckout(config)
             || LocalGitCheckout.HasRepositoryToClone(definition))
         {
             return;

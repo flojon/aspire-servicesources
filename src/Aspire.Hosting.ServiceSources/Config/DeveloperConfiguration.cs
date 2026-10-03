@@ -206,6 +206,8 @@ internal sealed class DeveloperConfiguration
 
         var (repositories, undeclaredRepositoryNames) = CanonicalizeToCatalog(boundRepositories, declaredRepositoryNames);
 
+        ValidateRepositoryEntries(repositories, undeclaredRepositoryNames);
+
         return new DeveloperConfiguration
         {
             Services = services,
@@ -400,6 +402,59 @@ internal sealed class DeveloperConfiguration
         }
 
         return (canonical, undeclared);
+    }
+
+    /// <summary>
+    /// Refuses a repository entry whose <c>source</c> is not <c>path</c> or <c>repository</c>, or that
+    /// sets a <c>prepare</c> step: a group-level step needs a marker keyed to the group, which does not exist.
+    /// </summary>
+    /// <remarks>
+    /// Skips entries naming no declared repository: those are dead configuration, reported by
+    /// <see cref="ServiceConfigAudit"/> rather than failed on.
+    /// </remarks>
+    private static void ValidateRepositoryEntries(
+        Dictionary<string, RepositoryDeveloperConfig> repositories, IReadOnlyList<string> undeclaredNames)
+    {
+        var skipped = undeclaredNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var problems = new List<Raw>();
+
+        foreach (var (name, config) in repositories.OrderBy(entry => entry.Key, StringComparer.Ordinal))
+        {
+            if (skipped.Contains(name))
+            {
+                continue;
+            }
+
+            var key = $"{RepositoriesKey}:{name}";
+
+            if (!string.IsNullOrEmpty(config.Source)
+                && !string.Equals(config.Source, "path", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(config.Source, "repository", StringComparison.OrdinalIgnoreCase))
+            {
+                problems.Add(Raw.Compose($"Repository '{new Name(name)}': source '{new Name(config.Source)}' is not valid for a repository. "
+                    + $"Expected 'path' (use the directory in 'path:path') or 'repository' (the managed checkout). "
+                    + $"Correct '{Raw.Escaped(key)}:source' in '{Raw.Literal(FileName)}', or wherever a higher layer set it."));
+            }
+
+            if (config.Prepare?.IsDeclared == true || config.Path?.Prepare?.IsDeclared == true)
+            {
+                problems.Add(Raw.Compose($"Repository '{new Name(name)}': a repository entry does not take a 'prepare' step. "
+                    + $"Set 'path.prepare' on each member service under '{Raw.Literal(ServicesKey)}' instead."));
+            }
+        }
+
+        if (problems.Count == 0)
+        {
+            return;
+        }
+
+        if (problems.Count == 1)
+        {
+            throw ServiceSourcesConfigurationException.For($"{problems[0]}");
+        }
+
+        throw ServiceSourcesConfigurationException.For(
+            $"{problems.Count} repository entries are invalid:{Raw.Join("", problems.Select(p => Raw.Compose($"{Raw.NewLine}  - {p}")))}");
     }
 
     /// <summary>
