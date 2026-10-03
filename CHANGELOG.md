@@ -61,9 +61,11 @@ never existed. Check the tag of the last release before adding one.
   `ServiceSources__Repositories__<name>__Source` and `__Path__Path`) redirects every grouped member
   whose source is `repository` or `path`, so a monorepo AppHost keeps its grouping without repeating
   a `path.path` per service. A member's own `path.path` still wins, members on `url`, `container` or
-  `kubernetes` are left alone, a group `ref` is ignored while the group is on `path`, and the
+  `kubernetes` are left alone, a member that sets its own `repository.ref` is not redirected (its
+  "ref is shared" error stands), a group `ref` is ignored while the group is on `path`, and the
   builds of the members are serialized like any other `"path"` services in one repository. A
-  `repositories` entry naming no declared repository is now reported at startup.
+  `repositories` entry naming no declared repository is now reported at startup, as is a
+  `repositories.<name>.path.path` set without `source`, which would otherwise be silently unread.
 
 ### Fixed
 

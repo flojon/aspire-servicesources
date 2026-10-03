@@ -300,6 +300,38 @@ public class GroupPathSourceTests
     }
 
     [Fact]
+    public async Task MemberOwnRepositoryRef_UnderDeferredTiming_FailsTheServiceOnStartRatherThanAtAddService()
+    {
+        var groupDir = ProjectTree("Orders");
+        Fixture(
+            Local(Group(groupDir), new JsonObject
+            {
+                ["orders"] = new JsonObject { ["source"] = "repository", ["repository"] = new JsonObject { ["ref"] = "feature/x" } },
+            }),
+            out var appHost);
+        var builder = TestHelpers.CreateBuilderThatCanStart(appHost);
+
+        var orders = builder.AddService("orders");
+
+        // Deferred: the managed checkout is still cold, so the refusal is the start task's, per service.
+        Assert.Contains(orders.Resource.Annotations, a => a is ExplicitStartupAnnotation);
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+        var notifications = services.GetRequiredService<ResourceNotificationService>();
+        await notifications.PublishUpdateAsync(orders.Resource, snapshot => snapshot with
+        {
+            State = new ResourceStateSnapshot(KnownResourceStates.NotStarted, null),
+        });
+
+        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await notifications.WaitForResourceAsync(orders.Resource.Name, KnownResourceStates.FailedToStart, timeout.Token);
+        Assert.False(Directory.Exists(Path.Combine(appHost, ".servicesources", "checkouts", "monorepo")));
+    }
+
+    [Fact]
     public void MemberProjectEscapingTheGroupDirectory_IsRefused()
     {
         var groupDir = ProjectTree("Orders");

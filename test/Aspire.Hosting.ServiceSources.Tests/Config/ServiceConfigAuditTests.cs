@@ -355,6 +355,18 @@ public class ServiceConfigAuditTests
     }
 
     [Fact]
+    public async Task RepositoryEntryWithAnEmptyDirectoryAndNoSource_IsNotReported()
+    {
+        var builder = CreateBuilder(MonorepoCatalog, """
+            { "services": { "orders": { "source": "container" } },
+              "repositories": { "monorepo": { "path": { "path": "" } } } }
+            """);
+        builder.AddService("orders");
+
+        Assert.Empty(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+    }
+
+    [Fact]
     public async Task RepositoryEntryWithAnExplicitRepositorySource_IsNotReportedForItsDirectory()
     {
         var builder = CreateBuilder(MonorepoCatalog, """

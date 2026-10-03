@@ -694,8 +694,8 @@ internal sealed class LocalCheckoutPrefetch
                 Config: entry.Value,
                 RepositoryConfig: config.DeveloperConfig.Repositories.GetValueOrDefault(
                     config.Catalog.Services[entry.Key].Repository.CheckoutName)))
-            // A member its group redirects to a directory of its own is never cloned: AddService resolves
-            // it through the path source, so a speculative clone would be work nothing uses.
+            // A redirected member resolves through the path source, so a clone would be wasted. One
+            // setting its own ref is not redirected, and stays so its refusal still surfaces.
             .Where(candidate => !GroupPathSource.Redirects(
                 candidate.Name, candidate.Definition, candidate.Config, candidate.RepositoryConfig))
             // Only candidates with a repository to clone at all — checked first since it is a plain
