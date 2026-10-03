@@ -329,10 +329,9 @@ public class DeferredKindCheckoutTests
 
         Assert.Null(LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage);
 
-        Assert.True(
-            SpinWait.SpinUntil(() => git.Cloned.Count > 0, TimeSpan.FromSeconds(30)),
-            "the deferred service's own checkout was never cloned.");
-        Assert.Equal(["https://example.com/frontend.git"], git.Cloned);
+        // Not cloned from AddService() either: that waits for BeforeStartEvent.
+        Thread.Sleep(300);
+        Assert.Empty(git.Cloned);
     }
 
     /// <summary>

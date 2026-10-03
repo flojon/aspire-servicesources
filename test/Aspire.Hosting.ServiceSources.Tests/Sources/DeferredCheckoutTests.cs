@@ -817,6 +817,77 @@ public class DeferredCheckoutTests
     }
 
     [Fact]
+    public async Task Add_DoesNotStartTheClone()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+
+        var git = new FakeGitClient();
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig());
+
+        // A clone started from Add runs on a background thread at once; give it time to show itself.
+        await Task.Delay(300);
+
+        Assert.Empty(git.Cloned);
+        Assert.False(Directory.Exists(ExpectedRepoRoot(dir, "orders")));
+    }
+
+    [Fact]
+    public async Task Handler_WithNothingGating_StartsEveryColdService()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+
+        var git = new FakeGitClient();
+        var source = new LocalProjectSource(git);
+        var orders = source.Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
+        var billing = source.Resolve(builder, "billing", Definition("billing"), DevConfig()).WithHttpEndpoint();
+
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+        await PublishNotStartedAsync(services, orders.Resource);
+        await PublishNotStartedAsync(services, billing.Resource);
+
+        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.True(File.Exists(Path.Combine(ExpectedRepoRoot(dir, "orders"), "Service.csproj")));
+        Assert.True(File.Exists(Path.Combine(ExpectedRepoRoot(dir, "billing"), "Service.csproj")));
+    }
+
+    [Fact]
+    public async Task Handler_StartsEveryPickedCheckout_BeforeAnyServiceWaitsOnItsResource()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+
+        var git = new FakeGitClient();
+        var gateOrders = git.BlockFor("https://example.com/orders.git");
+        var gateBilling = git.BlockFor("https://example.com/billing.git");
+        var source = new LocalProjectSource(git);
+        source.Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
+        source.Resolve(builder, "billing", Definition("billing"), DevConfig()).WithHttpEndpoint();
+
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+
+        // NotStarted is never published, so no StartDeferredAsync can have reached GetRepoRoot yet:
+        // both clones are running only because the handler called StartCheckout for the whole batch.
+        Assert.True(
+            SpinWait.SpinUntil(() => git.Cloned.Count == 2, TimeSpan.FromSeconds(30)),
+            "the handler did not start every picked checkout up front.");
+
+        gateOrders.Set();
+        gateBilling.Set();
+        services.GetRequiredService<IHostApplicationLifetime>().StopApplication();
+        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+    }
+
+    [Fact]
     public async Task StartPath_DoesNotDependOnAfterResourcesCreated()
     {
         var dir = CreateAppHostDirectory("orders");

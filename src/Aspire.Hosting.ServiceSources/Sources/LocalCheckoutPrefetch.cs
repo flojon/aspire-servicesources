@@ -447,6 +447,19 @@ internal sealed class LocalCheckoutPrefetch
     }
 
     /// <summary>
+    /// Records that <paramref name="serviceName"/> is added by the AppHost without starting its
+    /// clone, so a service that is added but not (yet) started is not reported as speculative work.
+    /// </summary>
+    public void MarkRequested(string serviceName, ServiceDefinition definition)
+    {
+        lock (_gate)
+        {
+            _requested.Add(serviceName);
+            RecordServiceOnCheckoutLocked(serviceName, definition.Repository.CheckoutName);
+        }
+    }
+
+    /// <summary>
     /// The progress stream to watch <paramref name="serviceName"/>'s checkout through, created if
     /// this run has not started that checkout yet.
     /// </summary>

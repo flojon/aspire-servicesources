@@ -33,13 +33,11 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// and <c>dotnet run --project</c> builds the project then too, rather than at startup.
 /// </para>
 /// <para>
-/// The clone itself is not made any later. It is started from this registration —
-/// <see cref="LocalCheckoutPrefetch.StartCheckout"/>, on a background thread — rather than by the
-/// speculative prefetch, because a deferred service is the one case where the prefetch does not have
-/// to guess: nothing between here and <c>BeforeStartEvent</c> waits on the clone, so it overlaps
-/// with the rest of composition wherever it was started from, and the prefetch is free to leave it
-/// out and stop cloning services this AppHost never adds (#76). All that changes for this service is
-/// who waits for it — a background task after the host is up, instead of composition.
+/// The clone is started at <c>BeforeStartEvent</c> —
+/// <see cref="LocalCheckoutPrefetch.StartCheckout"/>, on a background thread — not from this
+/// registration: composition only records the service as requested, so a cold checkout nobody
+/// picks is never cloned, and the prefetch is free to leave it out of its speculative set (#76).
+/// Who waits for the clone is a background task after the host is up, instead of composition.
 /// </para>
 /// <para>
 /// What still has to be final before <c>Build()</c> is the <em>path</em>. DCP freezes it into the
@@ -124,7 +122,7 @@ internal sealed class DeferredCheckout
     /// withheld and started alongside it, in the order it was added. <c>OnCheckoutLanded</c> is the
     /// kind's own post-clone work, run once the repository is on disk and before anything starts.
     /// </summary>
-    private sealed record Deferred(
+    internal sealed record Deferred(
         string ServiceName,
         IResource Resource,
         IReadOnlyList<IResource> HeldBack,
@@ -495,15 +493,9 @@ internal sealed class DeferredCheckout
         IPrepareCommandRunner prepareRunner,
         Action<IResource, string, ILogger> onCheckoutLanded)
     {
-        // The clone starts here, not in the speculative phase: the prefetch leaves a service that
-        // would be deferred out of its set precisely because this call will claim it (#76). Starting
-        // it now rather than when the start task gets to it keeps it overlapping with the rest of
-        // composition — nothing between here and BeforeStartEvent waits on it.
-        //
-        // It also marks the service requested, which it must: the prefetch decides what to report as
-        // speculative work at BeforeStartEvent, before a deferred service has waited on anything.
-        prefetch.StartCheckout(
-            serviceName, definition, config, repositoryConfig, builder.AppHostDirectory, gitClient);
+        // Requested here, cloned at BeforeStartEvent: the speculative report runs before any
+        // deferred service has been started and must not name this one as work nobody wanted.
+        prefetch.MarkRequested(serviceName, definition);
 
         lock (_gate)
         {
@@ -702,7 +694,30 @@ internal sealed class DeferredCheckout
             snapshot = [.. _deferred];
         }
 
-        foreach (var deferred in snapshot)
+        StartPicked(snapshot, services, checkoutNameLock, cancellationToken);
+    }
+
+    /// <summary>
+    /// Starts every checkout in the batch before any service waits on its own, then launches each
+    /// service's start task.
+    /// </summary>
+    /// <remarks>
+    /// Order matters: a start task that reached <c>GetRepoRoot</c> before its checkout was
+    /// registered would clone synchronously on its own thread, outside the shared checkout entry
+    /// that grouped services (#291) rely on to clone once.
+    /// </remarks>
+    private void StartPicked(
+        IReadOnlyList<Deferred> picked, IServiceProvider services, CheckoutNameLock checkoutNameLock,
+        CancellationToken cancellationToken)
+    {
+        foreach (var deferred in picked)
+        {
+            deferred.Prefetch.StartCheckout(
+                deferred.ServiceName, deferred.Definition, deferred.Config, deferred.RepositoryConfig,
+                deferred.AppHostDirectory, deferred.GitClient);
+        }
+
+        foreach (var deferred in picked)
         {
             // Deliberately not awaited: BeforeStartEvent is awaited by host startup, and waiting
             // for the checkout here would put the block back exactly where this class exists to
