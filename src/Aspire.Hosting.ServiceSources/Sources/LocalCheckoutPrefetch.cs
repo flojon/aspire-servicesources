@@ -58,8 +58,8 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// pure function of configuration (see <see cref="DeferredCheckout.ShouldDefer"/> and
 /// <see cref="ILocalResourceKind.SupportsDeferredCheckout"/>), so it is answerable here, for a
 /// service nobody has mentioned. A deferred registration blocks composition on nothing, so its
-/// clone no longer has to be started ahead of demand to overlap with the others — it starts at its
-/// own <c>AddService()</c> call, via <see cref="StartCheckout"/>, and overlaps just the same.
+/// clone no longer has to be started ahead of demand to overlap with the others — it starts at
+/// <c>BeforeStartEvent</c>, via <see cref="StartCheckout"/>, together with the others.
 /// </item>
 /// </list>
 /// <para>
@@ -162,8 +162,8 @@ internal sealed class LocalCheckoutPrefetch
     /// </summary>
     /// <remarks>
     /// It is <b>not</b> complete thereafter, which it used to be: <see cref="StartCheckout"/> adds
-    /// an entry each time a deferred service is registered, interleaved with the
-    /// <c>AddService()</c> calls that read the dictionary in <see cref="GetRepoRoot"/>. That is why
+    /// an entry for each deferred service started at <c>BeforeStartEvent</c>, interleaved with the
+    /// start tasks that read the dictionary in <see cref="GetRepoRoot"/>. That is why
     /// both sides take <see cref="_gate"/> — the lock became load-bearing when the prefetch stopped
     /// being the only writer (#76), and dropping it on the strength of "populated once, then read"
     /// would now be a data race.
@@ -753,7 +753,7 @@ internal sealed class LocalCheckoutPrefetch
 
     /// <summary>
     /// Whether this service would be registered deferred if the AppHost added it — in which case its
-    /// clone is <see cref="StartCheckout"/>'s to start, at that call, and starting it speculatively
+    /// clone is <see cref="StartCheckout"/>'s to start, at <c>BeforeStartEvent</c>, and starting it speculatively
     /// here would only download a repository for a service that may never be mentioned.
     /// </summary>
     /// <remarks>
