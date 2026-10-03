@@ -1,7 +1,7 @@
 # Aspire.Hosting.ServiceSources — Gating a cold checkout behind an interactive source pick
 
 **Date:** 2026-09-30
-**Status:** Draft (human decisions applied; one review round applied)
+**Status:** Draft (human decisions applied, including the bounded wait; one review round applied)
 **Resolves:** GitHub issue #271.
 **Does not build:** #8 (offline `configure` CLI), #70 (post-start "Change source" command).
 
@@ -55,7 +55,7 @@ helpers) is unchanged. The `BeforeStartEvent` subscriber:
 3. Saved decisions are honoured whether or not a prompt can be shown. Undecided and
    `IsAvailable == false`: every undecided service is treated as picked, one Information line.
    Undecided and available: one background, non-awaited, never-throwing task (tracked in `_startTasks`)
-   shows the prompt. Decided services start immediately and independently of the prompt; the prompt's own batch starts when it is answered. `StartCheckout` must have been called for every picked or saved-`true` service before its `StartDeferredAsync` runs: otherwise `GetRepoRoot` finds no `_checkouts` entry and clones synchronously on the calling thread, bypassing `_checkouts` (order matters for shared-`CheckoutName` siblings).
+   shows the prompt, which is bounded by `PromptTimeout` (see The prompt). Decided services start immediately and independently of the prompt; the prompt's own batch starts when it is answered. `StartCheckout` must have been called for every picked or saved-`true` service before its `StartDeferredAsync` runs: otherwise `GetRepoRoot` finds no `_checkouts` entry and clones synchronously on the calling thread, bypassing `_checkouts` (order matters for shared-`CheckoutName` siblings).
 4. Picked: `StartCheckout` for the whole batch before any blocks (picked clones still overlap each
    other; overlap with composition is lost, inherent to gating), then the existing `StartDeferredAsync`.
 5. Unpicked: published **Skipped** after its withheld resources reach `NotStarted`; never cloned,
@@ -67,13 +67,14 @@ One dialog, "Choose services to check out", only undecided services, catalog ord
 input each, default checked (accepting unchanged equals pre-#271 behaviour), label = service name,
 description = redacted URL and ref, plus the dependents line below. Positional input names (`s0`...) mapped back, since service names
 are free text. Text is plain (markdown disabled on the inputs), every interpolated value goes through the
-package's escaping seam, and the URL through `GitUrl.Redact`. The prompt opens immediately; separately, each undecided service publishes custom state "Awaiting source selection" once its withheld resources reach `NotStarted` (Finding 5), replaced by Skipped or "Checking out" on the answer. The checkbox reads "Clone and start"; unchecked means only "do not clone for me this run" (see the warm rule). The dialog message and title are plain text too: `EnableMessageMarkdown` and each input's `EnableDescriptionMarkdown` are set false explicitly (names verified in the Spike). Values shown are scheme, host and path of the URL only (no query or fragment; `GitUrl.Redact` alone does not strip query-string tokens), ref and URL length-capped, all through `Raw.Escaped`; service names are not shown through `Name`, which truncates. The prompt's cancellation is linked to `ApplicationStopping`. A missing, renamed or non-boolean answer for a service means "start" with a warning.
+package's escaping seam, and the URL through `GitUrl.Redact`. The prompt opens immediately; separately, each undecided service publishes custom state "Awaiting source selection" once its withheld resources reach `NotStarted` (Finding 5), replaced by Skipped or "Checking out" on the answer, or by "Checking out" on expiry. The checkbox reads "Clone and start"; unchecked means only "do not clone for me this run" (see the warm rule). The dialog message and title are plain text too: `EnableMessageMarkdown` and each input's `EnableDescriptionMarkdown` are set false explicitly (names verified in the Spike). Values shown are scheme, host and path of the URL only (no query or fragment; `GitUrl.Redact` alone does not strip query-string tokens), ref and URL length-capped, all through `Raw.Escaped`; service names are not shown through `Name`, which truncates. The prompt is **bounded**: an internal constant `PromptTimeout` of 5 minutes (no user-facing setting; a configurable value belongs to #8). Its token is a `CancellationTokenSource(PromptTimeout)` linked with `ApplicationStopping`, so both end the wait; which one fired is told by `ApplicationStopping.IsCancellationRequested`. The deadline is computed once when the prompt opens (from `TimeProvider`, so tests control it) and stated in two places: the dialog message ("Answer within 5 minutes (by HH:mm); after that all of these start this run and nothing is saved. Closing this dialog does the same") and the custom state text, "Awaiting source selection (starts automatically at HH:mm)" (local time; the 5 minutes is formatted from the constant, not typed twice). On expiry the dialog is closed/abandoned by cancelling the prompt token (Spike (e) confirms the dashboard removes it). A missing, renamed or non-boolean answer for a service means "start" with a warning.
 
 | Outcome | Result |
 |---|---|
 | Accepted | Checked start, unchecked Skipped; both persisted. |
 | Dismissed/cancelled | Every undecided service starts this run; nothing persisted. Stated in the dialog text ("Closing this dialog starts all of them this run"); chosen because it equals pre-#271 behaviour. |
-| Host stopping | Nothing starts, nothing persisted. |
+| Timed out (`PromptTimeout`, no answer) | Same as dismissed: the dialog is closed, every undecided service starts this run, nothing persisted; one Information line says the wait expired. Covers unattended runs (CI with a dashboard, containers, `DistributedApplicationTestingBuilder`). |
+| Host stopping (before the deadline) | Nothing starts, nothing persisted. |
 | Prompt throws | Logged; treated as "cannot be shown": undecided start. |
 
 ### Unpicked state: distinct `Skipped`
@@ -177,21 +178,17 @@ true with the dashboard, false when disabled / non-interactive, and its value un
 `DistributedApplicationTestingBuilder`; (b) `PromptInputsAsync` queues and
 renders once the dashboard connects; (c) cancel returns the cancelled outcome; (d) a custom state text disables the dashboard Start command
 where `NotStarted` does not, and Skipped survives later DCP updates to the held-back resources (if not,
-re-publish on change). Names of the markdown options. If (a) or (b) fail, return
+re-publish on change). Names of the markdown options. (e) Cancelling the token passed to `PromptInputsAsync` after the deadline removes the dialog from the dashboard and returns the cancelled outcome. If (e) fails (dialog stays open), the expiry still starts the services and the dialog is left until answered, with a late answer ignored and a warning; record it and tell the human. If (a) or (b) fail, return
 to the human: awaiting from `AfterResourcesCreatedEvent` deadlocks consumers that `WaitFor` a deferred
 service (see the comment on `EnsureSubscribed`).
 
 ## Testing
 
-Dependents: facade-shaped and real-shaped waits, transitive, capped. Fake `IInteractionService`: accepted subset, dismissed, throws, unavailable; saved decisions all / some /
+Dependents: facade-shaped and real-shaped waits, transitive, capped. Fake `IInteractionService` and fake `TimeProvider`: accepted subset, dismissed, throws, unavailable, timed out (all undecided start, nothing persisted, token cancelled, deadline text present in state and message, host stopping before the deadline starts nothing); saved decisions all / some /
 none; malformed and newer-version files; shared group with one picked; Eager, publish, `path`, warm never
 prompt; Skipped on service and held-back helper; no clone for skipped; `UnusedCheckoutsMessage` stays
 null. `dotnet test -f net10.0` per round; full matrix once before landing.
 
 ## Open Questions
 
-1. The prompt can be available but unattended (CI with a dashboard, containerised or test hosts): a cold
-   service that used to clone on its own would sit in "Awaiting source selection" forever, with its
-   `WaitFor` consumers. Add a bounded wait (for example a few minutes, then start all undecided as if the
-   prompt were unavailable, nothing persisted), or accept an indefinite wait? This bears on the
-   "no escape hatch short of Eager" decision, which predates the question.
+None. (The unattended-prompt question is resolved by the bounded `PromptTimeout`; it also resolves the earlier concern that `Eager` was the only escape hatch for unattended runs.)
