@@ -43,7 +43,8 @@ internal static class GroupPathSource
 
         if (string.Equals(config.Source, RepositorySourceName, StringComparison.OrdinalIgnoreCase))
         {
-            return config.Repository.Path is null;
+            // A member's own ref is refused on the managed-checkout route, which a redirect would skip.
+            return config.Repository.Path is null && config.Repository.Ref is null;
         }
 
         return string.Equals(config.Source, PathSourceName, StringComparison.OrdinalIgnoreCase)

@@ -119,6 +119,24 @@ internal static class ServiceConfigAudit
             reasons.Add(OrphanedRepositoryEntriesReason(repositoryOrphans, config.RepositoryNames));
         }
 
+        // An explicit "repository" source is excluded: it legitimately cancels a lower layer's path.
+        var undeclared = repositoryOrphans.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var inertPaths = config.Repositories
+            .Where(entry => !undeclared.Contains(entry.Key)
+                && string.IsNullOrEmpty(entry.Value.Source)
+                && entry.Value.Path?.Path is not null)
+            .Select(entry => entry.Key)
+            .OrderBy(key => key, StringComparer.Ordinal);
+
+        foreach (var name in inertPaths)
+        {
+            reasons.Add(Raw.Compose(
+                $"Repository '{new Name(name)}': a directory is set in 'path.path' but 'source' is not, so nothing reads it "
+                + $"and the group keeps using its managed checkout. Set \"source\": \"path\" on "
+                + $"'{Raw.Escaped($"{DeveloperConfiguration.RepositoriesKey}:{name}")}' in '{Raw.Literal(DeveloperConfiguration.FileName)}', "
+                + $"or wherever a higher layer set it, or remove the directory."));
+        }
+
         return reasons;
     }
 
@@ -181,14 +199,16 @@ internal static class ServiceConfigAudit
                 : Raw.Compose($"'{new Name(orphan)}' (did you mean '{new Name(closest)}'?)");
         });
 
-        var declared = candidates.Select(name => Raw.Compose($"'{new Name(name)}'"));
+        var declared = candidates.Length == 0
+            ? Raw.Compose($"declares no shared repositories, and '{Raw.Literal(DeveloperConfigFileSource.FileRepositoriesKey)}' entries apply only to services grouped with 'repositoryRef'")
+            : Raw.Compose($"declares: {Raw.Join(", ", candidates.Select(name => Raw.Compose($"'{new Name(name)}'")))}");
 
         return Raw.Compose(
             $"Repository configuration that nothing read: {Raw.Join(", ", described)}. No repository in "
             + $"this AppHost's catalog is named {(orphans.Count == 1 ? Raw.Literal("it") : Raw.Literal("any of them"))}, so "
             + $"{(orphans.Count == 1 ? Raw.Literal("the entry configures") : Raw.Literal("the entries configure"))} nothing, and the services "
             + $"of the repository it was meant for use their managed checkout instead. This AppHost's "
-            + $"catalog declares: {Raw.Join(", ", declared)}. Correct the key "
+            + $"catalog {declared}. Correct the key "
             + $"under \"{Raw.Literal(DeveloperConfigFileSource.FileRepositoriesKey)}\" in '{Raw.Literal(DeveloperConfiguration.FileName)}', or "
             + $"wherever a higher layer set it, or remove the entry if it is deliberately unused.");
     }

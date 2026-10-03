@@ -5,6 +5,7 @@ using Aspire.Hosting.ServiceSources;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
+using Aspire.Hosting.ServiceSources.Prepare;
 using Aspire.Hosting.ServiceSources.Sources;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -54,10 +55,10 @@ public class GroupPathSourceTests
         return root;
     }
 
-    private static string Fixture(JsonObject local, out string appHost)
+    private static string Fixture(JsonObject local, out string appHost, string catalog = Catalog)
     {
         appHost = TempDirectories.CreateSubdirectory().FullName;
-        File.WriteAllText(Path.Combine(appHost, "servicesources.yaml"), Catalog);
+        File.WriteAllText(Path.Combine(appHost, "servicesources.yaml"), catalog);
         File.WriteAllText(Path.Combine(appHost, "servicesources.local.json"), local.ToJsonString());
 
         return appHost;
@@ -164,24 +165,16 @@ public class GroupPathSourceTests
     }
 
     [Fact]
-    public void GroupSourceRepository_LeavesMembersOnTheirOwnSource()
+    public void GroupSourceRepository_LeavesMembersOnTheManagedCheckout()
     {
         var groupDir = ProjectTree("Orders");
-        var own = ProjectTree("Orders");
-        Fixture(
-            Local(Group(groupDir, source: "repository"), new JsonObject
-            {
-                ["orders"] = new JsonObject
-                {
-                    ["source"] = "repository", ["repository"] = new JsonObject { ["path"] = own },
-                },
-            }),
-            out var appHost);
+        Fixture(Local(Group(groupDir, source: "repository"), new JsonObject { ["orders"] = Repository("repository") }), out var appHost);
         var builder = TestHelpers.CreateBuilder(appHost);
 
         builder.AddService("orders");
 
-        Assert.Equal(Path.Combine(own, "src", "Orders", "Orders.csproj"), ProjectPathOf(builder, "orders"));
+        var planned = Path.Combine(appHost, ".servicesources", "checkouts", "monorepo", "src", "Orders", "Orders.csproj");
+        Assert.Equal(planned, Path.GetFullPath(ProjectPathOf(builder, "orders")));
     }
 
     [Fact]
@@ -252,18 +245,106 @@ public class GroupPathSourceTests
     public void UngroupedServiceWithItsOwnRepository_IsNotReachedByTheGroup()
     {
         var groupDir = ProjectTree("Orders");
-        var own = ProjectTree("Solo");
-        Fixture(
-            Local(Group(groupDir), new JsonObject
-            {
-                ["solo"] = new JsonObject { ["source"] = "repository", ["repository"] = new JsonObject { ["path"] = own } },
-            }),
-            out var appHost);
+        Fixture(Local(Group(groupDir), new JsonObject { ["solo"] = Repository("repository") }), out var appHost);
         var builder = TestHelpers.CreateBuilder(appHost);
 
         builder.AddService("solo");
 
-        Assert.Equal(Path.Combine(own, "src", "Solo", "Solo.csproj"), ProjectPathOf(builder, "solo"));
+        var planned = Path.Combine(appHost, ".servicesources", "checkouts", "solo", "src", "Solo", "Solo.csproj");
+        Assert.Equal(planned, Path.GetFullPath(ProjectPathOf(builder, "solo")));
+    }
+
+    [Fact]
+    public void ServiceNamedLikeAGroupedRepository_IsRefusedAtLoad_SoTheGroupCannotReachIt()
+    {
+        var groupDir = ProjectTree("Billing");
+        Fixture(
+            new JsonObject
+            {
+                ["services"] = new JsonObject { ["billing"] = Repository("repository") },
+                ["repositories"] = new JsonObject { ["billing"] = Group(groupDir) },
+            },
+            out var appHost,
+            catalog: """
+                repositories:
+                  billing:
+                    repository: https://example.com/billing.git
+                services:
+                  billing:
+                    repository: https://example.com/billing-own.git
+                    project: src/Billing/Billing.csproj
+                """);
+        var builder = TestHelpers.CreateBuilder(appHost);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("billing"));
+
+        Assert.Contains("names both an ungrouped service", ex.Message);
+    }
+
+    [Fact]
+    public void MemberOwnRepositoryRef_IsStillRefusedWhenTheGroupIsOnPath()
+    {
+        var groupDir = ProjectTree("Orders");
+        Fixture(
+            Local(Group(groupDir), new JsonObject
+            {
+                ["orders"] = new JsonObject { ["source"] = "repository", ["repository"] = new JsonObject { ["ref"] = "feature/x" } },
+            }),
+            out var appHost);
+        var builder = TestHelpers.CreateBuilder(appHost);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
+
+        Assert.Contains("'repository.ref' cannot be set", ex.Message);
+    }
+
+    [Fact]
+    public void MemberProjectEscapingTheGroupDirectory_IsRefused()
+    {
+        var groupDir = ProjectTree("Orders");
+        var outside = Path.Combine(Path.GetDirectoryName(groupDir)!, "escape");
+        Directory.CreateDirectory(outside);
+        File.WriteAllText(Path.Combine(outside, "Escape.csproj"), "<Project />");
+        Fixture(
+            Local(Group(groupDir), new JsonObject { ["orders"] = Repository("repository") }),
+            out var appHost,
+            catalog: """
+                repositories:
+                  monorepo:
+                    repository: https://example.com/monorepo.git
+                services:
+                  orders:
+                    repositoryRef: monorepo
+                    project: ../escape/Escape.csproj
+                """);
+        var builder = TestHelpers.CreateBuilder(appHost);
+
+        Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
+    }
+
+    [Fact]
+    public void PathMemberWhoseCatalogDefinesPath_IsDisplacedByTheGroupDirectory()
+    {
+        var groupDir = ProjectTree("Orders");
+        Fixture(
+            Local(Group(groupDir), new JsonObject { ["orders"] = Repository("path") }),
+            out var appHost,
+            catalog: """
+                repositories:
+                  monorepo:
+                    repository: https://example.com/monorepo.git
+                services:
+                  orders:
+                    repositoryRef: monorepo
+                    path: legacy/orders
+                    project: src/Orders/Orders.csproj
+                """);
+        var builder = TestHelpers.CreateBuilder(appHost);
+
+        builder.AddService("orders");
+
+        Assert.Equal(Path.Combine(groupDir, "src", "Orders", "Orders.csproj"), ProjectPathOf(builder, "orders"));
     }
 
     [Fact]
@@ -402,6 +483,14 @@ public class GroupPathSourceTests
         Assert.Equal(expected, GroupPathSource.Redirects("orders", Grouped(), config, PathGroup()));
     }
 
+    [Fact]
+    public void Redirects_IsFalseForARepositoryMemberThatSetsItsOwnRef()
+    {
+        var config = new ServiceDeveloperConfig { Source = "repository", Repository = new() { Ref = "feature/x" } };
+
+        Assert.False(GroupPathSource.Redirects("orders", Grouped(), config, PathGroup()));
+    }
+
     [Theory]
     [InlineData("repository")]
     [InlineData(null)]
@@ -424,29 +513,39 @@ public class GroupPathSourceTests
 
     // === members sharing the group directory share one build gate ===
 
-    private sealed class RecordingRunner : IBuildRunner
+    private sealed class ConcurrencyTrackingRunner : IBuildRunner
     {
-        public List<string> Builds { get; } = [];
+        private int _running;
 
-        public Task<int> RunAsync(
+        public int MaxConcurrent { get; private set; }
+
+        public int Builds { get; private set; }
+
+        public async Task<int> RunAsync(
             string projectFile, string? configuration, Action<string> onLine, CancellationToken cancellationToken)
         {
-            lock (Builds)
+            var now = Interlocked.Increment(ref _running);
+
+            lock (this)
             {
-                Builds.Add(projectFile);
+                MaxConcurrent = Math.Max(MaxConcurrent, now);
+                Builds++;
             }
 
-            return Task.FromResult(0);
+            await Task.Delay(100, cancellationToken);
+            Interlocked.Decrement(ref _running);
+
+            return 0;
         }
     }
 
     [Fact]
-    public async Task GroupMembers_ShareOneBuildGateKey_AndBuildOnceBetweenThem()
+    public async Task GroupMembers_ShareOneBuildGateKey_AndBuildOneAtATime()
     {
         var groupDir = ProjectTree("Orders", "Basket");
         Directory.CreateDirectory(Path.Combine(groupDir, ".git"));
         var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
-        var runner = new RecordingRunner();
+        var runner = new ConcurrencyTrackingRunner();
         var source = new PathSource(buildRunner: runner);
         var group = PathGroup();
         group.Path!.Path = groupDir;
@@ -465,9 +564,71 @@ public class GroupPathSourceTests
         var key = BuildGroupKey.For(groupDir, null, () => null);
         Assert.Equal(2, PathBuildGate.For(builder).MemberCount(key));
 
-        var orders = Assert.IsAssignableFrom<ProjectResource>(Assert.Single(builder.Resources, r => r.Name == "orders"));
-        await builder.Eventing.PublishAsync(new BeforeResourceStartedEvent(orders, builder.Services.BuildServiceProvider()));
+        var services = builder.Services.BuildServiceProvider();
+        await Task.WhenAll(builder.Resources.OfType<ProjectResource>().Select(
+            resource => builder.Eventing.PublishAsync(new BeforeResourceStartedEvent(resource, services))));
 
-        Assert.Equal(Path.Combine(groupDir, "src", "Orders", "Orders.csproj"), Assert.Single(runner.Builds));
+        Assert.Equal(2, runner.Builds);
+        Assert.Equal(1, runner.MaxConcurrent);
+    }
+
+    // === prepare: only a declared path.prepare runs in the group directory ===
+
+    private sealed class DirectoryRecordingRunner : IPrepareCommandRunner
+    {
+        public List<(string Directory, IReadOnlyList<string> Command)> Runs { get; } = [];
+
+        public int Run(
+            string workingDirectory, IReadOnlyList<string> command, CancellationToken cancellationToken,
+            Action<string> onLine)
+        {
+            Runs.Add((workingDirectory, command));
+            return 0;
+        }
+    }
+
+    private static (DirectoryRecordingRunner Runner, string GroupDir) ResolveRedirectedWithCatalogPrepare(
+        PrepareDeveloperConfig? memberPrepare)
+    {
+        var groupDir = ProjectTree("Orders");
+        var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
+        var runner = new DirectoryRecordingRunner();
+        var definition = new ServiceDefinition
+        {
+            Repository = new RepositoryDefinition
+            {
+                Url = "https://example.com/monorepo.git",
+                CheckoutName = "monorepo",
+                Prepare = new PrepareMetadata { Command = ["npm", "ci"] },
+            },
+            Project = "src/Orders/Orders.csproj",
+            Kind = LocalKinds.Dotnet,
+            Origin = CatalogOrigin.FromYaml("servicesources.yaml"),
+        };
+        var group = PathGroup();
+        group.Path!.Path = groupDir;
+        var config = new ServiceDeveloperConfig { Source = "repository", Path = new() { Prepare = memberPrepare } };
+
+        new PathSource(prepareRunner: runner).Resolve(builder, "orders", definition, config, group);
+
+        return (runner, groupDir);
+    }
+
+    [Fact]
+    public void RedirectedMember_DoesNotRunTheGroupsCatalogPrepare()
+    {
+        var (runner, _) = ResolveRedirectedWithCatalogPrepare(memberPrepare: null);
+
+        Assert.Empty(runner.Runs);
+    }
+
+    [Fact]
+    public void RedirectedMember_RunsItsOwnPathPrepareInTheGroupDirectory()
+    {
+        var (runner, groupDir) = ResolveRedirectedWithCatalogPrepare(new PrepareDeveloperConfig { Command = ["make", "dev"] });
+
+        var run = Assert.Single(runner.Runs);
+        Assert.Equal(["make", "dev"], run.Command);
+        Assert.Equal(Path.GetFullPath(groupDir), Path.GetFullPath(run.Directory));
     }
 }

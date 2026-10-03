@@ -324,6 +324,49 @@ public class ServiceConfigAuditTests
     }
 
     [Fact]
+    public async Task RepositoryEntryWhenTheCatalogDeclaresNone_SaysSoInsteadOfAnEmptyList()
+    {
+        var builder = CreateBuilder(OrdersCatalog, """
+            { "services": { "orders": { "source": "container" } },
+              "repositories": { "monorepo": { "source": "path", "path": { "path": "/src/monorepo" } } } }
+            """);
+        builder.AddService("orders");
+
+        var warning = Assert.Single(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+
+        Assert.Contains("declares no shared repositories", warning);
+        Assert.Contains("repositoryRef", warning);
+        Assert.DoesNotContain("declares: .", warning);
+    }
+
+    [Fact]
+    public async Task RepositoryEntryWithADirectoryButNoSource_IsReported()
+    {
+        var builder = CreateBuilder(MonorepoCatalog, """
+            { "services": { "orders": { "source": "container" } },
+              "repositories": { "monorepo": { "path": { "path": "/src/monorepo" } } } }
+            """);
+        builder.AddService("orders");
+
+        var warning = Assert.Single(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+
+        Assert.Contains("Repository 'monorepo'", warning);
+        Assert.Contains("'source' is not", warning);
+    }
+
+    [Fact]
+    public async Task RepositoryEntryWithAnExplicitRepositorySource_IsNotReportedForItsDirectory()
+    {
+        var builder = CreateBuilder(MonorepoCatalog, """
+            { "services": { "orders": { "source": "container" } },
+              "repositories": { "monorepo": { "source": "repository", "path": { "path": "/src/monorepo" } } } }
+            """);
+        builder.AddService("orders");
+
+        Assert.Empty(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+    }
+
+    [Fact]
     public async Task RepositoryEntryInAnotherCasing_IsNotReported()
     {
         var builder = CreateBuilder(MonorepoCatalog, """
