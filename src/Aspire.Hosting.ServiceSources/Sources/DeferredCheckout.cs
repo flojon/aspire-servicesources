@@ -790,7 +790,7 @@ internal sealed class DeferredCheckout
         var task = Task.Run(
             () => PromptAsync(
                 interaction, undecided, dependents, deadline, timeProvider, services, logger, checkoutNameLock,
-                cancellationToken),
+                fileState, selectionPath, cancellationToken),
             CancellationToken.None);
 
         lock (_gate)
@@ -811,6 +811,8 @@ internal sealed class DeferredCheckout
         IServiceProvider services,
         ILogger logger,
         CheckoutNameLock checkoutNameLock,
+        SelectionFileState fileState,
+        string selectionPath,
         CancellationToken cancellationToken)
     {
         try
@@ -892,12 +894,14 @@ internal sealed class DeferredCheckout
             var answers = SourcePrompt.Map(result, undecided);
             var start = new List<Deferred>();
             var skip = new List<Deferred>();
+            var chosen = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
 
             for (var i = 0; i < undecided.Count; i++)
             {
                 if (answers[i] == SourceAnswer.Skip)
                 {
                     skip.Add(undecided[i]);
+                    chosen[undecided[i].ServiceName] = false;
                     continue;
                 }
 
@@ -907,11 +911,25 @@ internal sealed class DeferredCheckout
                 {
                     ServiceSourcesLog.Warning(
                         logger,
-                        $"The source-selection prompt returned no usable answer for service '{new Name(undecided[i].ServiceName)}', so it starts.");
+                        $"The source-selection prompt returned no usable answer for service '{new Name(undecided[i].ServiceName)}', so it starts and the choice is not saved.");
+                }
+                else
+                {
+                    chosen[undecided[i].ServiceName] = true;
                 }
             }
 
             Apply(start, skip, services, checkoutNameLock, cancellationToken);
+
+            // After Apply, so a slow disk never delays a start. A newer file was already reported
+            // and is left alone.
+            if (chosen.Count > 0 && fileState != SelectionFileState.Newer
+                && !SourceSelectionStore.TrySave(undecided[0].AppHostDirectory, chosen))
+            {
+                ServiceSourcesLog.Warning(
+                    logger,
+                    $"The choice could not be saved to '{Raw.Escaped(selectionPath)}', so it applies to this run only and you will be asked again.");
+            }
         }
         catch (Exception)
         {

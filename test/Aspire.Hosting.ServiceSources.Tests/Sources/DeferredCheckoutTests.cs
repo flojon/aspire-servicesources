@@ -7,6 +7,7 @@ using Aspire.Hosting.ServiceSources.Tests.Git;
 using Aspire.Hosting.ServiceSources.Sources;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Sources;
@@ -2138,6 +2139,207 @@ public class DeferredCheckoutTests
 
         Assert.Equal(0, interaction.PromptCount);
         Assert.Empty(warnings);
+    }
+
+    private static string SelectionFile(string appHostDirectory) =>
+        Path.Combine(appHostDirectory, ".servicesources", "selection.json");
+
+    private static (IDistributedApplicationBuilder Builder, FakeGitClient Git) TwoServices(
+        string dir, FakeInteractionService interaction)
+    {
+        var builder = PromptBuilder(dir, interaction);
+        var git = new FakeGitClient();
+        var source = new LocalProjectSource(git);
+        source.Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
+        source.Resolve(builder, "billing", Definition("billing"), DevConfig()).WithHttpEndpoint();
+
+        return (builder, git);
+    }
+
+    [Fact]
+    public async Task AcceptedAnswer_IsPersisted_BothStartsAndSkips_MergedWithWhatWasThere()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        PlantSelection(dir, """{ "version": 1, "services": { "gone": { "start": false } } }""");
+        var interaction = new FakeInteractionService { IsAvailable = true, Answer = inputs => Checked(inputs, true, false) };
+        var (builder, _) = TwoServices(dir, interaction);
+
+        await RunGateAsync(builder, "orders", "billing");
+        await TasksAsync(builder);
+
+        var (decisions, state) = SourceSelectionStore.Read(dir);
+        Assert.Equal(SelectionFileState.Valid, state);
+        Assert.True(decisions["orders"]);
+        Assert.False(decisions["billing"]);
+        Assert.False(decisions["gone"]);
+    }
+
+    [Fact]
+    public async Task AcceptedAnswer_IsPersistedInTheCatalogSpelling()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var interaction = new FakeInteractionService { IsAvailable = true, Answer = inputs => Checked(inputs, false) };
+        var builder = PromptBuilder(dir, interaction);
+        new LocalProjectSource(new FakeGitClient()).Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
+
+        await RunGateAsync(builder, "orders");
+        await TasksAsync(builder);
+
+        Assert.Contains("\"orders\"", File.ReadAllText(SelectionFile(dir)));
+    }
+
+    [Fact]
+    public async Task AServiceTheAnswerDidNotCover_StartsButIsNotPersisted()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var interaction = new FakeInteractionService
+        {
+            IsAvailable = true,
+            Answer = inputs =>
+            {
+                inputs[0].Value = "false";
+                return InteractionResult.Ok(new InteractionInputCollection([inputs[0]]));
+            },
+        };
+        var (builder, git) = TwoServices(dir, interaction);
+        var warnings = TestHelpers.CaptureServiceSourcesLog(builder);
+
+        await RunGateAsync(builder, "orders", "billing");
+        await TasksAsync(builder);
+
+        var (decisions, _) = SourceSelectionStore.Read(dir);
+        Assert.False(decisions["orders"]);
+        Assert.False(decisions.ContainsKey("billing"));
+        Assert.Equal(["https://example.com/billing.git"], git.Cloned.ToArray());
+        lock (warnings)
+        {
+            Assert.Contains(warnings, entry => entry.Level == LogLevel.Warning && entry.Message.Contains("'billing'"));
+        }
+    }
+
+    [Fact]
+    public async Task ThrowingPrompt_PersistsNothing()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var interaction = new FakeInteractionService { IsAvailable = true, Throw = new InvalidOperationException("no dashboard") };
+        var (builder, _) = TwoServices(dir, interaction);
+
+        await RunGateAsync(builder, "orders", "billing");
+        await TasksAsync(builder);
+
+        Assert.False(File.Exists(SelectionFile(dir)));
+    }
+
+    [Fact]
+    public async Task NewerFile_IsNotOverwritten_ThePromptStillRuns_AndAWarningSaysWhy()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        const string newer = """{ "version": 2, "services": { "orders": { "start": false } } }""";
+        PlantSelection(dir, newer);
+        var interaction = new FakeInteractionService { IsAvailable = true, Answer = inputs => Checked(inputs, true, false) };
+        var (builder, git) = TwoServices(dir, interaction);
+        var log = TestHelpers.CaptureServiceSourcesLog(builder);
+
+        var services = await RunGateAsync(builder, "orders", "billing");
+        await TasksAsync(builder);
+
+        Assert.Equal(1, interaction.PromptCount);
+        Assert.Equal(["s0", "s1"], interaction.Inputs.Select(input => input.Name));
+        Assert.Equal(newer, File.ReadAllText(SelectionFile(dir)));
+        Assert.Equal(["https://example.com/orders.git"], git.Cloned.ToArray());
+        Assert.Equal("Skipped", CurrentState(services, RealResource(builder, "billing")));
+        lock (log)
+        {
+            Assert.Contains(log, entry => entry.Level == LogLevel.Warning && entry.Message.Contains("newer version"));
+        }
+    }
+
+    [Fact]
+    public async Task InvalidFile_WarnsNamingThePath_AndIsReplacedAfterAnAnswer()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        PlantSelection(dir, "garbage");
+        var interaction = new FakeInteractionService { IsAvailable = true, Answer = inputs => Checked(inputs, false) };
+        var builder = PromptBuilder(dir, interaction);
+        new LocalProjectSource(new FakeGitClient()).Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
+        var log = TestHelpers.CaptureServiceSourcesLog(builder);
+
+        await RunGateAsync(builder, "orders");
+        await TasksAsync(builder);
+
+        lock (log)
+        {
+            Assert.Contains(
+                log,
+                entry => entry.Level == LogLevel.Warning && entry.Message.Contains("selection.json") && entry.Message.Contains("malformed"));
+        }
+
+        var (decisions, state) = SourceSelectionStore.Read(dir);
+        Assert.Equal(SelectionFileState.Valid, state);
+        Assert.False(decisions["orders"]);
+    }
+
+    [Fact]
+    public async Task InvalidFile_IsNotReplacedWhenNobodyAnswers()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        PlantSelection(dir, "garbage");
+        var interaction = new FakeInteractionService
+        {
+            IsAvailable = true,
+            Answer = _ => InteractionResult.Cancel<InteractionInputCollection>(),
+        };
+        var builder = PromptBuilder(dir, interaction);
+        new LocalProjectSource(new FakeGitClient()).Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
+
+        await RunGateAsync(builder, "orders");
+        await TasksAsync(builder);
+
+        Assert.Equal("garbage", File.ReadAllText(SelectionFile(dir)));
+    }
+
+    [Fact]
+    public async Task FailedSave_WarnsAndTheRunProceeds()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        Directory.CreateDirectory(SelectionFile(dir));
+        var interaction = new FakeInteractionService { IsAvailable = true, Answer = inputs => Checked(inputs, true, false) };
+        var (builder, git) = TwoServices(dir, interaction);
+        var log = TestHelpers.CaptureServiceSourcesLog(builder);
+
+        var services = await RunGateAsync(builder, "orders", "billing");
+        await TasksAsync(builder);
+
+        Assert.Equal(["https://example.com/orders.git"], git.Cloned.ToArray());
+        Assert.Equal("Skipped", CurrentState(services, RealResource(builder, "billing")));
+        lock (log)
+        {
+            Assert.Contains(
+                log, entry => entry.Level == LogLevel.Warning && entry.Message.Contains("could not be saved"));
+        }
+    }
+
+    [Fact]
+    public async Task ASavedSelectionBeingApplied_IsReportedOnceNamingTheFileAndHowToClearIt()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        PlantSelection(
+            dir, """{ "version": 1, "services": { "orders": { "start": true }, "billing": { "start": false } } }""");
+        var interaction = new FakeInteractionService { IsAvailable = true };
+        var (builder, _) = TwoServices(dir, interaction);
+        var log = TestHelpers.CaptureServiceSourcesLog(builder);
+
+        await RunGateAsync(builder, "orders", "billing");
+        await TasksAsync(builder);
+
+        lock (log)
+        {
+            var applied = log.Where(entry => entry.Message.Contains("saved source selection")).ToArray();
+            var line = Assert.Single(applied);
+            Assert.Equal(LogLevel.Information, line.Level);
+            Assert.Contains("selection.json", line.Message);
+            Assert.Contains("Delete the file", line.Message);
+        }
     }
 
     private const string OrdersUrl = "https://example.com/orders.git";

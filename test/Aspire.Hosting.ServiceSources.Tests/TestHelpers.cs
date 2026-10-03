@@ -123,6 +123,46 @@ internal static class TestHelpers
     }
 
     /// <summary>
+    /// Everything the package logs, at any level, from now on. For notices that are information, not warnings.
+    /// </summary>
+    public static List<(LogLevel Level, string Message)> CaptureServiceSourcesLog(IDistributedApplicationBuilder builder)
+    {
+        var captured = new List<(LogLevel, string)>();
+
+        builder.Services.AddSingleton<ILoggerProvider>(new LevelCapturingProvider((level, message) =>
+        {
+            lock (captured)
+            {
+                captured.Add((level, message));
+            }
+        }));
+
+        return captured;
+    }
+
+    private sealed class LevelCapturingProvider(Action<LogLevel, string> write) : ILoggerProvider
+    {
+        public ILogger CreateLogger(string categoryName) =>
+            categoryName == ServiceSourcesCategory ? new LevelCapturingLogger(write) : NullLogger.Instance;
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class LevelCapturingLogger(Action<LogLevel, string> write) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => write(logLevel, formatter(state, exception));
+    }
+
+    /// <summary>
     /// The package's own warnings, delivered as they are written rather than collected once
     /// something has finished.
     /// </summary>
