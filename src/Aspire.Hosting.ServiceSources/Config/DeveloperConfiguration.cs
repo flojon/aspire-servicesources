@@ -96,6 +96,17 @@ internal sealed class DeveloperConfiguration
     public required IReadOnlyList<string> CatalogNames { get; init; }
 
     /// <summary>
+    /// Keys under <c>repositories</c> that name no repository the catalog declares, as the developer
+    /// spelled them. A case-variant of a declared name is not among them: it binds to the declared
+    /// one. Exists so a typo'd repository name is reported rather than silently leaving the group on
+    /// its managed checkout.
+    /// </summary>
+    public required IReadOnlyList<string> UndeclaredRepositoryNames { get; init; }
+
+    /// <summary>The repository names the catalog declares, for offering a near miss.</summary>
+    public required IReadOnlyList<string> RepositoryNames { get; init; }
+
+    /// <summary>
     /// Reads the developer's selection out of <paramref name="builder"/>'s configuration. Whichever
     /// entry point the AppHost called first has already put <c>servicesources.local.json</c> into
     /// that chain; the call below covers the internal paths that reach a read without one, and is a
@@ -193,12 +204,9 @@ internal sealed class DeveloperConfiguration
             NormalizeBlankToAbsent(config, DeveloperConfigShape.Repository);
         }
 
-        // The undeclared-repository-names half is discarded: nothing today offers a near-miss
-        // suggestion for a repository entry the way NotConfiguredError does for a service, so there
-        // is nothing yet that would read it. CanonicalizeToCatalog<T> still computes it, being the
-        // one walk that also decides the canonical keying — recomputing it separately would be a
-        // second pass over the same entries to throw the answer away differently.
-        var (repositories, _) = CanonicalizeToCatalog(boundRepositories, declaredRepositoryNames);
+        var (repositories, undeclaredRepositoryNames) = CanonicalizeToCatalog(boundRepositories, declaredRepositoryNames);
+
+        ValidateRepositoryEntries(repositories, undeclaredRepositoryNames);
 
         return new DeveloperConfiguration
         {
@@ -206,6 +214,8 @@ internal sealed class DeveloperConfiguration
             Repositories = repositories,
             UndeclaredNames = undeclaredNames,
             CatalogNames = declaredNames,
+            UndeclaredRepositoryNames = undeclaredRepositoryNames,
+            RepositoryNames = declaredRepositoryNames,
             FilePath = path,
             FileFound = File.Exists(path),
             // Asked unconditionally, and not gated on nothing being configured — which reads as the
@@ -392,6 +402,59 @@ internal sealed class DeveloperConfiguration
         }
 
         return (canonical, undeclared);
+    }
+
+    /// <summary>
+    /// Refuses a repository entry whose <c>source</c> is not <c>path</c> or <c>repository</c>, or that
+    /// sets a <c>prepare</c> step: a group-level step needs a marker keyed to the group, which does not exist.
+    /// </summary>
+    /// <remarks>
+    /// Skips entries naming no declared repository: those are dead configuration, reported by
+    /// <see cref="ServiceConfigAudit"/> rather than failed on.
+    /// </remarks>
+    private static void ValidateRepositoryEntries(
+        Dictionary<string, RepositoryDeveloperConfig> repositories, IReadOnlyList<string> undeclaredNames)
+    {
+        var skipped = undeclaredNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var problems = new List<Raw>();
+
+        foreach (var (name, config) in repositories.OrderBy(entry => entry.Key, StringComparer.Ordinal))
+        {
+            if (skipped.Contains(name))
+            {
+                continue;
+            }
+
+            var key = $"{RepositoriesKey}:{name}";
+
+            if (!string.IsNullOrEmpty(config.Source)
+                && !string.Equals(config.Source, "path", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(config.Source, "repository", StringComparison.OrdinalIgnoreCase))
+            {
+                problems.Add(Raw.Compose($"Repository '{new Name(name)}': source '{new Name(config.Source)}' is not valid for a repository. "
+                    + $"Expected 'path' (use the directory in 'path:path') or 'repository' (the managed checkout). "
+                    + $"Correct '{Raw.Escaped(key)}:source' in '{Raw.Literal(FileName)}', or wherever a higher layer set it."));
+            }
+
+            if (config.Prepare?.IsDeclared == true || config.Path?.Prepare?.IsDeclared == true)
+            {
+                problems.Add(Raw.Compose($"Repository '{new Name(name)}': a repository entry does not take a 'prepare' step. "
+                    + $"Set 'path.prepare' on each member service under '{Raw.Literal(ServicesKey)}' instead."));
+            }
+        }
+
+        if (problems.Count == 0)
+        {
+            return;
+        }
+
+        if (problems.Count == 1)
+        {
+            throw ServiceSourcesConfigurationException.For($"{problems[0]}");
+        }
+
+        throw ServiceSourcesConfigurationException.For(
+            $"{problems.Count} repository entries are invalid:{Raw.Join("", problems.Select(p => Raw.Compose($"{Raw.NewLine}  - {p}")))}");
     }
 
     /// <summary>

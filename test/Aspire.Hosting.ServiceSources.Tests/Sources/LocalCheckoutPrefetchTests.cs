@@ -361,6 +361,59 @@ public class LocalCheckoutPrefetchTests
     }
 
     [Fact]
+    public void GroupOnPath_StartsNoSpeculativeCloneForTheGroup_WhileAnotherRepositoryStillClones()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        var groupDir = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(groupDir, "Service.csproj"), "<Project />");
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.yaml"),
+            """
+            repositories:
+              monorepo:
+                repository: https://example.com/monorepo.git
+            services:
+              orders:
+                repositoryRef: monorepo
+                project: Service.csproj
+              basket:
+                repositoryRef: monorepo
+                project: Service.csproj
+              payments:
+                repository: https://example.com/payments.git
+                project: Service.csproj
+            """);
+        File.WriteAllText(
+            Path.Combine(dir, "servicesources.local.json"),
+            new System.Text.Json.Nodes.JsonObject
+            {
+                ["services"] = new System.Text.Json.Nodes.JsonObject
+                {
+                    ["orders"] = new System.Text.Json.Nodes.JsonObject { ["source"] = "repository" },
+                    ["basket"] = new System.Text.Json.Nodes.JsonObject { ["source"] = "repository" },
+                    ["payments"] = new System.Text.Json.Nodes.JsonObject { ["source"] = "repository" },
+                },
+                ["repositories"] = new System.Text.Json.Nodes.JsonObject
+                {
+                    ["monorepo"] = new System.Text.Json.Nodes.JsonObject
+                    {
+                        ["source"] = "path",
+                        ["path"] = new System.Text.Json.Nodes.JsonObject { ["path"] = groupDir },
+                    },
+                },
+            }.ToJsonString());
+        var builder = TestHelpers.CreateBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
+        var git = new FakeGitClient();
+        var source = new LocalProjectSource(git);
+
+        source.Resolve(builder, "payments", Definition("payments"), DevConfig());
+
+        Assert.Equal(["https://example.com/payments.git"], git.Cloned);
+        Assert.False(Directory.Exists(Path.Combine(dir, ".servicesources", "checkouts", "monorepo")));
+    }
+
+    [Fact]
     public void SecondAddService_ReusesThePrefetchedCheckout()
     {
         var dir = CreateAppHostDirectory("orders", "billing");

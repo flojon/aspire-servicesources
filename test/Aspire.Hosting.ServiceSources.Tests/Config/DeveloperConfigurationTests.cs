@@ -1403,4 +1403,139 @@ public class DeveloperConfigurationTests
 
         Assert.DoesNotContain("Did you mean", ex.Message);
     }
+
+    private const string MonorepoCatalog = """
+        repositories:
+          monorepo:
+            repository: https://github.com/company/monorepo
+        services:
+          orders:
+            repositoryRef: monorepo
+            project: src/Orders/Orders.csproj
+        """;
+
+    private static RepositoryDeveloperConfig LoadedRepository(string json, Action<IDistributedApplicationBuilder>? configure = null)
+    {
+        var builder = CreateBuilder(CreateAppHostDirectory(MonorepoCatalog, json));
+        configure?.Invoke(builder);
+
+        return ServiceSourcesConfigCache.LoadedFor(builder).DeveloperConfig.Repositories["monorepo"];
+    }
+
+    [Fact]
+    public void ReadFrom_UndeclaredRepositoryEntry_IsExposedAndDeclaredOneIsNot()
+    {
+        var dir = CreateAppHostDirectory(
+            MonorepoCatalog,
+            """{ "repositories": { "monorpeo": { "source": "path" }, "monorepo": { "source": "path" } } }""");
+
+        var loaded = ServiceSourcesConfigCache.LoadedFor(CreateBuilder(dir)).DeveloperConfig;
+
+        Assert.Equal(["monorpeo"], loaded.UndeclaredRepositoryNames.ToArray());
+        Assert.Equal(["monorepo"], loaded.RepositoryNames.ToArray());
+    }
+
+    [Fact]
+    public void ReadFrom_RepositoryPathSourceInJsonFile_BindsToTheDeclaredName()
+    {
+        var loaded = ServiceSourcesConfigCache.LoadedFor(CreateBuilder(CreateAppHostDirectory(
+            MonorepoCatalog,
+            """{ "repositories": { "Monorepo": { "source": "path", "path": { "path": "/src/mono" } } } }"""))).DeveloperConfig;
+
+        var group = loaded.Repositories["monorepo"];
+
+        Assert.Equal("path", group.Source);
+        Assert.Equal("/src/mono", group.Path?.Path);
+        Assert.Empty(loaded.UndeclaredRepositoryNames);
+    }
+
+    [Fact]
+    public void ReadFrom_RepositoryPathSourceFromEnvironmentKeys_BindsCaseInsensitively()
+    {
+        // The colon spelling is what ServiceSources__Repositories__MONOREPO__Source__... translates to.
+        var group = LoadedRepository("{}", builder =>
+            builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ServiceSources:Repositories:MONOREPO:Source"] = "path",
+                ["ServiceSources:Repositories:MONOREPO:Path:Path"] = "/src/mono",
+            }));
+
+        Assert.Equal("path", group.Source);
+        Assert.Equal("/src/mono", group.Path?.Path);
+    }
+
+    [Fact]
+    public void ReadFrom_HigherLayerSourceRepository_CancelsALowerLayersPath()
+    {
+        var group = LoadedRepository(
+            """{ "repositories": { "monorepo": { "source": "path", "path": { "path": "/src/mono" } } } }""",
+            builder => builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ServiceSources:Repositories:monorepo:Source"] = "repository",
+            }));
+
+        Assert.Equal("repository", group.Source);
+    }
+
+    [Fact]
+    public void ReadFrom_RepositoryPathBlockWithoutSource_IsAccepted()
+    {
+        var group = LoadedRepository("""{ "repositories": { "monorepo": { "path": { "path": "/src/mono" } } } }""");
+
+        Assert.Null(group.Source);
+        Assert.Equal("/src/mono", group.Path?.Path);
+    }
+
+    [Fact]
+    public void ReadFrom_RepositoryPathAsAString_IsRefusedAsABlockExpected()
+    {
+        var dir = CreateAppHostDirectory(MonorepoCatalog, """{ "repositories": { "monorepo": { "path": "/src/mono" } } }""");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.LoadedFor(CreateBuilder(dir)));
+
+        Assert.Contains("takes a block of settings", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("url")]
+    [InlineData("container")]
+    [InlineData("kubernetes")]
+    public void ReadFrom_RepositorySourceOtherThanPathOrRepository_IsRefused(string source)
+    {
+        var dir = CreateAppHostDirectory(
+            MonorepoCatalog, $$"""{ "repositories": { "monorepo": { "source": "{{source}}" } } }""");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.LoadedFor(CreateBuilder(dir)));
+
+        Assert.Contains("Repository 'monorepo'", ex.Message);
+        Assert.Contains($"'{source}'", ex.Message);
+        Assert.Contains("ServiceSources:Repositories:monorepo:source", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("""{ "source": "path", "path": { "path": "/a", "prepare": { "command": ["./go.sh"] } } }""")]
+    [InlineData("""{ "source": "path", "path": { "path": "/a" }, "prepare": { "command": ["./go.sh"] } }""")]
+    public void ReadFrom_RepositoryEntryWithAPrepareStep_IsRefusedPointingAtTheMemberServices(string entry)
+    {
+        var dir = CreateAppHostDirectory(MonorepoCatalog, $$"""{ "repositories": { "monorepo": {{entry}} } }""");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.LoadedFor(CreateBuilder(dir)));
+
+        Assert.Contains("Repository 'monorepo'", ex.Message);
+        Assert.Contains("'path.prepare' on each member service", ex.Message);
+    }
+
+    [Fact]
+    public void ReadFrom_InvalidEntryForAnUndeclaredRepository_DoesNotFailStartup()
+    {
+        var dir = CreateAppHostDirectory(
+            MonorepoCatalog, """{ "repositories": { "monorpeo": { "source": "url" } } }""");
+
+        var loaded = ServiceSourcesConfigCache.LoadedFor(CreateBuilder(dir)).DeveloperConfig;
+
+        Assert.Equal(["monorpeo"], loaded.UndeclaredRepositoryNames.ToArray());
+    }
 }

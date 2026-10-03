@@ -129,6 +129,12 @@ A service grouped into a `repositories:` entry doesn't inherit that repository's
 `"path"`: the group's step is written to run once at the root of its shared checkout, not in one
 member's directory once per member. Only a `path.prepare` block the developer declares runs there.
 
+**A group can be pointed at one tree.** A `path` service still has nothing to clone, but setting
+`repositories.<name>` to `{ "source": "path", "path": { "path": "..." } }` in
+`servicesources.local.json` makes every grouped member of that repository use the directory as its
+root instead of a `path.path` per service; see
+[Pointing a whole group at a checkout you already have](repository.md#several-services-from-one-repository).
+
 **`defaultSource: path` is close to free.** Unlike [`defaultSource: repository`'s warning](../getting-started/quickstart.md#defaulting-a-source) —
 about the clone every developer and CI trigger by default — a `"path"` service with nothing in
 `servicesources.local.json` costs nothing extra when the directory is in-repo: it's already there,
@@ -155,9 +161,10 @@ by construction.
 `kubernetes` and `container`, a `"path"` service is always resolved eagerly, with full
 launch-profile fidelity — there's no clone to defer, so no "Preparing" state ever appears for one.
 
-**No `repositories:` grouping either.** Grouping exists to avoid cloning one external repository
-twice; a `"path"` service has nothing to clone, so there's no shared-checkout identity to opt into.
-Two services naming the same resolved `path` are just two entries pointing at one directory.
+**A `"path"` service needs no `repositories:` entry to share a directory.** Grouping exists to avoid
+cloning one external repository twice; a `"path"` service has nothing to clone. Two services naming
+the same resolved `path` are just two entries pointing at one directory. A `repositories:` entry is
+only for redirecting a `repositoryRef` group to one directory in a single setting, as described above.
 
 **`repository.path` is deprecated.** It resolves a directory the same way — no clone, no ref —
 reachable a second, less discoverable way, nested under a source whose other machinery it never
@@ -211,6 +218,7 @@ describes how the code is laid out. It has no effect unless the service resolves
 
 **What is not covered.** A managed checkout (`"repository"`) is not gated: ungrouped ones each have
 their own clone, and services in a `WithSharedRepository` group share one clone and are not gated
-either. Launching from an IDE, where the debugger builds the project itself, and `dotnet watch`
+either. The members of a group pointed at one directory are `"path"` services in one repository, so
+they are gated. Launching from an IDE, where the debugger builds the project itself, and `dotnet watch`
 bypass the gate. A build that fails is logged to the service's own console and the service still
 starts, so its own `dotnet run` reports the real error.
