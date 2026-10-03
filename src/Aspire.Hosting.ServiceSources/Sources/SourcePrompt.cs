@@ -80,7 +80,10 @@ internal static class SourcePrompt
     /// dialog message so the two cannot disagree.
     /// </summary>
     public static string AwaitingState(DateTimeOffset deadline) =>
-        $"Awaiting source selection (starts automatically at {Clock(deadline)})";
+        $"{AwaitingStatePrefix} (starts automatically at {Clock(deadline)})";
+
+    /// <summary>What every awaiting state text starts with, for code that has to recognise one.</summary>
+    public const string AwaitingStatePrefix = "Awaiting source selection";
 
     /// <summary>
     /// One answer per service, in the order of <paramref name="undecided"/>. A missing, renamed or

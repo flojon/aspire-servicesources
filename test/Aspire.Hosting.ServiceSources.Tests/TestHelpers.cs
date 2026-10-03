@@ -40,7 +40,13 @@ internal static class TestHelpers
     private static IDistributedApplicationBuilder CreateBuilderCore(DistributedApplicationOptions options)
     {
         options.Args = [.. options.Args ?? [], TestBuilderDefaults.DisableConfigReloadArg];
-        return DistributedApplication.CreateBuilder(options);
+        var builder = DistributedApplication.CreateBuilder(options);
+
+        // Replaces Aspire's real service, which reports itself available whenever DCP options are set;
+        // a test that wants the source-pick prompt registers its own scripted one over this.
+        builder.Services.AddSingleton<IInteractionService>(new FakeInteractionService());
+
+        return builder;
     }
 
     /// <summary>

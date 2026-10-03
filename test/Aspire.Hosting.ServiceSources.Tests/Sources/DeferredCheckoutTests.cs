@@ -1631,6 +1631,515 @@ public class DeferredCheckoutTests
                 State = new ResourceStateSnapshot(KnownResourceStates.NotStarted, null),
             });
 
+    /// <summary>A clock the test advances by hand, so the prompt deadline never costs real minutes.</summary>
+    private sealed class ManualTimeProvider : TimeProvider
+    {
+        private readonly object _lock = new();
+        private readonly List<ManualTimer> _timers = [];
+        private DateTimeOffset _now = new(2026, 10, 3, 12, 0, 0, TimeSpan.Zero);
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            lock (_lock)
+            {
+                return _now;
+            }
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = new ManualTimer(this, callback, state);
+            timer.Change(dueTime, period);
+
+            lock (_lock)
+            {
+                _timers.Add(timer);
+            }
+
+            return timer;
+        }
+
+        public void Advance(TimeSpan by)
+        {
+            List<ManualTimer> due;
+
+            lock (_lock)
+            {
+                _now += by;
+                due = _timers.Where(timer => timer.Due is { } at && at <= _now).ToList();
+            }
+
+            foreach (var timer in due)
+            {
+                timer.Fire();
+            }
+        }
+
+        private sealed class ManualTimer(ManualTimeProvider owner, TimerCallback callback, object? state) : ITimer
+        {
+            public DateTimeOffset? Due { get; private set; }
+
+            public bool Change(TimeSpan dueTime, TimeSpan period)
+            {
+                Due = dueTime == Timeout.InfiniteTimeSpan ? null : owner.GetUtcNow() + dueTime;
+                return true;
+            }
+
+            public void Fire()
+            {
+                Due = null;
+                callback(state);
+            }
+
+            public void Dispose() => Due = null;
+
+            public ValueTask DisposeAsync()
+            {
+                Due = null;
+                return ValueTask.CompletedTask;
+            }
+        }
+    }
+
+    private static InteractionResult<InteractionInputCollection> Checked(
+        IReadOnlyList<InteractionInput> inputs, params bool[] start)
+    {
+        for (var i = 0; i < inputs.Count; i++)
+        {
+            inputs[i].Value = start[i] ? "true" : "false";
+        }
+
+        return InteractionResult.Ok(new InteractionInputCollection(inputs));
+    }
+
+    private static IDistributedApplicationBuilder PromptBuilder(
+        string dir, FakeInteractionService interaction, ManualTimeProvider? time = null)
+    {
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+        builder.Services.AddSingleton<IInteractionService>(interaction);
+
+        if (time is not null)
+        {
+            builder.Services.AddSingleton<TimeProvider>(time);
+        }
+
+        return builder;
+    }
+
+    private static async Task<IServiceProvider> RunGateAsync(IDistributedApplicationBuilder builder, params string[] names)
+    {
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+
+        foreach (var name in names)
+        {
+            await PublishNotStartedAsync(services, RealResource(builder, name));
+        }
+
+        return services;
+    }
+
+    /// <summary>
+    /// Waits for every background task, including the ones the prompt's answer launches after this
+    /// is first called.
+    /// </summary>
+    private static async Task TasksAsync(IDistributedApplicationBuilder builder)
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var deferred = DeferredCheckout.For(builder);
+
+        while (true)
+        {
+            var tasks = deferred.StartTasks;
+            await Task.WhenAll(tasks).WaitAsync(deadline.Token);
+
+            if (deferred.StartTasks.Count == tasks.Count)
+            {
+                return;
+            }
+        }
+    }
+
+    private static void PlantSelection(string appHostDirectory, string json)
+    {
+        var tool = Directory.CreateDirectory(Path.Combine(appHostDirectory, ".servicesources")).FullName;
+        File.WriteAllText(Path.Combine(tool, "selection.json"), json);
+    }
+
+    private static void AssertWaitsFor(Func<bool> condition, string because) =>
+        Assert.True(SpinWait.SpinUntil(condition, TimeSpan.FromSeconds(30)), because);
+
+    private static IReadOnlyList<ServiceDefinition> SharedGroupDefinitions(params string[] names)
+    {
+        var repository = new RepositoryDefinition
+        {
+            Url = "https://example.com/monorepo.git", CheckoutName = "monorepo",
+        };
+
+        return [.. names.Select(name => new ServiceDefinition
+        {
+            Repository = repository,
+            Project = "Service.csproj",
+            Kind = LocalKinds.Dotnet,
+            Origin = CatalogOrigin.FromYaml("servicesources.yaml"),
+        })];
+    }
+
+    [Fact]
+    public async Task Prompt_Accepted_StartsTheCheckedServicesAndSkipsTheOthers()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var interaction = new FakeInteractionService { IsAvailable = true, Answer = inputs => Checked(inputs, true, false) };
+        var builder = PromptBuilder(dir, interaction);
+        var git = new FakeGitClient();
+        var source = new LocalProjectSource(git);
+        source.Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
+        source.Resolve(builder, "billing", Definition("billing"), DevConfig()).WithHttpEndpoint();
+
+        var services = await RunGateAsync(builder, "orders", "billing");
+        await TasksAsync(builder);
+
+        Assert.Equal(1, interaction.PromptCount);
+        Assert.Equal(["s0", "s1"], interaction.Inputs.Select(input => input.Name));
+        Assert.Equal(["https://example.com/orders.git"], git.Cloned.ToArray());
+        Assert.Equal("Skipped", CurrentState(services, RealResource(builder, "billing")));
+        Assert.False(Directory.Exists(ExpectedRepoRoot(dir, "billing")));
+    }
+
+    [Fact]
+    public async Task Prompt_Dismissed_StartsEveryUndecidedService()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var interaction = new FakeInteractionService
+        {
+            IsAvailable = true,
+            Answer = _ => InteractionResult.Cancel<InteractionInputCollection>(),
+        };
+        var builder = PromptBuilder(dir, interaction);
+        var git = new FakeGitClient();
+        var source = new LocalProjectSource(git);
+        source.Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
+        source.Resolve(builder, "billing", Definition("billing"), DevConfig()).WithHttpEndpoint();
+
+        var services = await RunGateAsync(builder, "orders", "billing");
+        await TasksAsync(builder);
+
+        Assert.Equal(2, git.Cloned.Count);
+        Assert.NotEqual("Skipped", CurrentState(services, RealResource(builder, "billing")));
+        Assert.False(File.Exists(Path.Combine(dir, ".servicesources", "selection.json")));
+    }
+
+    [Fact]
+    public async Task Prompt_ThatThrows_StartsEveryUndecidedService()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var interaction = new FakeInteractionService
+        {
+            IsAvailable = true,
+            Throw = new InvalidOperationException("InteractionService is not available"),
+        };
+        var builder = PromptBuilder(dir, interaction);
+        var git = new FakeGitClient();
+        var source = new LocalProjectSource(git);
+        source.Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
+        source.Resolve(builder, "billing", Definition("billing"), DevConfig()).WithHttpEndpoint();
+
+        await RunGateAsync(builder, "orders", "billing");
+        await TasksAsync(builder);
+
+        Assert.Equal(2, git.Cloned.Count);
+    }
+
+    [Fact]
+    public async Task PromptUnavailable_StartsEveryUndecidedService_WithoutAsking()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var interaction = new FakeInteractionService { IsAvailable = false };
+        var builder = PromptBuilder(dir, interaction);
+        var git = new FakeGitClient();
+        var source = new LocalProjectSource(git);
+        source.Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
+        source.Resolve(builder, "billing", Definition("billing"), DevConfig()).WithHttpEndpoint();
+
+        await RunGateAsync(builder, "orders", "billing");
+        await TasksAsync(builder);
+
+        Assert.Equal(0, interaction.PromptCount);
+        Assert.Equal(2, git.Cloned.Count);
+    }
+
+    [Fact]
+    public async Task PromptTimedOut_StartsEveryUndecidedService_AndCancelsTheDialog()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var interaction = new FakeInteractionService { IsAvailable = true };
+        var time = new ManualTimeProvider();
+        var builder = PromptBuilder(dir, interaction, time);
+        var git = new FakeGitClient();
+        var source = new LocalProjectSource(git);
+        source.Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
+        source.Resolve(builder, "billing", Definition("billing"), DevConfig()).WithHttpEndpoint();
+
+        var services = await RunGateAsync(builder, "orders", "billing");
+        await interaction.Prompted.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Nothing starts while the dialog is open and the deadline has not passed.
+        Assert.Empty(git.Cloned);
+        time.Advance(DeferredCheckout.PromptTimeout - TimeSpan.FromSeconds(1));
+        Assert.False(interaction.PromptToken.IsCancellationRequested);
+        Assert.Empty(git.Cloned);
+
+        time.Advance(TimeSpan.FromSeconds(2));
+        await TasksAsync(builder);
+
+        Assert.True(interaction.PromptToken.IsCancellationRequested);
+        Assert.Equal(2, git.Cloned.Count);
+        Assert.NotEqual("Skipped", CurrentState(services, RealResource(builder, "billing")));
+        Assert.False(File.Exists(Path.Combine(dir, ".servicesources", "selection.json")));
+    }
+
+    [Fact]
+    public async Task HostStoppingBeforeTheDeadline_StartsNothing()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var interaction = new FakeInteractionService { IsAvailable = true };
+        var time = new ManualTimeProvider();
+        var builder = PromptBuilder(dir, interaction, time);
+        var git = new FakeGitClient();
+        var source = new LocalProjectSource(git);
+        source.Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
+        source.Resolve(builder, "billing", Definition("billing"), DevConfig()).WithHttpEndpoint();
+
+        var services = await RunGateAsync(builder, "orders", "billing");
+        await interaction.Prompted.WaitAsync(TimeSpan.FromSeconds(30));
+
+        services.GetRequiredService<IHostApplicationLifetime>().StopApplication();
+        await TasksAsync(builder);
+
+        Assert.Empty(git.Cloned);
+        Assert.NotEqual("Skipped", CurrentState(services, RealResource(builder, "billing")));
+        Assert.False(File.Exists(Path.Combine(dir, ".servicesources", "selection.json")));
+    }
+
+    [Fact]
+    public async Task UndecidedServices_ShowTheDeadlineInTheirStateWhileTheDialogIsOpen()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var interaction = new FakeInteractionService { IsAvailable = true };
+        var time = new ManualTimeProvider();
+        var builder = PromptBuilder(dir, interaction, time);
+        new LocalProjectSource(new FakeGitClient()).Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
+
+        var services = await RunGateAsync(builder, "orders");
+        var expected = $"Awaiting source selection (starts automatically at {(time.GetUtcNow() + DeferredCheckout.PromptTimeout).ToLocalTime():HH:mm})";
+
+        AssertWaitsFor(
+            () => CurrentState(services, RealResource(builder, "orders")) == expected,
+            "the awaiting state never appeared.");
+        Assert.Contains(expected[^6..^1], interaction.Message);
+
+        services.GetRequiredService<IHostApplicationLifetime>().StopApplication();
+        await TasksAsync(builder);
+    }
+
+    [Fact]
+    public async Task AnAnswerArrivingBeforeNotStarted_LeavesNoAwaitingStateBehind()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var interaction = new FakeInteractionService { IsAvailable = true, Answer = inputs => Checked(inputs, true, false) };
+        var builder = PromptBuilder(dir, interaction);
+        var source = new LocalProjectSource(new FakeGitClient());
+        source.Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
+        source.Resolve(builder, "billing", Definition("billing"), DevConfig()).WithHttpEndpoint();
+
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+        await interaction.Prompted.WaitAsync(TimeSpan.FromSeconds(30));
+        await Task.Delay(200);
+
+        await PublishNotStartedAsync(services, RealResource(builder, "orders"));
+        await PublishNotStartedAsync(services, RealResource(builder, "billing"));
+        await TasksAsync(builder);
+
+        Assert.Equal("Skipped", CurrentState(services, RealResource(builder, "billing")));
+    }
+
+    [Fact]
+    public async Task DecidedServices_StartWithoutWaitingForThePromptAboutTheRest()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        PlantSelection(dir, """{ "version": 1, "services": { "orders": { "start": true } } }""");
+        var interaction = new FakeInteractionService { IsAvailable = true };
+        var time = new ManualTimeProvider();
+        var builder = PromptBuilder(dir, interaction, time);
+        var git = new FakeGitClient();
+        var source = new LocalProjectSource(git);
+        source.Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
+        source.Resolve(builder, "billing", Definition("billing"), DevConfig()).WithHttpEndpoint();
+
+        await RunGateAsync(builder, "orders", "billing");
+        await interaction.Prompted.WaitAsync(TimeSpan.FromSeconds(30));
+
+        AssertWaitsFor(
+            () => File.Exists(Path.Combine(ExpectedRepoRoot(dir, "orders"), "Service.csproj")),
+            "the saved-true service waited for the open dialog.");
+        Assert.Equal(["https://example.com/orders.git"], git.Cloned.ToArray());
+        Assert.Equal(["s0"], interaction.Inputs.Select(input => input.Name));
+        Assert.Contains("billing", interaction.Inputs[0].Label);
+
+        time.Advance(DeferredCheckout.PromptTimeout + TimeSpan.FromSeconds(1));
+        await TasksAsync(builder);
+
+        Assert.Equal(2, git.Cloned.Count);
+    }
+
+    [Fact]
+    public async Task SavedSelection_AllDecided_NeverPrompts_AndSkipsWithoutCloning()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        PlantSelection(
+            dir, """{ "version": 1, "services": { "orders": { "start": true }, "billing": { "start": false } } }""");
+        var interaction = new FakeInteractionService { IsAvailable = true };
+        var builder = PromptBuilder(dir, interaction);
+        var git = new FakeGitClient();
+        var source = new LocalProjectSource(git);
+        source.Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
+        source.Resolve(builder, "billing", Definition("billing"), DevConfig()).WithHttpEndpoint();
+
+        var services = await RunGateAsync(builder, "orders", "billing");
+        await TasksAsync(builder);
+
+        Assert.Equal(0, interaction.PromptCount);
+        Assert.Equal(["https://example.com/orders.git"], git.Cloned.ToArray());
+        Assert.Equal("Skipped", CurrentState(services, RealResource(builder, "billing")));
+    }
+
+    [Fact]
+    public async Task SavedSelection_AllFalse_SkipsEverythingEvenWhenThePromptCannotBeShown()
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        PlantSelection(
+            dir, """{ "version": 1, "services": { "orders": { "start": false }, "billing": { "start": false } } }""");
+        var interaction = new FakeInteractionService { IsAvailable = false };
+        var builder = PromptBuilder(dir, interaction);
+        var git = new FakeGitClient();
+        var source = new LocalProjectSource(git);
+        source.Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
+        source.Resolve(builder, "billing", Definition("billing"), DevConfig()).WithHttpEndpoint();
+
+        var services = await RunGateAsync(builder, "orders", "billing");
+        await TasksAsync(builder);
+
+        Assert.Empty(git.Cloned);
+        Assert.Equal("Skipped", CurrentState(services, RealResource(builder, "orders")));
+        Assert.Equal("Skipped", CurrentState(services, RealResource(builder, "billing")));
+    }
+
+    [Fact]
+    public async Task SavedSelection_MatchesServiceNamesIgnoringCase()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        PlantSelection(dir, """{ "version": 1, "services": { "ORDERS": { "start": false } } }""");
+        var interaction = new FakeInteractionService { IsAvailable = true };
+        var builder = PromptBuilder(dir, interaction);
+        new LocalProjectSource(new FakeGitClient()).Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
+
+        var services = await RunGateAsync(builder, "orders");
+        await TasksAsync(builder);
+
+        Assert.Equal(0, interaction.PromptCount);
+        Assert.Equal("Skipped", CurrentState(services, RealResource(builder, "orders")));
+    }
+
+    [Fact]
+    public async Task SharedCheckout_OnePickedMember_ClonesOnce_AndTheUnpickedMemberIsSkipped()
+    {
+        var dir = TempDirectories.CreateSubdirectory().FullName;
+        var interaction = new FakeInteractionService { IsAvailable = true, Answer = inputs => Checked(inputs, true, false) };
+        var builder = PromptBuilder(dir, interaction);
+        var git = new FakeGitClient();
+        var source = new LocalProjectSource(git);
+        var definitions = SharedGroupDefinitions("orders", "billing");
+        source.Resolve(builder, "orders", definitions[0], DevConfig()).WithHttpEndpoint();
+        source.Resolve(builder, "billing", definitions[1], DevConfig()).WithHttpEndpoint();
+
+        var services = await RunGateAsync(builder, "orders", "billing");
+        await TasksAsync(builder);
+
+        Assert.Equal(["https://example.com/monorepo.git"], git.Cloned.ToArray());
+        Assert.Equal("Skipped", CurrentState(services, RealResource(builder, "billing")));
+        Assert.Null(LocalCheckoutPrefetch.For(builder, git).UnusedCheckoutsMessage);
+    }
+
+    [Fact]
+    public async Task EagerTiming_NeverPrompts_AndNeverReadsTheSelectionFile()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        PlantSelection(dir, "garbage");
+        var interaction = new FakeInteractionService { IsAvailable = true };
+        var builder = PromptBuilder(dir, interaction);
+        builder.SetCheckoutTiming(CheckoutTiming.Eager);
+        new LocalProjectSource(new FakeGitClient()).Resolve(builder, "orders", Definition("orders"), DevConfig());
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.Equal(0, interaction.PromptCount);
+        Assert.Empty(warnings);
+    }
+
+    [Fact]
+    public async Task PublishMode_NeverPrompts_AndNeverReadsTheSelectionFile()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        PlantSelection(dir, "garbage");
+        var interaction = new FakeInteractionService { IsAvailable = true };
+        var builder = TestHelpers.CreatePublishingBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+        builder.Services.AddSingleton<IInteractionService>(interaction);
+        new LocalProjectSource(new FakeGitClient()).Resolve(builder, "orders", Definition("orders"), DevConfig());
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.Equal(0, interaction.PromptCount);
+        Assert.Empty(warnings);
+    }
+
+    [Fact]
+    public async Task PathOverride_NeverPrompts_AndNeverReadsTheSelectionFile()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        PlantSelection(dir, "garbage");
+        var checkout = TempDirectories.CreateSubdirectory().FullName;
+        File.WriteAllText(Path.Combine(checkout, "Service.csproj"), "<Project />");
+        var interaction = new FakeInteractionService { IsAvailable = true };
+        var builder = PromptBuilder(dir, interaction);
+        new LocalProjectSource(new FakeGitClient()).Resolve(builder, "orders", Definition("orders"), DevConfig(path: checkout));
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.Equal(0, interaction.PromptCount);
+        Assert.DoesNotContain(warnings, warning => warning.Contains("selection", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task WarmCheckout_NeverPrompts_AndNeverReadsTheSelectionFile()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        PlantSelection(dir, "garbage");
+        PlantExistingCheckout(dir, "orders");
+        var interaction = new FakeInteractionService { IsAvailable = true };
+        var builder = PromptBuilder(dir, interaction);
+        new LocalProjectSource(new FakeGitClient()).Resolve(builder, "orders", Definition("orders"), DevConfig());
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.Equal(0, interaction.PromptCount);
+        Assert.Empty(warnings);
+    }
+
     private const string OrdersUrl = "https://example.com/orders.git";
 
     private static IResource RealResource(IDistributedApplicationBuilder builder, string name) =>

@@ -9,6 +9,7 @@ using Aspire.Hosting.ServiceSources.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
 
@@ -535,7 +536,7 @@ internal sealed class DeferredCheckout
         // resource instead, in StartDeferredAsync, which needs nothing from the rest of the graph.
         builder.Eventing.Subscribe<BeforeStartEvent>((@event, cancellationToken) =>
         {
-            StartAll(@event.Services, CheckoutNameLock.For(builder), cancellationToken);
+            Gate(@event, CheckoutNameLock.For(builder), cancellationToken);
             return Task.CompletedTask;
         });
     }
@@ -677,7 +678,7 @@ internal sealed class DeferredCheckout
     }
 
     /// <summary>
-    /// The per-service checkout-then-start tasks <see cref="StartAll"/> launched. Exposed for tests
+    /// The per-service checkout-then-start tasks <see cref="Gate"/> launched. Exposed for tests
     /// — in a real run nothing awaits these, which is the whole point of them.
     /// </summary>
     public IReadOnlyList<Task> StartTasks
@@ -693,8 +694,266 @@ internal sealed class DeferredCheckout
 
     private readonly List<Task> _startTasks = [];
 
-    private void StartAll(IServiceProvider services, CheckoutNameLock checkoutNameLock, CancellationToken cancellationToken) =>
-        Apply(Snapshot(), [], services, checkoutNameLock, cancellationToken);
+    /// <summary>
+    /// How long the source-pick dialog waits for an answer before every undecided service starts.
+    /// Not a setting: a configurable wait belongs with the offline configuration command.
+    /// </summary>
+    internal static readonly TimeSpan PromptTimeout = TimeSpan.FromMinutes(5);
+
+    private const string LogCategory = "Aspire.Hosting.ServiceSources";
+
+    /// <summary>
+    /// Splits the deferred services into those a saved selection already decides and those the
+    /// developer is asked about, then starts or skips each group. Never blocks and never throws: the
+    /// prompt, if any, is awaited by a background task so unrelated resources are not held back.
+    /// </summary>
+    private void Gate(BeforeStartEvent @event, CheckoutNameLock checkoutNameLock, CancellationToken cancellationToken)
+    {
+        var snapshot = Snapshot();
+        if (snapshot.Count == 0)
+        {
+            return;
+        }
+
+        var services = @event.Services;
+        var logger = services.GetService<ILoggerFactory>()?.CreateLogger(LogCategory) ?? NullLogger.Instance;
+
+        var (saved, fileState) = SourceSelectionStore.Read(snapshot[0].AppHostDirectory);
+        var selectionPath = Path.Combine(ToolDirectory.PathIn(snapshot[0].AppHostDirectory), SourceSelectionStore.FileName);
+
+        if (fileState == SelectionFileState.Invalid)
+        {
+            ServiceSourcesLog.Warning(
+                logger,
+                $"The saved source selection at '{Raw.Escaped(selectionPath)}' is malformed, too large or not a regular file, "
+                + $"so it is ignored; answering the prompt replaces it.");
+        }
+        else if (fileState == SelectionFileState.Newer)
+        {
+            ServiceSourcesLog.Warning(
+                logger,
+                $"The saved source selection at '{Raw.Escaped(selectionPath)}' was written by a newer version of this package, "
+                + $"so it is ignored and will not be changed.");
+        }
+
+        var picked = new List<Deferred>();
+        var skipped = new List<Deferred>();
+        var undecided = new List<Deferred>();
+
+        foreach (var deferred in snapshot)
+        {
+            if (!saved.TryGetValue(deferred.ServiceName, out var start))
+            {
+                undecided.Add(deferred);
+            }
+            else if (start)
+            {
+                picked.Add(deferred);
+            }
+            else
+            {
+                skipped.Add(deferred);
+            }
+        }
+
+        if (picked.Count + skipped.Count > 0)
+        {
+            ServiceSourcesLog.Information(
+                logger,
+                $"Applying the saved source selection from '{Raw.Escaped(selectionPath)}' to {picked.Count + skipped.Count} "
+                + $"service(s). Delete the file, or one service's entry in it, to be asked again.");
+        }
+
+        if (undecided.Count == 0)
+        {
+            Apply(picked, skipped, services, checkoutNameLock, cancellationToken);
+            return;
+        }
+
+        var interaction = services.GetService<IInteractionService>();
+        if (interaction is null || !interaction.IsAvailable)
+        {
+            ServiceSourcesLog.Information(
+                logger,
+                $"There is no dashboard to ask which of {undecided.Count} service(s) to clone, so all of them start.");
+
+            Apply([.. picked, .. undecided], skipped, services, checkoutNameLock, cancellationToken);
+            return;
+        }
+
+        Apply(picked, skipped, services, checkoutNameLock, cancellationToken);
+
+        var timeProvider = services.GetService<TimeProvider>() ?? TimeProvider.System;
+        var deadline = timeProvider.GetUtcNow().Add(PromptTimeout);
+        var dependents = SkippedDependents.For(@event.Model.Resources, undecided);
+
+        var task = Task.Run(
+            () => PromptAsync(
+                interaction, undecided, dependents, deadline, timeProvider, services, logger, checkoutNameLock,
+                cancellationToken),
+            CancellationToken.None);
+
+        lock (_gate)
+        {
+            _startTasks.Add(task);
+        }
+    }
+
+    /// <summary>
+    /// Shows the dialog and acts on how it ended. Never throws: it runs on a task nobody awaits.
+    /// </summary>
+    private async Task PromptAsync(
+        IInteractionService interaction,
+        IReadOnlyList<Deferred> undecided,
+        IReadOnlyDictionary<string, Raw> dependents,
+        DateTimeOffset deadline,
+        TimeProvider timeProvider,
+        IServiceProvider services,
+        ILogger logger,
+        CheckoutNameLock checkoutNameLock,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var stopping = services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping;
+
+            // The deadline and "host stopping" both cancel the wait; which one fired is told by the
+            // token that is set, since the dialog answers either with the same cancelled result.
+            using var timeout = new CancellationTokenSource(PromptTimeout, timeProvider);
+            using var wait = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token, stopping, cancellationToken);
+            using var answered = new CancellationTokenSource();
+
+            var awaiting = undecided
+                .Select(deferred => PublishAwaitingAsync(deferred, services, deadline, answered.Token, stopping))
+                .ToArray();
+
+            var content = SourcePrompt.Build(undecided, dependents, deadline, PromptTimeout);
+
+            InteractionResult<InteractionInputCollection>? result = null;
+            Exception? failure = null;
+
+            try
+            {
+                result = await interaction
+                    .PromptInputsAsync(content.Title, content.Message, content.Inputs, content.Options, wait.Token)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Treated as a cancelled dialog; the tokens below say why.
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+
+            // Stops a pending "Awaiting" publish and waits out one in flight, so it cannot land after
+            // the outcome's own state and overwrite it.
+            await answered.CancelAsync().ConfigureAwait(false);
+            await Task.WhenAll(awaiting).ConfigureAwait(false);
+
+            if (stopping.IsCancellationRequested || cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            if (failure is not null)
+            {
+                ServiceSourcesLog.Warning(
+                    logger,
+                    $"The source-selection prompt could not be shown: {Raw.Cause(failure)} All {undecided.Count} undecided "
+                    + $"service(s) start this run and nothing is saved.");
+
+                Apply(undecided, [], services, checkoutNameLock, cancellationToken);
+                return;
+            }
+
+            if (result is null || result.Canceled)
+            {
+                if (timeout.IsCancellationRequested)
+                {
+                    ServiceSourcesLog.Information(
+                        logger,
+                        $"The source-selection prompt got no answer within {(int)PromptTimeout.TotalMinutes} minute(s), so all "
+                        + $"{undecided.Count} undecided service(s) start this run and nothing is saved.");
+                }
+                else
+                {
+                    ServiceSourcesLog.Information(
+                        logger,
+                        $"The source-selection prompt was closed without an answer, so all {undecided.Count} undecided "
+                        + $"service(s) start this run and nothing is saved.");
+                }
+
+                Apply(undecided, [], services, checkoutNameLock, cancellationToken);
+                return;
+            }
+
+            var answers = SourcePrompt.Map(result, undecided);
+            var start = new List<Deferred>();
+            var skip = new List<Deferred>();
+
+            for (var i = 0; i < undecided.Count; i++)
+            {
+                if (answers[i] == SourceAnswer.Skip)
+                {
+                    skip.Add(undecided[i]);
+                    continue;
+                }
+
+                start.Add(undecided[i]);
+
+                if (answers[i] == SourceAnswer.StartUnanswered)
+                {
+                    ServiceSourcesLog.Warning(
+                        logger,
+                        $"The source-selection prompt returned no usable answer for service '{new Name(undecided[i].ServiceName)}', so it starts.");
+                }
+            }
+
+            Apply(start, skip, services, checkoutNameLock, cancellationToken);
+        }
+        catch (Exception)
+        {
+            // Nothing is left to report to: the host is going down or logging already has.
+        }
+    }
+
+    /// <summary>
+    /// Publishes the "Awaiting source selection" state once DCP has withheld the service's resources.
+    /// Ends quietly when the prompt is answered first or the host stops.
+    /// </summary>
+    private static async Task PublishAwaitingAsync(
+        Deferred deferred, IServiceProvider services, DateTimeOffset deadline,
+        CancellationToken answered, CancellationToken stopping)
+    {
+        try
+        {
+            var notifications = services.GetRequiredService<ResourceNotificationService>();
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(answered, stopping);
+
+            foreach (var withheld in deferred.AllResources)
+            {
+                await notifications.WaitForResourceAsync(
+                    withheld.Name, KnownResourceStates.NotStarted, linked.Token)
+                    .ConfigureAwait(false);
+            }
+
+            foreach (var withheld in deferred.AllResources)
+            {
+                await PublishStateAsync(notifications, withheld, SourcePrompt.AwaitingState(deadline))
+                    .ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Answered or stopping before DCP withheld the resources: there is nothing to publish.
+        }
+        catch (Exception)
+        {
+            // A state that could not be shown costs the label, not the prompt.
+        }
+    }
 
     internal IReadOnlyList<Deferred> Snapshot()
     {
@@ -741,9 +1000,7 @@ internal sealed class DeferredCheckout
             // published before that would be overwritten by it.
             foreach (var withheld in deferred.AllResources)
             {
-                await notifications.WaitForResourceAsync(
-                    withheld.Name, KnownResourceStates.NotStarted, shutdown.Token)
-                    .ConfigureAwait(false);
+                await WaitUntilWithheldAsync(notifications, withheld.Name, shutdown.Token).ConfigureAwait(false);
             }
 
             foreach (var withheld in deferred.AllResources)
@@ -843,9 +1100,7 @@ internal sealed class DeferredCheckout
             // needs, and it depends on nothing outside this service's own resources.
             foreach (var withheld in deferred.AllResources)
             {
-                await notifications.WaitForResourceAsync(
-                    withheld.Name, KnownResourceStates.NotStarted, stoppingToken)
-                    .ConfigureAwait(false);
+                await WaitUntilWithheldAsync(notifications, withheld.Name, stoppingToken).ConfigureAwait(false);
             }
 
             await PublishCheckingOutAsync(notifications, deferred.Resource).ConfigureAwait(false);
@@ -1108,6 +1363,19 @@ internal sealed class DeferredCheckout
             }
         }
     }
+
+    /// <summary>
+    /// Waits until DCP has withheld the resource: it reports <c>NotStarted</c>, or the "Awaiting
+    /// source selection" text this class replaced that state with while the dialog was open.
+    /// </summary>
+    private static Task WaitUntilWithheldAsync(
+        ResourceNotificationService notifications, string resourceName, CancellationToken cancellationToken) =>
+        notifications.WaitForResourceAsync(
+            resourceName,
+            resourceEvent => resourceEvent.Snapshot.State?.Text is { } text
+                && (string.Equals(text, KnownResourceStates.NotStarted, StringComparison.Ordinal)
+                    || text.StartsWith(SourcePrompt.AwaitingStatePrefix, StringComparison.Ordinal)),
+            cancellationToken);
 
     private static Task PublishCheckingOutAsync(ResourceNotificationService notifications, IResource resource) =>
         PublishStateAsync(notifications, resource, CheckingOutState);
