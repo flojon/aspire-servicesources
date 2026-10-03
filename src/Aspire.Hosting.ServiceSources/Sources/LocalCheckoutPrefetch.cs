@@ -231,7 +231,7 @@ internal sealed class LocalCheckoutPrefetch
             var remedyTail = _isRunMode
                 ? Raw.Literal(
                     "Deferred checkout also stops it, and is the default: a service whose first checkout is "
-                    + "deferred past startup is cloned only when it is added. Deferral does not help if this AppHost calls "
+                    + "deferred past startup is cloned only when it is added and picked. Deferral does not help if this AppHost calls "
                     + "builder.SetCheckoutTiming(CheckoutTiming.Eager) (removing that call restores it) or if the "
                     + "service's kind declines deferred checkout, in which case clearing the entry is the only remedy.")
                 : Raw.Literal(

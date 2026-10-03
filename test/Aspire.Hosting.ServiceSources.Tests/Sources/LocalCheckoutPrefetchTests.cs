@@ -974,6 +974,11 @@ public class LocalCheckoutPrefetchTests
         Assert.Contains("billing", message);
         Assert.Contains("declines deferred checkout", message);
         Assert.Contains("clearing the entry is the only remedy", message);
+
+        // The deferred service the AppHost added is requested, so it is never named here even though
+        // it is no longer cloned from AddService().
+        Assert.DoesNotContain("orders", message);
+        Assert.Contains("cloned only when it is added and picked", message);
     }
 
     [Fact]
