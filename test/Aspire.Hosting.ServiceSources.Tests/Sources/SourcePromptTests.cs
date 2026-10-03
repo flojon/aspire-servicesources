@@ -116,9 +116,10 @@ public class SourcePromptTests
 
         var content = Build([Service(name)]);
 
-        Assert.Contains(new string('n', 100), content.Inputs[0].Label);
-        Assert.DoesNotContain('\u001b', content.Inputs[0].Label);
-        Assert.DoesNotContain('\n', content.Inputs[0].Label);
+        var label = content.Inputs[0].Label!;
+        Assert.Contains(new string('n', 100), label);
+        Assert.DoesNotContain('\u001b', label);
+        Assert.DoesNotContain('\n', label);
     }
 
     [Fact]
