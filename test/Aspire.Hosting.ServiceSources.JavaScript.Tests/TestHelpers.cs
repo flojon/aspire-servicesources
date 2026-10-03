@@ -23,6 +23,8 @@ internal static class TestHelpers
         {
             ProjectDirectory = appHostDirectory,
             Args = [TestBuilderDefaults.DisableConfigReloadArg],
+            // Keeps IInteractionService unavailable, so a deferred service starts without the source-pick prompt.
+            DisableDashboard = true,
         });
 
     /// <summary>

@@ -61,7 +61,8 @@ never existed. Check the tag of the last release before adding one.
 - **A cold `"repository"` checkout is no longer cloned at `AddService()`; the dashboard asks which
   ones to clone and start** ([#271]). In run mode, once the AppHost starts, one dialog lists the
   services whose managed clone does not exist yet, all checked. Checked services are cloned and
-  started as before; unchecked ones are never cloned and show a `Skipped` state. The answer is
+  started as before; unchecked ones are not cloned (unless a service sharing the repository is
+  picked) and show a `Skipped` state. The answer is
   remembered in `.servicesources/selection.json` (git-ignored), so the next run asks only about
   services it has no entry for; delete the file, or one service's entry, to be asked again. Nothing
   here fails to build, but a service that used to start unattended now waits for the answer.

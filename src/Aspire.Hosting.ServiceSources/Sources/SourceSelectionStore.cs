@@ -102,7 +102,7 @@ internal static class SourceSelectionStore
 
             return true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
         {
             if (scratch is not null)
             {
@@ -113,7 +113,7 @@ internal static class SourceSelectionStore
         }
     }
 
-    private static string PathIn(string appHostDirectory) =>
+    internal static string PathIn(string appHostDirectory) =>
         Path.Combine(ToolDirectory.PathIn(appHostDirectory), FileName);
 
     private static byte[]? ReadBounded(string path)

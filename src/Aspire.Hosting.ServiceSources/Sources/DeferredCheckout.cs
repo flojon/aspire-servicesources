@@ -37,7 +37,7 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// The clone is started at <c>BeforeStartEvent</c> —
 /// <see cref="LocalCheckoutPrefetch.StartCheckout"/>, on a background thread — not from this
 /// registration: composition only records the service as requested, so a cold checkout nobody
-/// picks is never cloned, and the prefetch is free to leave it out of its speculative set (#76).
+/// picks is never cloned, and the prefetch is free to leave it out of its speculative set.
 /// Who waits for the clone is a background task after the host is up, instead of composition.
 /// </para>
 /// <para>
@@ -719,14 +719,14 @@ internal sealed class DeferredCheckout
         var logger = services.GetService<ILoggerFactory>()?.CreateLogger(LogCategory) ?? NullLogger.Instance;
 
         var (saved, fileState) = SourceSelectionStore.Read(snapshot[0].AppHostDirectory);
-        var selectionPath = Path.Combine(ToolDirectory.PathIn(snapshot[0].AppHostDirectory), SourceSelectionStore.FileName);
+        var selectionPath = SourceSelectionStore.PathIn(snapshot[0].AppHostDirectory);
 
         if (fileState == SelectionFileState.Invalid)
         {
             ServiceSourcesLog.Warning(
                 logger,
                 $"The saved source selection at '{Raw.Escaped(selectionPath)}' is malformed, too large or not a regular file, "
-                + $"so it is ignored; answering the prompt replaces it.");
+                + $"so it is ignored; delete or fix it, or answer the prompt to replace it.");
         }
         else if (fileState == SelectionFileState.Newer)
         {
@@ -815,9 +815,11 @@ internal sealed class DeferredCheckout
         string selectionPath,
         CancellationToken cancellationToken)
     {
+        var applied = false;
+
         try
         {
-            var stopping = services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping;
+            var stopping = services.GetService<IHostApplicationLifetime>()?.ApplicationStopping ?? CancellationToken.None;
 
             // The deadline and "host stopping" both cancel the wait; which one fired is told by the
             // token that is set, since the dialog answers either with the same cancelled result.
@@ -829,13 +831,13 @@ internal sealed class DeferredCheckout
                 .Select(deferred => PublishAwaitingAsync(deferred, services, deadline, answered.Token, stopping))
                 .ToArray();
 
-            var content = SourcePrompt.Build(undecided, dependents, deadline, PromptTimeout);
-
             InteractionResult<InteractionInputCollection>? result = null;
             Exception? failure = null;
 
             try
             {
+                var content = SourcePrompt.Build(undecided, dependents, deadline, PromptTimeout);
+
                 result = await interaction
                     .PromptInputsAsync(content.Title, content.Message, content.Inputs, content.Options, wait.Token)
                     .ConfigureAwait(false);
@@ -866,6 +868,7 @@ internal sealed class DeferredCheckout
                     $"The source-selection prompt could not be shown: {Raw.Cause(failure)} All {undecided.Count} undecided "
                     + $"service(s) start this run and nothing is saved.");
 
+                applied = true;
                 Apply(undecided, [], services, checkoutNameLock, cancellationToken);
                 return;
             }
@@ -887,6 +890,7 @@ internal sealed class DeferredCheckout
                         + $"service(s) start this run and nothing is saved.");
                 }
 
+                applied = true;
                 Apply(undecided, [], services, checkoutNameLock, cancellationToken);
                 return;
             }
@@ -919,6 +923,7 @@ internal sealed class DeferredCheckout
                 }
             }
 
+            applied = true;
             Apply(start, skip, services, checkoutNameLock, cancellationToken);
 
             // After Apply, so a slow disk never delays a start. A newer file was already reported
@@ -931,9 +936,26 @@ internal sealed class DeferredCheckout
                     $"The choice could not be saved to '{Raw.Escaped(selectionPath)}', so it applies to this run only and you will be asked again.");
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // Nothing is left to report to: the host is going down or logging already has.
+            // Anything thrown before Apply must not strand the services awaiting a decision.
+            if (!applied && !cancellationToken.IsCancellationRequested)
+            {
+                try
+                {
+                    // Before the log line: a throwing logger must not leave the services waiting.
+                    Apply(undecided, [], services, checkoutNameLock, cancellationToken);
+
+                    ServiceSourcesLog.Warning(
+                        logger,
+                        $"The source-selection prompt failed: {Raw.Cause(ex)} All {undecided.Count} undecided "
+                        + $"service(s) start this run and nothing is saved.");
+                }
+                catch (Exception)
+                {
+                    // Nothing is left to report to: the host is going down or logging already has.
+                }
+            }
         }
     }
 
@@ -1027,7 +1049,7 @@ internal sealed class DeferredCheckout
             }
 
             ServiceSourcesLog.Information(
-                logger, $"Skipped: it was not selected, so it is not cloned or started this run.");
+                logger, $"Skipped: it was not selected, so it is not cloned or started this run. Delete its entry in .servicesources/selection.json to be asked again.");
         }
         catch (OperationCanceledException)
         {
@@ -1046,7 +1068,7 @@ internal sealed class DeferredCheckout
     /// <remarks>
     /// Order matters: a start task that reached <c>GetRepoRoot</c> before its checkout was
     /// registered would clone synchronously on its own thread, outside the shared checkout entry
-    /// that grouped services (#291) rely on to clone once.
+    /// that grouped services rely on to clone once.
     /// </remarks>
     private void StartPicked(
         IReadOnlyList<Deferred> picked, IServiceProvider services, CheckoutNameLock checkoutNameLock,

@@ -1939,6 +1939,7 @@ public class DeferredCheckoutTests
         AssertWaitsFor(
             () => CurrentState(services, RealResource(builder, "orders")) == expected,
             "the awaiting state never appeared.");
+        await interaction.Prompted.WaitAsync(TimeSpan.FromSeconds(30));
         Assert.Contains(expected[^6..^1], interaction.Message);
 
         services.GetRequiredService<IHostApplicationLifetime>().StopApplication();
