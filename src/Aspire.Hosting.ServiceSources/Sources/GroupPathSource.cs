@@ -7,7 +7,7 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 
 /// <summary>
 /// A <c>repositories.&lt;name&gt;</c> entry with <c>"source": "path"</c>: wherever a grouped member
-/// would use the group's checkout, it uses this directory instead (#416).
+/// would use the group's checkout, it uses this directory instead.
 /// </summary>
 /// <remarks>
 /// Decides which members the entry reaches. Every reader of "does this member run from a managed

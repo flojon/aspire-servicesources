@@ -422,7 +422,7 @@ public class GroupPathSourceTests
         Assert.False(GroupPathSource.Redirects("monorepo", Grouped("monorepo"), config, PathGroup()));
     }
 
-    // === #397: members sharing the group directory share one build gate ===
+    // === members sharing the group directory share one build gate ===
 
     private sealed class RecordingRunner : IBuildRunner
     {
