@@ -401,10 +401,10 @@ jobs:
       # The CLI pins its own version into the host project it generates - measured, 13.5.2
       # emits Aspire.Hosting 13.5.2 and 13.5.3 emits 13.5.3 - so a CLI below $(AspireVersion)
       # in Directory.Build.props fails `aspire restore` with NU1605 (package downgrade) before
-      # codegen runs. That makes 13.5.2 the oldest CLI clearing today's floor; this pins the
+      # codegen runs. That makes 13.6.0 the oldest CLI clearing today's floor; this pins the
       # newest release instead, so the surface is checked against the generator a contributor
       # gets. `verify repo invariants` fails if this pin and that floor part company.
-      ASPIRE_CLI_VERSION: '13.5.3'
+      ASPIRE_CLI_VERSION: '13.6.0'
 
     steps:
       - uses: actions/checkout@v7
