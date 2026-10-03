@@ -192,3 +192,30 @@ null. `dotnet test -f net10.0` per round; full matrix once before landing.
 ## Open Questions
 
 None. (The unattended-prompt question is resolved by the bounded `PromptTimeout`; it also resolves the earlier concern that `Eager` was the only escape hatch for unattended runs.)
+
+## Spike results
+
+Measured on Aspire 13.5.2 with a scratch AppHost (explicit-start executable, a `BeforeStartEvent`
+handler that starts a background task, a real dashboard in a browser).
+
+- **(a) `IsAvailable`:** `true` inside the `BeforeStartEvent` handler and in the background task,
+  with the dashboard enabled and before any browser connected. `false` with
+  `DistributedApplicationOptions.DisableDashboard = true`, where `PromptInputsAsync` throws
+  `InvalidOperationException` (the "never throws" task has to catch it). Under
+  `DistributedApplicationTestingBuilder`: not measured, since the repo's tests do not reference
+  Aspire.Hosting.Testing and the unit tests inject a fake `IInteractionService`; the production rule
+  (`IsAvailable == false` starts every undecided service) covers it either way.
+- **(b) Queue and render:** the prompt, started before the dashboard was open, was rendered when the
+  browser connected. The gate passes.
+- **(c) Dismiss:** closing the dialog with the X returns `Canceled == true`, `Data == null`.
+- **(d) Custom state:** the state text `Skipped` published after awaiting `NotStarted` stays on the
+  resource and removes the Start command from the row's actions. The dashboard still offers Stop
+  and Restart on it; those act on a resource that was never started and are not guarded by this
+  design. Whether later DCP updates overwrite it was not observable: DCP publishes nothing further
+  for a withheld resource, so `Skipped` stays as published and Task 3 needs no re-publish.
+- **(e) Deadline cancel:** cancelling the linked token at the deadline removes the dialog and
+  returns `Canceled == true`. The fallback in the spec is not needed.
+- **Markdown options:** `InputsDialogInteractionOptions.EnableMessageMarkdown` and
+  `InteractionInput.EnableDescriptionMarkdown`, both `bool`, set to `false`. The input's label is
+  plain text.
+
