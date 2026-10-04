@@ -56,7 +56,23 @@ never existed. Check the tag of the last release before adding one.
   not contain (or a project with no `launchSettings.json` at all), and a `dotnet:` block, or
   the code-catalog calls, on a service whose kind is not `dotnet`.
 
+- **A `repositories.<name>` entry can use the `"path"` source to point a whole `repositoryRef` group
+  at an existing checkout** ([#416]). `{ "source": "path", "path": { "path": "../eShop" } }` (or
+  `ServiceSources__Repositories__<name>__Source` and `__Path__Path`) redirects every grouped member
+  whose source is `repository` or `path`, so a monorepo AppHost keeps its grouping without repeating
+  a `path.path` per service. A member's own `path.path` still wins, members on `url`, `container` or
+  `kubernetes` are left alone, a member that sets its own `repository.ref` is not redirected (its
+  "ref is shared" error stands), a group `ref` is ignored while the group is on `path`, and the
+  builds of the members are serialized like any other `"path"` services in one repository. A
+  `repositories` entry naming no declared repository is now reported at startup, as is a
+  `repositories.<name>.path.path` set without `source`, which would otherwise be silently unread.
+
 ### Changed
+
+- **A `repositories.<name>` entry that sets `prepare` is now a startup error** ([#416]). It was 
+  bound but never read, so the step silently never ran. Set `path.prepare` on each member service
+  instead. A `repositories.<name>` entry with `source: path` and no `path.path` is likewise refused
+  when the configuration is read, rather than only when a member resolves.
 
 - **A cold `"repository"` checkout is no longer cloned at `AddService()`; the dashboard asks which
   ones to clone and start** ([#271]). In run mode, once the AppHost starts, one dialog lists the
@@ -1988,6 +2004,7 @@ Targets `net10.0`.
 [#375]: https://github.com/flojon/aspire-servicesources/issues/375
 [#385]: https://github.com/flojon/aspire-servicesources/issues/385
 [#415]: https://github.com/flojon/aspire-servicesources/issues/415
+[#416]: https://github.com/flojon/aspire-servicesources/issues/416
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

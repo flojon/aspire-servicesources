@@ -232,9 +232,8 @@ public class LocalProjectSourceTests
         };
 
     /// <summary>
-    /// The grouped-service checks in <see cref="LocalGitCheckout.PrepareRepoRoot"/> (criterion 4, and
-    /// the reserved <c>path</c> field) run before anything touches the filesystem or git, so a
-    /// managed checkout — never created here — is enough to reach them.
+    /// The grouped-service checks in <see cref="LocalGitCheckout.PrepareRepoRoot"/> (criterion 4) run before
+    /// anything touches the filesystem or git, so a managed checkout — never created here — is enough to reach them.
     /// </summary>
     private static string UnusedManagedAppHostDirectory => TempDirectories.CreateSubdirectory().FullName;
 
@@ -268,23 +267,6 @@ public class LocalProjectSourceTests
 
         Assert.Equal(repoRoot, resolved.RepoRoot);
         Assert.True(resolved.NeedsReconciliation);
-    }
-
-    [Fact]
-    public void PrepareRepoRoot_RepositoryPathOnGroupedService_ThrowsReservedError()
-    {
-        var repositoryConfig = new RepositoryDeveloperConfig { Path = "/some/where" };
-
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            LocalGitCheckout.PrepareRepoRoot(
-                ServiceName, GroupedDefinition(), DevConfig(), repositoryConfig,
-                UnusedManagedAppHostDirectory, new FakeGitClient()));
-
-        Assert.Contains("Repository 'monorepo'", ex.Message);
-        Assert.Contains("ServiceSources:Repositories:monorepo:path", ex.Message);
-        Assert.Contains("reserved", ex.Message);
-        Assert.Contains("'path' source", ex.Message);
-        Assert.DoesNotContain("repository.path", ex.Message);
     }
 
     /// <summary>
