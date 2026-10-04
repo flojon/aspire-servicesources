@@ -75,6 +75,18 @@ never existed. Check the tag of the last release before adding one.
   each one. To get the previous behaviour back, call `builder.SetCheckoutTiming(CheckoutTiming.Eager)`
   before the first `AddService()`.
 
+- **A changed `prepare` command is confirmed in the dashboard before it re-runs** ([#298]). When
+  the catalog's `prepare` command for a warm managed checkout is not the one that last succeeded
+  there, the dashboard now shows the command and asks before running it; a first use, a moved
+  commit and `always` mode still run unprompted. Only an explicit "Run"
+  runs the step: closing the dialog, no answer within 5 minutes or a dialog that cannot be shown
+  declines, and the service shows `Skipped` (restart the AppHost to be asked again). That
+  deliberately differs from the cold-checkout source pick, which starts on timeout, because this is
+  a consent gate on changed catalog code. With no dashboard the step runs unprompted and the log says
+  why. Cost: the one run that needs asking is deferred even though the checkout is warm, so it loses
+  composition-time launch-profile fidelity; `SetCheckoutTiming(CheckoutTiming.Eager)`, `aspire
+  publish` and kinds that cannot defer are unchanged.
+
 ### Fixed
 
 - **Two `"path"` services in one repository no longer race on a shared project's `bin/` and
@@ -1992,3 +2004,4 @@ Targets `net10.0`.
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
 [#397]: https://github.com/flojon/aspire-servicesources/issues/397
+[#298]: https://github.com/flojon/aspire-servicesources/issues/298

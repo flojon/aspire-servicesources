@@ -86,6 +86,7 @@ internal sealed class DeferredCheckout
     /// which phase and the log says how far into it.
     /// </remarks>
     private const string PreparingState = "Preparing";
+    private const string AwaitingConfirmationState = "Awaiting prepare confirmation";
 
     /// <summary>
     /// What the State column says for a service the developer chose not to clone. A custom text
@@ -145,6 +146,12 @@ internal sealed class DeferredCheckout
         IPrepareCommandRunner PrepareRunner,
         Action<IResource, string, ILogger> OnCheckoutLanded)
     {
+        /// <summary>
+        /// Whether the checkout was already on disk when this was registered, which is how a service
+        /// deferred only for its prepare confirmation differs from one deferred for a clone.
+        /// </summary>
+        public bool CheckoutWasPresent { get; init; }
+
         /// <summary>Everything withheld for this service, in the order it must be started.</summary>
         public IEnumerable<IResource> AllResources => HeldBack.Append(Resource);
     }
@@ -188,7 +195,8 @@ internal sealed class DeferredCheckout
     /// <summary>
     /// Whether <paramref name="serviceName"/> should be registered deferred rather than resolved
     /// eagerly. Scoped tightly on purpose: a warm checkout keeps today's path exactly, with full
-    /// launch-profile fidelity, so the blast radius is first-run-only.
+    /// launch-profile fidelity, except for the one run whose prepare command has changed and needs
+    /// asking about, so the blast radius is first-run-only plus that run.
     /// </summary>
     /// <remarks>
     /// Two decisions layered, in this order: the policy this type owns — the timing setting, run mode — and
@@ -198,9 +206,15 @@ internal sealed class DeferredCheckout
     /// that predicate before leaving the real decision to this method, so the filesystem half has
     /// to be the same rule in both places rather than two that happen to agree.
     /// </remarks>
+    /// <param name="prepareStep">
+    /// The service's prepare step, when the caller can resolve one. A warm managed checkout is also
+    /// deferred when this step would run only because its command changed, since the consent prompt
+    /// can only be shown once the dashboard is up.
+    /// </param>
+    /// <param name="gitClient">Reads the commit the prepare marker is compared against; required with <paramref name="prepareStep"/>.</param>
     public bool ShouldDefer(
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
-        ServiceDeveloperConfig config)
+        ServiceDeveloperConfig config, PrepareStep? prepareStep = null, IGitClient? gitClient = null)
     {
         lock (_gate)
         {
@@ -239,8 +253,24 @@ internal sealed class DeferredCheckout
         // managed root — a complete checkout, or debris from an interrupted clone — goes down the
         // eager path, which is the one that knows how to tell those apart and what to do about
         // each.
-        return LocalGitCheckout.IsColdManagedCheckout(
-            builder.AppHostDirectory, definition.Repository.CheckoutName, config);
+        if (LocalGitCheckout.IsColdManagedCheckout(
+                builder.AppHostDirectory, definition.Repository.CheckoutName, config))
+        {
+            return true;
+        }
+
+        // The one warm case that is deferred: the marker lives in the checkout, so only a checkout
+        // that exists can show its command changed, and the prompt needs the dashboard.
+        return prepareStep is not null
+            && gitClient is not null
+            && LocalGitCheckout.IsManagedCheckout(config)
+            && CheckoutPreparation.WouldRunBecauseCommandChanged(
+                serviceName,
+                prepareStep,
+                LocalGitCheckout.ManagedRepoRoot(builder.AppHostDirectory, definition.Repository.CheckoutName),
+                builder.AppHostDirectory,
+                managedCheckout: true,
+                gitClient);
     }
 
     /// <summary>
@@ -509,7 +539,10 @@ internal sealed class DeferredCheckout
         {
             _deferred.Add(new Deferred(
                 serviceName, resource, heldBack, repoRoot, definition, config, repositoryConfig,
-                builder.AppHostDirectory, prefetch, gitClient, prepareStep, prepareRunner, onCheckoutLanded));
+                builder.AppHostDirectory, prefetch, gitClient, prepareStep, prepareRunner, onCheckoutLanded)
+            {
+                CheckoutWasPresent = Directory.Exists(repoRoot),
+            });
         }
 
         EnsureSubscribed(builder);
@@ -695,8 +728,8 @@ internal sealed class DeferredCheckout
     private readonly List<Task> _startTasks = [];
 
     /// <summary>
-    /// How long the source-pick dialog waits for an answer before every undecided service starts.
-    /// Not a setting: a configurable wait belongs with the offline configuration command.
+    /// How long a dialog waits for an answer: the source pick starts every undecided service when it
+    /// lapses, the changed-command confirmation declines. Not a setting: a configurable wait belongs with the offline configuration command.
     /// </summary>
     internal static readonly TimeSpan PromptTimeout = TimeSpan.FromMinutes(5);
 
@@ -736,13 +769,20 @@ internal sealed class DeferredCheckout
                 + $"so it is ignored and will not be changed.");
         }
 
+        var present = new List<Deferred>();
         var picked = new List<Deferred>();
         var skipped = new List<Deferred>();
         var undecided = new List<Deferred>();
 
         foreach (var deferred in snapshot)
         {
-            if (!saved.TryGetValue(deferred.ServiceName, out var start))
+            // The pick decides what to clone; a checkout already on disk has nothing to clone, so
+            // this service was only deferred to ask about its prepare command and always starts.
+            if (deferred.CheckoutWasPresent)
+            {
+                present.Add(deferred);
+            }
+            else if (!saved.TryGetValue(deferred.ServiceName, out var start))
             {
                 undecided.Add(deferred);
             }
@@ -763,6 +803,8 @@ internal sealed class DeferredCheckout
                 $"Applying the saved source selection from '{Raw.Escaped(selectionPath)}' to {picked.Count + skipped.Count} "
                 + $"service(s). Delete the file, or one service's entry in it, to be asked again.");
         }
+
+        picked.AddRange(present);
 
         if (undecided.Count == 0)
         {
@@ -1219,13 +1261,27 @@ internal sealed class DeferredCheckout
                 // failure becomes this one service's state instead of an exception out of composition.
                 if (deferred.PrepareStep is { } step)
                 {
+                    var label = deferred.Definition.Repository.CheckoutName == deferred.ServiceName
+                        ? PreparePlan.ServiceLabel(deferred.ServiceName)
+                        : PreparePlan.RepositoryLabel(deferred.Definition.Repository.CheckoutName);
+
+                    if (!await ConfirmChangedCommandAsync(
+                            deferred, step, label, repoRoot, services, notifications, logger, stoppingToken)
+                        .ConfigureAwait(false))
+                    {
+                        foreach (var withheld in deferred.AllResources)
+                        {
+                            await PublishStateAsync(notifications, withheld, SkippedState).ConfigureAwait(false);
+                        }
+
+                        return;
+                    }
+
                     await PublishStateAsync(notifications, deferred.Resource, PreparingState).ConfigureAwait(false);
 
                     CheckoutPreparation.Run(
                         deferred.ServiceName,
-                        deferred.Definition.Repository.CheckoutName == deferred.ServiceName
-                            ? PreparePlan.ServiceLabel(deferred.ServiceName)
-                            : PreparePlan.RepositoryLabel(deferred.Definition.Repository.CheckoutName),
+                        label,
                         deferred.Definition.Repository.CheckoutName,
                         step,
                         repoRoot,
@@ -1298,6 +1354,95 @@ internal sealed class DeferredCheckout
         {
             await ReportFailureAsync(deferred, services, ex, started).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Asks before running a prepare command that differs from the one that last succeeded here.
+    /// Anything but an explicit yes declines, so an unattended dashboard cannot approve a command
+    /// nobody read.
+    /// </summary>
+    /// <remarks>
+    /// Only a changed command asks: a moved commit, a first use or a re-pointed path run the command
+    /// the developer already ran or accepted by cloning. Without a dashboard nothing can ask, so the
+    /// step runs unprompted as it always has.
+    /// </remarks>
+    private static async Task<bool> ConfirmChangedCommandAsync(
+        Deferred deferred, PrepareStep step, Raw label, string repoRoot, IServiceProvider services,
+        ResourceNotificationService notifications, ILogger logger, CancellationToken stoppingToken)
+    {
+        if (!CheckoutPreparation.WouldRunBecauseCommandChanged(
+                deferred.ServiceName,
+                step,
+                repoRoot,
+                deferred.AppHostDirectory,
+                managedCheckout: true,
+                deferred.GitClient))
+        {
+            return true;
+        }
+
+        var interaction = services.GetService<IInteractionService>();
+        if (interaction is null || !interaction.IsAvailable)
+        {
+            ServiceSourcesLog.Information(
+                logger,
+                $"No dashboard to ask, so the changed prepare command runs unprompted.");
+
+            return true;
+        }
+
+        var command = CheckoutPreparation.DescribeCommand(step);
+
+        try
+        {
+            await PublishStateAsync(notifications, deferred.Resource, AwaitingConfirmationState).ConfigureAwait(false);
+
+            var timeProvider = services.GetService<TimeProvider>() ?? TimeProvider.System;
+            using var timeout = new CancellationTokenSource(PromptTimeout, timeProvider);
+            using var wait = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token, stoppingToken);
+
+            var result = await interaction
+                .PromptConfirmationAsync(
+                    "Run changed prepare command?",
+                    Raw.Compose(
+                        $"The catalog's prepare command for {label} is not the one that last succeeded here. "
+                        + $"Running it executes code from the catalog on this machine, in {Raw.Escaped(repoRoot)}: "
+                        + $"{command} "
+                        + $"Skip, or no answer within {(int)PromptTimeout.TotalMinutes} minutes, leaves the service not started "
+                        + $"until the AppHost restarts, and anything waiting on it keeps waiting.").ToString(),
+                    new MessageBoxInteractionOptions
+                    {
+                        PrimaryButtonText = "Run",
+                        SecondaryButtonText = "Skip",
+                        ShowSecondaryButton = true,
+                        EnableMessageMarkdown = false,
+                        Intent = MessageIntent.Warning,
+                    },
+                    wait.Token)
+                .ConfigureAwait(false);
+
+            if (!result.Canceled && result.Data)
+            {
+                return true;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Timed out or host stopping; the latter is rethrown below.
+        }
+        catch (Exception ex)
+        {
+            ServiceSourcesLog.Warning(
+                logger, $"The prepare confirmation could not be shown: {Raw.Cause(ex)}");
+        }
+
+        stoppingToken.ThrowIfCancellationRequested();
+
+        ServiceSourcesLog.Information(
+            logger,
+            $"Skipped: its prepare command has changed since it last succeeded and was not approved, so nothing was run or started. Restart the AppHost to be asked again.");
+
+        return false;
     }
 
     /// <summary>

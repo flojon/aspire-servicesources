@@ -270,6 +270,33 @@ Every decision to run says why — no completion recorded, the command changed, 
 commit couldn't be determined, or the mode is `always`. A decision to *skip* says nothing: that's
 the ordinary case, and the marker already records it.
 
+**A changed command asks first.** Of those reasons, one runs a different command line from the one
+you ran or accepted before: the catalog's command is no longer the one that last succeeded in this
+checkout. (The gate compares the command line, not the scripts it invokes; those arrive with a moved
+commit, which is what pinning is for.)
+In run mode the dashboard shows the command and asks before running it. Every other reason runs
+unprompted, including `always` mode, so a catalog that switches to `always` with a new command is
+not asked about either. This is a consent gate on changed catalog code, so it **fails closed**: only an explicit
+"Run" runs the step. Closing the dialog, no answer within 5 minutes, or a dialog that cannot be
+shown declines, and the service shows `Skipped` instead of starting; anything that waits on it keeps
+waiting. Fix the catalog if the change
+was unintended, then restart the AppHost to be asked again. (The cold-checkout source pick is the
+opposite: an unanswered dialog starts everything.) With no dashboard to ask through (`aspire run`
+without one, CI) nothing can ask, so the step runs as before and the log says why.
+
+The cost is that this run is deferred even though the checkout is warm, so the service is registered
+before the checkout is read and loses composition-time launch-profile fidelity, as a first-run clone
+does.
+
+A service deferred only for this reason is left out of the source pick: it has nothing to clone, so
+the pick neither asks about it nor skips it, and a saved `selection.json` entry for it is ignored.
+
+`aspire publish`, `SetCheckoutTiming(CheckoutTiming.Eager)` and a kind that cannot defer (a custom
+kind, some `javascript` app types) keep today's unprompted behaviour. Services that share one
+checkout share one completion marker, so one such member runs the changed command and records it,
+and the deferred members then find nothing changed and do not ask. Services sharing a checkout are
+also asked one at a time, and after a decline the next one asks again.
+
 **Your own directory declares its own step.** A service pointed at your own directory — the
 [`"path"` source](path.md) with `path.path`, or the deprecated `repository.path` — **never inherits the catalog's
 `prepare` block**. Nothing establishes that your directory is even a checkout
@@ -308,7 +335,8 @@ to happen.
 `path` checkout is *your* working tree — the axis it protects is blast radius, not letting a
 catalog command mutate a directory this tool doesn't own. A managed checkout under
 `.servicesources/checkouts/` is exactly the opposite: fully tool-owned, so nothing here asks before
-its `prepare` step (or the `dotnet`/`javascript`/`java` build that follows it) runs the first time —
+its `prepare` step (or the `dotnet`/`javascript`/`java` build that follows it) runs the first time,
+and the only thing that asks before it re-runs is [a changed command](#prepare-a-checkout-that-has-to-bootstrap-itself) —
 yet that script is foreign code in the sense that matters for [`SECURITY.md`](https://github.com/flojon/aspire-servicesources/blob/main/SECURITY.md): written
 and reviewed by the service repository, not by you. Meeting this notice on a `path` service is not a
 sign that a managed one asks first too.
@@ -511,10 +539,11 @@ service and the dashboard won't link it. Add the line and the next run is whole;
 on a warm checkout too, where it updates the endpoint the profile already created rather than
 adding one.
 
-Scoped deliberately narrowly, so the blast radius is first-run-only:
+Scoped deliberately narrowly, so the blast radius is first-run-only (plus that one changed-command run):
 
-- Only a checkout that doesn't exist yet. A warm checkout — every run after the first — takes
-  the existing eager path unchanged, with full launch-profile fidelity.
+- Only a checkout that doesn't exist yet, plus the one run where a warm checkout's `prepare` command
+  changed and needs [asking about](#prepare-a-checkout-that-has-to-bootstrap-itself). Every other warm run — every run after the first —
+  takes the existing eager path unchanged, with full launch-profile fidelity.
 - Only managed checkouts. Your own directory (the [`"path"` source](path.md)) has nothing to clone.
 - Only the `"repository"` source, and within it only the kinds that own a managed checkout: `dotnet`,
   `java` and `javascript`. The other sources — `url`, `kubernetes`, `container` and
