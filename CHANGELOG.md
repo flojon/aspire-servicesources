@@ -67,6 +67,25 @@ never existed. Check the tag of the last release before adding one.
   `repositories` entry naming no declared repository is now reported at startup, as is a
   `repositories.<name>.path.path` set without `source`, which would otherwise be silently unread.
 
+### Changed
+
+- **A cold `"repository"` checkout is no longer cloned at `AddService()`; the dashboard asks which
+  ones to clone and start** ([#271]). In run mode, once the AppHost starts, one dialog lists the
+  services whose managed clone does not exist yet, all checked. Checked services are cloned and
+  started as before; unchecked ones are not cloned (unless a service sharing the repository is
+  picked) and show a `Skipped` state. The answer is
+  remembered in `.servicesources/selection.json` (git-ignored), so the next run asks only about
+  services it has no entry for; delete the file, or one service's entry, to be asked again. Nothing
+  here fails to build, but a service that used to start unattended now waits for the answer.
+
+  An unanswered dialog does not hang the AppHost: closing it, or no answer within 5 minutes, starts
+  every service that was waiting on it, as before, and saves nothing. A run with no dashboard to ask
+  through never prompts and starts every service that has no saved choice. A warm checkout, a `path`
+  override, `aspire publish` and `SetCheckoutTiming(CheckoutTiming.Eager)` are unchanged and never
+  prompt. A service that `WaitFor`s a skipped service keeps waiting; the dialog lists what waits on
+  each one. To get the previous behaviour back, call `builder.SetCheckoutTiming(CheckoutTiming.Eager)`
+  before the first `AddService()`.
+
 ### Fixed
 
 - **Two `"path"` services in one repository no longer race on a shared project's `bin/` and
@@ -1965,6 +1984,7 @@ Targets `net10.0`.
 [#241]: https://github.com/flojon/aspire-servicesources/issues/241
 [#247]: https://github.com/flojon/aspire-servicesources/issues/247
 [#258]: https://github.com/flojon/aspire-servicesources/issues/258
+[#271]: https://github.com/flojon/aspire-servicesources/issues/271
 [#279]: https://github.com/flojon/aspire-servicesources/issues/279
 [#291]: https://github.com/flojon/aspire-servicesources/issues/291
 [#313]: https://github.com/flojon/aspire-servicesources/issues/313

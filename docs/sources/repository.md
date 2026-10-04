@@ -101,9 +101,10 @@ the `"path"` spelling to paste instead.)
   Nothing else is speculated over. A checkout that already exists — every service on every run
   after the first — is resolved only for the services you add, and so is a `path` override. And a
   service whose first checkout is *deferred* — the default since 0.8.0 — is cloned only when you
-  add it: a deferred registration blocks on nothing, so its clone no longer has to be started ahead
+  add it and, in run mode, pick it in the [dashboard prompt](#choosing-which-services-to-clone): a
+  deferred registration blocks on nothing, so its clone no longer has to be started ahead
   of demand to run alongside the others. Under the default `CheckoutTiming.Deferred`, a config
-  listing ten `"repository"` services in front of an AppHost that adds two downloads two (#76).
+  listing ten `"repository"` services in front of an AppHost that adds two downloads at most two (#76).
 
   Either way, only the services you actually add are reconciled to their configured `ref`: a
   checkout that already exists is never touched on behalf of an entry you don't `AddService()`, so
@@ -437,17 +438,19 @@ var orders = builder.AddService("orders").WithHttpEndpoint();
 ```
 
 The dashboard comes up immediately, checkout progress and failure become resource state you can
-see, and one bad clone costs one service instead of the run. The clones stay parallel: a deferred
-service's clone starts at its own `AddService()` call and blocks nobody, so several of them still
-run at once — the wall-clock is the slowest clone, not the sum. The one thing that still clones in
-turn is a third-party `kind` handler that declares deferral support and then declines it for a
+see, and one bad clone costs one service instead of the run. The clones stay parallel: the
+checkouts of the services you pick are all started together once the AppHost starts and block
+nobody, so several of them still run at once — the wall-clock is the slowest clone, not the sum.
+They no longer start while `AddService()` is still composing the AppHost: which ones to clone is
+asked first (see [Choosing which services to clone](#choosing-which-services-to-clone)). The one
+thing that still clones in turn is a third-party `kind` handler that declares deferral support and then declines it for a
 particular service; the built-in `dotnet`, `java` and `javascript` kinds never do. If you maintain
 a kind of your own, [Implementing a kind](../guides/non-dotnet-services.md#implementing-a-kind) covers the two members that opt into
 this and what declining late costs.
 
 It also stops the AppHost downloading repositories it doesn't use. Without deferral the clones have
 to start before the AppHost has said which services it wants, so every `"repository"` entry with no
-checkout yet is cloned; a deferred one is cloned only when it is added (#76).
+checkout yet is cloned; a deferred one is cloned only when it is added and picked (#76).
 
 The wait is one you can watch. git's own progress becomes the service's state — the phase it is
 in, that phase's percentage, and the bytes transferred while a pack is arriving
@@ -539,13 +542,68 @@ resolves eagerly, exactly as it does under `CheckoutTiming.Eager`. Every other `
 `package.json` script by definition and is deferred unconditionally.
 
 Deferred by default since 0.8.0: a service that used to be running by the time `Build()` returned
-is now started after it instead, which is visible to anything in your AppHost that assumed
-otherwise. An AppHost that needs every service running by the time `Build()` returns opts out
+is now started after it instead, and only after you have been asked which cold services to clone,
+which is visible to anything in your AppHost that assumed otherwise. An AppHost that needs every service running by the time `Build()` returns opts out
 permanently with `builder.SetCheckoutTiming(CheckoutTiming.Eager)`, called before your first
 `AddService()`, which is where the decision is made — the same ordering `AddServiceCatalog()`
 requires. A call made after any service has already resolved throws
 `ServiceSourcesConfigurationException` naming the service, rather than silently having no effect
 on it. `UseDeferredCheckout()` is obsolete — it is redundant now that deferred is the default (it still overrides an earlier `SetCheckoutTiming(CheckoutTiming.Eager)`).
+
+### Choosing which services to clone
+
+A deferred service is not cloned when `AddService()` runs. Once the AppHost starts, the dashboard asks
+once, in a dialog titled "Choose services to check out", which of the cold `"repository"` services to
+clone and start. There is one checkbox per service, all checked, and each shows the repository
+(scheme, host and path only, never credentials), the `ref`, and which resources `WaitFor` it.
+
+- **Checked** services are cloned, prepared and started exactly as before.
+- **Unchecked** services are never cloned. Their state reads **Skipped** and the dashboard offers no
+  Start command for them. The choice means "do not clone this for me", and a later run can change it
+  (see below).
+
+The choice is saved in `.servicesources/selection.json`, which is git-ignored with the rest of that
+directory. The next run asks only about services that have no entry in it: a new service, an entry you
+removed, or a first run. To be asked again, delete the file, or one service's entry in it. Services
+that already have an entry start or skip straight away, and do not wait for a dialog about the others.
+
+```json
+{
+  "version": 1,
+  "services": {
+    "orders": { "start": false }
+  }
+}
+```
+
+Service names match case-insensitively. Set `start` to `true` to clone a service you skipped earlier, or
+remove its entry to be asked again; entries for services that are no longer declared are harmless.
+
+The dialog never holds the AppHost up. If you close it, or nobody answers within 5 minutes (the dialog
+and each waiting service's state show the time it runs out), every service that was waiting on the
+question is cloned and started, as it was before the prompt existed, and nothing is saved. The 5
+minutes is not a setting. An AppHost with no dashboard to ask through, such as a run with the dashboard
+disabled, never prompts: services with no saved choice start, and saved choices are still honoured.
+
+What the prompt leaves alone:
+
+- A checkout that already exists. Once a service has been cloned, by an earlier pick, by hand, or
+  because a service sharing its repository was picked, it is warm on every later run and starts
+  regardless of any entry in `selection.json`, which is no longer consulted for it. To keep a service off for good, give it the
+  [`"disabled"`](disabled.md) source instead.
+- `path` services, `aspire publish`, and an AppHost that calls `SetCheckoutTiming(CheckoutTiming.Eager)`.
+  None of them prompt or read `selection.json`.
+- Services that share a repository. The pick is per service but the clone is per repository: one picked
+  member clones it once, and its unpicked siblings are Skipped for this run only.
+
+A service that `WaitFor`s a skipped service keeps waiting, because the wait is your own declared
+ordering and dropping it would start the consumer against a dependency that is not coming. The dialog
+lists what waits on each service ("Waited on by: ...") so the consequence is visible before you answer.
+`SetCheckoutTiming(CheckoutTiming.Eager)` restores cloning every cold service at startup with no prompt.
+
+A malformed, oversized or non-regular `selection.json` is ignored with a warning naming the path, and is
+replaced the next time you answer the dialog (or delete or fix it yourself). A file written by a newer version of the package is
+ignored and never overwritten.
 
 ## Managed checkouts don't inherit your AppHost repository's build settings
 
