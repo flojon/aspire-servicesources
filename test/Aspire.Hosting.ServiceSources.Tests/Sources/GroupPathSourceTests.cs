@@ -620,7 +620,7 @@ public class GroupPathSourceTests
     }
 
     private static (DirectoryRecordingRunner Runner, string GroupDir) ResolveRedirectedWithCatalogPrepare(
-        PrepareDeveloperConfig? memberPrepare)
+        PrepareDeveloperConfig? memberPrepare, PrepareDeveloperConfig? repositoryPrepare = null)
     {
         var groupDir = ProjectTree("Orders");
         var builder = TestHelpers.CreateBuilder(TempDirectories.CreateSubdirectory().FullName);
@@ -640,6 +640,7 @@ public class GroupPathSourceTests
         var group = PathGroup();
         group.Path!.Path = groupDir;
         var config = new ServiceDeveloperConfig { Source = "repository", Path = new() { Prepare = memberPrepare } };
+        config.Repository.Prepare = repositoryPrepare;
 
         new PathSource(prepareRunner: runner).Resolve(builder, "orders", definition, config, group);
 
@@ -662,5 +663,18 @@ public class GroupPathSourceTests
         var run = Assert.Single(runner.Runs);
         Assert.Equal(["make", "dev"], run.Command);
         Assert.Equal(Path.GetFullPath(groupDir), Path.GetFullPath(run.Directory));
+    }
+
+    [Fact]
+    public void RedirectedMember_WithItsOwnRepositoryPrepare_IsRefusedPointingAtPathPrepare()
+    {
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            ResolveRedirectedWithCatalogPrepare(
+                memberPrepare: null,
+                repositoryPrepare: new PrepareDeveloperConfig { Command = ["make", "dev"] }));
+
+        Assert.Contains("Service 'orders'", ex.Message);
+        Assert.Contains("'repository.prepare'", ex.Message);
+        Assert.Contains("'path.prepare'", ex.Message);
     }
 }

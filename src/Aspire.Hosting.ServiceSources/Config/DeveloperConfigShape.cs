@@ -1,3 +1,4 @@
+using Aspire.Hosting.ServiceSources.Sources;
 using System.Reflection;
 using Aspire.Hosting.ServiceSources.Messages;
 
@@ -44,7 +45,7 @@ internal sealed class DeveloperConfigShape
     /// one service's own <c>repository</c> block. Its <c>source</c> takes <c>path</c> or <c>repository</c> only.
     /// </summary>
     public static DeveloperConfigShape Repository { get; } =
-        Of<RepositoryDeveloperConfig>("Repository", "repository", ["repository", "path"]);
+        Of<RepositoryDeveloperConfig>("Repository", "repository", [GroupPathSource.RepositorySourceName, GroupPathSource.PathSourceName]);
 
     private DeveloperConfigShape(
         Type entry,

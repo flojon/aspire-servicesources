@@ -18,7 +18,7 @@ internal static class GroupPathSource
 {
     internal const string PathSourceName = "path";
 
-    private const string RepositorySourceName = "repository";
+    internal const string RepositorySourceName = "repository";
 
     /// <summary>
     /// Whether <paramref name="serviceName"/> is resolved by <see cref="PathSource"/> against the

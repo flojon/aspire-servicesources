@@ -1,3 +1,4 @@
+using Aspire.Hosting.ServiceSources.Sources;
 using Aspire.Hosting.ServiceSources.Messages;
 using Microsoft.Extensions.Configuration;
 
@@ -428,12 +429,19 @@ internal sealed class DeveloperConfiguration
             var key = $"{RepositoriesKey}:{name}";
 
             if (!string.IsNullOrEmpty(config.Source)
-                && !string.Equals(config.Source, "path", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(config.Source, "repository", StringComparison.OrdinalIgnoreCase))
+                && !string.Equals(config.Source, GroupPathSource.PathSourceName, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(config.Source, GroupPathSource.RepositorySourceName, StringComparison.OrdinalIgnoreCase))
             {
                 problems.Add(Raw.Compose($"Repository '{new Name(name)}': source '{new Name(config.Source)}' is not valid for a repository. "
                     + $"Expected 'path' (use the directory in 'path:path') or 'repository' (the managed checkout). "
                     + $"Correct '{Raw.Escaped(key)}:source' in '{Raw.Literal(FileName)}', or wherever a higher layer set it."));
+            }
+
+            if (string.Equals(config.Source, GroupPathSource.PathSourceName, StringComparison.OrdinalIgnoreCase)
+                && config.Path?.Path is null)
+            {
+                problems.Add(Raw.Compose($"Repository '{new Name(name)}': source is 'path' but no directory is set. "
+                    + $"Set '{Raw.Escaped(key)}:path:path' to a directory you already have on disk, or set '{Raw.Escaped(key)}:source' to 'repository' to use the managed checkout."));
             }
 
             if (config.Prepare?.IsDeclared == true || config.Path?.Prepare?.IsDeclared == true)

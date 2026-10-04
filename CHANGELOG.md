@@ -69,6 +69,11 @@ never existed. Check the tag of the last release before adding one.
 
 ### Changed
 
+- **A `repositories.<name>` entry that sets `prepare` is now a startup error** ([#416]). It was 
+  bound but never read, so the step silently never ran. Set `path.prepare` on each member service
+  instead. A `repositories.<name>` entry with `source: path` and no `path.path` is likewise refused
+  when the configuration is read, rather than only when a member resolves.
+
 - **A cold `"repository"` checkout is no longer cloned at `AddService()`; the dashboard asks which
   ones to clone and start** ([#271]). In run mode, once the AppHost starts, one dialog lists the
   services whose managed clone does not exist yet, all checked. Checked services are cloned and

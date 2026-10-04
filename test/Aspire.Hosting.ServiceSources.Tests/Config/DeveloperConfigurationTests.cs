@@ -1427,7 +1427,7 @@ public class DeveloperConfigurationTests
     {
         var dir = CreateAppHostDirectory(
             MonorepoCatalog,
-            """{ "repositories": { "monorpeo": { "source": "path" }, "monorepo": { "source": "path" } } }""");
+            """{ "repositories": { "monorpeo": { "source": "path" }, "monorepo": { "source": "path", "path": { "path": "/src/mono" } } } }""");
 
         var loaded = ServiceSourcesConfigCache.LoadedFor(CreateBuilder(dir)).DeveloperConfig;
 
@@ -1526,6 +1526,20 @@ public class DeveloperConfigurationTests
 
         Assert.Contains("Repository 'monorepo'", ex.Message);
         Assert.Contains("'path.prepare' on each member service", ex.Message);
+    }
+
+    [Fact]
+    public void ReadFrom_RepositoryPathSourceWithNoDirectory_IsRefusedWhenRead()
+    {
+        var dir = CreateAppHostDirectory(
+            MonorepoCatalog, """{ "repositories": { "monorepo": { "source": "path" } } }""");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.LoadedFor(CreateBuilder(dir)));
+
+        Assert.Contains("Repository 'monorepo'", ex.Message);
+        Assert.Contains("no directory is set", ex.Message);
+        Assert.Contains("ServiceSources:Repositories:monorepo:path:path", ex.Message);
     }
 
     [Fact]

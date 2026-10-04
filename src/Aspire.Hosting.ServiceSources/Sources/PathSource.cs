@@ -62,6 +62,12 @@ internal sealed class PathSource(
 
         var groupRedirect = GroupPathSource.Redirects(serviceName, definition, config, repositoryConfig);
 
+        if (groupRedirect && config.Repository.Prepare?.IsDeclared == true)
+        {
+            throw ServiceSourcesConfigurationException.For(
+                $"Service '{new Name(serviceName)}': 'repository.prepare' is not read while the repository '{new Name(definition.Repository.CheckoutName)}' is on the 'path' source. Move it to 'path.prepare'.");
+        }
+
         var repoRoot = groupRedirect
             ? GroupPathSource.ResolveDirectory(definition, repositoryConfig!, builder.AppHostDirectory)
             : ResolveRepoRoot(builder, serviceName, definition, config, builder.AppHostDirectory);
