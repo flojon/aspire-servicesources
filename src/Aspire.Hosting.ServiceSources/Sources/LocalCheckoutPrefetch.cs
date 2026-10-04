@@ -766,6 +766,11 @@ internal sealed class LocalCheckoutPrefetch
     /// speculative form of the question.
     /// </para>
     /// <para>
+    /// The warm-and-changed-command deferral <c>ShouldDefer</c> also makes is not asked about here,
+    /// on purpose: every candidate has already passed the cold-checkout filter, and a warm checkout
+    /// has nothing to clone, so it can never be in the set either way.
+    /// </para>
+    /// <para>
     /// The mirror is exact but for one case, which cannot be mirrored: a kind whose
     /// <see cref="ILocalResourceKind.ResolveDeferred"/> returns <see langword="null"/> after its
     /// <see cref="ILocalResourceKind.SupportsDeferredCheckout"/> answered <see langword="true"/>.

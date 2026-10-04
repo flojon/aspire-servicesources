@@ -123,7 +123,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
 
         var deferred = DeferredCheckout.For(builder);
 
-        if (deferred.ShouldDefer(builder, serviceName, definition, config))
+        if (deferred.ShouldDefer(builder, serviceName, definition, config, prepare.Step, gitClient))
         {
             // Nothing is on disk for this service yet, so registering the resource against the path
             // its checkout will have — and starting it once the clone lands — costs the AppHost

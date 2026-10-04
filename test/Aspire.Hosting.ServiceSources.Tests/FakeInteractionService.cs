@@ -70,9 +70,49 @@ internal sealed class FakeInteractionService : IInteractionService
         throw new NotSupportedException();
 #pragma warning restore ASPIREINTERACTION001
 
-    public Task<InteractionResult<bool>> PromptConfirmationAsync(
+    /// <summary>Answers a confirmation. Null leaves it open until its token is cancelled.</summary>
+    public Func<InteractionResult<bool>>? Confirm { get; set; }
+
+    public int ConfirmCount { get; private set; }
+
+    private readonly TaskCompletionSource<bool> _confirmed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Completes when a confirmation has been shown.</summary>
+    public Task WaitForConfirmAsync() => _confirmed.Task;
+
+    public string? ConfirmMessage { get; private set; }
+
+    public MessageBoxInteractionOptions? ConfirmOptions { get; private set; }
+
+    public async Task<InteractionResult<bool>> PromptConfirmationAsync(
         string title, string message, MessageBoxInteractionOptions? options = null,
-        CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        CancellationToken cancellationToken = default)
+    {
+        ConfirmCount++;
+        _confirmed.TrySetResult(true);
+        ConfirmMessage = message;
+        ConfirmOptions = options;
+
+        if (Throw is not null)
+        {
+            throw Throw;
+        }
+
+        if (Confirm is not null)
+        {
+            return Confirm();
+        }
+
+        try
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+
+        return InteractionResult.Cancel<bool>();
+    }
 
     public Task<InteractionResult<bool>> PromptMessageBoxAsync(
         string title, string message, MessageBoxInteractionOptions? options = null,
