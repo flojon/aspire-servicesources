@@ -48,11 +48,11 @@ what each injected — so it shows as *Exited*, not Running, and those two log l
 see both the native service-discovery path and the
 [portable endpoint accessor](../guides/configuration.md#naming-a-services-endpoint) working.
 
-!!! note "Requires Aspire CLI 13.5.3+"
+!!! note "Requires Aspire CLI 13.6.0+"
     The CLI pins its own Aspire version for the host project it generates, so a CLI older than this
-    package's Aspire floor (13.5.2) fails `aspire restore` with
-    `NU1605: Detected package downgrade: Aspire.Hosting from 13.5.2 to 13.5.1` before codegen even
-    runs. 13.5.3 is the first release that pins high enough. On it, the generated SDK type-checks
+    package's Aspire floor (13.6.0) fails `aspire restore` with
+    `NU1605: Detected package downgrade: Aspire.Hosting from 13.6.0 to 13.5.4` before codegen even
+    runs. 13.6.0 is the first release that pins high enough. On it, the generated SDK type-checks
     clean under strict `tsc` and the sample runs end-to-end — `withReference()` on the
     `addService()` result injects the resolved service's discovery variables into the consuming
     resource, e.g. `services__inventory__http__0=http://inventory.dev.internal:80` pointing at the

@@ -18,15 +18,15 @@ namespace Aspire.Hosting.ServiceSources.Tests;
 [Trait("IO", "true")]
 public class GuestLanguageFloorTargetsTests
 {
-    // The floor is 13.5.2 for Aspire.Hosting.JavaScript. Each case is the resolved version an
+    // The floor is 13.6.0 for Aspire.Hosting.JavaScript. Each case is the resolved version an
     // AppHost would have, and whether the gate must reject it.
     [Theory]
-    [InlineData("13.4.6", true)]                 // an older release
-    [InlineData("13.5.1", true)]                 // the patch below the floor
-    [InlineData("13.5.2-preview.1.25", true)]    // a prerelease OF the floor precedes it (SemVer)
-    [InlineData("13.5.2", false)]                // exactly the floor
-    [InlineData("13.5.3", false)]                // newer
-    [InlineData("13.5.3-preview.1.25", false)]   // a prerelease above the floor is still above it
+    [InlineData("13.5.2", true)]                 // an older release
+    [InlineData("13.5.4", true)]                 // the newest release below the floor
+    [InlineData("13.6.0-preview.1.25", true)]    // a prerelease OF the floor precedes it (SemVer)
+    [InlineData("13.6.0", false)]                // exactly the floor
+    [InlineData("13.6.1", false)]                // newer
+    [InlineData("13.6.1-preview.1.25", false)]   // a prerelease above the floor is still above it
     [InlineData("14.0.0", false)]                // a new major is not this gate's business
     public async Task TheFloorGate_RejectsExactlyTheVersionsBelowTheFloor(
         string resolved, bool shouldReject)
