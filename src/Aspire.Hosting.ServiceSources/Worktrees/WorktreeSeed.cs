@@ -73,6 +73,16 @@ internal static class WorktreeSeed
             }
         }
 
+        // Only entries seeding just copied: one the developer writes afterwards is deliberate.
+        if (copied.Contains(DeveloperConfiguration.FileName))
+        {
+            foreach (var notice in PathOverrideCheck.Inspect(
+                Path.Combine(worktree, DeveloperConfiguration.FileName), home))
+            {
+                warnings.AddNotice(notice);
+            }
+        }
+
         if (copied.Count > 0)
         {
             warnings.AddNotice(Raw.Compose(
