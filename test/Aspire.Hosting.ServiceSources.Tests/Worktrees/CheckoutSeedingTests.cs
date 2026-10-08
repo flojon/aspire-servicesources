@@ -77,6 +77,7 @@ public class CheckoutSeedingTests
         Prepare(NewAppHost(), home, git);
 
         Assert.Empty(git.ReferenceClones);
+        Assert.Single(git.PlainClones);
     }
 
     [Fact]
@@ -171,6 +172,8 @@ public class CheckoutSeedingTests
         var homeCheckout = LocalGitCheckout.ManagedRepoRoot(home, "orders");
         git.Clone(url, homeCheckout);
         TestRepository.At(homeCheckout).Git("branch", "home-only");
+
+        Assert.Equal(homeCheckout, LocalGitCheckout.ReferenceCheckout(home, Definition(url), git));
 
         var prepared = Prepare(NewAppHost(), home, git, url: url);
 

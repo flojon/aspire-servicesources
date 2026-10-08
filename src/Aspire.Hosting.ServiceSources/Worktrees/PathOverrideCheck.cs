@@ -6,7 +6,7 @@ namespace Aspire.Hosting.ServiceSources.Worktrees;
 
 internal enum PathOverrideVerdict
 {
-    /// <summary>The same directory outside the main worktree, from both: the developer's own external checkout.</summary>
+    /// <summary>The same directory from both, and not main's files: the developer's own external checkout.</summary>
     Unchanged,
 
     /// <summary>Each worktree's own directory at the same position: the monorepo case.</summary>
@@ -46,7 +46,7 @@ internal static class PathOverrideCheck
             return PathOverrideVerdict.IntoMainWorktree;
         }
 
-        if (same && !WorktreeHome.IsInside(fromHome, mainTop))
+        if (same)
         {
             return PathOverrideVerdict.Unchanged;
         }
@@ -65,7 +65,8 @@ internal static class PathOverrideCheck
     }
 
     /// <summary>One notice per override that does not resolve the way it did in the main worktree.</summary>
-    public static IReadOnlyList<Raw> Inspect(string configFile, HomeWorktree home)
+    /// <param name="configured">Reads the builder's configuration, which holds every layer above the file.</param>
+    public static IReadOnlyList<Raw> Inspect(string configFile, HomeWorktree home, Func<string, string?> configured)
     {
         try
         {
@@ -76,9 +77,14 @@ internal static class PathOverrideCheck
 
                 foreach (var service in file.GetSection(DeveloperConfigFileSource.FileServicesKey).GetChildren())
                 {
+                    var effective = configured($"{DeveloperConfiguration.ServicesKey}:{service.Key}:source");
+                    effective = string.IsNullOrWhiteSpace(effective) ? service["source"] : effective;
+
                     foreach (var (section, key, source) in Overrides)
                     {
-                        if (!string.Equals(service["source"], source, StringComparison.OrdinalIgnoreCase)
+                        // With no source named here, the catalog's default decides, so every block may be read.
+                        if ((!string.IsNullOrWhiteSpace(effective)
+                                && !string.Equals(effective, source, StringComparison.OrdinalIgnoreCase))
                             || service[$"{section}:path"] is not { } value
                             || string.IsNullOrWhiteSpace(value))
                         {

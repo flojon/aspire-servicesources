@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Worktrees;
+using Microsoft.Extensions.Configuration;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Worktrees;
 
@@ -24,9 +25,15 @@ public class PathOverrideCheckTests
         fake.WriteHome(DeveloperConfiguration.FileName, json.ToJsonString());
     }
 
-    private static IReadOnlyList<string> PathNotices(FakeWorktree fake)
+    private static IReadOnlyList<string> PathNotices(FakeWorktree fake, string? configuredSource = null)
     {
         var builder = fake.CreateWorktreeBuilder();
+        if (configuredSource is not null)
+        {
+            builder.Configuration.AddInMemoryCollection(
+                new Dictionary<string, string?> { [$"{DeveloperConfiguration.ServicesKey}:orders:source"] = configuredSource });
+        }
+
         DeveloperConfigFileSource.EnsureRegistered(builder);
         return [.. ServiceSourcesWarnings.For(builder).Messages.Where(message => message.Contains("Service 'orders'", StringComparison.Ordinal))];
     }
@@ -97,6 +104,44 @@ public class PathOverrideCheckTests
         Assert.Empty(PathNotices(fake));
     }
 
+    private static void WriteHomePathBlockWithoutSource(FakeWorktree fake) =>
+        fake.WriteHome(
+            DeveloperConfiguration.FileName,
+            new JsonObject
+            {
+                ["services"] = new JsonObject
+                {
+                    ["orders"] = new JsonObject { ["path"] = new JsonObject { ["path"] = Path.Combine(fake.MainTop, "x") } },
+                },
+            }.ToJsonString());
+
+    [Fact]
+    public void BlockWithNoSourceAnywhere_Warns()
+    {
+        var fake = FakeWorktree.Siblings();
+        WriteHomePathBlockWithoutSource(fake);
+
+        Assert.Single(PathNotices(fake));
+    }
+
+    [Fact]
+    public void BlockWithNoSourceInTheFile_WarnsWhenAHigherLayerSelectsItsSource()
+    {
+        var fake = FakeWorktree.Siblings();
+        WriteHomePathBlockWithoutSource(fake);
+
+        Assert.Single(PathNotices(fake, configuredSource: "path"));
+    }
+
+    [Fact]
+    public void BlockWithNoSourceInTheFile_IsSilentWhenAHigherLayerSelectsAnotherSource()
+    {
+        var fake = FakeWorktree.Siblings();
+        WriteHomePathBlockWithoutSource(fake);
+
+        Assert.Empty(PathNotices(fake, configuredSource: "container"));
+    }
+
     [Fact]
     public void InRepositoryRelativePathFromANestedWorktree_IsSilent()
     {
@@ -146,6 +191,8 @@ public class PathOverrideCheckTests
     [InlineData("/x/other", "/other", nameof(PathOverrideVerdict.ResolvesDifferently))]
     // Row 4, nested: another worktree beside this one under main's .worktrees is not main's own files.
     [InlineData("/x/other-repo", "/x/main/.worktrees/other-repo", nameof(PathOverrideVerdict.ResolvesDifferently), "/x/main/.worktrees/x")]
+    // Row 1, nested: an override into the nested worktree itself is its own directory from both.
+    [InlineData("/x/main/.worktrees/x/orders", "/x/main/.worktrees/x/orders", nameof(PathOverrideVerdict.Unchanged), "/x/main/.worktrees/x")]
     public void Classify_FollowsTheTable(string fromHome, string fromWorktree, string expected, string worktreeTop = "/x/wt")
     {
         static string Full(string path) => Path.GetFullPath(path);

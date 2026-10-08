@@ -143,7 +143,7 @@ internal sealed partial class GitCliClient(
     {
         string[] progressOption = progress is null ? [] : ["--progress"];
 
-        // -if-able: a reference that vanished since it was chosen clones normally instead of failing.
+        // --reference-if-able: a reference that vanished since it was chosen clones normally instead of failing.
         // --dissociate: copies borrowed objects in, so a gc or deletion of the reference cannot corrupt this clone.
         RunRemoteCommand(
             ["clone", .. progressOption, $"--reference-if-able={referenceRepository}", "--dissociate",

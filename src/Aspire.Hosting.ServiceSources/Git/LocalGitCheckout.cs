@@ -859,6 +859,7 @@ internal static class LocalGitCheckout
                 ? candidate
                 : null;
     }
+
     // GitUrl.Identity reduces both URL forms (https://host/path) and scp-like SSH syntax
     // ([user@]host:path, e.g. git@github.com:example/orders) down to "host/path", so an HTTPS
     // remote and an SSH remote for the same repository compare equal.

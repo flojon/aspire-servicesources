@@ -77,7 +77,7 @@ internal static class WorktreeSeed
         if (copied.Contains(DeveloperConfiguration.FileName))
         {
             foreach (var notice in PathOverrideCheck.Inspect(
-                Path.Combine(worktree, DeveloperConfiguration.FileName), home))
+                Path.Combine(worktree, DeveloperConfiguration.FileName), home, key => builder.Configuration[key]))
             {
                 warnings.AddNotice(notice);
             }
@@ -106,39 +106,28 @@ internal static class WorktreeSeed
             return false;
         }
 
-        using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read);
-
-        FileStream output;
+        var scratch = $"{destination}.{Guid.NewGuid():N}.tmp";
         try
         {
-            output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            using (var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read))
+            using (var output = new FileStream(scratch, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                input.CopyTo(output);
+            }
+
+            // Moved whole, so a concurrent AppHost never reads a half-written file.
+            File.Move(scratch, destination, overwrite: false);
+            return true;
         }
         catch (IOException) when (File.Exists(destination))
         {
             // A concurrent AppHost in the same worktree copied it first.
             return false;
         }
-
-        var complete = false;
-        try
-        {
-            using (output)
-            {
-                input.CopyTo(output);
-            }
-
-            complete = true;
-        }
         finally
         {
-            // A half-written copy would block every later seed, since existing files are never overwritten.
-            if (!complete)
-            {
-                TryDelete(destination);
-            }
+            TryDelete(scratch);
         }
-
-        return true;
     }
 
     private static void WriteMarker(string marker, string home, IReadOnlyList<string> copied)
@@ -169,6 +158,7 @@ internal static class WorktreeSeed
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            // Best effort: a stray scratch file is harmless.
         }
     }
 }
