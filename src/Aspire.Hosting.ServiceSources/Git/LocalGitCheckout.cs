@@ -302,6 +302,11 @@ internal static class LocalGitCheckout
     /// is reserved (see the check below) and <see cref="RepositoryDeveloperConfig.Prepare"/> is a
     /// caller's concern, not this method's.
     /// </param>
+    /// <param name="homeAppHostDirectory">
+    /// Finds the main worktree's copy of this AppHost directory when this one is a linked worktree,
+    /// whose checkout of the same repository a cold clone may borrow objects from. Called only for a
+    /// cold clone, because finding it can spawn git.
+    /// </param>
     /// <exception cref="ServiceSourcesConfigurationException">
     /// <paramref name="config"/> sets <c>repository.path</c> alongside <c>repository.ref</c>; a
     /// grouped service sets <c>repository.ref</c> at all (criterion 4 — its repository's ref is
@@ -315,7 +320,8 @@ internal static class LocalGitCheckout
         RepositoryDeveloperConfig? repositoryConfig,
         string appHostDirectory,
         IGitClient gitClient,
-        IGitProgressSink? progress = null)
+        IGitProgressSink? progress = null,
+        Func<string?>? homeAppHostDirectory = null)
     {
         // Both checked ahead of everything else below — the managed-checkout branch, the ref this
         // checkout will sit on — because both are about a shape of configuration that must never be
@@ -378,11 +384,13 @@ internal static class LocalGitCheckout
                 $"{label}: there is no checkout at '{Raw.Escaped(repoRoot)}' and no repository url to clone one from. A checkout can only be created where the catalog names a repository to clone from.");
         }
 
+        var referenceCheckout = ReferenceCheckout(homeAppHostDirectory?.Invoke(), definition, gitClient);
+
         // A clone that loses the race to a concurrent AppHost leaves us using *their*
         // checkout, not one we just made, so it gets the same treatment as a checkout found
         // there on a later run: theirs may be a clone of another repository, and may hold
         // work in flight that a checkout would discard.
-        if (CloneIntoPlace(label, definition, checkoutsRoot, repoRoot, gitClient, progress))
+        if (CloneIntoPlace(label, definition, checkoutsRoot, repoRoot, referenceCheckout, gitClient, progress))
         {
             return new PreparedCheckout(repoRoot, NeedsReconciliation: true);
         }
@@ -505,6 +513,7 @@ internal static class LocalGitCheckout
         ServiceDefinition definition,
         string checkoutsRoot,
         string repoRoot,
+        string? referenceCheckout,
         IGitClient gitClient,
         IGitProgressSink? progress)
     {
@@ -527,16 +536,35 @@ internal static class LocalGitCheckout
                 $"{label}: the checkout at '{Raw.Escaped(repoRoot)}' has a '.git' file rather than a '.git' directory, so it is a linked worktree or a clone made with --separate-git-dir rather than a checkout this tool cloned. Move it aside and re-run to have it cloned fresh, or point the service at it with the 'path' source — 'source': 'path' and 'path': {{ 'path': '...' }} in servicesources.local.json.");
         }
 
-        // Unique per attempt: two builders resolving the same checkout concurrently (xUnit does
-        // exactly that) must not clone into a shared scratch directory.
-        var scratch = Path.Combine(
-            checkoutsRoot, $".incoming-{definition.Repository.CheckoutName}-{Guid.NewGuid():N}");
+        var scratch = NewScratchDirectory(checkoutsRoot, definition);
+        string? abandonedScratch = null;
 
         try
         {
             try
             {
-                gitClient.Clone(definition.Repository.Url, scratch, progress);
+                if (referenceCheckout is null)
+                {
+                    gitClient.Clone(definition.Repository.Url, scratch, progress);
+                }
+                else
+                {
+                    try
+                    {
+                        gitClient.CloneWithReference(definition.Repository.Url, scratch, referenceCheckout, progress);
+                    }
+                    catch (GitReferenceFailedException ex)
+                    {
+                        // The progress sink rather than ServiceSourcesWarnings: a deferred clone runs after that buffer is flushed.
+                        progress?.Report(Raw.Compose(
+                            $"Could not borrow objects from '{Raw.Escaped(referenceCheckout)}' ({Raw.Cause(ex)}); cloning without it.").ToString());
+
+                        // A fresh directory, since the failed attempt may have left files behind.
+                        abandonedScratch = scratch;
+                        scratch = NewScratchDirectory(checkoutsRoot, definition);
+                        gitClient.Clone(definition.Repository.Url, scratch, progress);
+                    }
+                }
             }
             catch (GitAuthenticationFailedException ex)
             {
@@ -615,20 +643,39 @@ internal static class LocalGitCheckout
         }
         finally
         {
-            if (Directory.Exists(scratch))
+            TryDeleteScratch(scratch);
+
+            if (abandonedScratch is not null)
             {
-                try
-                {
-                    Directory.Delete(scratch, recursive: true);
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    // Best effort, deliberately not fatal. A leaked scratch directory costs disk
-                    // inside a gitignored, tool-managed tree and can never block a later clone:
-                    // its name is unique per attempt and the destination name is untouched.
-                    // SweepAbandonedScratchDirectories collects it on a later run.
-                }
+                TryDeleteScratch(abandonedScratch);
             }
+        }
+    }
+
+    /// <remarks>
+    /// Unique per attempt: two builders resolving the same checkout concurrently (xUnit does
+    /// exactly that) must not clone into a shared scratch directory.
+    /// </remarks>
+    private static string NewScratchDirectory(string checkoutsRoot, ServiceDefinition definition) =>
+        Path.Combine(checkoutsRoot, $".incoming-{definition.Repository.CheckoutName}-{Guid.NewGuid():N}");
+
+    private static void TryDeleteScratch(string scratch)
+    {
+        if (!Directory.Exists(scratch))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.Delete(scratch, recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Best effort, deliberately not fatal. A leaked scratch directory costs disk
+            // inside a gitignored, tool-managed tree and can never block a later clone:
+            // its name is unique per attempt and the destination name is untouched.
+            // SweepAbandonedScratchDirectories collects it on a later run.
         }
     }
 
@@ -788,6 +835,30 @@ internal static class LocalGitCheckout
     /// </remarks>
     private static void EnsureToolDirectory(string appHostDirectory) =>
         CheckoutBuildBarrier.Ensure(ToolDirectory.Ensure(appHostDirectory));
+
+    /// <summary>
+    /// The home worktree's checkout of this repository, when it is safe to borrow objects from.
+    /// </summary>
+    /// <remarks>
+    /// Only a '.git' directory: git refuses a linked-worktree reference. The origin check keeps an
+    /// unrelated repository at the same name from being borrowed from.
+    /// </remarks>
+    internal static string? ReferenceCheckout(
+        string? homeAppHostDirectory, ServiceDefinition definition, IGitClient gitClient)
+    {
+        if (homeAppHostDirectory is null)
+        {
+            return null;
+        }
+
+        var candidate = ManagedRepoRoot(homeAppHostDirectory, definition.Repository.CheckoutName);
+
+        return Directory.Exists(Path.Combine(candidate, ".git"))
+            && gitClient.GetOriginUrl(candidate) is { } origin
+            && RepositoryUrlsMatch(origin, definition.Repository.Url)
+                ? candidate
+                : null;
+    }
 
     // GitUrl.Identity reduces both URL forms (https://host/path) and scp-like SSH syntax
     // ([user@]host:path, e.g. git@github.com:example/orders) down to "host/path", so an HTTPS

@@ -5,6 +5,7 @@ using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Messages;
+using Aspire.Hosting.ServiceSources.Worktrees;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -140,6 +141,10 @@ internal sealed class LocalCheckoutPrefetch
     // Deferral never applies to publish, so the notice's remedy differs by mode.
     private bool _isRunMode;
 
+    // Lazy because the prefetch exists on every run, and finding home spawns git in a linked worktree.
+    // WorktreeHome caches per builder, so concurrent clones share one resolution.
+    private Func<string?>? _homeAppHostDirectory;
+
     public static LocalCheckoutPrefetch For(
         IDistributedApplicationBuilder builder, IGitClient gitClient)
     {
@@ -179,6 +184,7 @@ internal sealed class LocalCheckoutPrefetch
 
             _started = true;
             _isRunMode = builder.ExecutionContext.IsRunMode;
+            _homeAppHostDirectory = () => WorktreeHome.TryResolve(builder)?.AppHostDirectory;
 
             // Buffered to BeforeStartEvent for the same reason ServiceSourcesWarnings is:
             // AddService() runs while the AppHost is still being composed, before there is an
@@ -626,7 +632,8 @@ internal sealed class LocalCheckoutPrefetch
             try
             {
                 prepared = LocalGitCheckout.PrepareRepoRoot(
-                    serviceName, definition, config, repositoryConfig, appHostDirectory, gitClient, progress);
+                    serviceName, definition, config, repositoryConfig, appHostDirectory, gitClient, progress,
+                    _homeAppHostDirectory);
             }
             finally
             {
@@ -856,7 +863,8 @@ internal sealed class LocalCheckoutPrefetch
                 // may never be added, but reconciling an existing checkout is not — see
                 // GetRepoRoot, which finishes the job for the services that are.
                 var prepared = LocalGitCheckout.PrepareRepoRoot(
-                    serviceName, definition, config, repositoryConfig, appHostDirectory, gitClient, progress);
+                    serviceName, definition, config, repositoryConfig, appHostDirectory, gitClient, progress,
+                    _homeAppHostDirectory);
                 return new CheckoutResult(prepared, null);
             }
             catch (Exception ex)
