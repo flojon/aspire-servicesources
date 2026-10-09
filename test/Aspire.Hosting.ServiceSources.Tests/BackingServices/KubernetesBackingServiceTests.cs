@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Sockets;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.BackingServices;
 using Aspire.Hosting.ServiceSources.Config;
@@ -1839,20 +1841,26 @@ public class KubernetesBackingServiceTests
     [Fact]
     public async Task WholeStringSecret_AgainstASingleNamedPort_Forwards()
     {
+        // Whole-string mode forwards to the remote port number itself, so a fixed port would make
+        // the probe's outcome depend on whatever the host already runs there.
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
         var builder = CreateBuilder();
-        var reader = new FakeSecretReader("Host=orders-pg;Port=5672;Database=orders");
+        var reader = new FakeSecretReader($"Host=orders-pg;Port={port};Database=orders");
 
         var db = Resolve(
             builder,
-            NamedConfig("${secret:orders-cs:connectionString}", ("amqp", 5672)),
+            NamedConfig("${secret:orders-cs:connectionString}", ("amqp", port)),
             allocator: new OccupiedPortAllocator(occupied: -1),
             secretReader: reader);
 
         Assert.Equal(
-            "Host=localhost;Port=5672;Database=orders",
+            $"Host=localhost;Port={port};Database=orders",
             await db.Resource.ConnectionStringExpression.GetValueAsync(default));
 
-        Assert.Contains("5672:5672", await TunnelArgsAsync(builder));
+        Assert.Contains($"{port}:{port}", await TunnelArgsAsync(builder));
 
         var registration = builder.Services.BuildServiceProvider()
             .GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations
@@ -1861,7 +1869,10 @@ public class KubernetesBackingServiceTests
         var result = await registration.Factory(null!)
             .CheckHealthAsync(new HealthCheckContext { Registration = registration }, default);
 
-        Assert.Contains($"127.0.0.1:5672", result.Description);
+        Assert.Equal(HealthStatus.Healthy, result.Status);
+
+        // Throws unless the probe connected to this listener's port specifically.
+        using var accepted = await listener.AcceptTcpClientAsync().WaitAsync(TimeSpan.FromSeconds(5));
     }
 
 
