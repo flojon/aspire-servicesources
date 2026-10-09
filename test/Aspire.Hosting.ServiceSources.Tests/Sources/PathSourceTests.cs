@@ -751,7 +751,9 @@ public class PathSourceTests
         var runner = new DelegatePrepareRunner((_, _, _, _) =>
         {
             running.Release();
-            release.Wait(TimeSpan.FromSeconds(10));
+
+            // No timeout: one that expired under load would release the lock mid-assertion.
+            release.Wait();
             return 0;
         });
 
@@ -759,27 +761,42 @@ public class PathSourceTests
         var definition = Definition(path: "services/orders", prepare: prepare);
         var source = new PathSource(new GitCliClient(), runner);
 
-        var resolveTask = Task.Run(() => source.Resolve(builder, ServiceName, definition, DevConfig()));
+        // A thread of its own: the step blocks it, and a starved pool would delay the start.
+        var resolveTask = Task.Factory.StartNew(
+            () => source.Resolve(builder, ServiceName, definition, DevConfig()),
+            CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
-        Assert.True(running.Wait(TimeSpan.FromSeconds(10)), "the prepare step never started");
+        var released = false;
+        try
+        {
+            Assert.True(running.Wait(TimeSpan.FromSeconds(30)), "the prepare step never started");
 
-        // While the step is running, a second acquisition of the lock keyed on this same resolved
-        // path must block — the discipline that keeps two services sharing one resolved path from
-        // preparing it at once (design "prepare: once/always/never only").
-        var lockKey = PrepareMarker.NormalizeCheckoutPath(serviceDir);
-        var checkoutLock = CheckoutNameLock.For(builder);
-        var secondAcquire = Task.Run(() => checkoutLock.Acquire(lockKey));
+            // While the step is running, a second acquisition of the lock keyed on this same resolved
+            // path must block — the discipline that keeps two services sharing one resolved path from
+            // preparing it at once (design "prepare: once/always/never only").
+            var lockKey = PrepareMarker.NormalizeCheckoutPath(serviceDir);
+            var checkoutLock = CheckoutNameLock.For(builder);
 
-        await Task.WhenAny(secondAcquire, Task.Delay(TimeSpan.FromMilliseconds(300)));
-        Assert.False(
-            secondAcquire.IsCompleted,
-            "a second acquire of the same resolved path's lock succeeded while its prepare step was still running");
+            // A free semaphore completes WaitAsync synchronously, so this is a check, not a race.
+            var secondAcquire = checkoutLock.AcquireAsync(lockKey, CancellationToken.None);
+            Assert.False(
+                secondAcquire.IsCompleted,
+                "a second acquire of the same resolved path's lock succeeded while its prepare step was still running");
 
-        release.Release();
-        await resolveTask;
+            release.Release();
+            released = true;
+            await resolveTask.WaitAsync(TimeSpan.FromSeconds(30));
 
-        var secondHolder = await secondAcquire.WaitAsync(TimeSpan.FromSeconds(10));
-        secondHolder.Dispose();
+            var secondHolder = await secondAcquire.WaitAsync(TimeSpan.FromSeconds(10));
+            secondHolder.Dispose();
+        }
+        finally
+        {
+            if (!released)
+            {
+                release.Release();
+            }
+        }
     }
 
     // === No deferred-checkout interaction ===

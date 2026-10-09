@@ -1063,6 +1063,10 @@ public class CheckoutPreparationTests
                     // The rename can be observed mid-flight as a momentary sharing violation, which
                     // is a read that saw nothing rather than a read that saw half a file.
                 }
+
+                // NTFS refuses a replace while any handle is open, FileShare.Delete or not, so an
+                // unbroken read loop would exhaust the rename's retries and drop the write.
+                Thread.Sleep(1);
             }
         });
 
