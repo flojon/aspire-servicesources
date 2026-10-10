@@ -194,9 +194,10 @@ internal sealed class DeferredCheckout
 
     /// <summary>
     /// Whether <paramref name="serviceName"/> should be registered deferred rather than resolved
-    /// eagerly. Scoped tightly on purpose: a warm checkout keeps today's path exactly, with full
-    /// launch-profile fidelity, except for the one run whose prepare command has changed and needs
-    /// asking about, so the blast radius is first-run-only plus that run.
+    /// eagerly. A warm checkout keeps today's path, with full launch-profile fidelity, unless its
+    /// prepare step is about to run: a bootstrap is the longest thing this package waits for, and only
+    /// the deferred path can show it in the dashboard as it happens rather than as a console nobody
+    /// is watching under <c>aspire run</c>.
     /// </summary>
     /// <remarks>
     /// Two decisions layered, in this order: the policy this type owns — the timing setting, run mode — and
@@ -208,8 +209,9 @@ internal sealed class DeferredCheckout
     /// </remarks>
     /// <param name="prepareStep">
     /// The service's prepare step, when the caller can resolve one. A warm managed checkout is also
-    /// deferred when this step would run only because its command changed, since the consent prompt
-    /// can only be shown once the dashboard is up.
+    /// deferred when this step would run for any reason — a moved commit, a changed command, an
+    /// <c>always</c> mode, a step that never completed — so its progress reaches the dashboard, and
+    /// the consent prompt for a changed command can be shown once that is up.
     /// </param>
     /// <param name="gitClient">Reads the commit the prepare marker is compared against; required with <paramref name="prepareStep"/>.</param>
     public bool ShouldDefer(
@@ -259,12 +261,14 @@ internal sealed class DeferredCheckout
             return true;
         }
 
-        // The one warm case that is deferred: the marker lives in the checkout, so only a checkout
-        // that exists can show its command changed, and the prompt needs the dashboard.
+        // The warm case that is deferred: a checkout that exists but whose prepare step is about to
+        // run. The marker lives in the checkout, so only one that exists can say whether it would;
+        // the run then gets a state, a live resource log and, for a changed command, the prompt.
+        // A step that is already satisfied stays eager, with nothing to show.
         return prepareStep is not null
             && gitClient is not null
             && LocalGitCheckout.IsManagedCheckout(config)
-            && CheckoutPreparation.WouldRunBecauseCommandChanged(
+            && CheckoutPreparation.WouldRun(
                 serviceName,
                 prepareStep,
                 LocalGitCheckout.ManagedRepoRoot(builder.AppHostDirectory, definition.Repository.CheckoutName),

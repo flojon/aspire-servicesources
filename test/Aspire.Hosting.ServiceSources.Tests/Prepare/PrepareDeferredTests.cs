@@ -719,12 +719,13 @@ public class PrepareDeferredTests
     }
 
     /// <remarks>
-    /// The warm case, which is every start after the first: deferral is refused for a checkout that
-    /// already exists, so every re-run of every step — an <c>oncePerCommit</c> step running again
-    /// because <c>ref</c> moved, every start of an <c>always</c> step — takes the eager path.
+    /// The warm case, which is every start after the first: a checkout that already exists is still
+    /// deferred when its step is about to run, for any reason — an <c>oncePerCommit</c> step running
+    /// again because <c>ref</c> moved, every start of an <c>always</c> step — so the re-run reaches the
+    /// dashboard instead of a console nobody is watching.
     /// </remarks>
     [Fact]
-    public void AWarmCheckout_PreparesEagerly()
+    public async Task AWarmCheckoutWhoseStepWouldRun_IsDeferredRatherThanPreparedDuringComposition()
     {
         var dir = CreateAppHostDirectory("routing");
         var repoRoot = Path.Combine(dir, ".servicesources", "checkouts", "routing");
@@ -738,12 +739,19 @@ public class PrepareDeferredTests
         builder.AddLocalKind(KindName, new StandInKind(journal, "app.jar"));
 
         var runner = new FakeRunner(journal);
-        new LocalProjectSource(new FakeGitClient(), runner)
+        var resource = new LocalProjectSource(new FakeGitClient(), runner)
             .Resolve(builder, "routing", Definition("routing", Prepare("always")), DevConfig());
 
-        // During composition, before anything was deferred.
+        // Nothing ran during composition; the step waits for the host to be up.
+        Assert.Equal(0, runner.Runs);
+
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+        await PublishNotStartedAsync(services, resource.Resource);
+        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
         Assert.Equal(1, runner.Runs);
-        Assert.Empty(DeferredCheckout.For(builder).StartTasks);
     }
 
     /// <summary>Answers the cold-checkout source pick up front, so only the prepare prompt can appear.</summary>
@@ -974,7 +982,7 @@ public class PrepareDeferredTests
     }
 
     [Fact]
-    public async Task ShouldDefer_WarmCheckoutRunningForAnotherReason_StaysEager()
+    public async Task ShouldDefer_WarmCheckoutRunningForAnotherReason_Defers()
     {
         var (dir, git, _) = await WarmCheckoutAsync();
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
@@ -982,7 +990,7 @@ public class PrepareDeferredTests
 
         var always = StepFor(Prepare("always"));
 
-        Assert.False(DeferredCheckout.For(builder)
+        Assert.True(DeferredCheckout.For(builder)
             .ShouldDefer(builder, "routing", Definition("routing"), DevConfig(), always, git));
     }
 

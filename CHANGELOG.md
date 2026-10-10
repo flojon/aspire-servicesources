@@ -58,6 +58,13 @@ never existed. Check the tag of the last release before adding one.
 
 ### Changed
 
+- **A warm `"repository"` checkout whose `prepare` step is about to run is now deferred, not only
+  one whose command changed.** In run mode a moved commit, an `always` step or an unfinished step
+  now shows `Preparing` in the dashboard with live output in the service's resource log, where it
+  used to run during `AddService()` with output only on the console. The service therefore starts
+  after `Build()` returns and its launch profile is read after the step, as for a first-run clone.
+  A warm run whose step is already satisfied, `aspire publish`, and a `path` override are unchanged.
+
 - **A cold `"repository"` checkout is no longer cloned at `AddService()`; the dashboard asks which
   ones to clone and start** ([#271]). In run mode, once the AppHost starts, one dialog lists the
   services whose managed clone does not exist yet, all checked. Checked services are cloned and

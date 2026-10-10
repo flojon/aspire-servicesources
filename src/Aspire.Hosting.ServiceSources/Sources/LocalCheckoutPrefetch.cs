@@ -766,7 +766,7 @@ internal sealed class LocalCheckoutPrefetch
     /// speculative form of the question.
     /// </para>
     /// <para>
-    /// The warm-and-changed-command deferral <c>ShouldDefer</c> also makes is not asked about here,
+    /// The warm-and-prepare-would-run deferral <c>ShouldDefer</c> also makes is not asked about here,
     /// on purpose: every candidate has already passed the cold-checkout filter, and a warm checkout
     /// has nothing to clone, so it can never be in the set either way.
     /// </para>

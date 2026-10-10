@@ -286,7 +286,9 @@ without one, CI) nothing can ask, so the step runs as before and the log says wh
 
 The cost is that this run is deferred even though the checkout is warm, so the service is registered
 before the checkout is read and loses composition-time launch-profile fidelity, as a first-run clone
-does.
+does. The same applies to any warm run whose step is about to run for another reason (a moved commit,
+`always`, a step that never completed): it shows `Preparing` with live output in the resource log.
+Only the changed-command case asks first. A warm run whose step is already satisfied stays eager.
 
 A service deferred only for this reason is left out of the source pick: it has nothing to clone, so
 the pick neither asks about it nor skips it, and a saved `selection.json` entry for it is ignored.
@@ -539,11 +541,12 @@ service and the dashboard won't link it. Add the line and the next run is whole;
 on a warm checkout too, where it updates the endpoint the profile already created rather than
 adding one.
 
-Scoped deliberately narrowly, so the blast radius is first-run-only (plus that one changed-command run):
+Scoped deliberately narrowly:
 
-- Only a checkout that doesn't exist yet, plus the one run where a warm checkout's `prepare` command
-  changed and needs [asking about](#prepare-a-checkout-that-has-to-bootstrap-itself). Every other warm run — every run after the first —
-  takes the existing eager path unchanged, with full launch-profile fidelity.
+- Only a checkout that doesn't exist yet, plus a warm checkout whose `prepare` step is about to run (a
+  changed command, which is [asked about](#prepare-a-checkout-that-has-to-bootstrap-itself) first, a
+  moved commit, `always`). Every other warm run takes the existing eager path unchanged, with full
+  launch-profile fidelity.
 - Only managed checkouts. Your own directory (the [`"path"` source](path.md)) has nothing to clone.
 - Only the `"repository"` source, and within it only the kinds that own a managed checkout: `dotnet`,
   `java` and `javascript`. The other sources — `url`, `kubernetes`, `container` and
