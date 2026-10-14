@@ -68,6 +68,13 @@ internal sealed class FakeInteractionService : IInteractionService
     public Task<InteractionResult<bool>> PromptProgressAsync(
         string title, ProgressInteractionOptions? options = null, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
+
+#pragma warning disable ASPIRETERMINAL001 // experimental too, for the same reason
+    public Task<InteractionResult<bool>> PromptTerminalAsync(
+        string message, ApplicationModel.AspireTerminal terminal, TerminalInteractionOptions? options = null,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+#pragma warning restore ASPIRETERMINAL001
 #pragma warning restore ASPIREINTERACTION001
 
     /// <summary>Answers a confirmation. Null leaves it open until its token is cancelled.</summary>
