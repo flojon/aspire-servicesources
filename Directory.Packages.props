@@ -57,6 +57,8 @@
     <PackageVersion Include="Aspire.Hosting.AppHost" Version="$(AspireVersion)" />
     <PackageVersion Include="Aspire.Hosting.JavaScript" Version="$(AspireVersion)" />
     <PackageVersion Include="CommunityToolkit.Aspire.Hosting.Java" Version="13.3.0" />
+    <!-- Still preview-only; must match OfficialJavaIntegration.MinimumVersion. -->
+    <PackageVersion Include="Aspire.Hosting.Java" Version="13.6.1-preview.1.26506.6" />
     <PackageVersion Include="coverlet.collector" Version="10.1.0" />
     <!-- An analyzer core references with PrivateAssets="all". It reaches no nuspec and constrains
          no consumer, so it is not a floor and does not belong in src/Directory.Packages.props —

@@ -4,9 +4,9 @@ using Aspire.Hosting.ServiceSources.Messages;
 namespace Aspire.Hosting.ServiceSources.Java;
 
 /// <summary>
-/// Runs a <c>"repository"</c>-sourced service written in Java, by handing its checkout to the Aspire
-/// Community Toolkit's Java integration (<c>AddJavaApp</c> + <c>WithMavenGoal</c>/
-/// <c>WithGradleTask</c>). Registered for the <c>java</c> kind by
+/// Runs a <c>"repository"</c>-sourced service written in Java, by handing its checkout to whichever
+/// Java hosting integration the AppHost references — Aspire's own <c>Aspire.Hosting.Java</c> or the
+/// Community Toolkit's (see <see cref="JavaIntegration"/>). Registered for the <c>java</c> kind by
 /// <see cref="JavaServiceSourcesBuilderExtensions.UseJava"/>.
 /// </summary>
 internal sealed class JavaLocalResourceKind : ILocalResourceKind
@@ -14,11 +14,11 @@ internal sealed class JavaLocalResourceKind : ILocalResourceKind
     /// <summary>The <c>kind:</c> value in <c>servicesources.yaml</c> this handler is registered for.</summary>
     public const string KindName = "java";
 
-    public Type ResourceType => typeof(JavaAppExecutableResource);
+    public Type ResourceType => JavaIntegration.Installed.ResourceType;
 
-    // What the Community Toolkit's integration execs when no wrapper override is annotated, and the
-    // extension Windows spells that same wrapper with. Mirrored here rather than read from it (they're
-    // private) so the wrapper this checks for is the very file the resource would run.
+    // What both integrations exec when no wrapper override is annotated, and the extension Windows
+    // spells that same wrapper with. Mirrored here rather than read from them (they're private) so
+    // the wrapper this checks for is the very file the resource would run.
     private const string MavenWrapper = "mvnw";
     private const string MavenWindowsExtension = ".cmd";
     private const string GradleWrapper = "gradlew";
@@ -35,7 +35,7 @@ internal sealed class JavaLocalResourceKind : ILocalResourceKind
 
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) =>
-        Plan(serviceName, repoRoot, rawConfig).Add(builder);
+        Plan(serviceName, repoRoot, rawConfig).Add(builder, JavaIntegration.Installed);
 
     /// <summary>
     /// Unconditional: every java options block builds the same resource cold as warm, for the
@@ -58,7 +58,7 @@ internal sealed class JavaLocalResourceKind : ILocalResourceKind
 
         return new DeferredLocalResource
         {
-            Service = plan.Add(builder),
+            Service = plan.Add(builder, JavaIntegration.Installed),
             ValidateCheckout = plan.RequireCheckout,
         };
     }
@@ -85,8 +85,8 @@ internal sealed class JavaLocalResourceKind : ILocalResourceKind
     /// Where the wrapper script the resource will exec is going to be, and what to say if it turns
     /// out not to be there. Handed to the integration explicitly (via <c>WithWrapperPath</c>) rather
     /// than left to its default, so the file checked is provably the one the resource runs: the
-    /// integration sets the command from this path without checking it, and there is no fallback to
-    /// a system-wide <c>mvn</c>/<c>gradle</c>.
+    /// integration checks this path no earlier than launch, and there is no fallback to a system-wide
+    /// <c>mvn</c>/<c>gradle</c>.
     /// </summary>
     private static PlannedWrapper PlanWrapper(
         string repoRoot, string workingDirectory, ValidatedJavaKindOptions options)
@@ -155,43 +155,12 @@ internal sealed class JavaLocalResourceKind : ILocalResourceKind
                 $"Service '{new Name(ServiceName)}': java.{Raw.Escaped(Wrapper.RunModeField)} runs the repository's own '{Raw.Escaped(Wrapper.RelativeName)}' wrapper script, but '{Raw.Escaped(Wrapper.Path)}' does not exist. Commit the wrapper beside the project, or set java.wrapperPath to where this checkout keeps it — a multi-module repository usually has a single wrapper at its root, relative to which java.wrapperPath is read.");
         }
 
-        public IResourceBuilder<IResourceWithServiceDiscovery> Add(IDistributedApplicationBuilder builder)
-        {
-            // One dispatch, so a run mode added later can't compile into a resource that was added but
-            // never told how to start.
-            var javaApp = (Options.RunMode.Kind, Wrapper) switch
-            {
-                // AddJavaApp's jar overload applies both the jar path and the args itself.
-                (JavaRunModeKind.Jar, _) =>
-                    builder.AddJavaApp(ServiceName, WorkingDirectory, Options.RunMode.Value, Options.Args),
-
-                // WithWrapperPath first: WithMavenGoal/WithGradleTask read the wrapper annotation as they
-                // run and set the resource's command from it there and then, so annotating afterwards
-                // would leave the command pointing at the default wrapper.
-                (JavaRunModeKind.MavenGoal, { } mavenWrapper) =>
-                    builder.AddJavaApp(ServiceName, WorkingDirectory)
-                        .WithWrapperPath(mavenWrapper.Path)
-                        .WithMavenGoal(Options.RunMode.Value, Options.Args),
-                (JavaRunModeKind.GradleTask, { } gradleWrapper) =>
-                    builder.AddJavaApp(ServiceName, WorkingDirectory)
-                        .WithWrapperPath(gradleWrapper.Path)
-                        .WithGradleTask(Options.RunMode.Value, Options.Args),
-                _ => throw new InvalidOperationException($"Unhandled Java run mode '{Options.RunMode.Kind}'."),
-            };
-
-            // AddJavaApp adds no endpoint of its own, so declare the one the service listens on — the
-            // whole point of AddService() is handing consumers something they can WithReference().
-            // java.port is required, so this is as true of a deferred service as of a warm one. Named
-            // after the scheme (matching ContainerSource/KubernetesSource) rather than always "http",
-            // so a https-scheme service is the one GetServiceEndpoint() and GetEndpoint("https") find.
-            javaApp.WithEndpoint(targetPort: Options.Port, scheme: Options.Scheme, name: Options.Scheme);
-
-            // AddProject wires this in for free; an executable resource like AddJavaApp does not, so
-            // it needs the same call any Aspire apphost would add by hand.
-            javaApp.WithOtlpExporter();
-
-            return javaApp;
-        }
+        public IResourceBuilder<IResourceWithServiceDiscovery> Add(
+            IDistributedApplicationBuilder builder, JavaIntegration integration) =>
+            // java.port is required, so the endpoint is as known for a deferred service as a warm one.
+            integration.Add(
+                builder, ServiceName, WorkingDirectory, Options.RunMode, Wrapper?.Path, Options.Args,
+                Options.Port, Options.Scheme);
     }
 
     /// <summary>

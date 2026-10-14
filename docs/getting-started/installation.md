@@ -36,6 +36,7 @@ referenced by your AppHost alongside this one — see
 | `kind` | Package | Minimum |
 | --- | --- | --- |
 | `java` | `CommunityToolkit.Aspire.Hosting.Java` | 13.3.0 |
+| `java` | or `Aspire.Hosting.Java` (preview) | 13.6.1-preview.1 |
 | `javascript` | `Aspire.Hosting.JavaScript` | 13.6.1 |
 
 ```bash
@@ -45,6 +46,11 @@ dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources
 dotnet add package Aspire.Hosting.JavaScript              # kind: javascript
 dotnet add package CommunityToolkit.Aspire.Hosting.Java   # kind: java
 ```
+
+For `java`, either package works, and the one the AppHost references is used — the official
+one if both are. `Aspire.Hosting.Java` is still in preview; this package is built against
+13.6.1-preview.1.26506.6, and an older preview is reported at startup with the version to move
+to. Like the others, it is not a dependency, so an AppHost that doesn't use it never sees it.
 
 Add one per language you actually use, and nothing for a language you don't. This package
 compiles against both but declares neither as a dependency, so an AppHost with no

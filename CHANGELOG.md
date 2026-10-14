@@ -52,6 +52,12 @@ never existed. Check the tag of the last release before adding one.
 
 ### Added
 
+- **`kind: java` also runs on Aspire's official `Aspire.Hosting.Java` integration** (preview).
+  Reference it instead of `CommunityToolkit.Aspire.Hosting.Java` and `java` services run
+  through it, with no catalog or AppHost change. When both are referenced the official one is
+  used. `Unwrap<T>` takes the installed integration's resource type: `JavaAppResource` for the
+  official package, `JavaAppExecutableResource` for the Community Toolkit's.
+
 - **A `dotnet` service can select its launch profile** ([#415]). A new `dotnet:` block in the yaml
   catalog takes `launchProfileName` (run under that `launchSettings.json` profile) and
   `excludeLaunchProfile` (run with none), and `WithLaunchProfile(...)` /

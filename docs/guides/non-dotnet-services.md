@@ -124,11 +124,12 @@ that use them.
 
 ## Java: `kind: java`
 
-Runs the checkout through the Aspire Community Toolkit's
-[Java integration](https://github.com/CommunityToolkit/Aspire), which your AppHost references
-itself as `CommunityToolkit.Aspire.Hosting.Java` (13.3.0 or newer — see
-[Installation](../getting-started/installation.md#non-net-services)). `java` is a built-in kind, resolved the same way `dotnet` always has
-been — reference the package and declare the kind, no registration call needed:
+Runs the checkout through whichever Java hosting integration your AppHost references itself:
+the Aspire Community Toolkit's [Java integration](https://github.com/CommunityToolkit/Aspire),
+`CommunityToolkit.Aspire.Hosting.Java` (13.3.0 or newer), or Aspire's own `Aspire.Hosting.Java`,
+which is still in preview — see [Installation](../getting-started/installation.md#non-net-services).
+If both are referenced, the official one is used. `java` is a built-in kind, resolved the same way
+`dotnet` always has been — reference a package and declare the kind, no registration call needed:
 
 === "C#"
 
@@ -255,9 +256,10 @@ AppHost with `Unwrap<JavaAppExecutableResource>(...)`, most often paired with As
 hardcoding a path.
 
 **Reaching the rest of the Java integration.** The `java:` block covers how to start the app; it
-deliberately doesn't mirror every modifier the Community Toolkit offers. Anything else is reachable
-from the AppHost with `Unwrap<JavaAppExecutableResource>(...)`, which hands the delegate the real
-resource builder:
+deliberately doesn't mirror every modifier the integration offers. Anything else is reachable
+from the AppHost with `Unwrap<T>(...)`, which hands the delegate the real resource builder. `T` is
+the installed integration's resource type — `JavaAppExecutableResource` for the Community
+Toolkit's, `Aspire.Hosting.Java.JavaAppResource` for the official one:
 
 ```csharp
 builder.AddService("catalog")

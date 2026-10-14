@@ -13,6 +13,7 @@
   </Folder>
   <Folder Name="/test/">
     <Project Path="test/Aspire.Hosting.ServiceSources.Tests/Aspire.Hosting.ServiceSources.Tests.csproj" />
+    <Project Path="test/Aspire.Hosting.ServiceSources.Java.Official.Tests/Aspire.Hosting.ServiceSources.Java.Official.Tests.csproj" />
     <Project Path="test/Aspire.Hosting.ServiceSources.Java.Tests/Aspire.Hosting.ServiceSources.Java.Tests.csproj" />
     <Project Path="test/Aspire.Hosting.ServiceSources.JavaScript.Tests/Aspire.Hosting.ServiceSources.JavaScript.Tests.csproj" />
   </Folder>
