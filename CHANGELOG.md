@@ -44,6 +44,12 @@ never existed. Check the tag of the last release before adding one.
   surfaces later, as that service's own resource state, rather than failing the AppHost synchronously
   at `AddService()`.
 
+- **The Aspire floor is now 13.6.0** (was 13.5.2). `Aspire.Hosting` and `Aspire.Hosting.JavaScript`
+  are floored at 13.6.0, so an AppHost still on Aspire 13.5.x gets a mixed Aspire family at restore
+  (`NU1605` against its own `Aspire.AppHost.Sdk` and `Aspire.Hosting.AppHost`). Move the AppHost's
+  `Aspire.AppHost.Sdk`, and any `Aspire.Hosting.JavaScript` reference, to 13.6.0 or later. The
+  generated-code sample now needs Aspire CLI 13.6.0 or later.
+
 ### Added
 
 - **A `dotnet` service can select its launch profile** ([#415]). A new `dotnet:` block in the yaml

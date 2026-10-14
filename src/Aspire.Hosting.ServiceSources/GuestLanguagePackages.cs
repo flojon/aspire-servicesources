@@ -34,7 +34,7 @@ internal static class GuestLanguagePackages
     private static readonly Dictionary<string, (string PackageId, string MinimumVersion)> ByAssemblyName =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            ["Aspire.Hosting.JavaScript"] = ("Aspire.Hosting.JavaScript", "13.5.2"),
+            ["Aspire.Hosting.JavaScript"] = ("Aspire.Hosting.JavaScript", "13.6.0"),
             ["CommunityToolkit.Aspire.Hosting.Java"] = ("CommunityToolkit.Aspire.Hosting.Java", "13.3.0"),
         };
 
@@ -91,7 +91,7 @@ internal static class GuestLanguagePackages
     {
         if (exception is FileNotFoundException { FileName: { } fileName })
         {
-            // "Aspire.Hosting.JavaScript, Version=13.5.2.0, Culture=neutral, PublicKeyToken=..." -
+            // "Aspire.Hosting.JavaScript, Version=13.6.0.0, Culture=neutral, PublicKeyToken=..." -
             // the simple name is all that identifies the package.
             var simpleName = fileName.Split(',')[0].Trim();
 

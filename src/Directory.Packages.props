@@ -39,7 +39,7 @@
          the helper. So above 13.5.0 a mismatched pair is ordinary API drift rather than a
          guaranteed crash.
 
-         Only 13.5.0 has to be cleared, then; the floor sits at 13.5.2 because that is the
+         Only 13.5.0 has to be cleared, then; the floor sits at 13.6.0 because that is the
          version this repository builds and tests against, and a floor no one has run is worth
          less than one that is exercised on every CI run. Later patches still reach consumers
          on their own - this is a minimum, not a pin - so it does not need raising to stay

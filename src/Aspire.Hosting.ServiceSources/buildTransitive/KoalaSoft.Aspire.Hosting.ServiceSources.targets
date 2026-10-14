@@ -18,7 +18,7 @@
     get past. The run-time report in GuestLanguagePackages still stands behind it.
   -->
   <PropertyGroup>
-    <ServiceSourcesJavaScriptMinVersion>13.5.2</ServiceSourcesJavaScriptMinVersion>
+    <ServiceSourcesJavaScriptMinVersion>13.6.0</ServiceSourcesJavaScriptMinVersion>
     <ServiceSourcesJavaMinVersion>13.3.0</ServiceSourcesJavaMinVersion>
   </PropertyGroup>
 
@@ -45,7 +45,7 @@
 
     <!--
       [MSBuild]::VersionLessThan parses with System.Version semantics, which stop at the first '-':
-      it reads 13.5.2-preview.1 as 13.5.2 and so calls it not-less-than the 13.5.2 floor. By SemVer
+      it reads 13.6.0-preview.1 as 13.6.0 and so calls it not-less-than the 13.6.0 floor. By SemVer
       a prerelease precedes the release it labels, and the difference is real rather than pedantic -
       a preview cut before the release carries that release's assembly version, so it binds and then
       fails on the missing member with a MissingMethodException, which is not a load failure and is
@@ -53,7 +53,7 @@
 
       So the comparison is split: the numeric core against the floor as before, plus an equal core
       carrying a prerelease label, which is the one case System.Version cannot see. A prerelease
-      *above* the floor (13.5.3-preview.1 against a 13.5.2 floor) is correctly left alone.
+      *above* the floor (13.6.1-preview.1 against a 13.6.0 floor) is correctly left alone.
     -->
     <ItemGroup>
       <_ServiceSourcesJavaScriptVersion>

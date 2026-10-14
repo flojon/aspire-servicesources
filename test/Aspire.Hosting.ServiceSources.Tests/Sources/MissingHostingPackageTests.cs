@@ -146,7 +146,7 @@ public class MissingHostingPackageTests
     /// is actually installed rather than by reading the exception.
     /// </summary>
     [Theory]
-    [InlineData("javascript", "Aspire.Hosting.JavaScript", "13.5.2")]
+    [InlineData("javascript", "Aspire.Hosting.JavaScript", "13.6.0")]
     [InlineData("java", "CommunityToolkit.Aspire.Hosting.Java", "13.3.0")]
     public void PackagePresentButOlderThanTheFloor_IsReportedAsTooOld(
         string kind, string packageId, string floor)
@@ -276,9 +276,9 @@ public class MissingHostingPackageTests
 
         private FileNotFoundException LoadFailure() =>
             new(
-                $"Could not load file or assembly '{assemblyName}, Version=13.5.2.0, Culture=neutral, "
+                $"Could not load file or assembly '{assemblyName}, Version=13.6.0.0, Culture=neutral, "
                 + "PublicKeyToken=cc7b13ffcd2ddd51'. The system cannot find the file specified.",
-                $"{assemblyName}, Version=13.5.2.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51");
+                $"{assemblyName}, Version=13.6.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51");
     }
 
     private sealed class BrokenKind : ILocalResourceKind

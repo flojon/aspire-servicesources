@@ -22,7 +22,7 @@ AppHost code never changes when a developer switches.
 dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources
 ```
 
-Requires .NET 8+ and Aspire 13.5.2+ — move your AppHost's `Aspire.AppHost.Sdk` to 13.5.2 or later
+Requires .NET 8+ and Aspire 13.6.0+ — move your AppHost's `Aspire.AppHost.Sdk` to 13.6.0 or later
 at the same time, or you get a mixed Aspire family. Services in other languages need one extra
 package each. See
 [Installation](https://aspire-servicesources.readthedocs.io/en/latest/getting-started/installation/).
