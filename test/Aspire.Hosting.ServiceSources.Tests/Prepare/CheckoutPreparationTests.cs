@@ -1050,21 +1050,29 @@ public class CheckoutPreparationTests
         // same way PrepareMarker.Read does, since a plain File.ReadAllText holds no FileShare.Delete
         // and would make this thread the obstacle to the rename it is here to observe.
         using var reading = new CancellationTokenSource();
-        var reader = Task.Run(() =>
+        using var firstRead = new ManualResetEventSlim();
+        var reader = Task.Factory.StartNew(() =>
         {
             while (!reading.IsCancellationRequested)
             {
                 try
                 {
                     observed.Add(PrepareMarker.ReadAllTextSharingRename(fixture.MarkerPath));
+                    firstRead.Set();
                 }
                 catch (IOException)
                 {
                     // The rename can be observed mid-flight as a momentary sharing violation, which
                     // is a read that saw nothing rather than a read that saw half a file.
                 }
+
+                // NTFS refuses a replace while any handle is open, FileShare.Delete or not, so an
+                // unbroken read loop would exhaust the rename's retries and drop the write.
+                Thread.Sleep(1);
             }
-        });
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+
+        Assert.True(firstRead.Wait(TimeSpan.FromSeconds(10)), "the reader never completed a read");
 
         fixture.Git.HeadCommitSha = "3333333333333333333333333333333333333333";
         Run(fixture, Step());
@@ -1074,6 +1082,7 @@ public class CheckoutPreparationTests
 
         var after = File.ReadAllText(fixture.MarkerPath);
         Assert.NotEqual(recorded, after);
+        Assert.NotEmpty(observed);
         Assert.All(observed, seen => Assert.True(
             seen == recorded || seen == after, $"a reader saw neither record whole: '{seen}'"));
     }
