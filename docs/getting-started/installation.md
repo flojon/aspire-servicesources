@@ -36,6 +36,7 @@ referenced by your AppHost alongside this one — see
 | `kind` | Package | Minimum |
 | --- | --- | --- |
 | `java` | `CommunityToolkit.Aspire.Hosting.Java` | 13.3.0 |
+| `java` | or `Aspire.Hosting.Java` (preview) | 13.6.1-preview.1 |
 | `javascript` | `Aspire.Hosting.JavaScript` | 13.6.1 |
 
 ```bash
@@ -46,6 +47,17 @@ dotnet add package Aspire.Hosting.JavaScript              # kind: javascript
 dotnet add package CommunityToolkit.Aspire.Hosting.Java   # kind: java
 ```
 
+For `java`, either package works, and the one the AppHost references is used — the Community
+Toolkit's if both are, so referencing the official one transitively changes nothing. `Aspire.Hosting.Java` is still in preview; this package is built against
+13.6.1-preview.1.26506.6, and an older preview is reported with the version to move to — at build time
+(`SERVICESOURCES003`) where the check runs, otherwise when the first `java` service resolves. Like the others, it is not a dependency, so an AppHost that doesn't use it never sees it.
+
+A caveat on the official package: it pins `System.Security.Cryptography.Pkcs` 10.0.12 and, through
+`Aspire.Hosting`, `MessagePack` 2.5.302, both of which NuGet audit flags (NU1902/NU1903) — as errors
+under `-warnaserror` or `TreatWarningsAsErrors`. Raise them with a direct `PackageReference` to
+`System.Security.Cryptography.Pkcs` 10.0.13 and `MessagePack` 2.5.303 or newer, or suppress the
+advisories, until the packages move.
+
 Add one per language you actually use, and nothing for a language you don't. This package
 compiles against both but declares neither as a dependency, so an AppHost with no
 `javascript` service never sees `Aspire.Hosting.JavaScript`, nor the Aspire floor it carries
@@ -55,7 +67,7 @@ above the minimum above, and the two need not match each other.
 
 Forget one and you are told which. Below the minimum, your build fails naming the package and
 the version it resolved — `SERVICESOURCES001` for `Aspire.Hosting.JavaScript`,
-`SERVICESOURCES002` for `CommunityToolkit.Aspire.Hosting.Java`. A prerelease of the minimum
+`SERVICESOURCES002` for `CommunityToolkit.Aspire.Hosting.Java`, `SERVICESOURCES003` for `Aspire.Hosting.Java`. A prerelease of the minimum
 counts as below it. Missing entirely, the first `AddService()` for a service of that kind fails
 with a message naming the package to install — which is the only report a guest-language AppHost
 gets, since the Aspire CLI hands it this package through a project reference and a project

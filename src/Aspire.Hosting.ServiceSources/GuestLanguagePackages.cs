@@ -154,7 +154,11 @@ internal static class GuestLanguagePackages
         + $"declaring no '{kind}' service does not inherit it, which means it is not installed "
         + $"for you: run `dotnet add package {package.PackageId}`. A guest-language AppHost adds "
         + $"\"{package.PackageId}\": \"{package.MinimumVersion}\" to the \"packages\" section of "
-        + "aspire.config.json instead.";
+        + "aspire.config.json instead."
+        + (kind == Java.JavaLocalResourceKind.KindName
+            ? $" Aspire's own {Java.OfficialJavaIntegration.AssemblyName} (preview) works too, and is "
+                + "used when the AppHost does not reference the Community Toolkit's."
+            : "");
 
     /// <summary>
     /// The version of <paramref name="assemblyName"/> this process can load, or

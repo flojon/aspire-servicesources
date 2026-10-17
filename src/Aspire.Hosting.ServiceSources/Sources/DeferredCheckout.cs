@@ -446,7 +446,8 @@ internal sealed class DeferredCheckout
     /// Keyed on the resource kinds DCP materialises rather than on
     /// <see cref="IResourceWithoutLifetime"/>: that marker is not on <c>ParameterResource</c> in the
     /// Aspire versions this package supports, so testing for it would let a parameter through. Both
-    /// resources the shipped handlers add — a <c>JavaAppExecutableResource</c>, and the
+    /// resources the shipped handlers add — a <c>JavaAppExecutableResource</c> (or, on the official
+    /// integration, a <c>JavaAppResource</c>), and the
     /// <c>JavaScriptInstallerResource</c> beside a <c>ViteAppResource</c> — are
     /// <see cref="ExecutableResource"/>s. Projects are named separately because
     /// <c>ProjectResource</c> is not one; DCP builds its executable while preparing the model.

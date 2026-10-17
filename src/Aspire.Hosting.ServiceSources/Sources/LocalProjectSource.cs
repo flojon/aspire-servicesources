@@ -499,7 +499,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
 
         try
         {
-            return ReadResourceType(serviceName, definition.Kind, handler);
+            return ReadResourceType(serviceName, definition.Kind, handler, claimNothingIfUnsettled: true);
         }
         catch (Exception ex) when (GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, definition.Kind) is not null)
         {
@@ -540,12 +540,25 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// Reads <see cref="ILocalResourceKind.ResourceType"/>, naming the service and kind when the
     /// handler faults. A missing hosting package is left to the caller, which knows what it means.
     /// </summary>
-    private static Type ReadResourceType(string serviceName, string kind, ILocalResourceKind handler)
+    /// <param name="claimNothingIfUnsettled">
+    /// Answer "no particular type" when the handler reports, from <c>ResourceType</c>, that it
+    /// cannot settle its type yet (<see cref="ServiceSourcesConfigurationException.AsUnsettledResourceType"/>),
+    /// rather than throwing it.
+    /// </param>
+    private static Type ReadResourceType(
+        string serviceName, string kind, ILocalResourceKind handler, bool claimNothingIfUnsettled = false)
     {
         Type? declared;
         try
         {
             declared = handler.ResourceType;
+        }
+        catch (ServiceSourcesConfigurationException ex) when (claimNothingIfUnsettled && ex.IsUnsettledResourceType)
+        {
+            // A handler that says it cannot settle its type yet - a hosting package too old to
+            // use - claims nothing where the caller only wants to know whether to claim a type.
+            // Any other configuration problem is the handler's to report, and still is.
+            return typeof(IResourceWithServiceDiscovery);
         }
         catch (Exception ex) when (ex is not ServiceSourcesConfigurationException
             && GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, kind) is null)

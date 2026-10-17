@@ -35,13 +35,15 @@
     <AdditionalFiles Include="BannedSymbols.txt" />
   </ItemGroup>
 
-  <!-- The two guest-language hosting packages are compile-time only: PrivateAssets="all" keeps
+  <!-- The guest-language hosting packages are compile-time only: PrivateAssets="all" keeps
        them out of this package's nuspec, so an AppHost inherits neither them nor the Aspire
        floors they carry. The kinds reach their types only inside method bodies, so the JIT
        needs the assembly on disk only when a service actually declares kind: javascript/java. -->
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting.JavaScript" PrivateAssets="all" />
     <PackageReference Include="CommunityToolkit.Aspire.Hosting.Java" PrivateAssets="all" />
+    <PackageReference Include="Aspire.Hosting.Java" PrivateAssets="all" />
+    <PackageReference Include="System.Security.Cryptography.Pkcs" PrivateAssets="all" />
   </ItemGroup>
 
   <!-- The floor check for the two undeclared references, imported into a consuming project by
