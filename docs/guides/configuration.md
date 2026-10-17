@@ -235,7 +235,7 @@ warn: Aspire.Hosting.ServiceSources
 `Unwrap<T>(configure)` skips the same way. On `"url"`, `"kubernetes"` and `"disabled"` the delegate
 never runs and the skip joins the service's message above. It also skips when a reachable source
 resolves to something other than a `T` — a `java` service a developer switched to `"container"`
-resolves to a container, not a `JavaAppExecutableResource` — and logs what the service resolved to
+resolves to a container, not a `JavaAppExecutableResource` (or the official package's `JavaAppResource`) — and logs what the service resolved to
 instead. It follows the same wait-ordering exception: `Unwrap<IResourceWithWaitSupport>(...)` on a
 `"kubernetes"` service still runs, against the port-forward.
 

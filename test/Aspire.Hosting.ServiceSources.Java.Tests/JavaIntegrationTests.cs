@@ -55,6 +55,13 @@ public class JavaIntegrationTests
     [InlineData("13.6.0-preview.9.99999.9", true)]
     [InlineData("13.7.0-preview.1.1.1", false)]
     [InlineData("not a version", false)]
+    [InlineData("13.6.1.0-preview.1.26506.6", false)]   // a fourth component of zero is the same version
+    [InlineData("13.6.0.0", true)]
+    [InlineData("13.6.1-dev", false)]                    // a label never seen before is not evidence of age
+    [InlineData("13.6.1-rc.1", false)]
+    [InlineData("13.6.1-preview.1.99999999999999999999999.1", false)]   // longer than a long
+    [InlineData("13.6.1-preview.+1.26506.6", false)]
+    [InlineData("13.6.1-preview.1.0026506.5", true)]     // leading zeros do not change the number
     public void IsOlder_ComparesLikeNuGet(string installed, bool expected) =>
         Assert.Equal(expected, PackageVersionComparison.IsOlder(installed, "13.6.1-preview.1.26506.6"));
 
@@ -82,9 +89,40 @@ public class JavaIntegrationTests
             LocalProjectSource.KindResourceType(builder, "tool", definition));
     }
 
+    /// <summary>
+    /// Only a kind that says it is unsettled gets the pass: any other configuration problem a handler
+    /// reports from <c>ResourceType</c> is still the handler's to report.
+    /// </summary>
+    [Fact]
+    public void KindResourceType_HandlerThatReportsAnOrdinaryConfigurationProblem_StillThrows()
+    {
+        var builder = DistributedApplication.CreateBuilder([TestBuilderDefaults.DisableConfigReloadArg]);
+        builder.AddLocalKind("broken", new BrokenTypeKind());
+
+        var definition = new ServiceDefinition
+        {
+            Repository = new RepositoryDefinition { Url = "https://github.com/example/tool", CheckoutName = "tool" },
+            Project = "tool",
+            Kind = "broken",
+            Origin = CatalogOrigin.FromYaml("servicesources.yaml"),
+        };
+
+        Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            LocalProjectSource.KindResourceType(builder, "tool", definition));
+    }
+
+    private sealed class BrokenTypeKind : ILocalResourceKind
+    {
+        public Type ResourceType => throw new ServiceSourcesConfigurationException("misconfigured");
+
+        public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
+            IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) =>
+            throw new NotSupportedException();
+    }
+
     private sealed class UnsettledTypeKind : ILocalResourceKind
     {
-        public Type ResourceType => throw new ServiceSourcesConfigurationException("too old");
+        public Type ResourceType => throw new ServiceSourcesConfigurationException("too old").AsUnsettledResourceType();
 
         public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
             IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) =>

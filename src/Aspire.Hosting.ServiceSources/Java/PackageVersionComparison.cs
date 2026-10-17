@@ -8,14 +8,15 @@ namespace Aspire.Hosting.ServiceSources.Java;
 internal static class PackageVersionComparison
 {
     /// <summary>
-    /// Whether <paramref name="installed"/> is older than <paramref name="minimum"/>. A version
-    /// that does not parse is never called older: nothing here should fail an AppHost on a
-    /// version string it cannot read.
+    /// Whether <paramref name="installed"/> is older than <paramref name="minimum"/>. Answers
+    /// <see langword="false"/> whenever it cannot tell: a version that does not parse, or two
+    /// prereleases whose labels differ ("dev" against "preview"), which have no order here. Nothing
+    /// should fail an AppHost on a version string this does not understand.
     /// </summary>
     public static bool IsOlder(string installed, string minimum) =>
         TryParse(installed, out var left) && TryParse(minimum, out var right) && Compare(left, right) < 0;
 
-    private static bool TryParse(string text, out (Version Core, string[] Prerelease) version)
+    private static bool TryParse(string text, out (int[] Core, string[] Prerelease) version)
     {
         version = default;
 
@@ -24,22 +25,38 @@ internal static class PackageVersionComparison
         var dash = withoutMetadata.IndexOf('-');
         var core = dash < 0 ? withoutMetadata : withoutMetadata[..dash];
 
-        if (!Version.TryParse(core, out var parsed))
+        var parts = core.Split('.');
+        var numbers = new int[Math.Max(parts.Length, 4)];
+
+        if (parts.Length is < 2 or > 4)
         {
             return false;
         }
 
-        version = (parsed, dash < 0 ? [] : withoutMetadata[(dash + 1)..].Split('.'));
+        for (var i = 0; i < parts.Length; i++)
+        {
+            if (!int.TryParse(parts[i], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out numbers[i]))
+            {
+                return false;
+            }
+        }
+
+        version = (numbers, dash < 0 ? [] : withoutMetadata[(dash + 1)..].Split('.'));
         return true;
     }
 
-    private static int Compare((Version Core, string[] Prerelease) left, (Version Core, string[] Prerelease) right)
+    /// <summary>Negative, zero or positive; zero also for "cannot be ordered".</summary>
+    private static int Compare((int[] Core, string[] Prerelease) left, (int[] Core, string[] Prerelease) right)
     {
-        var core = left.Core.CompareTo(right.Core);
-
-        if (core != 0)
+        // Missing components are zero, so 13.6 and 13.6.0.0 are the same version.
+        for (var i = 0; i < left.Core.Length; i++)
         {
-            return core;
+            var part = left.Core[i].CompareTo(right.Core[i]);
+
+            if (part != 0)
+            {
+                return part;
+            }
         }
 
         // A release outranks any prerelease of it.
@@ -50,29 +67,40 @@ internal static class PackageVersionComparison
 
         for (var i = 0; i < Math.Min(left.Prerelease.Length, right.Prerelease.Length); i++)
         {
-            var identifier = CompareIdentifier(left.Prerelease[i], right.Prerelease[i]);
+            var leftNumeric = IsNumeric(left.Prerelease[i]);
+            var rightNumeric = IsNumeric(right.Prerelease[i]);
 
-            if (identifier != 0)
+            if (leftNumeric && rightNumeric)
             {
-                return identifier;
+                var number = CompareNumbers(left.Prerelease[i], right.Prerelease[i]);
+
+                if (number != 0)
+                {
+                    return number;
+                }
+            }
+            else if (!string.Equals(left.Prerelease[i], right.Prerelease[i], StringComparison.OrdinalIgnoreCase))
+            {
+                // Different labels, or a label against a number: SemVer orders them, but a label
+                // this package has never seen is not evidence the install is old.
+                return 0;
             }
         }
 
         return left.Prerelease.Length.CompareTo(right.Prerelease.Length);
     }
 
-    private static int CompareIdentifier(string left, string right)
-    {
-        var leftNumeric = long.TryParse(left, out var leftNumber);
-        var rightNumeric = long.TryParse(right, out var rightNumber);
+    private static bool IsNumeric(string identifier) =>
+        identifier.Length > 0 && identifier.All(char.IsAsciiDigit);
 
-        return (leftNumeric, rightNumeric) switch
-        {
-            (true, true) => leftNumber.CompareTo(rightNumber),
-            // Numeric identifiers rank below alphanumeric ones.
-            (true, false) => -1,
-            (false, true) => 1,
-            _ => string.CompareOrdinal(left, right),
-        };
+    // Digit strings of any length: by length once leading zeros are gone, then by text.
+    private static int CompareNumbers(string left, string right)
+    {
+        left = left.TrimStart('0');
+        right = right.TrimStart('0');
+
+        return left.Length != right.Length
+            ? left.Length.CompareTo(right.Length)
+            : string.CompareOrdinal(left, right);
     }
 }

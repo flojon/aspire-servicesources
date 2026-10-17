@@ -56,7 +56,8 @@ never existed. Check the tag of the last release before adding one.
   Reference it instead of `CommunityToolkit.Aspire.Hosting.Java` and `java` services run
   through it, with no catalog or AppHost change. When both are referenced the Community Toolkit's
   is used, so a package that arrives transitively changes nothing. An official preview older than
-  `13.6.1-preview.1.26506.6` is reported at startup. The preview pins package versions that NuGet
+  `13.6.1-preview.1.26506.6` is reported at build time (`SERVICESOURCES003`), or else when the
+  first `java` service resolves. The preview pins package versions that NuGet
   audit flags; see [Installation](docs/getting-started/installation.md#non-net-services). `Unwrap<T>` takes the installed integration's resource type: `JavaAppResource` for the
   official package, `JavaAppExecutableResource` for the Community Toolkit's.
 

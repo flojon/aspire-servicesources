@@ -251,7 +251,8 @@ an endpoint named `https` instead of `http`, so `catalog.GetServiceEndpoint()` r
 `catalog.GetEndpoint("https")` works directly; see
 [naming a service's endpoint](configuration.md#naming-a-services-endpoint). Getting the app itself to actually
 serve TLS is a framework concern the `java:` block deliberately stays out of — reach it from the
-AppHost with `Unwrap<JavaAppExecutableResource>(...)`, most often paired with Aspire's own
+AppHost with `Unwrap<T>(...)` (`JavaAppExecutableResource` for the Community Toolkit's
+integration, `JavaAppResource` for the official one), most often paired with Aspire's own
 `WithHttpsCertificateConfiguration` to hand the service the developer certificate without
 hardcoding a path.
 
@@ -259,7 +260,10 @@ hardcoding a path.
 deliberately doesn't mirror every modifier the integration offers. Anything else is reachable
 from the AppHost with `Unwrap<T>(...)`, which hands the delegate the real resource builder. `T` is
 the installed integration's resource type — `JavaAppExecutableResource` for the Community
-Toolkit's, `Aspire.Hosting.Java.JavaAppResource` for the official one:
+Toolkit's, `Aspire.Hosting.Java.JavaAppResource` for the official one. The example below is
+written for the Community Toolkit's: `WithMavenBuild`, `WithJvmArgs` and `WithOtelAgent` are its
+modifiers, and an AppHost that references only `Aspire.Hosting.Java` has neither that type nor
+those methods — use `Unwrap<JavaAppResource>(...)` with that package's own:
 
 ```csharp
 builder.AddService("catalog")
@@ -272,8 +276,8 @@ builder.AddService("catalog")
 
 This survives a developer switching `catalog` to any other source in their own
 `servicesources.local.json`: when it no longer resolves to a Java resource, the delegate is skipped
-and the skip is logged at startup. The parameterless `Unwrap<JavaAppExecutableResource>()` returns
-the builder directly but throws in that case — use it only where the AppHost genuinely requires a
+and the skip is logged at startup. The parameterless `Unwrap<JavaAppExecutableResource>()` (`Unwrap<JavaAppResource>()` on the
+official package) returns the builder directly but throws in that case — use it only where the AppHost genuinely requires a
 Java resource. See [configuring a resolved service](configuration.md#configuring-a-resolved-service).
 
 `UseJava()`/`useJava()` (also exported to Aspire's Type System for a TypeScript AppHost) is

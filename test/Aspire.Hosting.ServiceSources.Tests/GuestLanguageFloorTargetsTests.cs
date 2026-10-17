@@ -72,6 +72,37 @@ public class GuestLanguageFloorTargetsTests
     }
 
     /// <summary>
+    /// Aspire's own Java package has a preview as its floor, so unlike the others a preview of the
+    /// floor's version is acceptable when it is not older than the floor's.
+    /// </summary>
+    [Theory]
+    [InlineData("13.5.4", true)]
+    [InlineData("13.6.0", true)]
+    [InlineData("13.6.1-preview.1.26506.5", true)]   // the build just before the floor
+    [InlineData("13.6.1-preview.1.9", true)]         // 9 < 26506 numerically, not as text
+    [InlineData("13.6.1-preview.1.26506.6", false)]  // exactly the floor
+    [InlineData("13.6.1-preview.1.26506.10", false)]
+    [InlineData("13.6.1-preview.2.1.1", false)]
+    [InlineData("13.6.1", false)]
+    [InlineData("13.6.2-preview.1.1.1", false)]
+    [InlineData("13.6.1-dev", false)]                // a label this gate cannot order is left to run time
+    public async Task TheOfficialJavaFloorGate_AcceptsAPreviewNotOlderThanTheFloor(string resolved, bool shouldReject)
+    {
+        var (exitCode, output) = await RunProbeAsync("Aspire.Hosting.Java", resolved);
+
+        if (shouldReject)
+        {
+            Assert.Contains("SERVICESOURCES003", output, StringComparison.Ordinal);
+            Assert.NotEqual(0, exitCode);
+        }
+        else
+        {
+            Assert.DoesNotContain("SERVICESOURCES003", output, StringComparison.Ordinal);
+            Assert.Equal(0, exitCode);
+        }
+    }
+
+    /// <summary>
     /// The common case, and the one a check like this most easily gets wrong: an AppHost that
     /// references neither package must build, because it declares no service of either kind.
     /// </summary>

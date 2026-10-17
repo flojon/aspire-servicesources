@@ -30,8 +30,14 @@ internal sealed class JavaLocalResourceKind : ILocalResourceKind
     /// service has added anything, so a <c>workingDirectory</c> or a wrapper script that is not in
     /// the repository is reported here rather than as a bare exec failure from DCP much later.
     /// </summary>
-    public void Validate(string serviceName, string repoRoot, object? rawConfig) =>
+    public void Validate(string serviceName, string repoRoot, object? rawConfig)
+    {
+        // The hosting package is part of the verdict: an official preview too old to use is
+        // reported here, with the rest of the configuration, rather than from Resolve.
+        _ = JavaIntegration.Installed;
+
         Plan(serviceName, repoRoot, rawConfig).RequireCheckout();
+    }
 
     public IResourceBuilder<IResourceWithServiceDiscovery> Resolve(
         IDistributedApplicationBuilder builder, string serviceName, string repoRoot, object? rawConfig) =>

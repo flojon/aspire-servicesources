@@ -541,8 +541,9 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// handler faults. A missing hosting package is left to the caller, which knows what it means.
     /// </summary>
     /// <param name="claimNothingIfUnsettled">
-    /// Answer "no particular type" when the handler itself reports a configuration problem, rather
-    /// than throwing it.
+    /// Answer "no particular type" when the handler reports, from <c>ResourceType</c>, that it
+    /// cannot settle its type yet (<see cref="ServiceSourcesConfigurationException.AsUnsettledResourceType"/>),
+    /// rather than throwing it.
     /// </param>
     private static Type ReadResourceType(
         string serviceName, string kind, ILocalResourceKind handler, bool claimNothingIfUnsettled = false)
@@ -552,12 +553,11 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         {
             declared = handler.ResourceType;
         }
-        catch (ServiceSourcesConfigurationException) when (claimNothingIfUnsettled)
+        catch (ServiceSourcesConfigurationException ex) when (claimNothingIfUnsettled && ex.IsUnsettledResourceType)
         {
-            // A handler that reports a configuration problem from ResourceType itself - a hosting
-            // package too old to use, say - cannot say yet. Where the caller only wants to know
-            // whether to claim a type, that is claiming nothing; the same exception comes back
-            // from the handler's own Validate and resource creation, which is where it belongs.
+            // A handler that says it cannot settle its type yet - a hosting package too old to
+            // use - claims nothing where the caller only wants to know whether to claim a type.
+            // Any other configuration problem is the handler's to report, and still is.
             return typeof(IResourceWithServiceDiscovery);
         }
         catch (Exception ex) when (ex is not ServiceSourcesConfigurationException

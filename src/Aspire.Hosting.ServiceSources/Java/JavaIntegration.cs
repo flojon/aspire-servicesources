@@ -212,15 +212,20 @@ internal sealed class OfficialJavaIntegration : JavaIntegration
             // The runtime refuses an assembly version below the one core references.
             throw TooOld(null, ex);
         }
-        catch (Exception ex) when (ex is FileNotFoundException or FileLoadException)
+        catch (IOException ex) when (ex is FileNotFoundException or FileLoadException)
         {
             // The package is there; something it needs is not. Saying it is missing or old would
             // send the reader to change the one thing that is fine.
-            var dependency = ex is FileNotFoundException notFound ? notFound.FileName : ((FileLoadException)ex).FileName;
+            var dependency = ((IOException)ex) switch
+            {
+                FileNotFoundException notFound => notFound.FileName,
+                FileLoadException loadFailure => loadFailure.FileName,
+                _ => null,
+            };
 
             throw ServiceSourcesConfigurationException.For(
                 $"Services with kind 'java' run through {Raw.Literal(AssemblyName)} when the AppHost references it, but it could not be loaded because its dependency {Raw.Escaped(dependency ?? "(unnamed)")} could not be. Fix that reference, or remove {Raw.Literal(AssemblyName)} to use {Raw.Literal(CommunityToolkitJavaIntegration.AssemblyName)} instead.",
-                ex);
+                ex).AsUnsettledResourceType();
         }
 
         // A preview cut before a release carries that release's assembly version, so an older one
@@ -239,12 +244,9 @@ internal sealed class OfficialJavaIntegration : JavaIntegration
             ? Raw.Compose($"")
             : Raw.Compose($" ({Raw.Escaped(installed)} is installed)");
 
-        return inner is null
-            ? ServiceSourcesConfigurationException.For(
-                $"Services with kind 'java' run through {Raw.Literal(AssemblyName)} when the AppHost references it, but the installed version{found} is older than {Raw.Literal(MinimumVersion)}, which this package needs. Raise {Raw.Literal(AssemblyName)} to {Raw.Literal(MinimumVersion)} or newer, or remove it to use {Raw.Literal(CommunityToolkitJavaIntegration.AssemblyName)} instead.")
-            : ServiceSourcesConfigurationException.For(
-                $"Services with kind 'java' run through {Raw.Literal(AssemblyName)} when the AppHost references it, but the installed version{found} is older than {Raw.Literal(MinimumVersion)}, which this package needs. Raise {Raw.Literal(AssemblyName)} to {Raw.Literal(MinimumVersion)} or newer, or remove it to use {Raw.Literal(CommunityToolkitJavaIntegration.AssemblyName)} instead.",
-                inner);
+        return ServiceSourcesConfigurationException.For(
+            $"Services with kind 'java' run through {Raw.Literal(AssemblyName)} when the AppHost references it, but the installed version{found} is older than {Raw.Literal(MinimumVersion)}, which this package needs. Raise {Raw.Literal(AssemblyName)} to {Raw.Literal(MinimumVersion)} or newer, or remove it to use {Raw.Literal(CommunityToolkitJavaIntegration.AssemblyName)} instead.",
+            inner).AsUnsettledResourceType();
     }
 
     /// <summary>
