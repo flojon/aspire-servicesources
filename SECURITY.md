@@ -34,10 +34,36 @@ But it's drawn on **blast radius** — don't let a catalog command mutate a dire
 doesn't own — not on **provenance**, which is what this document is about: whether the code being
 run is one you or your team reviewed. The two axes come apart exactly where they matter most: a
 managed checkout under `.servicesources/checkouts/` is fully tool-owned, so nothing about that
-notice applies to it, and nothing else asks before its `prepare` step — or the `dotnet`/`javascript`/`java`
-build that follows it — runs for the first time. Yet that checkout's script is the foreign code most
-worth being asked about. A developer who has met the `path` notice and reasonably concludes some
-general "this tool asks before running anything foreign" rule exists would be wrong.
+notice applies to it. The one thing that asks before a managed checkout's `prepare` step runs is a
+**changed command**, described below; the first run — and the `dotnet`/`javascript`/`java` build that
+follows — is not asked about. Yet that checkout's script is the foreign code most worth being asked
+about. A developer who has met the `path` notice and reasonably concludes some general "this tool
+asks before running anything foreign" rule exists would be wrong.
+
+### The one exception: a `prepare` command that changed
+
+When the catalog's `prepare` command for a warm managed checkout is not the one that last succeeded
+there, the dashboard asks before running it, showing the command. This is the one re-run whose
+command line differs from the one you ran or accepted before. It compares the command line, not the
+scripts that command invokes, which change with a moved commit, so pinning `defaultRef` is still the
+lever. Everything else that re-runs a step — `always` mode (so a catalog that switches to `always`
+with a new command is not asked about), a first use, a moved commit, a re-pointed path — runs
+unprompted.
+
+It is a consent gate, not a picker, so it fails closed: **only an explicit "Run" runs the step.**
+Closing the dialog, no answer within 5 minutes, or a dialog that cannot be shown all decline, and
+the service shows `Skipped` rather than starting; restart the AppHost to be asked again. That
+deliberately differs from the cold-checkout source pick, where an unanswered dialog starts every
+service. Anything waiting on a skipped service keeps waiting. With no dashboard to ask through (`aspire run` without one, CI), nothing can ask, so the
+step runs unprompted and the log says why. `aspire publish` never runs the step. `SetCheckoutTiming(CheckoutTiming.Eager)`
+and a kind that cannot be deferred (a custom kind, some `javascript` app types, or one whose
+`ResolveDeferred` returns null) also keep running a changed command unprompted. Services sharing a
+checkout share one completion marker, so one such member runs and records the changed command and the
+deferred members then find nothing changed: it removes the prompt for the whole repository.
+
+The cost: that one run is registered before the checkout is read, like a first-run clone, so it
+loses composition-time launch-profile fidelity (a `dotnet` service should declare its own
+endpoints, as for any deferred service).
 
 ## The lever: pin `defaultRef` / `repository.ref` to a commit
 

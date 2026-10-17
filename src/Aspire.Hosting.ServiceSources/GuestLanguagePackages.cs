@@ -34,7 +34,7 @@ internal static class GuestLanguagePackages
     private static readonly Dictionary<string, (string PackageId, string MinimumVersion)> ByAssemblyName =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            ["Aspire.Hosting.JavaScript"] = ("Aspire.Hosting.JavaScript", "13.5.2"),
+            ["Aspire.Hosting.JavaScript"] = ("Aspire.Hosting.JavaScript", "13.6.1"),
             ["CommunityToolkit.Aspire.Hosting.Java"] = ("CommunityToolkit.Aspire.Hosting.Java", "13.3.0"),
         };
 
@@ -91,7 +91,7 @@ internal static class GuestLanguagePackages
     {
         if (exception is FileNotFoundException { FileName: { } fileName })
         {
-            // "Aspire.Hosting.JavaScript, Version=13.5.2.0, Culture=neutral, PublicKeyToken=..." -
+            // "Aspire.Hosting.JavaScript, Version=13.6.1.0, Culture=neutral, PublicKeyToken=..." -
             // the simple name is all that identifies the package.
             var simpleName = fileName.Split(',')[0].Trim();
 
@@ -154,7 +154,11 @@ internal static class GuestLanguagePackages
         + $"declaring no '{kind}' service does not inherit it, which means it is not installed "
         + $"for you: run `dotnet add package {package.PackageId}`. A guest-language AppHost adds "
         + $"\"{package.PackageId}\": \"{package.MinimumVersion}\" to the \"packages\" section of "
-        + "aspire.config.json instead.";
+        + "aspire.config.json instead."
+        + (kind == Java.JavaLocalResourceKind.KindName
+            ? $" Aspire's own {Java.OfficialJavaIntegration.AssemblyName} (preview) works too, and is "
+                + "used when the AppHost does not reference the Community Toolkit's."
+            : "");
 
     /// <summary>
     /// The version of <paramref name="assemblyName"/> this process can load, or

@@ -18,15 +18,15 @@ namespace Aspire.Hosting.ServiceSources.Tests;
 [Trait("IO", "true")]
 public class GuestLanguageFloorTargetsTests
 {
-    // The floor is 13.5.2 for Aspire.Hosting.JavaScript. Each case is the resolved version an
+    // The floor is 13.6.1 for Aspire.Hosting.JavaScript. Each case is the resolved version an
     // AppHost would have, and whether the gate must reject it.
     [Theory]
-    [InlineData("13.4.6", true)]                 // an older release
-    [InlineData("13.5.1", true)]                 // the patch below the floor
-    [InlineData("13.5.2-preview.1.25", true)]    // a prerelease OF the floor precedes it (SemVer)
-    [InlineData("13.5.2", false)]                // exactly the floor
-    [InlineData("13.5.3", false)]                // newer
-    [InlineData("13.5.3-preview.1.25", false)]   // a prerelease above the floor is still above it
+    [InlineData("13.5.4", true)]                 // an older release
+    [InlineData("13.6.0", true)]                 // the patch below the floor
+    [InlineData("13.6.1-preview.1.25", true)]    // a prerelease OF the floor precedes it (SemVer)
+    [InlineData("13.6.1", false)]                // exactly the floor
+    [InlineData("13.6.2", false)]                // newer
+    [InlineData("13.6.2-preview.1.25", false)]   // a prerelease above the floor is still above it
     [InlineData("14.0.0", false)]                // a new major is not this gate's business
     public async Task TheFloorGate_RejectsExactlyTheVersionsBelowTheFloor(
         string resolved, bool shouldReject)
@@ -67,6 +67,37 @@ public class GuestLanguageFloorTargetsTests
         else
         {
             Assert.DoesNotContain("SERVICESOURCES002", output, StringComparison.Ordinal);
+            Assert.Equal(0, exitCode);
+        }
+    }
+
+    /// <summary>
+    /// Aspire's own Java package has a preview as its floor, so unlike the others a preview of the
+    /// floor's version is acceptable when it is not older than the floor's.
+    /// </summary>
+    [Theory]
+    [InlineData("13.5.4", true)]
+    [InlineData("13.6.0", true)]
+    [InlineData("13.6.1-preview.1.26506.5", true)]   // the build just before the floor
+    [InlineData("13.6.1-preview.1.9", true)]         // 9 < 26506 numerically, not as text
+    [InlineData("13.6.1-preview.1.26506.6", false)]  // exactly the floor
+    [InlineData("13.6.1-preview.1.26506.10", false)]
+    [InlineData("13.6.1-preview.2.1.1", false)]
+    [InlineData("13.6.1", false)]
+    [InlineData("13.6.2-preview.1.1.1", false)]
+    [InlineData("13.6.1-dev", false)]                // a label this gate cannot order is left to run time
+    public async Task TheOfficialJavaFloorGate_AcceptsAPreviewNotOlderThanTheFloor(string resolved, bool shouldReject)
+    {
+        var (exitCode, output) = await RunProbeAsync("Aspire.Hosting.Java", resolved);
+
+        if (shouldReject)
+        {
+            Assert.Contains("SERVICESOURCES003", output, StringComparison.Ordinal);
+            Assert.NotEqual(0, exitCode);
+        }
+        else
+        {
+            Assert.DoesNotContain("SERVICESOURCES003", output, StringComparison.Ordinal);
             Assert.Equal(0, exitCode);
         }
     }

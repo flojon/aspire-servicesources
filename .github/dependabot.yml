@@ -33,7 +33,7 @@
 # so it holds regardless of what graph Dependabot walks to get there. The trade-off, confirmed
 # against GitHub's own docs rather than assumed: `ignore` suppresses Dependabot's *security*
 # updates for a matching dependency too, not just version updates, so a real advisory against
-# any of these five packages will not auto-generate a PR the way it does for test/ and
+# any of these packages will not auto-generate a PR the way it does for test/ and
 # samples/. Repository vulnerability alerts stay enabled regardless (Settings > Code security),
 # so an advisory is still visible - it just does not turn into an automatic PR the way it
 # would elsewhere, and a src/ floor bump for a CVE has to be raised and verified by hand
@@ -83,6 +83,9 @@ updates:
       # `verify repo invariants` job fails if they part.
       - dependency-name: "Aspire.Hosting.AppHost"
       - dependency-name: "CommunityToolkit.Aspire.Hosting.Java"
+      # Aspire's own Java integration, the alternative to the Community Toolkit's: a preview, and
+      # a floor for the same reason (see the targets file's SERVICESOURCES003).
+      - dependency-name: "Aspire.Hosting.Java"
       - dependency-name: "YamlDotNet"
     schedule:
       interval: "weekly"

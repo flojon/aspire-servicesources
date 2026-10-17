@@ -222,14 +222,32 @@ internal static class CheckoutPreparation
         IGitClient gitClient) =>
         Decide(serviceName, step, repoRoot, appHostDirectory, managedCheckout, gitClient).Reason is not null;
 
+    /// <summary>
+    /// Whether this step would run only because the catalog's command is not the one that last
+    /// succeeded here. The one reason a caller may want consent for, since it is the only one where
+    /// the thing about to execute is different from what the developer ran before.
+    /// </summary>
+    public static bool WouldRunBecauseCommandChanged(
+        string serviceName,
+        PrepareStep step,
+        string repoRoot,
+        string appHostDirectory,
+        bool managedCheckout,
+        IGitClient gitClient) =>
+        Decide(serviceName, step, repoRoot, appHostDirectory, managedCheckout, gitClient).CommandChanged;
+
+    /// <summary>The step's command as one redacted line, for a prompt.</summary>
+    public static Raw DescribeCommand(PrepareStep step) => RedactedDescribe(step);
+
     /// <param name="Reason">Why the step is about to run, or <see langword="null"/> when it is not.</param>
+    /// <param name="CommandChanged">Whether <paramref name="Reason"/> is that the command differs from the recorded one.</param>
     /// <param name="CheckoutPath">
     /// The normalized checkout path a <c>path</c> marker is keyed on, or <see langword="null"/> for a
     /// managed checkout, whose marker location is already the key.
     /// </param>
     /// <param name="Commit">The commit the step would run against, where that is knowable.</param>
     private readonly record struct Decision(
-        Raw? Reason, string MarkerPath, string? CheckoutPath, string? Commit);
+        Raw? Reason, bool CommandChanged, string MarkerPath, string? CheckoutPath, string? Commit);
 
     private static Decision Decide(
         string serviceName,
@@ -258,8 +276,9 @@ internal static class CheckoutPreparation
             ? gitClient.GetHeadCommitSha(repoRoot)
             : null;
 
-        return new Decision(
-            ReasonToRun(step, markerPath, commit, checkoutPath), markerPath, checkoutPath, commit);
+        var reason = ReasonToRun(step, markerPath, commit, checkoutPath, out var commandChanged);
+
+        return new Decision(reason, commandChanged, markerPath, checkoutPath, commit);
     }
 
     /// <summary>
@@ -272,8 +291,10 @@ internal static class CheckoutPreparation
     /// about this start rather than a warning bolted onto a mode choice.
     /// </remarks>
     private static Raw? ReasonToRun(
-        PrepareStep step, string markerPath, string? commit, string? checkoutPath)
+        PrepareStep step, string markerPath, string? commit, string? checkoutPath, out bool commandChanged)
     {
+        commandChanged = false;
+
         // `never` should not reach here at all: it means "no step", so PreparePlan resolves it to
         // one and this is never handed a step carrying it. Checked anyway, because the cost of
         // being wrong about that is running a command in a directory the developer manages — and a
@@ -300,6 +321,7 @@ internal static class CheckoutPreparation
 
         if (!string.Equals(marker.CommandHash, step.CommandHash, StringComparison.Ordinal))
         {
+            commandChanged = true;
             return Raw.Literal("its prepare command has changed since it last succeeded.");
         }
 

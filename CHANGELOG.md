@@ -44,7 +44,22 @@ never existed. Check the tag of the last release before adding one.
   surfaces later, as that service's own resource state, rather than failing the AppHost synchronously
   at `AddService()`.
 
+- **The Aspire floor is now 13.6.1** (was 13.5.2). `Aspire.Hosting` and `Aspire.Hosting.JavaScript`
+  are floored at 13.6.1, so an AppHost still on Aspire 13.5.x gets a mixed Aspire family at restore
+  (`NU1605` against its own `Aspire.AppHost.Sdk` and `Aspire.Hosting.AppHost`). Move the AppHost's
+  `Aspire.AppHost.Sdk`, and any `Aspire.Hosting.JavaScript` reference, to 13.6.1 or later. The
+  generated-code sample now needs Aspire CLI 13.6.1 or later.
+
 ### Added
+
+- **`kind: java` also runs on Aspire's official `Aspire.Hosting.Java` integration** (preview).
+  Reference it instead of `CommunityToolkit.Aspire.Hosting.Java` and `java` services run
+  through it, with no catalog or AppHost change. When both are referenced the Community Toolkit's
+  is used, so a package that arrives transitively changes nothing. An official preview older than
+  `13.6.1-preview.1.26506.6` is reported at build time (`SERVICESOURCES003`), or else when the
+  first `java` service resolves. The preview pins package versions that NuGet
+  audit flags; see [Installation](docs/getting-started/installation.md#non-net-services). `Unwrap<T>` takes the installed integration's resource type: `JavaAppResource` for the
+  official package, `JavaAppExecutableResource` for the Community Toolkit's.
 
 - **A `dotnet` service can select its launch profile** ([#415]). A new `dotnet:` block in the yaml
   catalog takes `launchProfileName` (run under that `launchSettings.json` profile) and
@@ -90,6 +105,18 @@ never existed. Check the tag of the last release before adding one.
   prompt. A service that `WaitFor`s a skipped service keeps waiting; the dialog lists what waits on
   each one. To get the previous behaviour back, call `builder.SetCheckoutTiming(CheckoutTiming.Eager)`
   before the first `AddService()`.
+
+- **A changed `prepare` command is confirmed in the dashboard before it re-runs** ([#298]). When
+  the catalog's `prepare` command for a warm managed checkout is not the one that last succeeded
+  there, the dashboard now shows the command and asks before running it; a first use, a moved
+  commit and `always` mode still run unprompted. Only an explicit "Run"
+  runs the step: closing the dialog, no answer within 5 minutes or a dialog that cannot be shown
+  declines, and the service shows `Skipped` (restart the AppHost to be asked again). That
+  deliberately differs from the cold-checkout source pick, which starts on timeout, because this is
+  a consent gate on changed catalog code. With no dashboard the step runs unprompted and the log says
+  why. Cost: the one run that needs asking is deferred even though the checkout is warm, so it loses
+  composition-time launch-profile fidelity; `SetCheckoutTiming(CheckoutTiming.Eager)`, `aspire
+  publish` and kinds that cannot defer are unchanged.
 
 ### Fixed
 
@@ -2009,3 +2036,4 @@ Targets `net10.0`.
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
 [#397]: https://github.com/flojon/aspire-servicesources/issues/397
+[#298]: https://github.com/flojon/aspire-servicesources/issues/298

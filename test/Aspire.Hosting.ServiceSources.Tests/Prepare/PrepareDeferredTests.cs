@@ -745,4 +745,310 @@ public class PrepareDeferredTests
         Assert.Equal(1, runner.Runs);
         Assert.Empty(DeferredCheckout.For(builder).StartTasks);
     }
+
+    /// <summary>Answers the cold-checkout source pick up front, so only the prepare prompt can appear.</summary>
+    private static void PlantSelection(string appHostDirectory)
+    {
+        var tool = Directory.CreateDirectory(Path.Combine(appHostDirectory, ".servicesources")).FullName;
+        File.WriteAllText(
+            Path.Combine(tool, "selection.json"),
+            """{ "version": 1, "services": { "routing": { "start": true } } }""");
+    }
+
+    private const string ChangedCommandLine = "bash -c changed";
+
+    /// <summary>
+    /// Warms a checkout with the stock command, then registers a second start whose catalog command
+    /// differs and returns once that start is waiting to run.
+    /// </summary>
+    private static async Task<(FakeRunner Runner, IServiceProvider Services, IDistributedApplicationBuilder Builder)>
+        StartWithChangedCommandAsync(FakeInteractionService? interaction, TimeProvider? time = null)
+    {
+        var (dir, git, journal) = await WarmCheckoutAsync();
+
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+        builder.AddLocalKind(KindName, new StandInKind(journal, "prepare.sh"));
+        if (interaction is not null)
+        {
+            builder.Services.AddSingleton<IInteractionService>(interaction);
+        }
+
+        if (time is not null)
+        {
+            builder.Services.AddSingleton(time);
+        }
+
+        var runner = new FakeRunner(journal);
+        var changed = new PrepareMetadata { Command = ["bash", "-c", "changed"] };
+        var resource = new LocalProjectSource(git, runner)
+            .Resolve(builder, "routing", Definition("routing", changed), DevConfig());
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+        await PublishNotStartedAsync(services, resource.Resource);
+
+        return (runner, services, builder);
+    }
+
+    private static Task StartTasksAsync(IDistributedApplicationBuilder builder) =>
+        Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+    private static async Task AssertDeclinedAsync(
+        FakeRunner runner, IServiceProvider services, IDistributedApplicationBuilder builder)
+    {
+        var registered = Assert.Single(builder.Resources, r => r.Name == "routing");
+        Assert.Equal(0, runner.Runs);
+        Assert.Equal("Skipped", await StateOfAsync(services, registered, TimeSpan.FromSeconds(30)));
+    }
+
+    [Fact]
+    public async Task ChangedCommand_Confirmed_Runs()
+    {
+        var interaction = new FakeInteractionService { IsAvailable = true, Confirm = () => InteractionResult.Ok(true) };
+
+        var (runner, _, builder) = await StartWithChangedCommandAsync(interaction);
+        await StartTasksAsync(builder);
+
+        Assert.Equal(1, interaction.ConfirmCount);
+        Assert.Contains(ChangedCommandLine, interaction.ConfirmMessage);
+        Assert.Equal(1, runner.Runs);
+    }
+
+    [Fact]
+    public async Task ChangedCommand_Declined_SkipsWithoutRunningOrStarting()
+    {
+        var interaction = new FakeInteractionService { IsAvailable = true, Confirm = () => InteractionResult.Ok(false) };
+
+        var (runner, services, builder) = await StartWithChangedCommandAsync(interaction);
+        await StartTasksAsync(builder);
+
+        Assert.Equal(1, interaction.ConfirmCount);
+        await AssertDeclinedAsync(runner, services, builder);
+    }
+
+    [Fact]
+    public async Task ChangedCommand_DialogClosedWithoutAnAnswer_Declines()
+    {
+        var interaction = new FakeInteractionService
+        {
+            IsAvailable = true, Confirm = () => InteractionResult.Cancel<bool>(),
+        };
+
+        var (runner, services, builder) = await StartWithChangedCommandAsync(interaction);
+        await StartTasksAsync(builder);
+
+        Assert.Equal(1, interaction.ConfirmCount);
+        await AssertDeclinedAsync(runner, services, builder);
+    }
+
+    [Fact]
+    public async Task ChangedCommand_PromptThrows_Declines()
+    {
+        var interaction = new FakeInteractionService { IsAvailable = true, Throw = new InvalidOperationException("no dashboard") };
+
+        var (runner, services, builder) = await StartWithChangedCommandAsync(interaction);
+        await StartTasksAsync(builder);
+
+        Assert.Equal(1, interaction.ConfirmCount);
+        await AssertDeclinedAsync(runner, services, builder);
+    }
+
+    [Fact]
+    public async Task ChangedCommand_NoAnswerWithinTimeout_Declines()
+    {
+        var interaction = new FakeInteractionService { IsAvailable = true };
+        var time = new ManualTimeProvider();
+
+        var (runner, services, builder) = await StartWithChangedCommandAsync(interaction, time);
+        var tasks = StartTasksAsync(builder);
+
+        await interaction.WaitForConfirmAsync().WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.False(tasks.IsCompleted);
+        time.Advance(DeferredCheckout.PromptTimeout + TimeSpan.FromSeconds(1));
+        await tasks;
+
+        await AssertDeclinedAsync(runner, services, builder);
+    }
+
+    [Fact]
+    public async Task ChangedCommand_NoDashboard_RunsUnprompted()
+    {
+        var interaction = new FakeInteractionService { IsAvailable = false };
+
+        var (runner, _, builder) = await StartWithChangedCommandAsync(interaction);
+        await StartTasksAsync(builder);
+
+        Assert.Equal(0, interaction.ConfirmCount);
+        Assert.Equal(1, runner.Runs);
+    }
+
+    [Fact]
+    public async Task ChangedCommand_NoInteractionServiceRegistered_RunsUnprompted()
+    {
+        var (runner, _, builder) = await StartWithChangedCommandAsync(interaction: null);
+        await StartTasksAsync(builder);
+
+        Assert.Equal(1, runner.Runs);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("always")]
+    public async Task FirstUseAndAlwaysMode_RunWithoutAsking(string? mode)
+    {
+        var dir = CreateAppHostDirectory("routing");
+        PlantSelection(dir);
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+        var interaction = new FakeInteractionService { IsAvailable = true };
+        builder.Services.AddSingleton<IInteractionService>(interaction);
+
+        var journal = new Journal();
+        builder.AddLocalKind(KindName, new StandInKind(journal, "prepare.sh"));
+        var runner = new FakeRunner(journal);
+        var routing = new LocalProjectSource(new FakeGitClient(), runner)
+            .Resolve(builder, "routing", Definition("routing", Prepare(mode)), DevConfig());
+
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+        await PublishNotStartedAsync(services, routing.Resource);
+        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Equal(0, interaction.ConfirmCount);
+        Assert.Equal(1, runner.Runs);
+    }
+
+    /// <summary>A warm managed checkout whose marker records the stock command's success.</summary>
+    private static async Task<(string Dir, FakeGitClient Git, Journal Journal)> WarmCheckoutAsync()
+    {
+        var dir = CreateAppHostDirectory("routing");
+        PlantSelection(dir);
+        var git = new FakeGitClient();
+        var journal = new Journal();
+
+        var first = TestHelpers.CreateBuilderThatCanStart(dir);
+        first.SetCheckoutTiming(CheckoutTiming.Deferred);
+        first.AddLocalKind(KindName, new StandInKind(journal, "prepare.sh"));
+        var resource = new LocalProjectSource(git, new FakeRunner(journal))
+            .Resolve(first, "routing", Definition("routing", Prepare()), DevConfig());
+        var services = first.Services.BuildServiceProvider();
+        await first.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(first.Resources)));
+        await PublishNotStartedAsync(services, resource.Resource);
+        await Task.WhenAll(DeferredCheckout.For(first).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+        return (dir, git, journal);
+    }
+
+    private static PrepareStep StepFor(PrepareMetadata metadata) =>
+        PreparePlan.For(
+            "routing", PreparePlan.ServiceLabel("routing"), metadata, null, managedCheckout: true, windows: false)
+            .Step!;
+
+    [Fact]
+    public async Task ShouldDefer_WarmCheckoutWithChangedCommand_Defers()
+    {
+        var (dir, git, _) = await WarmCheckoutAsync();
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+
+        var changed = StepFor(new PrepareMetadata { Command = ["bash", "-c", "changed"] });
+
+        Assert.True(DeferredCheckout.For(builder)
+            .ShouldDefer(builder, "routing", Definition("routing"), DevConfig(), changed, git));
+    }
+
+    [Fact]
+    public async Task ShouldDefer_WarmCheckoutWithUnchangedCommand_StaysEager()
+    {
+        var (dir, git, _) = await WarmCheckoutAsync();
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+
+        var unchanged = StepFor(Prepare());
+
+        Assert.False(DeferredCheckout.For(builder)
+            .ShouldDefer(builder, "routing", Definition("routing"), DevConfig(), unchanged, git));
+    }
+
+    [Fact]
+    public async Task ShouldDefer_WarmCheckoutRunningForAnotherReason_StaysEager()
+    {
+        var (dir, git, _) = await WarmCheckoutAsync();
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+
+        var always = StepFor(Prepare("always"));
+
+        Assert.False(DeferredCheckout.For(builder)
+            .ShouldDefer(builder, "routing", Definition("routing"), DevConfig(), always, git));
+    }
+
+    [Fact]
+    public async Task ShouldDefer_WarmCheckoutWithChangedCommandInPublishMode_StaysEager()
+    {
+        var (dir, git, _) = await WarmCheckoutAsync();
+        var builder = TestHelpers.CreatePublishingBuilder(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+
+        var changed = StepFor(new PrepareMetadata { Command = ["bash", "-c", "changed"] });
+
+        Assert.False(DeferredCheckout.For(builder)
+            .ShouldDefer(builder, "routing", Definition("routing"), DevConfig(), changed, git));
+    }
+
+    [Fact]
+    public async Task WarmCheckoutWithUnchangedCommand_PreparesNothingAndStaysEager()
+    {
+        var (dir, git, journal) = await WarmCheckoutAsync();
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+        var interaction = new FakeInteractionService { IsAvailable = true };
+        builder.Services.AddSingleton<IInteractionService>(interaction);
+        builder.AddLocalKind(KindName, new StandInKind(journal, "prepare.sh"));
+
+        var runner = new FakeRunner(journal);
+        new LocalProjectSource(git, runner)
+            .Resolve(builder, "routing", Definition("routing", Prepare()), DevConfig());
+
+        Assert.Empty(DeferredCheckout.For(builder).StartTasks);
+        Assert.Equal(0, runner.Runs);
+        Assert.Equal(0, interaction.ConfirmCount);
+    }
+
+    /// <remarks>
+    /// The source pick asks which services to clone. A service deferred only for its prepare
+    /// confirmation has nothing to clone, so it must not be asked that, or skipped by it.
+    /// </remarks>
+    [Fact]
+    public async Task WarmCheckoutWithChangedCommand_IsNotAskedWhichServicesToClone()
+    {
+        var (dir, _, _) = await WarmCheckoutAsync();
+        File.Delete(Path.Combine(dir, ".servicesources", "selection.json"));
+
+        var interaction = new FakeInteractionService { IsAvailable = true, Confirm = () => InteractionResult.Ok(true) };
+
+        var git = new FakeGitClient();
+        var journal = new Journal();
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+        builder.Services.AddSingleton<IInteractionService>(interaction);
+        builder.AddLocalKind(KindName, new StandInKind(journal, "prepare.sh"));
+        var runner = new FakeRunner(journal);
+        var resource = new LocalProjectSource(git, runner).Resolve(
+            builder, "routing", Definition("routing", new PrepareMetadata { Command = ["bash", "-c", "changed"] }),
+            DevConfig());
+
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+        await PublishNotStartedAsync(services, resource.Resource);
+        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Equal(0, interaction.PromptCount);
+        Assert.Equal(1, interaction.ConfirmCount);
+        Assert.Equal(1, runner.Runs);
+    }
 }

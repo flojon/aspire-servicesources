@@ -11,20 +11,20 @@ dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources
 
 - .NET 8 or later — net8.0, net9.0 and net10.0 are all supported.
 - An AppHost project using the `Aspire.AppHost.Sdk` (`aspire new` / `aspire restore` sets this up).
-- Aspire 13.5.2 or later — see below.
+- Aspire 13.6.1 or later — see below.
 - Whatever the sources you use need on `PATH`: `git` 2.7+ for [`"repository"`](../sources/repository.md),
   `kubectl` for [`"kubernetes"`](../sources/kubernetes.md).
 
 ## Aspire version
 
-!!! warning "This package floors Aspire at 13.5.2, so an AppHost still on 13.4.x gets a mixed Aspire family."
-    NuGet takes the highest floor, so `Aspire.Hosting` is lifted to 13.5.2 while your
+!!! warning "This package floors Aspire at 13.6.1, so an AppHost still on 13.5.x gets a mixed Aspire family."
+    NuGet takes the highest floor, so `Aspire.Hosting` is lifted to 13.6.1 while your
     `Aspire.AppHost.Sdk`, `Aspire.Hosting.AppHost` and the DCP and dashboard packages the SDK
     pins to it stay where they are. Nothing warns about it at restore. Move your AppHost's own
-    Aspire version to 13.5.2 or later at the same time:
+    Aspire version to 13.6.1 or later at the same time:
 
     ```xml
-    <Sdk Name="Aspire.AppHost.Sdk" Version="13.5.2" />
+    <Sdk Name="Aspire.AppHost.Sdk" Version="13.6.1" />
     ```
 
 ## Non-.NET services
@@ -36,7 +36,8 @@ referenced by your AppHost alongside this one — see
 | `kind` | Package | Minimum |
 | --- | --- | --- |
 | `java` | `CommunityToolkit.Aspire.Hosting.Java` | 13.3.0 |
-| `javascript` | `Aspire.Hosting.JavaScript` | 13.5.2 |
+| `java` | or `Aspire.Hosting.Java` (preview) | 13.6.1-preview.1 |
+| `javascript` | `Aspire.Hosting.JavaScript` | 13.6.1 |
 
 ```bash
 dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources
@@ -45,6 +46,17 @@ dotnet add package KoalaSoft.Aspire.Hosting.ServiceSources
 dotnet add package Aspire.Hosting.JavaScript              # kind: javascript
 dotnet add package CommunityToolkit.Aspire.Hosting.Java   # kind: java
 ```
+
+For `java`, either package works, and the one the AppHost references is used — the Community
+Toolkit's if both are, so referencing the official one transitively changes nothing. `Aspire.Hosting.Java` is still in preview; this package is built against
+13.6.1-preview.1.26506.6, and an older preview is reported with the version to move to — at build time
+(`SERVICESOURCES003`) where the check runs, otherwise when the first `java` service resolves. Like the others, it is not a dependency, so an AppHost that doesn't use it never sees it.
+
+A caveat on the official package: it pins `System.Security.Cryptography.Pkcs` 10.0.12 and, through
+`Aspire.Hosting`, `MessagePack` 2.5.302, both of which NuGet audit flags (NU1902/NU1903) — as errors
+under `-warnaserror` or `TreatWarningsAsErrors`. Raise them with a direct `PackageReference` to
+`System.Security.Cryptography.Pkcs` 10.0.13 and `MessagePack` 2.5.303 or newer, or suppress the
+advisories, until the packages move.
 
 Add one per language you actually use, and nothing for a language you don't. This package
 compiles against both but declares neither as a dependency, so an AppHost with no
@@ -55,7 +67,7 @@ above the minimum above, and the two need not match each other.
 
 Forget one and you are told which. Below the minimum, your build fails naming the package and
 the version it resolved — `SERVICESOURCES001` for `Aspire.Hosting.JavaScript`,
-`SERVICESOURCES002` for `CommunityToolkit.Aspire.Hosting.Java`. A prerelease of the minimum
+`SERVICESOURCES002` for `CommunityToolkit.Aspire.Hosting.Java`, `SERVICESOURCES003` for `Aspire.Hosting.Java`. A prerelease of the minimum
 counts as below it. Missing entirely, the first `AddService()` for a service of that kind fails
 with a message naming the package to install — which is the only report a guest-language AppHost
 gets, since the Aspire CLI hands it this package through a project reference and a project

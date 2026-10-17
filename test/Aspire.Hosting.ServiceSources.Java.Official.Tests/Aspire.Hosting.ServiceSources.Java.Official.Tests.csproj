@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- A test assembly, not an integration; see Directory.Build.props. -->
+    <IsAspirePolyglotCompatible>false</IsAspirePolyglotCompatible>
+  </PropertyGroup>
+
+  <!-- The official Java integration, with the Community Toolkit's deliberately absent: this is the
+       AppHost that has only the official package installed. -->
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.Java" />
+    <PackageReference Include="System.Security.Cryptography.Pkcs" />
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="Aspire.Hosting.ServiceSources.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Aspire.Hosting.ServiceSources\Aspire.Hosting.ServiceSources.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Aspire.Hosting.ServiceSources.Tests\TempDirectories.cs" Link="TempDirectories.cs" />
+    <Compile Include="..\Aspire.Hosting.ServiceSources.Tests\TestBuilderDefaults.cs" Link="TestBuilderDefaults.cs" />
+  </ItemGroup>
+
+</Project>
