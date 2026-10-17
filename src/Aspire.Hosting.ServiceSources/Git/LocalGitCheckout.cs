@@ -179,6 +179,7 @@ internal static class LocalGitCheckout
     /// service, <c>path.path</c> for a <c>"path"</c> one — resolved and checked to exist. Unconfined:
     /// it is the developer's own machine, so unlike a catalog-written path it may point anywhere.
     /// </summary>
+    /// <param name="subject">The service or repository the override belongs to, as the message should name it.</param>
     /// <param name="key">The key the developer wrote, as the message should name it.</param>
     /// <remarks>
     /// Anchored to the AppHost directory (matching Aspire's own <c>AddProject</c>), not to the
@@ -188,14 +189,14 @@ internal static class LocalGitCheckout
     /// surface as an obscure failure rather than as a named config error.
     /// </remarks>
     public static string ResolveDeveloperDirectory(
-        string serviceName, string key, string path, string appHostDirectory)
+        Raw subject, string key, string path, string appHostDirectory)
     {
         var resolved = Path.GetFullPath(path, appHostDirectory);
 
         if (!Directory.Exists(resolved))
         {
             throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': the '{Raw.Escaped(key)}' override points at '{Raw.Escaped(resolved)}', which does not exist. '{Raw.Escaped(key)}' must name an existing local directory.");
+                $"{subject}: the '{Raw.Escaped(key)}' override points at '{Raw.Escaped(resolved)}', which does not exist. '{Raw.Escaped(key)}' must name an existing local directory.");
         }
 
         return resolved;
@@ -298,15 +299,12 @@ internal static class LocalGitCheckout
     /// <param name="repositoryConfig">
     /// This service's group-level developer-config entry (#291) — <see langword="null"/> for an
     /// ungrouped service, the overwhelming common case, which never has one. Only its
-    /// <see cref="RepositoryDeveloperConfig.Ref"/> is read here; <see cref="RepositoryDeveloperConfig.Path"/>
-    /// is reserved (see the check below) and <see cref="RepositoryDeveloperConfig.Prepare"/> is a
-    /// caller's concern, not this method's.
+    /// <see cref="RepositoryDeveloperConfig.Ref"/> is read here.
     /// </param>
     /// <exception cref="ServiceSourcesConfigurationException">
     /// <paramref name="config"/> sets <c>repository.path</c> alongside <c>repository.ref</c>; a
     /// grouped service sets <c>repository.ref</c> at all (criterion 4 — its repository's ref is
-    /// shared, not per-member); or <paramref name="repositoryConfig"/> sets <c>path</c>, which is
-    /// reserved rather than implemented as a whole-group checkout redirect.
+    /// shared, not per-member).
     /// </exception>
     public static PreparedCheckout PrepareRepoRoot(
         string serviceName,
@@ -338,12 +336,6 @@ internal static class LocalGitCheckout
                 $"Service '{new Name(serviceName)}': 'repository.ref' cannot be set — this service is grouped into the shared repository '{new Name(definition.Repository.CheckoutName)}', whose ref applies to every member alike rather than to any one of them. Set '{Raw.Literal(DeveloperConfiguration.RepositoriesKey, default)}:{new Name(definition.Repository.CheckoutName)}:ref' instead.");
         }
 
-        if (grouped && repositoryConfig?.Path is not null)
-        {
-            throw ServiceSourcesConfigurationException.For(
-                $"Repository '{new Name(definition.Repository.CheckoutName)}': '{Raw.Literal(DeveloperConfiguration.RepositoriesKey, default)}:{new Name(definition.Repository.CheckoutName)}:path' is reserved and does not redirect the group's checkout — that is not implemented yet. Point one member service at a checkout you manage yourself with the 'path' source instead — 'source': 'path' and 'path': {{ 'path': '...' }} for that service in {Raw.Literal(DeveloperConfiguration.FileName)}.");
-        }
-
         if (config.Repository.Path is not null)
         {
             if (config.Repository.Ref is not null)
@@ -354,7 +346,7 @@ internal static class LocalGitCheckout
 
             // Used as-is: no clone, no checkout, no fetch, ever.
             return new PreparedCheckout(
-                ResolveDeveloperDirectory(serviceName, "repository.path", config.Repository.Path, appHostDirectory),
+                ResolveDeveloperDirectory(PreparePlan.ServiceLabel(serviceName), "repository.path", config.Repository.Path, appHostDirectory),
                 NeedsReconciliation: false);
         }
 
