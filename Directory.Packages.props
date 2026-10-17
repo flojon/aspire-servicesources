@@ -38,6 +38,7 @@
        src/Directory.Packages.props imports this one rather than repeating it. -->
   <ItemGroup>
     <PackageVersion Include="MinVer" Version="8.0.0" />
+    <PackageVersion Include="MessagePack" Version="2.5.307" />
   </ItemGroup>
 
   <ItemGroup>
