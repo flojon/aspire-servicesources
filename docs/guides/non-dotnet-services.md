@@ -128,7 +128,7 @@ Runs the checkout through whichever Java hosting integration your AppHost refere
 the Aspire Community Toolkit's [Java integration](https://github.com/CommunityToolkit/Aspire),
 `CommunityToolkit.Aspire.Hosting.Java` (13.3.0 or newer), or Aspire's own `Aspire.Hosting.Java`,
 which is still in preview — see [Installation](../getting-started/installation.md#non-net-services).
-If both are referenced, the official one is used. `java` is a built-in kind, resolved the same way
+If both are referenced, the Community Toolkit's is used; reference only the official one to run through it. `java` is a built-in kind, resolved the same way
 `dotnet` always has been — reference a package and declare the kind, no registration call needed:
 
 === "C#"

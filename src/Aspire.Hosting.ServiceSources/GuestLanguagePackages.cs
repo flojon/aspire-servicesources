@@ -157,7 +157,7 @@ internal static class GuestLanguagePackages
         + "aspire.config.json instead."
         + (kind == Java.JavaLocalResourceKind.KindName
             ? $" Aspire's own {Java.OfficialJavaIntegration.AssemblyName} (preview) works too, and is "
-                + "used instead whenever the AppHost references it."
+                + "used when the AppHost does not reference the Community Toolkit's."
             : "");
 
     /// <summary>

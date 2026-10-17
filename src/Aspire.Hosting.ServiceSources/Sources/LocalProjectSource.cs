@@ -499,7 +499,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
 
         try
         {
-            return ReadResourceType(serviceName, definition.Kind, handler);
+            return ReadResourceType(serviceName, definition.Kind, handler, claimNothingIfUnsettled: true);
         }
         catch (Exception ex) when (GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, definition.Kind) is not null)
         {
@@ -540,12 +540,25 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// Reads <see cref="ILocalResourceKind.ResourceType"/>, naming the service and kind when the
     /// handler faults. A missing hosting package is left to the caller, which knows what it means.
     /// </summary>
-    private static Type ReadResourceType(string serviceName, string kind, ILocalResourceKind handler)
+    /// <param name="claimNothingIfUnsettled">
+    /// Answer "no particular type" when the handler itself reports a configuration problem, rather
+    /// than throwing it.
+    /// </param>
+    private static Type ReadResourceType(
+        string serviceName, string kind, ILocalResourceKind handler, bool claimNothingIfUnsettled = false)
     {
         Type? declared;
         try
         {
             declared = handler.ResourceType;
+        }
+        catch (ServiceSourcesConfigurationException) when (claimNothingIfUnsettled)
+        {
+            // A handler that reports a configuration problem from ResourceType itself - a hosting
+            // package too old to use, say - cannot say yet. Where the caller only wants to know
+            // whether to claim a type, that is claiming nothing; the same exception comes back
+            // from the handler's own Validate and resource creation, which is where it belongs.
+            return typeof(IResourceWithServiceDiscovery);
         }
         catch (Exception ex) when (ex is not ServiceSourcesConfigurationException
             && GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, kind) is null)

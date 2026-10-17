@@ -47,10 +47,16 @@ dotnet add package Aspire.Hosting.JavaScript              # kind: javascript
 dotnet add package CommunityToolkit.Aspire.Hosting.Java   # kind: java
 ```
 
-For `java`, either package works, and the one the AppHost references is used — the official
-one if both are. `Aspire.Hosting.Java` is still in preview; this package is built against
+For `java`, either package works, and the one the AppHost references is used — the Community
+Toolkit's if both are, so referencing the official one transitively changes nothing. `Aspire.Hosting.Java` is still in preview; this package is built against
 13.6.1-preview.1.26506.6, and an older preview is reported at startup with the version to move
 to. Like the others, it is not a dependency, so an AppHost that doesn't use it never sees it.
+
+A caveat on the official package: it pins `System.Security.Cryptography.Pkcs` 10.0.12 and, through
+`Aspire.Hosting`, `MessagePack` 2.5.302, both of which NuGet audit flags (NU1902/NU1903) — as errors
+under `-warnaserror` or `TreatWarningsAsErrors`. Raise them with a direct `PackageReference` to
+`System.Security.Cryptography.Pkcs` 10.0.13 and `MessagePack` 2.5.303 or newer, or suppress the
+advisories, until the packages move.
 
 Add one per language you actually use, and nothing for a language you don't. This package
 compiles against both but declares neither as a dependency, so an AppHost with no

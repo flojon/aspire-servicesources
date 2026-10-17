@@ -26,6 +26,19 @@ public class OfficialJavaIntegrationTests
     }
 
     /// <summary>
+    /// The version check reads the package's informational version; if a release stopped stamping
+    /// one, it would quietly stop checking.
+    /// </summary>
+    [Fact]
+    public void InstalledVersion_IsReadableAndNotOlderThanTheMinimum()
+    {
+        var installed = OfficialJavaIntegration.InstalledVersion();
+
+        Assert.NotNull(installed);
+        Assert.False(PackageVersionComparison.IsOlder(installed, OfficialJavaIntegration.MinimumVersion), installed);
+    }
+
+    /// <summary>
     /// The too-old message quotes the version core compiles against, which lives in
     /// <c>Directory.Packages.props</c>; a bump there has to move the message with it.
     /// </summary>
