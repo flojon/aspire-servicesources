@@ -146,26 +146,21 @@ public class OfficialJavaIntegrationTests
     }
 
     /// <summary>
-    /// Windows cannot exec a <c>.cmd</c>/<c>.bat</c> directly, so there the official integration runs
-    /// the wrapper through <c>cmd.exe /c call</c>, naming it relative to the working directory;
-    /// elsewhere the wrapper is the command itself.
+    /// The official integration does not exec the wrapper directly on any platform: on Windows it runs
+    /// it through <c>cmd.exe /c call</c>, on Linux and macOS through <c>sh</c>. Either way the wrapper
+    /// is an argument, named relative to the working directory.
     /// </summary>
     private static async Task AssertLaunchesAsync(string wrapper, JavaAppResource resource)
     {
         var expected = Path.GetFullPath(wrapper);
-
-        if (!OperatingSystem.IsWindows())
-        {
-            Assert.Equal(expected, Path.GetFullPath(resource.Command));
-            return;
-        }
 
         // Its replacement is not in the Aspire version core builds against.
 #pragma warning disable CS0618
         var args = await resource.GetArgumentValuesAsync();
 #pragma warning restore CS0618
         Assert.Contains(args, arg => string.Equals(
-            Path.GetFullPath(Path.Combine(resource.WorkingDirectory, arg)), expected, StringComparison.OrdinalIgnoreCase));
+            Path.GetFullPath(Path.Combine(resource.WorkingDirectory, arg)), expected,
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal));
     }
 
     private static JavaAppResource Resolve(

@@ -43,6 +43,7 @@
     <PackageReference Include="Aspire.Hosting.JavaScript" PrivateAssets="all" />
     <PackageReference Include="CommunityToolkit.Aspire.Hosting.Java" PrivateAssets="all" />
     <PackageReference Include="Aspire.Hosting.Java" PrivateAssets="all" />
+    <PackageReference Include="System.Security.Cryptography.Pkcs" PrivateAssets="all" />
   </ItemGroup>
 
   <!-- The floor check for the two undeclared references, imported into a consuming project by

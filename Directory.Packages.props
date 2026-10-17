@@ -59,6 +59,10 @@
     <PackageVersion Include="CommunityToolkit.Aspire.Hosting.Java" Version="13.3.0" />
     <!-- Still preview-only; must match OfficialJavaIntegration.MinimumVersion. -->
     <PackageVersion Include="Aspire.Hosting.Java" Version="13.6.1-preview.1.26506.6" />
+    <!-- Aspire.Hosting.Java pins 10.0.12, which NuGet audit flags (NU1902/NU1903) and -warnaserror
+         turns into errors. A direct reference outranks that transitive one; drop it once the
+         Java package moves past 10.0.12. -->
+    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
     <PackageVersion Include="coverlet.collector" Version="10.1.0" />
     <!-- An analyzer core references with PrivateAssets="all". It reaches no nuspec and constrains
          no consumer, so it is not a floor and does not belong in src/Directory.Packages.props —
