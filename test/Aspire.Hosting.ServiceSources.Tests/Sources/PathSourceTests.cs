@@ -767,6 +767,7 @@ public class PathSourceTests
             CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
         var released = false;
+        Task<IDisposable>? secondAcquire = null;
         try
         {
             Assert.True(running.Wait(TimeSpan.FromSeconds(30)), "the prepare step never started");
@@ -778,7 +779,7 @@ public class PathSourceTests
             var checkoutLock = CheckoutNameLock.For(builder);
 
             // A free semaphore completes WaitAsync synchronously, so this is a check, not a race.
-            var secondAcquire = checkoutLock.AcquireAsync(lockKey, CancellationToken.None);
+            secondAcquire = checkoutLock.AcquireAsync(lockKey, CancellationToken.None);
             Assert.False(
                 secondAcquire.IsCompleted,
                 "a second acquire of the same resolved path's lock succeeded while its prepare step was still running");
@@ -789,12 +790,28 @@ public class PathSourceTests
 
             var secondHolder = await secondAcquire.WaitAsync(TimeSpan.FromSeconds(10));
             secondHolder.Dispose();
+            secondAcquire = null;
         }
         finally
         {
             if (!released)
             {
                 release.Release();
+            }
+
+            // Let the resolve finish and give back anything the second acquire took, so a failed
+            // assertion above doesn't leave the lock held or the resolve unobserved.
+            try
+            {
+                await resolveTask.WaitAsync(TimeSpan.FromSeconds(30));
+                if (secondAcquire is not null)
+                {
+                    (await secondAcquire.WaitAsync(TimeSpan.FromSeconds(10))).Dispose();
+                }
+            }
+            catch (Exception) when (!released)
+            {
+                // Cleanup only; the assertion that got us here is the failure worth reporting.
             }
         }
     }
