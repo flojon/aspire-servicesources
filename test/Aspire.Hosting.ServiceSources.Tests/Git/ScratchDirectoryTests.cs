@@ -117,4 +117,38 @@ public class ScratchDirectoryTests
 
         Assert.False(Directory.Exists(legacy));
     }
+
+    [Fact]
+    public void Sweep_LockFileWithNoDirectory_IsRemoved()
+    {
+        var root = NewRoot();
+        File.WriteAllText(Path.Combine(root, ".incoming-deadbeef.lock"), "");
+
+        ScratchDirectory.SweepAbandoned(root);
+
+        Assert.Empty(Directory.GetFileSystemEntries(root));
+    }
+
+    [Fact]
+    public void Sweep_LockOfAClaimedNameBeforeItsDirectoryExists_IsKept()
+    {
+        var root = NewRoot();
+        using var claimed = ScratchDirectory.Create(root);
+
+        ScratchDirectory.SweepAbandoned(root);
+
+        Assert.True(File.Exists(claimed.Path + ".lock"));
+    }
+
+    [Fact]
+    public void Dispose_RemovesTheLockFileToo()
+    {
+        var root = NewRoot();
+        var scratch = ScratchDirectory.Create(root);
+        Directory.CreateDirectory(scratch.Path);
+
+        scratch.Dispose();
+
+        Assert.Empty(Directory.GetFileSystemEntries(root));
+    }
 }

@@ -57,7 +57,7 @@ internal sealed class ScratchDirectory : IDisposable
             try
             {
                 var stream = new FileStream(
-                    path + LockSuffix, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
+                    path + LockSuffix, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 1);
                 return new ScratchDirectory(path, stream);
             }
             catch (IOException) when (File.Exists(path + LockSuffix))
@@ -75,6 +75,14 @@ internal sealed class ScratchDirectory : IDisposable
     {
         try
         {
+            foreach (var orphan in Directory.EnumerateFiles(checkoutsRoot, Prefix + "*" + LockSuffix))
+            {
+                if (!Directory.Exists(orphan[..^LockSuffix.Length]))
+                {
+                    SweepOrphanLock(orphan);
+                }
+            }
+
             foreach (var directory in Directory.EnumerateDirectories(checkoutsRoot, Prefix + "*"))
             {
                 try
@@ -90,6 +98,23 @@ internal sealed class ScratchDirectory : IDisposable
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // The enumeration itself failed, so there is nothing we can sweep.
+        }
+    }
+
+    private static void SweepOrphanLock(string lockPath)
+    {
+        try
+        {
+            // Opening exclusively first proves no clone owns it; one between claiming and cloning does.
+            using (new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None, 1))
+            {
+            }
+
+            File.Delete(lockPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Held by a live clone, or already gone.
         }
     }
 
@@ -109,7 +134,7 @@ internal sealed class ScratchDirectory : IDisposable
         FileStream stale;
         try
         {
-            stale = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
+            stale = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None, 1);
         }
         catch (IOException)
         {
@@ -121,6 +146,8 @@ internal sealed class ScratchDirectory : IDisposable
         {
             DeleteTree(directory);
         }
+
+        File.Delete(lockPath);
     }
 
     public void Dispose()
@@ -130,19 +157,38 @@ internal sealed class ScratchDirectory : IDisposable
             return;
         }
 
+        var removed = false;
         try
         {
             DeleteTree(Path);
+            removed = true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // Best effort: a leaked directory costs disk in a gitignored tree. Releasing the lock
-            // below hands it to the next sweep, which retries.
+            // Best effort: a leaked directory costs disk in a gitignored tree. Keeping the lock
+            // file, now unheld, hands the directory to the next sweep immediately.
         }
         finally
         {
             _lock.Dispose();
             _lock = null;
+        }
+
+        if (removed)
+        {
+            TryDeleteLockFile(Path + LockSuffix);
+        }
+    }
+
+    private static void TryDeleteLockFile(string lockPath)
+    {
+        try
+        {
+            File.Delete(lockPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // An unheld lock beside no directory is inert; the sweep removes it.
         }
     }
 
