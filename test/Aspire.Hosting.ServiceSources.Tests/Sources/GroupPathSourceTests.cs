@@ -18,6 +18,7 @@ namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 /// that would use the group's checkout at one directory.
 /// </summary>
 [Trait("IO", "true")]
+[Trait("Concurrency", "true")]
 public class GroupPathSourceTests
 {
     private const string Catalog = """

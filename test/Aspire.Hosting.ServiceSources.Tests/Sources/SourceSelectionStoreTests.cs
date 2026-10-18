@@ -5,6 +5,7 @@ using Xunit;
 namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 
 [Trait("IO", "true")]
+[Trait("Concurrency", "true")]
 public class SourceSelectionStoreTests
 {
     private static string NewAppHost() => TempDirectories.CreateSubdirectory().FullName;

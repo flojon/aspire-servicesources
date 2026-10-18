@@ -6,6 +6,7 @@ using Xunit;
 namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 
 [Trait("IO", "true")]
+[Trait("Timing", "true")]
 public class ProcessBuildRunnerTests
 {
     private static ProcessStartInfo Sleeper() => OperatingSystem.IsWindows()
