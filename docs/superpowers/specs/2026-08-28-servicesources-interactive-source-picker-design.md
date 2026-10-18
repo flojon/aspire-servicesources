@@ -293,6 +293,30 @@ the implementation must read "services that exist" from the catalog and "chosen 
 developer config as they now work, and write answers where #69 says developer config lives. This
 design does not fix that; the first implementation step is to re-derive it.
 
+**Re-derived against main (2026-10-18):**
+
+- **"Unconfigured" is one decision point.** `ServiceSourcesConfigCache.ResolveService` throws
+  `DeveloperConfiguration.NotConfiguredError` in exactly two cases: no entry for the service, or an
+  entry whose `source` is blank. The placeholder replaces that throw when interactive mode is on;
+  strict mode keeps it verbatim. A service that is missing from the *catalog* still throws — that is
+  an AppHost bug, not something a developer can answer in a dialog.
+- **Developer config is a layered `IConfiguration`.** `servicesources.local.json` is only the
+  lowest-precedence layer (`DeveloperConfigFileSource`); appsettings, user secrets, environment and
+  the command line override it, and a catalog `defaultSource` (#158) sits below the file. "Unconfigured"
+  therefore means *no layer* supplied a source. The picker writes to the file because it is the only
+  layer this package owns, and must say so when a higher layer would shadow the answer.
+- **A catalog `defaultSource` is already a configured service.** It never reaches the placeholder
+  path, and `LoadedConfig.DefaultedServiceNames` keeps it out of the eager prefetch.
+- **`AddService()` returns a `ServiceResource` facade, never the registered resource (#313).** The
+  placeholder is therefore not the returned object: it is the *real* registered resource behind a
+  `ResolvedService.Bridge`, like `ServiceContainerResource`, with a new `"unconfigured"` source name
+  in the reachability table so `WithEnvironment` / `WithReference` on the facade are skipped with a
+  warning, as for `"disabled"`. `DisabledSource` registers nothing; the placeholder must, because it
+  carries the dashboard state and the `Configure` command.
+- **Keep `NotConfiguredError`'s diagnostics.** Its near-miss notes (misspelled root key, misspelled
+  service name) are what make the typo'd-key consequence below tolerable. The placeholder's dashboard
+  property should carry the same text rather than a generic "Not configured".
+
 Answers and #428's `selection.json` are different facts (which source a service uses, versus
 which declared services to run this time) and stay in separate stores. The prompts should not be
 raised twice: once a service is configured, #428's prompt takes over for it on the next run.
