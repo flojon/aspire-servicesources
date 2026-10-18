@@ -35,6 +35,13 @@ internal readonly struct Raw
     internal static Raw Escaped(string? value) => new(Name.Escape(value));
 
     /// <summary>
+    /// Caller-controlled text for a dialog a person reads, where doubled backslashes and
+    /// <c>'</c> would misstate a path or command. Control and invisible characters are still
+    /// spelled out, so nothing can forge a line.
+    /// </summary>
+    internal static Raw Display(string? value) => new(ConfiguredValue.Bare(value));
+
+    /// <summary>
     /// Already-safe fragments joined. Safe by construction: every part is a <see cref="Raw"/>
     /// already and the separator is a constant, so nothing unescaped enters through here.
     /// </summary>

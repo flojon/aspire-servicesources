@@ -241,6 +241,13 @@ public class RawPathDoesNotCompileTests
             var rendered = factory.Invoke(null, arguments)!.ToString()!;
 
             Assert.DoesNotContain("\n", rendered, StringComparison.Ordinal);
+
+            // Display is for a dialog no message quotes around, so only forged lines are its concern.
+            if (factory.Name == nameof(Raw.Display))
+            {
+                return;
+            }
+
             Assert.DoesNotContain("'", rendered.Replace("\\u0027", "", StringComparison.Ordinal), StringComparison.Ordinal);
             Assert.DoesNotContain("\"", rendered.Replace("\\\"", "", StringComparison.Ordinal), StringComparison.Ordinal);
         });
