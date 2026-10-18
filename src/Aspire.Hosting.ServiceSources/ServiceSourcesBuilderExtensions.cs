@@ -96,7 +96,21 @@ public static class ServiceSourcesBuilderExtensions
         // hear about an unrelated entry nothing else names.
         ServiceConfigAudit.EnsureSubscribed(builder);
 
-        var (definition, developerConfig) = ServiceSourcesConfigCache.ResolveService(builder, name);
+        var (definition, resolvedConfig, notConfigured) =
+            ServiceSourcesConfigCache.ResolveServiceOrNotConfigured(builder, name);
+
+        if (resolvedConfig is null)
+        {
+            // Strict mode is the behaviour before the opt-in existed: the same exception, unchanged.
+            if (!InteractiveServiceConfiguration.IsEnabled(builder))
+            {
+                throw notConfigured!;
+            }
+
+            return UnconfiguredSource.Resolve(builder, name, notConfigured!.Message);
+        }
+
+        var developerConfig = resolvedConfig;
 
         // Resolved once here rather than inside each source: the source that actually reads it
         // must not depend on ServiceSourcesConfigCache.LoadedFor by itself, which would tie its unit
@@ -277,6 +291,27 @@ public static class ServiceSourcesBuilderExtensions
     [AspireExportIgnore]
     public static IDistributedApplicationBuilder UseDeferredCheckout(this IDistributedApplicationBuilder builder) =>
         builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+
+    /// <summary>
+    /// Lets a service no configuration layer gave a source resolve to a placeholder instead of
+    /// throwing, so the AppHost reaches the dashboard. The placeholder starts nothing, has no
+    /// endpoints and shows <c>Not configured</c>.
+    /// </summary>
+    /// <remarks>
+    /// Must be called before the first <see cref="AddService"/>. Ignored when the <c>CI</c>
+    /// environment variable is set, so a committed call does not weaken CI. The
+    /// <c>SERVICESOURCES_INTERACTIVE</c> setting overrides that in both directions: <c>1</c>/<c>true</c>
+    /// forces it on, <c>0</c>/<c>false</c> forces today's strict behaviour.
+    /// </remarks>
+    [AspireExport]
+    public static IDistributedApplicationBuilder UseInteractiveServiceConfiguration(
+        this IDistributedApplicationBuilder builder)
+    {
+        DeveloperConfigFileSource.EnsureRegistered(builder);
+
+        InteractiveServiceConfiguration.OptIn(builder);
+        return builder;
+    }
 
     /// <summary>
     /// Registers <paramref name="handler"/> as the resolver for local-sourced services whose

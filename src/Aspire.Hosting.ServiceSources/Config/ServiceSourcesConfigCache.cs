@@ -134,6 +134,20 @@ internal static class ServiceSourcesConfigCache
     public static (ServiceDefinition Definition, ServiceDeveloperConfig DeveloperConfig) ResolveService(
         IDistributedApplicationBuilder builder, string serviceName)
     {
+        var (definition, developerConfig, notConfigured) = ResolveServiceOrNotConfigured(builder, serviceName);
+
+        return notConfigured is null ? (definition, developerConfig!) : throw notConfigured;
+    }
+
+    /// <summary>
+    /// <see cref="ResolveService"/> with the one failure a developer can fix by answering a
+    /// question — a declared service no configuration layer gave a source — returned instead of
+    /// thrown. A service the catalog does not declare still throws: that is the AppHost's mistake.
+    /// </summary>
+    public static (ServiceDefinition Definition, ServiceDeveloperConfig? DeveloperConfig,
+        ServiceSourcesConfigurationException? NotConfigured) ResolveServiceOrNotConfigured(
+        IDistributedApplicationBuilder builder, string serviceName)
+    {
         var loaded = LoadedFor(builder);
 
         if (!loaded.Catalog.Services.TryGetValue(serviceName, out var definition))
@@ -144,7 +158,7 @@ internal static class ServiceSourcesConfigCache
 
         if (!loaded.DeveloperConfig.Services.TryGetValue(serviceName, out var developerConfig))
         {
-            throw loaded.DeveloperConfig.NotConfiguredError(serviceName);
+            return (definition, null, loaded.DeveloperConfig.NotConfiguredError(serviceName));
         }
 
         // An entry with a blank source is an entry with no source. It arrives that way from an
@@ -154,10 +168,10 @@ internal static class ServiceSourcesConfigCache
         // recognise, so it takes the same route as an entry that is absent altogether.
         if (string.IsNullOrWhiteSpace(developerConfig.Source))
         {
-            throw loaded.DeveloperConfig.NotConfiguredError(serviceName);
+            return (definition, null, loaded.DeveloperConfig.NotConfiguredError(serviceName));
         }
 
-        return (definition, developerConfig);
+        return (definition, developerConfig, null);
     }
 
     /// <summary>
