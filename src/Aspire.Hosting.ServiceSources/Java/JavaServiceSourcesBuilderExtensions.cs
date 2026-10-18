@@ -49,7 +49,9 @@ public static class JavaServiceSourcesBuilderExtensions
     ///     .AsJava(o => o.WithMavenGoal("spring-boot:run").WithPort(8080));
     /// </code>
     /// </example>
-    [AspireExport]
+    // The synchronous callback runs from the guest's capability call; on the RPC thread the guest's
+    // calls back into the host can't be served and the callback times out.
+    [AspireExport(RunSyncOnBackgroundThread = true)]
     public static ServiceDefinitionBuilder AsJava(
         this ServiceDefinitionBuilder builder, Action<JavaKindOptionsBuilder> configure)
     {

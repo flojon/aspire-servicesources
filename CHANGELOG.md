@@ -134,6 +134,12 @@ never existed. Check the tag of the last release before adding one.
 
 ### Fixed
 
+- **`asJava`/`asJavaScript` inside an `addServiceCatalog` callback no longer hang a TypeScript
+  AppHost** ([#463]). The first call made inside the nested callback never returned, and after 60s
+  both callbacks timed out with `Callback 'callback_2_…' timed out after 60s` and the AppHost
+  failed. `AsJava()` and `AsJavaScript()` now run off the RPC thread, as `AddServiceCatalog()`
+  already did. C# AppHosts were not affected.
+
 - **Two `"path"` services in one repository no longer race on a shared project's `bin/` and
   `obj/`** ([#397]). Aspire starts independent resources at once, so two services whose projects
   share a `ProjectReference` ran two builds over the same output directory and one failed
@@ -2048,6 +2054,7 @@ Targets `net10.0`.
 [#416]: https://github.com/flojon/aspire-servicesources/issues/416
 [#448]: https://github.com/flojon/aspire-servicesources/issues/448
 [#449]: https://github.com/flojon/aspire-servicesources/issues/449
+[#463]: https://github.com/flojon/aspire-servicesources/issues/463
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

@@ -54,7 +54,7 @@ await builder.addServiceCatalog(async (catalog) => {
   await catalogService.withRepository('https://github.com/spring-projects/spring-petclinic', {
     defaultRef: 'main',
   });
-  await catalogService.withDefaultSource('local');
+  await catalogService.withDefaultSource('repository');
   // asJava is the typed alternative to withKind('java', { options: {...} }) — Stage 1 shipped only
   // the untyped bag because JavaKindOptions had no public handle yet. The lambda nested inside the
   // addServiceCatalog lambda is exactly the shape Stage 0 measured crossing ATS.
@@ -73,7 +73,7 @@ const payments = await builder
   .addService('payments')
   .withEnvironment('DEMO_INJECTED_BY_APPHOST', 'true')
   .withReference(inventory)
-  .withHttpsEndpoint();
+  .withHttpsEndpoint({ targetPort: 80 });
 
 const probeScript =
   'console.log("INVENTORY_URL=" + process.env.INVENTORY_URL);' +
