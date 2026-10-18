@@ -106,7 +106,7 @@ public static class ServiceEndpointExtensions
                 return Raw.Compose(
                     $"Service '{name}' exposes no endpoint, so there is none to reference.{source} A "
                     + $"'disabled' service has nothing running for it, deliberately, so there is no endpoint "
-                    + $"to declare one for. {Raw.Literal(OutOfBandSourceAdvice.SwitchSource)}.");
+                    + $"to declare one for. To get one, {Raw.Literal(OutOfBandSourceAdvice.SwitchSource)}.");
             }
 
             return Raw.Compose(

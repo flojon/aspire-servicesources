@@ -412,7 +412,7 @@ internal static class CheckoutPreparation
         Raw label, PrepareStep step, int exitCode, string[] quoted) =>
         Raw.Compose($"{label}: its prepare step failed. The command '{RedactedDescribe(step)}' exited with "
             + $"code {exitCode}, so the checkout was left as the command found it and nothing was recorded as "
-            + $"completed — the step will run again from the beginning on the next start.{QuotedTailSuffix(quoted)}");
+            + $"completed — the step will run again from the beginning on the next AppHost start.{QuotedTailSuffix(quoted)}");
 
     /// <summary>The output-tail portion of <see cref="FailedMessage"/>, or a note that there was none.</summary>
     private static Raw QuotedTailSuffix(string[] quoted) =>
@@ -430,7 +430,7 @@ internal static class CheckoutPreparation
     /// <see cref="Raw.NewLine"/> is not one.
     /// </summary>
     private static Raw JoinedQuotedLines(IEnumerable<string> quoted) =>
-        quoted.Select(Raw.Escaped).Aggregate((a, b) => Raw.Compose($"{a}{Raw.NewLine}  {b}"));
+        quoted.Select(Raw.Output).Aggregate((a, b) => Raw.Compose($"{a}{Raw.NewLine}  {b}"));
 
     /// <remarks>
     /// Reported apart from a non-zero exit because it is a different problem with a different fix:

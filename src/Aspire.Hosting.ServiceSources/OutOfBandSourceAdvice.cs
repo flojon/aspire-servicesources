@@ -29,7 +29,7 @@ internal static class OutOfBandSourceAdvice
     /// </remarks>
     internal const string SwitchSource =
         "give it a 'repository' or 'container' source in servicesources.local.json — which works only " +
-        "where its 'servicesources.yaml' entry already declares that source: a 'repository' or " +
+        "where its catalog entry already declares that source: a 'repository' or " +
         "'repositoryRef' for 'repository', a 'container' block for 'container'";
 
     /// <summary>
