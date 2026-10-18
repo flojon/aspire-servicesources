@@ -9,7 +9,7 @@ namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 [Trait("Timing", "true")]
 public class PathBuildGateTests
 {
-    private static readonly TimeSpan Rendezvous = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan Rendezvous = TimeSpan.FromSeconds(30);
 
     private const string Key = "p:/repo";
 

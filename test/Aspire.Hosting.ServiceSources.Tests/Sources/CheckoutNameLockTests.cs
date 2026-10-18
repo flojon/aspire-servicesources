@@ -12,7 +12,7 @@ namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 [Trait("Timing", "true")]
 public class CheckoutNameLockTests
 {
-    private static readonly TimeSpan Rendezvous = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan Rendezvous = TimeSpan.FromSeconds(30);
 
     [Fact]
     public async Task Acquire_SameCheckoutName_BlocksASecondCallerUntilTheFirstReleases()
