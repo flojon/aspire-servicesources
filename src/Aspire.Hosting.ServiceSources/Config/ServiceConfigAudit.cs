@@ -137,6 +137,19 @@ internal static class ServiceConfigAudit
                 + $"or wherever a higher layer set it, or remove the directory."));
         }
 
+        var ignoredPrepares = config.Repositories
+            .Where(entry => !undeclared.Contains(entry.Key)
+                && (entry.Value.Prepare?.IsDeclared == true || entry.Value.Path?.Prepare?.IsDeclared == true))
+            .Select(entry => entry.Key)
+            .OrderBy(key => key, StringComparer.Ordinal);
+
+        foreach (var name in ignoredPrepares)
+        {
+            reasons.Add(Raw.Compose(
+                $"Repository '{new Name(name)}': a repository entry does not take a 'prepare' step, so it is ignored. "
+                + $"Set 'path.prepare' on each member service under '{Raw.Literal(DeveloperConfiguration.ServicesKey)}' instead."));
+        }
+
         return reasons;
     }
 

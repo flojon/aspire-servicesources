@@ -88,13 +88,11 @@ never existed. Check the tag of the last release before adding one.
   builds of the members are serialized like any other `"path"` services in one repository. A
   `repositories` entry naming no declared repository is now reported at startup, as is a
   `repositories.<name>.path.path` set without `source`, which would otherwise be silently unread.
+  A `prepare` on a `repositories.<name>` entry is never run, so it is ignored with a startup warning
+  ([#448]); set `path.prepare` on each member service instead. An entry with `source: path` and no
+  `path.path` is refused when the configuration is read.
 
 ### Changed
-
-- **A `repositories.<name>` entry that sets `prepare` is now a startup error** ([#416]). It was
-  bound but never read, so the step silently never ran. Set `path.prepare` on each member service
-  instead. A `repositories.<name>` entry with `source: path` and no `path.path` is likewise refused
-  when the configuration is read, rather than only when a member resolves.
 
 - **A cold `"repository"` checkout is no longer cloned at `AddService()`; the dashboard asks which
   ones to clone and start** ([#271]). In run mode, once the AppHost starts, one dialog lists the
@@ -2042,6 +2040,7 @@ Targets `net10.0`.
 [#385]: https://github.com/flojon/aspire-servicesources/issues/385
 [#415]: https://github.com/flojon/aspire-servicesources/issues/415
 [#416]: https://github.com/flojon/aspire-servicesources/issues/416
+[#448]: https://github.com/flojon/aspire-servicesources/issues/448
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
