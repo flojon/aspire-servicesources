@@ -75,6 +75,56 @@ full walkthrough is in the
 prefer a committed `servicesources.yaml` over code? See
 [The YAML catalog](https://aspire-servicesources.readthedocs.io/en/latest/guides/yaml-catalog/).
 
+## Using `AddService()` with existing AppHost helpers
+
+`AddService()` returns an `IResourceBuilder<ServiceResource>`. `ServiceResource` does not inherit
+`ProjectResource` — a service isn't always a project, and the type shouldn't reveal which source
+resolved it — so a helper hard-typed to `IResourceBuilder<ProjectResource>` won't accept it. Two
+approaches cover most cases.
+
+**1. Widen your own helpers** to a generic constrained to the capabilities their body uses, instead
+of a concrete resource type. A helper that only calls `WithReference`, `WaitFor` and `WithEnvironment`
+needs nothing more than the interfaces behind them:
+
+```csharp
+static class AppHostExtensions
+{
+    // was: this IResourceBuilder<ProjectResource> app
+    public static IResourceBuilder<T> AddOllama<T>(
+        this IResourceBuilder<T> app,
+        IResourceBuilder<IResourceWithServiceDiscovery> ollama,
+        string model)
+        where T : IResourceWithEnvironment, IResourceWithWaitSupport
+    {
+        return app.WithReference(ollama).WaitFor(ollama).WithEnvironment("OLLAMA_MODEL", model);
+    }
+}
+```
+
+This accepts a project, a container or a `ServiceResource`. `ServiceResource` implements
+`IResourceWithServiceDiscovery`, `IResourceWithEnvironment`, `IResourceWithArgs`,
+`IResourceWithEndpoints` and `IResourceWithWaitSupport`; parameters that take another resource
+should use the same interface-typed form (`IResourceBuilder<IResourceWithServiceDiscovery>`) rather
+than `IResourceBuilder<ProjectResource>`.
+
+**2. Use `GetServiceEndpoint()` where an API takes only an `EndpointReference`.** Many integrations
+accept the resource builder through an interface-typed overload, and those take a service as is
+(Aspire.Hosting.Yarp's `AddCluster` has an `IResourceBuilder<IResourceWithServiceDiscovery>` overload).
+Where one accepts only an `EndpointReference`, or you need the service's URL as a value,
+`GetServiceEndpoint()` returns the `https` endpoint, else `http`, else the service's only endpoint —
+whichever source resolved it:
+
+```csharp
+var commonAuth = builder.AddService("common-auth");
+
+builder.AddProject<Projects.Web>("web")
+    .WithEnvironment("Services__CommonAuth", commonAuth.GetServiceEndpoint());
+```
+
+It throws `ServiceSourcesConfigurationException` if the service exposes no endpoints, or several and
+none named `http` or `https`; name the one you mean with `GetEndpoint("...")`. The endpoint is chosen
+when you call it, so call it after any `Configure(...)` that adds an endpoint.
+
 ## Learn more
 
 - [Sources](https://aspire-servicesources.readthedocs.io/en/latest/sources/) — every way to resolve a service.
