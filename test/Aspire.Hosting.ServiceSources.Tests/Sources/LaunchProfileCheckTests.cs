@@ -2,6 +2,7 @@ using Aspire.Hosting.ServiceSources.Sources;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Sources;
 
+[Trait("IO", "true")]
 public class LaunchProfileCheckTests
 {
     private const string TwoProfiles = """
