@@ -1650,6 +1650,9 @@ public class DeferredCheckoutTests
         builder.SetCheckoutTiming(CheckoutTiming.Deferred);
         builder.Services.AddSingleton<IInteractionService>(interaction);
 
+        // Pinned so these tests do not depend on whether the machine running them has CI set.
+        builder.Configuration["SERVICESOURCES_INTERACTIVE"] = "true";
+
         if (time is not null)
         {
             builder.Services.AddSingleton<TimeProvider>(time);
@@ -1781,6 +1784,51 @@ public class DeferredCheckoutTests
         await TasksAsync(builder);
 
         Assert.Equal(2, git.Cloned.Count);
+    }
+
+    [Theory]
+    [InlineData("true", null, true)]
+    [InlineData("1", "true", true)]
+    [InlineData("True", "false", true)]
+    [InlineData(null, null, true)]
+    [InlineData(null, "false", true)]
+    [InlineData("false", null, false)]
+    [InlineData(null, "true", false)]
+    [InlineData(null, "1", false)]
+    public async Task Prompt_IsSkippedInCiUnlessForced(string? forced, string? ci, bool asked)
+    {
+        var dir = CreateAppHostDirectory("orders", "billing");
+        var interaction = new FakeInteractionService { IsAvailable = true, Answer = inputs => Checked(inputs, true, false) };
+        var builder = PromptBuilder(dir, interaction);
+        builder.Configuration["SERVICESOURCES_INTERACTIVE"] = forced;
+        builder.Configuration["CI"] = ci;
+        var git = new FakeGitClient();
+        var source = new LocalProjectSource(git);
+        source.Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
+        source.Resolve(builder, "billing", Definition("billing"), DevConfig()).WithHttpEndpoint();
+
+        await RunGateAsync(builder, "orders", "billing");
+        await TasksAsync(builder);
+
+        Assert.Equal(asked ? 1 : 0, interaction.PromptCount);
+        Assert.Equal(asked ? 1 : 2, git.Cloned.Count);
+    }
+
+    [Fact]
+    public async Task SavedChoice_ForAChangedRepository_IsAskedAgain()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        PlantSelection(dir, """{ "version": 1, "services": { "orders": { "start": false, "fingerprint": "0000000000000000" } } }""");
+        var interaction = new FakeInteractionService { IsAvailable = true, Answer = inputs => Checked(inputs, true) };
+        var builder = PromptBuilder(dir, interaction);
+        var git = new FakeGitClient();
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
+
+        await RunGateAsync(builder, "orders");
+        await TasksAsync(builder);
+
+        Assert.Equal(1, interaction.PromptCount);
+        Assert.Equal(["https://example.com/orders.git"], git.Cloned.ToArray());
     }
 
     [Fact]

@@ -156,7 +156,8 @@ internal static class GuestLanguagePackages
         + $"\"{package.PackageId}\": \"{package.MinimumVersion}\" to the \"packages\" section of "
         + "aspire.config.json instead."
         + (kind == Java.JavaLocalResourceKind.KindName
-            ? $" Aspire's own {Java.OfficialJavaIntegration.AssemblyName} (preview) works too, and is "
+            ? $" Aspire's own {Java.OfficialJavaIntegration.AssemblyName} (preview, {Java.OfficialJavaIntegration.MinimumVersion} or newer: "
+                + $"`dotnet add package {Java.OfficialJavaIntegration.AssemblyName} --prerelease`) works too, and is "
                 + "used when the AppHost does not reference the Community Toolkit's."
             : "");
 

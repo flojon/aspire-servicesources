@@ -12,12 +12,21 @@ internal enum SelectionFileState
     /// <summary>The file was read and every entry is usable.</summary>
     Valid,
 
+    /// <summary>
+    /// The file was read but some entries were unusable and are ignored; the rest are kept, so one bad
+    /// entry never costs the developer their other decisions.
+    /// </summary>
+    Partial,
+
     /// <summary>The file is malformed, oversized or not a regular file; it is treated as empty.</summary>
     Invalid,
 
     /// <summary>The file was written by a newer version of the package and must not be replaced.</summary>
     Newer,
 }
+
+/// <summary>One saved decision and, when known, the fingerprint of the service it was made about.</summary>
+internal readonly record struct SelectionEntry(bool Start, string? Fingerprint);
 
 /// <summary>
 /// Reads and writes <c>.servicesources/selection.json</c>: which cold checkouts the developer chose
@@ -36,9 +45,32 @@ internal static class SourceSelectionStore
 
     private const int CurrentVersion = 1;
 
+    private const string LockFileName = ".selection.lock";
+
+    private const int LockAttempts = 50;
+
+    private static readonly TimeSpan LockRetryDelay = TimeSpan.FromMilliseconds(40);
+
     public static (IReadOnlyDictionary<string, bool> Decisions, SelectionFileState State) Read(string appHostDirectory)
     {
-        var empty = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        var (entries, state) = ReadEntries(appHostDirectory);
+        var decisions = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, entry) in entries)
+        {
+            decisions[name] = entry.Start;
+        }
+
+        return (decisions, state);
+    }
+
+    /// <summary>
+    /// Like <see cref="Read"/>, with each entry's fingerprint: what the service was when the developer
+    /// answered, so a decision about a repository that has since changed is not applied to the new one.
+    /// </summary>
+    public static (IReadOnlyDictionary<string, SelectionEntry> Entries, SelectionFileState State) ReadEntries(
+        string appHostDirectory)
+    {
+        var empty = new Dictionary<string, SelectionEntry>(StringComparer.OrdinalIgnoreCase);
         var path = PathIn(appHostDirectory);
 
         try
@@ -68,12 +100,25 @@ internal static class SourceSelectionStore
     }
 
     /// <summary>
+    /// A fingerprint for a service's repository and ref. Compared, never used: nothing read back from
+    /// the file reaches a clone.
+    /// </summary>
+    public static string Fingerprint(string repositoryUrl, string? reference)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(repositoryUrl + "\n" + reference);
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes))[..16].ToLowerInvariant();
+    }
+
+    /// <summary>
     /// Merges <paramref name="answered"/> into the file. Returns <see langword="false"/> without
     /// throwing when it could not, including when the file is newer than this version understands.
     /// </summary>
-    public static bool TrySave(string appHostDirectory, IReadOnlyDictionary<string, bool> answered)
+    public static bool TrySave(
+        string appHostDirectory, IReadOnlyDictionary<string, bool> answered,
+        IReadOnlyDictionary<string, string>? fingerprints = null)
     {
         string? scratch = null;
+        FileStream? guard = null;
 
         try
         {
@@ -81,19 +126,34 @@ internal static class SourceSelectionStore
             var directory = ToolDirectory.Ensure(appHostDirectory);
             var path = Path.Combine(directory, FileName);
 
-            // Re-read now: another AppHost over this directory may have saved since the prompt opened.
-            var (existing, state) = Read(appHostDirectory);
+            // A link is read as invalid and ignored, so it is not replaced either: renaming a file
+            // over it would destroy the link and stop updating whatever it points at.
+            if (File.Exists(path) && File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
+            {
+                return false;
+            }
+
+            guard = AcquireLock(directory);
+            if (guard is null)
+            {
+                return false;
+            }
+
+            // Re-read now, under the lock: another AppHost over this directory may have saved since
+            // the prompt opened.
+            var (existing, state) = ReadEntries(appHostDirectory);
             if (state == SelectionFileState.Newer)
             {
                 return false;
             }
 
-            var merged = new Dictionary<string, bool>(existing, StringComparer.OrdinalIgnoreCase);
+            var merged = new Dictionary<string, SelectionEntry>(existing, StringComparer.OrdinalIgnoreCase);
             foreach (var (name, start) in answered)
             {
                 // Removed first so the catalog's spelling replaces a differently cased older key.
                 merged.Remove(name);
-                merged[name] = start;
+                merged[name] = new SelectionEntry(
+                    start, fingerprints is not null && fingerprints.TryGetValue(name, out var fingerprint) ? fingerprint : null);
             }
 
             scratch = Path.Combine(directory, $".incoming-selection-{Guid.NewGuid():N}.json");
@@ -111,6 +171,33 @@ internal static class SourceSelectionStore
 
             return false;
         }
+        finally
+        {
+            guard?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Takes the cross-process lock that makes <see cref="TrySave"/>'s read-merge-write atomic, waiting
+    /// briefly for a concurrent saver. Null when it could not.
+    /// </summary>
+    private static FileStream? AcquireLock(string directory)
+    {
+        var lockPath = Path.Combine(directory, LockFileName);
+
+        for (var attempt = 0; attempt < LockAttempts; attempt++)
+        {
+            try
+            {
+                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException)
+            {
+                Thread.Sleep(LockRetryDelay);
+            }
+        }
+
+        return null;
     }
 
     internal static string PathIn(string appHostDirectory) =>
@@ -132,8 +219,8 @@ internal static class SourceSelectionStore
         return length > MaxBytes ? null : buffer.AsSpan(0, length).ToArray();
     }
 
-    private static (IReadOnlyDictionary<string, bool>, SelectionFileState) Parse(
-        byte[] bytes, Dictionary<string, bool> empty)
+    private static (IReadOnlyDictionary<string, SelectionEntry>, SelectionFileState) Parse(
+        byte[] bytes, Dictionary<string, SelectionEntry> empty)
     {
         using var document = JsonDocument.Parse(bytes);
         var root = document.RootElement;
@@ -157,25 +244,35 @@ internal static class SourceSelectionStore
             return (empty, SelectionFileState.Invalid);
         }
 
-        var decisions = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        var entries = new Dictionary<string, SelectionEntry>(StringComparer.OrdinalIgnoreCase);
+        var skipped = false;
 
         // Enumerated rather than looked up, so a duplicate key is last-wins on every target framework.
         foreach (var service in services.EnumerateObject())
         {
+            // An unusable entry is dropped on its own: the file's other decisions stay good, and the
+            // next save no longer carries it.
             if (service.Value.ValueKind != JsonValueKind.Object
                 || !service.Value.TryGetProperty("start", out var start)
                 || start.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
             {
-                return (empty, SelectionFileState.Invalid);
+                skipped = true;
+                continue;
             }
 
-            decisions[service.Name] = start.GetBoolean();
+            string? fingerprint = null;
+            if (service.Value.TryGetProperty("fingerprint", out var print) && print.ValueKind == JsonValueKind.String)
+            {
+                fingerprint = print.GetString();
+            }
+
+            entries[service.Name] = new SelectionEntry(start.GetBoolean(), fingerprint);
         }
 
-        return (decisions, SelectionFileState.Valid);
+        return (entries, skipped ? SelectionFileState.Partial : SelectionFileState.Valid);
     }
 
-    private static byte[] Serialize(Dictionary<string, bool> decisions)
+    private static byte[] Serialize(Dictionary<string, SelectionEntry> decisions)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
@@ -184,10 +281,15 @@ internal static class SourceSelectionStore
             writer.WriteNumber("version", CurrentVersion);
             writer.WriteStartObject("services");
 
-            foreach (var (name, start) in decisions.OrderBy(entry => entry.Key, StringComparer.Ordinal))
+            foreach (var (name, entry) in decisions.OrderBy(entry => entry.Key, StringComparer.Ordinal))
             {
                 writer.WriteStartObject(name);
-                writer.WriteBoolean("start", start);
+                writer.WriteBoolean("start", entry.Start);
+                if (entry.Fingerprint is not null)
+                {
+                    writer.WriteString("fingerprint", entry.Fingerprint);
+                }
+
                 writer.WriteEndObject();
             }
 

@@ -85,6 +85,7 @@ public class GuestLanguageFloorTargetsTests
     [InlineData("13.6.1-preview.2.1.1", false)]
     [InlineData("13.6.1", false)]
     [InlineData("13.6.2-preview.1.1.1", false)]
+    [InlineData("13.6.1-preview.1", true)]           // a single number is still below 1.26506.6
     [InlineData("13.6.1-dev", false)]                // a label this gate cannot order is left to run time
     public async Task TheOfficialJavaFloorGate_AcceptsAPreviewNotOlderThanTheFloor(string resolved, bool shouldReject)
     {
@@ -103,6 +104,19 @@ public class GuestLanguageFloorTargetsTests
     }
 
     /// <summary>
+    /// With the Community Toolkit's package also resolved, that one wins at run time and the
+    /// official assembly is never loaded, so its being old is not a reason to fail the build.
+    /// </summary>
+    [Fact]
+    public async Task AnOldOfficialJava_IsAccepted_WhenTheCommunityToolkitIsAlsoResolved()
+    {
+        var (exitCode, output) = await RunProbeAsync("Aspire.Hosting.Java", "13.5.0", alsoResolved: "CommunityToolkit.Aspire.Hosting.Java");
+
+        Assert.DoesNotContain("SERVICESOURCES003", output, StringComparison.Ordinal);
+        Assert.Equal(0, exitCode);
+    }
+
+    /// <summary>
     /// The common case, and the one a check like this most easily gets wrong: an AppHost that
     /// references neither package must build, because it declares no service of either kind.
     /// </summary>
@@ -116,7 +130,7 @@ public class GuestLanguageFloorTargetsTests
     }
 
     private static async Task<(int ExitCode, string Output)> RunProbeAsync(
-        string? packageId, string? resolved)
+        string? packageId, string? resolved, string? alsoResolved = null)
     {
         var dir = TempDirectories.CreateSubdirectory("floor-gate").FullName;
 
@@ -130,6 +144,10 @@ public class GuestLanguageFloorTargetsTests
                          <NuGetPackageId>{packageId}</NuGetPackageId>
                          <NuGetPackageVersion>{resolved}</NuGetPackageVersion>
                        </ResolvedCompileFileDefinitions>
+                       {(alsoResolved is null ? "" : $@"<ResolvedCompileFileDefinitions Include=""other.dll"">
+                         <NuGetPackageId>{alsoResolved}</NuGetPackageId>
+                         <NuGetPackageVersion>13.3.0</NuGetPackageVersion>
+                       </ResolvedCompileFileDefinitions>")}
                      </ItemGroup>
                    """;
 

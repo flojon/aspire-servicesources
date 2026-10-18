@@ -216,12 +216,9 @@ internal sealed class OfficialJavaIntegration : JavaIntegration
         {
             // The package is there; something it needs is not. Saying it is missing or old would
             // send the reader to change the one thing that is fine.
-            var dependency = ((IOException)ex) switch
-            {
-                FileNotFoundException notFound => notFound.FileName,
-                FileLoadException loadFailure => loadFailure.FileName,
-                _ => null,
-            };
+            var dependency = ex is FileNotFoundException notFound
+                ? notFound.FileName
+                : ((FileLoadException)ex).FileName;
 
             throw ServiceSourcesConfigurationException.For(
                 $"Services with kind 'java' run through {Raw.Literal(AssemblyName)} when the AppHost references it, but it could not be loaded because its dependency {Raw.Escaped(dependency ?? "(unnamed)")} could not be. Fix that reference, or remove {Raw.Literal(AssemblyName)} to use {Raw.Literal(CommunityToolkitJavaIntegration.AssemblyName)} instead.",
