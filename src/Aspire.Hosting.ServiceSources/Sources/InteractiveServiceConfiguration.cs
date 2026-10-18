@@ -1,6 +1,5 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Configuration;
-using Aspire.Hosting.ServiceSources.Messages;
 
 namespace Aspire.Hosting.ServiceSources.Sources;
 
@@ -10,38 +9,15 @@ namespace Aspire.Hosting.ServiceSources.Sources;
 /// </summary>
 internal static class InteractiveServiceConfiguration
 {
-    internal const string OverrideKey = "SERVICESOURCES_INTERACTIVE";
-
-    private const string CiKey = "CI";
-
     private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, object> OptedIn = new();
 
     public static void OptIn(IDistributedApplicationBuilder builder) => OptedIn.TryAdd(builder, new object());
 
-    public static bool IsEnabled(IDistributedApplicationBuilder builder)
-    {
+    // The same CI and SERVICESOURCES_INTERACTIVE decision as the source-pick prompt, so one setting
+    // silences both. The override applies only with the opt-in: without it nothing here changes.
+    public static bool IsEnabled(IDistributedApplicationBuilder builder) =>
         // A manifest cannot describe the placeholder, so publish keeps failing fast on a missing source.
-        if (!builder.ExecutionContext.IsRunMode)
-        {
-            return false;
-        }
-
-        var overrideValue = builder.Configuration[OverrideKey];
-
-        if (!string.IsNullOrWhiteSpace(overrideValue))
-        {
-            return ParseOverride(overrideValue);
-        }
-
-        return OptedIn.TryGetValue(builder, out _) && string.IsNullOrWhiteSpace(builder.Configuration[CiKey]);
-    }
-
-    private static bool ParseOverride(string value) => value.Trim().ToLowerInvariant() switch
-    {
-        "1" or "true" => true,
-        "0" or "false" => false,
-        _ => throw ServiceSourcesConfigurationException.For(
-            $"{Raw.Literal(OverrideKey)} is '{new Name(value)}', which is neither a true nor a false value. Use 1 or true to " +
-            $"ask about unconfigured services, 0 or false to fail on them."),
-    };
+        builder.ExecutionContext.IsRunMode
+        && OptedIn.TryGetValue(builder, out _)
+        && InteractivePrompts.IsEnabled(builder.Configuration);
 }

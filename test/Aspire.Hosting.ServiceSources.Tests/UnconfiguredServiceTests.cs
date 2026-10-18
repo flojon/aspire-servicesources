@@ -29,7 +29,7 @@ public class UnconfiguredServiceTests
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["CI"] = ci,
-            [InteractiveServiceConfiguration.OverrideKey] = interactive,
+            [InteractivePrompts.EnvironmentVariable] = interactive,
         });
 
         if (optIn)
@@ -89,16 +89,21 @@ public class UnconfiguredServiceTests
 
     [Theory]
     [InlineData("true", null, false, false)]
-    [InlineData("true", "1", false, true)]
+    [InlineData("", "1", false, false)]
     [InlineData("", null, true, true)]
     [InlineData("true", null, true, false)]
+    [InlineData("1", null, true, false)]
+    [InlineData("false", null, true, true)]
+    [InlineData("0", null, true, true)]
+    [InlineData("true", "1", true, true)]
+    [InlineData("true", "yes", true, true)]
     [InlineData("", "0", true, false)]
-    [InlineData("", "false", true, false)]
-    [InlineData("", "TRUE", false, true)]
+    [InlineData("", "FALSE", true, false)]
+    [InlineData("", "maybe", true, true)]
+    [InlineData("true", "maybe", true, false)]
     public void WhetherAPlaceholderIsUsed_FollowsTheOptInTheCiVariableAndTheOverride(
         string ci, string? interactive, bool optIn, bool expectPlaceholder)
     {
-        // Row 2 is the override forcing it on without an opt-in or against CI.
         var builder = Builder(ci, interactive, optIn);
 
         if (expectPlaceholder)
@@ -113,23 +118,13 @@ public class UnconfiguredServiceTests
     }
 
     [Fact]
-    public void AnOverrideThatIsNeitherTrueNorFalse_IsRejectedRatherThanGuessedAt()
-    {
-        var builder = Builder(interactive: "maybe");
-
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("inventory"));
-
-        Assert.Contains("SERVICESOURCES_INTERACTIVE", ex.Message);
-    }
-
-    [Fact]
     public void InPublishMode_AnUnconfiguredService_StillThrows_EvenWhenForcedOn()
     {
         var builder = TestHelpers.CreatePublishingBuilder(AppHostDirectory());
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["CI"] = "",
-            [InteractiveServiceConfiguration.OverrideKey] = "1",
+            [InteractivePrompts.EnvironmentVariable] = "1",
         });
         builder.UseInteractiveServiceConfiguration();
 

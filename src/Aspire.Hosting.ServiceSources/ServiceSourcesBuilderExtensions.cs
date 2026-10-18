@@ -299,9 +299,11 @@ public static class ServiceSourcesBuilderExtensions
     /// </summary>
     /// <remarks>
     /// Must be called before the first <see cref="AddService"/>. Ignored when the <c>CI</c>
-    /// environment variable is set, so a committed call does not weaken CI. The
-    /// <c>SERVICESOURCES_INTERACTIVE</c> setting overrides that in both directions: <c>1</c>/<c>true</c>
-    /// forces it on, <c>0</c>/<c>false</c> forces today's strict behaviour.
+    /// environment variable is set (other than to <c>false</c> or <c>0</c>), so a committed call does
+    /// not weaken CI, and in publish mode. The same <c>SERVICESOURCES_INTERACTIVE</c> setting that
+    /// governs the source-pick prompt overrides the <c>CI</c> check once this has been called:
+    /// <c>true</c> forces it on, <c>false</c> restores the exception. Without this call nothing
+    /// changes.
     /// </remarks>
     [AspireExport]
     public static IDistributedApplicationBuilder UseInteractiveServiceConfiguration(
