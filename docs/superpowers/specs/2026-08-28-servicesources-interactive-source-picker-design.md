@@ -213,7 +213,7 @@ is intended: a CI job that opted out of one question should not be asked the oth
 | `1` / `true` / `yes` | Interactive regardless of `CI` |
 | `0` / `false` / `no` | Strict regardless of `CI` |
 
-`CI` counts as set when it is anything but empty, `false` or `0`. The override has no effect
+`CI` counts as set when it is anything but empty or a false value (`false`, `0`, `no`). The override has no effect
 without the opt-in — nothing changes for an AppHost that never called it — and none in publish
 mode, where a manifest cannot describe the placeholder and a missing source keeps failing fast.
 
@@ -223,8 +223,9 @@ service and the file.
 ### The placeholder resource
 
 An unconfigured service resolves to a registered resource behind the same `ServiceResource` facade
-every other source returns (#313), so an AppHost's `AddService("orders")` line and everything chained
-off it compile and run unchanged:
+every other source returns (#313), so the `AddService("orders")` line compiles and runs, and the
+configuration calls chained off it (`WithEnvironment`, `WithReference`, `WaitFor`) are skipped with a
+warning or ignored rather than failing. Two calls are the exception, below:
 
 ```csharp
 internal sealed class UnconfiguredServiceResource(string name)
@@ -238,8 +239,9 @@ what the dashboard shows:
 
 - `ResourceType = "Service (unconfigured)"`
 - `State = new ResourceStateSnapshot("Not configured", KnownResourceStateStyles.Info)`
-- a `Reason` property naming the configuration key to set — no file path, and nothing that assumes
-  how the source gets chosen, because the `Configure` command (below) changes that
+- a short `Reason` property naming the configuration key to set — no file path, and nothing that
+  assumes how the source gets chosen, because the `Configure` command (below) changes that. The full
+  `NotConfiguredError` text, near-miss hints included, goes to the log once instead.
 
 It has no endpoints and starts no process. `ServiceSourceAnnotation(name, "unconfigured")` is how
 the rest of the package recognises it, and a `Configure` command (below) is added to it.
@@ -298,18 +300,29 @@ third-party source (#54, still open) would appear without touching this code onc
 can be extended; until then there is nothing to derive beyond those six.
 
 **The list is filtered per service, not offered whole.** A source is only a valid answer where the
-service's catalog entry declares what it needs: `repository` needs a `repository` or `repositoryRef`,
-`container` needs a `container` block (the precondition `OutOfBandSourceAdvice.SwitchSource` already
-states), and picking either without it would throw at the next run — the failure this design exists to
-remove. `AddService` already enumerates what a catalog entry can resolve to
-(`DeclaredResolutions`), and the picker reuses that rather than restating the rules. The exact
-precondition for `url`, `kubernetes` and `path` has to be confirmed against each source's `Resolve`
-when implementing; this document does not assert it.
+service's catalog entry declares what it needs, and picking one without it would throw at the next
+run — the failure this design exists to remove. The rules, read off each source's `Resolve`:
+
+| Source | Offered when |
+|---|---|
+| `repository` | the catalog entry names a repository to clone (`LocalGitCheckout.HasRepositoryToClone`) |
+| `container` | it has a `container` block with an `image` and a `port` (`ContainerSource.ResolveContainerConfig`) |
+| `kubernetes` | it has a `kubernetes` block (`KubernetesSource`); any further required field is to be confirmed |
+| `url`, `path`, `disabled` | always — a developer's own `url`, `path` or nothing at all is enough |
+
+`AddService`'s `DeclaredResolutions` cannot be reused for this, which an earlier draft claimed. It is
+private; it keeps only sources whose `DeclaredResourceType` is non-null, so `url` and `disabled`
+(which do not override it) never appear; and `repository` and `path` always answer, since a
+developer's own path makes them selectable, so they never filter. It answers "what type would this
+resolve to if chosen", not "can the picker offer it". The picker needs its own per-source predicate,
+a default interface method beside `DeclaredResourceType`, so a third-party source (#54) states its own
+precondition instead of being hard-coded here.
 
 A service whose chosen source needs more than its name then gets a short follow-up
 `PromptInputsAsync`, but far fewer sources need one than the first draft assumed. What a *developer*
 may set per source is fixed by the config types (`ServiceDeveloperConfig` and its blocks): `path`
-requires a `path`; `url` takes a `url`, overriding the catalog's; `repository` takes an optional `ref`
+requires a `path` unless the catalog entry has a `path:`; `url` requires a `url` when the catalog
+entry has none (`UrlSource.ResolveUrl` throws otherwise) and otherwise only overrides it; `repository` takes an optional `ref`
 and `path`; `container` takes only an optional `tag` — its image comes from the catalog, so it is not
 asked for; `kubernetes` takes optional `context`, `namespace`, `port` and `scheme`; `disabled` takes
 nothing. The common answer — `repository`, `container`, `disabled` — therefore needs no follow-up at
@@ -333,9 +346,12 @@ re-raise the dialog.
 The two prompts can both appear in one run: after a partial first configuration, the unconfigured
 services get this dialog and the configured, undecided cold checkouts get #428's. They answer
 different questions and neither can be folded into the other — a placeholder cannot be a checkout
-candidate until a source exists, which is next run — so the dialogs are titled by their question and
-raised in a fixed order, this one first. On the very first run only this dialog appears, and from the
-second only #428's.
+candidate until a source exists, which is next run — so the dialogs are titled by their question. Their order is not controlled: each runs on its own
+task from its own `BeforeStartEvent` handler, and handler order is subscription order, which depends
+on whether the first deferred service or the first placeholder is added first. Whether Aspire shows
+two pending prompts together or one after the other has not been verified here, and should be checked
+before this ships. When no service has a source, only this dialog appears; once every service has one,
+only #428's can; a partly configured file, or a catalog `defaultSource` on some services, gives both.
 
 **Pull.** Each placeholder also carries a `Configure` command, so a service added to
 `servicesources.yaml` by a teammate after the developer's file already exists can be configured
@@ -379,8 +395,9 @@ design does not fix that; the first implementation step is to re-derive it.
   warning, as for `"disabled"`. `DisabledSource` registers nothing; the placeholder must, because it
   carries the dashboard state and the `Configure` command.
 - **Keep `NotConfiguredError`'s diagnostics.** Its near-miss notes (misspelled root key, misspelled
-  service name) are what make the typo'd-key consequence below tolerable. The placeholder's dashboard
-  property should carry the same text rather than a generic "Not configured".
+  service name) are what make the typo'd-key consequence below tolerable. They are logged as one
+  notice when the placeholder is created, not shown in the dashboard property, which stays short and
+  free of local file paths.
 
 Answers and #428's `selection.json` are different facts (which source a service uses, versus
 which declared services to run this time) and stay in separate stores. The prompts should not be
@@ -435,8 +452,9 @@ The dialog itself needs a live AppHost and a dashboard client, so the logic is k
   them, and the result reloads through `DeveloperConfigLoader` unchanged.
 - Consumer safety: a resource that references an unconfigured service composes and the
   application starts.
-- Closed and timed-out dialogs: neither starts anything or re-raises the dialog, and each logs one
-  line naming the placeholders.
+- Closed dialog and host stop: neither starts anything or re-raises the dialog, and a closed one
+  logs one line naming the placeholders. There is no timeout path to test, because the prompt has no
+  deadline.
 - Blank shadowing: a blank value for the key in a provider above the file produces the warning;
   no such provider produces none.
 - Per-service choices: a service whose catalog entry declares no `container` block is not offered
