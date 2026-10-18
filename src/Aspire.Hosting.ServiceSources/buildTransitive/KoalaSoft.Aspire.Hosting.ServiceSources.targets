@@ -80,17 +80,18 @@
       the numeric core is compared as before and, for an equal core, the numbers after "-preview."
       are compared as a version of their own ("1.26506.6"). A label of any other shape on an equal
       core is left alone rather than failed on: it cannot be ordered here, and the run-time check
-      stands behind it.
+      stands behind it. Not checked at all when the Community Toolkit's package is also resolved:
+      that one wins at run time, so the official assembly is never loaded.
     -->
     <PropertyGroup>
       <_ServiceSourcesOfficialJavaMinCore>$([System.Text.RegularExpressions.Regex]::Replace('$(ServiceSourcesOfficialJavaMinVersion)', '-.*$', ''))</_ServiceSourcesOfficialJavaMinCore>
-      <_ServiceSourcesOfficialJavaMinTail>$([System.Text.RegularExpressions.Regex]::Match('$(ServiceSourcesOfficialJavaMinVersion)', '-preview\.([0-9]+(\.[0-9]+)+)$').Groups[1].Value)</_ServiceSourcesOfficialJavaMinTail>
+      <_ServiceSourcesOfficialJavaMinTail>$([System.Text.RegularExpressions.Regex]::Match('$(ServiceSourcesOfficialJavaMinVersion)', '-preview\.([0-9]+(\.[0-9]+)*)$').Groups[1].Value)</_ServiceSourcesOfficialJavaMinTail>
     </PropertyGroup>
 
     <ItemGroup>
       <_ServiceSourcesOfficialJavaVersion>
         <Core>$([System.Text.RegularExpressions.Regex]::Replace('%(Identity)', '-.*$', ''))</Core>
-        <Tail>$([System.Text.RegularExpressions.Regex]::Match('%(Identity)', '-preview\.([0-9]+(\.[0-9]+)+)$').Groups[1].Value)</Tail>
+        <Tail>$([System.Text.RegularExpressions.Regex]::Match('%(Identity)', '-preview\.([0-9]+(\.[0-9]+)*)$').Groups[1].Value)</Tail>
       </_ServiceSourcesOfficialJavaVersion>
       <_ServiceSourcesOfficialJavaVersion>
         <OlderPreview Condition="'%(Tail)' != ''">$([MSBuild]::VersionLessThan('%(Tail)', '$(_ServiceSourcesOfficialJavaMinTail)'))</OlderPreview>
@@ -111,7 +112,7 @@
            Code="SERVICESOURCES002"
            Text="KoalaSoft.Aspire.Hosting.ServiceSources needs CommunityToolkit.Aspire.Hosting.Java $(ServiceSourcesJavaMinVersion) or newer for services with kind 'java', but this project resolves %(_ServiceSourcesJavaVersion.Identity). Raise the CommunityToolkit.Aspire.Hosting.Java version, or remove the reference if no service declares that kind. If it arrived transitively and neither is yours to do, set ServiceSourcesSkipGuestLanguageFloorCheck=true to bypass this check - the failure is then reported at run time, by the service that needed it." />
 
-    <Error Condition="'@(_ServiceSourcesOfficialJavaVersion)' != ''
+    <Error Condition="'@(_ServiceSourcesOfficialJavaVersion)' != '' and '@(_ServiceSourcesJavaVersion)' == ''
                       and ($([MSBuild]::VersionLessThan('%(_ServiceSourcesOfficialJavaVersion.Core)', '$(_ServiceSourcesOfficialJavaMinCore)'))
                            or ('%(_ServiceSourcesOfficialJavaVersion.OlderPreview)' == 'True'
                                and $([MSBuild]::VersionEquals('%(_ServiceSourcesOfficialJavaVersion.Core)', '$(_ServiceSourcesOfficialJavaMinCore)'))))"
