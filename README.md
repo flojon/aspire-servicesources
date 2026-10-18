@@ -80,37 +80,50 @@ prefer a committed `servicesources.yaml` over code? See
 `AddService()` returns an `IResourceBuilder<ServiceResource>`. `ServiceResource` does not inherit
 `ProjectResource` — a service isn't always a project, and the type shouldn't reveal which source
 resolved it — so a helper hard-typed to `IResourceBuilder<ProjectResource>` won't accept it. Two
-fixes cover most cases:
+approaches cover most cases.
 
 **1. Widen your own helpers** to a generic constrained to the capabilities their body uses, instead
-of a concrete resource type:
+of a concrete resource type. A helper that only calls `WithReference`, `WaitFor` and `WithEnvironment`
+needs nothing more than the interfaces behind them:
 
 ```csharp
-// before
-static IResourceBuilder<ProjectResource> AddOllama(this IResourceBuilder<ProjectResource> app, ...)
-
-// after: accepts a ProjectResource, a ServiceResource, a container, ...
-static IResourceBuilder<T> AddOllama<T>(this IResourceBuilder<T> app, ...)
-    where T : IResourceWithEnvironment, IResourceWithWaitSupport
+static class AppHostExtensions
 {
-    return app.WithReference(ollama).WaitFor(ollama).WithEnvironment("OLLAMA_MODEL", model);
+    // was: this IResourceBuilder<ProjectResource> app
+    public static IResourceBuilder<T> AddOllama<T>(
+        this IResourceBuilder<T> app,
+        IResourceBuilder<IResourceWithServiceDiscovery> ollama,
+        string model)
+        where T : IResourceWithEnvironment, IResourceWithWaitSupport
+    {
+        return app.WithReference(ollama).WaitFor(ollama).WithEnvironment("OLLAMA_MODEL", model);
+    }
 }
 ```
 
-`ServiceResource` implements `IResourceWithServiceDiscovery`, `IResourceWithEnvironment`,
-`IResourceWithArgs`, `IResourceWithEndpoints` and `IResourceWithWaitSupport`.
+This accepts a project, a container or a `ServiceResource`. `ServiceResource` implements
+`IResourceWithServiceDiscovery`, `IResourceWithEnvironment`, `IResourceWithArgs`,
+`IResourceWithEndpoints` and `IResourceWithWaitSupport`; parameters that take another resource
+should use the same interface-typed form (`IResourceBuilder<IResourceWithServiceDiscovery>`) rather
+than `IResourceBuilder<ProjectResource>`.
 
-**2. Pass an `EndpointReference` where a third-party API only takes concrete types.** Some
-integrations have no generic overload — Aspire.Hosting.Yarp's `AddCluster(...)` takes a concrete
-resource type or an `EndpointReference`, so widening your parameter won't help. Use
-`GetServiceEndpoint()`, which picks the service's `https` endpoint, else `http`, whichever source
-resolved it:
+**2. Use `GetServiceEndpoint()` where an API takes only an `EndpointReference`.** Many integrations
+accept the resource builder through an interface-typed overload, and those take a service as is
+(Aspire.Hosting.Yarp's `AddCluster` has an `IResourceBuilder<IResourceWithServiceDiscovery>` overload).
+Where one accepts only an `EndpointReference`, or you need the service's URL as a value,
+`GetServiceEndpoint()` returns the `https` endpoint, else `http`, else the service's only endpoint —
+whichever source resolved it:
 
 ```csharp
-var catalogApi = builder.AddService("catalog-api");
+var commonAuth = builder.AddService("common-auth");
 
-yarp.WithConfiguration(c => c.AddCluster(catalogApi.GetServiceEndpoint()));
+builder.AddProject<Projects.Web>("web")
+    .WithEnvironment("Services__CommonAuth", commonAuth.GetServiceEndpoint());
 ```
+
+It throws `ServiceSourcesConfigurationException` if the service exposes no endpoints, or several and
+none named `http` or `https`; name the one you mean with `GetEndpoint("...")`. The endpoint is chosen
+when you call it, so call it after any `Configure(...)` that adds an endpoint.
 
 ## Learn more
 
