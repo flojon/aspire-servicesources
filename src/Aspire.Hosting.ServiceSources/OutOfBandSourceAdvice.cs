@@ -50,6 +50,8 @@ internal static class OutOfBandSourceAdvice
             "configuration would reach kubectl rather than the service",
         "disabled" =>
             "a developer has switched it off in servicesources.local.json, so there is nothing local to configure",
+        "unconfigured" =>
+            "no source has been chosen for it, so nothing is running for it",
         _ => "it runs out of band",
     };
 
@@ -61,6 +63,7 @@ internal static class OutOfBandSourceAdvice
     internal static string ExpectedConfiguredWhere(string source) => source switch
     {
         "disabled" => "There is nowhere else to configure it while it stays disabled",
+        "unconfigured" => "There is nothing to configure until a source is chosen for it",
         _ => "The service is expected to be configured wherever it actually runs",
     };
 
@@ -68,6 +71,7 @@ internal static class OutOfBandSourceAdvice
     internal static string ConfigureInsteadClause(string source) => source switch
     {
         "disabled" => "Drop the configuration",
+        "unconfigured" => "Drop the configuration until a source is chosen",
         _ => "Configure the service where it actually runs, drop the configuration",
     };
 

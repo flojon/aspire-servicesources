@@ -20,6 +20,12 @@ internal static class InteractiveServiceConfiguration
 
     public static bool IsEnabled(IDistributedApplicationBuilder builder)
     {
+        // A manifest cannot describe the placeholder, so publish keeps failing fast on a missing source.
+        if (!builder.ExecutionContext.IsRunMode)
+        {
+            return false;
+        }
+
         var overrideValue = builder.Configuration[OverrideKey];
 
         if (!string.IsNullOrWhiteSpace(overrideValue))

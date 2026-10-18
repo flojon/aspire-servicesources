@@ -107,7 +107,7 @@ public static class ServiceSourcesBuilderExtensions
                 throw notConfigured!;
             }
 
-            return UnconfiguredSource.Resolve(builder, name, notConfigured!.Message);
+            return UnconfiguredSource.Resolve(builder, name);
         }
 
         var developerConfig = resolvedConfig;

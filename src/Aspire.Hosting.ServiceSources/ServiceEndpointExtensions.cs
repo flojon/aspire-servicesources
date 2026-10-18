@@ -109,6 +109,15 @@ public static class ServiceEndpointExtensions
                     + $"to declare one for. To get one, {Raw.Literal(OutOfBandSourceAdvice.SwitchSource)}.");
             }
 
+            // Same dead end as "disabled": nothing runs for it, so declaring an endpoint is skipped.
+            if (string.Equals(annotation?.Source, "unconfigured", StringComparison.Ordinal))
+            {
+                return Raw.Compose(
+                    $"Service '{name}' exposes no endpoint, so there is none to reference.{source} No source "
+                    + $"has been chosen for it, so nothing is running to give it one. To get one, "
+                    + $"{Raw.Literal(OutOfBandSourceAdvice.SwitchSource)}.");
+            }
+
             return Raw.Compose(
                 $"Service '{name}' exposes no endpoint, so there is none to reference.{source} "
                 + $"Give the service an endpoint — a 'scheme'/'port' entry for a 'kubernetes' or "

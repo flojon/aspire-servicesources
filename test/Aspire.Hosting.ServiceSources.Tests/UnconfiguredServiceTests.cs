@@ -123,6 +123,62 @@ public class UnconfiguredServiceTests
     }
 
     [Fact]
+    public void InPublishMode_AnUnconfiguredService_StillThrows_EvenWhenForcedOn()
+    {
+        var builder = TestHelpers.CreatePublishingBuilder(AppHostDirectory());
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["CI"] = "",
+            [InteractiveServiceConfiguration.OverrideKey] = "1",
+        });
+        builder.UseInteractiveServiceConfiguration();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("inventory"));
+
+        Assert.Contains("No service sources are configured", ex.Message);
+    }
+
+    [Fact]
+    public void ThePlaceholdersReason_NamesTheKeyToSet_AndNoFilePath()
+    {
+        var builder = Builder();
+
+        builder.AddService("inventory");
+
+        var placeholder = Assert.Single(builder.Resources.OfType<UnconfiguredServiceResource>());
+        var snapshot = Assert.Single(placeholder.Annotations.OfType<ResourceSnapshotAnnotation>()).InitialSnapshot;
+        var reason = Assert.Single(snapshot.Properties, p => p.Name == "Reason").Value?.ToString();
+
+        Assert.Contains("ServiceSources:Services:inventory:source", reason);
+        Assert.DoesNotContain("servicesources.local.json", reason);
+        Assert.DoesNotContain(Path.DirectorySeparatorChar, reason!);
+    }
+
+    [Fact]
+    public void UnwrapOnAPlaceholder_ExplainsThatNoSourceHasBeenChosen()
+    {
+        var builder = Builder();
+        var inventory = builder.AddService("inventory");
+
+        var ex = Assert.ThrowsAny<Exception>(() => inventory.Unwrap<ProjectResource>());
+
+        Assert.Contains("no source has been chosen", ex.Message);
+        Assert.DoesNotContain("runs out of band", ex.Message);
+    }
+
+    [Fact]
+    public void GetServiceEndpointOnAPlaceholder_ExplainsThatNoSourceHasBeenChosen()
+    {
+        var builder = Builder();
+        var inventory = builder.AddService("inventory");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => inventory.GetServiceEndpoint());
+
+        Assert.Contains("No source has been chosen", ex.Message);
+        Assert.DoesNotContain("WithHttpEndpoint", ex.Message);
+    }
+
+    [Fact]
     public async Task AConsumerThatWaitsOnAndReferencesAPlaceholder_StillStarts()
     {
         var builder = Builder();
