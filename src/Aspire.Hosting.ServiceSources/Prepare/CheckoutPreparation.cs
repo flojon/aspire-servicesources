@@ -370,7 +370,7 @@ internal static class CheckoutPreparation
                 // interleaved into one.
                 lock (tail)
                 {
-                    sink.Report(Raw.Compose($"{tag} {Raw.Escaped(redacted)}"));
+                    sink.Report(Raw.Compose($"{tag} {Raw.Output(redacted)}"));
 
                     tail.Enqueue(redacted);
                     if (tail.Count > OutputTailLines)
@@ -402,7 +402,7 @@ internal static class CheckoutPreparation
     /// gets the same redaction #270 already gives its output, rather than only the lines it prints
     /// (#286).
     /// </remarks>
-    private static Raw RedactedDescribe(PrepareStep step) => Raw.Escaped(GitUrl.RedactAll(step.Describe()));
+    private static Raw RedactedDescribe(PrepareStep step) => Raw.Output(GitUrl.RedactAll(step.Describe()));
 
     /// <param name="quoted">
     /// The output tail, already snapshotted by the caller — this must not enumerate the live queue,

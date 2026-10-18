@@ -1492,7 +1492,7 @@ internal sealed class DeferredCheckout
                         + $"Running it executes code from the catalog on this machine, in {Raw.Display(repoRoot)}: "
                         + $"{command}. "
                         + $"Skip, or no answer within {(int)PromptTimeout.TotalMinutes} minutes, leaves the service not started "
-                        + $"until the AppHost restarts, and anything waiting on it keeps waiting.").ToString(),
+                        + $"until the next AppHost start, and anything waiting on it keeps waiting.").ToString(),
                     new MessageBoxInteractionOptions
                     {
                         PrimaryButtonText = "Run",
