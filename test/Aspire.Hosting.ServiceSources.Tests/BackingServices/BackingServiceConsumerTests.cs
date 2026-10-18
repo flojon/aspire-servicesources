@@ -11,7 +11,7 @@ namespace Aspire.Hosting.ServiceSources.Tests.BackingServices;
 [Trait("IO", "true")]
 public class BackingServiceConsumerTests
 {
-    private static string FixtureRepoPath => Path.Combine(AppContext.BaseDirectory, "Fixtures", "sample-service.git");
+    private static string FixtureRepoPath => SampleServiceFixture.RepoPath;
 
     private static IDistributedApplicationBuilder CreateBuilder(string localJson)
     {
