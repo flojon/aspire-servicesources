@@ -333,7 +333,7 @@ internal static class LocalGitCheckout
         if (grouped && config.Repository.Ref is not null)
         {
             throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': 'repository.ref' cannot be set — this service is grouped into the shared repository '{new Name(definition.Repository.CheckoutName)}', whose ref applies to every member alike rather than to any one of them. Set '{Raw.Literal(DeveloperConfiguration.RepositoriesKey, default)}:{new Name(definition.Repository.CheckoutName)}:ref' instead. If that repository is on the 'path' source, the group's ref is not used; remove this service's 'repository.ref' so it follows the group's directory.");
+                $"Service '{new Name(serviceName)}': 'repository.ref' cannot be set — this service is grouped into the shared repository '{new Name(definition.Repository.CheckoutName)}', whose ref applies to every member alike rather than to any one of them. Set '{Raw.Literal(DeveloperConfiguration.RepositoriesKey, default)}:{new Name(definition.Repository.CheckoutName)}:ref' instead. If that repository is on the 'path' source, the group's ref is not used; remove this service's 'repository.ref' (and any 'repository.path') so it follows the group's directory.");
         }
 
         if (config.Repository.Path is not null)
