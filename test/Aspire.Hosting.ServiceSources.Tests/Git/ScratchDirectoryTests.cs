@@ -151,4 +151,30 @@ public class ScratchDirectoryTests
 
         Assert.Empty(Directory.GetFileSystemEntries(root));
     }
+
+    [Fact]
+    public void Dispose_DirectoryCannotBeRemoved_KeepsTheLockSoTheNextSweepFinishesTheJob()
+    {
+        // Linux lets an open file be deleted, so only Windows can make the removal fail.
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var root = NewRoot();
+        var scratch = ScratchDirectory.Create(root);
+        var held = Populate(scratch.Path);
+        File.SetAttributes(held, FileAttributes.Normal);
+
+        using (new FileStream(held, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            scratch.Dispose();
+        }
+
+        Assert.True(File.Exists(scratch.Path + ".lock"));
+
+        ScratchDirectory.SweepAbandoned(root);
+
+        Assert.Empty(Directory.GetFileSystemEntries(root));
+    }
 }
