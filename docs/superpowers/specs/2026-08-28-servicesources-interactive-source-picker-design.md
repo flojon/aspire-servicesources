@@ -293,20 +293,49 @@ one dialog instead of ten.
 
 The choice list is derived from the source dictionary `AddService` resolves through, which is a
 private, closed set today: `repository`, `container`, `url`, `kubernetes`, `path` and `disabled`.
-All six are offered — `disabled` is the way to say "I don't want this service" and stops it being
-asked about again. A third-party source (#54, still open) would appear without touching this code once
-that dictionary can be extended; until then there is nothing to derive beyond those six.
+`disabled` is the way to say "I don't want this service" and stops it being asked about again. A
+third-party source (#54, still open) would appear without touching this code once that dictionary
+can be extended; until then there is nothing to derive beyond those six.
 
-A service whose chosen source needs more than a name then gets a short follow-up
-`PromptInputsAsync` — `repository` needs a `ref`, `path` needs a directory, `container` needs an
-image, `url` needs a URL, `kubernetes` needs what its catalog block leaves open. This two-step shape
-is forced: `PromptInputsAsync` takes a fixed input list, so a field cannot
-appear in response to an earlier answer in the same form. #70 evaluated showing every field at
-once with `ValidationCallback` rejecting mismatches and rejected it; this design follows that
-conclusion. Validation reuses the #43 per-source field rules via `ValidationCallback`.
+**The list is filtered per service, not offered whole.** A source is only a valid answer where the
+service's catalog entry declares what it needs: `repository` needs a `repository` or `repositoryRef`,
+`container` needs a `container` block (the precondition `OutOfBandSourceAdvice.SwitchSource` already
+states), and picking either without it would throw at the next run — the failure this design exists to
+remove. `AddService` already enumerates what a catalog entry can resolve to
+(`DeclaredResolutions`), and the picker reuses that rather than restating the rules. The exact
+precondition for `url`, `kubernetes` and `path` has to be confirmed against each source's `Resolve`
+when implementing; this document does not assert it.
+
+A service whose chosen source needs more than its name then gets a short follow-up
+`PromptInputsAsync`, but far fewer sources need one than the first draft assumed. What a *developer*
+may set per source is fixed by the config types (`ServiceDeveloperConfig` and its blocks): `path`
+requires a `path`; `url` takes a `url`, overriding the catalog's; `repository` takes an optional `ref`
+and `path`; `container` takes only an optional `tag` — its image comes from the catalog, so it is not
+asked for; `kubernetes` takes optional `context`, `namespace`, `port` and `scheme`; `disabled` takes
+nothing. The common answer — `repository`, `container`, `disabled` — therefore needs no follow-up at
+all. This two-step shape is forced: `PromptInputsAsync` takes a fixed input list, so a field cannot
+appear in response to an earlier answer in the same form. #70 weighed the alternative — every field at
+once, with `ValidationCallback` rejecting mismatches — and judged sequential prompts read better and
+behave correctly in the CLI; this design follows that. Validation reuses the #43 rules: the raw
+answers are loaded into an in-memory configuration section for the entry and run through
+`DeveloperConfigValidator`, so no typed object has to be built from a half-filled form.
 
 If `IsAvailable` is false, nothing is prompted and the AppHost logs one warning naming every
 unconfigured service and the key to set for each.
+
+**When nobody answers.** #428's prompt starts every undecided service and saves nothing when it times
+out, is closed, or cannot be shown. The same fallback is meaningless here, because a placeholder has
+nothing to start. So this prompt has no deadline — it stays pending until answered or the host stops,
+which is the behaviour measured earlier — and a closed dialog leaves the placeholders as they are,
+logs one line naming them, and relies on the `Configure` command below as the way back in. It does not
+re-raise the dialog.
+
+The two prompts can both appear in one run: after a partial first configuration, the unconfigured
+services get this dialog and the configured, undecided cold checkouts get #428's. They answer
+different questions and neither can be folded into the other — a placeholder cannot be a checkout
+candidate until a source exists, which is next run — so the dialogs are titled by their question and
+raised in a fixed order, this one first. On the very first run only this dialog appears, and from the
+second only #428's.
 
 **Pull.** Each placeholder also carries a `Configure` command, so a service added to
 `servicesources.yaml` by a teammate after the developer's file already exists can be configured
@@ -357,6 +386,19 @@ Answers and #428's `selection.json` are different facts (which source a service 
 which declared services to run this time) and stay in separate stores. The prompts should not be
 raised twice: once a service is configured, #428's prompt takes over for it on the next run.
 
+The file written is the one beside this AppHost, which in a linked git worktree is that worktree's own
+copy. `WorktreeSeed` copies the main worktree's file in once on first run and never writes back, so
+an answer given in a linked worktree does not reach the main one, which asks again in its own time.
+
+**A higher layer can shadow the answer, but only by blanking the key.** An unconfigured service is one
+where no layer supplies a non-blank `source`, so a value from appsettings, user secrets or the
+environment cannot be in the way. What can is a higher layer that sets the key to blank — the one
+gesture configuration offers for dropping a value a layer below set, and the reason
+`ResolveService` treats a blank source as absent. Before saving, the picker asks each configuration
+provider other than the file's whether it holds `ServiceSources:Services:<name>:source` with a blank
+value. If one does, the answer is still saved, and the notification says it will not take effect
+until that layer stops blanking the key, naming the provider.
+
 Saving is followed by `PromptNotificationAsync` with `MessageIntent.Success` stating that the
 choice is saved and takes effect on the next run. The UI must not imply the current run changed —
 it did not. A dashboard command that stops the AppHost so the developer can immediately re-run is
@@ -393,6 +435,12 @@ The dialog itself needs a live AppHost and a dashboard client, so the logic is k
   them, and the result reloads through `DeveloperConfigLoader` unchanged.
 - Consumer safety: a resource that references an unconfigured service composes and the
   application starts.
+- Closed and timed-out dialogs: neither starts anything or re-raises the dialog, and each logs one
+  line naming the placeholders.
+- Blank shadowing: a blank value for the key in a provider above the file produces the warning;
+  no such provider produces none.
+- Per-service choices: a service whose catalog entry declares no `container` block is not offered
+  `container`.
 - State durability: the placeholder's custom state and property are still present after the
   application has started and DCP has published its own updates — the microsoft/aspire#13647
   check noted above.
