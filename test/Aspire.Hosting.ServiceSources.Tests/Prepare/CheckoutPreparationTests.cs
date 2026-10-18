@@ -1074,10 +1074,17 @@ public class CheckoutPreparationTests
 
         Assert.True(firstRead.Wait(TimeSpan.FromSeconds(10)), "the reader never completed a read");
 
-        fixture.Git.HeadCommitSha = "3333333333333333333333333333333333333333";
-        Run(fixture, Step());
+        try
+        {
+            fixture.Git.HeadCommitSha = "3333333333333333333333333333333333333333";
+            Run(fixture, Step());
+        }
+        finally
+        {
+            await reading.CancelAsync();
+        }
 
-        await reading.CancelAsync();
+        // Surfaces a reader that died on something other than a sharing violation.
         await reader.WaitAsync(TimeSpan.FromSeconds(10));
 
         var after = File.ReadAllText(fixture.MarkerPath);

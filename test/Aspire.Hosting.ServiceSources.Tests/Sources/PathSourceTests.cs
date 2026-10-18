@@ -799,19 +799,26 @@ public class PathSourceTests
                 release.Release();
             }
 
-            // Let the resolve finish and give back anything the second acquire took, so a failed
-            // assertion above doesn't leave the lock held or the resolve unobserved.
+            // Give back anything the second acquire took, then let the resolve finish, so a failed
+            // assertion above doesn't leave the lock held or the resolve unobserved. Cleanup errors
+            // are swallowed: the failure that got us here is the one worth reporting.
             try
             {
-                await resolveTask.WaitAsync(TimeSpan.FromSeconds(30));
                 if (secondAcquire is not null)
                 {
                     (await secondAcquire.WaitAsync(TimeSpan.FromSeconds(10))).Dispose();
                 }
             }
-            catch (Exception) when (!released)
+            catch (Exception)
             {
-                // Cleanup only; the assertion that got us here is the failure worth reporting.
+            }
+
+            try
+            {
+                await resolveTask.WaitAsync(TimeSpan.FromSeconds(30));
+            }
+            catch (Exception)
+            {
             }
         }
     }
