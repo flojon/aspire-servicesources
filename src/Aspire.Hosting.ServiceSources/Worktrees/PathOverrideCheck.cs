@@ -27,7 +27,8 @@ internal enum PathOverrideVerdict
 internal static class PathOverrideCheck
 {
     // Every block that carries a directory: path.path, repository.path and its deprecated local.path alias.
-    // Each is read only under the source that uses it, so a leftover block for another source is inert.
+    // Each is read only under the source that uses it, so once a source is known a leftover block for
+    // another source is inert. See Inspect for the case where none is known yet.
     private static readonly (string Block, string Source)[] Overrides =
     [
         .. DeveloperConfigShape.Service.BlockFields
@@ -100,7 +101,10 @@ internal static class PathOverrideCheck
             {
                 var key = $"{prefix}{service}:{block}:{PathField}";
 
-                // With no source named in any layer, the catalog's default decides, so every block may be read.
+                // With no source named in any layer, the catalog's default decides, and it is not visible yet:
+                // it lands as a configuration layer only after the file is registered. Every block is read
+                // rather than guessed at, which can cost one spurious notice for a leftover block but never
+                // misses a copied path that would make this worktree edit the main worktree's files.
                 if ((!string.IsNullOrWhiteSpace(effective)
                         && !string.Equals(effective, source, StringComparison.OrdinalIgnoreCase))
                     || !fromFile.TryGetValue(key, out var value)
