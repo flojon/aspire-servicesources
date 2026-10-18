@@ -9,7 +9,7 @@ namespace Aspire.Hosting.ServiceSources.Tests;
 [Trait("IO", "true")]
 public class AddServiceIntegrationTests
 {
-    private static string FixtureRepoPath => Path.Combine(AppContext.BaseDirectory, "Fixtures", "sample-service.git");
+    private static string FixtureRepoPath => SampleServiceFixture.RepoPath;
 
     private static IDistributedApplicationBuilder CreateBuilder(string appHostDirectory) =>
         TestHelpers.CreateBuilder(appHostDirectory);
