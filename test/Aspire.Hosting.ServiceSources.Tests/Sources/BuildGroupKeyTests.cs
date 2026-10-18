@@ -90,11 +90,13 @@ public class BuildGroupKeyTests
     }
 
     [Fact]
-    public void For_NoGitButSameBuildGroup_GroupDirectoryAndSiblingShareAKey()
+    public void For_NoGitAndSiblingOutsideTheConfiguredRoot_KeepsItsOwnKey()
     {
         var root = TempDirectories.CreateSubdirectory().FullName;
+        var groupDirectory = Dir(root, "eShop");
+        var outside = TempDirectories.CreateSubdirectory().FullName;
 
-        Assert.Equal(KeyOf(Dir(root, "eShop"), "shared"), KeyOf(Dir(root, "eShop/src/X"), "shared"));
+        Assert.NotEqual(KeyOf(groupDirectory, configuredRoot: () => root), KeyOf(outside, configuredRoot: () => root));
     }
 
     [Fact]
