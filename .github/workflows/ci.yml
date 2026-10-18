@@ -378,8 +378,8 @@ jobs:
     # the merge. aspire-matrix.yml documents the same trap from the side where a filter is safe.
     name: 📘 typescript export surface
     runs-on: ubuntu-latest
-    # Nothing here starts an AppHost; this only caps a hung restore or codegen.
-    timeout-minutes: 15
+    # Caps a hung restore, codegen or AppHost start.
+    timeout-minutes: 20
     permissions:
       contents: read
 
@@ -499,6 +499,24 @@ jobs:
       - name: Typecheck the generated SDK
         working-directory: ${{ matrix.sample }}
         run: npx tsc --noEmit -p tsconfig.apphost.json
+
+      # tsc proves the AppHost typechecks, not that it runs: a stale string such as
+      # withDefaultSource('local') typechecks fine and fails at startup, and a callback nested in
+      # another (asJava inside addServiceCatalog) only deadlocks once the host actually invokes
+      # it. `aspire start` returns only after the AppHost has run its own top-level code, so
+      # success means every catalog callback completed. Containers are pulled after that point and
+      # are not waited for, hence the stop straight away.
+      - name: Start the sample AppHost
+        timeout-minutes: 5
+        working-directory: ${{ matrix.sample }}
+        run: |
+          cp servicesources.local.json.example servicesources.local.json
+          aspire start --isolated --non-interactive --nologo
+
+      - name: Stop the sample AppHost
+        if: always()
+        working-directory: ${{ matrix.sample }}
+        run: aspire stop --apphost . --non-interactive --nologo || true
 
       # A failure above is a diagnostic pointing by line into two megabytes of machine-written
       # TypeScript that exists only on the runner. Named per matrix leg (matrix.slug) - two legs

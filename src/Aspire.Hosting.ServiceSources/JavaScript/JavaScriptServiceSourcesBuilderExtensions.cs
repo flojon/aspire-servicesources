@@ -52,7 +52,9 @@ public static class JavaScriptServiceSourcesBuilderExtensions
     ///     .AsJavaScript(o => o.WithAppType(JavaScriptAppTypes.Vite).WithPort(3000));
     /// </code>
     /// </example>
-    [AspireExport]
+    // The synchronous callback runs from the guest's capability call; on the RPC thread the guest's
+    // calls back into the host can't be served and the callback times out.
+    [AspireExport(RunSyncOnBackgroundThread = true)]
     public static ServiceDefinitionBuilder AsJavaScript(
         this ServiceDefinitionBuilder builder, Action<JavaScriptKindOptionsBuilder> configure)
     {

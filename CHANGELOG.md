@@ -134,6 +134,12 @@ never existed. Check the tag of the last release before adding one.
 
 ### Fixed
 
+- **`asJava`/`asJavaScript` inside an `addServiceCatalog` callback no longer hang a TypeScript
+  AppHost** ([#463]). The first call made inside the nested callback never returned, and after 60s
+  both callbacks timed out with `Callback 'callback_2_…' timed out after 60s` and the AppHost
+  failed. `AsJava()` and `AsJavaScript()` now run off the RPC thread, as `AddServiceCatalog()`
+  already did. C# AppHosts were not affected.
+
 - **A `"repository"` clone no longer fails on Windows for repositories with long paths, and its
   leftovers no longer linger** ([#462]). git is now run with `core.longpaths=true` on Windows, the
   staging directory is named `.incoming-<8 hex>` instead of embedding the service name and a
@@ -2059,6 +2065,7 @@ Targets `net10.0`.
 [#448]: https://github.com/flojon/aspire-servicesources/issues/448
 [#449]: https://github.com/flojon/aspire-servicesources/issues/449
 [#462]: https://github.com/flojon/aspire-servicesources/issues/462
+[#463]: https://github.com/flojon/aspire-servicesources/issues/463
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
