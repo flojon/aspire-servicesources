@@ -811,6 +811,7 @@ public class PathSourceTests
             }
             catch (Exception)
             {
+                // Cleanup only; the failure that got us here is the one worth reporting.
             }
 
             try
@@ -819,6 +820,7 @@ public class PathSourceTests
             }
             catch (Exception)
             {
+                // Cleanup only; the failure that got us here is the one worth reporting.
             }
         }
     }
