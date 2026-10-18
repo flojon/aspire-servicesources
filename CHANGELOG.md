@@ -95,6 +95,10 @@ never existed. Check the tag of the last release before adding one.
 
 ### Changed
 
+- **Docs: build serialization needs `ServiceSources:RepositoryRoot` or `buildGroup` when there is no
+  `.git`** ([#449]). Without either, a `repositories.<name>` group directory and a sibling with its own
+  `path.path` inside it are separate build groups and can build concurrently. A test now pins the
+  layout; no behavior changed.
 - **A cold `"repository"` checkout is no longer cloned at `AddService()`; the dashboard asks which
   ones to clone and start** ([#271]). In run mode, once the AppHost starts, one dialog lists the
   services whose managed clone does not exist yet, all checked. Checked services are cloned and
@@ -2042,6 +2046,7 @@ Targets `net10.0`.
 [#415]: https://github.com/flojon/aspire-servicesources/issues/415
 [#416]: https://github.com/flojon/aspire-servicesources/issues/416
 [#448]: https://github.com/flojon/aspire-servicesources/issues/448
+[#449]: https://github.com/flojon/aspire-servicesources/issues/449
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

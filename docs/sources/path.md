@@ -193,6 +193,15 @@ two builds that did not need it at the cost of a little startup time, and never 
 `prepare` lock groups differently, by resolved service directory: it guards a step that runs *in*
 that directory.)
 
+**A copy of the repository without its `.git`** (a source archive, a container build context) has no
+repository to find, so each service directory is its own group. That includes a `repositories.<name>`
+group directory and a sibling whose own `path.path` points inside it, such as `../eShop/src/X`: they
+get different keys and can build at the same time on a shared `obj/` and `bin/`. Give the services
+one `buildGroup`, or set `ServiceSources:RepositoryRoot` to a directory that contains the AppHost
+directory and every one of those service directories (for `../eShop/src/X` that is their common
+parent or higher, not necessarily the AppHost's own repository root). A service outside that
+directory silently stays in its own group. They are then serialized again.
+
 **`buildGroup` names a group explicitly** for what the repository rule cannot see, such as two
 repositories that share a project through a sibling path:
 
