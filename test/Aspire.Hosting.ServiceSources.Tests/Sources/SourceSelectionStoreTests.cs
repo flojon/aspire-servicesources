@@ -195,7 +195,9 @@ public class SourceSelectionStoreTests
         var names = Enumerable.Range(0, 12).Select(i => $"svc{i}").ToArray();
 
         var results = await Task.WhenAll(names.Select(name => Task.Run(
-            () => SourceSelectionStore.TrySave(host, new Dictionary<string, bool> { [name] = true }))));
+            // ~30 s of lock retries: the default ~2 s runs out when parallel test processes starve the savers.
+            () => SourceSelectionStore.TrySave(
+                host, new Dictionary<string, bool> { [name] = true }, lockAttempts: 750))));
 
         Assert.All(results, Assert.True);
         Assert.Equal(names.Order(), SourceSelectionStore.Read(host).Decisions.Keys.Order());

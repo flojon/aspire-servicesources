@@ -280,7 +280,7 @@ not asked about either. This is a consent gate on changed catalog code, so it **
 "Run" runs the step. Closing the dialog, no answer within 5 minutes, or a dialog that cannot be
 shown declines, and the service shows `Skipped` instead of starting; anything that waits on it keeps
 waiting. Fix the catalog if the change
-was unintended, then restart the AppHost to be asked again. (The cold-checkout source pick is the
+was unintended, then it asks again on the next AppHost start. (The cold-checkout source pick is the
 opposite: an unanswered dialog starts everything.) With no dashboard to ask through (`aspire run`
 without one, CI) nothing can ask, so the step runs as before and the log says why.
 

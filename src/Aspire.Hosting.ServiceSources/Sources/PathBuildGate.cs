@@ -74,7 +74,7 @@ internal sealed class PathBuildGate
 
             var exitCode = await runner.RunAsync(
                 projectFile, configuration,
-                line => ServiceSourcesLog.Information(logger, $"{Raw.Escaped(line)}"),
+                line => ServiceSourcesLog.Information(logger, $"{Raw.Output(line)}"),
                 cancellationToken).ConfigureAwait(false);
 
             if (exitCode != 0)

@@ -419,4 +419,60 @@ public class GitCliClientTests
         Assert.NotNull(client.GetHeadCommitSha(destination));
         Assert.Null(client.GetHeadCommitSha(inside));
     }
+
+    /// <summary>The argv git was started with, as git's own trace reports it.</summary>
+    private static string TraceOf(bool isWindows, Action<GitCliClient, string> act)
+    {
+        var trace = Path.Combine(TempDirectories.CreateSubdirectory().FullName, "trace.json");
+        var environment = TestRepository.IsolatedEnvironment();
+        environment["GIT_TRACE2_EVENT"] = trace;
+
+        var origin = TestRepository.CreateOrigin();
+        var destination = TestRepository.EmptyDestination();
+        var client = new GitCliClient(environment, isWindows);
+        client.Clone(origin.Path, destination);
+        File.Delete(trace);
+        act(client, destination);
+
+        return File.ReadAllText(trace);
+    }
+
+    [Fact]
+    public void OnWindows_FetchAndCheckoutAndCloneEnableLongPaths()
+    {
+        var trace = TraceOf(isWindows: true, (client, destination) =>
+        {
+            client.Fetch(destination);
+            client.Checkout(destination, "feature/x");
+        });
+
+        Assert.Contains("core.longpaths=true", trace, StringComparison.Ordinal);
+        Assert.Contains("\"fetch\"", trace, StringComparison.Ordinal);
+        Assert.Contains("\"checkout\"", trace, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OffWindows_LongPathsAreNotTouched()
+    {
+        var trace = TraceOf(isWindows: false, (client, destination) =>
+        {
+            client.Fetch(destination);
+            client.Checkout(destination, "feature/x");
+        });
+
+        Assert.DoesNotContain("core.longpaths", trace, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OnWindows_CloneEnablesLongPaths()
+    {
+        var trace = Path.Combine(TempDirectories.CreateSubdirectory().FullName, "trace.json");
+        var environment = TestRepository.IsolatedEnvironment();
+        environment["GIT_TRACE2_EVENT"] = trace;
+
+        new GitCliClient(environment, isWindows: true)
+            .Clone(TestRepository.CreateOrigin().Path, TestRepository.EmptyDestination());
+
+        Assert.Contains("core.longpaths=true", File.ReadAllText(trace), StringComparison.Ordinal);
+    }
 }

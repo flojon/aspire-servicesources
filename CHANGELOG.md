@@ -140,6 +140,13 @@ never existed. Check the tag of the last release before adding one.
   failed. `AsJava()` and `AsJavaScript()` now run off the RPC thread, as `AddServiceCatalog()`
   already did. C# AppHosts were not affected.
 
+- **A `"repository"` clone no longer fails on Windows for repositories with long paths, and its
+  leftovers no longer linger** ([#462]). git is now run with `core.longpaths=true` on Windows, the
+  staging directory is named `.incoming-<8 hex>` instead of embedding the service name and a
+  32-character GUID, and a staging directory whose clone died is removed by the next clone in that
+  `checkouts` folder instead of after 24 hours. A clone still running in another AppHost is never
+  touched, and read-only files git leaves in `.git` no longer block the cleanup. See
+  [Troubleshooting](docs/troubleshooting.md#long-paths-on-windows).
 - **Two `"path"` services in one repository no longer race on a shared project's `bin/` and
   `obj/`** ([#397]). Aspire starts independent resources at once, so two services whose projects
   share a `ProjectReference` ran two builds over the same output directory and one failed
@@ -151,6 +158,9 @@ never existed. Check the tag of the last release before adding one.
   `buildGroup` is now a reserved key, so a yaml service cannot use a custom `kind` of that name. Managed
   checkouts are unchanged, and the gate does not apply when an IDE or `dotnet watch` builds the
   project.
+
+- **A failed clone's git output is shown as git wrote it** ([#465](https://github.com/flojon/aspire-servicesources/issues/465)). The failure message and the resource log escaped backslashes and apostrophes, so a Windows path read as `D:\\Source\\…` and an apostrophe as `\u0027`; they now appear as written, with git's lines joined by ` | `.
+- **The error for a `disabled` service's endpoint reads as a sentence and no longer assumes a yaml catalog** ([#465](https://github.com/flojon/aspire-servicesources/issues/465)). The advice now starts with a capital and says "catalog entry" rather than `servicesources.yaml` entry, which is wrong for a catalog defined in code, and names the code-catalog helpers (`WithRepository`, `WithSharedRepository`, `WithContainer`; `WithProject` for a missing `project`).
 
 ## [0.7.0] - 2026-09-28
 
@@ -2054,6 +2064,7 @@ Targets `net10.0`.
 [#416]: https://github.com/flojon/aspire-servicesources/issues/416
 [#448]: https://github.com/flojon/aspire-servicesources/issues/448
 [#449]: https://github.com/flojon/aspire-servicesources/issues/449
+[#462]: https://github.com/flojon/aspire-servicesources/issues/462
 [#463]: https://github.com/flojon/aspire-servicesources/issues/463
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507

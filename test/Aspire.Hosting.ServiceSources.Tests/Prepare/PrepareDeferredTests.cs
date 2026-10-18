@@ -502,7 +502,7 @@ public class PrepareDeferredTests
         var refusal = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(() =>
             builder.Eventing.PublishAsync(new BeforeResourceStartedEvent(routing, services)));
 
-        Assert.Contains("Restart the AppHost", refusal.Message, StringComparison.Ordinal);
+        Assert.Contains("next AppHost start", refusal.Message, StringComparison.Ordinal);
     }
 
     /// <remarks>
