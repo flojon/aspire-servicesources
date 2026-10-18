@@ -44,11 +44,6 @@ public class SourceSelectionStoreTests
     }
 
     [Theory]
-    [InlineData("""{ "version": 1, "services": { "orders": { "start": "true" } } }""")]
-    [InlineData("""{ "version": 1, "services": { "orders": { "start": 1 } } }""")]
-    [InlineData("""{ "version": 1, "services": { "orders": { "start": null } } }""")]
-    [InlineData("""{ "version": 1, "services": { "orders": { } } }""")]
-    [InlineData("""{ "version": 1, "services": { "orders": true } }""")]
     [InlineData("""{ "version": 1, "services": [] }""")]
     [InlineData("""{ "version": 1 }""")]
     [InlineData("""{ "version": "1", "services": { } }""")]
@@ -113,6 +108,97 @@ public class SourceSelectionStoreTests
 
         Assert.Equal(SelectionFileState.Valid, state);
         Assert.True(decisions["orders"]);
+    }
+
+    [Theory]
+    [InlineData("""{ "version": 1, "services": { "orders": { "start": "true" } } }""")]
+    [InlineData("""{ "version": 1, "services": { "orders": { "start": 1 } } }""")]
+    [InlineData("""{ "version": 1, "services": { "orders": { "start": null } } }""")]
+    [InlineData("""{ "version": 1, "services": { "orders": { } } }""")]
+    [InlineData("""{ "version": 1, "services": { "orders": true } }""")]
+    public void Read_OnlyBadEntry_IsPartialAndEmpty(string content)
+    {
+        var host = NewAppHost();
+        Plant(host, content);
+
+        var (decisions, state) = SourceSelectionStore.Read(host);
+
+        Assert.Equal(SelectionFileState.Partial, state);
+        Assert.Empty(decisions);
+    }
+
+    [Fact]
+    public void Read_OneBadEntry_KeepsTheOthersAndSaveDoesNotLoseThem()
+    {
+        var host = NewAppHost();
+        Plant(host, """{ "version": 1, "services": { "orders": { "start": true }, "x": { "start": "yes" }, "billing": { "start": false } } }""");
+
+        var (decisions, state) = SourceSelectionStore.Read(host);
+        Assert.Equal(SelectionFileState.Partial, state);
+        Assert.True(decisions["orders"]);
+        Assert.False(decisions["billing"]);
+        Assert.False(decisions.ContainsKey("x"));
+
+        Assert.True(SourceSelectionStore.TrySave(host, new Dictionary<string, bool> { ["x"] = true }));
+
+        var (saved, savedState) = SourceSelectionStore.Read(host);
+        Assert.Equal(SelectionFileState.Valid, savedState);
+        Assert.True(saved["orders"]);
+        Assert.False(saved["billing"]);
+        Assert.True(saved["x"]);
+    }
+
+    [Fact]
+    public void Fingerprint_RoundTripsAndAnOlderEntryHasNone()
+    {
+        var host = NewAppHost();
+        Plant(host, """{ "version": 1, "services": { "old": { "start": true } } }""");
+
+        Assert.True(SourceSelectionStore.TrySave(
+            host,
+            new Dictionary<string, bool> { ["orders"] = false },
+            new Dictionary<string, string> { ["orders"] = SourceSelectionStore.Fingerprint("https://x/orders.git", "main") }));
+
+        var (entries, _) = SourceSelectionStore.ReadEntries(host);
+        Assert.Null(entries["old"].Fingerprint);
+        Assert.Equal(SourceSelectionStore.Fingerprint("https://x/orders.git", "main"), entries["orders"].Fingerprint);
+        Assert.NotEqual(
+            SourceSelectionStore.Fingerprint("https://x/orders.git", "main"),
+            SourceSelectionStore.Fingerprint("https://x/other.git", "main"));
+    }
+
+    [Fact]
+    public void TrySave_SymbolicLinkAtThePath_ReturnsFalseAndKeepsTheLink()
+    {
+        var host = NewAppHost();
+        var target = Path.Combine(host, "real.json");
+        File.WriteAllText(target, """{ "version": 1, "services": { } }""");
+        Directory.CreateDirectory(ToolDirectory.PathIn(host));
+
+        try
+        {
+            File.CreateSymbolicLink(SelectionPath(host), target);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            return; // creating links needs a privilege this machine does not grant
+        }
+
+        Assert.False(SourceSelectionStore.TrySave(host, new Dictionary<string, bool> { ["orders"] = true }));
+        Assert.NotNull(new FileInfo(SelectionPath(host)).LinkTarget);
+    }
+
+    [Fact]
+    public async Task TrySave_ConcurrentSavers_LoseNoEntries()
+    {
+        var host = NewAppHost();
+        var names = Enumerable.Range(0, 12).Select(i => $"svc{i}").ToArray();
+
+        var results = await Task.WhenAll(names.Select(name => Task.Run(
+            () => SourceSelectionStore.TrySave(host, new Dictionary<string, bool> { [name] = true }))));
+
+        Assert.All(results, Assert.True);
+        Assert.Equal(names.Order(), SourceSelectionStore.Read(host).Decisions.Keys.Order());
     }
 
     [Fact]

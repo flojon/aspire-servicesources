@@ -60,9 +60,13 @@ internal sealed class PathSource(
             LocalProjectSource.ValidateProject(serviceName, definition.Project, Source);
         }
 
-        var repoRoot = ResolveRepoRoot(builder, serviceName, definition, config, builder.AppHostDirectory);
+        var groupRedirect = GroupPathSource.Redirects(serviceName, definition, config, repositoryConfig);
 
-        RunPrepareIfDue(builder, serviceName, definition, config, repoRoot);
+        var repoRoot = groupRedirect
+            ? GroupPathSource.ResolveDirectory(definition, repositoryConfig!, builder.AppHostDirectory)
+            : ResolveRepoRoot(builder, serviceName, definition, config, builder.AppHostDirectory);
+
+        RunPrepareIfDue(builder, serviceName, definition, config, repoRoot, developerDirectory: groupRedirect || config.Path.Path is not null);
 
         if (isDotnetKind)
         {
@@ -142,7 +146,7 @@ internal sealed class PathSource(
     {
         if (config.Path.Path is { } overridePath)
         {
-            return LocalGitCheckout.ResolveDeveloperDirectory(serviceName, "path.path", overridePath, appHostDirectory);
+            return LocalGitCheckout.ResolveDeveloperDirectory(PreparePlan.ServiceLabel(serviceName), "path.path", overridePath, appHostDirectory);
         }
 
         RequireCatalogPath(serviceName, definition);
@@ -361,14 +365,14 @@ internal sealed class PathSource(
     /// </remarks>
     private void RunPrepareIfDue(
         IDistributedApplicationBuilder builder, string serviceName, ServiceDefinition definition,
-        ServiceDeveloperConfig config, string repoRoot)
+        ServiceDeveloperConfig config, string repoRoot, bool developerDirectory)
     {
         var catalogPrepare = LocalGitCheckout.IsGrouped(definition, serviceName) ? null : definition.Repository.Prepare;
 
-        // A developer's own path.path points at their working tree, anywhere on disk, which nothing
-        // establishes is a checkout of the repository the catalog names — so, exactly as for
-        // repository.path, the catalog's step is not run there; only one the developer declares is.
-        var plan = config.Path.Path is not null
+        // A developer-named directory (path.path, or a group's) is a working tree nothing establishes is a
+        // checkout of the repository the catalog names — so, as for repository.path, the catalog's step
+        // is not run there; only one the developer declares is.
+        var plan = developerDirectory
             ? PreparePlan.ForPathOverride(serviceName, catalogPrepare, config.Path.Prepare, OperatingSystem.IsWindows())
             : PreparePlan.ForCatalogPath(serviceName, catalogPrepare, config.Path.Prepare, OperatingSystem.IsWindows());
 

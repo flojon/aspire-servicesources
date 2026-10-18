@@ -32,6 +32,24 @@ public class GuestLanguagePackageFloorTests
     }
 
     /// <summary>
+    /// The official Java package is not in <see cref="GuestLanguagePackages.Floors"/>, which pairs
+    /// every floor with the kind that reaches it and the Toolkit already holds <c>java</c>; its
+    /// run-time check is <c>OfficialJavaIntegration.TryLoad</c>. Its build-time floor is still a
+    /// literal in the targets file, held here to the constant that check uses.
+    /// </summary>
+    [Fact]
+    public void TheOfficialJavaFloor_InTheTargetsFile_IsTheOneTryLoadEnforces()
+    {
+        var targets = File.ReadAllText(TargetsPath());
+        var version = Java.OfficialJavaIntegration.MinimumVersion;
+
+        Assert.Contains(
+            $"<ServiceSourcesOfficialJavaMinVersion>{version}</ServiceSourcesOfficialJavaMinVersion>",
+            targets,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A floor has to be the version core actually restores against, and nothing structural makes it
     /// so: those versions live in <c>Directory.Build.props</c> and <c>Directory.Packages.props</c>
     /// while the floors are literals in two other files. Drift is silent and one-directional in the

@@ -149,10 +149,24 @@ that happens to be first in the group:
 ```
 
 `ServiceSources__Repositories__monorepo__Ref` is the environment-variable spelling, the same
-pattern `ServiceSources__Services__<service>__Repository__Ref` uses. `path` exists on the shape but is
-reserved rather than implemented — a group's shared checkout is not yet redirectable in one
-setting, so a non-null value is a configuration error naming the repository; switch one member to
-`"source": "path"` with its own `path.path` to split it out individually instead.
+pattern `ServiceSources__Services__<service>__Repository__Ref` uses.
+
+The entry takes the same `source` and `path` block a service does, to point every member of the group
+at one directory you already have checked out, written once:
+
+```json
+{
+  "repositories": {
+    "monorepo": { "source": "path", "path": { "path": "../monorepo" } }
+  }
+}
+```
+
+The environment spelling is `ServiceSources__Repositories__monorepo__Source=path` and
+`ServiceSources__Repositories__monorepo__Path__Path=../monorepo`. `source` is `path` or `repository`
+(the managed checkout, which lets a higher layer cancel a lower layer's `path`). Only `path.path` is
+accepted in the block; a `prepare` belongs on each member's own `path` block. See
+[Pointing a whole group at a checkout you already have](../sources/repository.md#several-services-from-one-repository).
 
 Two failures are reported differently on purpose, because a typo in a configuration key produces an
 empty section rather than an error:
@@ -235,7 +249,7 @@ warn: Aspire.Hosting.ServiceSources
 `Unwrap<T>(configure)` skips the same way. On `"url"`, `"kubernetes"` and `"disabled"` the delegate
 never runs and the skip joins the service's message above. It also skips when a reachable source
 resolves to something other than a `T` — a `java` service a developer switched to `"container"`
-resolves to a container, not a `JavaAppExecutableResource` — and logs what the service resolved to
+resolves to a container, not a `JavaAppExecutableResource` (or the official package's `JavaAppResource`) — and logs what the service resolved to
 instead. It follows the same wait-ordering exception: `Unwrap<IResourceWithWaitSupport>(...)` on a
 `"kubernetes"` service still runs, against the port-forward.
 

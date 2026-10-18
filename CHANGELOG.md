@@ -44,6 +44,12 @@ never existed. Check the tag of the last release before adding one.
   surfaces later, as that service's own resource state, rather than failing the AppHost synchronously
   at `AddService()`.
 
+- **The Aspire floor is now 13.6.1** (was 13.5.2). `Aspire.Hosting` and `Aspire.Hosting.JavaScript`
+  are floored at 13.6.1, so an AppHost still on Aspire 13.5.x gets a mixed Aspire family at restore
+  (`NU1605` against its own `Aspire.AppHost.Sdk` and `Aspire.Hosting.AppHost`). Move the AppHost's
+  `Aspire.AppHost.Sdk`, and any `Aspire.Hosting.JavaScript` reference, to 13.6.1 or later. The
+  generated-code sample now needs Aspire CLI 13.6.1 or later.
+
 ### Added
 
 - **An AppHost run from a linked git worktree starts from the main worktree's state.** Its first run
@@ -52,6 +58,16 @@ never existed. Check the tag of the last release before adding one.
   repository instead of downloading everything. Seeding happens once; afterwards the worktree's
   files and checkouts are independent. A copied `path` override that resolves differently from the
   worktree is reported at startup.
+
+- **`kind: java` also runs on Aspire's official `Aspire.Hosting.Java` integration** (preview).
+  Reference it instead of `CommunityToolkit.Aspire.Hosting.Java` and `java` services run
+  through it, with no catalog or AppHost change. When both are referenced the Community Toolkit's
+  is used, so a package that arrives transitively changes nothing. An official preview older than
+  `13.6.1-preview.1.26506.6` is reported at build time (`SERVICESOURCES003`), or else when the
+  first `java` service resolves. The preview pins package versions that NuGet
+  audit flags; see [Installation](docs/getting-started/installation.md#non-net-services). `Unwrap<T>` takes the installed integration's resource type: `JavaAppResource` for the
+  official package, `JavaAppExecutableResource` for the Community Toolkit's.
+
 - **A `dotnet` service can select its launch profile** ([#415]). A new `dotnet:` block in the yaml
   catalog takes `launchProfileName` (run under that `launchSettings.json` profile) and
   `excludeLaunchProfile` (run with none), and `WithLaunchProfile(...)` /
@@ -62,7 +78,23 @@ never existed. Check the tag of the last release before adding one.
   not contain (or a project with no `launchSettings.json` at all), and a `dotnet:` block, or
   the code-catalog calls, on a service whose kind is not `dotnet`.
 
+- **A `repositories.<name>` entry can use the `"path"` source to point a whole `repositoryRef` group
+  at an existing checkout** ([#416]). `{ "source": "path", "path": { "path": "../eShop" } }` (or
+  `ServiceSources__Repositories__<name>__Source` and `__Path__Path`) redirects every grouped member
+  whose source is `repository` or `path`, so a monorepo AppHost keeps its grouping without repeating
+  a `path.path` per service. A member's own `path.path` still wins, members on `url`, `container` or
+  `kubernetes` are left alone, a member that sets its own `repository.ref` is not redirected (its
+  "ref is shared" error stands), a group `ref` is ignored while the group is on `path`, and the
+  builds of the members are serialized like any other `"path"` services in one repository. A
+  `repositories` entry naming no declared repository is now reported at startup, as is a
+  `repositories.<name>.path.path` set without `source`, which would otherwise be silently unread.
+
 ### Changed
+
+- **A `repositories.<name>` entry that sets `prepare` is now a startup error** ([#416]). It was
+  bound but never read, so the step silently never ran. Set `path.prepare` on each member service
+  instead. A `repositories.<name>` entry with `source: path` and no `path.path` is likewise refused
+  when the configuration is read, rather than only when a member resolves.
 
 - **A cold `"repository"` checkout is no longer cloned at `AddService()`; the dashboard asks which
   ones to clone and start** ([#271]). In run mode, once the AppHost starts, one dialog lists the
@@ -75,7 +107,10 @@ never existed. Check the tag of the last release before adding one.
 
   An unanswered dialog does not hang the AppHost: closing it, or no answer within 5 minutes, starts
   every service that was waiting on it, as before, and saves nothing. A run with no dashboard to ask
-  through never prompts and starts every service that has no saved choice. A warm checkout, a `path`
+  through never prompts and starts every service that has no saved choice, and so does a run where
+  the `CI` environment variable is set (set `SERVICESOURCES_INTERACTIVE=true` to be asked anyway, or
+  `false` to never be asked). A saved choice made for a different repository than the service now
+  points at is asked about again. A warm checkout, a `path`
   override, `aspire publish` and `SetCheckoutTiming(CheckoutTiming.Eager)` are unchanged and never
   prompt. A service that `WaitFor`s a skipped service keeps waiting; the dialog lists what waits on
   each one. To get the previous behaviour back, call `builder.SetCheckoutTiming(CheckoutTiming.Eager)`
@@ -2006,6 +2041,7 @@ Targets `net10.0`.
 [#375]: https://github.com/flojon/aspire-servicesources/issues/375
 [#385]: https://github.com/flojon/aspire-servicesources/issues/385
 [#415]: https://github.com/flojon/aspire-servicesources/issues/415
+[#416]: https://github.com/flojon/aspire-servicesources/issues/416
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

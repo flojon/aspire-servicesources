@@ -76,7 +76,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
             // mechanism keeps working exactly as it does today, and only a one-time notice is owed.
             // AddNotice dedupes identical text, so a service resolved more than once in a run
             // reports this only once.
-            ServiceSourcesWarnings.For(builder).AddNotice(LocalPathDeprecationNotice(serviceName, config));
+            ServiceSourcesWarnings.For(builder).AddNotice(LocalPathDeprecationNotice(serviceName, definition, config));
         }
 
         // Whether this service is on its own repository or sharing one with others — the same test
@@ -277,7 +277,8 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// the source rename.
     /// </para>
     /// </remarks>
-    private static Raw LocalPathDeprecationNotice(string serviceName, ServiceDeveloperConfig config)
+    private static Raw LocalPathDeprecationNotice(
+        string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
     {
         // Double-quoted and escaped through Raw.Escaped (Name's JSON-compatible escaping), because
         // this snippet is meant to be pasted into servicesources.local.json as it stands — a Windows
@@ -290,6 +291,13 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
         {
             notice = Raw.Compose($"{notice} Move this service's 'repository.prepare' block to 'path.prepare': it is "
                 + $"not read under the 'path' source.");
+        }
+
+        if (LocalGitCheckout.IsGrouped(definition, serviceName))
+        {
+            notice = Raw.Compose($"{notice} To redirect the whole '{new Name(definition.Repository.CheckoutName)}' repository at once, "
+                + $"set '{Raw.Literal(DeveloperConfigFileSource.FileRepositoriesKey)}.{new Name(definition.Repository.CheckoutName)}' to "
+                + $"{{ \"source\": \"path\", \"path\": {{ \"path\": \"...\" }} }}.");
         }
 
         return notice;
@@ -499,7 +507,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
 
         try
         {
-            return ReadResourceType(serviceName, definition.Kind, handler);
+            return ReadResourceType(serviceName, definition.Kind, handler, claimNothingIfUnsettled: true);
         }
         catch (Exception ex) when (GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, definition.Kind) is not null)
         {
@@ -540,12 +548,25 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
     /// Reads <see cref="ILocalResourceKind.ResourceType"/>, naming the service and kind when the
     /// handler faults. A missing hosting package is left to the caller, which knows what it means.
     /// </summary>
-    private static Type ReadResourceType(string serviceName, string kind, ILocalResourceKind handler)
+    /// <param name="claimNothingIfUnsettled">
+    /// Answer "no particular type" when the handler reports, from <c>ResourceType</c>, that it
+    /// cannot settle its type yet (<see cref="ServiceSourcesConfigurationException.AsUnsettledResourceType"/>),
+    /// rather than throwing it.
+    /// </param>
+    private static Type ReadResourceType(
+        string serviceName, string kind, ILocalResourceKind handler, bool claimNothingIfUnsettled = false)
     {
         Type? declared;
         try
         {
             declared = handler.ResourceType;
+        }
+        catch (ServiceSourcesConfigurationException ex) when (claimNothingIfUnsettled && ex.IsUnsettledResourceType)
+        {
+            // A handler that says it cannot settle its type yet - a hosting package too old to
+            // use - claims nothing where the caller only wants to know whether to claim a type.
+            // Any other configuration problem is the handler's to report, and still is.
+            return typeof(IResourceWithServiceDiscovery);
         }
         catch (Exception ex) when (ex is not ServiceSourcesConfigurationException
             && GuestLanguagePackages.DescribeMissingPackage(ex, serviceName, kind) is null)

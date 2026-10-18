@@ -18,8 +18,11 @@
     get past. The run-time report in GuestLanguagePackages still stands behind it.
   -->
   <PropertyGroup>
-    <ServiceSourcesJavaScriptMinVersion>13.5.2</ServiceSourcesJavaScriptMinVersion>
+    <ServiceSourcesJavaScriptMinVersion>13.6.1</ServiceSourcesJavaScriptMinVersion>
     <ServiceSourcesJavaMinVersion>13.3.0</ServiceSourcesJavaMinVersion>
+    <!-- Aspire's own Java integration, an alternative to the Community Toolkit's for kind 'java'.
+         Preview-only, so its floor is a preview: see the comparison in the target below. -->
+    <ServiceSourcesOfficialJavaMinVersion>13.6.1-preview.1.26506.6</ServiceSourcesOfficialJavaMinVersion>
   </PropertyGroup>
 
   <!--
@@ -37,6 +40,10 @@
                                       Condition="'%(NuGetPackageId)' == 'Aspire.Hosting.JavaScript'" />
       <_ServiceSourcesJavaAsset Include="@(ResolvedCompileFileDefinitions)"
                                 Condition="'%(NuGetPackageId)' == 'CommunityToolkit.Aspire.Hosting.Java'" />
+      <_ServiceSourcesOfficialJavaAsset Include="@(ResolvedCompileFileDefinitions)"
+                                        Condition="'%(NuGetPackageId)' == 'Aspire.Hosting.Java'" />
+      <_ServiceSourcesOfficialJavaVersion
+          Include="@(_ServiceSourcesOfficialJavaAsset->'%(NuGetPackageVersion)'->Distinct())" />
       <_ServiceSourcesJavaScriptVersion
           Include="@(_ServiceSourcesJavaScriptAsset->'%(NuGetPackageVersion)'->Distinct())" />
       <_ServiceSourcesJavaVersion
@@ -45,7 +52,7 @@
 
     <!--
       [MSBuild]::VersionLessThan parses with System.Version semantics, which stop at the first '-':
-      it reads 13.5.2-preview.1 as 13.5.2 and so calls it not-less-than the 13.5.2 floor. By SemVer
+      it reads 13.6.1-preview.1 as 13.6.1 and so calls it not-less-than the 13.6.1 floor. By SemVer
       a prerelease precedes the release it labels, and the difference is real rather than pedantic -
       a preview cut before the release carries that release's assembly version, so it binds and then
       fails on the missing member with a MissingMethodException, which is not a load failure and is
@@ -53,7 +60,7 @@
 
       So the comparison is split: the numeric core against the floor as before, plus an equal core
       carrying a prerelease label, which is the one case System.Version cannot see. A prerelease
-      *above* the floor (13.5.3-preview.1 against a 13.5.2 floor) is correctly left alone.
+      *above* the floor (13.6.2-preview.1 against a 13.6.1 floor) is correctly left alone.
     -->
     <ItemGroup>
       <_ServiceSourcesJavaScriptVersion>
@@ -64,6 +71,31 @@
         <Core>$([System.Text.RegularExpressions.Regex]::Replace('%(Identity)', '-.*$', ''))</Core>
         <Prerelease>$([System.String]::Copy('%(Identity)').Contains('-'))</Prerelease>
       </_ServiceSourcesJavaVersion>
+    </ItemGroup>
+
+    <!--
+      The official package's floor is itself a preview (13.6.1-preview.1.26506.6), which the split
+      above cannot express: there, any prerelease of the floor's version counts as below it. A
+      preview of the floor's own version is the thing to accept when it is at least this one, so
+      the numeric core is compared as before and, for an equal core, the numbers after "-preview."
+      are compared as a version of their own ("1.26506.6"). A label of any other shape on an equal
+      core is left alone rather than failed on: it cannot be ordered here, and the run-time check
+      stands behind it. Not checked at all when the Community Toolkit's package is also resolved:
+      that one wins at run time, so the official assembly is never loaded.
+    -->
+    <PropertyGroup>
+      <_ServiceSourcesOfficialJavaMinCore>$([System.Text.RegularExpressions.Regex]::Replace('$(ServiceSourcesOfficialJavaMinVersion)', '-.*$', ''))</_ServiceSourcesOfficialJavaMinCore>
+      <_ServiceSourcesOfficialJavaMinTail>$([System.Text.RegularExpressions.Regex]::Match('$(ServiceSourcesOfficialJavaMinVersion)', '-preview\.([0-9]+(\.[0-9]+)*)$').Groups[1].Value)</_ServiceSourcesOfficialJavaMinTail>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <_ServiceSourcesOfficialJavaVersion>
+        <Core>$([System.Text.RegularExpressions.Regex]::Replace('%(Identity)', '-.*$', ''))</Core>
+        <Tail>$([System.Text.RegularExpressions.Regex]::Match('%(Identity)', '-preview\.([0-9]+(\.[0-9]+)*)$').Groups[1].Value)</Tail>
+      </_ServiceSourcesOfficialJavaVersion>
+      <_ServiceSourcesOfficialJavaVersion>
+        <OlderPreview Condition="'%(Tail)' != ''">$([MSBuild]::VersionLessThan('%(Tail)', '$(_ServiceSourcesOfficialJavaMinTail)'))</OlderPreview>
+      </_ServiceSourcesOfficialJavaVersion>
     </ItemGroup>
 
     <Error Condition="'@(_ServiceSourcesJavaScriptVersion)' != ''
@@ -79,6 +111,13 @@
                                and $([MSBuild]::VersionEquals('%(_ServiceSourcesJavaVersion.Core)', '$(ServiceSourcesJavaMinVersion)'))))"
            Code="SERVICESOURCES002"
            Text="KoalaSoft.Aspire.Hosting.ServiceSources needs CommunityToolkit.Aspire.Hosting.Java $(ServiceSourcesJavaMinVersion) or newer for services with kind 'java', but this project resolves %(_ServiceSourcesJavaVersion.Identity). Raise the CommunityToolkit.Aspire.Hosting.Java version, or remove the reference if no service declares that kind. If it arrived transitively and neither is yours to do, set ServiceSourcesSkipGuestLanguageFloorCheck=true to bypass this check - the failure is then reported at run time, by the service that needed it." />
+
+    <Error Condition="'@(_ServiceSourcesOfficialJavaVersion)' != '' and '@(_ServiceSourcesJavaVersion)' == ''
+                      and ($([MSBuild]::VersionLessThan('%(_ServiceSourcesOfficialJavaVersion.Core)', '$(_ServiceSourcesOfficialJavaMinCore)'))
+                           or ('%(_ServiceSourcesOfficialJavaVersion.OlderPreview)' == 'True'
+                               and $([MSBuild]::VersionEquals('%(_ServiceSourcesOfficialJavaVersion.Core)', '$(_ServiceSourcesOfficialJavaMinCore)'))))"
+           Code="SERVICESOURCES003"
+           Text="KoalaSoft.Aspire.Hosting.ServiceSources needs Aspire.Hosting.Java $(ServiceSourcesOfficialJavaMinVersion) or newer for services with kind 'java' that run through it, but this project resolves %(_ServiceSourcesOfficialJavaVersion.Identity). Raise the Aspire.Hosting.Java version, or remove the reference to use CommunityToolkit.Aspire.Hosting.Java instead. If it arrived transitively and neither is yours to do, set ServiceSourcesSkipGuestLanguageFloorCheck=true to bypass this check - the failure is then reported at run time, by the first service that needed it." />
   </Target>
 
 </Project>

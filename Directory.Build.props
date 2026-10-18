@@ -25,6 +25,11 @@
 
   <ItemGroup>
     <PackageReference Include="MinVer" PrivateAssets="All" />
+    <!-- Reaches every project through Aspire.Hosting (via StreamJsonRpc), pinned at 2.5.302 by
+         both, which NuGet audit flags (GHSA-qhrr-8q5h-9q3h, fixed in 2.5.303) and -warnaserror
+         turns into errors. A direct reference outranks the transitive one. PrivateAssets keeps it
+         out of the nuspec; drop it once Aspire.Hosting moves past 2.5.302. -->
+    <PackageReference Include="MessagePack" PrivateAssets="All" />
   </ItemGroup>
 
   <!-- Package metadata every package in src/ shares. Only PackageId, Description and
@@ -71,7 +76,7 @@
        before it did, this property floated while global.json's version stayed put, and the
        matrix built a mixed-version family (#116). -->
   <PropertyGroup>
-    <AspireVersion Condition="'$(AspireVersion)' == ''">13.5.2</AspireVersion>
+    <AspireVersion Condition="'$(AspireVersion)' == ''">13.6.1</AspireVersion>
   </PropertyGroup>
 
 </Project>

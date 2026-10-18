@@ -31,9 +31,25 @@ public sealed class ServiceSourcesConfigurationException : Exception
     internal static ServiceSourcesConfigurationException For(ServiceTextHandler message) =>
         new(message.Text);
 
-    internal static ServiceSourcesConfigurationException For(ServiceTextHandler message, Exception innerException) =>
-        new(message.Text, innerException);
+    internal static ServiceSourcesConfigurationException For(ServiceTextHandler message, Exception? innerException) =>
+        innerException is null ? new(message.Text) : new(message.Text, innerException);
 #pragma warning restore RS0030
+
+    private const string UnsettledResourceTypeKey = "ServiceSources.UnsettledResourceType";
+
+    /// <summary>
+    /// Marks a problem that a kind's <c>ResourceType</c> reports because it cannot say what it
+    /// declares yet - a hosting package too old to use - as opposed to an ordinary configuration
+    /// error. Where core only wants to know whether to claim a type, the former claims nothing; the
+    /// problem itself is reported when the kind validates or creates its resource.
+    /// </summary>
+    internal ServiceSourcesConfigurationException AsUnsettledResourceType()
+    {
+        Data[UnsettledResourceTypeKey] = true;
+        return this;
+    }
+
+    internal bool IsUnsettledResourceType => Data.Contains(UnsettledResourceTypeKey);
 
     /// <summary>
     /// Every message on this type is written to be read by the developer who has to act on it, and

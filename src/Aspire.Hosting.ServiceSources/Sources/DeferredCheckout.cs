@@ -6,6 +6,7 @@ using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Prepare;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Messages;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -446,7 +447,8 @@ internal sealed class DeferredCheckout
     /// Keyed on the resource kinds DCP materialises rather than on
     /// <see cref="IResourceWithoutLifetime"/>: that marker is not on <c>ParameterResource</c> in the
     /// Aspire versions this package supports, so testing for it would let a parameter through. Both
-    /// resources the shipped handlers add — a <c>JavaAppExecutableResource</c>, and the
+    /// resources the shipped handlers add — a <c>JavaAppExecutableResource</c> (or, on the official
+    /// integration, a <c>JavaAppResource</c>), and the
     /// <c>JavaScriptInstallerResource</c> beside a <c>ViteAppResource</c> — are
     /// <see cref="ExecutableResource"/>s. Projects are named separately because
     /// <c>ProjectResource</c> is not one; DCP builds its executable while preparing the model.
@@ -751,7 +753,7 @@ internal sealed class DeferredCheckout
         var services = @event.Services;
         var logger = services.GetService<ILoggerFactory>()?.CreateLogger(LogCategory) ?? NullLogger.Instance;
 
-        var (saved, fileState) = SourceSelectionStore.Read(snapshot[0].AppHostDirectory);
+        var (saved, fileState) = SourceSelectionStore.ReadEntries(snapshot[0].AppHostDirectory);
         var selectionPath = SourceSelectionStore.PathIn(snapshot[0].AppHostDirectory);
 
         if (fileState == SelectionFileState.Invalid)
@@ -760,6 +762,13 @@ internal sealed class DeferredCheckout
                 logger,
                 $"The saved source selection at '{Raw.Escaped(selectionPath)}' is malformed, too large or not a regular file, "
                 + $"so it is ignored; delete or fix it, or answer the prompt to replace it.");
+        }
+        else if (fileState == SelectionFileState.Partial)
+        {
+            ServiceSourcesLog.Warning(
+                logger,
+                $"Some entries in the saved source selection at '{Raw.Escaped(selectionPath)}' are malformed, so those are "
+                + $"ignored and asked about again; the rest still apply.");
         }
         else if (fileState == SelectionFileState.Newer)
         {
@@ -782,11 +791,19 @@ internal sealed class DeferredCheckout
             {
                 present.Add(deferred);
             }
-            else if (!saved.TryGetValue(deferred.ServiceName, out var start))
+            else if (!saved.TryGetValue(deferred.ServiceName, out var entry))
             {
                 undecided.Add(deferred);
             }
-            else if (start)
+            else if (entry.Fingerprint is not null && entry.Fingerprint != FingerprintOf(deferred))
+            {
+                // Answered about a different repository or ref; the old answer is not this service's.
+                ServiceSourcesLog.Information(
+                    logger,
+                    $"The saved choice for service '{new Name(deferred.ServiceName)}' was made for a different repository or ref, so it is asked about again.");
+                undecided.Add(deferred);
+            }
+            else if (entry.Start)
             {
                 picked.Add(deferred);
             }
@@ -818,6 +835,17 @@ internal sealed class DeferredCheckout
             ServiceSourcesLog.Information(
                 logger,
                 $"There is no dashboard to ask which of {undecided.Count} service(s) to clone, so all of them start.");
+
+            Apply([.. picked, .. undecided], skipped, services, checkoutNameLock, cancellationToken);
+            return;
+        }
+
+        if (!InteractivePrompts.IsEnabled(services.GetService<IConfiguration>()))
+        {
+            ServiceSourcesLog.Information(
+                logger,
+                $"Nobody is expected to answer here ({Raw.Escaped(InteractivePrompts.DisableReason)}), so all {undecided.Count} undecided "
+                + $"service(s) start without asking. Set {Raw.Escaped(InteractivePrompts.EnvironmentVariable)}=true to be asked anyway.");
 
             Apply([.. picked, .. undecided], skipped, services, checkoutNameLock, cancellationToken);
             return;
@@ -858,6 +886,13 @@ internal sealed class DeferredCheckout
         CancellationToken cancellationToken)
     {
         var applied = false;
+
+        // The fallback every way of not getting an answer shares: start everything undecided, save nothing.
+        void StartAllUndecided()
+        {
+            applied = true;
+            Apply(undecided, [], services, checkoutNameLock, cancellationToken);
+        }
 
         try
         {
@@ -910,8 +945,7 @@ internal sealed class DeferredCheckout
                     $"The source-selection prompt could not be shown: {Raw.Cause(failure)} All {undecided.Count} undecided "
                     + $"service(s) start this run and nothing is saved.");
 
-                applied = true;
-                Apply(undecided, [], services, checkoutNameLock, cancellationToken);
+                StartAllUndecided();
                 return;
             }
 
@@ -932,8 +966,7 @@ internal sealed class DeferredCheckout
                         + $"service(s) start this run and nothing is saved.");
                 }
 
-                applied = true;
-                Apply(undecided, [], services, checkoutNameLock, cancellationToken);
+                StartAllUndecided();
                 return;
             }
 
@@ -971,7 +1004,9 @@ internal sealed class DeferredCheckout
             // After Apply, so a slow disk never delays a start. A newer file was already reported
             // and is left alone.
             if (chosen.Count > 0 && fileState != SelectionFileState.Newer
-                && !SourceSelectionStore.TrySave(undecided[0].AppHostDirectory, chosen))
+                && !SourceSelectionStore.TrySave(
+                    undecided[0].AppHostDirectory, chosen,
+                    undecided.ToDictionary(deferred => deferred.ServiceName, FingerprintOf, StringComparer.OrdinalIgnoreCase)))
             {
                 ServiceSourcesLog.Warning(
                     logger,
@@ -986,7 +1021,7 @@ internal sealed class DeferredCheckout
                 try
                 {
                     // Before the log line: a throwing logger must not leave the services waiting.
-                    Apply(undecided, [], services, checkoutNameLock, cancellationToken);
+                    StartAllUndecided();
 
                     ServiceSourcesLog.Warning(
                         logger,
@@ -1014,18 +1049,8 @@ internal sealed class DeferredCheckout
             var notifications = services.GetRequiredService<ResourceNotificationService>();
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(answered, stopping);
 
-            foreach (var withheld in deferred.AllResources)
-            {
-                await notifications.WaitForResourceAsync(
-                    withheld.Name, KnownResourceStates.NotStarted, linked.Token)
-                    .ConfigureAwait(false);
-            }
-
-            foreach (var withheld in deferred.AllResources)
-            {
-                await PublishStateAsync(notifications, withheld, SourcePrompt.AwaitingState(deadline))
-                    .ConfigureAwait(false);
-            }
+            await PublishWhenWithheldAsync(notifications, deferred, SourcePrompt.AwaitingState(deadline), linked.Token)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -1036,6 +1061,29 @@ internal sealed class DeferredCheckout
             // A state that could not be shown costs the label, not the prompt.
         }
     }
+
+    /// <summary>
+    /// Publishes <paramref name="state"/> on each of the service's resources once DCP has withheld them.
+    /// DCP publishes <c>NotStarted</c> for each after the handler returns, and a state published before
+    /// that would be overwritten by it.
+    /// </summary>
+    private static async Task PublishWhenWithheldAsync(
+        ResourceNotificationService notifications, Deferred deferred, string state, CancellationToken cancellationToken)
+    {
+        foreach (var withheld in deferred.AllResources)
+        {
+            await WaitUntilWithheldAsync(notifications, withheld.Name, cancellationToken).ConfigureAwait(false);
+        }
+
+        foreach (var withheld in deferred.AllResources)
+        {
+            await PublishStateAsync(notifications, withheld, state).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>What a saved decision about this service was made against; see <see cref="SourceSelectionStore.Fingerprint"/>.</summary>
+    private static string FingerprintOf(Deferred deferred) =>
+        SourceSelectionStore.Fingerprint(deferred.Definition.Repository.Url, deferred.Definition.Repository.DefaultRef);
 
     internal IReadOnlyList<Deferred> Snapshot()
     {
@@ -1078,20 +1126,12 @@ internal sealed class DeferredCheckout
                 cancellationToken,
                 services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping);
 
-            // DCP publishes NotStarted for each withheld resource after the handler returns; a state
-            // published before that would be overwritten by it.
-            foreach (var withheld in deferred.AllResources)
-            {
-                await WaitUntilWithheldAsync(notifications, withheld.Name, shutdown.Token).ConfigureAwait(false);
-            }
-
-            foreach (var withheld in deferred.AllResources)
-            {
-                await PublishStateAsync(notifications, withheld, SkippedState).ConfigureAwait(false);
-            }
+            await PublishWhenWithheldAsync(notifications, deferred, SkippedState, shutdown.Token).ConfigureAwait(false);
 
             ServiceSourcesLog.Information(
-                logger, $"Skipped: it was not selected, so it is not cloned or started this run. Delete its entry in .servicesources/selection.json to be asked again.");
+                logger,
+                $"Skipped: it was not selected, so it is not cloned or started this run. Delete its entry in "
+                + $"{Raw.Escaped(Path.Combine(ToolDirectory.Name, SourceSelectionStore.FileName))} to be asked again.");
         }
         catch (OperationCanceledException)
         {
@@ -1118,9 +1158,28 @@ internal sealed class DeferredCheckout
     {
         foreach (var deferred in picked)
         {
-            deferred.Prefetch.StartCheckout(
-                deferred.ServiceName, deferred.Definition, deferred.Config, deferred.RepositoryConfig,
-                deferred.AppHostDirectory, deferred.GitClient);
+            try
+            {
+                deferred.Prefetch.StartCheckout(
+                    deferred.ServiceName, deferred.Definition, deferred.Config, deferred.RepositoryConfig,
+                    deferred.AppHostDirectory, deferred.GitClient);
+            }
+            catch (Exception ex)
+            {
+                // This runs inside BeforeStartEvent, so a throw here would abort the whole host and
+                // leave the other services unapplied. Its start task resolves the checkout itself and
+                // reports a real failure as this service's state; the note below is for the log.
+                try
+                {
+                    var logger = services.GetRequiredService<ResourceLoggerService>().GetLogger(deferred.Resource);
+                    ServiceSourcesLog.Warning(
+                        logger, $"The checkout could not be started ahead of time: {Raw.Cause(ex)} It is retried when the service starts.");
+                }
+                catch (Exception)
+                {
+                    // Noting it must not become the failure.
+                }
+            }
         }
 
         foreach (var deferred in picked)
@@ -1626,4 +1685,38 @@ internal sealed class DeferredCheckout
             // one of the ways the checkout got interrupted in the first place.
         }
     }
+}
+
+/// <summary>
+/// Whether a source-selection prompt should be shown at all. A dashboard being present does not mean a
+/// person is watching it: <c>IInteractionService.IsAvailable</c> is true on a CI runner too.
+/// </summary>
+internal static class InteractivePrompts
+{
+    /// <summary>Forces the prompt on (<c>true</c>) or off (<c>false</c>) whatever the environment says.</summary>
+    public const string EnvironmentVariable = "SERVICESOURCES_INTERACTIVE";
+
+    public const string DisableReason = "CI is set";
+
+    public static bool IsEnabled(IConfiguration? configuration)
+    {
+        if (Parse(Read(configuration, EnvironmentVariable)) is { } forced)
+        {
+            return forced;
+        }
+
+        // Providers set CI to "true", "1" or "True" alike, so anything but empty or an explicit false is CI.
+        var ci = Read(configuration, "CI");
+        return string.IsNullOrWhiteSpace(ci) || Parse(ci) is false;
+    }
+
+    private static string? Read(IConfiguration? configuration, string key) =>
+        configuration is not null ? configuration[key] : Environment.GetEnvironmentVariable(key);
+
+    private static bool? Parse(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        "true" or "1" or "yes" => true,
+        "false" or "0" or "no" => false,
+        _ => null,
+    };
 }
