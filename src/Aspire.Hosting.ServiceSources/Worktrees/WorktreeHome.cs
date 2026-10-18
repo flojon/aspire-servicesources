@@ -19,7 +19,9 @@ internal static class WorktreeHome
     private static readonly ConditionalWeakTable<IDistributedApplicationBuilder, Slot> Slots = new();
 
     internal static StringComparison PathComparison =>
-        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
 
     public static HomeWorktree? TryResolve(IDistributedApplicationBuilder builder) =>
         SlotFor(builder).Resolve(builder.AppHostDirectory);
@@ -62,7 +64,18 @@ internal static class WorktreeHome
 
     internal static bool SamePath(string a, string b) => string.Equals(Normalize(a), Normalize(b), PathComparison);
 
-    internal static bool IsInside(string path, string root) => !PathSource.IsOutside(Path.GetRelativePath(root, path));
+    // Compared by prefix under PathComparison: Path.GetRelativePath is case-sensitive on every Unix,
+    // including macOS, whose default filesystems are not.
+    internal static bool IsInside(string path, string root)
+    {
+        var (p, r) = (Normalize(path), Normalize(root));
+        return string.Equals(p, r, PathComparison)
+            || p.StartsWith(r.EndsWith(Path.DirectorySeparatorChar) ? r : r + Path.DirectorySeparatorChar, PathComparison);
+    }
+
+    /// <summary>The part of <paramref name="path"/> below <paramref name="root"/>; the caller has checked <see cref="IsInside"/>.</summary>
+    internal static string RelativeTo(string path, string root) =>
+        Normalize(path)[Normalize(root).Length..].TrimStart(Path.DirectorySeparatorChar);
 
     private static Slot SlotFor(IDistributedApplicationBuilder builder) =>
         Slots.GetValue(builder, static _ => new Slot());

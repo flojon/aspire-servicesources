@@ -1,6 +1,5 @@
 using Aspire.Hosting.ServiceSources.Config;
 using Aspire.Hosting.ServiceSources.Messages;
-using Microsoft.Extensions.Configuration;
 
 namespace Aspire.Hosting.ServiceSources.Worktrees;
 
@@ -27,14 +26,20 @@ internal enum PathOverrideVerdict
 /// </remarks>
 internal static class PathOverrideCheck
 {
-    // repository.path and its deprecated local.path alias still resolve a directory the same way.
+    // Every block that carries a directory: path.path, repository.path and its deprecated local.path alias.
     // Each is read only under the source that uses it, so a leftover block for another source is inert.
-    private static readonly (string Section, string Key, string Source)[] Overrides =
+    private static readonly (string Block, string Source)[] Overrides =
     [
-        ("path", "path.path", "path"),
-        ("repository", "repository.path", "repository"),
-        ("local", "local.path", "repository"),
+        .. DeveloperConfigShape.Service.BlockFields
+            .Where(block => block.Value.ContainsKey(PathField))
+            .Select(block => (
+                block.Key,
+                DeveloperConfigShape.Service.DeprecatedBlockNames.Contains(block.Key) ? RepositorySource : block.Key)),
     ];
+
+    private const string PathField = "path";
+    private const string RepositorySource = "repository";
+    private const string RetiredLocalSource = "local";
 
     public static PathOverrideVerdict Classify(string fromHome, string fromWorktree, string mainTop, string worktreeTop)
     {
@@ -54,8 +59,8 @@ internal static class PathOverrideCheck
         if (WorktreeHome.IsInside(fromHome, mainTop)
             && WorktreeHome.IsInside(fromWorktree, worktreeTop)
             && string.Equals(
-                Path.GetRelativePath(mainTop, fromHome),
-                Path.GetRelativePath(worktreeTop, fromWorktree),
+                WorktreeHome.RelativeTo(fromHome, mainTop),
+                WorktreeHome.RelativeTo(fromWorktree, worktreeTop),
                 WorktreeHome.PathComparison))
         {
             return PathOverrideVerdict.MirrorsMainWorktree;
@@ -65,56 +70,60 @@ internal static class PathOverrideCheck
     }
 
     /// <summary>One notice per override that does not resolve the way it did in the main worktree.</summary>
-    /// <param name="configured">Reads the builder's configuration, which holds every layer above the file.</param>
-    public static IReadOnlyList<Raw> Inspect(string configFile, HomeWorktree home, Func<string, string?> configured)
+    /// <param name="configFile">The copied file, named in each notice.</param>
+    /// <param name="fileEntries">What the copied file contributed, keyed as the builder's configuration is.</param>
+    /// <param name="configured">Reads the builder's configuration, which holds every layer.</param>
+    public static IReadOnlyList<Raw> Inspect(
+        string configFile,
+        HomeWorktree home,
+        IEnumerable<KeyValuePair<string, string?>> fileEntries,
+        Func<string, string?> configured)
     {
-        try
+        var fromFile = fileEntries.ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.OrdinalIgnoreCase);
+        var prefix = $"{DeveloperConfiguration.ServicesKey}:";
+        var notices = new List<Raw>();
+
+        var services = fromFile.Keys
+            .Where(key => key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .Select(key => key[prefix.Length..].Split(':')[0])
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var service in services)
         {
-            var file = new ConfigurationBuilder().AddJsonFile(configFile, optional: true).Build();
-            using (file as IDisposable)
+            var effective = configured($"{prefix}{service}:source");
+            if (string.Equals(effective, RetiredLocalSource, StringComparison.OrdinalIgnoreCase))
             {
-                var notices = new List<Raw>();
+                effective = RepositorySource;
+            }
 
-                foreach (var service in file.GetSection(DeveloperConfigFileSource.FileServicesKey).GetChildren())
+            foreach (var (block, source) in Overrides)
+            {
+                var key = $"{prefix}{service}:{block}:{PathField}";
+
+                // With no source named in any layer, the catalog's default decides, so every block may be read.
+                if ((!string.IsNullOrWhiteSpace(effective)
+                        && !string.Equals(effective, source, StringComparison.OrdinalIgnoreCase))
+                    || !fromFile.TryGetValue(key, out var value)
+                    || string.IsNullOrWhiteSpace(value)
+
+                    // A higher layer wins, so the copied value is not the one in effect.
+                    || !string.Equals(configured(key), value, StringComparison.Ordinal))
                 {
-                    var effective = configured($"{DeveloperConfiguration.ServicesKey}:{service.Key}:source");
-                    effective = string.IsNullOrWhiteSpace(effective) ? service["source"] : effective;
-
-                    foreach (var (section, key, source) in Overrides)
-                    {
-                        // With no source named here, the catalog's default decides, so every block may be read.
-                        if ((!string.IsNullOrWhiteSpace(effective)
-                                && !string.Equals(effective, source, StringComparison.OrdinalIgnoreCase))
-                            || service[$"{section}:path"] is not { } value
-                            || string.IsNullOrWhiteSpace(value))
-                        {
-                            continue;
-                        }
-
-                        var fromHome = Path.GetFullPath(value, home.AppHostDirectory);
-                        var fromWorktree = Path.GetFullPath(value, home.WorktreeAppHostDirectory);
-                        var verdict = Classify(fromHome, fromWorktree, home.MainTop, home.WorktreeTop);
-
-                        if (verdict is PathOverrideVerdict.IntoMainWorktree or PathOverrideVerdict.ResolvesDifferently)
-                        {
-                            notices.Add(Notice(service.Key, key, value, fromHome, fromWorktree, configFile, verdict));
-                        }
-                    }
+                    continue;
                 }
 
-                return notices;
+                var fromHome = Path.GetFullPath(value, home.AppHostDirectory);
+                var fromWorktree = Path.GetFullPath(value, home.WorktreeAppHostDirectory);
+                var verdict = Classify(fromHome, fromWorktree, home.MainTop, home.WorktreeTop);
+
+                if (verdict is PathOverrideVerdict.IntoMainWorktree or PathOverrideVerdict.ResolvesDifferently)
+                {
+                    notices.Add(Notice(service, $"{block.ToLowerInvariant()}.{PathField}", value, fromHome, fromWorktree, configFile, verdict));
+                }
             }
         }
-        catch (Exception ex) when (ex is InvalidDataException or FormatException or ArgumentException)
-        {
-            // A malformed file is reported by registration, which reads it next.
-            return [];
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // The copy already happened; escaping here would lose the "copied" notice and the marker for good.
-            return [];
-        }
+
+        return notices;
     }
 
     private static Raw Notice(

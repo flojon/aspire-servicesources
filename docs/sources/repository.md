@@ -800,7 +800,7 @@ first run, ServiceSources seeds it once from the main worktree's copy of the sam
   main worktree's checkout of the same repository, so only what that checkout lacks is downloaded.
   The result is an ordinary, independent clone.
 
-Seeding happens once, and `.servicesources/worktree-seed.json` records it. A copied file you delete
+Seeding happens once, and `.servicesources/worktree-seed.json` records it. If the main worktree has neither file yet, nothing is recorded and the next run tries again. A file that is a symbolic link is not copied (a notice says so); copy its contents yourself. A copied file you delete
 stays deleted; delete the marker to seed again. `prepare` steps are not seeded, so they run on the
 worktree's first use of each checkout.
 

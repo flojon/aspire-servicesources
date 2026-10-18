@@ -150,22 +150,36 @@ internal sealed partial class GitCliClient(
                 "--", repositoryUrl, destinationPath],
             GitUrl.Parse(repositoryUrl).Host,
             progress,
-            result => LooksLikeReferenceFailure(result.StandardError, referenceRepository)
-                ? GitReferenceFailedException.For($"{Describe(result)}", GitCommandFailedException.For($"{Describe(result)}"))
+            result => LooksLikeReferenceFailure(result.StandardError, referenceRepository, repositoryUrl)
+                ? ReferenceFailure(Describe(result))
                 : null);
     }
 
+    private static GitReferenceFailedException ReferenceFailure(Raw description) =>
+        GitReferenceFailedException.For($"{description}", GitCommandFailedException.For($"{description}"));
+
     /// <summary>Whether git blamed the reference repository for a failed clone.</summary>
-    internal static bool LooksLikeReferenceFailure(string standardError, string referenceRepository)
+    /// <param name="repositoryUrl">
+    /// Blanked out of the output first: git echoes it, and a URL such as <c>/org/alternate-service</c>
+    /// must not read as a complaint about the reference.
+    /// </param>
+    internal static bool LooksLikeReferenceFailure(
+        string standardError, string referenceRepository, string? repositoryUrl = null)
     {
         // -if-able reports a missing reference on an "info:" line and carries on, so that line never explains a failure.
         var diagnosis = string.Join('\n', standardError.Split('\n')
             .Where(line => !line.TrimStart().StartsWith("info:", StringComparison.Ordinal)));
 
+        if (!string.IsNullOrEmpty(repositoryUrl))
+        {
+            diagnosis = diagnosis.Replace(repositoryUrl, string.Empty, StringComparison.OrdinalIgnoreCase);
+        }
+
         return diagnosis.Contains(referenceRepository, StringComparison.OrdinalIgnoreCase)
             || diagnosis.Contains(referenceRepository.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase)
             || diagnosis.Contains("reference repository", StringComparison.OrdinalIgnoreCase)
-            || diagnosis.Contains("alternate", StringComparison.OrdinalIgnoreCase)
+            || diagnosis.Contains("alternate object", StringComparison.OrdinalIgnoreCase)
+            || diagnosis.Contains("info/alternates", StringComparison.OrdinalIgnoreCase)
             || diagnosis.Contains("repack to clean up", StringComparison.OrdinalIgnoreCase);
     }
 

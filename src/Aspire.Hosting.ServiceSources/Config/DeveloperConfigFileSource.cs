@@ -175,7 +175,7 @@ internal static class DeveloperConfigFileSource
                 }
 
                 // Before the read, so a linked worktree's first run reads what was seeded from the main worktree.
-                WorktreeSeed.EnsureSeeded(builder);
+                var seededFrom = WorktreeSeed.EnsureSeeded(builder);
 
                 // Reading the file is the part that can fail on the file's own account, and it
                 // touches nothing on the builder, so a malformed file throws with the slot still
@@ -193,6 +193,12 @@ internal static class DeveloperConfigFileSource
                 _registered = true;
 
                 builder.Configuration.Sources.Insert(0, source);
+
+                // After the insert, so the check reads every configuration layer and the file is parsed once.
+                if (seededFrom is not null)
+                {
+                    WorktreeSeed.ReportPathOverrides(builder, seededFrom, source.InitialData ?? []);
+                }
             }
         }
     }

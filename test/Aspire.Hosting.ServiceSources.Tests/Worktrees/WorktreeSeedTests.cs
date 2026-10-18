@@ -85,14 +85,52 @@ public class WorktreeSeedTests
     }
 
     [Fact]
-    public void HomeWithNothingToCopy_StillWritesTheMarker()
+    public void HomeWithNothingToCopy_WritesNoMarker_SoALaterRunCanSeed()
     {
         var fake = FakeWorktree.Siblings();
 
         var builder = Run(fake);
 
-        Assert.True(File.Exists(WorktreeSeed.MarkerPath(fake.WorktreeAppHost)));
+        Assert.False(File.Exists(WorktreeSeed.MarkerPath(fake.WorktreeAppHost)));
         Assert.Empty(Notices(builder));
+
+        fake.WriteHome(DeveloperConfiguration.FileName, HomeConfig);
+        Run(fake);
+
+        Assert.Equal(HomeConfig, File.ReadAllText(Path.Combine(fake.WorktreeAppHost, DeveloperConfiguration.FileName)));
+        Assert.True(File.Exists(WorktreeSeed.MarkerPath(fake.WorktreeAppHost)));
+    }
+
+    [Fact]
+    public void SymbolicLinkSource_IsReported_NotCopied()
+    {
+        var fake = FakeWorktree.Siblings();
+        var target = Path.Combine(TempDirectories.CreateSubdirectory().FullName, "dotfiles.json");
+        File.WriteAllText(target, HomeConfig);
+        File.CreateSymbolicLink(Path.Combine(fake.MainAppHost, DeveloperConfiguration.FileName), target);
+
+        var builder = Run(fake);
+
+        Assert.False(File.Exists(Path.Combine(fake.WorktreeAppHost, DeveloperConfiguration.FileName)));
+        Assert.Contains(Notices(builder), notice => notice.Contains("symbolic link", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AnUnexpectedFailure_IsANotice_NotAStartupFailure()
+    {
+        var fake = FakeWorktree.Siblings();
+        fake.WriteHome(DeveloperConfiguration.FileName, HomeConfig);
+        var builder = fake.CreateWorktreeBuilder();
+        WorktreeHome.UseProbe(builder, new ThrowingProbe());
+
+        DeveloperConfigFileSource.EnsureRegistered(builder);
+
+        Assert.Contains(Notices(builder), notice => notice.Contains("next run", StringComparison.Ordinal));
+    }
+
+    private sealed class ThrowingProbe : IWorktreeProbe
+    {
+        public WorktreeLayout? Probe(string directory) => throw new NotSupportedException("odd path");
     }
 
     [Fact]

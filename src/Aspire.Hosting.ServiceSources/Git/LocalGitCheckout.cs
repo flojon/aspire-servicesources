@@ -384,13 +384,11 @@ internal static class LocalGitCheckout
                 $"{label}: there is no checkout at '{Raw.Escaped(repoRoot)}' and no repository url to clone one from. A checkout can only be created where the catalog names a repository to clone from.");
         }
 
-        var referenceCheckout = ReferenceCheckout(homeAppHostDirectory?.Invoke(), definition, gitClient);
-
         // A clone that loses the race to a concurrent AppHost leaves us using *their*
         // checkout, not one we just made, so it gets the same treatment as a checkout found
         // there on a later run: theirs may be a clone of another repository, and may hold
         // work in flight that a checkout would discard.
-        if (CloneIntoPlace(label, definition, checkoutsRoot, repoRoot, referenceCheckout, gitClient, progress))
+        if (CloneIntoPlace(label, definition, checkoutsRoot, repoRoot, homeAppHostDirectory, gitClient, progress))
         {
             return new PreparedCheckout(repoRoot, NeedsReconciliation: true);
         }
@@ -513,7 +511,7 @@ internal static class LocalGitCheckout
         ServiceDefinition definition,
         string checkoutsRoot,
         string repoRoot,
-        string? referenceCheckout,
+        Func<string?>? homeAppHostDirectory,
         IGitClient gitClient,
         IGitProgressSink? progress)
     {
@@ -536,8 +534,8 @@ internal static class LocalGitCheckout
                 $"{label}: the checkout at '{Raw.Escaped(repoRoot)}' has a '.git' file rather than a '.git' directory, so it is a linked worktree or a clone made with --separate-git-dir rather than a checkout this tool cloned. Move it aside and re-run to have it cloned fresh, or point the service at it with the 'path' source — 'source': 'path' and 'path': {{ 'path': '...' }} in servicesources.local.json.");
         }
 
+        var referenceCheckout = TryReferenceCheckout(homeAppHostDirectory, definition, gitClient);
         var scratch = NewScratchDirectory(checkoutsRoot, definition);
-        string? abandonedScratch = null;
 
         try
         {
@@ -560,7 +558,7 @@ internal static class LocalGitCheckout
                             $"Could not borrow objects from '{Raw.Escaped(referenceCheckout)}' ({Raw.Cause(ex)}); cloning without it.").ToString());
 
                         // A fresh directory, since the failed attempt may have left files behind.
-                        abandonedScratch = scratch;
+                        TryDeleteScratch(scratch);
                         scratch = NewScratchDirectory(checkoutsRoot, definition);
                         gitClient.Clone(definition.Repository.Url, scratch, progress);
                     }
@@ -644,11 +642,6 @@ internal static class LocalGitCheckout
         finally
         {
             TryDeleteScratch(scratch);
-
-            if (abandonedScratch is not null)
-            {
-                TryDeleteScratch(abandonedScratch);
-            }
         }
     }
 
@@ -835,6 +828,23 @@ internal static class LocalGitCheckout
     /// </remarks>
     private static void EnsureToolDirectory(string appHostDirectory) =>
         CheckoutBuildBarrier.Ensure(ToolDirectory.Ensure(appHostDirectory));
+
+    /// <summary>
+    /// <see cref="ReferenceCheckout"/>, degraded to <see langword="null"/> by any failure: borrowing is an
+    /// optimisation, and the home checkout is a directory this tool does not control.
+    /// </summary>
+    private static string? TryReferenceCheckout(
+        Func<string?>? homeAppHostDirectory, ServiceDefinition definition, IGitClient gitClient)
+    {
+        try
+        {
+            return ReferenceCheckout(homeAppHostDirectory?.Invoke(), definition, gitClient);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>
     /// The home worktree's checkout of this repository, when it is safe to borrow objects from.

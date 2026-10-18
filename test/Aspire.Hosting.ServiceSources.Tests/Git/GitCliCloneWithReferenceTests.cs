@@ -65,6 +65,7 @@ public class GitCliCloneWithReferenceTests
     [InlineData("error: object file /home/x/orders/.git/objects/ab/cdef is empty", true)]
     [InlineData("fatal: unable to access 'https://example.com/orders.git/': Could not resolve host: example.com", false)]
     [InlineData("info: Could not add alternate for '/home/x/orders': reference repository '/home/x/orders' does not exist\nfatal: unable to access 'https://example.com/orders.git/': Could not resolve host", false)]
-    public void LooksLikeReferenceFailure_BlamesTheReferenceOnlyWhenGitDoes(string standardError, bool expected) =>
-        Assert.Equal(expected, GitCliClient.LooksLikeReferenceFailure(standardError, "/home/x/orders"));
+    [InlineData("fatal: unable to access 'https://host/org/alternate-service.git/': Could not resolve host: host", false, "https://host/org/alternate-service.git")]
+    public void LooksLikeReferenceFailure_BlamesTheReferenceOnlyWhenGitDoes(string standardError, bool expected, string? url = null) =>
+        Assert.Equal(expected, GitCliClient.LooksLikeReferenceFailure(standardError, "/home/x/orders", url));
 }
