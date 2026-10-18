@@ -1072,10 +1072,10 @@ public class CheckoutPreparationTests
             }
         }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
-        Assert.True(firstRead.Wait(TimeSpan.FromSeconds(10)), "the reader never completed a read");
-
         try
         {
+            Assert.True(firstRead.Wait(TimeSpan.FromSeconds(10)), "the reader never completed a read");
+
             fixture.Git.HeadCommitSha = "3333333333333333333333333333333333333333";
             Run(fixture, Step());
         }
