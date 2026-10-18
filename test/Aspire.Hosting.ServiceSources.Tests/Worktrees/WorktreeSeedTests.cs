@@ -107,7 +107,15 @@ public class WorktreeSeedTests
         var fake = FakeWorktree.Siblings();
         var target = Path.Combine(TempDirectories.CreateSubdirectory().FullName, "dotfiles.json");
         File.WriteAllText(target, HomeConfig);
-        File.CreateSymbolicLink(Path.Combine(fake.MainAppHost, DeveloperConfiguration.FileName), target);
+
+        try
+        {
+            File.CreateSymbolicLink(Path.Combine(fake.MainAppHost, DeveloperConfiguration.FileName), target);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            return; // creating links needs a privilege this machine does not grant
+        }
 
         var builder = Run(fake);
 

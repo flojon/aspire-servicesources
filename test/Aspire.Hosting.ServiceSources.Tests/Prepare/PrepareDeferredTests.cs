@@ -475,7 +475,38 @@ public class PrepareDeferredTests
     }
 
     /// <remarks>
-    /// A failed deferred step is not confined to the dashboard: <c>ServiceStartupFailureNotices</c>
+    /// FailedToStart re-enables the dashboard's Start, which would launch the service against a
+    /// checkout its prepare step never finished.
+    /// </remarks>
+    [Fact]
+    public async Task AFailedStep_RefusesALaterStartOfTheResource()
+    {
+        var dir = CreateAppHostDirectory("routing");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+
+        var journal = new Journal();
+        builder.AddLocalKind(KindName, new StandInKind(journal, "app.jar"));
+
+        new LocalProjectSource(new FakeGitClient(), new FakeRunner(journal) { ExitCode = 9 })
+            .Resolve(builder, "routing", Definition("routing", Prepare()), DevConfig());
+
+        var routing = Assert.Single(builder.Resources, r => r.Name == "routing");
+
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+        await PublishNotStartedAsync(services, routing);
+        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+        var refusal = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(() =>
+            builder.Eventing.PublishAsync(new BeforeResourceStartedEvent(routing, services)));
+
+        Assert.Contains("Restart the AppHost", refusal.Message, StringComparison.Ordinal);
+    }
+
+    /// <remarks>
+    /// A failed deferred step is not confined to the dashboard:<c>ServiceStartupFailureNotices</c>
     /// reads resource <em>state</em> rather than any one failure path, so it already covers this one.
     /// </remarks>
     [Fact]
