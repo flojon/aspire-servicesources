@@ -666,15 +666,12 @@ public class GroupPathSourceTests
     }
 
     [Fact]
-    public void RedirectedMember_WithItsOwnRepositoryPrepare_IsRefusedPointingAtPathPrepare()
+    public void RedirectedMember_WithItsOwnRepositoryPrepare_IgnoresIt()
     {
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            ResolveRedirectedWithCatalogPrepare(
-                memberPrepare: null,
-                repositoryPrepare: new PrepareDeveloperConfig { Command = ["make", "dev"] }));
+        var (runner, _) = ResolveRedirectedWithCatalogPrepare(
+            memberPrepare: null,
+            repositoryPrepare: new PrepareDeveloperConfig { Command = ["make", "dev"] });
 
-        Assert.Contains("Service 'orders'", ex.Message);
-        Assert.Contains("'repository.prepare'", ex.Message);
-        Assert.Contains("'path.prepare'", ex.Message);
+        Assert.Empty(runner.Runs);
     }
 }
