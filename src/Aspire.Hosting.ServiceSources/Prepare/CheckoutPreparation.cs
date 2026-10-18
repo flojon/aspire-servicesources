@@ -370,7 +370,7 @@ internal static class CheckoutPreparation
                 // interleaved into one.
                 lock (tail)
                 {
-                    sink.Report(Raw.Compose($"{tag} {Raw.Escaped(redacted)}"));
+                    sink.Report(Raw.Compose($"{tag} {Raw.Output(redacted)}"));
 
                     tail.Enqueue(redacted);
                     if (tail.Count > OutputTailLines)
@@ -402,7 +402,7 @@ internal static class CheckoutPreparation
     /// gets the same redaction #270 already gives its output, rather than only the lines it prints
     /// (#286).
     /// </remarks>
-    private static Raw RedactedDescribe(PrepareStep step) => Raw.Escaped(GitUrl.RedactAll(step.Describe()));
+    private static Raw RedactedDescribe(PrepareStep step) => Raw.Output(GitUrl.RedactAll(step.Describe()));
 
     /// <param name="quoted">
     /// The output tail, already snapshotted by the caller — this must not enumerate the live queue,
@@ -412,7 +412,7 @@ internal static class CheckoutPreparation
         Raw label, PrepareStep step, int exitCode, string[] quoted) =>
         Raw.Compose($"{label}: its prepare step failed. The command '{RedactedDescribe(step)}' exited with "
             + $"code {exitCode}, so the checkout was left as the command found it and nothing was recorded as "
-            + $"completed — the step will run again from the beginning on the next start.{QuotedTailSuffix(quoted)}");
+            + $"completed — the step will run again from the beginning on the next AppHost start.{QuotedTailSuffix(quoted)}");
 
     /// <summary>The output-tail portion of <see cref="FailedMessage"/>, or a note that there was none.</summary>
     private static Raw QuotedTailSuffix(string[] quoted) =>
@@ -430,7 +430,7 @@ internal static class CheckoutPreparation
     /// <see cref="Raw.NewLine"/> is not one.
     /// </summary>
     private static Raw JoinedQuotedLines(IEnumerable<string> quoted) =>
-        quoted.Select(Raw.Escaped).Aggregate((a, b) => Raw.Compose($"{a}{Raw.NewLine}  {b}"));
+        quoted.Select(Raw.Output).Aggregate((a, b) => Raw.Compose($"{a}{Raw.NewLine}  {b}"));
 
     /// <remarks>
     /// Reported apart from a non-zero exit because it is a different problem with a different fix:

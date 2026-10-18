@@ -567,7 +567,7 @@ internal sealed class DeferredCheckout
                 deferred.Failed
                     ? throw ServiceSourcesConfigurationException.For(
                         $"Service '{new Name(serviceName)}' was not started: its checkout or prepare step failed earlier "
-                        + $"in this run. Restart the AppHost to run it again.")
+                        + $"in this run. It will run again on the next AppHost start.")
                     : Task.CompletedTask);
         }
 
@@ -1490,9 +1490,9 @@ internal sealed class DeferredCheckout
                     Raw.Compose(
                         $"The catalog's prepare command for {label} is not the one that last succeeded here. "
                         + $"Running it executes code from the catalog on this machine, in {Raw.Display(repoRoot)}: "
-                        + $"{command} "
+                        + $"{command}. "
                         + $"Skip, or no answer within {(int)PromptTimeout.TotalMinutes} minutes, leaves the service not started "
-                        + $"until the AppHost restarts, and anything waiting on it keeps waiting.").ToString(),
+                        + $"until the next AppHost start, and anything waiting on it keeps waiting.").ToString(),
                     new MessageBoxInteractionOptions
                     {
                         PrimaryButtonText = "Run",
@@ -1523,7 +1523,7 @@ internal sealed class DeferredCheckout
 
         ServiceSourcesLog.Information(
             logger,
-            $"Skipped: its prepare command has changed since it last succeeded and was not approved, so nothing was run or started. Restart the AppHost to be asked again.");
+            $"Skipped: its prepare command has changed since it last succeeded and was not approved, so nothing was run or started. You will be asked again on the next AppHost start.");
 
         return false;
     }
@@ -1571,7 +1571,7 @@ internal sealed class DeferredCheckout
                 // Verbatim, progress lines included: the logs are where the developer goes for what
                 // actually happened, and git's own stream is a better record of it than any summary
                 // of ours. The State column is where the summarising happens.
-                ServiceSourcesLog.Information(logger, $"{Raw.Escaped(line)}");
+                ServiceSourcesLog.Information(logger, $"{Raw.Output(line)}");
 
                 if (!GitProgressLine.TryParse(line, out var parsed))
                 {

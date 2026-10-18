@@ -324,9 +324,9 @@ public class EndpointSkipGapRepro
             + "resolves to a fixed, already-running URL with no local process to configure. The service "
             + "is expected to be configured wherever it actually runs. To make this AppHost's "
             + "configuration and start ordering apply instead, give it a 'repository' or 'container' source "
-            + "in servicesources.local.json — which works only where its 'servicesources.yaml' entry "
-            + "already declares that source: a 'repository' or 'repositoryRef' for 'repository', a "
-            + "'container' block for 'container'.",
+            + "in servicesources.local.json — which works only where its catalog entry "
+            + "already declares that source: a 'repository' or 'repositoryRef' for 'repository' (WithRepository or WithSharedRepository in a code catalog), "
+            + "a 'container' block for 'container' (WithContainer in a code catalog).",
             Assert.Single(warnings));
     }
 
@@ -352,9 +352,9 @@ public class EndpointSkipGapRepro
             + "configuration would reach kubectl rather than the service. The service is expected to be "
             + "configured wherever it actually runs. To make this AppHost's configuration and start "
             + "ordering apply instead, give it a 'repository' or 'container' source in "
-            + "servicesources.local.json — which works only where its 'servicesources.yaml' entry "
-            + "already declares that source: a 'repository' or 'repositoryRef' for 'repository', a "
-            + "'container' block for 'container'.",
+            + "servicesources.local.json — which works only where its catalog entry "
+            + "already declares that source: a 'repository' or 'repositoryRef' for 'repository' (WithRepository or WithSharedRepository in a code catalog), "
+            + "a 'container' block for 'container' (WithContainer in a code catalog).",
             Assert.Single(warnings));
     }
 

@@ -80,7 +80,7 @@ public class SkipRemedyTests
         Assert.Contains("servicesources.local.json", message);
         // Without these three the sentence reads as an unconditional instruction, which is what sent
         // a reader of a url-only service into an exception on both options.
-        Assert.Contains("servicesources.yaml", message);
+        Assert.Contains("its catalog entry", message);
         Assert.Contains("'repository' or 'repositoryRef' for 'repository'", message);
         Assert.Contains("'container' block for 'container'", message);
     }

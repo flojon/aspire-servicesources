@@ -53,8 +53,33 @@ internal sealed class PrepareStep
     /// three. This is for a human to read; nothing parses it back.
     /// </remarks>
     public string Describe() =>
-        string.Join(" ", Command.Select(argument =>
-            argument.Length == 0 || argument.Any(char.IsWhiteSpace) ? $"\"{argument}\"" : argument));
+        string.Join(" ", Command.Select(Quote));
+
+    // Backslashes are doubled only where they precede a quote, as CommandLineToArgvW reads them, so
+    // a Windows path stays readable while an argument holding quotes still has unambiguous bounds.
+    private static string Quote(string argument)
+    {
+        if (argument.Length > 0 && !argument.Any(character => char.IsWhiteSpace(character) || character == '"'))
+        {
+            return argument;
+        }
+
+        var quoted = new System.Text.StringBuilder("\"");
+        var backslashes = 0;
+        foreach (var character in argument)
+        {
+            if (character == '\\')
+            {
+                backslashes++;
+                continue;
+            }
+
+            quoted.Append('\\', character == '"' ? (backslashes * 2) + 1 : backslashes).Append(character);
+            backslashes = 0;
+        }
+
+        return quoted.Append('\\', backslashes * 2).Append('"').ToString();
+    }
 
     /// <summary>
     /// Validates a command and mode that have already been merged, and confines the first element to

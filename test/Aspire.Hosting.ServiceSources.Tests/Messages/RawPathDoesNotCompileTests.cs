@@ -242,8 +242,8 @@ public class RawPathDoesNotCompileTests
 
             Assert.DoesNotContain("\n", rendered, StringComparison.Ordinal);
 
-            // Display is for a dialog no message quotes around, so only forged lines are its concern.
-            if (factory.Name == nameof(Raw.Display))
+            // Display and Output are for text no message quotes around, so only forged lines are its concern.
+            if (factory.Name is nameof(Raw.Display) or nameof(Raw.Output))
             {
                 return;
             }

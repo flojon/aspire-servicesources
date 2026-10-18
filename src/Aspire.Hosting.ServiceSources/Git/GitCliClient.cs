@@ -478,7 +478,7 @@ internal sealed partial class GitCliClient(
     private static Raw Describe(GitCommandResult result)
     {
         var stderr = result.StandardError.Trim();
-        return stderr.Length > 0 ? Raw.Escaped(stderr) : Raw.Compose($"git exited with code {result.ExitCode}.");
+        return stderr.Length > 0 ? Raw.Output(stderr) : Raw.Compose($"git exited with code {result.ExitCode}.");
     }
 
     /// <summary>

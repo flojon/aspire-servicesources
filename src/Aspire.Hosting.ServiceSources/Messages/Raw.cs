@@ -90,8 +90,16 @@ internal readonly struct Raw
     /// not from Bare's escape spelling of whatever it left behind.
     /// </para>
     /// </remarks>
-    internal static Raw Cause(Exception exception) =>
-        new(string.Join(" | ", SplitLines(exception.Message).Select(ConfiguredValue.Bare)));
+    internal static Raw Cause(Exception exception) => Output(exception.Message);
+
+    /// <summary>
+    /// A process's or git's own output, shown as written: backslashes and apostrophes are neither doubled nor
+    /// escaped, since a clone failure naming a Windows path is the common case. Line
+    /// breaks are joined with <c>" | "</c> and every other invisible is still spelled out, so the
+    /// output cannot forge a line.
+    /// </summary>
+    internal static Raw Output(string? text) =>
+        new(string.Join(" | ", SplitLines(text).Select(ConfiguredValue.Bare)));
 
     // Message is non-null by signature but not by contract — a subclass can still override it to
     // return null, same as Bare (which this replaces for cause text) has always tolerated.

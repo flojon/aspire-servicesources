@@ -153,6 +153,9 @@ never existed. Check the tag of the last release before adding one.
   checkouts are unchanged, and the gate does not apply when an IDE or `dotnet watch` builds the
   project.
 
+- **A failed clone's git output is shown as git wrote it** ([#465](https://github.com/flojon/aspire-servicesources/issues/465)). The failure message and the resource log escaped backslashes and apostrophes, so a Windows path read as `D:\\Source\\…` and an apostrophe as `\u0027`; they now appear as written, with git's lines joined by ` | `.
+- **The error for a `disabled` service's endpoint reads as a sentence and no longer assumes a yaml catalog** ([#465](https://github.com/flojon/aspire-servicesources/issues/465)). The advice now starts with a capital and says "catalog entry" rather than `servicesources.yaml` entry, which is wrong for a catalog defined in code, and names the code-catalog helpers (`WithRepository`, `WithSharedRepository`, `WithContainer`; `WithProject` for a missing `project`).
+
 ## [0.7.0] - 2026-09-28
 
 ### Breaking

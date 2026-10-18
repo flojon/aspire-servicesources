@@ -788,7 +788,7 @@ internal sealed class LocalProjectSource(IGitClient gitClient, IPrepareCommandRu
             throw ServiceSourcesConfigurationException.For(
                 $"Service '{new Name(serviceName)}': 'project' is required for a '{Raw.Escaped(sourceName)}' service of kind 'dotnet'. It names "
                 + $"the project file to run, relative to the service's checkout — for example "
-                + $"'src/Orders.Api/Orders.Api.csproj'. It belongs on the service's 'servicesources.yaml' entry; "
+                + $"'src/Orders.Api/Orders.Api.csproj'. It belongs on the service's catalog entry ('project' in servicesources.yaml, WithProject in a code catalog); "
                 + $"'servicesources.local.json' chooses the source and carries no 'project'.");
         }
 
