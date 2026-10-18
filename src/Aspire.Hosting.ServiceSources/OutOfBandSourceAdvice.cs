@@ -30,7 +30,8 @@ internal static class OutOfBandSourceAdvice
     internal const string SwitchSource =
         "give it a 'repository' or 'container' source in servicesources.local.json — which works only " +
         "where its catalog entry already declares that source: a 'repository' or " +
-        "'repositoryRef' for 'repository', a 'container' block for 'container'";
+        "'repositoryRef' for 'repository' (WithRepository or WithSharedRepository in a code catalog), " +
+        "a 'container' block for 'container' (WithContainer in a code catalog)";
 
     /// <summary>
     /// Why a source runs out of band, in the clause each message builds its sentence around.
