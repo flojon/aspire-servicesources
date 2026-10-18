@@ -30,6 +30,7 @@ const payments = await builder
   // resolve through "container", which is already on disk, so declaring the endpoint changes
   // nothing about how payments runs. Present so the typecheck-typescript CI job compiles a real
   // call to it, the same way getServiceEndpoint() below is exercised rather than merely generated.
+  // The container's own port: an https endpoint on a container resource must name it.
   .withHttpsEndpoint({ targetPort: 80 });
 //
 // probe prints what the AppHost injected for inventory and then exits, so it shows as Exited (not

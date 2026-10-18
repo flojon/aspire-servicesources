@@ -65,6 +65,15 @@ await builder.addServiceCatalog(async (catalog) => {
   await catalogService.withPrepare(['./mvnw', '-q', 'dependency:go-offline'], {
     mode: PrepareMode.Once,
   });
+
+  // Declared only, like "catalog" above: the nested asJavaScript callback is the other kind that
+  // crosses ATS inside addServiceCatalog, and CI starting this AppHost exercises it.
+  const frontend = await catalog.addService('frontend');
+  await frontend.withRepository('https://github.com/dotnet/aspire-samples', { defaultRef: 'main' });
+  await frontend.asJavaScript(async (o) => {
+    await o.withRunScript('dev');
+    await o.withPort(3000);
+  });
 });
 
 const inventory = await builder.addService('inventory');
@@ -73,6 +82,7 @@ const payments = await builder
   .addService('payments')
   .withEnvironment('DEMO_INJECTED_BY_APPHOST', 'true')
   .withReference(inventory)
+  // The container's own port: an https endpoint on a container resource must name it.
   .withHttpsEndpoint({ targetPort: 80 });
 
 const probeScript =

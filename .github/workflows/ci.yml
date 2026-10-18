@@ -507,6 +507,7 @@ jobs:
       # success means every catalog callback completed. Containers are pulled after that point and
       # are not waited for, hence the stop straight away.
       - name: Start the sample AppHost
+        timeout-minutes: 5
         working-directory: ${{ matrix.sample }}
         run: |
           cp servicesources.local.json.example servicesources.local.json
