@@ -91,6 +91,11 @@ never existed. Check the tag of the last release before adding one.
 
 ### Changed
 
+- **Docs: build serialization needs `ServiceSources:RepositoryRoot` or `buildGroup` when there is no
+  `.git`** ([#449]). Without either, a `repositories.<name>` group directory and a sibling with its own
+  `path.path` inside it are separate build groups and can build concurrently. A test now pins the
+  layout; no behavior changed.
+
 - **A `repositories.<name>` entry that sets `prepare` is now a startup error** ([#416]). It was
   bound but never read, so the step silently never ran. Set `path.prepare` on each member service
   instead. A `repositories.<name>` entry with `source: path` and no `path.path` is likewise refused
@@ -2042,6 +2047,7 @@ Targets `net10.0`.
 [#385]: https://github.com/flojon/aspire-servicesources/issues/385
 [#415]: https://github.com/flojon/aspire-servicesources/issues/415
 [#416]: https://github.com/flojon/aspire-servicesources/issues/416
+[#449]: https://github.com/flojon/aspire-servicesources/issues/449
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

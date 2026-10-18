@@ -70,6 +70,34 @@ public class BuildGroupKeyTests
     }
 
     [Fact]
+    public void For_NoGitNoConfiguredRoot_GroupDirectoryAndASiblingWithItsOwnPathDiffer()
+    {
+        var root = TempDirectories.CreateSubdirectory().FullName;
+        var groupDirectory = Dir(root, "eShop");
+        var sibling = Dir(root, "eShop/src/X");
+
+        Assert.NotEqual(KeyOf(groupDirectory), KeyOf(sibling));
+    }
+
+    [Fact]
+    public void For_NoGitButConfiguredRootAboveBoth_GroupDirectoryAndSiblingShareAKey()
+    {
+        var root = TempDirectories.CreateSubdirectory().FullName;
+        var groupDirectory = Dir(root, "eShop");
+        var sibling = Dir(root, "eShop/src/X");
+
+        Assert.Equal(KeyOf(groupDirectory, configuredRoot: () => root), KeyOf(sibling, configuredRoot: () => root));
+    }
+
+    [Fact]
+    public void For_NoGitButSameBuildGroup_GroupDirectoryAndSiblingShareAKey()
+    {
+        var root = TempDirectories.CreateSubdirectory().FullName;
+
+        Assert.Equal(KeyOf(Dir(root, "eShop"), "shared"), KeyOf(Dir(root, "eShop/src/X"), "shared"));
+    }
+
+    [Fact]
     public void For_ConfiguredRootThatIsNotAnAncestor_FallsBackToTheServiceDirectory()
     {
         var unrelated = TempDirectories.CreateSubdirectory().FullName;
