@@ -361,8 +361,12 @@ internal sealed class ServiceSourcesWarnings
         bool everyRevertWasAnAddition,
         IReadOnlyList<string> registeredEndpoints) =>
         $"Service '{new Name(serviceName)}': {string.Join("; ", reverts)}. Its source is '{new Name(source)}' — " +
-        $"{OutOfBandSourceAdvice.SourceDetail(source)}. An out-of-band service's endpoints are fixed by its source, so " +
-        $"configure the service where it actually runs. {WhereToGoInstead(source, everyRevertWasAnAddition, registeredEndpoints)}" +
+        $"{OutOfBandSourceAdvice.SourceDetail(source)}. " +
+        (string.Equals(source, "unconfigured", StringComparison.Ordinal)
+            // Nothing runs, so there is no endpoint to move and nowhere else to configure it.
+            ? "There is no endpoint to change until a source is chosen. "
+            : $"An out-of-band service's endpoints are fixed by its source, so configure the service where it " +
+              $"actually runs. {WhereToGoInstead(source, everyRevertWasAnAddition, registeredEndpoints)}") +
         $"{SwitchSourceRemedy}";
 
     /// <summary>

@@ -107,6 +107,9 @@ public static class ServiceSourcesBuilderExtensions
                 throw notConfigured!;
             }
 
+            // The dashboard Reason stays short; the full text keeps the near-miss hints for a typo'd key.
+            ServiceSourcesWarnings.For(builder).AddNotice(Raw.Cause(notConfigured!));
+
             return UnconfiguredSource.Resolve(builder, name);
         }
 
@@ -304,6 +307,12 @@ public static class ServiceSourcesBuilderExtensions
     /// governs the source-pick prompt overrides the <c>CI</c> check once this has been called:
     /// <c>true</c> forces it on, <c>false</c> restores the exception. Without this call nothing
     /// changes.
+    /// <para>
+    /// Calls that need an endpoint or a concrete resource type still throw on a placeholder, with a
+    /// message saying no source has been chosen: <c>GetServiceEndpoint()</c> and the type-returning
+    /// <c>Unwrap&lt;T&gt;()</c>. An AppHost that makes either call on such a service can still stop before
+    /// the dashboard. Configuration calls such as <c>WithEnvironment</c> only warn.
+    /// </para>
     /// </remarks>
     [AspireExport]
     public static IDistributedApplicationBuilder UseInteractiveServiceConfiguration(

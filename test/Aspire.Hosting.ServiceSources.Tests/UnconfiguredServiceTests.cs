@@ -2,6 +2,7 @@ using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.ServiceSources.Sources;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using ServiceSourcesOverloadProbe;
 using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests;
@@ -148,6 +149,32 @@ public class UnconfiguredServiceTests
         Assert.Contains("ServiceSources:Services:inventory:source", reason);
         Assert.DoesNotContain("servicesources.local.json", reason);
         Assert.DoesNotContain(Path.DirectorySeparatorChar, reason!);
+    }
+
+    [Fact]
+    public void ThePlaceholderLogsTheFullNotConfiguredText_WhichTheDashboardReasonOmits()
+    {
+        var builder = Builder();
+
+        builder.AddService("inventory");
+
+        var notice = Assert.Single(ServiceSourcesWarnings.For(builder).Messages);
+        Assert.Contains("No service sources are configured", notice);
+        Assert.Contains("inventory", notice);
+    }
+
+    [Fact]
+    public async Task AnEndpointAddedByAGuestAppHost_IsRevertedWithoutAdviceToConfigureWhereItRuns()
+    {
+        var builder = Builder();
+        var inventory = builder.AddService("inventory");
+
+        GuestLanguageEndpointCallbacks.EndpointCallback(inventory, "probe", ("Port", 4242));
+
+        var warnings = await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder);
+
+        Assert.Contains(warnings, w => w.Contains("There is no endpoint to change until a source is chosen"));
+        Assert.DoesNotContain(warnings, w => w.Contains("where it actually runs"));
     }
 
     [Fact]
