@@ -797,7 +797,7 @@ it. The environment spelling is `ServiceSources__Repositories__eshop__Source=pat
 - A relative value resolves against the AppHost directory, not the json file, and the directory must
   exist; a missing one is an error naming the repository and `ServiceSources:Repositories:eshop:path:path`.
 - Precedence, first that applies: a member's own `path.path` (or the deprecated `repository.path`),
-  then the group's directory, then the managed checkout. So one member can still point elsewhere
+  then, for a member on `"path"`, the `path:` its catalog entry declares, then the group's directory, then the managed checkout. So one member can still point elsewhere
   while its siblings share the group's directory.
 - A member set to `url`, `container` or `kubernetes` is left alone, so running one dependency from an
   image keeps working. An ungrouped service of the same name as the repository is not reached either.
@@ -828,7 +828,9 @@ same working tree; unlike `"path"` services in one repository, they are not gate
 cloning one external repository twice, and a `"path"` service has nothing to clone — two of them naming
 the same resolved directory are just two entries pointing at it, no `repositories:` entry needed. The
 exception is a group-level `"source": "path"` entry, which supplies the directory to a grouped
-`"path"` service that sets none.
+`"path"` service that sets none — neither a developer `path.path` nor a catalog `path:`. A catalog
+`path:` is the author's own layout, so a member on `"path"` that declares one keeps it; only a developer's
+`path.path` (or `repository.path`) beats the group.
 
 ## Working in git worktrees
 

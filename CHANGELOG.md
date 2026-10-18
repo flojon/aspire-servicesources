@@ -82,11 +82,12 @@ never existed. Check the tag of the last release before adding one.
   at an existing checkout** ([#416]). `{ "source": "path", "path": { "path": "../eShop" } }` (or
   `ServiceSources__Repositories__<name>__Source` and `__Path__Path`) redirects every grouped member
   whose source is `repository` or `path`, so a monorepo AppHost keeps its grouping without repeating
-  a `path.path` per service. A member's own `path.path` still wins, members on `url`, `container` or
-  `kubernetes` are left alone, a member that sets its own `repository.ref` is refused at `AddService`
-  whatever the checkout timing (a group's ref is shared, so no member's own applies), a group `ref`
-  is ignored while the group is on `path`, and the builds of the members are serialized like any
-  other `"path"` services in one repository. A
+  a `path.path` per service. A member's own `path.path` still wins, and so does a `path:` its catalog
+  entry declares for a `path` member (the author's layout, not a developer override); members on
+  `url`, `container` or `kubernetes` are left alone, a member that sets its own `repository.ref` is
+  refused at `AddService` whatever the checkout timing (a group's ref is shared, so no member's own
+  applies), a group `ref` is ignored while the group is on `path`, and the builds of the members are
+  serialized like any other `"path"` services in one repository. A
   `repositories` entry naming no declared repository is now reported at startup, as is a
   `repositories.<name>.path.path` set without `source`, which would otherwise be silently unread.
   A `prepare` on a `repositories.<name>` entry is never run, so it is ignored with a startup warning

@@ -343,7 +343,7 @@ public class GroupPathSourceTests
     }
 
     [Fact]
-    public void PathMemberWhoseCatalogDefinesPath_IsDisplacedByTheGroupDirectory()
+    public void PathMemberWhoseCatalogDefinesPath_KeepsItsCatalogDirectory()
     {
         var groupDir = ProjectTree("Orders");
         Fixture(
@@ -359,11 +359,14 @@ public class GroupPathSourceTests
                     path: legacy/orders
                     project: src/Orders/Orders.csproj
                 """);
+        var ownDir = Path.Combine(appHost, "legacy", "orders", "src", "Orders");
+        Directory.CreateDirectory(ownDir);
+        File.WriteAllText(Path.Combine(ownDir, "Orders.csproj"), "<Project />");
         var builder = TestHelpers.CreateBuilder(appHost);
 
         builder.AddService("orders");
 
-        Assert.Equal(Path.Combine(groupDir, "src", "Orders", "Orders.csproj"), ProjectPathOf(builder, "orders"));
+        Assert.Equal(Path.Combine(ownDir, "Orders.csproj"), ProjectPathOf(builder, "orders"));
     }
 
     [Fact]
@@ -500,6 +503,22 @@ public class GroupPathSourceTests
         };
 
         Assert.Equal(expected, GroupPathSource.Redirects("orders", Grouped(), config, PathGroup()));
+    }
+
+    [Theory]
+    [InlineData("path", false)]
+    [InlineData("repository", true)]
+    public void Redirects_LeavesOnlyAPathMemberWithACatalogPath(string source, bool expected)
+    {
+        var definition = Grouped();
+        definition = new ServiceDefinition
+        {
+            Repository = definition.Repository, Project = definition.Project, Kind = definition.Kind,
+            Origin = definition.Origin, Path = "legacy/orders",
+        };
+
+        Assert.Equal(expected, GroupPathSource.Redirects(
+            "orders", definition, new ServiceDeveloperConfig { Source = source }, PathGroup()));
     }
 
     [Fact]
