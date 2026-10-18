@@ -1517,15 +1517,29 @@ public class DeveloperConfigurationTests
     [Theory]
     [InlineData("""{ "source": "path", "path": { "path": "/a", "prepare": { "command": ["./go.sh"] } } }""")]
     [InlineData("""{ "source": "path", "path": { "path": "/a" }, "prepare": { "command": ["./go.sh"] } }""")]
-    public void ReadFrom_RepositoryEntryWithAPrepareStep_IsRefusedPointingAtTheMemberServices(string entry)
+    public void ReadFrom_RepositoryEntryWithAPrepareStep_DoesNotFailStartup(string entry)
     {
         var dir = CreateAppHostDirectory(MonorepoCatalog, $$"""{ "repositories": { "monorepo": {{entry}} } }""");
+
+        var config = ServiceSourcesConfigCache.LoadedFor(CreateBuilder(dir)).DeveloperConfig;
+
+        var repository = config.Repositories["monorepo"];
+        Assert.Equal("path", repository.Source);
+        Assert.Equal("/a", repository.Path?.Path);
+    }
+
+    [Fact]
+    public void ReadFrom_RepositoryEntryWithAPrepareStepAndABadSource_IsRefusedForTheSourceOnly()
+    {
+        var dir = CreateAppHostDirectory(
+            MonorepoCatalog,
+            """{ "repositories": { "monorepo": { "source": "git", "prepare": { "command": ["./go.sh"] } } } }""");
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => ServiceSourcesConfigCache.LoadedFor(CreateBuilder(dir)));
 
-        Assert.Contains("Repository 'monorepo'", ex.Message);
-        Assert.Contains("'path.prepare' on each member service", ex.Message);
+        Assert.Contains("ServiceSources:Repositories:monorepo:source", ex.Message);
+        Assert.DoesNotContain("prepare", ex.Message);
     }
 
     [Fact]

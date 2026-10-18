@@ -354,6 +354,39 @@ public class ServiceConfigAuditTests
         Assert.Contains("'source' is not", warning);
     }
 
+    [Theory]
+    [InlineData("""{ "source": "path", "path": { "path": "/a", "prepare": { "command": ["./go.sh"] } } }""")]
+    [InlineData("""{ "source": "path", "path": { "path": "/a" }, "prepare": { "command": ["./go.sh"] } }""")]
+    public async Task RepositoryEntryWithAPrepareStep_IsReportedPointingAtTheMemberServices(string entry)
+    {
+        var builder = CreateBuilder(MonorepoCatalog, $$"""
+            { "services": { "orders": { "source": "container" } },
+              "repositories": { "monorepo": {{entry}} } }
+            """);
+        builder.AddService("orders");
+
+        var warning = Assert.Single(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+
+        Assert.Contains("Repository 'monorepo'", warning);
+        Assert.Contains("ignored", warning);
+        Assert.Contains("'path.prepare' on each member service", warning);
+    }
+
+    [Fact]
+    public async Task UndeclaredRepositoryEntryWithAPrepareStep_IsReportedAsOrphanedOnly()
+    {
+        var builder = CreateBuilder(MonorepoCatalog, """
+            { "services": { "orders": { "source": "container" } },
+              "repositories": { "ghost": { "source": "path", "path": { "path": "/a" }, "prepare": { "command": ["./go.sh"] } } } }
+            """);
+        builder.AddService("orders");
+
+        var warning = Assert.Single(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+
+        Assert.Contains("ghost", warning);
+        Assert.DoesNotContain("does not take a 'prepare' step", warning);
+    }
+
     [Fact]
     public async Task RepositoryEntryWithAnEmptyDirectoryAndNoSource_IsNotReported()
     {

@@ -300,7 +300,7 @@ public class GroupPathSourceTests
     }
 
     [Fact]
-    public async Task MemberOwnRepositoryRef_UnderDeferredTiming_FailsTheServiceOnStartRatherThanAtAddService()
+    public void MemberOwnRepositoryRef_UnderDeferredTiming_IsRefusedAtAddServiceAndClonesNothing()
     {
         var groupDir = ProjectTree("Orders");
         Fixture(
@@ -311,23 +311,10 @@ public class GroupPathSourceTests
             out var appHost);
         var builder = TestHelpers.CreateBuilderThatCanStart(appHost);
 
-        var orders = builder.AddService("orders");
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => builder.AddService("orders"));
 
-        // Deferred: the managed checkout is still cold, so the refusal is the start task's, per service.
-        Assert.Contains(orders.Resource.Annotations, a => a is ExplicitStartupAnnotation);
-        var services = builder.Services.BuildServiceProvider();
-        await builder.Eventing.PublishAsync(
-            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
-        var notifications = services.GetRequiredService<ResourceNotificationService>();
-        await notifications.PublishUpdateAsync(orders.Resource, snapshot => snapshot with
-        {
-            State = new ResourceStateSnapshot(KnownResourceStates.NotStarted, null),
-        });
-
-        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
-
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await notifications.WaitForResourceAsync(orders.Resource.Name, KnownResourceStates.FailedToStart, timeout.Token);
+        Assert.Contains("'repository.ref' cannot be set", ex.Message);
+        Assert.Contains("'path' source", ex.Message);
         Assert.False(Directory.Exists(Path.Combine(appHost, ".servicesources", "checkouts", "monorepo")));
     }
 
@@ -535,11 +522,11 @@ public class GroupPathSourceTests
     }
 
     [Fact]
-    public void Redirects_IsFalseForARepositoryMemberThatSetsItsOwnRef()
+    public void Redirects_IsTrueForARepositoryMemberThatSetsItsOwnRef_SoItIsNeverPrefetched()
     {
         var config = new ServiceDeveloperConfig { Source = "repository", Repository = new() { Ref = "feature/x" } };
 
-        Assert.False(GroupPathSource.Redirects("orders", Grouped(), config, PathGroup()));
+        Assert.True(GroupPathSource.Redirects("orders", Grouped(), config, PathGroup()));
     }
 
     [Theory]

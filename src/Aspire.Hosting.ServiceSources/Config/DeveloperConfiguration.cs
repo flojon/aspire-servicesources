@@ -406,12 +406,13 @@ internal sealed class DeveloperConfiguration
     }
 
     /// <summary>
-    /// Refuses a repository entry whose <c>source</c> is not <c>path</c> or <c>repository</c>, or that
-    /// sets a <c>prepare</c> step: a group-level step needs a marker keyed to the group, which does not exist.
+    /// Refuses a repository entry whose <c>source</c> is not <c>path</c> or <c>repository</c>, or whose
+    /// <c>path</c> source names no directory.
     /// </summary>
     /// <remarks>
     /// Skips entries naming no declared repository: those are dead configuration, reported by
-    /// <see cref="ServiceConfigAudit"/> rather than failed on.
+    /// <see cref="ServiceConfigAudit"/> rather than failed on. A <c>prepare</c> step on a repository
+    /// entry is ignored and reported there too, since a group-level step has no marker to key to.
     /// </remarks>
     private static void ValidateRepositoryEntries(
         Dictionary<string, RepositoryDeveloperConfig> repositories, IReadOnlyList<string> undeclaredNames)
@@ -442,12 +443,6 @@ internal sealed class DeveloperConfiguration
             {
                 problems.Add(Raw.Compose($"Repository '{new Name(name)}': source is 'path' but no directory is set. "
                     + $"Set '{Raw.Escaped(key)}:path:path' to a directory you already have on disk, or set '{Raw.Escaped(key)}:source' to 'repository' to use the managed checkout."));
-            }
-
-            if (config.Prepare?.IsDeclared == true || config.Path?.Prepare?.IsDeclared == true)
-            {
-                problems.Add(Raw.Compose($"Repository '{new Name(name)}': a repository entry does not take a 'prepare' step. "
-                    + $"Set 'path.prepare' on each member service under '{Raw.Literal(ServicesKey)}' instead."));
             }
         }
 

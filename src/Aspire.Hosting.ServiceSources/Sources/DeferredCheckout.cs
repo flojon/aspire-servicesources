@@ -153,6 +153,18 @@ internal sealed class DeferredCheckout
         /// </summary>
         public bool CheckoutWasPresent { get; init; }
 
+        private volatile bool _failed;
+
+        /// <summary>
+        /// Whether the checkout or its prepare step failed, after which a dashboard Start must not
+        /// launch the service: FailedToStart re-enables that command, and DCP would run it unprepared.
+        /// </summary>
+        public bool Failed
+        {
+            get => _failed;
+            set => _failed = value;
+        }
+
         /// <summary>Everything withheld for this service, in the order it must be started.</summary>
         public IEnumerable<IResource> AllResources => HeldBack.Append(Resource);
     }
@@ -537,14 +549,26 @@ internal sealed class DeferredCheckout
         // deferred service has been started and must not name this one as work nobody wanted.
         prefetch.MarkRequested(serviceName, definition);
 
+        var deferred = new Deferred(
+            serviceName, resource, heldBack, repoRoot, definition, config, repositoryConfig,
+            builder.AppHostDirectory, prefetch, gitClient, prepareStep, prepareRunner, onCheckoutLanded)
+        {
+            CheckoutWasPresent = Directory.Exists(repoRoot),
+        };
+
         lock (_gate)
         {
-            _deferred.Add(new Deferred(
-                serviceName, resource, heldBack, repoRoot, definition, config, repositoryConfig,
-                builder.AppHostDirectory, prefetch, gitClient, prepareStep, prepareRunner, onCheckoutLanded)
-            {
-                CheckoutWasPresent = Directory.Exists(repoRoot),
-            });
+            _deferred.Add(deferred);
+        }
+
+        foreach (var withheld in deferred.AllResources)
+        {
+            builder.Eventing.Subscribe<BeforeResourceStartedEvent>(withheld, (_, _) =>
+                deferred.Failed
+                    ? throw ServiceSourcesConfigurationException.For(
+                        $"Service '{new Name(serviceName)}' was not started: its checkout or prepare step failed earlier "
+                        + $"in this run. Restart the AppHost to run it again.")
+                    : Task.CompletedTask);
         }
 
         EnsureSubscribed(builder);
@@ -1465,7 +1489,7 @@ internal sealed class DeferredCheckout
                     "Run changed prepare command?",
                     Raw.Compose(
                         $"The catalog's prepare command for {label} is not the one that last succeeded here. "
-                        + $"Running it executes code from the catalog on this machine, in {Raw.Escaped(repoRoot)}: "
+                        + $"Running it executes code from the catalog on this machine, in {Raw.Display(repoRoot)}: "
                         + $"{command} "
                         + $"Skip, or no answer within {(int)PromptTimeout.TotalMinutes} minutes, leaves the service not started "
                         + $"until the AppHost restarts, and anything waiting on it keeps waiting.").ToString(),
@@ -1647,6 +1671,8 @@ internal sealed class DeferredCheckout
     private static async Task ReportFailureAsync(
         Deferred deferred, IServiceProvider services, Exception exception, IReadOnlyList<IResource> started)
     {
+        deferred.Failed = true;
+
         try
         {
             var notifications = services.GetRequiredService<ResourceNotificationService>();

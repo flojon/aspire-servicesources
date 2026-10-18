@@ -45,13 +45,31 @@ internal static class GroupPathSource
 
         if (string.Equals(config.Source, RepositorySourceName, StringComparison.OrdinalIgnoreCase))
         {
-            // A member's own ref is refused on the managed-checkout route, which a redirect would skip.
-            return config.Repository.Path is null && config.Repository.Ref is null;
+            return config.Repository.Path is null;
         }
 
         return string.Equals(config.Source, PathSourceName, StringComparison.OrdinalIgnoreCase)
             && config.Path.Path is null
             && string.IsNullOrWhiteSpace(definition.Path);
+    }
+
+    /// <summary>
+    /// Refuses a redirected <c>repository</c> member that sets its own <c>repository.ref</c>, at the
+    /// same moment whatever the checkout timing: a ref is the group's to set, and the redirect never
+    /// reaches the managed-checkout route that would otherwise refuse it.
+    /// </summary>
+    public static void ThrowIfMemberSetsOwnRef(
+        string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config)
+    {
+        if (config.Repository.Ref is null
+            || !string.Equals(config.Source, RepositorySourceName, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var checkoutName = new Name(definition.Repository.CheckoutName);
+        throw ServiceSourcesConfigurationException.For(
+            $"Service '{new Name(serviceName)}': 'repository.ref' cannot be set — this service is grouped into the shared repository '{checkoutName}', which is on the 'path' source, so nothing is checked out and no ref applies. Remove this service's 'repository.ref' so it follows the group's directory, or set the repository's 'source' to 'repository', remove this service's 'repository.ref' and put the ref on '{Raw.Literal(DeveloperConfiguration.RepositoriesKey, default)}:{checkoutName}:ref'.");
     }
 
     /// <summary>The group's directory, resolved like a service's <c>path.path</c> and required to exist.</summary>

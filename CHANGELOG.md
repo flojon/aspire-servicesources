@@ -65,7 +65,7 @@ never existed. Check the tag of the last release before adding one.
   is used, so a package that arrives transitively changes nothing. An official preview older than
   `13.6.1-preview.1.26506.6` is reported at build time (`SERVICESOURCES003`), or else when the
   first `java` service resolves. The preview pins package versions that NuGet
-  audit flags; see [Installation](docs/getting-started/installation.md#non-net-services). `Unwrap<T>` takes the installed integration's resource type: `JavaAppResource` for the
+  audit flags; see [Installation](docs/getting-started/installation.md#non-net-services). `Unwrap<T>` takes the installed integration's resource type: `Aspire.Hosting.Java.JavaAppResource` for the
   official package, `JavaAppExecutableResource` for the Community Toolkit's.
 
 - **A `dotnet` service can select its launch profile** ([#415]). A new `dotnet:` block in the yaml
@@ -83,20 +83,23 @@ never existed. Check the tag of the last release before adding one.
   `ServiceSources__Repositories__<name>__Source` and `__Path__Path`) redirects every grouped member
   whose source is `repository` or `path`, so a monorepo AppHost keeps its grouping without repeating
   a `path.path` per service. A member's own `path.path` still wins, and so does a `path:` its catalog
-  entry declares for a `path` member (the author's layout, not a developer override); members on `url`, `container` or
-  `kubernetes` are left alone, a member that sets its own `repository.ref` is not redirected (its
-  "ref is shared" error stands), a group `ref` is ignored while the group is on `path`, and the
-  builds of the members are serialized like any other `"path"` services in one repository. A
+  entry declares for a `path` member (the author's layout, not a developer override); members on
+  `url`, `container` or `kubernetes` are left alone, a member that sets its own `repository.ref` is
+  refused at `AddService` whatever the checkout timing (a group's ref is shared, so no member's own
+  applies), a group `ref` is ignored while the group is on `path`, and the builds of the members are
+  serialized like any other `"path"` services in one repository. A
   `repositories` entry naming no declared repository is now reported at startup, as is a
   `repositories.<name>.path.path` set without `source`, which would otherwise be silently unread.
+  A `prepare` on a `repositories.<name>` entry is never run, so it is ignored with a startup warning
+  ([#448]); set `path.prepare` on each member service instead. An entry with `source: path` and no
+  `path.path` is refused when the configuration is read.
 
 ### Changed
 
-- **A `repositories.<name>` entry that sets `prepare` is now a startup error** ([#416]). It was
-  bound but never read, so the step silently never ran. Set `path.prepare` on each member service
-  instead. A `repositories.<name>` entry with `source: path` and no `path.path` is likewise refused
-  when the configuration is read, rather than only when a member resolves.
-
+- **Docs: build serialization needs `ServiceSources:RepositoryRoot` or `buildGroup` when there is no
+  `.git`** ([#449]). Without either, a `repositories.<name>` group directory and a sibling with its own
+  `path.path` inside it are separate build groups and can build concurrently. A test now pins the
+  layout; no behavior changed.
 - **A cold `"repository"` checkout is no longer cloned at `AddService()`; the dashboard asks which
   ones to clone and start** ([#271]). In run mode, once the AppHost starts, one dialog lists the
   services whose managed clone does not exist yet, all checked. Checked services are cloned and
@@ -2043,6 +2046,8 @@ Targets `net10.0`.
 [#385]: https://github.com/flojon/aspire-servicesources/issues/385
 [#415]: https://github.com/flojon/aspire-servicesources/issues/415
 [#416]: https://github.com/flojon/aspire-servicesources/issues/416
+[#448]: https://github.com/flojon/aspire-servicesources/issues/448
+[#449]: https://github.com/flojon/aspire-servicesources/issues/449
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

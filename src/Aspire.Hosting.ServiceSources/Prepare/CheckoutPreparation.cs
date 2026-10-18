@@ -237,7 +237,7 @@ internal static class CheckoutPreparation
         Decide(serviceName, step, repoRoot, appHostDirectory, managedCheckout, gitClient).CommandChanged;
 
     /// <summary>The step's command as one redacted line, for a prompt.</summary>
-    public static Raw DescribeCommand(PrepareStep step) => RedactedDescribe(step);
+    public static Raw DescribeCommand(PrepareStep step) => Raw.Display(GitUrl.RedactAll(step.Describe()));
 
     /// <param name="Reason">Why the step is about to run, or <see langword="null"/> when it is not.</param>
     /// <param name="CommandChanged">Whether <paramref name="Reason"/> is that the command differs from the recorded one.</param>
