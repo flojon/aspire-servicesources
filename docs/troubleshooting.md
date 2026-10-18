@@ -19,6 +19,15 @@ SERVICESOURCES_GIT_HOST environment variables.
   (set SERVICESOURCES_FULL_ERRORS=1 for the full exception detail, including stack traces)
 ```
 
+## Long paths on Windows
+
+On Windows, git is run with `core.longpaths=true`, so a repository with deeply nested files can be
+cloned and checked out under the AppHost's directory. Windows itself must still allow long paths for
+the tools that later read those files (`LongPathsEnabled`), and a shorter AppHost location helps
+either way. Clones are staged in `.servicesources/checkouts/.incoming-<8 hex>` and renamed into
+place; a staging directory left by a clone that was killed is removed the next time any clone starts
+in that folder, so you can also delete it by hand.
+
 ## Getting the full exception detail
 
 The stack frames behind that message are this package's own plumbing and don't help with a
