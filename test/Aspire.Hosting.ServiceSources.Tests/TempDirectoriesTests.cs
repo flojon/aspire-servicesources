@@ -50,8 +50,15 @@ public class TempDirectoriesTests
         // with a single-digit id short enough to matter.
         const int NoSuchProcessId = 999_999_999;
         var orphan = Directory.CreateDirectory(
-            Path.Combine(TempDirectories.CommonRoot, $"{NoSuchProcessId}-orphan-marker"));
-        File.WriteAllText(Path.Combine(orphan.FullName, "leftover.txt"), "");
+            Path.Combine(TempDirectories.CommonRoot, $"{NoSuchProcessId}-orphan-marker-{Guid.NewGuid():N}"));
+        try
+        {
+            File.WriteAllText(Path.Combine(orphan.FullName, "leftover.txt"), "");
+        }
+        catch (IOException)
+        {
+            // A parallel test process's own sweep already took it, which is what this test expects.
+        }
 
         TempDirectories.SweepOrphanedProcessRoots();
 

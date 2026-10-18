@@ -115,7 +115,7 @@ internal static class SourceSelectionStore
     /// </summary>
     public static bool TrySave(
         string appHostDirectory, IReadOnlyDictionary<string, bool> answered,
-        IReadOnlyDictionary<string, string>? fingerprints = null)
+        IReadOnlyDictionary<string, string>? fingerprints = null, int lockAttempts = LockAttempts)
     {
         string? scratch = null;
         FileStream? guard = null;
@@ -133,7 +133,7 @@ internal static class SourceSelectionStore
                 return false;
             }
 
-            guard = AcquireLock(directory);
+            guard = AcquireLock(directory, lockAttempts);
             if (guard is null)
             {
                 return false;
@@ -181,11 +181,11 @@ internal static class SourceSelectionStore
     /// Takes the cross-process lock that makes <see cref="TrySave"/>'s read-merge-write atomic, waiting
     /// briefly for a concurrent saver. Null when it could not.
     /// </summary>
-    private static FileStream? AcquireLock(string directory)
+    private static FileStream? AcquireLock(string directory, int lockAttempts)
     {
         var lockPath = Path.Combine(directory, LockFileName);
 
-        for (var attempt = 0; attempt < LockAttempts; attempt++)
+        for (var attempt = 0; attempt < lockAttempts; attempt++)
         {
             try
             {
