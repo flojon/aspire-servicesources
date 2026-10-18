@@ -356,7 +356,7 @@ public class GroupPathSourceTests
     }
 
     [Fact]
-    public void PathMemberWhoseCatalogDefinesPath_IsDisplacedByTheGroupDirectory()
+    public void PathMemberWhoseCatalogDefinesPath_KeepsItsCatalogDirectory()
     {
         var groupDir = ProjectTree("Orders");
         Fixture(
@@ -372,11 +372,14 @@ public class GroupPathSourceTests
                     path: legacy/orders
                     project: src/Orders/Orders.csproj
                 """);
+        var ownDir = Path.Combine(appHost, "legacy", "orders", "src", "Orders");
+        Directory.CreateDirectory(ownDir);
+        File.WriteAllText(Path.Combine(ownDir, "Orders.csproj"), "<Project />");
         var builder = TestHelpers.CreateBuilder(appHost);
 
         builder.AddService("orders");
 
-        Assert.Equal(Path.Combine(groupDir, "src", "Orders", "Orders.csproj"), ProjectPathOf(builder, "orders"));
+        Assert.Equal(Path.Combine(ownDir, "Orders.csproj"), ProjectPathOf(builder, "orders"));
     }
 
     [Fact]

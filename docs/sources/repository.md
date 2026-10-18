@@ -829,7 +829,9 @@ same working tree; unlike `"path"` services in one repository, they are not gate
 cloning one external repository twice, and a `"path"` service has nothing to clone — two of them naming
 the same resolved directory are just two entries pointing at it, no `repositories:` entry needed. The
 exception is a group-level `"source": "path"` entry, which supplies the directory to a grouped
-`"path"` service that sets none.
+`"path"` service that sets none — neither a developer `path.path` nor a catalog `path:`. A catalog
+`path:` is the author's own layout, so a member that declares one keeps it; only a developer's
+`path.path` (or `repository.path`) beats the group.
 
 ## Working in git worktrees
 
