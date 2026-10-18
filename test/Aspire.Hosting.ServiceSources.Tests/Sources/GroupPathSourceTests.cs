@@ -518,6 +518,22 @@ public class GroupPathSourceTests
         Assert.Equal(expected, GroupPathSource.Redirects("orders", Grouped(), config, PathGroup()));
     }
 
+    [Theory]
+    [InlineData("path", false)]
+    [InlineData("repository", true)]
+    public void Redirects_LeavesOnlyAPathMemberWithACatalogPath(string source, bool expected)
+    {
+        var definition = Grouped();
+        definition = new ServiceDefinition
+        {
+            Repository = definition.Repository, Project = definition.Project, Kind = definition.Kind,
+            Origin = definition.Origin, Path = "legacy/orders",
+        };
+
+        Assert.Equal(expected, GroupPathSource.Redirects(
+            "orders", definition, new ServiceDeveloperConfig { Source = source }, PathGroup()));
+    }
+
     [Fact]
     public void Redirects_IsFalseForARepositoryMemberThatSetsItsOwnRef()
     {

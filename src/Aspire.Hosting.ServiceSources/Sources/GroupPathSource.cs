@@ -30,7 +30,7 @@ internal static class GroupPathSource
     /// chose <c>url</c>, <c>container</c>, <c>kubernetes</c> or <c>disabled</c> is left alone, and a
     /// member's own directory (<c>path.path</c>, <c>repository.path</c>) wins over the group's. A
     /// catalog <c>path:</c> is not a developer override, but it is the author's explicit layout, so a
-    /// <c>path</c> member that declares one keeps it.
+    /// <c>path</c> member that declares one keeps it (a <c>repository</c> member never read it).
     /// </remarks>
     public static bool Redirects(
         string serviceName, ServiceDefinition definition, ServiceDeveloperConfig config,
