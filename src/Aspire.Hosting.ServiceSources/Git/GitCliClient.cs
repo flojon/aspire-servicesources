@@ -26,8 +26,13 @@ namespace Aspire.Hosting.ServiceSources.Git;
 /// config, so without this the suite's results would depend on the credential helper the machine
 /// running it happens to have configured.
 /// </param>
+/// <param name="isWindows">
+/// Whether to apply the Windows-only <c>core.longpaths</c> setting; defaults to the running OS.
+/// Injectable so the argument is testable on any platform.
+/// </param>
 internal sealed partial class GitCliClient(
-    IReadOnlyDictionary<string, string?>? environmentOverrides = null) : IGitClient
+    IReadOnlyDictionary<string, string?>? environmentOverrides = null,
+    bool? isWindows = null) : IGitClient
 {
     private const string UsernameEnvironmentVariable = "SERVICESOURCES_GIT_USERNAME";
     private const string TokenEnvironmentVariable = "SERVICESOURCES_GIT_TOKEN";
@@ -343,7 +348,7 @@ internal sealed partial class GitCliClient(
     }
 
     private GitCommandResult TryRun(string repositoryPath, IReadOnlyList<string> arguments) =>
-        GitCommand.Run(["-C", repositoryPath, .. arguments], environmentOverrides);
+        GitCommand.Run([.. PlatformOptions(), "-C", repositoryPath, .. arguments], environmentOverrides);
 
     /// <summary>
     /// Runs a git command that talks to a remote, applying the credential ladder and translating an
@@ -375,7 +380,8 @@ internal sealed partial class GitCliClient(
         IGitProgressSink? progress = null,
         Func<GitCommandResult, Exception?>? classifyFailure = null)
     {
-        var result = GitCommand.Run([.. CredentialLadderOptions(), .. arguments], environmentOverrides, progress);
+        var result = GitCommand.Run(
+            [.. PlatformOptions(), .. CredentialLadderOptions(), .. arguments], environmentOverrides, progress);
         if (result.Succeeded)
         {
             return;
@@ -388,7 +394,9 @@ internal sealed partial class GitCliClient(
             // same sink, so the percentage starts over — with the first attempt's failure in the
             // resource's logs just above it to say why.
             var retry = GitCommand.Run(
-                [.. EnvironmentOnlyCredentialOptions(), .. arguments], environmentOverrides, progress);
+                [.. PlatformOptions(), .. EnvironmentOnlyCredentialOptions(), .. arguments],
+                environmentOverrides,
+                progress);
             if (retry.Succeeded)
             {
                 return;
@@ -440,6 +448,13 @@ internal sealed partial class GitCliClient(
         && environmentOverrides.TryGetValue(HostEnvironmentVariable, out var overridden)
             ? overridden
             : Environment.GetEnvironmentVariable(HostEnvironmentVariable);
+
+    /// <summary>
+    /// Lets git on Windows create and delete paths past MAX_PATH, which a deeply nested repository
+    /// reaches easily once the checkout sits under an AppHost's own directory.
+    /// </summary>
+    private string[] PlatformOptions() =>
+        isWindows ?? OperatingSystem.IsWindows() ? ["-c", "core.longpaths=true"] : [];
 
     /// <summary>
     /// Appends the environment-variable helper after whatever the developer has configured, so it

@@ -511,7 +511,7 @@ internal static class LocalGitCheckout
         var displayRepository = GitUrl.Redact(definition.Repository.Url);
 
         Directory.CreateDirectory(checkoutsRoot);
-        SweepAbandonedScratchDirectories(checkoutsRoot);
+        ScratchDirectory.SweepAbandoned(checkoutsRoot);
 
         // Reached because ".git" is not a *directory*, which is not the same as "no repository":
         // ".git" is a file for a linked worktree ("git worktree add") and for a clone made with
@@ -527,7 +527,7 @@ internal static class LocalGitCheckout
         }
 
         var referenceCheckout = TryReferenceCheckout(homeAppHostDirectory, definition, gitClient, progress);
-        var scratch = NewScratchDirectory(checkoutsRoot, definition);
+        var scratch = ScratchDirectory.Create(checkoutsRoot);
 
         try
         {
@@ -535,13 +535,13 @@ internal static class LocalGitCheckout
             {
                 if (referenceCheckout is null)
                 {
-                    gitClient.Clone(definition.Repository.Url, scratch, progress);
+                    gitClient.Clone(definition.Repository.Url, scratch.Path, progress);
                 }
                 else
                 {
                     try
                     {
-                        gitClient.CloneWithReference(definition.Repository.Url, scratch, referenceCheckout, progress);
+                        gitClient.CloneWithReference(definition.Repository.Url, scratch.Path, referenceCheckout, progress);
                     }
                     catch (GitReferenceFailedException ex)
                     {
@@ -550,9 +550,9 @@ internal static class LocalGitCheckout
                             $"Could not borrow objects from '{Raw.Escaped(referenceCheckout)}' ({Raw.Cause(ex)}); cloning without it.").ToString());
 
                         // A fresh directory, since the failed attempt may have left files behind.
-                        TryDeleteScratch(scratch);
-                        scratch = NewScratchDirectory(checkoutsRoot, definition);
-                        gitClient.Clone(definition.Repository.Url, scratch, progress);
+                        scratch.Dispose();
+                        scratch = ScratchDirectory.Create(checkoutsRoot);
+                        gitClient.Clone(definition.Repository.Url, scratch.Path, progress);
                     }
                 }
             }
@@ -610,7 +610,7 @@ internal static class LocalGitCheckout
 
             try
             {
-                Directory.Move(scratch, repoRoot);
+                Directory.Move(scratch.Path, repoRoot);
             }
             catch (IOException ex)
             {
@@ -633,87 +633,7 @@ internal static class LocalGitCheckout
         }
         finally
         {
-            TryDeleteScratch(scratch);
-        }
-    }
-
-    /// <remarks>
-    /// Unique per attempt: two builders resolving the same checkout concurrently (xUnit does
-    /// exactly that) must not clone into a shared scratch directory.
-    /// </remarks>
-    private static string NewScratchDirectory(string checkoutsRoot, ServiceDefinition definition) =>
-        Path.Combine(checkoutsRoot, $".incoming-{definition.Repository.CheckoutName}-{Guid.NewGuid():N}");
-
-    private static void TryDeleteScratch(string scratch)
-    {
-        if (!Directory.Exists(scratch))
-        {
-            return;
-        }
-
-        try
-        {
-            Directory.Delete(scratch, recursive: true);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // Best effort, deliberately not fatal. A leaked scratch directory costs disk
-            // inside a gitignored, tool-managed tree and can never block a later clone:
-            // its name is unique per attempt and the destination name is untouched.
-            // SweepAbandonedScratchDirectories collects it on a later run.
-        }
-    }
-
-    /// <summary>
-    /// How long a scratch directory must have gone untouched before it counts as abandoned.
-    /// </summary>
-    /// <remarks>
-    /// The <c>finally</c> in <see cref="CloneIntoPlace"/> removes the scratch directory on every
-    /// path it controls, but it does not run when the process is killed — and checkouts are cloned
-    /// speculatively on background threads for every <c>"repository"</c> service in
-    /// <c>servicesources.local.json</c>, including ones this AppHost never calls <c>AddService</c>
-    /// for (see <see cref="Sources.LocalCheckoutPrefetch"/>). A Ctrl-C during startup, or the host
-    /// exiting while an unrequested clone is still in flight, therefore leaks a partial copy of a
-    /// repository that nothing would otherwise remove.
-    /// <para>
-    /// Sweeping on age rather than on liveness is what makes this safe. A concurrent AppHost's
-    /// in-flight clone is seconds or minutes old, so it can never be mistaken for debris, and
-    /// nothing is still cloning a day later — which is why this is not the "sweeping would delete a
-    /// live clone" hazard that an unconditional startup sweep would be.
-    /// </para>
-    /// </remarks>
-    private static readonly TimeSpan AbandonedScratchAge = TimeSpan.FromHours(24);
-
-    /// <summary>
-    /// Removes <c>.incoming-*</c> directories left behind by clones that were killed rather than
-    /// completed. Best effort throughout: a scratch directory that cannot be removed costs disk in a
-    /// gitignored, tool-managed tree and can never block a clone, so failing here must not fail
-    /// resolution.
-    /// </summary>
-    private static void SweepAbandonedScratchDirectories(string checkoutsRoot)
-    {
-        try
-        {
-            foreach (var scratch in Directory.EnumerateDirectories(checkoutsRoot, ".incoming-*"))
-            {
-                try
-                {
-                    if (DateTime.UtcNow - Directory.GetLastWriteTimeUtc(scratch) < AbandonedScratchAge)
-                    {
-                        continue;
-                    }
-
-                    Directory.Delete(scratch, recursive: true);
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    // Held open by something, or not ours to delete. Leave it for a later run.
-                }
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // The enumeration itself failed, so there is nothing we can sweep.
+            scratch.Dispose();
         }
     }
 
