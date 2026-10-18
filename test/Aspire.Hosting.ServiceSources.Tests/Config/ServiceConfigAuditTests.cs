@@ -292,4 +292,101 @@ public class ServiceConfigAuditTests
 
         Assert.Empty(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
     }
+
+    private const string MonorepoCatalog = """
+        repositories:
+          monorepo:
+            repository: https://github.com/company/monorepo
+        services:
+          orders:
+            repositoryRef: monorepo
+            project: src/Orders/Orders.csproj
+            container:
+              image: ghcr.io/company/orders
+              port: 8080
+        """;
+
+    [Fact]
+    public async Task RepositoryEntryMatchingNoDeclaredRepository_IsReportedWithDidYouMean()
+    {
+        var builder = CreateBuilder(MonorepoCatalog, """
+            { "services": { "orders": { "source": "container" } },
+              "repositories": { "monorpeo": { "source": "path", "path": { "path": "/src/monorepo" } } } }
+            """);
+        builder.AddService("orders");
+
+        var warning = Assert.Single(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+
+        Assert.Contains("monorpeo", warning);
+        Assert.Contains("(did you mean 'monorepo'?)", warning);
+        Assert.Contains("repositories", warning);
+        Assert.DoesNotContain("Service configuration that nothing read", warning);
+    }
+
+    [Fact]
+    public async Task RepositoryEntryWhenTheCatalogDeclaresNone_SaysSoInsteadOfAnEmptyList()
+    {
+        var builder = CreateBuilder(OrdersCatalog, """
+            { "services": { "orders": { "source": "container" } },
+              "repositories": { "monorepo": { "source": "path", "path": { "path": "/src/monorepo" } } } }
+            """);
+        builder.AddService("orders");
+
+        var warning = Assert.Single(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+
+        Assert.Contains("declares no shared repositories", warning);
+        Assert.Contains("repositoryRef", warning);
+        Assert.DoesNotContain("declares: .", warning);
+    }
+
+    [Fact]
+    public async Task RepositoryEntryWithADirectoryButNoSource_IsReported()
+    {
+        var builder = CreateBuilder(MonorepoCatalog, """
+            { "services": { "orders": { "source": "container" } },
+              "repositories": { "monorepo": { "path": { "path": "/src/monorepo" } } } }
+            """);
+        builder.AddService("orders");
+
+        var warning = Assert.Single(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+
+        Assert.Contains("Repository 'monorepo'", warning);
+        Assert.Contains("'source' is not", warning);
+    }
+
+    [Fact]
+    public async Task RepositoryEntryWithAnEmptyDirectoryAndNoSource_IsNotReported()
+    {
+        var builder = CreateBuilder(MonorepoCatalog, """
+            { "services": { "orders": { "source": "container" } },
+              "repositories": { "monorepo": { "path": { "path": "" } } } }
+            """);
+        builder.AddService("orders");
+
+        Assert.Empty(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+    }
+
+    [Fact]
+    public async Task RepositoryEntryWithAnExplicitRepositorySource_IsNotReportedForItsDirectory()
+    {
+        var builder = CreateBuilder(MonorepoCatalog, """
+            { "services": { "orders": { "source": "container" } },
+              "repositories": { "monorepo": { "source": "repository", "path": { "path": "/src/monorepo" } } } }
+            """);
+        builder.AddService("orders");
+
+        Assert.Empty(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+    }
+
+    [Fact]
+    public async Task RepositoryEntryInAnotherCasing_IsNotReported()
+    {
+        var builder = CreateBuilder(MonorepoCatalog, """
+            { "services": { "orders": { "source": "container" } },
+              "repositories": { "MonoRepo": { "source": "path", "path": { "path": "/src/monorepo" } } } }
+            """);
+        builder.AddService("orders");
+
+        Assert.Empty(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+    }
 }

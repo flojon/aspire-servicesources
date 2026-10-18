@@ -98,7 +98,19 @@ public static class ServiceSourcesBuilderExtensions
 
         var (definition, developerConfig) = ServiceSourcesConfigCache.ResolveService(builder, name);
 
-        if (!Sources.TryGetValue(developerConfig.Source, out var source))
+        // Resolved once here rather than inside each source: the source that actually reads it
+        // must not depend on ServiceSourcesConfigCache.LoadedFor by itself, which would tie its unit
+        // tests to the whole catalog-loading pipeline that ResolveService just walked above. This is
+        // a cache hit off the same instance ResolveService populated.
+        var repositoryConfig = ServiceSourcesConfigCache.LoadedFor(builder)
+            .DeveloperConfig.Repositories.GetValueOrDefault(definition.Repository.CheckoutName);
+
+        // A group on "path" takes its members over before their own source is looked up.
+        var selectedSource = GroupPathSource.Redirects(name, definition, developerConfig, repositoryConfig)
+            ? GroupPathSource.PathSourceName
+            : developerConfig.Source;
+
+        if (!Sources.TryGetValue(selectedSource, out var source))
         {
             // Retired, not unknown: "local" used to be this exact source under its old name, so a
             // config still naming it gets the specific migration rather than the generic "unknown
@@ -133,13 +145,6 @@ public static class ServiceSourcesBuilderExtensions
                 + $"it — appsettings, user secrets, the environment variable "
                 + $"{keyAsEnvironmentVariable}, or the command line.");
         }
-
-        // Resolved once here rather than inside each source: the source that actually reads it —
-        // LocalProjectSource — must not depend on ServiceSourcesConfigCache.LoadedFor by itself,
-        // which would tie its unit tests to the whole catalog-loading pipeline that ResolveService
-        // just walked above. This is a cache hit off the same instance ResolveService populated.
-        var repositoryConfig = ServiceSourcesConfigCache.LoadedFor(builder)
-            .DeveloperConfig.Repositories.GetValueOrDefault(definition.Repository.CheckoutName);
 
         var service = source.Resolve(builder, name, definition, developerConfig, repositoryConfig);
 
