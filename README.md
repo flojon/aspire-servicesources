@@ -75,6 +75,43 @@ full walkthrough is in the
 prefer a committed `servicesources.yaml` over code? See
 [The YAML catalog](https://aspire-servicesources.readthedocs.io/en/latest/guides/yaml-catalog/).
 
+## Using `AddService()` with existing AppHost helpers
+
+`AddService()` returns an `IResourceBuilder<ServiceResource>`. `ServiceResource` does not inherit
+`ProjectResource` — a service isn't always a project, and the type shouldn't reveal which source
+resolved it — so a helper hard-typed to `IResourceBuilder<ProjectResource>` won't accept it. Two
+fixes cover most cases:
+
+**1. Widen your own helpers** to a generic constrained to the capabilities their body uses, instead
+of a concrete resource type:
+
+```csharp
+// before
+static IResourceBuilder<ProjectResource> AddOllama(this IResourceBuilder<ProjectResource> app, ...)
+
+// after: accepts a ProjectResource, a ServiceResource, a container, ...
+static IResourceBuilder<T> AddOllama<T>(this IResourceBuilder<T> app, ...)
+    where T : IResourceWithEnvironment, IResourceWithWaitSupport
+{
+    return app.WithReference(ollama).WaitFor(ollama).WithEnvironment("OLLAMA_MODEL", model);
+}
+```
+
+`ServiceResource` implements `IResourceWithServiceDiscovery`, `IResourceWithEnvironment`,
+`IResourceWithArgs`, `IResourceWithEndpoints` and `IResourceWithWaitSupport`.
+
+**2. Pass an `EndpointReference` where a third-party API only takes concrete types.** Some
+integrations have no generic overload — Aspire.Hosting.Yarp's `AddCluster(...)` takes a concrete
+resource type or an `EndpointReference`, so widening your parameter won't help. Use
+`GetServiceEndpoint()`, which picks the service's `https` endpoint, else `http`, whichever source
+resolved it:
+
+```csharp
+var catalogApi = builder.AddService("catalog-api");
+
+yarp.WithConfiguration(c => c.AddCluster(catalogApi.GetServiceEndpoint()));
+```
+
 ## Learn more
 
 - [Sources](https://aspire-servicesources.readthedocs.io/en/latest/sources/) — every way to resolve a service.
