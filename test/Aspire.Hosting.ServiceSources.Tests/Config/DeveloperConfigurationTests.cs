@@ -1517,15 +1517,13 @@ public class DeveloperConfigurationTests
     [Theory]
     [InlineData("""{ "source": "path", "path": { "path": "/a", "prepare": { "command": ["./go.sh"] } } }""")]
     [InlineData("""{ "source": "path", "path": { "path": "/a" }, "prepare": { "command": ["./go.sh"] } }""")]
-    public void ReadFrom_RepositoryEntryWithAPrepareStep_IsRefusedPointingAtTheMemberServices(string entry)
+    public void ReadFrom_RepositoryEntryWithAPrepareStep_DoesNotFailStartup(string entry)
     {
         var dir = CreateAppHostDirectory(MonorepoCatalog, $$"""{ "repositories": { "monorepo": {{entry}} } }""");
 
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
-            () => ServiceSourcesConfigCache.LoadedFor(CreateBuilder(dir)));
+        var config = ServiceSourcesConfigCache.LoadedFor(CreateBuilder(dir)).DeveloperConfig;
 
-        Assert.Contains("Repository 'monorepo'", ex.Message);
-        Assert.Contains("'path.prepare' on each member service", ex.Message);
+        Assert.True(config.Repositories.ContainsKey("monorepo"));
     }
 
     [Fact]

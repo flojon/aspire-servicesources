@@ -165,7 +165,7 @@ at one directory you already have checked out, written once:
 The environment spelling is `ServiceSources__Repositories__monorepo__Source=path` and
 `ServiceSources__Repositories__monorepo__Path__Path=../monorepo`. `source` is `path` or `repository`
 (the managed checkout, which lets a higher layer cancel a lower layer's `path`). Only `path.path` is
-accepted in the block; a `prepare` belongs on each member's own `path` block. See
+accepted in the block; a `prepare` belongs on each member's own `path` block (a repository-level one is ignored with a startup warning). See
 [Pointing a whole group at a checkout you already have](../sources/repository.md#several-services-from-one-repository).
 
 Two failures are reported differently on purpose, because a typo in a configuration key produces an
