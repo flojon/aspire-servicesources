@@ -106,9 +106,13 @@ public static class ServiceSourcesBuilderExtensions
             .DeveloperConfig.Repositories.GetValueOrDefault(definition.Repository.CheckoutName);
 
         // A group on "path" takes its members over before their own source is looked up.
-        var selectedSource = GroupPathSource.Redirects(name, definition, developerConfig, repositoryConfig)
-            ? GroupPathSource.PathSourceName
-            : developerConfig.Source;
+        var redirected = GroupPathSource.Redirects(name, definition, developerConfig, repositoryConfig);
+        if (redirected)
+        {
+            GroupPathSource.ThrowIfMemberSetsOwnRef(name, definition, developerConfig);
+        }
+
+        var selectedSource = redirected ? GroupPathSource.PathSourceName : developerConfig.Source;
 
         if (!Sources.TryGetValue(selectedSource, out var source))
         {
