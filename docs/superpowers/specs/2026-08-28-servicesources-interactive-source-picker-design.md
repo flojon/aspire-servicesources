@@ -14,10 +14,12 @@ service whose source is already known, where this defers the *choice*; #271 / #4
 `.servicesources/selection.json`; #134 (code-authored catalog) and #69 (developer config through
 `IConfiguration`) have merged and change where this design reads and writes; #8 (CLI configuration
 UX) is served by the same `PromptInputsAsync` implementation; #43 (per-source field validation) is
-reused rather than duplicated; #54 (third-party sources) is picked up automatically by deriving
-the source list from the registry.
+reused rather than duplicated; #54 (third-party sources, still open) would be picked up by
+deriving the source list from the source dictionary once that can be extended.
 **Corrected by:** the review on PR #128 — an earlier draft claimed a checkout could never precede
-a prompt within one run. See *The prompt cannot precede a type choice within a single run*.
+a prompt within one run (see *The prompt cannot precede a type choice within a single run*), raised
+the prompt from an event that deadlocks behind `WaitFor` (see *Interactions raised at startup*),
+and described `CI` and `SERVICESOURCES_INTERACTIVE` as new when #428 already owns them.
 
 ## Since this was written
 
@@ -47,7 +49,7 @@ There is nothing in the product to tell them what the file should contain, and t
 reaches the dashboard, so the dashboard cannot help. They read the README, hand-write JSON, and
 run again.
 
-The original draft also counted the eager clone of every `"local"` entry (#76) as a motivation.
+The original draft also counted the eager clone of every `"repository"` entry (#76) as a motivation.
 That is resolved by deferred checkout, and #428 lets the developer decline services at start. What
 remains is that choosing a source is still a file the developer must author before anything runs;
 this design makes it a question answered in the dashboard.
@@ -70,7 +72,7 @@ resolved from the built application's service provider, and the dashboard starts
 
 What follows from them is narrower than "the prompt must come first". It follows only when the
 answer **changes the resource type**. The source choice this design asks about does exactly that —
-`local` produces a `ProjectResource`, `container` a container, `url` nothing at all — so for a
+`repository` produces a `ProjectResource`, `container` a container, `url` nothing at all — so for a
 genuinely unconfigured service the two-phase shape is correct: run one configures, run two works.
 #70 reached the same conclusion independently.
 
@@ -112,7 +114,7 @@ into the executable's working directory and `--project` argument during
 | --- | --- |
 | The initial clone (repository known, not yet on disk) | Choice of repository |
 | `ref` / branch selection, including switching refs | `project` within the repo, or a self-managed `path` |
-| | Source *type*: `local` / `container` / `url` / `kubernetes` |
+| | Source *type*: `repository` / `container` / `url` / `kubernetes` / `path` |
 
 This is the finding #130 acted on; deferred checkout is now the default (#216). It is the reason
 this section must not be read as a blanket impossibility — it had already been cited as one.
@@ -132,14 +134,24 @@ dashboard is enabled and whether a non-interactive scope is active — not wheth
 present. A CI job running the AppHost with a dashboard nobody opens reports `true`. Detecting
 "nobody is watching" needs the environment, not this flag.
 
-### Interactions raised at startup do not block startup, and they wait
+### Interactions raised at startup do not block startup, and they wait — from the right event
 
-`IInteractionService` resolves from `AfterResourcesCreatedEvent`. A `PromptInputsAsync` started
-there and deliberately not awaited leaves the application free to finish starting — verified:
+`IInteractionService` resolves once the application is built. A `PromptInputsAsync` started and
+deliberately not awaited leaves the application free to finish starting — verified:
 `Distributed application started` was logged while the prompt was outstanding. The prompt then
-stays pending indefinitely until a dashboard client answers it, rather than failing because no
-browser was attached at the moment it was raised. This is exactly the semantics the push half of
-the design needs.
+stays pending until a dashboard client answers it, rather than failing because no browser was
+attached at the moment it was raised.
+
+**The event matters, and the first draft chose the wrong one.** It raised the prompt from
+`AfterResourcesCreatedEvent`, and that experiment had no consumer waiting on the service. That
+event sits behind the whole `WaitFor` graph: a resource with an unsatisfied wait is not created
+until the wait resolves, and a placeholder never reaches `Running`. A consumer that did
+`WaitFor(orders)` would keep the event from firing, so the prompt that could unblock it would never
+appear. #428 hit the same trap and moved to `BeforeStartEvent`, running the dialog on a task nobody
+awaits (`DeferredCheckout`, the comment above its subscription); this design does the same. The
+placeholder is also `IResourceWithoutLifetime`, so a consumer's `WaitFor` on it is ignored rather
+than hanging. Both are needed: the event choice keeps the prompt reachable, the marker keeps the
+consumer starting.
 
 ### A consumer can reference an endpoint-less placeholder safely
 
@@ -183,44 +195,63 @@ builder.UseInteractiveServiceConfiguration();
 ```
 
 Called before the first `AddService()`. `UseJava()` and `UseDeferredCheckout()` are obsolete, so
-the name is settled on its own merits against the surviving `Use*` methods. Without it, a service missing from `servicesources.local.json`
-throws exactly as it does today, so the change is non-breaking for every existing consumer.
+the name is settled on its own merits against the surviving `Use*` methods. Without it, a service
+missing from `servicesources.local.json` throws exactly as it does today, so the change is
+non-breaking for every existing consumer. The opt-in exists only because the placeholder has to be
+decided during composition, before `IInteractionService` exists; #428's source-pick prompt needs no
+opt-in because it runs after the application is built.
 
-The call is suppressed automatically when the standard `CI` environment variable is set — the
-variable GitHub Actions, GitLab CI and Azure DevOps all define — so a committed opt-in does not
-weaken CI. Because that is a heuristic and will be wrong on some runner, an explicit override
-takes precedence in both directions:
+**The `CI` and `SERVICESOURCES_INTERACTIVE` rules are not new: `InteractivePrompts`
+(`DeferredCheckout.cs`) already owns them for #428's prompt, and this design reuses that one
+decision.** One setting therefore governs both prompts, so `SERVICESOURCES_INTERACTIVE=false`
+silences the source-pick prompt and turns the placeholder back into the exception together. That
+is intended: a CI job that opted out of one question should not be asked the other.
 
-| `SERVICESOURCES_INTERACTIVE` | Behaviour |
+| `SERVICESOURCES_INTERACTIVE` | Behaviour after `UseInteractiveServiceConfiguration()` |
 |---|---|
-| unset | Interactive unless `CI` is set |
-| `1` / `true` | Interactive regardless of `CI` |
-| `0` / `false` | Strict regardless of `CI` |
+| unset or unrecognised | Interactive unless `CI` is set |
+| `1` / `true` / `yes` | Interactive regardless of `CI` |
+| `0` / `false` / `no` | Strict regardless of `CI` |
+
+`CI` counts as set when it is anything but empty, `false` or `0`. The override has no effect
+without the opt-in — nothing changes for an AppHost that never called it — and none in publish
+mode, where a manifest cannot describe the placeholder and a missing source keeps failing fast.
 
 Strict mode is today's behaviour verbatim: `ServiceSourcesConfigurationException` naming the
 service and the file.
 
 ### The placeholder resource
 
-An unconfigured service resolves to:
+An unconfigured service resolves to a registered resource behind the same `ServiceResource` facade
+every other source returns (#313), so an AppHost's `AddService("orders")` line and everything chained
+off it compile and run unchanged:
 
 ```csharp
 internal sealed class UnconfiguredServiceResource(string name)
-    : Resource(name), IResourceWithServiceDiscovery;
+    : Resource(name), IResourceWithServiceDiscovery, IResourceWithoutLifetime;
 ```
 
-registered with `WithInitialState`:
+registered with `WithInitialState` and handed to `ResolvedService.Bridge` under the source name
+`"unconfigured"`, which is out of band (`Reachability.OutOfBandSources`), so `WithEnvironment` and
+similar calls on the facade are skipped with a warning. The registered resource, not the facade, is
+what the dashboard shows:
 
 - `ResourceType = "Service (unconfigured)"`
 - `State = new ResourceStateSnapshot("Not configured", KnownResourceStateStyles.Info)`
-- a property naming the catalog entry it came from, so the dashboard row explains itself
+- a `Reason` property naming the configuration key to set — no file path, and nothing that assumes
+  how the source gets chosen, because the `Configure` command (below) changes that
 
-It has no endpoints and starts no process. It carries `ServiceSourceAnnotation(name, "(none)")`
-so the rest of the package can recognise it, and a `Configure` command (below).
+It has no endpoints and starts no process. `ServiceSourceAnnotation(name, "unconfigured")` is how
+the rest of the package recognises it, and a `Configure` command (below) is added to it.
 
-Critically, an unconfigured service is **not** a `"local"` service, so `LocalCheckoutPrefetch`
+Critically, an unconfigured service is **not** a `"repository"` service, so `LocalCheckoutPrefetch`
 never sees it and nothing is cloned for it. This is the mechanism by which the design stops
 paying for repositories the developer never chose.
+
+Because the placeholder has no endpoints, `GetServiceEndpoint()` and `Unwrap<T>()` on it still
+throw at composition. Their messages say that no source has been chosen rather than that the
+service "runs out of band"; making them tolerant instead is left for later, since silently
+returning a dangling endpoint reference is worse than a clear stop.
 
 **The authoring API here is the one upstream is most likely to move.**
 microsoft/aspire#17722 (*Spec: Custom Resource Lifecycle Model*, open, no milestone) proposes
@@ -242,11 +273,11 @@ service too, with no developer config and no network access.
 
 That opens a faster path than the placeholder. For a catalog entry whose `kind` is `dotnet`, this
 design *could* speculatively register an explicit-start `ProjectResource` at the path a managed
-checkout would occupy, using the deferred-checkout mechanism that is now the default. If the developer then answers `local` with
+checkout would occupy, using the deferred-checkout mechanism that is now the default. If the developer then answers `repository` with
 a managed checkout, it clones and starts in the same run — no restart at all.
 
 It is recorded as an option rather than the recommendation because of what it costs when the guess
-is wrong. Any other answer — `container`, `url`, `kubernetes`, or `local` with a self-managed
+is wrong. Any other answer — `container`, `url`, `kubernetes`, or `path` as a self-managed
 `path` — leaves a phantom `NotStarted` project resource in the dashboard for a service that is not
 a project, and the `path` answer still needs a restart because it changes the frozen path. It
 trades dashboard clarity for a faster first run, and it only ever helps `kind: dotnet`. Worth
@@ -254,23 +285,28 @@ revisiting now that deferred checkout has settled in practice.
 
 ### Push, then pull
 
-**Push.** One subscription to `AfterResourcesCreatedEvent`. If any placeholders exist and
-`IInteractionService.IsAvailable`, it starts — without awaiting — a single `PromptInputsAsync`
-carrying one `InputType.Choice` input per unconfigured service. Asking for every service in one
-form is what keeps a ten-service fresh clone to one dialog instead of ten.
+**Push.** One subscription to `BeforeStartEvent`, beside #428's, never `AfterResourcesCreatedEvent`
+(see *Interactions raised at startup*). If any placeholders exist and `IInteractionService.IsAvailable`,
+it starts — without awaiting — a single `PromptInputsAsync` carrying one `InputType.Choice` input per
+unconfigured service. Asking for every service in one form is what keeps a ten-service fresh clone to
+one dialog instead of ten.
 
-The choice list is derived from the registered sources rather than hard-coded, so a third-party
-source (#54) appears without touching this code.
+The choice list is derived from the source dictionary `AddService` resolves through, which is a
+private, closed set today: `repository`, `container`, `url`, `kubernetes`, `path` and `disabled`.
+All six are offered — `disabled` is the way to say "I don't want this service" and stops it being
+asked about again. A third-party source (#54, still open) would appear without touching this code once
+that dictionary can be extended; until then there is nothing to derive beyond those six.
 
 A service whose chosen source needs more than a name then gets a short follow-up
-`PromptInputsAsync` — `local` needs `path`/`ref`, `container` needs an image, `url` needs a URL.
-This two-step shape is forced: `PromptInputsAsync` takes a fixed input list, so a field cannot
+`PromptInputsAsync` — `repository` needs a `ref`, `path` needs a directory, `container` needs an
+image, `url` needs a URL, `kubernetes` needs what its catalog block leaves open. This two-step shape
+is forced: `PromptInputsAsync` takes a fixed input list, so a field cannot
 appear in response to an earlier answer in the same form. #70 evaluated showing every field at
 once with `ValidationCallback` rejecting mismatches and rejected it; this design follows that
 conclusion. Validation reuses the #43 per-source field rules via `ValidationCallback`.
 
 If `IsAvailable` is false, nothing is prompted and the AppHost logs one warning naming every
-unconfigured service and the file to add them to.
+unconfigured service and the key to set for each.
 
 **Pull.** Each placeholder also carries a `Configure` command, so a service added to
 `servicesources.yaml` by a teammate after the developer's file already exists can be configured
@@ -346,9 +382,13 @@ The dialog itself needs a live AppHost and a dashboard client, so the logic is k
 - Placeholder construction: an unconfigured service yields a registered resource of the expected
   type and state, carries the annotation, and is absent from the prefetch set.
 - Strict mode: with `SERVICESOURCES_INTERACTIVE=0`, or `CI` set and no override, an unconfigured
-  service throws the current exception with the current message.
-- Override precedence: the four combinations of `CI` and `SERVICESOURCES_INTERACTIVE`.
-- Source-option derivation: registering an additional source makes it appear in the choice list.
+  service throws the current exception with the current message; so does publish mode.
+- Decision matrix: the combinations of opt-in, `CI` (including `false` and `0`) and
+  `SERVICESOURCES_INTERACTIVE` (including an unrecognised value), asserted against
+  `InteractivePrompts` so the two prompts cannot drift.
+- Source-option derivation: the choice list equals the source dictionary's keys.
+- Wait safety: a consumer that `WaitFor`s a placeholder starts, and the prompt is still raised
+  (the `AfterResourcesCreatedEvent` deadlock).
 - Config merge round-trip: writing a chosen source into a file with existing entries preserves
   them, and the result reloads through `DeveloperConfigLoader` unchanged.
 - Consumer safety: a resource that references an unconfigured service composes and the
