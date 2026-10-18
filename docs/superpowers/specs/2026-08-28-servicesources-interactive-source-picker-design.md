@@ -1,21 +1,38 @@
 # Aspire.Hosting.ServiceSources — Interactive Source Picker for Unconfigured Services
 
 **Date:** 2026-08-28
-**Status:** Design — not yet implemented.
+**Status:** Design — not yet implemented. Reconciled with main on 2026-10-18 (see *Since this was
+written*).
 **Complements:** GitHub issue #70 (per-service "Change source" command), which covers services
 that already resolved. This design covers the case #70 does not reach — a service with no source
 at all — and reuses #70's dialog machinery to do it.
 **Depends on:** #62 (every source returns a real registered resource) — merged, and the hard
 prerequisite #70 named.
-**Related:** #130 / #136 (`UseDeferredCheckout()`) share this design's mechanism from the other
-side — they defer the checkout of a service whose source is already known, where this defers the
-*choice*; #134 (code-authored catalog) changes where "the set of services that exist" is read
-from; #69 (developer config through `IConfiguration`) supplies a better persistence layer later;
-#8 (CLI configuration UX) is served by the same `PromptInputsAsync` implementation; #43
-(per-source field validation) is reused rather than duplicated; #54 (third-party sources) is
-picked up automatically by deriving the source list from the registry.
+**Related:** #130 / #136 / #216 made deferred checkout the default — they defer the checkout of a
+service whose source is already known, where this defers the *choice*; #271 / #428 added the
+`BeforeStartEvent` prompt that picks among *declared* cold checkouts, persisted in
+`.servicesources/selection.json`; #134 (code-authored catalog) and #69 (developer config through
+`IConfiguration`) have merged and change where this design reads and writes; #8 (CLI configuration
+UX) is served by the same `PromptInputsAsync` implementation; #43 (per-source field validation) is
+reused rather than duplicated; #54 (third-party sources) is picked up automatically by deriving
+the source list from the registry.
 **Corrected by:** the review on PR #128 — an earlier draft claimed a checkout could never precede
 a prompt within one run. See *The prompt cannot precede a type choice within a single run*.
+
+## Since this was written
+
+- **#76 is closed and deferred checkout is the default (#216, #404).** Nothing clones before the
+  AppHost has started, so the cost this design originally also set out to remove is gone. The
+  remaining motivation is the first-run failure below.
+- **#428 shipped a pick among declared services.** A `BeforeStartEvent` prompt asks which cold
+  checkouts to run, skips the rest and remembers the answer in `.servicesources/selection.json`.
+  It cannot help a service that has no source at all, because `AddService()` throws before the
+  prompt exists. This design covers that gap; the two prompts must read as one flow, not two.
+- **#134 and #69 have merged**, so the "two config files read directly" description under
+  *Persistence and restart* is out of date and must be re-checked against them before
+  implementation.
+- **`UseDeferredCheckout()` and `UseJava()` are now obsolete no-ops**, so the opt-in family named
+  below is not a family to join.
 
 ## Motivation
 
@@ -30,13 +47,10 @@ There is nothing in the product to tell them what the file should contain, and t
 reaches the dashboard, so the dashboard cannot help. They read the README, hand-write JSON, and
 run again.
 
-The failure mode on the other side is worse. Once the file *does* exist and marks services
-`"local"`, the first `AddService()` call clones every `"local"` entry in parallel before the
-AppHost has said which services it wants (see `LocalCheckoutPrefetch`). A developer who wanted to
-run one service against local source and the rest as containers pays a cold clone for all of them
-unless they curate the file by hand first. #76 tracks that cost; this design removes the reason to
-incur it, by making "which services are local" a question the developer answers in the dashboard
-rather than a file they must author before anything runs.
+The original draft also counted the eager clone of every `"local"` entry (#76) as a motivation.
+That is resolved by deferred checkout, and #428 lets the developer decline services at start. What
+remains is that choosing a source is still a file the developer must author before anything runs;
+this design makes it a question answered in the dashboard.
 
 The goal is that `aspire run` on a fresh clone reaches a working dashboard, shows which services
 have no source, and asks.
@@ -100,9 +114,8 @@ into the executable's working directory and `--project` argument during
 | `ref` / branch selection, including switching refs | `project` within the repo, or a self-managed `path` |
 | | Source *type*: `local` / `container` / `url` / `kubernetes` |
 
-This is the finding #130 acts on, implemented as `builder.UseDeferredCheckout()` in #136. That work
-is the reason this section must not be read as a blanket impossibility — it had already been cited
-as one.
+This is the finding #130 acted on; deferred checkout is now the default (#216). It is the reason
+this section must not be read as a blanket impossibility — it had already been cited as one.
 
 ### `IsAvailable` cannot gate the composition-time decision
 
@@ -169,9 +182,8 @@ console before cloning" as an alternative to this design.
 builder.UseInteractiveServiceConfiguration();
 ```
 
-Called before the first `AddService()`, joining the `Use*` opt-in family alongside `UseJava()`,
-`UseJavaScript()` and `UseDeferredCheckout()` (#136) — the name should be settled against that
-family rather than in isolation. Without it, a service missing from `servicesources.local.json`
+Called before the first `AddService()`. `UseJava()` and `UseDeferredCheckout()` are obsolete, so
+the name is settled on its own merits against the surviving `Use*` methods. Without it, a service missing from `servicesources.local.json`
 throws exactly as it does today, so the change is non-breaking for every existing consumer.
 
 The call is suppressed automatically when the standard `CI` environment variable is set — the
@@ -230,7 +242,7 @@ service too, with no developer config and no network access.
 
 That opens a faster path than the placeholder. For a catalog entry whose `kind` is `dotnet`, this
 design *could* speculatively register an explicit-start `ProjectResource` at the path a managed
-checkout would occupy, using the mechanism #136 builds. If the developer then answers `local` with
+checkout would occupy, using the deferred-checkout mechanism that is now the default. If the developer then answers `local` with
 a managed checkout, it clones and starts in the same run — no restart at all.
 
 It is recorded as an option rather than the recommendation because of what it costs when the guess
@@ -238,7 +250,7 @@ is wrong. Any other answer — `container`, `url`, `kubernetes`, or `local` with
 `path` — leaves a phantom `NotStarted` project resource in the dashboard for a service that is not
 a project, and the `path` answer still needs a restart because it changes the frozen path. It
 trades dashboard clarity for a faster first run, and it only ever helps `kind: dotnet`. Worth
-revisiting once `UseDeferredCheckout()` has settled in practice.
+revisiting now that deferred checkout has settled in practice.
 
 ### Push, then pull
 
@@ -273,13 +285,17 @@ has. The file is created if absent. #69 may later move this onto `IConfiguration
 secrets; the merge logic is written behind a small interface so that swap does not rewrite the
 dialog code.
 
-Both ends of this design read the two config files directly — "unconfigured" means *present in
-`servicesources.yaml`, absent from `servicesources.local.json`*, and answers are written back to
-the latter. **#134 changes the first half of that**: it makes the catalog authorable in code and
-`servicesources.yaml` optional, so "the set of services that exist" stops being a file this design
-can read. The concept survives — a service the AppHost knows about but the developer has not
-chosen a source for — but where both halves are read from has to follow #134 and #69 rather than
-be fixed here.
+As drafted, "unconfigured" meant *present in `servicesources.yaml`, absent from
+`servicesources.local.json`*. #134 made the catalog authorable in code and #69 moved developer
+config onto `IConfiguration`, so neither half is necessarily a file any more. The concept
+survives — a service the AppHost knows about but the developer has not chosen a source for — but
+the implementation must read "services that exist" from the catalog and "chosen sources" from
+developer config as they now work, and write answers where #69 says developer config lives. This
+design does not fix that; the first implementation step is to re-derive it.
+
+Answers and #428's `selection.json` are different facts (which source a service uses, versus
+which declared services to run this time) and stay in separate stores. The prompts should not be
+raised twice: once a service is configured, #428's prompt takes over for it on the next run.
 
 Saving is followed by `PromptNotificationAsync` with `MessageIntent.Success` stating that the
 choice is saved and takes effect on the next run. The UI must not imply the current run changed —
@@ -327,7 +343,7 @@ exist and raises none when they do not.
   (microsoft/aspire#13839) lands, since a dashboard session that survives the restart is what makes
   it worth having.
 - Moving persistence onto `IConfiguration` / user secrets — #69.
-- Progress reporting during checkouts — #130 / #136. Note that deferral is what makes this
+- Progress reporting during checkouts — #130 / #136 (shipped). Note that deferral is what makes this
   tractable at all: a checkout that runs before `Build()` has nowhere to report to, since the CLI
   never renders AppHost console output, while one that runs after the dashboard is up can publish
   real resource state. Nothing here needs to solve it.
