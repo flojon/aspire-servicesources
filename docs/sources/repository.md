@@ -809,10 +809,9 @@ it. The environment spelling is `ServiceSources__Repositories__eshop__Source=pat
   it. A `prepare` on the group entry is refused; set `path.prepare` on each member instead. For the
   same reason a member's own `repository.prepare` is dropped silently once the group redirects it, so
   move it to that member's `path.prepare`.
-- A member's own `repository.ref` is still refused, as for any grouped member: a group's ref is
-  shared, and the group's own `ref` is ignored while it is on `path`. The member is not redirected, so
-  with a cold managed checkout and deferred checkout timing (the default) the refusal is not thrown from
-  `AddService`: that service fails to start, with the reason in its logs.
+- A member's own `repository.ref` is refused while the group is on `path`, as for any grouped member:
+  a group's ref is shared, and the group's own `ref` is ignored while it is on `path`. `AddService`
+  throws, whatever the checkout timing, and nothing is cloned.
 - The reached members are `"path"` services in one repository, so their `dotnet` builds run one after
   another rather than racing (see [Several path services from one repository](path.md#several-path-services-from-one-repository)).
 - A `repositories` entry naming no declared repository is reported at startup, with a
