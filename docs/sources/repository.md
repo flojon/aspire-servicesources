@@ -806,8 +806,8 @@ it. The environment spelling is `ServiceSources__Repositories__eshop__Source=pat
   `"source": "path"` is not read, and a group `ref` is ignored while the group is on `path`.
 - The group's catalog `prepare` step is not run in a directory you manage, and nothing is printed
   about it: a redirected member inherits no catalog `prepare`, only a `path.prepare` you declare on
-  it. A `prepare` on the group entry in developer configuration is ignored with a startup warning; set `path.prepare` on each member instead. For the
-  same reason a member's own `repository.prepare` is dropped silently once the group redirects it, so
+  it. A `prepare` on the group entry is ignored with a startup warning; set `path.prepare` on each
+  member instead. For the same reason a member's own `repository.prepare` is dropped silently once the group redirects it, so
   move it to that member's `path.prepare`.
 - A member's own `repository.ref` is still refused, as for any grouped member: a group's ref is
   shared, and the group's own `ref` is ignored while it is on `path`. The member is not redirected, so

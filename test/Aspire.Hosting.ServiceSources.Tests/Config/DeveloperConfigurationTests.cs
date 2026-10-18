@@ -1523,7 +1523,23 @@ public class DeveloperConfigurationTests
 
         var config = ServiceSourcesConfigCache.LoadedFor(CreateBuilder(dir)).DeveloperConfig;
 
-        Assert.True(config.Repositories.ContainsKey("monorepo"));
+        var repository = config.Repositories["monorepo"];
+        Assert.Equal("path", repository.Source);
+        Assert.Equal("/a", repository.Path?.Path);
+    }
+
+    [Fact]
+    public void ReadFrom_RepositoryEntryWithAPrepareStepAndABadSource_IsRefusedForTheSourceOnly()
+    {
+        var dir = CreateAppHostDirectory(
+            MonorepoCatalog,
+            """{ "repositories": { "monorepo": { "source": "git", "prepare": { "command": ["./go.sh"] } } } }""");
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(
+            () => ServiceSourcesConfigCache.LoadedFor(CreateBuilder(dir)));
+
+        Assert.Contains("ServiceSources:Repositories:monorepo:source", ex.Message);
+        Assert.DoesNotContain("prepare", ex.Message);
     }
 
     [Fact]

@@ -373,6 +373,21 @@ public class ServiceConfigAuditTests
     }
 
     [Fact]
+    public async Task UndeclaredRepositoryEntryWithAPrepareStep_IsReportedAsOrphanedOnly()
+    {
+        var builder = CreateBuilder(MonorepoCatalog, """
+            { "services": { "orders": { "source": "container" } },
+              "repositories": { "ghost": { "source": "path", "path": { "path": "/a" }, "prepare": { "command": ["./go.sh"] } } } }
+            """);
+        builder.AddService("orders");
+
+        var warning = Assert.Single(await TestHelpers.PublishBeforeStartEventCapturingWarningsAsync(builder));
+
+        Assert.Contains("ghost", warning);
+        Assert.DoesNotContain("does not take a 'prepare' step", warning);
+    }
+
+    [Fact]
     public async Task RepositoryEntryWithAnEmptyDirectoryAndNoSource_IsNotReported()
     {
         var builder = CreateBuilder(MonorepoCatalog, """
