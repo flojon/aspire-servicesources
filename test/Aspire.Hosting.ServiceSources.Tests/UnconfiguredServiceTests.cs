@@ -7,6 +7,7 @@ using Xunit;
 namespace Aspire.Hosting.ServiceSources.Tests;
 
 [Trait("IO", "true")]
+[Trait("Timing", "true")]
 public class UnconfiguredServiceTests
 {
     private static string AppHostDirectory()
