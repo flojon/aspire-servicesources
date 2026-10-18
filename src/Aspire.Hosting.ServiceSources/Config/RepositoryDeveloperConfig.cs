@@ -22,6 +22,6 @@ internal sealed class RepositoryDeveloperConfig
     /// <summary>The ref the group's shared managed checkout sits on. Unread while the group is on <c>"path"</c>.</summary>
     public string? Ref { get; set; }
 
-    /// <summary>Refused when the configuration is read; a per-service <c>path.prepare</c> is the supported spelling.</summary>
+    /// <summary>Bound but ignored and reported by <see cref="ServiceConfigAudit"/>; a per-service <c>path.prepare</c> is the supported spelling.</summary>
     public PrepareDeveloperConfig? Prepare { get; set; }
 }
