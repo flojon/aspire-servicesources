@@ -21,16 +21,20 @@ internal static class WorktreeSeed
     /// <returns>The home worktree when this call copied its config file, otherwise <see langword="null"/>.</returns>
     public static HomeWorktree? EnsureSeeded(IDistributedApplicationBuilder builder)
     {
+        var state = new SeedState();
+
         try
         {
-            return Seed(builder);
+            Seed(builder, state);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             ServiceSourcesWarnings.For(builder).AddNotice(Raw.Compose(
                 $"Could not finish seeding this linked worktree's ServiceSources files from the main worktree ({Raw.Cause(ex)}). It will be tried again on the next run."));
-            return null;
         }
+
+        // Whatever was copied before a failure is still the worktree's file, so its overrides are still inspected.
+        return state.ConfigCopiedFrom;
     }
 
     /// <summary>
@@ -54,11 +58,13 @@ internal static class WorktreeSeed
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            // The copy already happened; a failed inspection must not fail the run.
+            // The copy already happened; a failed inspection must not fail the run, but it must not be silent.
+            ServiceSourcesWarnings.For(builder).AddNotice(Raw.Compose(
+                $"Could not check the copied {Raw.Literal(DeveloperConfiguration.FileName)} for directory overrides that resolve differently in this linked worktree ({Raw.Cause(ex)})."));
         }
     }
 
-    private static HomeWorktree? Seed(IDistributedApplicationBuilder builder)
+    private static void Seed(IDistributedApplicationBuilder builder, SeedState state)
     {
         var worktree = builder.AppHostDirectory;
         var marker = MarkerPath(worktree);
@@ -66,7 +72,7 @@ internal static class WorktreeSeed
         // The marker, not the files, records that seeding happened, so a copy the developer deletes stays deleted.
         if (File.Exists(marker) || WorktreeHome.TryResolve(builder) is not { } home)
         {
-            return null;
+            return;
         }
 
         ToolDirectory.Ensure(worktree);
@@ -97,10 +103,15 @@ internal static class WorktreeSeed
                 {
                     case CopyOutcome.Copied:
                         copied.Add(display);
+                        if (display == DeveloperConfiguration.FileName)
+                        {
+                            state.ConfigCopiedFrom = home;
+                        }
+
                         break;
                     case CopyOutcome.SourceIsLink:
                         warnings.AddNotice(Raw.Compose(
-                            $"'{Raw.Escaped(source)}' is a symbolic link, so it was not copied into this linked worktree. Copy its contents to '{Raw.Escaped(destination)}' yourself if this worktree should have them."));
+                            $"'{Raw.Escaped(source)}' is a symbolic link, so it was not copied into this linked worktree, and seeding is not retried. Copy its contents to '{Raw.Escaped(destination)}' yourself if this worktree should have them."));
                         break;
                 }
             }
@@ -123,9 +134,12 @@ internal static class WorktreeSeed
         {
             WriteMarker(marker, home.AppHostDirectory, copied);
         }
+    }
 
-        // Only an entry seeding just copied is inspected: one the developer writes afterwards is deliberate.
-        return copied.Contains(DeveloperConfiguration.FileName) ? home : null;
+    // Only an entry seeding just copied is inspected: one the developer writes afterwards is deliberate.
+    private sealed class SeedState
+    {
+        public HomeWorktree? ConfigCopiedFrom { get; set; }
     }
 
     /// <summary>Copies a regular file to a destination that must not exist yet.</summary>

@@ -14,6 +14,9 @@ internal sealed class ScriptedCloneGitClient : IGitClient
 
     public Exception? ReferenceFailure { get; init; }
 
+    /// <summary>Thrown by <see cref="GetOriginUrl"/>, as a corrupt or foreign-owned home checkout would.</summary>
+    public Exception? OriginFailure { get; init; }
+
     public IReadOnlyList<string> PlainClones { get { lock (_gate) { return [.. _plainClones]; } } }
 
     public IReadOnlyList<(string Destination, string Reference)> ReferenceClones { get { lock (_gate) { return [.. _referenceClones]; } } }
@@ -59,5 +62,5 @@ internal sealed class ScriptedCloneGitClient : IGitClient
 
     public bool IsRefCheckedOut(string repositoryPath, string reference) => true;
 
-    public string? GetOriginUrl(string repositoryPath) => HomeOrigin;
+    public string? GetOriginUrl(string repositoryPath) => OriginFailure is null ? HomeOrigin : throw OriginFailure;
 }

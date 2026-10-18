@@ -128,6 +128,25 @@ public class WorktreeSeedTests
         Assert.Contains(Notices(builder), notice => notice.Contains("next run", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void FailureAfterTheConfigCopy_StillInspectsItsPathOverrides()
+    {
+        var fake = FakeWorktree.Siblings();
+        var intoMain = Path.Combine(fake.MainTop, "other").Replace("\\", "\\\\", StringComparison.Ordinal);
+        fake.WriteHome(
+            DeveloperConfiguration.FileName,
+            $$"""{ "services": { "orders": { "source": "path", "path": { "path": "{{intoMain}}" } } } }""");
+
+        // A directory where the marker goes makes writing it fail after the copy has happened.
+        Directory.CreateDirectory(WorktreeSeed.MarkerPath(fake.WorktreeAppHost));
+
+        var builder = Run(fake);
+
+        Assert.True(File.Exists(Path.Combine(fake.WorktreeAppHost, DeveloperConfiguration.FileName)));
+        Assert.Contains(Notices(builder), notice => notice.Contains("next run", StringComparison.Ordinal));
+        Assert.Contains(Notices(builder), notice => notice.Contains("main worktree's files", StringComparison.Ordinal));
+    }
+
     private sealed class ThrowingProbe : IWorktreeProbe
     {
         public WorktreeLayout? Probe(string directory) => throw new NotSupportedException("odd path");

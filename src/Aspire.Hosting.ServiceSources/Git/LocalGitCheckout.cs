@@ -534,7 +534,7 @@ internal static class LocalGitCheckout
                 $"{label}: the checkout at '{Raw.Escaped(repoRoot)}' has a '.git' file rather than a '.git' directory, so it is a linked worktree or a clone made with --separate-git-dir rather than a checkout this tool cloned. Move it aside and re-run to have it cloned fresh, or point the service at it with the 'path' source — 'source': 'path' and 'path': {{ 'path': '...' }} in servicesources.local.json.");
         }
 
-        var referenceCheckout = TryReferenceCheckout(homeAppHostDirectory, definition, gitClient);
+        var referenceCheckout = TryReferenceCheckout(homeAppHostDirectory, definition, gitClient, progress);
         var scratch = NewScratchDirectory(checkoutsRoot, definition);
 
         try
@@ -834,7 +834,7 @@ internal static class LocalGitCheckout
     /// optimisation, and the home checkout is a directory this tool does not control.
     /// </summary>
     private static string? TryReferenceCheckout(
-        Func<string?>? homeAppHostDirectory, ServiceDefinition definition, IGitClient gitClient)
+        Func<string?>? homeAppHostDirectory, ServiceDefinition definition, IGitClient gitClient, IGitProgressSink? progress)
     {
         try
         {
@@ -842,6 +842,8 @@ internal static class LocalGitCheckout
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
+            progress?.Report(Raw.Compose(
+                $"Could not look for a checkout to borrow objects from ({Raw.Cause(ex)}); cloning without it.").ToString());
             return null;
         }
     }

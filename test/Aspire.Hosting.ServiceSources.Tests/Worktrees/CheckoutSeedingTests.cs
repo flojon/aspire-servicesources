@@ -92,6 +92,22 @@ public class CheckoutSeedingTests
     }
 
     [Fact]
+    public void HomeCheckoutThatCannotBeInspected_ClonesPlainly_AndSaysSo()
+    {
+        var home = NewAppHost();
+        HomeCheckout(home);
+        var sink = new RecordingProgressSink();
+        var git = new ScriptedCloneGitClient { OriginFailure = new InvalidOperationException("dubious ownership") };
+
+        var prepared = Prepare(NewAppHost(), home, git, sink);
+
+        Assert.True(Directory.Exists(Path.Combine(prepared.RepoRoot, ".git")));
+        Assert.Empty(git.ReferenceClones);
+        Assert.Single(git.PlainClones);
+        Assert.Contains(sink.Lines, line => line.Contains("dubious ownership", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void ReferenceFailure_RetriesPlainlyInAFreshScratchDirectory_AndSaysSo()
     {
         var home = NewAppHost();
