@@ -138,6 +138,51 @@ internal sealed partial class GitCliClient(
             ["clone", .. progressOption, "--", repositoryUrl, destinationPath], GitUrl.Parse(repositoryUrl).Host, progress);
     }
 
+    public void CloneWithReference(
+        string repositoryUrl, string destinationPath, string referenceRepository, IGitProgressSink? progress = null)
+    {
+        string[] progressOption = progress is null ? [] : ["--progress"];
+
+        // --reference-if-able: a reference that vanished since it was chosen clones normally instead of failing.
+        // --dissociate: copies borrowed objects in, so a gc or deletion of the reference cannot corrupt this clone.
+        RunRemoteCommand(
+            ["clone", .. progressOption, $"--reference-if-able={referenceRepository}", "--dissociate",
+                "--", repositoryUrl, destinationPath],
+            GitUrl.Parse(repositoryUrl).Host,
+            progress,
+            result => LooksLikeReferenceFailure(result.StandardError, referenceRepository, repositoryUrl)
+                ? ReferenceFailure(Describe(result))
+                : null);
+    }
+
+    private static GitReferenceFailedException ReferenceFailure(Raw description) =>
+        GitReferenceFailedException.For($"{description}", GitCommandFailedException.For($"{description}"));
+
+    /// <summary>Whether git blamed the reference repository for a failed clone.</summary>
+    /// <param name="repositoryUrl">
+    /// Blanked out of the output first: git echoes it, and a URL such as <c>/org/alternate-service</c>
+    /// must not read as a complaint about the reference.
+    /// </param>
+    internal static bool LooksLikeReferenceFailure(
+        string standardError, string referenceRepository, string? repositoryUrl = null)
+    {
+        // -if-able reports a missing reference on an "info:" line and carries on, so that line never explains a failure.
+        var diagnosis = string.Join('\n', standardError.Split('\n')
+            .Where(line => !line.TrimStart().StartsWith("info:", StringComparison.Ordinal)));
+
+        if (!string.IsNullOrEmpty(repositoryUrl))
+        {
+            diagnosis = diagnosis.Replace(repositoryUrl, string.Empty, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return diagnosis.Contains(referenceRepository, StringComparison.OrdinalIgnoreCase)
+            || diagnosis.Contains(referenceRepository.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase)
+            || diagnosis.Contains("reference repository", StringComparison.OrdinalIgnoreCase)
+            || diagnosis.Contains("alternate object", StringComparison.OrdinalIgnoreCase)
+            || diagnosis.Contains("info/alternates", StringComparison.OrdinalIgnoreCase)
+            || diagnosis.Contains("repack to clean up", StringComparison.OrdinalIgnoreCase);
+    }
+
     public void Checkout(string repositoryPath, string reference)
     {
         if (IsSafeReference(reference))
@@ -321,8 +366,14 @@ internal sealed partial class GitCliClient(
     /// retry, so a retry the token was never going to be offered on would only repeat the first
     /// attempt's failure at the cost of a second full network round trip.
     /// </param>
+    /// <param name="classifyFailure">
+    /// A more specific exception for a non-authentication failure, or <see langword="null"/> for the generic one.
+    /// </param>
     private void RunRemoteCommand(
-        IReadOnlyList<string> arguments, string? targetHost, IGitProgressSink? progress = null)
+        IReadOnlyList<string> arguments,
+        string? targetHost,
+        IGitProgressSink? progress = null,
+        Func<GitCommandResult, Exception?>? classifyFailure = null)
     {
         var result = GitCommand.Run([.. CredentialLadderOptions(), .. arguments], environmentOverrides, progress);
         if (result.Succeeded)
@@ -353,6 +404,11 @@ internal sealed partial class GitCliClient(
                 $"{message}",
                 GitCommandFailedException.For($"{message}"),
                 ResolvedNoCredentials(result.StandardError));
+        }
+
+        if (classifyFailure?.Invoke(result) is { } classified)
+        {
+            throw classified;
         }
 
         throw GitCommandFailedException.For($"{Describe(result)}");

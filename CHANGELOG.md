@@ -52,6 +52,13 @@ never existed. Check the tag of the last release before adding one.
 
 ### Added
 
+- **An AppHost run from a linked git worktree starts from the main worktree's state.** Its first run
+  copies `servicesources.local.json` and the saved source picks from the main worktree's AppHost, and
+  a cold `"repository"` checkout borrows objects from the main worktree's checkout of the same
+  repository instead of downloading everything. Seeding happens once; afterwards the worktree's
+  files and checkouts are independent. A copied `path` override that resolves differently from the
+  worktree is reported at startup.
+
 - **`kind: java` also runs on Aspire's official `Aspire.Hosting.Java` integration** (preview).
   Reference it instead of `CommunityToolkit.Aspire.Hosting.Java` and `java` services run
   through it, with no catalog or AppHost change. When both are referenced the Community Toolkit's

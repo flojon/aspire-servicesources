@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Configuration.Memory;
+using Aspire.Hosting.ServiceSources.Worktrees;
 
 namespace Aspire.Hosting.ServiceSources.Config;
 
@@ -173,6 +174,9 @@ internal static class DeveloperConfigFileSource
                     return;
                 }
 
+                // Before the read, so a linked worktree's first run reads what was seeded from the main worktree.
+                var seededFrom = WorktreeSeed.EnsureSeeded(builder);
+
                 // Reading the file is the part that can fail on the file's own account, and it
                 // touches nothing on the builder, so a malformed file throws with the slot still
                 // unset and the chain still untouched.
@@ -189,6 +193,12 @@ internal static class DeveloperConfigFileSource
                 _registered = true;
 
                 builder.Configuration.Sources.Insert(0, source);
+
+                // After the insert, so the check reads every configuration layer and the file is parsed once.
+                if (seededFrom is not null)
+                {
+                    WorktreeSeed.ReportPathOverrides(builder, seededFrom, source.InitialData ?? []);
+                }
             }
         }
     }

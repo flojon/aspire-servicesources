@@ -831,3 +831,29 @@ the same resolved directory are just two entries pointing at it, no `repositorie
 exception is a group-level `"source": "path"` entry, which supplies the directory to a grouped
 `"path"` service that sets none.
 
+## Working in git worktrees
+
+`git worktree add` checks out only tracked files, so an AppHost run from a linked worktree of its
+own repository would start without the git-ignored state the main worktree has built up. On its
+first run, ServiceSources seeds it once from the main worktree's copy of the same AppHost directory:
+
+- `servicesources.local.json` and `.servicesources/selection.json` are copied if the worktree has
+  none. An existing file is never overwritten.
+- A cold `"repository"` checkout still clones from the catalog's URL, but borrows objects from the
+  main worktree's checkout of the same repository, so only what that checkout lacks is downloaded.
+  The result is an ordinary, independent clone.
+
+Seeding happens once, and `.servicesources/worktree-seed.json` records it. If the main worktree has neither file yet, nothing is recorded and the next run tries again. A file that is a symbolic link is not copied (a notice says so); copy its contents yourself. A copied file you delete
+stays deleted; delete the marker to seed again. `prepare` steps are not seeded, so they run on the
+worktree's first use of each checkout.
+
+Afterwards the worktree's files and checkouts are its own: a checkout can sit on a different ref,
+carry different edits and build independently of the main worktree's. To share the main worktree's
+checkout of a service on purpose, point the service at it with the [`"path"` source](path.md) in
+the worktree's `servicesources.local.json`.
+
+If a copied `path.path` or `repository.path` resolves into the main worktree, or to a different
+directory than it did there, a startup notice names the entry. Edit the worktree's
+`servicesources.local.json` if that is not what you want.
+
+Detecting a linked worktree needs git 2.31 or newer. With an older git, nothing is seeded.

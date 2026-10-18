@@ -37,6 +37,19 @@ internal interface IGitClient
     /// </param>
     void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null);
 
+    /// <summary>
+    /// <see cref="Clone"/>, borrowing objects from <paramref name="referenceRepository"/> to save
+    /// network transfer. The result must not depend on the reference afterwards.
+    /// </summary>
+    /// <remarks>
+    /// A failure caused by the reference is reported as <see cref="GitReferenceFailedException"/>;
+    /// every other failure surfaces exactly as <see cref="Clone"/> would surface it. Defaulted to a
+    /// plain clone so test doubles need not implement it.
+    /// </remarks>
+    void CloneWithReference(
+        string repositoryUrl, string destinationPath, string referenceRepository, IGitProgressSink? progress = null) =>
+        Clone(repositoryUrl, destinationPath, progress);
+
     void Checkout(string repositoryPath, string reference);
 
     /// <summary>
