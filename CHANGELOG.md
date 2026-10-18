@@ -84,8 +84,9 @@ never existed. Check the tag of the last release before adding one.
   whose source is `repository` or `path`, so a monorepo AppHost keeps its grouping without repeating
   a `path.path` per service. A member's own `path.path` still wins, members on `url`, `container` or
   `kubernetes` are left alone, a member that sets its own `repository.ref` is refused at `AddService`
-  with the "ref is shared" error, whatever the checkout timing, a group `ref` is ignored while the group is on `path`, and the
-  builds of the members are serialized like any other `"path"` services in one repository. A
+  whatever the checkout timing (a group's ref is shared, so no member's own applies), a group `ref`
+  is ignored while the group is on `path`, and the builds of the members are serialized like any
+  other `"path"` services in one repository. A
   `repositories` entry naming no declared repository is now reported at startup, as is a
   `repositories.<name>.path.path` set without `source`, which would otherwise be silently unread.
 

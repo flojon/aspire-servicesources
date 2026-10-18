@@ -66,7 +66,7 @@ internal static class GroupPathSource
 
         var checkoutName = new Name(definition.Repository.CheckoutName);
         throw ServiceSourcesConfigurationException.For(
-            $"Service '{new Name(serviceName)}': 'repository.ref' cannot be set — this service is grouped into the shared repository '{checkoutName}', which is on the 'path' source, so nothing is checked out and no ref applies. Remove this service's 'repository.ref' so it follows the group's directory, or set the repository's 'source' to 'repository' and put the ref on '{Raw.Literal(DeveloperConfiguration.RepositoriesKey, default)}:{checkoutName}:ref'.");
+            $"Service '{new Name(serviceName)}': 'repository.ref' cannot be set — this service is grouped into the shared repository '{checkoutName}', which is on the 'path' source, so nothing is checked out and no ref applies. Remove this service's 'repository.ref' so it follows the group's directory, or set the repository's 'source' to 'repository', remove this service's 'repository.ref' and put the ref on '{Raw.Literal(DeveloperConfiguration.RepositoriesKey, default)}:{checkoutName}:ref'.");
     }
 
     /// <summary>The group's directory, resolved like a service's <c>path.path</c> and required to exist.</summary>
