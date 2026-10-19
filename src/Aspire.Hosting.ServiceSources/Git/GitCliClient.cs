@@ -140,7 +140,9 @@ internal sealed partial class GitCliClient(
         // "--" so a repository URL or a destination that begins with '-' is read as an argument
         // rather than as an option.
         RunRemoteCommand(
-            ["clone", .. progressOption, "--", repositoryUrl, destinationPath], GitUrl.Parse(repositoryUrl).Host, progress);
+            ["clone", .. PersistedLongPathsOption(), .. progressOption, "--", repositoryUrl, destinationPath],
+            GitUrl.Parse(repositoryUrl).Host,
+            progress);
     }
 
     public void CloneWithReference(
@@ -151,7 +153,7 @@ internal sealed partial class GitCliClient(
         // --reference-if-able: a reference that vanished since it was chosen clones normally instead of failing.
         // --dissociate: copies borrowed objects in, so a gc or deletion of the reference cannot corrupt this clone.
         RunRemoteCommand(
-            ["clone", .. progressOption, $"--reference-if-able={referenceRepository}", "--dissociate",
+            ["clone", .. PersistedLongPathsOption(), .. progressOption, $"--reference-if-able={referenceRepository}", "--dissociate",
                 "--", repositoryUrl, destinationPath],
             GitUrl.Parse(repositoryUrl).Host,
             progress,
@@ -454,6 +456,13 @@ internal sealed partial class GitCliClient(
     /// reaches easily once the checkout sits under an AppHost's own directory.
     /// </summary>
     private string[] PlatformOptions() =>
+        isWindows ?? OperatingSystem.IsWindows() ? ["-c", "core.longpaths=true"] : [];
+
+    /// <summary>
+    /// <c>git clone -c</c>, unlike the global <c>-c</c>, is written into the new clone's own config,
+    /// so plain <c>git status</c> and IDEs working in the checkout later get long paths too.
+    /// </summary>
+    private string[] PersistedLongPathsOption() =>
         isWindows ?? OperatingSystem.IsWindows() ? ["-c", "core.longpaths=true"] : [];
 
     /// <summary>

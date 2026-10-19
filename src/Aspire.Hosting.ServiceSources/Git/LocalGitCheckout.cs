@@ -511,7 +511,7 @@ internal static class LocalGitCheckout
         var displayRepository = GitUrl.Redact(definition.Repository.Url);
 
         Directory.CreateDirectory(checkoutsRoot);
-        ScratchDirectory.SweepAbandoned(checkoutsRoot);
+        ScratchDirectory.SweepAbandoned(checkoutsRoot, progress);
 
         // Reached because ".git" is not a *directory*, which is not the same as "no repository":
         // ".git" is a file for a linked worktree ("git worktree add") and for a clone made with
@@ -531,6 +531,8 @@ internal static class LocalGitCheckout
 
         try
         {
+            PackPathLimit.EnsureFits(label, repoRoot, scratch.Path);
+
             try
             {
                 if (referenceCheckout is null)

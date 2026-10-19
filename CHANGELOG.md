@@ -146,7 +146,10 @@ never existed. Check the tag of the last release before adding one.
   32-character GUID, and a staging directory whose clone died is removed by the next clone in that
   `checkouts` folder instead of after 24 hours. A clone still running in another AppHost is never
   touched, and read-only files git leaves in `.git` no longer block the cleanup. See
-  [Troubleshooting](docs/troubleshooting.md#long-paths-on-windows).
+  [Troubleshooting](docs/troubleshooting.md#long-paths-on-windows). A clone whose pack file would
+  pass `MAX_PATH` — which `core.longpaths` cannot fix — is now refused up front with the length it
+  needs and the fix, each clone keeps `core.longpaths=true` in its own config, and the sweep logs
+  each leftover it removes ([#474]).
 - **Two `"path"` services in one repository no longer race on a shared project's `bin/` and
   `obj/`** ([#397]). Aspire starts independent resources at once, so two services whose projects
   share a `ProjectReference` ran two builds over the same output directory and one failed
@@ -2066,6 +2069,7 @@ Targets `net10.0`.
 [#449]: https://github.com/flojon/aspire-servicesources/issues/449
 [#462]: https://github.com/flojon/aspire-servicesources/issues/462
 [#463]: https://github.com/flojon/aspire-servicesources/issues/463
+[#474]: https://github.com/flojon/aspire-servicesources/issues/474
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
