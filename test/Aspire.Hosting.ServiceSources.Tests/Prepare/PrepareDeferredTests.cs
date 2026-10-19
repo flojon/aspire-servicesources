@@ -497,10 +497,9 @@ public class PrepareDeferredTests
         await builder.Eventing.PublishAsync(
             new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
         await PublishNotStartedAsync(services, routing);
-        await Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+        await StartTasksAsync(builder);
 
-        var refusal = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(() =>
-            builder.Eventing.PublishAsync(new BeforeResourceStartedEvent(routing, services)));
+        var refusal = await StartIsRefusedAsync(builder, services, routing);
 
         Assert.Contains("next AppHost start", refusal.Message, StringComparison.Ordinal);
     }
@@ -574,6 +573,42 @@ public class PrepareDeferredTests
     }
 
     [Fact]
+    public async Task WhilePreparing_AStartIsRefused()
+    {
+        var dir = CreateAppHostDirectory("routing");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+
+        var journal = new Journal();
+        builder.AddLocalKind(KindName, new StandInKind(journal, "prepare.sh"));
+
+        using var gate = new ManualResetEventSlim(false);
+        var runner = new FakeRunner(journal) { Gate = gate };
+        new LocalProjectSource(new FakeGitClient(), runner)
+            .Resolve(builder, "routing", Definition("routing", Prepare()), DevConfig());
+
+        var routing = Assert.Single(builder.Resources, r => r.Name == "routing");
+
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+        await PublishNotStartedAsync(services, routing);
+
+        try
+        {
+            Assert.True(SpinWait.SpinUntil(() => Volatile.Read(ref runner.Runs) == 1, TimeSpan.FromSeconds(30)));
+
+            var refusal = await StartIsRefusedAsync(builder, services, routing);
+            Assert.Contains("prepare step is still running", refusal.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            gate.Set();
+            await StartTasksAsync(builder);
+        }
+    }
+
+    [Fact]
     public async Task ChangedCommand_Declined_RefusesALaterStart()
     {
         var interaction = new FakeInteractionService { IsAvailable = true, Confirm = () => InteractionResult.Ok(false) };
@@ -598,10 +633,7 @@ public class PrepareDeferredTests
     public async Task NotSelectedInTheSourcePick_AStartIsRefused()
     {
         var dir = CreateAppHostDirectory("routing");
-        var tool = Directory.CreateDirectory(Path.Combine(dir, ".servicesources")).FullName;
-        File.WriteAllText(
-            Path.Combine(tool, "selection.json"),
-            """{ "version": 1, "services": { "routing": { "start": false } } }""");
+        PlantSelection(dir, start: false);
 
         var builder = TestHelpers.CreateBuilderThatCanStart(dir);
         builder.SetCheckoutTiming(CheckoutTiming.Deferred);
@@ -624,8 +656,20 @@ public class PrepareDeferredTests
         var refusal = await StartIsRefusedAsync(builder, services, routing);
 
         Assert.Contains("not selected", refusal.Message, StringComparison.Ordinal);
-        Assert.Contains("selection.json", refusal.Message, StringComparison.Ordinal);
+        Assert.Contains(".servicesources/selection.json", refusal.Message, StringComparison.Ordinal);
         Assert.Empty(git.Cloned);
+
+        // DCP marks a refused start FailedToStart; the skip is painted back over it.
+        var notifications = services.GetRequiredService<ResourceNotificationService>();
+        await notifications.PublishUpdateAsync(routing, snapshot => snapshot with
+        {
+            State = new ResourceStateSnapshot(KnownResourceStates.FailedToStart, KnownResourceStateStyles.Error),
+        });
+
+        Assert.True(SpinWait.SpinUntil(
+            () => notifications.TryGetCurrentState(routing.Name, out var current)
+                && current.Snapshot.State?.Text == "Skipped",
+            TimeSpan.FromSeconds(30)));
     }
 
     /// <remarks>
@@ -699,10 +743,46 @@ public class PrepareDeferredTests
         Assert.Equal(2, starts);
         Assert.Equal(1, runner.Runs);
 
+        // No throw: a Start after release is the developer's.
         foreach (var resource in withheld)
         {
             await builder.Eventing.PublishAsync(new BeforeResourceStartedEvent(resource, services));
         }
+    }
+
+    /// <remarks>
+    /// The checkout and prepare step succeeded, so a start command that fails afterwards (a port
+    /// clash, say) must not lock the service out of a retry for the rest of the run.
+    /// </remarks>
+    [Fact]
+    public async Task AStartCommandFailingAfterRelease_DoesNotRefuseALaterStart()
+    {
+        var dir = CreateAppHostDirectory("routing");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+
+        var journal = new Journal();
+        builder.AddLocalKind(KindName, new StandInKind(journal, "prepare.sh"));
+
+        new LocalProjectSource(new FakeGitClient(), new FakeRunner(journal))
+            .Resolve(builder, "routing", Definition("routing", Prepare()), DevConfig());
+
+        var routing = Assert.Single(builder.Resources, r => r.Name == "routing");
+
+        Aspire.Hosting.ResourceBuilderExtensions.WithCommand(
+            builder.CreateResourceBuilder(routing),
+            KnownResourceCommands.StartCommand,
+            "Start",
+            _ => Task.FromResult(new ExecuteCommandResult { Success = false, Message = "port in use" }),
+            new CommandOptions());
+
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+        await PublishNotStartedAsync(services, routing);
+        await StartTasksAsync(builder);
+
+        await builder.Eventing.PublishAsync(new BeforeResourceStartedEvent(routing, services));
     }
 
     /// <remarks>
@@ -978,12 +1058,12 @@ public class PrepareDeferredTests
     }
 
     /// <summary>Answers the cold-checkout source pick up front, so only the prepare prompt can appear.</summary>
-    private static void PlantSelection(string appHostDirectory)
+    private static void PlantSelection(string appHostDirectory, bool start = true)
     {
         var tool = Directory.CreateDirectory(Path.Combine(appHostDirectory, ".servicesources")).FullName;
         File.WriteAllText(
             Path.Combine(tool, "selection.json"),
-            """{ "version": 1, "services": { "routing": { "start": true } } }""");
+            $$"""{ "version": 1, "services": { "routing": { "start": {{(start ? "true" : "false")}} } } }""");
     }
 
     private const string ChangedCommandLine = "bash -c changed";

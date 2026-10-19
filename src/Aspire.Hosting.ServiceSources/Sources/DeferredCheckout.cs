@@ -153,17 +153,13 @@ internal sealed class DeferredCheckout
         /// </summary>
         public bool CheckoutWasPresent { get; init; }
 
-        private volatile int _stage = (int)DeferredStage.Pending;
+        private volatile DeferredStage _stage;
 
-        /// <summary>
-        /// Where this service is on its way to being started by this package. Anything short of
-        /// <see cref="DeferredStage.Released"/> refuses a dashboard or CLI Start, which DCP would
-        /// otherwise run against a checkout that is missing, unprepared or unapproved.
-        /// </summary>
+        /// <summary>Where this service is on its way to being started by this package.</summary>
         public DeferredStage Stage
         {
-            get => (DeferredStage)_stage;
-            set => _stage = (int)value;
+            get => _stage;
+            set => _stage = value;
         }
 
         /// <summary>Everything withheld for this service, in the order it must be started.</summary>
@@ -564,50 +560,84 @@ internal sealed class DeferredCheckout
 
         foreach (var withheld in deferred.AllResources)
         {
-            builder.Eventing.Subscribe<BeforeResourceStartedEvent>(withheld, (_, _) =>
-                StartRefusal(deferred) is { } refusal
-                    ? throw ServiceSourcesConfigurationException.For($"{refusal}")
-                    : Task.CompletedTask);
+            builder.Eventing.Subscribe<BeforeResourceStartedEvent>(withheld, (@event, _) =>
+                RefuseUnreleasedStart(deferred, @event, repaint: true));
         }
 
         EnsureSubscribed(builder);
     }
 
     /// <summary>
-    /// Why a Start that did not come from this package must be refused, or <see langword="null"/>
-    /// once this package has released the service. Exposed for tests.
+    /// Throws for a Start that did not come from this package while the service is not released.
     /// </summary>
     /// <remarks>
     /// Keyed on the stage this package recorded rather than on the State column: our own start
     /// command raises the same event, and the column is the dashboard's to repaint.
     /// </remarks>
-    internal static Raw? StartRefusal(Deferred deferred)
+    private static Task RefuseUnreleasedStart(Deferred deferred, BeforeResourceStartedEvent @event, bool repaint)
     {
-        var service = new Name(deferred.ServiceName);
-        var selection = Raw.Escaped(Path.Combine(ToolDirectory.Name, SourceSelectionStore.FileName));
-
-        return deferred.Stage switch
+        if (StartRefusal(deferred) is not { } reason)
         {
-            DeferredStage.Released => null,
-            DeferredStage.Pending => Raw.Compose(
-                $"Service '{service}' was not started: its checkout is not ready yet. It starts on its own once the "
-                + $"checkout has landed; if the source-selection dialog is open, answer it first."),
-            DeferredStage.AwaitingConfirmation => Raw.Compose(
-                $"Service '{service}' was not started: its changed prepare command has not been approved yet. Answer the "
-                + $"\"Run changed prepare command?\" dialog; it starts on its own once the prepare step succeeds."),
-            DeferredStage.Preparing => Raw.Compose(
-                $"Service '{service}' was not started: its prepare step is still running. It starts on its own once the "
-                + $"step succeeds."),
-            DeferredStage.DeclinedPrepare => Raw.Compose(
-                $"Service '{service}' was not started: its changed prepare command was not approved, so neither the "
-                + $"command nor the service ran. It will run again on the next AppHost start, which asks again."),
-            DeferredStage.NotSelected => Raw.Compose(
-                $"Service '{service}' was not started: it was not selected for checkout, so it has nothing on disk to run. "
-                + $"To pick it again, delete its entry in {selection} and restart the AppHost."),
-            _ => Raw.Compose(
-                $"Service '{service}' was not started: its checkout or prepare step failed earlier in this run. It will "
-                + $"run again on the next AppHost start."),
-        };
+            return Task.CompletedTask;
+        }
+
+        // Nothing else repaints a terminal skip, so DCP's FailedToStart would hide it for the rest of the run.
+        if (repaint && deferred.Stage is DeferredStage.DeclinedPrepare or DeferredStage.NotSelected)
+        {
+            _ = RepaintSkippedAsync(@event.Resource, @event.Services);
+        }
+
+        throw ServiceSourcesConfigurationException.For(
+            $"Service '{new Name(deferred.ServiceName)}' was not started: {reason}");
+    }
+
+    private static Raw? StartRefusal(Deferred deferred) => deferred.Stage switch
+    {
+        DeferredStage.Released => null,
+        DeferredStage.Pending => Raw.Compose(
+            $"its checkout is not ready yet. It starts on its own once the checkout has landed; if the "
+            + $"source-selection dialog is open, answer it first."),
+        DeferredStage.AwaitingConfirmation => Raw.Compose(
+            $"its changed prepare command has not been approved yet. Answer the \"Run changed prepare command?\" "
+            + $"dialog; it starts on its own once the prepare step succeeds."),
+        DeferredStage.Preparing => Raw.Compose(
+            $"its prepare step is still running. It starts on its own once the step succeeds."),
+        DeferredStage.DeclinedPrepare => Raw.Compose(
+            $"its changed prepare command was not approved, so neither the command nor the service ran. The next "
+            + $"AppHost start asks again; if the change was unintended, fix the catalog first."),
+        DeferredStage.NotSelected => Raw.Compose(
+            $"it was not selected for checkout, so this run does not start it. To pick it again, delete its entry "
+            + $"in {SelectionFile} and restart the AppHost."),
+        DeferredStage.Failed => Raw.Compose(
+            $"its checkout or prepare step failed earlier in this run. It will run again on the next AppHost start."),
+        _ => throw new UnreachableException($"Unhandled deferred stage {deferred.Stage}."),
+    };
+
+    private static Raw SelectionFile => Raw.Display($"{ToolDirectory.Name}/{SourceSelectionStore.FileName}");
+
+    private static async Task RepaintSkippedAsync(IResource resource, IServiceProvider services)
+    {
+        try
+        {
+            var notifications = services.GetRequiredService<ResourceNotificationService>();
+
+            using var bounded = CancellationTokenSource.CreateLinkedTokenSource(
+                services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping);
+            bounded.CancelAfter(TimeSpan.FromMinutes(1));
+
+            await notifications.WaitForResourceAsync(
+                    resource.Name,
+                    resourceEvent => string.Equals(
+                        resourceEvent.Snapshot.State?.Text, KnownResourceStates.FailedToStart, StringComparison.Ordinal),
+                    bounded.Token)
+                .ConfigureAwait(false);
+
+            await PublishStateAsync(notifications, resource, SkippedState).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Best effort: the refusal itself already told the developer why.
+        }
     }
 
     private void EnsureSubscribed(IDistributedApplicationBuilder builder)
@@ -634,6 +664,23 @@ internal sealed class DeferredCheckout
             Gate(@event, CheckoutNameLock.For(builder), cancellationToken);
             return Task.CompletedTask;
         });
+
+        // Children Aspire adds for itself, such as a project's hidden rebuilder, would otherwise
+        // build the checkout before its prepare step was run or approved.
+        builder.Eventing.Subscribe<BeforeResourceStartedEvent>((@event, _) =>
+            @event.Resource is IResourceWithParent { Parent: var parent }
+                && DeferredFor(@event.Resource) is null
+                && DeferredFor(parent) is { } deferred
+                ? RefuseUnreleasedStart(deferred, @event, repaint: false)
+                : Task.CompletedTask);
+    }
+
+    private Deferred? DeferredFor(IResource resource)
+    {
+        lock (_gate)
+        {
+            return _deferred.FirstOrDefault(d => d.AllResources.Contains(resource));
+        }
     }
 
     /// <summary>
@@ -1193,7 +1240,7 @@ internal sealed class DeferredCheckout
             ServiceSourcesLog.Information(
                 logger,
                 $"Skipped: it was not selected, so it is not cloned or started this run. Delete its entry in "
-                + $"{Raw.Escaped(Path.Combine(ToolDirectory.Name, SourceSelectionStore.FileName))} to be asked again.");
+                + $"{SelectionFile} to be asked again.");
         }
         catch (OperationCanceledException)
         {
@@ -1679,8 +1726,9 @@ internal sealed class DeferredCheckout
     }
 
     /// <summary>
-    /// Waits until DCP has withheld the resource: it reports <c>NotStarted</c>, or the "Awaiting
-    /// source selection" text this class replaced that state with while the dialog was open.
+    /// Waits until DCP has withheld the resource: it reports <c>NotStarted</c>, the "Awaiting
+    /// source selection" text this class replaced that state with while the dialog was open, or
+    /// <c>FailedToStart</c> from a Start refused before this package got here.
     /// </summary>
     private static Task WaitUntilWithheldAsync(
         ResourceNotificationService notifications, string resourceName, CancellationToken cancellationToken) =>
@@ -1688,6 +1736,7 @@ internal sealed class DeferredCheckout
             resourceName,
             resourceEvent => resourceEvent.Snapshot.State?.Text is { } text
                 && (string.Equals(text, KnownResourceStates.NotStarted, StringComparison.Ordinal)
+                    || string.Equals(text, KnownResourceStates.FailedToStart, StringComparison.Ordinal)
                     || text.StartsWith(SourcePrompt.AwaitingStatePrefix, StringComparison.Ordinal)),
             cancellationToken);
 
@@ -1717,18 +1766,34 @@ internal sealed class DeferredCheckout
     private static async Task ReportFailureAsync(
         Deferred deferred, IServiceProvider services, Exception exception, IReadOnlyList<IResource> started)
     {
-        deferred.Stage = DeferredStage.Failed;
+        // Once released, the checkout and prepare step are fine and a later Start may succeed.
+        var released = deferred.Stage == DeferredStage.Released;
+
+        if (!released)
+        {
+            deferred.Stage = DeferredStage.Failed;
+        }
 
         try
         {
             var notifications = services.GetRequiredService<ResourceNotificationService>();
             var logger = services.GetRequiredService<ResourceLoggerService>().GetLogger(deferred.Resource);
 
-            ServiceSourcesLog.Error(
-                logger,
-                exception,
-                $"Service '{new Name(deferred.ServiceName)}': its deferred checkout could not be completed or "
-                + $"checked, so the service was never started. {Raw.Cause(exception)}");
+            if (released)
+            {
+                ServiceSourcesLog.Error(
+                    logger,
+                    exception,
+                    $"{Raw.Cause(exception)} Start it again from the dashboard once the cause is fixed.");
+            }
+            else
+            {
+                ServiceSourcesLog.Error(
+                    logger,
+                    exception,
+                    $"Service '{new Name(deferred.ServiceName)}': its deferred checkout could not be completed or "
+                    + $"checked, so the service was never started. {Raw.Cause(exception)}");
+            }
 
             // Every resource withheld for this service, not just the service's own: a held-back
             // helper left sitting in NotStarted reads as "still waiting" rather than as the casualty

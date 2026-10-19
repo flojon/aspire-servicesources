@@ -1924,6 +1924,74 @@ public class DeferredCheckoutTests
         await TasksAsync(builder);
     }
 
+    /// <remarks>
+    /// The refusal says the service starts on its own once the dialog is answered, which only holds
+    /// if DCP's FailedToStart for the refused Start still counts as withheld.
+    /// </remarks>
+    [Fact]
+    public async Task AStartRefusedWhileTheSourcePickIsOpen_StillStartsOnceItIsAnswered()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var interaction = new FakeInteractionService { IsAvailable = true };
+        var time = new ManualTimeProvider();
+        var builder = PromptBuilder(dir, interaction, time);
+        var git = new FakeGitClient();
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
+
+        var services = await RunGateAsync(builder, "orders");
+        await interaction.Prompted.WaitAsync(TimeSpan.FromSeconds(30));
+        var orders = RealResource(builder, "orders");
+
+        var refusal = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(() =>
+            builder.Eventing.PublishAsync(new BeforeResourceStartedEvent(orders, services)));
+        Assert.Contains("source-selection dialog", refusal.Message, StringComparison.Ordinal);
+
+        await services.GetRequiredService<ResourceNotificationService>().PublishUpdateAsync(orders, snapshot => snapshot with
+        {
+            State = new ResourceStateSnapshot(KnownResourceStates.FailedToStart, KnownResourceStateStyles.Error),
+        });
+
+        time.Advance(DeferredCheckout.PromptTimeout + TimeSpan.FromSeconds(1));
+        await TasksAsync(builder);
+
+        // Released: the package went on to start it, so a later Start is the developer's again.
+        await builder.Eventing.PublishAsync(new BeforeResourceStartedEvent(orders, services));
+    }
+
+    /// <remarks>
+    /// Aspire's hidden rebuilder runs <c>dotnet build</c> on the checkout, which must not happen
+    /// before the prepare step has run or been approved.
+    /// </remarks>
+    [Fact]
+    public async Task AProjectsRebuilder_IsRefusedUntilTheServiceIsReleased()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+
+        var git = new FakeGitClient();
+        var clone = git.BlockFor(OrdersUrl);
+        new LocalProjectSource(git).Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
+
+        var orders = RealResource(builder, "orders");
+        var rebuilder = Assert.Single(
+            builder.Resources, r => r is IResourceWithParent { Parent: var parent } && ReferenceEquals(parent, orders));
+
+        var services = await RunGateAsync(builder, "orders");
+
+        try
+        {
+            await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(() =>
+                builder.Eventing.PublishAsync(new BeforeResourceStartedEvent(rebuilder, services)));
+        }
+        finally
+        {
+            clone.Set();
+            services.GetRequiredService<IHostApplicationLifetime>().StopApplication();
+            await TasksAsync(builder);
+        }
+    }
+
     [Fact]
     public async Task AnAnswerArrivingBeforeNotStarted_LeavesNoAwaitingStateBehind()
     {

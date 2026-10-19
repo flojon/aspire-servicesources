@@ -588,9 +588,9 @@ clone and start. There is one checkbox per service, all checked, and each shows 
 (scheme, host and path only, never credentials), the `ref`, and which resources `WaitFor` it.
 
 - **Checked** services are cloned, prepared and started exactly as before.
-- **Unchecked** services are never cloned. Their state reads **Skipped**, and a Start from the dashboard or
-  CLI is refused with a message saying how to pick them again. The choice means "do not clone this for me", and a later run can change it
-  (see below).
+- **Unchecked** services are never cloned. Their state reads **Skipped**, and a Start from the
+  dashboard or CLI is refused with a message saying how to pick them again. The choice means "do not
+  clone this for me", and a later run can change it (see below).
 
 The choice is saved in `.servicesources/selection.json`, which is git-ignored with the rest of that
 directory. The next run asks only about services that have no entry in it: a new service, an entry you
