@@ -1818,6 +1818,11 @@ public class DeferredCheckoutTests
         var interaction = new FakeInteractionService { IsAvailable = true, Answer = inputs => Checked(inputs, true, false) };
         var builder = PromptBuilder(dir, interaction);
         builder.Configuration["SERVICESOURCES_INTERACTIVE"] = forced;
+        foreach (var name in new[] { "CI", "TF_BUILD", "JENKINS_URL" })
+        {
+            builder.Configuration[name] = null;
+        }
+
         builder.Configuration[variable] = value;
         var git = new FakeGitClient();
         var source = new LocalProjectSource(git);

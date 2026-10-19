@@ -1722,7 +1722,7 @@ internal static class InteractivePrompts
     /// <summary>Forces the prompt on (<c>true</c>) or off (<c>false</c>) whatever the environment says.</summary>
     public const string EnvironmentVariable = "SERVICESOURCES_INTERACTIVE";
 
-    public const string DisableReason = "CI is set";
+    public const string DisableReason = "a CI environment was detected";
 
     public static bool IsEnabled(IConfiguration? configuration)
     {
