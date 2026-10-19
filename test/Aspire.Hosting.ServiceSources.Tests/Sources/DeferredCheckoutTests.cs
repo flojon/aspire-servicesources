@@ -936,6 +936,19 @@ public class DeferredCheckoutTests
             .Resolve(builder, "orders", Definition("orders"), DevConfig())
             .WithHttpEndpoint();
 
+        foreach (var (name, state) in new[]
+        {
+            (KnownResourceCommands.StartCommand, ResourceCommandState.Hidden),
+            (KnownResourceCommands.StopCommand, ResourceCommandState.Enabled),
+            (KnownResourceCommands.RestartCommand, ResourceCommandState.Enabled),
+        })
+        {
+            RealResource(builder, "orders").Annotations.Add(new ResourceCommandAnnotation(
+                name, name, _ => state,
+                _ => Task.FromResult(new ExecuteCommandResult { Success = true }),
+                null, null, null, null, null, false));
+        }
+
         var services = builder.Services.BuildServiceProvider();
         var deferred = DeferredCheckout.For(builder);
         deferred.Apply([], deferred.Snapshot(), services, CheckoutNameLock.For(builder), CancellationToken.None);
@@ -946,7 +959,11 @@ public class DeferredCheckoutTests
             builder.Eventing.PublishAsync(new BeforeResourceStartedEvent(RealResource(builder, "orders"), services)));
 
         Assert.Contains("selection.json", refusal.Message, StringComparison.Ordinal);
-        Assert.Contains("next AppHost start", refusal.Message, StringComparison.Ordinal);
+        Assert.Contains("restart the AppHost", refusal.Message, StringComparison.Ordinal);
+
+        Assert.Equal(ResourceCommandState.Enabled, CommandStateOf(RealResource(builder, "orders"), KnownResourceCommands.StartCommand, services));
+        Assert.Equal(ResourceCommandState.Hidden, CommandStateOf(RealResource(builder, "orders"), KnownResourceCommands.StopCommand, services));
+        Assert.Equal(ResourceCommandState.Disabled, CommandStateOf(RealResource(builder, "orders"), KnownResourceCommands.RestartCommand, services));
     }
 
     [Fact]
@@ -2350,6 +2367,14 @@ public class DeferredCheckoutTests
     }
 
     private const string OrdersUrl = "https://example.com/orders.git";
+
+    private static ResourceCommandState CommandStateOf(IResource resource, string command, IServiceProvider services) =>
+        Assert.Single(resource.Annotations.OfType<ResourceCommandAnnotation>(), a => a.Name == command)
+            .UpdateState(new UpdateCommandStateContext
+            {
+                ResourceSnapshot = new CustomResourceSnapshot { ResourceType = "Executable", Properties = [] },
+                Services = services,
+            });
 
     private static IResource RealResource(IDistributedApplicationBuilder builder, string name) =>
         Assert.Single(builder.Resources, r => r.Name == name);

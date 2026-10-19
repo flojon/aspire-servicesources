@@ -166,7 +166,7 @@ internal sealed class DeferredCheckout
             set => Volatile.Write(ref _gate, (int)value);
         }
 
-        private int _commandsGated;
+        private readonly HashSet<ResourceCommandAnnotation> _gatedCommands = [];
 
         /// <summary>
         /// Wraps the dashboard's Start, Stop and Restart so they match <see cref="Gate"/>. Aspire adds
@@ -174,15 +174,19 @@ internal sealed class DeferredCheckout
         /// </summary>
         public void GateLifecycleCommands()
         {
-            if (Interlocked.Exchange(ref _commandsGated, 1) == 1)
+            // Idempotent rather than once-only: a command added after an earlier call is wrapped by the next.
+            lock (_gatedCommands)
             {
-                return;
+                WrapLifecycleCommands();
             }
+        }
 
+        private void WrapLifecycleCommands()
+        {
             foreach (var resource in AllResources)
             {
                 foreach (var original in resource.Annotations.OfType<ResourceCommandAnnotation>()
-                    .Where(a => StartGates.IsLifecycleCommand(a.Name))
+                    .Where(a => StartGates.IsLifecycleCommand(a.Name) && !_gatedCommands.Contains(a))
                     .ToList())
                 {
                     var wrapped = new ResourceCommandAnnotation(
@@ -201,6 +205,7 @@ internal sealed class DeferredCheckout
 
                     resource.Annotations.Remove(original);
                     resource.Annotations.Add(wrapped);
+                    _gatedCommands.Add(wrapped);
                 }
             }
         }
@@ -1838,8 +1843,7 @@ internal static class StartGates
                 + $"in this run. It will run again on the next AppHost start."),
             DeferredCheckout.StartGate.InProgress =>
                 Raw.Compose($"Service '{name}' was not started: its checkout is not ready yet, so there is nothing to run. "
-                + $"It starts by itself once the 'Choose services to check out' dialog is answered and the clone "
-                + $"and any prepare step have finished."),
+                + $"It starts by itself once its checkout, any dialog about it and any prepare step are done."),
             DeferredCheckout.StartGate.AwaitingConfirmation =>
                 Raw.Compose($"Service '{name}' was not started: it is waiting for your answer to the 'Run changed prepare "
                 + $"command?' dialog, and starting it now would skip the command you were asked to approve. "
@@ -1847,13 +1851,13 @@ internal static class StartGates
                 + $"AppHost start."),
             DeferredCheckout.StartGate.DeclinedPrepare =>
                 Raw.Compose($"Service '{name}' was not started: its changed prepare command was not approved, and starting "
-                + $"it without the prepare would run it against an unprepared checkout. It will run again on the "
+                + $"it without the prepare would run it against an unprepared checkout. It is started on the "
                 + $"next AppHost start, which asks again."),
             DeferredCheckout.StartGate.NotSelected =>
-                Raw.Compose($"Service '{name}' was not started: it was not selected in 'Choose services to check out', so "
-                + $"it has no checkout this run. Restart the AppHost and pick it; if the choice was saved, delete "
-                + $"its entry in {Raw.Escaped(Path.Combine(ToolDirectory.Name, SourceSelectionStore.FileName))} first. "
-                + $"It will run again on the next AppHost start."),
+                Raw.Compose($"Service '{name}' was not started: it was not selected to be checked out, so "
+                + $"it has no checkout this run. Delete its entry in "
+                + $"{Raw.Escaped(Path.Combine(ToolDirectory.Name, SourceSelectionStore.FileName))} and restart the "
+                + $"AppHost to be asked again."),
             _ => null,
         };
     }

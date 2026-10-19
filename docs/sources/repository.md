@@ -280,10 +280,10 @@ not asked about either. This is a consent gate on changed catalog code, so it **
 "Run" runs the step. Closing the dialog, no answer within 5 minutes, or a dialog that cannot be
 shown declines, and the service shows `Skipped` instead of starting; anything that waits on it keeps
 waiting. A declined service shows no Stop either, and its Start is refused with a message
-saying it asks again on the next AppHost start, so it can never run without the prepare. The
-same refusal applies while the dialog is open, and while a clone is still running: Start from
-the dashboard or `aspire resource <name> start` is refused until the checkout, any prepare and
-the dialogs are done. Fix the catalog if the change
+saying it asks again on the next AppHost start, so it can never run without the prepare. While the
+dialog is open, and while a clone or prepare is still running, the dashboard disables Start
+and hides Stop, and `aspire resource <name> start` is refused with a message, so the service can
+never run before the checkout, its prepare and the dialogs are done. Fix the catalog if the change
 was unintended, then it asks again on the next AppHost start. (The cold-checkout source pick is the
 opposite: an unanswered dialog starts everything.) With no dashboard to ask through (`aspire run`
 without one, CI) nothing can ask, so the step runs as before and the log says why.

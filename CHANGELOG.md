@@ -120,11 +120,9 @@ never existed. Check the tag of the last release before adding one.
   each one. To get the previous behaviour back, call `builder.SetCheckoutTiming(CheckoutTiming.Eager)`
   before the first `AddService()`.
 
-  Until a deferred service is ready, Start is refused with a message saying why ([#473]), from the
-  dashboard and `aspire resource <name> start` alike: while the clone or either dialog is pending,
-  and for a `Skipped` service, which has no checkout to run. The dashboard offers no Stop for these
-  states, where it used to offer one that failed with a raw DCP 404 ([#480]); a `Skipped` service
-  keeps a Start that explains how to get it going.
+  Until a deferred service is ready, `aspire resource <name> start` is refused with a message saying
+  why ([#473]); the dashboard disables Start while the clone or a dialog is pending, and keeps it
+  enabled on a `Skipped` service to show that message. See Fixed for the released part.
 
 - **A changed `prepare` command is confirmed in the dashboard before it re-runs** ([#298]). When
   the catalog's `prepare` command for a warm managed checkout is not the one that last succeeded
@@ -138,10 +136,16 @@ never existed. Check the tag of the last release before adding one.
   composition-time launch-profile fidelity; `SetCheckoutTiming(CheckoutTiming.Eager)`, `aspire
   publish` and kinds that cannot defer are unchanged.
 
-  While the dialog is open, Start is refused rather than running the service without the step you
-  were asked to approve, and so is Start after Skip ([#473]).
+  While the dialog is open, and after Skip, Start is refused rather than running the service
+  without the step you were asked to approve ([#473]).
 
 ### Fixed
+
+- **Start no longer runs a deferred service that is still checking out or preparing, and the dashboard
+  no longer offers a Stop that fails with a raw DCP 404** ([#473], [#480]). A Start sent while the
+  service showed `Checking out` or `Preparing` reported success and ran against a checkout that was
+  not ready; it is now refused with a message saying so, and the dashboard hides Stop and disables
+  Restart for those states, where Stop used to fail because nothing was running.
 
 - **`asJava`/`asJavaScript` inside an `addServiceCatalog` callback no longer hang a TypeScript
   AppHost** ([#463]). The first call made inside the nested callback never returned, and after 60s
