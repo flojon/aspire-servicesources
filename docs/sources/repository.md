@@ -842,9 +842,7 @@ first run, ServiceSources seeds it once from the main worktree's copy of the sam
   none. An existing file is never overwritten.
 - A cold `"repository"` checkout still clones from the catalog's URL, but borrows objects from the
   main worktree's checkout of the same repository, so only what that checkout lacks is downloaded.
-  The result is an ordinary, independent clone. On Windows, an AppHost path too long for the repack
-  that borrowing runs downloads the whole repository instead; see
-  [Long paths on Windows](../troubleshooting.md#long-paths-on-windows).
+  The result is an ordinary, independent clone.
 
 Seeding happens once, and `.servicesources/worktree-seed.json` records it. If the main worktree has neither file yet, nothing is recorded and the next run tries again. A file that is a symbolic link is not copied (a notice says so); copy its contents yourself. A copied file you delete
 stays deleted; delete the marker to seed again. `prepare` steps are not seeded, so they run on the

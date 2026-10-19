@@ -150,10 +150,9 @@ never existed. Check the tag of the last release before adding one.
   in another AppHost is never touched, and read-only files git leaves in `.git` no longer block the
   cleanup. git cannot write pack files past 259 characters on Windows whatever `core.longpaths` says,
   so an AppHost too deep for them is refused before cloning with a message naming the length and how
-  much shorter to go, instead of git's raw `unable to write file` error. A clone that would borrow
-  objects from the main worktree's checkout needs up to 16 more characters for the repack that
-  borrowing runs, so where those do not fit it clones without borrowing, with a line in the clone's
-  log, rather than failing and downloading twice. See
+  much shorter to go, instead of git's raw `unable to write file` error. The limit counts the
+  temporary pack a repack writes, so any checkout it allows can also borrow objects from the main
+  worktree's checkout and run `git gc --auto`. See
   [Troubleshooting](docs/troubleshooting.md#long-paths-on-windows).
 - **Two `"path"` services in one repository no longer race on a shared project's `bin/` and
   `obj/`** ([#397]). Aspire starts independent resources at once, so two services whose projects

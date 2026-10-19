@@ -32,32 +32,27 @@ Clones are staged in `.servicesources/checkouts/.incoming-<8 hex>` and renamed i
 directory left by a clone that was killed is removed the next time any clone starts in that folder,
 and the clone's progress log says so. You can also delete it by hand.
 
-### "git's pack files there need paths of N characters"
+### "git's pack files there, … need paths of N characters"
 
 ```
-Service 'orders': cannot clone into 'C:\\…\\.servicesources\\checkouts\\orders': git's pack files there
-need paths of 271 characters ('C:\\…\\.servicesources\\checkouts\\.incoming-00000000\\.git\\objects\\pack\\pack-0000…0000.pack'),
+Service 'orders': cannot clone into 'C:\\…\\.servicesources\\checkouts\\orders': git's pack files there,
+including the temporary ones a repack writes, need paths of 271 characters
+('C:\\…\\.servicesources\\checkouts\\.incoming-00000000\\.git\\objects\\pack\\.tmp-0000000000-pack-0000…0000.pack'),
 and Windows limits them to 259 even with core.longpaths or LongPathsEnabled. Move the repository or
 git worktree that holds the AppHost (the directory that holds '.servicesources') to a directory at
 least 12 characters shorter.
 ```
 
-git writes its pack files (`.git\objects\pack\pack-<40 hex>.pack`, 69 characters under the checkout)
-in a way that `core.longpaths` and `LongPathsEnabled` do not cover, so every clone into a directory
-that deep fails. The clone is first staged in `checkouts\.incoming-<8 hex>`, so the path in the
+git writes its pack files in a way that `core.longpaths` and `LongPathsEnabled` do not cover, so
+past 259 characters a clone fails. The longest is the temporary pack a repack writes,
+`.git\objects\pack\.tmp-<pid>-pack-<40 hex>.pack` (85 characters under the checkout, with a
+10-digit process id). Repacks run when a clone borrows objects from the main worktree's checkout and
+when `git gc --auto` maintains the checkout, so the check uses that length: any checkout it allows
+can also do both. The clone is first staged in `checkouts\.incoming-<8 hex>`, so the path in the
 message is whichever of that and `checkouts\<name>` is longer, with zeros standing in for the names
 git will pick. With checkouts at `<AppHost>\.servicesources\checkouts\<name>`, that is an AppHost
-directory longer than about 145 characters, or less for a checkout name over 18 characters. The check
+directory longer than about 129 characters, or less for a checkout name over 18 characters. The check
 runs before cloning, so nothing is downloaded.
-
-A repack needs up to 16 characters more than a plain pack, so a shorter limit applies below that
-one, to an AppHost directory longer than about 129 characters:
-
-- In a linked worktree, a clone that would borrow objects from the main worktree's checkout downloads
-  the whole repository instead, and its progress log says `Not borrowing objects from '…'`.
-- git's automatic maintenance (`git gc --auto`) cannot repack the checkout. Fetches still succeed,
-  but once enough packs pile up each one prints `unable to write file ….tmp-…pack` and leaves
-  temporary files in `.git\objects\pack`.
 
 Move the repository that holds the AppHost somewhere shorter, such as `C:\src\<repo>`. If it is a
 linked worktree (made with `git worktree add`), move it with `git worktree move <old> <new>` rather

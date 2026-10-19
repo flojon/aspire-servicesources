@@ -6,8 +6,7 @@ namespace Aspire.Hosting.ServiceSources.Tests.Git;
 
 public class PackPathLimitTests
 {
-    private const int PackSuffixLength = 69;
-    private const int RepackSuffixLength = 85;
+    private const int PackSuffixLength = 85;
 
     private static readonly int StagingNameLength = ".incoming-00000000".Length;
 
@@ -30,6 +29,7 @@ public class PackPathLimitTests
 
         Assert.Equal(100 + StagingNameLength + 1 + PackSuffixLength, longest.Length);
         Assert.EndsWith(".pack", longest, StringComparison.Ordinal);
+        Assert.Contains(@"\pack\.tmp-", longest, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -70,29 +70,5 @@ public class PackPathLimitTests
         var root = RootOfLength(400);
 
         PackPathLimit.EnsureFits(Label, root, Path.Combine(root, "orders"), isWindows: false);
-    }
-
-    [Fact]
-    public void RepackFits_AtTheLimit_IsTrue()
-    {
-        var root = RootOfLength(PackPathLimit.MaxLength - RepackSuffixLength - StagingNameLength - 1);
-
-        Assert.True(PackPathLimit.RepackFits(root, isWindows: true));
-    }
-
-    [Fact]
-    public void RepackFits_OneOverTheLimit_IsFalse()
-    {
-        var root = RootOfLength(PackPathLimit.MaxLength - RepackSuffixLength - StagingNameLength);
-
-        Assert.False(PackPathLimit.RepackFits(root, isWindows: true));
-    }
-
-    [Fact]
-    public void RepackFits_OffWindows_IsTrue()
-    {
-        var root = RootOfLength(400);
-
-        Assert.True(PackPathLimit.RepackFits(root, isWindows: false));
     }
 }
