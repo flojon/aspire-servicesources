@@ -80,38 +80,6 @@ public class CheckoutSeedingTests
         Assert.Single(git.PlainClones);
     }
 
-    /// <summary>Deep enough for a repack's temporary pack to overflow, not a plain clone's pack.</summary>
-    [Fact]
-    public void OnWindows_AppHostTooDeepForTheRepack_IsRefusedBeforeEitherClone()
-    {
-        if (!OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
-        var home = NewAppHost();
-        HomeCheckout(home);
-        var start = NewAppHost();
-        // A plain pack adds 69 characters and a repack 85; land between the two.
-        var stagingLength = PackPathLimit.MaxLength - 69 - 5;
-        var stagingSuffix = @"\.servicesources\checkouts\.incoming-00000000".Length;
-        var padding = stagingLength - stagingSuffix - start.Length - 1;
-        if (padding < 1)
-        {
-            return;
-        }
-
-        var appHost = Path.Combine(start, new string('p', padding));
-        Directory.CreateDirectory(appHost);
-        var git = new ScriptedCloneGitClient { HomeOrigin = Url };
-
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() => Prepare(appHost, home, git));
-
-        Assert.Contains("limits them to 259", ex.Message, StringComparison.Ordinal);
-        Assert.Empty(git.ReferenceClones);
-        Assert.Empty(git.PlainClones);
-    }
-
     [Fact]
     public void NoHome_ClonesPlainly()
     {

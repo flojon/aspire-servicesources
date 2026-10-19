@@ -18,7 +18,8 @@ internal static class PackPathLimit
     /// <summary>
     /// The temporary pack a repack writes, longer than any plain pack, <c>.idx</c>, <c>.rev</c> or
     /// <c>.keep</c>. Both <c>clone --dissociate</c> and <c>gc --auto</c> repack, so a checkout must fit
-    /// it to borrow objects and to be maintained. Ten digits is the widest a Windows process id can be.
+    /// it to borrow objects and to be maintained. Ten digits is the widest a Windows process id can be,
+    /// which also covers the two extra characters of a cruft pack's <c>.mtimes</c> for any real pid.
     /// </summary>
     private static readonly string LongestPackFile =
         @"\.git\objects\pack\.tmp-" + new string('0', 10) + "-pack-" + new string('0', 40) + ".pack";
