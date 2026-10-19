@@ -153,7 +153,7 @@ internal sealed class DeferredCheckout
         /// </summary>
         public bool CheckoutWasPresent { get; init; }
 
-        private volatile DeferredStage _stage;
+        private volatile DeferredStage _stage = DeferredStage.Pending;
 
         /// <summary>Where this service is on its way to being started by this package.</summary>
         public DeferredStage Stage
@@ -581,9 +581,9 @@ internal sealed class DeferredCheckout
             return Task.CompletedTask;
         }
 
-        // Nothing else repaints a terminal skip, so DCP's FailedToStart would hide it for the rest of the run.
         if (repaint && deferred.Stage is DeferredStage.DeclinedPrepare or DeferredStage.NotSelected)
         {
+            // Nothing else repaints a terminal skip, so DCP's FailedToStart would hide it for the rest of the run.
             _ = RepaintSkippedAsync(@event.Resource, @event.Services);
         }
 
@@ -668,11 +668,22 @@ internal sealed class DeferredCheckout
         // Children Aspire adds for itself, such as a project's hidden rebuilder, would otherwise
         // build the checkout before its prepare step was run or approved.
         builder.Eventing.Subscribe<BeforeResourceStartedEvent>((@event, _) =>
-            @event.Resource is IResourceWithParent { Parent: var parent }
-                && DeferredFor(@event.Resource) is null
-                && DeferredFor(parent) is { } deferred
+            DeferredFor(@event.Resource) is null && DeferredAncestor(@event.Resource) is { } deferred
                 ? RefuseUnreleasedStart(deferred, @event, repaint: false)
                 : Task.CompletedTask);
+    }
+
+    private Deferred? DeferredAncestor(IResource resource)
+    {
+        for (var current = resource; current is IResourceWithParent { Parent: var parent }; current = parent)
+        {
+            if (DeferredFor(parent) is { } deferred)
+            {
+                return deferred;
+            }
+        }
+
+        return null;
     }
 
     private Deferred? DeferredFor(IResource resource)
@@ -1784,7 +1795,7 @@ internal sealed class DeferredCheckout
                 ServiceSourcesLog.Error(
                     logger,
                     exception,
-                    $"{Raw.Cause(exception)} Start it again from the dashboard once the cause is fixed.");
+                    $"Start the failed resource again from the dashboard once the cause is fixed. {Raw.Cause(exception)}");
             }
             else
             {

@@ -1983,6 +1983,9 @@ public class DeferredCheckoutTests
         {
             await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(() =>
                 builder.Eventing.PublishAsync(new BeforeResourceStartedEvent(rebuilder, services)));
+            await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(() =>
+                builder.Eventing.PublishAsync(
+                    new BeforeResourceStartedEvent(new ChildResource("orders-nested", rebuilder), services)));
         }
         finally
         {
@@ -1990,6 +1993,11 @@ public class DeferredCheckoutTests
             services.GetRequiredService<IHostApplicationLifetime>().StopApplication();
             await TasksAsync(builder);
         }
+    }
+
+    private sealed class ChildResource(string name, IResource parent) : Resource(name), IResourceWithParent
+    {
+        public IResource Parent => parent;
     }
 
     [Fact]
