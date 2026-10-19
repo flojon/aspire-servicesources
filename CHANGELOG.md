@@ -135,8 +135,8 @@ never existed. Check the tag of the last release before adding one.
 ### Fixed
 
 - **Checkout progress lines show paths as written** ([#481]). `Resolving checkout of … into …` and
-  `Checkout ready at …`, and the saved-selection log lines, doubled every backslash in Windows paths;
-  they now read as the path on disk.
+  `Checkout ready at …` showed `C:\\Users\\…` for `C:\Users\…`, doubling every backslash in a Windows
+  path; they now read as the path on disk.
 
 - **`asJava`/`asJavaScript` inside an `addServiceCatalog` callback no longer hang a TypeScript
   AppHost** ([#463]). The first call made inside the nested callback never returned, and after 60s
