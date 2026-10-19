@@ -1,15 +1,15 @@
-using Aspire.Hosting.ServiceSources.Config;
-using Aspire.Hosting.ServiceSources.Config.Catalog;
 using Aspire.Hosting.ServiceSources.Git;
 using Aspire.Hosting.ServiceSources.Messages;
 using Xunit;
 
 namespace Aspire.Hosting.ServiceSources.Tests.Git;
 
-[Trait("IO", "true")]
 public class PackPathLimitTests
 {
     private const int PackSuffixLength = 69;
+    private const int RepackSuffixLength = 85;
+
+    private static readonly int StagingNameLength = ".incoming-00000000".Length;
 
     private static readonly Raw Label = Raw.Literal("Service 'orders'");
 
@@ -28,7 +28,7 @@ public class PackPathLimitTests
 
         var longest = PackPathLimit.LongestPackPath(root, Path.Combine(root, "orders"));
 
-        Assert.Equal(100 + ".incoming-00000000".Length + 1 + PackSuffixLength, longest.Length);
+        Assert.Equal(100 + StagingNameLength + 1 + PackSuffixLength, longest.Length);
         Assert.EndsWith(".pack", longest, StringComparison.Ordinal);
     }
 
@@ -44,7 +44,7 @@ public class PackPathLimitTests
     [Fact]
     public void EnsureFits_AtTheLimit_DoesNotThrow()
     {
-        var root = RootOfLength(PackPathLimit.MaxLength - PackSuffixLength - ".incoming-00000000".Length - 1);
+        var root = RootOfLength(PackPathLimit.MaxLength - PackSuffixLength - StagingNameLength - 1);
 
         PackPathLimit.EnsureFits(Label, root, Path.Combine(root, "orders"), isWindows: true);
     }
@@ -52,7 +52,7 @@ public class PackPathLimitTests
     [Fact]
     public void EnsureFits_OneOverTheLimit_ThrowsNamingTheLimitTheLengthAndTheFix()
     {
-        var root = RootOfLength(PackPathLimit.MaxLength - PackSuffixLength - ".incoming-00000000".Length);
+        var root = RootOfLength(PackPathLimit.MaxLength - PackSuffixLength - StagingNameLength);
 
         var ex = Assert.Throws<ServiceSourcesConfigurationException>(
             () => PackPathLimit.EnsureFits(Label, root, Path.Combine(root, "orders"), isWindows: true));
@@ -60,7 +60,7 @@ public class PackPathLimitTests
         Assert.Contains("Service 'orders'", ex.Message, StringComparison.Ordinal);
         Assert.Contains("paths of 260 characters", ex.Message, StringComparison.Ordinal);
         Assert.Contains("limits them to 259", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("Move the AppHost, or the git worktree it is in", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Move the AppHost (the directory that holds '.servicesources'), or the git worktree it is in", ex.Message, StringComparison.Ordinal);
         Assert.Contains("at least 1 characters shorter", ex.Message, StringComparison.Ordinal);
     }
 
@@ -72,54 +72,27 @@ public class PackPathLimitTests
         PackPathLimit.EnsureFits(Label, root, Path.Combine(root, "orders"), isWindows: false);
     }
 
-    /// <summary>The check sits in front of the clone, so git is never asked to fail on it.</summary>
     [Fact]
-    public void OnWindows_PrepareRepoRoot_TooDeepAppHost_RefusesBeforeCloning()
+    public void RepackFits_AtTheLimit_IsTrue()
     {
-        if (!OperatingSystem.IsWindows())
-        {
-            return;
-        }
+        var root = RootOfLength(PackPathLimit.MaxLength - RepackSuffixLength - StagingNameLength - 1);
 
-        var appHostDirectory = Path.Combine(
-            TempDirectories.CreateSubdirectory().FullName, new string('d', 100), new string('e', 100));
-        Directory.CreateDirectory(appHostDirectory);
-        var gitClient = new CloneRefusingGitClient();
-        var definition = new ServiceDefinition
-        {
-            Repository = new RepositoryDefinition { Url = "https://github.com/company/orders", CheckoutName = "orders" },
-            Project = "Orders.csproj",
-            Kind = LocalKinds.Dotnet,
-            Origin = CatalogOrigin.FromYaml("servicesources.yaml"),
-        };
-
-        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
-            LocalGitCheckout.PrepareRepoRoot(
-                "orders", definition, new ServiceDeveloperConfig { Source = "repository" }, repositoryConfig: null,
-                appHostDirectory, gitClient));
-
-        Assert.Contains("limits them to 259", ex.Message, StringComparison.Ordinal);
-        Assert.False(gitClient.CloneCalled);
+        Assert.True(PackPathLimit.RepackFits(root, Path.Combine(root, "orders"), isWindows: true));
     }
 
-    private sealed class CloneRefusingGitClient : IGitClient
+    [Fact]
+    public void RepackFits_OneOverTheLimit_IsFalse()
     {
-        public bool CloneCalled { get; private set; }
+        var root = RootOfLength(PackPathLimit.MaxLength - RepackSuffixLength - StagingNameLength);
 
-        public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null)
-        {
-            CloneCalled = true;
-            throw new InvalidOperationException("clone should not have been attempted");
-        }
+        Assert.False(PackPathLimit.RepackFits(root, Path.Combine(root, "orders"), isWindows: true));
+    }
 
-        public void Checkout(string repositoryPath, string reference) => throw new NotImplementedException();
+    [Fact]
+    public void RepackFits_OffWindows_IsTrue()
+    {
+        var root = RootOfLength(400);
 
-        public void Fetch(string repositoryPath) => throw new NotImplementedException();
-
-        public bool HasUncommittedChanges(string repositoryPath) => throw new NotImplementedException();
-
-        public bool IsRefCheckedOut(string repositoryPath, string reference) => throw new NotImplementedException();
-
-        public string? GetOriginUrl(string repositoryPath) => throw new NotImplementedException();
+        Assert.True(PackPathLimit.RepackFits(root, Path.Combine(root, "orders"), isWindows: false));
     }
 }

@@ -555,4 +555,18 @@ public class GitCliClientTests
 
         Assert.DoesNotContain("core.longpaths", LocalConfig(destination), StringComparison.Ordinal);
     }
+
+    /// <summary>An empty <c>.git</c> makes git discover the repository around it.</summary>
+    [Fact]
+    public void OnWindows_PersistLongPaths_BrokenCheckoutInsideAnotherRepository_LeavesThatRepositoryAlone()
+    {
+        var outer = TestRepository.CreateOrigin();
+        var checkout = Path.Combine(outer.Path, "checkouts", "orders");
+        Directory.CreateDirectory(Path.Combine(checkout, ".git"));
+
+        new GitCliClient(TestRepository.IsolatedEnvironment(), isWindows: true).PersistLongPaths(checkout);
+
+        Assert.DoesNotContain("core.longpaths", LocalConfig(outer.Path), StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(checkout, ".git", "config")));
+    }
 }

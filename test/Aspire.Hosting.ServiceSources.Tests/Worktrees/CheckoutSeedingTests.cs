@@ -80,6 +80,31 @@ public class CheckoutSeedingTests
         Assert.Single(git.PlainClones);
     }
 
+    /// <summary>Deep enough for a repack's temporary pack to overflow, not a plain clone's pack.</summary>
+    [Fact]
+    public void OnWindows_AppHostTooDeepForTheRepack_ClonesPlainly_AndSaysSo()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var home = NewAppHost();
+        HomeCheckout(home);
+        var start = NewAppHost();
+        var stagingSuffix = @"\.servicesources\checkouts\.incoming-00000000".Length;
+        var appHost = Path.Combine(start, new string('p', 185 - stagingSuffix - start.Length - 1));
+        Directory.CreateDirectory(appHost);
+        var sink = new RecordingProgressSink();
+        var git = new ScriptedCloneGitClient { HomeOrigin = Url };
+
+        Prepare(appHost, home, git, sink);
+
+        Assert.Empty(git.ReferenceClones);
+        Assert.Single(git.PlainClones);
+        Assert.Contains(sink.Lines, line => line.StartsWith("Not borrowing objects", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void NoHome_ClonesPlainly()
     {

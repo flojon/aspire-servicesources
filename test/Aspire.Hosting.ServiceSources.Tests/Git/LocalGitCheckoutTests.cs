@@ -231,14 +231,39 @@ public class LocalGitCheckoutTests
         Assert.Contains(progress.Lines, line => line.StartsWith("Removed 1 leftover clone staging directory", StringComparison.Ordinal));
     }
 
+    /// <summary>The check sits in front of the clone, so git is never asked to fail on it.</summary>
+    [Fact]
+    public void OnWindows_PrepareRepoRoot_TooDeepAppHost_RefusesBeforeCloning()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var appHostDirectory = Path.Combine(NewAppHostDirectory(), new string('d', 100), new string('e', 100));
+        Directory.CreateDirectory(appHostDirectory);
+        var gitClient = new RecordingGitClient();
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            LocalGitCheckout.PrepareRepoRoot("orders", OrdersDefinition(), Managed(), null, appHostDirectory, gitClient));
+
+        Assert.Contains("limits them to 259", ex.Message, StringComparison.Ordinal);
+        Assert.Empty(gitClient.Cloned);
+    }
+
     private sealed class RecordingGitClient : IGitClient
     {
         public List<string> LongPathsPersisted { get; } = [];
 
+        public List<string> Cloned { get; } = [];
+
         public string? OriginUrl { get; init; }
 
-        public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null) =>
+        public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null)
+        {
+            Cloned.Add(destinationPath);
             Directory.CreateDirectory(Path.Combine(destinationPath, ".git"));
+        }
 
         public void Checkout(string repositoryPath, string reference)
         {

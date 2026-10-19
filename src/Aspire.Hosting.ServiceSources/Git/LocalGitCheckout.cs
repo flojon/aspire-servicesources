@@ -531,6 +531,12 @@ internal static class LocalGitCheckout
         PackPathLimit.EnsureFits(label, checkoutsRoot, repoRoot, OperatingSystem.IsWindows());
 
         var referenceCheckout = TryReferenceCheckout(homeAppHostDirectory, definition, gitClient, progress);
+        if (referenceCheckout is not null && !PackPathLimit.RepackFits(checkoutsRoot, repoRoot, OperatingSystem.IsWindows()))
+        {
+            progress?.Report(Raw.Compose(
+                $"Not borrowing objects from '{Raw.Escaped(referenceCheckout)}': on Windows the checkout path is too long for the repack that borrowing needs; cloning without it.").ToString());
+            referenceCheckout = null;
+        }
         var scratch = ScratchDirectory.Create(checkoutsRoot);
 
         try

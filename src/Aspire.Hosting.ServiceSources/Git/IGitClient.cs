@@ -63,7 +63,7 @@ internal interface IGitClient
     /// <summary>
     /// On Windows, sets <c>core.longpaths=true</c> in the local config of the clone at
     /// <paramref name="repositoryPath"/> unless it already sets a value. Best effort: never throws
-    /// for a git failure. For checkouts cloned before clones carried the setting themselves.
+    /// for a git failure, and a missed write is retried on the next reconcile.
     /// </summary>
     /// <remarks>Defaulted to a no-op so test doubles need not implement it.</remarks>
     void PersistLongPaths(string repositoryPath)

@@ -36,16 +36,24 @@ and the clone's progress log says so. You can also delete it by hand.
 
 ```
 Service 'orders': cannot clone into 'C:\\…\\.servicesources\\checkouts\\orders': git's pack files there
-need paths of 271 characters ('C:\\…\\.git\\objects\\pack\\pack-0000…0000.pack'), and Windows limits them to
-259 even with core.longpaths or LongPathsEnabled. Move the AppHost, or the git worktree it is in, to a
-directory at least 12 characters shorter.
+need paths of 271 characters ('C:\\…\\.servicesources\\checkouts\\.incoming-00000000\\.git\\objects\\pack\\pack-0000…0000.pack'),
+and Windows limits them to 259 even with core.longpaths or LongPathsEnabled. Move the AppHost (the
+directory that holds '.servicesources'), or the git worktree it is in, to a directory at least 12
+characters shorter.
 ```
 
 git writes its pack files (`.git\objects\pack\pack-<40 hex>.pack`, 69 characters under the checkout)
 in a way that `core.longpaths` and `LongPathsEnabled` do not cover, so every clone into a directory
-that deep fails. With checkouts at `<AppHost>\.servicesources\checkouts\<name>`, that is an AppHost
-directory longer than about 145 characters. The check runs before cloning, so nothing is downloaded.
-Move the AppHost — or the git worktree it lives in — somewhere shorter, such as `C:\src\<repo>`.
+that deep fails. The clone is first staged in `checkouts\.incoming-<8 hex>`, so the path in the
+message is whichever of that and `checkouts\<name>` is longer, with zeros standing in for the names
+git will pick. With checkouts at `<AppHost>\.servicesources\checkouts\<name>`, that is an AppHost
+directory longer than about 145 characters, or less for a checkout name over 18 characters. The check
+runs before cloning, so nothing is downloaded.
+
+Move the AppHost somewhere shorter, such as `C:\src\<repo>`. If it is in a git worktree, move the
+worktree with `git worktree move <old> <new>` rather than by hand, which breaks the worktree's link.
+Or clone the repository somewhere short yourself and point the service at it with the `path` source
+(`"source": "path"` and `"path": { "path": "..." }` in `servicesources.local.json`).
 
 ## Getting the full exception detail
 

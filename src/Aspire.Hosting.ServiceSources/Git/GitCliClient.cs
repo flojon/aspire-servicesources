@@ -461,15 +461,17 @@ internal sealed partial class GitCliClient(
 
     public void PersistLongPaths(string repositoryPath)
     {
-        if (!IsWindows)
+        // --file rather than --local: a broken .git would let git discover, and write to, an enclosing repository.
+        var configPath = Path.Combine(repositoryPath, ".git", "config");
+        if (!IsWindows || !File.Exists(configPath))
         {
             return;
         }
 
         // Exit 1 means unset; an explicit value, even false, is the developer's to keep.
-        if (TryRun(repositoryPath, ["config", "--local", "--get", "core.longpaths"]).ExitCode == 1)
+        if (TryRun(repositoryPath, ["config", "--file", configPath, "--get", "core.longpaths"]).ExitCode == 1)
         {
-            TryRun(repositoryPath, ["config", "--local", "core.longpaths", "true"]);
+            TryRun(repositoryPath, ["config", "--file", configPath, "core.longpaths", "true"]);
         }
     }
 
