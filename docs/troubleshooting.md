@@ -34,7 +34,7 @@ has `core.longpaths=true` in its own git config, so plain `git status` and your 
 `core.longpaths` does not cover pack files: git writes `.git\objects\pack\pack-<hash>.pack` (69
 characters below the clone root) and fails if the whole path passes 259 characters, whatever
 `LongPathsEnabled` says. Because checkouts live under `<AppHost>\.servicesources\checkouts\<name>`,
-that means an AppHost directory of roughly 145 characters or more cannot clone at all. The error names
+that means an AppHost directory of more than about 145 characters cannot clone at all. The error names
 the length it needs and how many characters to remove; move the AppHost, or the worktree it is in,
 to a shorter path. Without this check git's own message is `unable to rename temporary '*.pack'
 file`.

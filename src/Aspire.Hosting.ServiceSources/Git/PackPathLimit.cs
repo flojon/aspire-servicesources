@@ -47,6 +47,6 @@ internal static class PackPathLimit
 
         var excess = required - MaxPathLength;
         throw ServiceSourcesConfigurationException.For(
-            $"{label}: cannot clone into '{Raw.Display(root)}'. git for Windows cannot write a pack file past {MaxPathLength} characters, whatever core.longpaths or LongPathsEnabled say, and this clone's longest path would be {required} characters ('{Raw.Display(longestRoot)}' plus {LongestPackSuffixLength} for '\\.git\\objects\\pack\\pack-<hash>.pack'). Move the AppHost, or the worktree it is in, to a path at least {excess} characters shorter.");
+            $"{label}: cannot clone into '{Raw.Display(root)}'. git for Windows cannot write a pack file past {MaxPathLength} characters, whatever core.longpaths or LongPathsEnabled say, and while staging, this clone's longest path would be {required} characters (under '{Raw.Display(longestRoot)}', plus {LongestPackSuffixLength} for '\\.git\\objects\\pack\\pack-<hash>.pack'). Move the AppHost, or the worktree it is in, to a path at least {excess} characters shorter.");
     }
 }
