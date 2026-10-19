@@ -180,4 +180,80 @@ public class LocalGitCheckoutTests
         Assert.Equal(beforePath, afterPath);
         Assert.Equal(Path.Combine(UnusedAppHostDirectory, ".servicesources", "checkouts", "orders"), afterPath);
     }
+
+    private static ServiceDefinition OrdersDefinition() => new()
+    {
+        Repository = new RepositoryDefinition { Url = "https://github.com/company/orders", CheckoutName = "orders" },
+        Project = "Orders.csproj",
+        Kind = LocalKinds.Dotnet,
+        Origin = CatalogOrigin.FromYaml("servicesources.yaml"),
+    };
+
+    [Fact]
+    public void ResolveRepoRoot_ExistingCheckout_BackfillsLongPaths()
+    {
+        var appHostDirectory = NewAppHostDirectory();
+        var repoRoot = LocalGitCheckout.ManagedRepoRoot(appHostDirectory, "orders");
+        Directory.CreateDirectory(Path.Combine(repoRoot, ".git"));
+        var gitClient = new RecordingGitClient();
+
+        LocalGitCheckout.ResolveRepoRoot("orders", OrdersDefinition(), Managed(), null, appHostDirectory, gitClient);
+
+        Assert.Equal([repoRoot], gitClient.LongPathsPersisted);
+    }
+
+    [Fact]
+    public void ResolveRepoRoot_ExistingCheckoutOfAnotherRepository_IsNotWrittenTo()
+    {
+        var appHostDirectory = NewAppHostDirectory();
+        Directory.CreateDirectory(Path.Combine(LocalGitCheckout.ManagedRepoRoot(appHostDirectory, "orders"), ".git"));
+        var gitClient = new RecordingGitClient { OriginUrl = "https://github.com/company/billing" };
+
+        Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            LocalGitCheckout.ResolveRepoRoot("orders", OrdersDefinition(), Managed(), null, appHostDirectory, gitClient));
+
+        Assert.Empty(gitClient.LongPathsPersisted);
+    }
+
+    [Fact]
+    public void PrepareRepoRoot_SweepRemovingALeftover_ReportsItToTheProgressSink()
+    {
+        var appHostDirectory = NewAppHostDirectory();
+        var checkoutsRoot = Path.GetDirectoryName(LocalGitCheckout.ManagedRepoRoot(appHostDirectory, "orders"))!;
+        var leftover = Path.Combine(checkoutsRoot, ".incoming-deadbeef");
+        Directory.CreateDirectory(leftover);
+        File.WriteAllText(leftover + ".lock", "");
+        var progress = new RecordingProgressSink();
+
+        LocalGitCheckout.PrepareRepoRoot(
+            "orders", OrdersDefinition(), Managed(), null, appHostDirectory, new RecordingGitClient(), progress);
+
+        Assert.Contains(progress.Lines, line => line.StartsWith("Removed 1 leftover clone staging directory", StringComparison.Ordinal));
+    }
+
+    private sealed class RecordingGitClient : IGitClient
+    {
+        public List<string> LongPathsPersisted { get; } = [];
+
+        public string? OriginUrl { get; init; }
+
+        public void Clone(string repositoryUrl, string destinationPath, IGitProgressSink? progress = null) =>
+            Directory.CreateDirectory(Path.Combine(destinationPath, ".git"));
+
+        public void Checkout(string repositoryPath, string reference)
+        {
+        }
+
+        public void Fetch(string repositoryPath)
+        {
+        }
+
+        public bool HasUncommittedChanges(string repositoryPath) => false;
+
+        public bool IsRefCheckedOut(string repositoryPath, string reference) => true;
+
+        public string? GetOriginUrl(string repositoryPath) => OriginUrl;
+
+        public void PersistLongPaths(string repositoryPath) => LongPathsPersisted.Add(repositoryPath);
+    }
 }

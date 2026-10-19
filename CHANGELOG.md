@@ -141,11 +141,16 @@ never existed. Check the tag of the last release before adding one.
   already did. C# AppHosts were not affected.
 
 - **A `"repository"` clone no longer fails on Windows for repositories with long paths, and its
-  leftovers no longer linger** ([#462]). git is now run with `core.longpaths=true` on Windows, the
+  leftovers no longer linger** ([#462], [#474]). git is now run with `core.longpaths=true` on
+  Windows, and each managed checkout keeps it in its own `.git/config`, so `git status` and IDEs work
+  there too; a checkout cloned earlier gets it on the next start unless it already sets a value. The
   staging directory is named `.incoming-<8 hex>` instead of embedding the service name and a
   32-character GUID, and a staging directory whose clone died is removed by the next clone in that
-  `checkouts` folder instead of after 24 hours. A clone still running in another AppHost is never
-  touched, and read-only files git leaves in `.git` no longer block the cleanup. See
+  `checkouts` folder instead of after 24 hours, with a line in the clone's log. A clone still running
+  in another AppHost is never touched, and read-only files git leaves in `.git` no longer block the
+  cleanup. git cannot write pack files past 259 characters on Windows whatever `core.longpaths` says,
+  so an AppHost too deep for them is refused before cloning with a message naming the length and how
+  much shorter to go, instead of git's raw `unable to write file` error. See
   [Troubleshooting](docs/troubleshooting.md#long-paths-on-windows).
 - **Two `"path"` services in one repository no longer race on a shared project's `bin/` and
   `obj/`** ([#397]). Aspire starts independent resources at once, so two services whose projects
@@ -2066,6 +2071,7 @@ Targets `net10.0`.
 [#449]: https://github.com/flojon/aspire-servicesources/issues/449
 [#462]: https://github.com/flojon/aspire-servicesources/issues/462
 [#463]: https://github.com/flojon/aspire-servicesources/issues/463
+[#474]: https://github.com/flojon/aspire-servicesources/issues/474
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

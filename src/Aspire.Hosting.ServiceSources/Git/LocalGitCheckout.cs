@@ -452,6 +452,8 @@ internal static class LocalGitCheckout
                 $"Service '{new Name(serviceName)}': checkout at '{Raw.Escaped(repoRoot)}' already contains a clone of '{Raw.Escaped(GitUrl.Redact(existingOrigin))}', which does not match the configured repository '{Raw.Escaped(GitUrl.Redact(definition.Repository.Url))}'. Remove the checkout directory or fix the configured repository URL.");
         }
 
+        gitClient.PersistLongPaths(repoRoot);
+
         if (reference is null)
         {
             return;
@@ -511,7 +513,7 @@ internal static class LocalGitCheckout
         var displayRepository = GitUrl.Redact(definition.Repository.Url);
 
         Directory.CreateDirectory(checkoutsRoot);
-        ScratchDirectory.SweepAbandoned(checkoutsRoot);
+        ScratchDirectory.SweepAbandoned(checkoutsRoot, line => progress?.Report(line));
 
         // Reached because ".git" is not a *directory*, which is not the same as "no repository":
         // ".git" is a file for a linked worktree ("git worktree add") and for a clone made with
@@ -525,6 +527,8 @@ internal static class LocalGitCheckout
             throw ServiceSourcesConfigurationException.For(
                 $"{label}: the checkout at '{Raw.Escaped(repoRoot)}' has a '.git' file rather than a '.git' directory, so it is a linked worktree or a clone made with --separate-git-dir rather than a checkout this tool cloned. Move it aside and re-run to have it cloned fresh, or point the service at it with the 'path' source — 'source': 'path' and 'path': {{ 'path': '...' }} in servicesources.local.json.");
         }
+
+        PackPathLimit.EnsureFits(label, checkoutsRoot, repoRoot, OperatingSystem.IsWindows());
 
         var referenceCheckout = TryReferenceCheckout(homeAppHostDirectory, definition, gitClient, progress);
         var scratch = ScratchDirectory.Create(checkoutsRoot);

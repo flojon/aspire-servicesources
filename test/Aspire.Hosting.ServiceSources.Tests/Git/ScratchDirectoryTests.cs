@@ -94,6 +94,52 @@ public class ScratchDirectoryTests
     }
 
     [Fact]
+    public void Sweep_RemovingDirectories_LogsOneLineCountingThem()
+    {
+        var root = NewRoot();
+        foreach (var name in new[] { ".incoming-deadbeef", ".incoming-0badf00d" })
+        {
+            var abandoned = Path.Combine(root, name);
+            Populate(abandoned);
+            File.WriteAllText(abandoned + ".lock", "");
+        }
+
+        var lines = new List<string>();
+        ScratchDirectory.SweepAbandoned(root, lines.Add);
+
+        var line = Assert.Single(lines);
+        Assert.StartsWith("Removed 2 leftover clone staging directories from '", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Sweep_RemovingOneDirectory_SaysDirectory()
+    {
+        var root = NewRoot();
+        var abandoned = Path.Combine(root, ".incoming-deadbeef");
+        Populate(abandoned);
+        File.WriteAllText(abandoned + ".lock", "");
+
+        var lines = new List<string>();
+        ScratchDirectory.SweepAbandoned(root, lines.Add);
+
+        Assert.StartsWith("Removed 1 leftover clone staging directory from '", Assert.Single(lines), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Sweep_RemovingNothing_LogsNothing()
+    {
+        var root = NewRoot();
+        using var live = ScratchDirectory.Create(root);
+        Populate(live.Path);
+        File.WriteAllText(Path.Combine(root, ".incoming-cafebabe.lock"), "");
+
+        var lines = new List<string>();
+        ScratchDirectory.SweepAbandoned(root, lines.Add);
+
+        Assert.Empty(lines);
+    }
+
+    [Fact]
     public void Sweep_UnmarkedDirectoryYoungerThanTheLegacyAge_IsKept()
     {
         var root = NewRoot();

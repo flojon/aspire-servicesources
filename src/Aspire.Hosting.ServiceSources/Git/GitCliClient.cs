@@ -138,9 +138,10 @@ internal sealed partial class GitCliClient(
         string[] progressOption = progress is null ? [] : ["--progress"];
 
         // "--" so a repository URL or a destination that begins with '-' is read as an argument
-        // rather than as an option.
+        // rather than as an option. PlatformOptions after "clone" are also written into the clone's
+        // own config, so git run there by anything else gets them too.
         RunRemoteCommand(
-            ["clone", .. progressOption, "--", repositoryUrl, destinationPath], GitUrl.Parse(repositoryUrl).Host, progress);
+            ["clone", .. progressOption, .. PlatformOptions(), "--", repositoryUrl, destinationPath], GitUrl.Parse(repositoryUrl).Host, progress);
     }
 
     public void CloneWithReference(
@@ -151,7 +152,7 @@ internal sealed partial class GitCliClient(
         // --reference-if-able: a reference that vanished since it was chosen clones normally instead of failing.
         // --dissociate: copies borrowed objects in, so a gc or deletion of the reference cannot corrupt this clone.
         RunRemoteCommand(
-            ["clone", .. progressOption, $"--reference-if-able={referenceRepository}", "--dissociate",
+            ["clone", .. progressOption, .. PlatformOptions(), $"--reference-if-able={referenceRepository}", "--dissociate",
                 "--", repositoryUrl, destinationPath],
             GitUrl.Parse(repositoryUrl).Host,
             progress,
@@ -454,7 +455,23 @@ internal sealed partial class GitCliClient(
     /// reaches easily once the checkout sits under an AppHost's own directory.
     /// </summary>
     private string[] PlatformOptions() =>
-        isWindows ?? OperatingSystem.IsWindows() ? ["-c", "core.longpaths=true"] : [];
+        IsWindows ? ["-c", "core.longpaths=true"] : [];
+
+    private bool IsWindows => isWindows ?? OperatingSystem.IsWindows();
+
+    public void PersistLongPaths(string repositoryPath)
+    {
+        if (!IsWindows)
+        {
+            return;
+        }
+
+        // Exit 1 means unset; an explicit value, even false, is the developer's to keep.
+        if (TryRun(repositoryPath, ["config", "--local", "--get", "core.longpaths"]).ExitCode == 1)
+        {
+            TryRun(repositoryPath, ["config", "--local", "core.longpaths", "true"]);
+        }
+    }
 
     /// <summary>
     /// Appends the environment-variable helper after whatever the developer has configured, so it

@@ -475,4 +475,84 @@ public class GitCliClientTests
 
         Assert.Contains("core.longpaths=true", File.ReadAllText(trace), StringComparison.Ordinal);
     }
+
+    private static string LocalConfig(string repository) =>
+        TestRepository.At(repository).Git("config", "--local", "--list");
+
+    /// <summary>A clone as one made before clones carried <c>core.longpaths</c>, on any OS.</summary>
+    private static string CloneWithoutLongPaths()
+    {
+        var destination = TestRepository.EmptyDestination();
+        new GitCliClient(TestRepository.IsolatedEnvironment(), isWindows: false)
+            .Clone(TestRepository.CreateOrigin().Path, destination);
+        return destination;
+    }
+
+    [Fact]
+    public void OnWindows_CloneWritesLongPathsIntoTheClonesOwnConfig()
+    {
+        var destination = TestRepository.EmptyDestination();
+
+        new GitCliClient(TestRepository.IsolatedEnvironment(), isWindows: true)
+            .Clone(TestRepository.CreateOrigin().Path, destination);
+
+        Assert.Contains("core.longpaths=true", LocalConfig(destination), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OnWindows_CloneWithReferenceWritesLongPathsIntoTheClonesOwnConfig()
+    {
+        var origin = TestRepository.CreateOrigin();
+        var reference = TestRepository.EmptyDestination("reference");
+        Client().Clone(origin.Path, reference);
+        var destination = TestRepository.EmptyDestination();
+
+        new GitCliClient(TestRepository.IsolatedEnvironment(), isWindows: true)
+            .CloneWithReference(origin.Path, destination, reference);
+
+        Assert.Contains("core.longpaths=true", LocalConfig(destination), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OffWindows_CloneLeavesLongPathsOutOfTheClonesConfig()
+    {
+        var destination = TestRepository.EmptyDestination();
+
+        new GitCliClient(TestRepository.IsolatedEnvironment(), isWindows: false)
+            .Clone(TestRepository.CreateOrigin().Path, destination);
+
+        Assert.DoesNotContain("core.longpaths", LocalConfig(destination), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OnWindows_PersistLongPaths_BackfillsACloneMissingIt()
+    {
+        var destination = CloneWithoutLongPaths();
+
+        new GitCliClient(TestRepository.IsolatedEnvironment(), isWindows: true).PersistLongPaths(destination);
+
+        Assert.Contains("core.longpaths=true", LocalConfig(destination), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OnWindows_PersistLongPaths_KeepsAValueTheDeveloperSet()
+    {
+        var destination = CloneWithoutLongPaths();
+        TestRepository.At(destination).Git("config", "--local", "core.longpaths", "false");
+
+        new GitCliClient(TestRepository.IsolatedEnvironment(), isWindows: true).PersistLongPaths(destination);
+
+        Assert.Contains("core.longpaths=false", LocalConfig(destination), StringComparison.Ordinal);
+        Assert.DoesNotContain("core.longpaths=true", LocalConfig(destination), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OffWindows_PersistLongPaths_DoesNothing()
+    {
+        var destination = CloneWithoutLongPaths();
+
+        new GitCliClient(TestRepository.IsolatedEnvironment(), isWindows: false).PersistLongPaths(destination);
+
+        Assert.DoesNotContain("core.longpaths", LocalConfig(destination), StringComparison.Ordinal);
+    }
 }

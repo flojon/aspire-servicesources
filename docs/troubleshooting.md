@@ -21,12 +21,31 @@ SERVICESOURCES_GIT_HOST environment variables.
 
 ## Long paths on Windows
 
-On Windows, git is run with `core.longpaths=true`, so a repository with deeply nested files can be
-cloned and checked out under the AppHost's directory. Windows itself must still allow long paths for
-the tools that later read those files (`LongPathsEnabled`), and a shorter AppHost location helps
-either way. Clones are staged in `.servicesources/checkouts/.incoming-<8 hex>` and renamed into
-place; a staging directory left by a clone that was killed is removed the next time any clone starts
-in that folder, so you can also delete it by hand.
+On Windows, git is run with `core.longpaths=true`, and each managed checkout has it in its own
+`.git/config` too, so a repository with deeply nested files can be cloned and checked out under the
+AppHost's directory, and a plain `git status` or an IDE works in it. A checkout cloned by an earlier
+version gets the setting the next time the AppHost starts, unless its config already sets
+`core.longpaths` either way. Windows itself must still allow long paths for the tools that later read
+those files (`LongPathsEnabled`), and a shorter AppHost location helps either way.
+
+Clones are staged in `.servicesources/checkouts/.incoming-<8 hex>` and renamed into place; a staging
+directory left by a clone that was killed is removed the next time any clone starts in that folder,
+and the clone's progress log says so. You can also delete it by hand.
+
+### "git's pack files there need paths of N characters"
+
+```
+Service 'orders': cannot clone into 'C:\\…\\.servicesources\\checkouts\\orders': git's pack files there
+need paths of 271 characters ('C:\\…\\.git\\objects\\pack\\pack-0000…0000.pack'), and Windows limits them to
+259 even with core.longpaths or LongPathsEnabled. Move the AppHost, or the git worktree it is in, to a
+directory at least 12 characters shorter.
+```
+
+git writes its pack files (`.git\objects\pack\pack-<40 hex>.pack`, 69 characters under the checkout)
+in a way that `core.longpaths` and `LongPathsEnabled` do not cover, so every clone into a directory
+that deep fails. With checkouts at `<AppHost>\.servicesources\checkouts\<name>`, that is an AppHost
+directory longer than about 145 characters. The check runs before cloning, so nothing is downloaded.
+Move the AppHost — or the git worktree it lives in — somewhere shorter, such as `C:\src\<repo>`.
 
 ## Getting the full exception detail
 

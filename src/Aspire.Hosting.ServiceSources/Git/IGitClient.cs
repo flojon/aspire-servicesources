@@ -61,6 +61,16 @@ internal interface IGitClient
     void Fetch(string repositoryPath);
 
     /// <summary>
+    /// On Windows, sets <c>core.longpaths=true</c> in the local config of the clone at
+    /// <paramref name="repositoryPath"/> unless it already sets a value. Best effort: never throws
+    /// for a git failure. For checkouts cloned before clones carried the setting themselves.
+    /// </summary>
+    /// <remarks>Defaulted to a no-op so test doubles need not implement it.</remarks>
+    void PersistLongPaths(string repositoryPath)
+    {
+    }
+
+    /// <summary>
     /// Returns <see langword="true"/> if the working tree at <paramref name="repositoryPath"/>
     /// has any uncommitted modification (staged or unstaged) to a tracked file. Untracked files
     /// (e.g. build output) do not count.

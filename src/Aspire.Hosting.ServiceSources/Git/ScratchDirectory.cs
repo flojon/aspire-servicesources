@@ -1,3 +1,5 @@
+using Aspire.Hosting.ServiceSources.Messages;
+
 namespace Aspire.Hosting.ServiceSources.Git;
 
 /// <summary>
@@ -25,6 +27,7 @@ internal sealed class ScratchDirectory : IDisposable
 
     private const string Prefix = ".incoming-";
     private const string LockSuffix = ".lock";
+    private const int IdLength = 8;
 
     private FileStream? _lock;
 
@@ -43,7 +46,7 @@ internal sealed class ScratchDirectory : IDisposable
     /// <param name="nextId">Source of the 8-character name suffix; replaceable to force collisions.</param>
     public static ScratchDirectory Create(string checkoutsRoot, Func<string>? nextId = null)
     {
-        nextId ??= () => Guid.NewGuid().ToString("N")[..8];
+        nextId ??= () => Guid.NewGuid().ToString("N")[..IdLength];
 
         // Creating the lock with CreateNew is the atomic claim, so two clones can never pick one name.
         while (true)
@@ -68,11 +71,19 @@ internal sealed class ScratchDirectory : IDisposable
     }
 
     /// <summary>
+    /// A path as long as any <see cref="Create"/> could return under <paramref name="checkoutsRoot"/>.
+    /// </summary>
+    public static string PlaceholderPath(string checkoutsRoot) =>
+        System.IO.Path.Combine(checkoutsRoot, Prefix + new string('0', IdLength));
+
+    /// <summary>
     /// Removes staging directories whose owner is gone. Best effort: failing to sweep must never fail
     /// resolution.
     /// </summary>
-    public static void SweepAbandoned(string checkoutsRoot)
+    /// <param name="log">Receives one line when a directory was removed, and nothing otherwise.</param>
+    public static void SweepAbandoned(string checkoutsRoot, Action<string>? log = null)
     {
+        var removed = 0;
         try
         {
             foreach (var orphan in Directory.EnumerateFiles(checkoutsRoot, Prefix + "*" + LockSuffix))
@@ -87,7 +98,10 @@ internal sealed class ScratchDirectory : IDisposable
             {
                 try
                 {
-                    SweepOne(directory);
+                    if (SweepOne(directory))
+                    {
+                        removed++;
+                    }
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
@@ -98,6 +112,13 @@ internal sealed class ScratchDirectory : IDisposable
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // The enumeration itself failed, so there is nothing we can sweep.
+        }
+
+        if (removed > 0)
+        {
+            var noun = removed == 1 ? Raw.Literal("directory") : Raw.Literal("directories");
+            log?.Invoke(Raw.Compose(
+                $"Removed {removed} leftover clone staging {noun} from '{Raw.Escaped(checkoutsRoot)}'.").ToString());
         }
     }
 
@@ -118,7 +139,8 @@ internal sealed class ScratchDirectory : IDisposable
         }
     }
 
-    private static void SweepOne(string directory)
+    /// <returns>Whether the directory was removed.</returns>
+    private static bool SweepOne(string directory)
     {
         var lockPath = directory + LockSuffix;
         if (!File.Exists(lockPath))
@@ -126,9 +148,10 @@ internal sealed class ScratchDirectory : IDisposable
             if (DateTime.UtcNow - Directory.GetLastWriteTimeUtc(directory) >= UnmarkedAbandonedAge)
             {
                 DeleteTree(directory);
+                return true;
             }
 
-            return;
+            return false;
         }
 
         FileStream stale;
@@ -139,7 +162,7 @@ internal sealed class ScratchDirectory : IDisposable
         catch (IOException)
         {
             // Another process holds it: a live clone.
-            return;
+            return false;
         }
 
         using (stale)
@@ -147,7 +170,8 @@ internal sealed class ScratchDirectory : IDisposable
             DeleteTree(directory);
         }
 
-        File.Delete(lockPath);
+        TryDeleteLockFile(lockPath);
+        return true;
     }
 
     public void Dispose()
