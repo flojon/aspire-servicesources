@@ -505,6 +505,206 @@ public class PrepareDeferredTests
         Assert.Contains("next AppHost start", refusal.Message, StringComparison.Ordinal);
     }
 
+    private static Task<ServiceSourcesConfigurationException> StartIsRefusedAsync(
+        IDistributedApplicationBuilder builder, IServiceProvider services, IResource resource) =>
+        Assert.ThrowsAsync<ServiceSourcesConfigurationException>(() =>
+            builder.Eventing.PublishAsync(new BeforeResourceStartedEvent(resource, services)));
+
+    /// <remarks>
+    /// A Start sent while the clone is still running would run the service against a checkout that
+    /// is not on disk yet.
+    /// </remarks>
+    [Fact]
+    public async Task WhileCheckingOut_AStartIsRefused()
+    {
+        var dir = CreateAppHostDirectory("routing");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+
+        var journal = new Journal();
+        builder.AddLocalKind(KindName, new StandInKind(journal, "prepare.sh"));
+
+        var git = new FakeGitClient();
+        var clone = git.BlockFor("https://example.com/routing.git");
+        new LocalProjectSource(git, new FakeRunner(journal))
+            .Resolve(builder, "routing", Definition("routing", Prepare()), DevConfig());
+
+        var routing = Assert.Single(builder.Resources, r => r.Name == "routing");
+
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+        await PublishNotStartedAsync(services, routing);
+
+        try
+        {
+            var refusal = await StartIsRefusedAsync(builder, services, routing);
+            Assert.Contains("checkout is not ready yet", refusal.Message, StringComparison.Ordinal);
+            Assert.Empty(journal.Entries);
+        }
+        finally
+        {
+            clone.Set();
+            await StartTasksAsync(builder);
+        }
+    }
+
+    /// <remarks>
+    /// The consent gate: a Start while the dialog is open would run the service without the step it
+    /// is asking about, and a later "Run" would prepare a service that is already running.
+    /// </remarks>
+    [Fact]
+    public async Task ChangedCommand_WhileAwaitingConfirmation_AStartIsRefused()
+    {
+        var interaction = new FakeInteractionService { IsAvailable = true };
+        var time = new ManualTimeProvider();
+
+        var (runner, services, builder) = await StartWithChangedCommandAsync(interaction, time);
+        var tasks = StartTasksAsync(builder);
+        var routing = Assert.Single(builder.Resources, r => r.Name == "routing");
+
+        await interaction.WaitForConfirmAsync().WaitAsync(TimeSpan.FromSeconds(30));
+
+        var refusal = await StartIsRefusedAsync(builder, services, routing);
+        Assert.Contains("Run changed prepare command?", refusal.Message, StringComparison.Ordinal);
+        Assert.Equal(0, runner.Runs);
+
+        time.Advance(DeferredCheckout.PromptTimeout + TimeSpan.FromSeconds(1));
+        await tasks;
+    }
+
+    [Fact]
+    public async Task ChangedCommand_Declined_RefusesALaterStart()
+    {
+        var interaction = new FakeInteractionService { IsAvailable = true, Confirm = () => InteractionResult.Ok(false) };
+
+        var (runner, services, builder) = await StartWithChangedCommandAsync(interaction);
+        await StartTasksAsync(builder);
+        await AssertDeclinedAsync(runner, services, builder);
+
+        var routing = Assert.Single(builder.Resources, r => r.Name == "routing");
+        var refusal = await StartIsRefusedAsync(builder, services, routing);
+
+        Assert.Contains("was not approved", refusal.Message, StringComparison.Ordinal);
+        Assert.Contains("next AppHost start", refusal.Message, StringComparison.Ordinal);
+        Assert.Equal(0, runner.Runs);
+    }
+
+    /// <remarks>
+    /// Left unchecked in the source pick, the service has no checkout, and DCP fails a Start with an
+    /// invalid working directory after reporting it started.
+    /// </remarks>
+    [Fact]
+    public async Task NotSelectedInTheSourcePick_AStartIsRefused()
+    {
+        var dir = CreateAppHostDirectory("routing");
+        var tool = Directory.CreateDirectory(Path.Combine(dir, ".servicesources")).FullName;
+        File.WriteAllText(
+            Path.Combine(tool, "selection.json"),
+            """{ "version": 1, "services": { "routing": { "start": false } } }""");
+
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+
+        var journal = new Journal();
+        builder.AddLocalKind(KindName, new StandInKind(journal, "prepare.sh"));
+
+        var git = new FakeGitClient();
+        new LocalProjectSource(git, new FakeRunner(journal))
+            .Resolve(builder, "routing", Definition("routing", Prepare()), DevConfig());
+
+        var routing = Assert.Single(builder.Resources, r => r.Name == "routing");
+
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+        await PublishNotStartedAsync(services, routing);
+        await StartTasksAsync(builder);
+
+        var refusal = await StartIsRefusedAsync(builder, services, routing);
+
+        Assert.Contains("not selected", refusal.Message, StringComparison.Ordinal);
+        Assert.Contains("selection.json", refusal.Message, StringComparison.Ordinal);
+        Assert.Empty(git.Cloned);
+    }
+
+    /// <remarks>
+    /// This package's own start goes through the same event as the developer's, so the refusal must
+    /// let it through — and a Stop then Start afterwards is the developer's to make.
+    /// </remarks>
+    [Fact]
+    public async Task OnceReleased_ThePackagesOwnStartAndALaterStartGetThrough()
+    {
+        var dir = CreateAppHostDirectory("routing");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+
+        var journal = new Journal();
+        builder.AddLocalKind(KindName, new StandInKind(journal, "prepare.sh", withHelper: true));
+
+        var runner = new FakeRunner(journal);
+        new LocalProjectSource(new FakeGitClient(), runner)
+            .Resolve(builder, "routing", Definition("routing", Prepare()), DevConfig());
+
+        var withheld = builder.Resources
+            .Where(r => r.Annotations.OfType<ExplicitStartupAnnotation>().Any())
+            .ToArray();
+        Assert.Equal(2, withheld.Length);
+
+        IServiceProvider? services = null;
+        var refused = new List<Exception>();
+        var starts = 0;
+
+        // Stands in for DCP, which raises BeforeResourceStartedEvent for every start it is asked for.
+        foreach (var resource in withheld)
+        {
+            Aspire.Hosting.ResourceBuilderExtensions.WithCommand(
+                builder.CreateResourceBuilder(resource),
+                KnownResourceCommands.StartCommand,
+                "Start",
+                async _ =>
+                {
+                    try
+                    {
+                        await builder.Eventing.PublishAsync(new BeforeResourceStartedEvent(resource, services!));
+                    }
+                    catch (Exception ex)
+                    {
+                        lock (refused)
+                        {
+                            refused.Add(ex);
+                        }
+
+                        return new ExecuteCommandResult { Success = false, Message = ex.Message };
+                    }
+
+                    Interlocked.Increment(ref starts);
+                    return new ExecuteCommandResult { Success = true };
+                },
+                new CommandOptions());
+        }
+
+        services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+
+        foreach (var resource in withheld)
+        {
+            await PublishNotStartedAsync(services, resource);
+        }
+
+        await StartTasksAsync(builder);
+
+        Assert.Empty(refused);
+        Assert.Equal(2, starts);
+        Assert.Equal(1, runner.Runs);
+
+        foreach (var resource in withheld)
+        {
+            await builder.Eventing.PublishAsync(new BeforeResourceStartedEvent(resource, services));
+        }
+    }
+
     /// <remarks>
     /// A failed deferred step is not confined to the dashboard:<c>ServiceStartupFailureNotices</c>
     /// reads resource <em>state</em> rather than any one failure path, so it already covers this one.

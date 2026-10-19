@@ -104,7 +104,8 @@ never existed. Check the tag of the last release before adding one.
   ones to clone and start** ([#271]). In run mode, once the AppHost starts, one dialog lists the
   services whose managed clone does not exist yet, all checked. Checked services are cloned and
   started as before; unchecked ones are not cloned (unless a service sharing the repository is
-  picked) and show a `Skipped` state. The answer is
+  picked) and show a `Skipped` state; a Start from the dashboard or CLI is refused for them, with a
+  message saying how to pick them again. The answer is
   remembered in `.servicesources/selection.json` (git-ignored), so the next run asks only about
   services it has no entry for; delete the file, or one service's entry, to be asked again. Nothing
   here fails to build, but a service that used to start unattended now waits for the answer.
@@ -125,7 +126,9 @@ never existed. Check the tag of the last release before adding one.
   there, the dashboard now shows the command and asks before running it; a first use, a moved
   commit and `always` mode still run unprompted. Only an explicit "Run"
   runs the step: closing the dialog, no answer within 5 minutes or a dialog that cannot be shown
-  declines, and the service shows `Skipped` (restart the AppHost to be asked again). That
+  declines, and the service shows `Skipped` (restart the AppHost to be asked again). A Start from
+  the dashboard or CLI is refused while the dialog is open and after it declines, so the service
+  never runs without the step. That
   deliberately differs from the cold-checkout source pick, which starts on timeout, because this is
   a consent gate on changed catalog code. With no dashboard the step runs unprompted and the log says
   why. Cost: the one run that needs asking is deferred even though the checkout is warm, so it loses
@@ -133,6 +136,12 @@ never existed. Check the tag of the last release before adding one.
   publish` and kinds that cannot defer are unchanged.
 
 ### Fixed
+
+- **A deferred service can no longer be started from the dashboard or CLI before its checkout and
+  `prepare` step are done** ([#473]). A Start sent while the service was `Checking out` or
+  `Preparing`, or after either had failed, launched it against a checkout that was missing or not
+  yet prepared. It is now refused with a message saying why and what happens next; the service
+  still starts on its own once both are done.
 
 - **`asJava`/`asJavaScript` inside an `addServiceCatalog` callback no longer hang a TypeScript
   AppHost** ([#463]). The first call made inside the nested callback never returned, and after 60s
@@ -2066,6 +2075,7 @@ Targets `net10.0`.
 [#449]: https://github.com/flojon/aspire-servicesources/issues/449
 [#462]: https://github.com/flojon/aspire-servicesources/issues/462
 [#463]: https://github.com/flojon/aspire-servicesources/issues/463
+[#473]: https://github.com/flojon/aspire-servicesources/issues/473
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
