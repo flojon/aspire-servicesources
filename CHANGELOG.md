@@ -134,6 +134,10 @@ never existed. Check the tag of the last release before adding one.
 
 ### Fixed
 
+- **Checkout progress lines show paths as written** ([#481]). `Resolving checkout of … into …` and
+  `Checkout ready at …`, and the saved-selection log lines, doubled every backslash in Windows paths;
+  they now read as the path on disk.
+
 - **`asJava`/`asJavaScript` inside an `addServiceCatalog` callback no longer hang a TypeScript
   AppHost** ([#463]). The first call made inside the nested callback never returned, and after 60s
   both callbacks timed out with `Callback 'callback_2_…' timed out after 60s` and the AppHost
@@ -2071,3 +2075,4 @@ Targets `net10.0`.
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
 [#397]: https://github.com/flojon/aspire-servicesources/issues/397
 [#298]: https://github.com/flojon/aspire-servicesources/issues/298
+[#481]: https://github.com/flojon/aspire-servicesources/issues/481

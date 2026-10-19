@@ -2530,6 +2530,22 @@ public class DeferredCheckoutTests
     }
 
     [Fact]
+    public async Task Deferred_ColdRun_ProgressLinesShowPathsAsWritten()
+    {
+        var (services, real, _) = await RunColdAsync(new(), new FakeGitClient());
+
+        var lines = await ReadLogUntilAsync(services, real, "Checkout ready");
+
+        var checkoutDir = Path.Combine(".servicesources", "checkouts", "orders");
+        foreach (var marker in new[] { "Resolving checkout of", "Checkout ready at" })
+        {
+            var line = Assert.Single(lines, l => l.Contains(marker, StringComparison.Ordinal));
+            Assert.Contains(checkoutDir, line, StringComparison.Ordinal);
+            Assert.DoesNotContain(@"\\", line, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public void Deferred_NamedProfile_WarmCheckout_ResolvesEagerlyWithTheRealProfile()
     {
         var dir = CreateAppHostDirectory("orders");
