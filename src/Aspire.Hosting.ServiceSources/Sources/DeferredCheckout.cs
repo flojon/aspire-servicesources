@@ -1851,8 +1851,8 @@ internal static class StartGates
                 + $"AppHost start."),
             DeferredCheckout.StartGate.DeclinedPrepare =>
                 Raw.Compose($"Service '{name}' was not started: its changed prepare command was not approved, and starting "
-                + $"it without the prepare would run it against an unprepared checkout. It is started on the "
-                + $"next AppHost start, which asks again."),
+                + $"it without the prepare would run it against an unprepared checkout. It asks again on the "
+                + $"next AppHost start."),
             DeferredCheckout.StartGate.NotSelected =>
                 Raw.Compose($"Service '{name}' was not started: it was not selected to be checked out, so "
                 + $"it has no checkout this run. Delete its entry in "

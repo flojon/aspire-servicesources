@@ -122,7 +122,7 @@ never existed. Check the tag of the last release before adding one.
 
   Until a deferred service is ready, `aspire resource <name> start` is refused with a message saying
   why ([#473]); the dashboard disables Start while the clone or a dialog is pending, and keeps it
-  enabled on a `Skipped` service to show that message. See Fixed for the released part.
+  enabled on a `Skipped` service to show that message.
 
 - **A changed `prepare` command is confirmed in the dashboard before it re-runs** ([#298]). When
   the catalog's `prepare` command for a warm managed checkout is not the one that last succeeded
@@ -145,7 +145,8 @@ never existed. Check the tag of the last release before adding one.
   no longer offers a Stop that fails with a raw DCP 404** ([#473], [#480]). A Start sent while the
   service showed `Checking out` or `Preparing` reported success and ran against a checkout that was
   not ready; it is now refused with a message saying so, and the dashboard hides Stop and disables
-  Restart for those states, where Stop used to fail because nothing was running.
+  Restart for those states, and for the other pre-start states, where Stop used to fail because nothing was
+  running.
 
 - **`asJava`/`asJavaScript` inside an `addServiceCatalog` callback no longer hang a TypeScript
   AppHost** ([#463]). The first call made inside the nested callback never returned, and after 60s

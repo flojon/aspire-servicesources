@@ -985,6 +985,38 @@ public class PrepareDeferredTests
     }
 
     [Fact]
+    public async Task GatingCommandsTwice_WrapsEachOnceAndPicksUpLateOnes()
+    {
+        var interaction = new FakeInteractionService { IsAvailable = true, Confirm = () => InteractionResult.Ok(false) };
+        var (_, _, builder) = await StartWithChangedCommandAsync(interaction);
+        await StartTasksAsync(builder);
+
+        var routing = Assert.Single(builder.Resources, r => r.Name == "routing");
+        var deferred = Assert.Single(DeferredCheckout.For(builder).Snapshot());
+        var before = routing.Annotations.OfType<ResourceCommandAnnotation>().ToList();
+
+        deferred.GateLifecycleCommands();
+        Assert.Equal(before, routing.Annotations.OfType<ResourceCommandAnnotation>().ToList());
+
+        routing.Annotations.Add(new ResourceCommandAnnotation(
+            KnownResourceCommands.StartCommand, "late", _ => ResourceCommandState.Enabled,
+            _ => Task.FromResult(new ExecuteCommandResult { Success = true }),
+            null, null, null, null, null, false));
+        deferred.GateLifecycleCommands();
+
+        var starts = routing.Annotations.OfType<ResourceCommandAnnotation>()
+            .Where(a => a.Name == KnownResourceCommands.StartCommand).ToList();
+        Assert.Equal(2, starts.Count);
+        Assert.All(starts, a => Assert.Equal(
+            ResourceCommandState.Enabled,
+            a.UpdateState(new UpdateCommandStateContext
+            {
+                ResourceSnapshot = new CustomResourceSnapshot { ResourceType = "Executable", Properties = [] },
+                Services = builder.Services.BuildServiceProvider(),
+            })));
+    }
+
+    [Fact]
     public async Task ChangedCommand_Confirmed_LeavesTheDashboardsOwnCommandStates()
     {
         var interaction = new FakeInteractionService { IsAvailable = true, Confirm = () => InteractionResult.Ok(true) };
