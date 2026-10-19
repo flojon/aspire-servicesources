@@ -958,7 +958,9 @@ public class DeferredCheckoutTests
         var refusal = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(() =>
             builder.Eventing.PublishAsync(new BeforeResourceStartedEvent(RealResource(builder, "orders"), services)));
 
-        Assert.Contains("selection.json", refusal.Message, StringComparison.Ordinal);
+        // Rendered as written: an escaped path doubles its backslashes on Windows.
+        Assert.Contains(Path.Combine(".servicesources", "selection.json"), refusal.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(@"\\", refusal.Message, StringComparison.Ordinal);
         Assert.Contains("restart the AppHost", refusal.Message, StringComparison.Ordinal);
 
         Assert.Equal(ResourceCommandState.Enabled, CommandStateOf(RealResource(builder, "orders"), KnownResourceCommands.StartCommand, services));

@@ -1856,7 +1856,7 @@ internal static class StartGates
             DeferredCheckout.StartGate.NotSelected =>
                 Raw.Compose($"Service '{name}' was not started: it was not selected to be checked out, so "
                 + $"it has no checkout this run. Delete its entry in "
-                + $"{Raw.Escaped(Path.Combine(ToolDirectory.Name, SourceSelectionStore.FileName))} and restart the "
+                + $"{Raw.Display(Path.Combine(ToolDirectory.Name, SourceSelectionStore.FileName))} and restart the "
                 + $"AppHost to be asked again."),
             _ => null,
         };
