@@ -1731,10 +1731,14 @@ internal static class InteractivePrompts
             return forced;
         }
 
-        // Providers set CI to "true", "1" or "True" alike, so anything but empty or an explicit false is CI.
-        var ci = Read(configuration, "CI");
-        return string.IsNullOrWhiteSpace(ci) || Parse(ci) is false;
+        return !CiVariables.Any(name => IsSet(Read(configuration, name)));
     }
+
+    // Azure Pipelines and Jenkins document no CI variable; JENKINS_URL is a URL, so only emptiness counts.
+    private static readonly string[] CiVariables = ["CI", "TF_BUILD", "JENKINS_URL"];
+
+    // Providers set these to "true", "1" or "True" alike, so anything but empty or an explicit false counts.
+    private static bool IsSet(string? value) => !string.IsNullOrWhiteSpace(value) && Parse(value) is not false;
 
     private static string? Read(IConfiguration? configuration, string key) =>
         configuration is not null ? configuration[key] : Environment.GetEnvironmentVariable(key);

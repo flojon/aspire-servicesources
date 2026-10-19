@@ -1797,11 +1797,28 @@ public class DeferredCheckoutTests
     [InlineData(null, "1", false)]
     public async Task Prompt_IsSkippedInCiUnlessForced(string? forced, string? ci, bool asked)
     {
+        await AssertPromptAsync(forced, "CI", ci, asked);
+    }
+
+    [Theory]
+    [InlineData(null, "TF_BUILD", "True", false)]
+    [InlineData(null, "TF_BUILD", "false", true)]
+    [InlineData("true", "TF_BUILD", "True", true)]
+    [InlineData(null, "JENKINS_URL", "https://jenkins.example.com/", false)]
+    [InlineData(null, "JENKINS_URL", "", true)]
+    [InlineData("false", "JENKINS_URL", null, false)]
+    public async Task Prompt_IsSkippedOnAzurePipelinesAndJenkins(string? forced, string variable, string? value, bool asked)
+    {
+        await AssertPromptAsync(forced, variable, value, asked);
+    }
+
+    private async Task AssertPromptAsync(string? forced, string variable, string? value, bool asked)
+    {
         var dir = CreateAppHostDirectory("orders", "billing");
         var interaction = new FakeInteractionService { IsAvailable = true, Answer = inputs => Checked(inputs, true, false) };
         var builder = PromptBuilder(dir, interaction);
         builder.Configuration["SERVICESOURCES_INTERACTIVE"] = forced;
-        builder.Configuration["CI"] = ci;
+        builder.Configuration[variable] = value;
         var git = new FakeGitClient();
         var source = new LocalProjectSource(git);
         source.Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
