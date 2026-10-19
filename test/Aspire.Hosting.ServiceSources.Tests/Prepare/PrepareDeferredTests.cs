@@ -814,6 +814,8 @@ public class PrepareDeferredTests
         var changed = new PrepareMetadata { Command = ["bash", "-c", "changed"] };
         var resource = new LocalProjectSource(git, runner)
             .Resolve(builder, "routing", Definition("routing", changed), DevConfig());
+        AddStandInLifecycleCommands(Assert.Single(builder.Resources, r => r.Name == "routing"));
+
         var services = builder.Services.BuildServiceProvider();
         await builder.Eventing.PublishAsync(
             new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
@@ -821,6 +823,40 @@ public class PrepareDeferredTests
 
         return (runner, services, builder);
     }
+
+    /// <summary>
+    /// Aspire adds Start, Stop and Restart when DCP creates the resource, which these tests never run;
+    /// stand-ins with the dashboard's defaults for a custom state (Stop on, Start hidden) show what the
+    /// package changes about them.
+    /// </summary>
+    private static void AddStandInLifecycleCommands(IResource resource)
+    {
+        foreach (var (name, state) in new[]
+        {
+            (KnownResourceCommands.StartCommand, ResourceCommandState.Hidden),
+            (KnownResourceCommands.StopCommand, ResourceCommandState.Enabled),
+            (KnownResourceCommands.RestartCommand, ResourceCommandState.Enabled),
+        })
+        {
+            resource.Annotations.Add(new ResourceCommandAnnotation(
+                name, name, _ => state,
+                _ => Task.FromResult(new ExecuteCommandResult { Success = true }),
+                null, null, null, null, null, false));
+        }
+    }
+
+    private static ResourceCommandState CommandStateOf(IResource resource, string command, IServiceProvider services) =>
+        Assert.Single(resource.Annotations.OfType<ResourceCommandAnnotation>(), a => a.Name == command)
+            .UpdateState(new UpdateCommandStateContext
+            {
+                ResourceSnapshot = new CustomResourceSnapshot { ResourceType = "Executable", Properties = [] },
+                Services = services,
+            });
+
+    private static async Task<string> RefusalOfStartAsync(
+        IDistributedApplicationBuilder builder, IServiceProvider services, IResource resource) =>
+        (await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(() =>
+            builder.Eventing.PublishAsync(new BeforeResourceStartedEvent(resource, services)))).Message;
 
     private static Task StartTasksAsync(IDistributedApplicationBuilder builder) =>
         Task.WhenAll(DeferredCheckout.For(builder).StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
@@ -900,6 +936,94 @@ public class PrepareDeferredTests
         await tasks;
 
         await AssertDeclinedAsync(runner, services, builder);
+    }
+
+    /// <remarks>
+    /// The Start that ran the service while the dialog was open, and ran the prepare after the fact
+    /// once Run was clicked, so a failure there said "never started" about a service that had.
+    /// </remarks>
+    [Fact]
+    public async Task ChangedCommand_WhileTheDialogIsOpen_RefusesStartAndOffersNoStop()
+    {
+        var interaction = new FakeInteractionService { IsAvailable = true };
+        var time = new ManualTimeProvider();
+
+        var (runner, services, builder) = await StartWithChangedCommandAsync(interaction, time);
+        var tasks = StartTasksAsync(builder);
+        await interaction.WaitForConfirmAsync().WaitAsync(TimeSpan.FromSeconds(30));
+
+        var routing = Assert.Single(builder.Resources, r => r.Name == "routing");
+        var refusal = await RefusalOfStartAsync(builder, services, routing);
+
+        Assert.Contains("Run changed prepare command?", refusal, StringComparison.Ordinal);
+        Assert.Equal(ResourceCommandState.Hidden, CommandStateOf(routing, KnownResourceCommands.StopCommand, services));
+        Assert.Equal(ResourceCommandState.Disabled, CommandStateOf(routing, KnownResourceCommands.RestartCommand, services));
+        Assert.Equal(ResourceCommandState.Disabled, CommandStateOf(routing, KnownResourceCommands.StartCommand, services));
+        Assert.Equal(0, runner.Runs);
+
+        time.Advance(DeferredCheckout.PromptTimeout + TimeSpan.FromSeconds(1));
+        await tasks;
+    }
+
+    [Fact]
+    public async Task ChangedCommand_Declined_RefusesALaterStartAndOffersAStartThatSaysWhy()
+    {
+        var interaction = new FakeInteractionService { IsAvailable = true, Confirm = () => InteractionResult.Ok(false) };
+
+        var (runner, services, builder) = await StartWithChangedCommandAsync(interaction);
+        await StartTasksAsync(builder);
+
+        var routing = Assert.Single(builder.Resources, r => r.Name == "routing");
+        var refusal = await RefusalOfStartAsync(builder, services, routing);
+
+        Assert.Contains("not approved", refusal, StringComparison.Ordinal);
+        Assert.Contains("next AppHost start", refusal, StringComparison.Ordinal);
+        Assert.Equal(ResourceCommandState.Enabled, CommandStateOf(routing, KnownResourceCommands.StartCommand, services));
+        Assert.Equal(ResourceCommandState.Hidden, CommandStateOf(routing, KnownResourceCommands.StopCommand, services));
+        Assert.Equal(ResourceCommandState.Disabled, CommandStateOf(routing, KnownResourceCommands.RestartCommand, services));
+        Assert.Equal(0, runner.Runs);
+    }
+
+    [Fact]
+    public async Task ChangedCommand_Confirmed_LeavesTheDashboardsOwnCommandStates()
+    {
+        var interaction = new FakeInteractionService { IsAvailable = true, Confirm = () => InteractionResult.Ok(true) };
+
+        var (_, services, builder) = await StartWithChangedCommandAsync(interaction);
+        await StartTasksAsync(builder);
+
+        var routing = Assert.Single(builder.Resources, r => r.Name == "routing");
+        Assert.Equal(ResourceCommandState.Enabled, CommandStateOf(routing, KnownResourceCommands.StopCommand, services));
+        Assert.Equal(ResourceCommandState.Hidden, CommandStateOf(routing, KnownResourceCommands.StartCommand, services));
+    }
+
+    [Fact]
+    public async Task AColdCheckoutStillBeingCloned_RefusesStart()
+    {
+        var dir = CreateAppHostDirectory("routing");
+        PlantSelection(dir);
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+
+        var journal = new Journal();
+        builder.AddLocalKind(KindName, new StandInKind(journal, "prepare.sh"));
+        var git = new FakeGitClient();
+        var clone = git.BlockFor("https://example.com/routing.git");
+        var routing = new LocalProjectSource(git, new FakeRunner(journal))
+            .Resolve(builder, "routing", Definition("routing", Prepare()), DevConfig());
+        AddStandInLifecycleCommands(Assert.Single(builder.Resources, r => r.Name == "routing"));
+
+        var services = builder.Services.BuildServiceProvider();
+        await builder.Eventing.PublishAsync(
+            new BeforeStartEvent(services, new DistributedApplicationModel(builder.Resources)));
+        await PublishNotStartedAsync(services, routing.Resource);
+
+        var refusal = await RefusalOfStartAsync(
+            builder, services, Assert.Single(builder.Resources, r => r.Name == "routing"));
+        Assert.Contains("checkout is not ready", refusal, StringComparison.Ordinal);
+
+        clone.Set();
+        await StartTasksAsync(builder);
     }
 
     [Fact]

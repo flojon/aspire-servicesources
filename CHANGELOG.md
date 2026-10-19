@@ -120,6 +120,12 @@ never existed. Check the tag of the last release before adding one.
   each one. To get the previous behaviour back, call `builder.SetCheckoutTiming(CheckoutTiming.Eager)`
   before the first `AddService()`.
 
+  Until a deferred service is ready, Start is refused with a message saying why ([#473]), from the
+  dashboard and `aspire resource <name> start` alike: while the clone or either dialog is pending,
+  and for a `Skipped` service, which has no checkout to run. The dashboard offers no Stop for these
+  states, where it used to offer one that failed with a raw DCP 404 ([#480]); a `Skipped` service
+  keeps a Start that explains how to get it going.
+
 - **A changed `prepare` command is confirmed in the dashboard before it re-runs** ([#298]). When
   the catalog's `prepare` command for a warm managed checkout is not the one that last succeeded
   there, the dashboard now shows the command and asks before running it; a first use, a moved
@@ -131,6 +137,9 @@ never existed. Check the tag of the last release before adding one.
   why. Cost: the one run that needs asking is deferred even though the checkout is warm, so it loses
   composition-time launch-profile fidelity; `SetCheckoutTiming(CheckoutTiming.Eager)`, `aspire
   publish` and kinds that cannot defer are unchanged.
+
+  While the dialog is open, Start is refused rather than running the service without the step you
+  were asked to approve, and so is Start after Skip ([#473]).
 
 ### Fixed
 
@@ -2066,6 +2075,8 @@ Targets `net10.0`.
 [#449]: https://github.com/flojon/aspire-servicesources/issues/449
 [#462]: https://github.com/flojon/aspire-servicesources/issues/462
 [#463]: https://github.com/flojon/aspire-servicesources/issues/463
+[#473]: https://github.com/flojon/aspire-servicesources/issues/473
+[#480]: https://github.com/flojon/aspire-servicesources/issues/480
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

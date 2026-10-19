@@ -153,20 +153,82 @@ internal sealed class DeferredCheckout
         /// </summary>
         public bool CheckoutWasPresent { get; init; }
 
-        private volatile bool _failed;
+        private int _gate = (int)StartGate.InProgress;
 
         /// <summary>
-        /// Whether the checkout or its prepare step failed, after which a dashboard Start must not
-        /// launch the service: FailedToStart re-enables that command, and DCP would run it unprepared.
+        /// Where this service is on the way to being started. Anything but <see cref="StartGate.Open"/>
+        /// refuses a Start sent from the dashboard or the CLI: it would run the service without the
+        /// checkout, or without the prepare step the developer was asked to approve.
         /// </summary>
-        public bool Failed
+        public StartGate Gate
         {
-            get => _failed;
-            set => _failed = value;
+            get => (StartGate)Volatile.Read(ref _gate);
+            set => Volatile.Write(ref _gate, (int)value);
+        }
+
+        private int _commandsGated;
+
+        /// <summary>
+        /// Wraps the dashboard's Start, Stop and Restart so they match <see cref="Gate"/>. Aspire adds
+        /// those commands when DCP creates the resource, so this runs only after DCP has withheld it.
+        /// </summary>
+        public void GateLifecycleCommands()
+        {
+            if (Interlocked.Exchange(ref _commandsGated, 1) == 1)
+            {
+                return;
+            }
+
+            foreach (var resource in AllResources)
+            {
+                foreach (var original in resource.Annotations.OfType<ResourceCommandAnnotation>()
+                    .Where(a => StartGates.IsLifecycleCommand(a.Name))
+                    .ToList())
+                {
+                    var wrapped = new ResourceCommandAnnotation(
+                        original.Name,
+                        original.DisplayName,
+                        context => StartGates.CommandState(this, original, context),
+                        original.ExecuteCommand,
+                        original.DisplayDescription,
+                        original.Arguments,
+                        original.ConfirmationMessage,
+                        original.IconName,
+                        original.IconVariant,
+                        original.IsHighlighted,
+                        original.Visibility,
+                        original.ValidateArguments);
+
+                    resource.Annotations.Remove(original);
+                    resource.Annotations.Add(wrapped);
+                }
+            }
         }
 
         /// <summary>Everything withheld for this service, in the order it must be started.</summary>
         public IEnumerable<IResource> AllResources => HeldBack.Append(Resource);
+    }
+
+    /// <summary>Why a service cannot be started yet, or has been told not to be.</summary>
+    internal enum StartGate
+    {
+        /// <summary>Not yet answered or checked out: the clone, the source pick or the prepare step is still ahead.</summary>
+        InProgress,
+
+        /// <summary>The "Run changed prepare command?" dialog is open.</summary>
+        AwaitingConfirmation,
+
+        /// <summary>The changed prepare command was not approved.</summary>
+        DeclinedPrepare,
+
+        /// <summary>Unchecked in the "Choose services to check out" dialog, so there is no checkout.</summary>
+        NotSelected,
+
+        /// <summary>The checkout or prepare step failed.</summary>
+        Failed,
+
+        /// <summary>Everything that had to happen first has; Start is the ordinary command.</summary>
+        Open,
     }
 
     public static DeferredCheckout For(IDistributedApplicationBuilder builder)
@@ -564,10 +626,8 @@ internal sealed class DeferredCheckout
         foreach (var withheld in deferred.AllResources)
         {
             builder.Eventing.Subscribe<BeforeResourceStartedEvent>(withheld, (_, _) =>
-                deferred.Failed
-                    ? throw ServiceSourcesConfigurationException.For(
-                        $"Service '{new Name(serviceName)}' was not started: its checkout or prepare step failed earlier "
-                        + $"in this run. It will run again on the next AppHost start.")
+                StartGates.RefusalFor(deferred) is { } refusal
+                    ? throw ServiceSourcesConfigurationException.For($"{refusal}")
                     : Task.CompletedTask);
         }
 
@@ -1099,6 +1159,8 @@ internal sealed class DeferredCheckout
             await WaitUntilWithheldAsync(notifications, withheld.Name, cancellationToken).ConfigureAwait(false);
         }
 
+        deferred.GateLifecycleCommands();
+
         foreach (var withheld in deferred.AllResources)
         {
             await PublishStateAsync(notifications, withheld, state).ConfigureAwait(false);
@@ -1126,6 +1188,8 @@ internal sealed class DeferredCheckout
 
         foreach (var deferred in skipped)
         {
+            deferred.Gate = StartGate.NotSelected;
+
             var task = Task.Run(() => SkipAsync(deferred, services, cancellationToken), CancellationToken.None);
 
             lock (_gate)
@@ -1268,6 +1332,8 @@ internal sealed class DeferredCheckout
                 await WaitUntilWithheldAsync(notifications, withheld.Name, stoppingToken).ConfigureAwait(false);
             }
 
+            deferred.GateLifecycleCommands();
+
             await PublishCheckingOutAsync(notifications, deferred.Resource).ConfigureAwait(false);
 
             ServiceSourcesLog.Information(
@@ -1352,6 +1418,8 @@ internal sealed class DeferredCheckout
                             deferred, step, label, repoRoot, services, notifications, logger, stoppingToken)
                         .ConfigureAwait(false))
                     {
+                        deferred.Gate = StartGate.DeclinedPrepare;
+
                         foreach (var withheld in deferred.AllResources)
                         {
                             await PublishStateAsync(notifications, withheld, SkippedState).ConfigureAwait(false);
@@ -1396,6 +1464,9 @@ internal sealed class DeferredCheckout
             ServiceSourcesLog.Information(logger, $"Checkout ready at {Raw.Escaped(repoRoot)}. Starting.");
 
             var commands = services.GetRequiredService<ResourceCommandService>();
+
+            // Opened only now: this is the Start the checkout and the prepare step were the wait for.
+            deferred.Gate = StartGate.Open;
 
             // Held-back helpers first, then the service. They are not merely ordered but dependent:
             // Aspire.Hosting.JavaScript's app already carries a WaitFor on its installer, so starting
@@ -1478,6 +1549,7 @@ internal sealed class DeferredCheckout
 
         try
         {
+            deferred.Gate = StartGate.AwaitingConfirmation;
             await PublishStateAsync(notifications, deferred.Resource, AwaitingConfirmationState).ConfigureAwait(false);
 
             var timeProvider = services.GetService<TimeProvider>() ?? TimeProvider.System;
@@ -1506,6 +1578,7 @@ internal sealed class DeferredCheckout
 
             if (!result.Canceled && result.Data)
             {
+                deferred.Gate = StartGate.InProgress;
                 return true;
             }
         }
@@ -1671,7 +1744,7 @@ internal sealed class DeferredCheckout
     private static async Task ReportFailureAsync(
         Deferred deferred, IServiceProvider services, Exception exception, IReadOnlyList<IResource> started)
     {
-        deferred.Failed = true;
+        deferred.Gate = StartGate.Failed;
 
         try
         {
@@ -1745,4 +1818,74 @@ internal static class InteractivePrompts
         "false" or "0" or "no" => false,
         _ => null,
     };
+}
+
+/// <summary>
+/// What a Start sent to a deferred service that is not ready is told, and what the dashboard offers
+/// meanwhile. Without this the custom states leave only a Stop with nothing behind it.
+/// </summary>
+internal static class StartGates
+{
+    /// <summary>The reason Start is refused, or <see langword="null"/> when it is not.</summary>
+    public static Raw? RefusalFor(DeferredCheckout.Deferred deferred)
+    {
+        var name = new Name(deferred.ServiceName);
+
+        return deferred.Gate switch
+        {
+            DeferredCheckout.StartGate.Failed =>
+                Raw.Compose($"Service '{name}' was not started: its checkout or prepare step failed earlier "
+                + $"in this run. It will run again on the next AppHost start."),
+            DeferredCheckout.StartGate.InProgress =>
+                Raw.Compose($"Service '{name}' was not started: its checkout is not ready yet, so there is nothing to run. "
+                + $"It starts by itself once the 'Choose services to check out' dialog is answered and the clone "
+                + $"and any prepare step have finished."),
+            DeferredCheckout.StartGate.AwaitingConfirmation =>
+                Raw.Compose($"Service '{name}' was not started: it is waiting for your answer to the 'Run changed prepare "
+                + $"command?' dialog, and starting it now would skip the command you were asked to approve. "
+                + $"Answer the dialog: Run prepares and starts it, Skip leaves it not started until the next "
+                + $"AppHost start."),
+            DeferredCheckout.StartGate.DeclinedPrepare =>
+                Raw.Compose($"Service '{name}' was not started: its changed prepare command was not approved, and starting "
+                + $"it without the prepare would run it against an unprepared checkout. It will run again on the "
+                + $"next AppHost start, which asks again."),
+            DeferredCheckout.StartGate.NotSelected =>
+                Raw.Compose($"Service '{name}' was not started: it was not selected in 'Choose services to check out', so "
+                + $"it has no checkout this run. Restart the AppHost and pick it; if the choice was saved, delete "
+                + $"its entry in {Raw.Escaped(Path.Combine(ToolDirectory.Name, SourceSelectionStore.FileName))} first. "
+                + $"It will run again on the next AppHost start."),
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// The state of a lifecycle command for a service that is not yet startable. Start stays available
+    /// where it can say why it is refused, Stop is hidden because nothing is running to stop, and
+    /// Restart is disabled.
+    /// </summary>
+    public static ResourceCommandState CommandState(
+        DeferredCheckout.Deferred deferred, ResourceCommandAnnotation original, UpdateCommandStateContext context)
+    {
+        var gate = deferred.Gate;
+        if (gate is DeferredCheckout.StartGate.Open or DeferredCheckout.StartGate.Failed)
+        {
+            return original.UpdateState(context);
+        }
+
+        if (original.Name == KnownResourceCommands.StartCommand)
+        {
+            return gate is DeferredCheckout.StartGate.DeclinedPrepare or DeferredCheckout.StartGate.NotSelected
+                ? ResourceCommandState.Enabled
+                : ResourceCommandState.Disabled;
+        }
+
+        return original.Name == KnownResourceCommands.StopCommand
+            ? ResourceCommandState.Hidden
+            : ResourceCommandState.Disabled;
+    }
+
+    public static bool IsLifecycleCommand(string name) =>
+        name == KnownResourceCommands.StartCommand
+        || name == KnownResourceCommands.StopCommand
+        || name == KnownResourceCommands.RestartCommand;
 }

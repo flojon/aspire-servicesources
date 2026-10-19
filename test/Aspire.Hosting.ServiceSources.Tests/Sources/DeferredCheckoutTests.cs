@@ -921,6 +921,34 @@ public class DeferredCheckoutTests
         Assert.Contains(log, line => line.Contains("Skipped", StringComparison.Ordinal));
     }
 
+    /// <remarks>
+    /// An unchecked service has no checkout, so a Start would reach DCP with a working directory that
+    /// does not exist and fail with a raw "directory name is invalid".
+    /// </remarks>
+    [Fact]
+    public async Task Skipped_RefusesStartNamingTheSelectionFile()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+
+        var orders = new LocalProjectSource(new FakeGitClient())
+            .Resolve(builder, "orders", Definition("orders"), DevConfig())
+            .WithHttpEndpoint();
+
+        var services = builder.Services.BuildServiceProvider();
+        var deferred = DeferredCheckout.For(builder);
+        deferred.Apply([], deferred.Snapshot(), services, CheckoutNameLock.For(builder), CancellationToken.None);
+        await PublishNotStartedAsync(services, RealResource(builder, "orders"));
+        await Task.WhenAll(deferred.StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+        var refusal = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(() =>
+            builder.Eventing.PublishAsync(new BeforeResourceStartedEvent(RealResource(builder, "orders"), services)));
+
+        Assert.Contains("selection.json", refusal.Message, StringComparison.Ordinal);
+        Assert.Contains("next AppHost start", refusal.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task Skipped_NeverClonesPreparesOrStarts()
     {

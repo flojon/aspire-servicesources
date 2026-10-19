@@ -279,7 +279,11 @@ unprompted, including `always` mode, so a catalog that switches to `always` with
 not asked about either. This is a consent gate on changed catalog code, so it **fails closed**: only an explicit
 "Run" runs the step. Closing the dialog, no answer within 5 minutes, or a dialog that cannot be
 shown declines, and the service shows `Skipped` instead of starting; anything that waits on it keeps
-waiting. Fix the catalog if the change
+waiting. A declined service shows no Stop either, and its Start is refused with a message
+saying it asks again on the next AppHost start, so it can never run without the prepare. The
+same refusal applies while the dialog is open, and while a clone is still running: Start from
+the dashboard or `aspire resource <name> start` is refused until the checkout, any prepare and
+the dialogs are done. Fix the catalog if the change
 was unintended, then it asks again on the next AppHost start. (The cold-checkout source pick is the
 opposite: an unanswered dialog starts everything.) With no dashboard to ask through (`aspire run`
 without one, CI) nothing can ask, so the step runs as before and the log says why.
@@ -587,9 +591,11 @@ clone and start. There is one checkbox per service, all checked, and each shows 
 (scheme, host and path only, never credentials), the `ref`, and which resources `WaitFor` it.
 
 - **Checked** services are cloned, prepared and started exactly as before.
-- **Unchecked** services are never cloned. Their state reads **Skipped** and the dashboard offers no
-  Start command for them. The choice means "do not clone this for me", and a later run can change it
-  (see below).
+- **Unchecked** services are never cloned. Their state reads **Skipped**. The dashboard offers no
+  Stop for them, since nothing is running, and its Start is refused with a message saying how to get
+  the service going: restart the AppHost and pick it, deleting its entry in
+  `.servicesources/selection.json` first if the choice was saved. The choice means "do not clone this
+  for me", and a later run can change it (see below).
 
 The choice is saved in `.servicesources/selection.json`, which is git-ignored with the rest of that
 directory. The next run asks only about services that have no entry in it: a new service, an entry you
