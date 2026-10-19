@@ -37,9 +37,9 @@ and the clone's progress log says so. You can also delete it by hand.
 ```
 Service 'orders': cannot clone into 'C:\\…\\.servicesources\\checkouts\\orders': git's pack files there
 need paths of 271 characters ('C:\\…\\.servicesources\\checkouts\\.incoming-00000000\\.git\\objects\\pack\\pack-0000…0000.pack'),
-and Windows limits them to 259 even with core.longpaths or LongPathsEnabled. Move the AppHost (the
-directory that holds '.servicesources'), or the git worktree it is in, to a directory at least 12
-characters shorter.
+and Windows limits them to 259 even with core.longpaths or LongPathsEnabled. Move the repository or
+git worktree that holds the AppHost (the directory that holds '.servicesources') to a directory at
+least 12 characters shorter.
 ```
 
 git writes its pack files (`.git\objects\pack\pack-<40 hex>.pack`, 69 characters under the checkout)
@@ -50,8 +50,19 @@ git will pick. With checkouts at `<AppHost>\.servicesources\checkouts\<name>`, t
 directory longer than about 145 characters, or less for a checkout name over 18 characters. The check
 runs before cloning, so nothing is downloaded.
 
-Move the AppHost somewhere shorter, such as `C:\src\<repo>`. If it is in a git worktree, move the
-worktree with `git worktree move <old> <new>` rather than by hand, which breaks the worktree's link.
+A repack needs up to 16 characters more than a plain pack, so a shorter limit applies below that
+one, to an AppHost directory longer than about 129 characters:
+
+- In a linked worktree, a clone that would borrow objects from the main worktree's checkout downloads
+  the whole repository instead, and its progress log says `Not borrowing objects from '…'`.
+- git's automatic maintenance (`git gc --auto`) cannot repack the checkout. Fetches still succeed,
+  but once enough packs pile up each one prints `unable to write file ….tmp-…pack` and leaves
+  temporary files in `.git\objects\pack`.
+
+Move the repository that holds the AppHost somewhere shorter, such as `C:\src\<repo>`. If it is a
+linked worktree (made with `git worktree add`), move it with `git worktree move <old> <new>` rather
+than by hand, which breaks the worktree's link. Move a main checkout by hand, then run
+`git worktree repair` if it has linked worktrees.
 Or clone the repository somewhere short yourself and point the service at it with the `path` source
 (`"source": "path"` and `"path": { "path": "..." }` in `servicesources.local.json`).
 

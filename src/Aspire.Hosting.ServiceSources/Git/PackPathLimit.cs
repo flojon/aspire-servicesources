@@ -30,15 +30,19 @@ internal static class PackPathLimit
     /// The longest pack-file path a clone into <paramref name="repoRoot"/> needs: the clone is staged
     /// under <paramref name="checkoutsRoot"/> and later fetches write into <paramref name="repoRoot"/>.
     /// </summary>
-    public static string LongestPackPath(string checkoutsRoot, string repoRoot) =>
-        LongestDirectory(checkoutsRoot, repoRoot) + LongestPackFile;
+    public static string LongestPackPath(string checkoutsRoot, string repoRoot)
+    {
+        var staging = ScratchDirectory.PlaceholderPath(checkoutsRoot);
+        return FullDirectory(staging.Length > repoRoot.Length ? staging : repoRoot) + LongestPackFile;
+    }
 
     /// <summary>
     /// Whether a reference clone's repack fits; one that does not falls back to a second, plain
     /// download, so it is better not attempted.
     /// </summary>
-    public static bool RepackFits(string checkoutsRoot, string repoRoot, bool isWindows) =>
-        !isWindows || (LongestDirectory(checkoutsRoot, repoRoot) + LongestRepackFile).Length <= MaxLength;
+    /// <remarks>Only the staging directory counts: the clone, and so its repack, runs there.</remarks>
+    public static bool RepackFits(string checkoutsRoot, bool isWindows) =>
+        !isWindows || (FullDirectory(ScratchDirectory.PlaceholderPath(checkoutsRoot)) + LongestRepackFile).Length <= MaxLength;
 
     /// <exception cref="ServiceSourcesConfigurationException">
     /// <paramref name="isWindows"/> and the longest pack path exceeds <see cref="MaxLength"/>.
@@ -57,12 +61,9 @@ internal static class PackPathLimit
         }
 
         throw ServiceSourcesConfigurationException.For(
-            $"{label}: cannot clone into '{Raw.Escaped(repoRoot)}': git's pack files there need paths of {longest.Length} characters ('{Raw.Escaped(longest)}'), and Windows limits them to {MaxLength} even with core.longpaths or LongPathsEnabled. Move the AppHost (the directory that holds '.servicesources'), or the git worktree it is in, to a directory at least {longest.Length - MaxLength} characters shorter.");
+            $"{label}: cannot clone into '{Raw.Escaped(repoRoot)}': git's pack files there need paths of {longest.Length} characters ('{Raw.Escaped(longest)}'), and Windows limits them to {MaxLength} even with core.longpaths or LongPathsEnabled. Move the repository or git worktree that holds the AppHost (the directory that holds '.servicesources') to a directory at least {longest.Length - MaxLength} characters shorter.");
     }
 
-    private static string LongestDirectory(string checkoutsRoot, string repoRoot)
-    {
-        var staging = ScratchDirectory.PlaceholderPath(checkoutsRoot);
-        return Path.GetFullPath(staging.Length > repoRoot.Length ? staging : repoRoot).TrimEnd('\\', '/');
-    }
+    private static string FullDirectory(string directory) =>
+        Path.GetFullPath(directory).TrimEnd('\\', '/');
 }

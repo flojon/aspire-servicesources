@@ -92,8 +92,16 @@ public class CheckoutSeedingTests
         var home = NewAppHost();
         HomeCheckout(home);
         var start = NewAppHost();
+        // A plain pack adds 69 characters and a repack 85; land between the two limits.
+        var stagingLength = PackPathLimit.MaxLength - 69 - 5;
         var stagingSuffix = @"\.servicesources\checkouts\.incoming-00000000".Length;
-        var appHost = Path.Combine(start, new string('p', 185 - stagingSuffix - start.Length - 1));
+        var padding = stagingLength - stagingSuffix - start.Length - 1;
+        if (padding < 1)
+        {
+            return;
+        }
+
+        var appHost = Path.Combine(start, new string('p', padding));
         Directory.CreateDirectory(appHost);
         var sink = new RecordingProgressSink();
         var git = new ScriptedCloneGitClient { HomeOrigin = Url };

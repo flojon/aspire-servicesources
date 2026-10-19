@@ -60,7 +60,7 @@ public class PackPathLimitTests
         Assert.Contains("Service 'orders'", ex.Message, StringComparison.Ordinal);
         Assert.Contains("paths of 260 characters", ex.Message, StringComparison.Ordinal);
         Assert.Contains("limits them to 259", ex.Message, StringComparison.Ordinal);
-        Assert.Contains("Move the AppHost (the directory that holds '.servicesources'), or the git worktree it is in", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("Move the repository or git worktree that holds the AppHost (the directory that holds '.servicesources')", ex.Message, StringComparison.Ordinal);
         Assert.Contains("at least 1 characters shorter", ex.Message, StringComparison.Ordinal);
     }
 
@@ -77,7 +77,7 @@ public class PackPathLimitTests
     {
         var root = RootOfLength(PackPathLimit.MaxLength - RepackSuffixLength - StagingNameLength - 1);
 
-        Assert.True(PackPathLimit.RepackFits(root, Path.Combine(root, "orders"), isWindows: true));
+        Assert.True(PackPathLimit.RepackFits(root, isWindows: true));
     }
 
     [Fact]
@@ -85,7 +85,7 @@ public class PackPathLimitTests
     {
         var root = RootOfLength(PackPathLimit.MaxLength - RepackSuffixLength - StagingNameLength);
 
-        Assert.False(PackPathLimit.RepackFits(root, Path.Combine(root, "orders"), isWindows: true));
+        Assert.False(PackPathLimit.RepackFits(root, isWindows: true));
     }
 
     [Fact]
@@ -93,6 +93,6 @@ public class PackPathLimitTests
     {
         var root = RootOfLength(400);
 
-        Assert.True(PackPathLimit.RepackFits(root, Path.Combine(root, "orders"), isWindows: false));
+        Assert.True(PackPathLimit.RepackFits(root, isWindows: false));
     }
 }

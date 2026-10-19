@@ -462,7 +462,7 @@ internal sealed partial class GitCliClient(
     public void PersistLongPaths(string repositoryPath)
     {
         // --file rather than --local: a broken .git would let git discover, and write to, an enclosing repository.
-        var configPath = Path.Combine(repositoryPath, ".git", "config");
+        var configPath = Path.GetFullPath(Path.Combine(repositoryPath, ".git", "config"));
         if (!IsWindows || !File.Exists(configPath))
         {
             return;
