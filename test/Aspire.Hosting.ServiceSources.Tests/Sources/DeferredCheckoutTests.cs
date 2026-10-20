@@ -963,6 +963,8 @@ public class DeferredCheckoutTests
         Assert.DoesNotContain(@"\\", refusal.Message, StringComparison.Ordinal);
         Assert.Contains("restart the AppHost", refusal.Message, StringComparison.Ordinal);
 
+        await AssertStopAndRestartRefusedAsync(
+            RealResource(builder, "orders"), services, Path.Combine(".servicesources", "selection.json"));
         Assert.Equal(ResourceCommandState.Enabled, CommandStateOf(RealResource(builder, "orders"), KnownResourceCommands.StartCommand, services));
         Assert.Equal(ResourceCommandState.Hidden, CommandStateOf(RealResource(builder, "orders"), KnownResourceCommands.StopCommand, services));
         Assert.Equal(ResourceCommandState.Disabled, CommandStateOf(RealResource(builder, "orders"), KnownResourceCommands.RestartCommand, services));
@@ -2377,6 +2379,32 @@ public class DeferredCheckoutTests
                 ResourceSnapshot = new CustomResourceSnapshot { ResourceType = "Executable", Properties = [] },
                 Services = services,
             });
+
+    private static async Task<ExecuteCommandResult> ExecuteOf(
+        IResource resource, string command, IServiceProvider services) =>
+        await Assert.Single(resource.Annotations.OfType<ResourceCommandAnnotation>(), a => a.Name == command)
+            .ExecuteCommand(new ExecuteCommandContext
+            {
+                Services = services,
+                ResourceName = resource.Name,
+                CancellationToken = CancellationToken.None,
+                Logger = Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+                Arguments = new InteractionInputCollection([]),
+            });
+
+    /// <summary>The CLI and API run Stop and Restart whatever the dashboard shows; DCP would answer them with a 404.</summary>
+    private static async Task AssertStopAndRestartRefusedAsync(
+        IResource resource, IServiceProvider services, string reason)
+    {
+        foreach (var command in new[] { KnownResourceCommands.StopCommand, KnownResourceCommands.RestartCommand })
+        {
+            var result = await ExecuteOf(resource, command, services);
+
+            Assert.False(result.Success);
+            Assert.Contains("nothing is running", result.Message, StringComparison.Ordinal);
+            Assert.Contains(reason, result.Message, StringComparison.Ordinal);
+        }
+    }
 
     private static IResource RealResource(IDistributedApplicationBuilder builder, string name) =>
         Assert.Single(builder.Resources, r => r.Name == name);

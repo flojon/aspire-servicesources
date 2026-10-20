@@ -853,6 +853,32 @@ public class PrepareDeferredTests
                 Services = services,
             });
 
+    private static async Task<ExecuteCommandResult> ExecuteOf(
+        IResource resource, string command, IServiceProvider services) =>
+        await Assert.Single(resource.Annotations.OfType<ResourceCommandAnnotation>(), a => a.Name == command)
+            .ExecuteCommand(new ExecuteCommandContext
+            {
+                Services = services,
+                ResourceName = resource.Name,
+                CancellationToken = CancellationToken.None,
+                Logger = Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+                Arguments = new InteractionInputCollection([]),
+            });
+
+    /// <summary>The CLI and API run Stop and Restart whatever the dashboard shows; DCP would answer them with a 404.</summary>
+    private static async Task AssertStopAndRestartRefusedAsync(
+        IResource resource, IServiceProvider services, string reason)
+    {
+        foreach (var command in new[] { KnownResourceCommands.StopCommand, KnownResourceCommands.RestartCommand })
+        {
+            var result = await ExecuteOf(resource, command, services);
+
+            Assert.False(result.Success);
+            Assert.Contains("nothing is running", result.Message, StringComparison.Ordinal);
+            Assert.Contains(reason, result.Message, StringComparison.Ordinal);
+        }
+    }
+
     private static async Task<string> RefusalOfStartAsync(
         IDistributedApplicationBuilder builder, IServiceProvider services, IResource resource) =>
         (await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(() =>
@@ -960,6 +986,7 @@ public class PrepareDeferredTests
         Assert.Equal(ResourceCommandState.Disabled, CommandStateOf(routing, KnownResourceCommands.RestartCommand, services));
         Assert.Equal(ResourceCommandState.Disabled, CommandStateOf(routing, KnownResourceCommands.StartCommand, services));
         Assert.Equal(0, runner.Runs);
+        await AssertStopAndRestartRefusedAsync(routing, services, "Run changed prepare command?");
 
         time.Advance(DeferredCheckout.PromptTimeout + TimeSpan.FromSeconds(1));
         await tasks;
@@ -976,6 +1003,7 @@ public class PrepareDeferredTests
         var routing = Assert.Single(builder.Resources, r => r.Name == "routing");
         var refusal = await RefusalOfStartAsync(builder, services, routing);
 
+        await AssertStopAndRestartRefusedAsync(routing, services, "not approved");
         Assert.Contains("not approved", refusal, StringComparison.Ordinal);
         Assert.Contains("next AppHost start", refusal, StringComparison.Ordinal);
         Assert.Equal(ResourceCommandState.Enabled, CommandStateOf(routing, KnownResourceCommands.StartCommand, services));
@@ -1053,6 +1081,17 @@ public class PrepareDeferredTests
         var refusal = await RefusalOfStartAsync(
             builder, services, Assert.Single(builder.Resources, r => r.Name == "routing"));
         Assert.Contains("checkout is not ready", refusal, StringComparison.Ordinal);
+        var routingResource = Assert.Single(builder.Resources, r => r.Name == "routing");
+
+        // The commands are wrapped by the start task once DCP has withheld the resource.
+        for (var i = 0;
+            i < 3000 && CommandStateOf(routingResource, KnownResourceCommands.StopCommand, services) != ResourceCommandState.Hidden;
+            i++)
+        {
+            await Task.Delay(10);
+        }
+
+        await AssertStopAndRestartRefusedAsync(routingResource, services, "waiting for its checkout");
 
         clone.Set();
         await StartTasksAsync(builder);

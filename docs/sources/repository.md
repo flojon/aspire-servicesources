@@ -282,8 +282,8 @@ shown declines, and the service shows `Skipped` instead of starting; anything th
 waiting. A declined service shows no Stop either, and its Start is refused with a message
 saying it asks again on the next AppHost start, so it can never run without the prepare. While the
 dialog is open, and while a clone or prepare is still running, the dashboard disables Start
-and hides Stop, and `aspire resource <name> start` is refused with a message, so the service can
-never run before the checkout, its prepare and the dialogs are done. Fix the catalog if the change
+and hides Stop, and `aspire resource <name> start`, `stop` and `restart` are refused with a message (there is
+nothing running to stop), so the service can never run before the checkout, its prepare and the dialogs are done. Fix the catalog if the change
 was unintended, then it asks again on the next AppHost start. (The cold-checkout source pick is the
 opposite: an unanswered dialog starts everything.) With no dashboard to ask through (`aspire run`
 without one, CI) nothing can ask, so the step runs as before and the log says why.

@@ -193,7 +193,9 @@ internal sealed class DeferredCheckout
                         original.Name,
                         original.DisplayName,
                         context => StartGates.CommandState(this, original, context),
-                        original.ExecuteCommand,
+                        async context => StartGates.NotRunningFor(this, original.Name) is { } refusal
+                            ? new ExecuteCommandResult { Success = false, Message = refusal.ToString() }
+                            : await original.ExecuteCommand(context).ConfigureAwait(false),
                         original.DisplayDescription,
                         original.Arguments,
                         original.ConfirmationMessage,
@@ -1856,6 +1858,41 @@ internal static class StartGates
             DeferredCheckout.StartGate.NotSelected =>
                 Raw.Compose($"Service '{name}' was not started: it was not selected to be checked out, so "
                 + $"it has no checkout this run. Delete its entry in "
+                + $"{Raw.Display(Path.Combine(ToolDirectory.Name, SourceSelectionStore.FileName))} and restart the "
+                + $"AppHost to be asked again."),
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// The reason Stop or Restart has nothing to act on, or <see langword="null"/> for Start and for a
+    /// service that is startable. The CLI and API run these regardless of the state the dashboard shows,
+    /// and DCP answers a resource it never created with a raw 404.
+    /// </summary>
+    public static Raw? NotRunningFor(DeferredCheckout.Deferred deferred, string command)
+    {
+        if (command != KnownResourceCommands.StopCommand && command != KnownResourceCommands.RestartCommand)
+        {
+            return null;
+        }
+
+        var past = Raw.Display(command == KnownResourceCommands.StopCommand ? "stopped" : "restarted");
+        var name = new Name(deferred.ServiceName);
+
+        return deferred.Gate switch
+        {
+            DeferredCheckout.StartGate.InProgress =>
+                Raw.Compose($"Service '{name}' was not {past}: nothing is running yet. It is waiting for its "
+                + $"checkout, any dialog about it and any prepare step, and starts by itself when they are done."),
+            DeferredCheckout.StartGate.AwaitingConfirmation =>
+                Raw.Compose($"Service '{name}' was not {past}: nothing is running yet. It is waiting for your "
+                + $"answer to the 'Run changed prepare command?' dialog; answer it to continue."),
+            DeferredCheckout.StartGate.DeclinedPrepare =>
+                Raw.Compose($"Service '{name}' was not {past}: nothing is running. Its changed prepare command "
+                + $"was not approved. It asks again on the next AppHost start."),
+            DeferredCheckout.StartGate.NotSelected =>
+                Raw.Compose($"Service '{name}' was not {past}: nothing is running. It was not selected to be "
+                + $"checked out. Delete its entry in "
                 + $"{Raw.Display(Path.Combine(ToolDirectory.Name, SourceSelectionStore.FileName))} and restart the "
                 + $"AppHost to be asked again."),
             _ => null,

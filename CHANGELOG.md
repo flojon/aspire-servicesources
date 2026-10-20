@@ -120,8 +120,8 @@ never existed. Check the tag of the last release before adding one.
   each one. To get the previous behaviour back, call `builder.SetCheckoutTiming(CheckoutTiming.Eager)`
   before the first `AddService()`.
 
-  Until a deferred service is ready, `aspire resource <name> start` is refused with a message saying
-  why ([#473]); the dashboard disables Start while the clone or a dialog is pending, and keeps it
+  Until a deferred service is ready, `aspire resource <name> start`, `stop` and `restart` are refused
+  with a message saying why ([#473], [#480]); the dashboard disables Start while the clone or a dialog is pending, and keeps it
   enabled on a `Skipped` service to show that message.
 
 - **A changed `prepare` command is confirmed in the dashboard before it re-runs** ([#298]). When
