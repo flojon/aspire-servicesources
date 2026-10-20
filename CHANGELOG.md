@@ -120,6 +120,10 @@ never existed. Check the tag of the last release before adding one.
   each one. To get the previous behaviour back, call `builder.SetCheckoutTiming(CheckoutTiming.Eager)`
   before the first `AddService()`.
 
+  Until a deferred service is ready, `aspire resource <name> start`, `stop` and `restart` are refused
+  with a message saying why ([#473], [#480]); the dashboard disables Start while the clone or a dialog is pending, and keeps it
+  enabled on a `Skipped` service to show that message.
+
 - **A changed `prepare` command is confirmed in the dashboard before it re-runs** ([#298]). When
   the catalog's `prepare` command for a warm managed checkout is not the one that last succeeded
   there, the dashboard now shows the command and asks before running it; a first use, a moved
@@ -132,7 +136,17 @@ never existed. Check the tag of the last release before adding one.
   composition-time launch-profile fidelity; `SetCheckoutTiming(CheckoutTiming.Eager)`, `aspire
   publish` and kinds that cannot defer are unchanged.
 
+  While the dialog is open, and after Skip, Start is refused rather than running the service
+  without the step you were asked to approve ([#473]).
+
 ### Fixed
+
+- **Start no longer runs a deferred service that is still checking out or preparing, and the dashboard
+  no longer offers a Stop that fails with a raw DCP 404** ([#473], [#480]). A Start sent while the
+  service showed `Checking out` or `Preparing` reported success and ran against a checkout that was
+  not ready; it is now refused with a message saying so, and the dashboard hides Stop and disables
+  Restart for those states, and for the other pre-start states, where Stop used to fail because nothing was
+  running.
 
 - **Checkout progress lines show paths as written** ([#481]). `Resolving checkout of … into …` and
   `Checkout ready at …` showed `C:\\Users\\…` for `C:\Users\…`, doubling every backslash in a Windows
@@ -2073,7 +2087,9 @@ Targets `net10.0`.
 [#449]: https://github.com/flojon/aspire-servicesources/issues/449
 [#462]: https://github.com/flojon/aspire-servicesources/issues/462
 [#463]: https://github.com/flojon/aspire-servicesources/issues/463
+[#473]: https://github.com/flojon/aspire-servicesources/issues/473
 [#474]: https://github.com/flojon/aspire-servicesources/issues/474
+[#480]: https://github.com/flojon/aspire-servicesources/issues/480
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948

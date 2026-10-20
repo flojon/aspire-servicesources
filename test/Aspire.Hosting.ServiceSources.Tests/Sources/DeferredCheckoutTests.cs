@@ -921,6 +921,55 @@ public class DeferredCheckoutTests
         Assert.Contains(log, line => line.Contains("Skipped", StringComparison.Ordinal));
     }
 
+    /// <remarks>
+    /// An unchecked service has no checkout, so a Start would reach DCP with a working directory that
+    /// does not exist and fail with a raw "directory name is invalid".
+    /// </remarks>
+    [Fact]
+    public async Task Skipped_RefusesStartNamingTheSelectionFile()
+    {
+        var dir = CreateAppHostDirectory("orders");
+        var builder = TestHelpers.CreateBuilderThatCanStart(dir);
+        builder.SetCheckoutTiming(CheckoutTiming.Deferred);
+
+        var orders = new LocalProjectSource(new FakeGitClient())
+            .Resolve(builder, "orders", Definition("orders"), DevConfig())
+            .WithHttpEndpoint();
+
+        foreach (var (name, state) in new[]
+        {
+            (KnownResourceCommands.StartCommand, ResourceCommandState.Hidden),
+            (KnownResourceCommands.StopCommand, ResourceCommandState.Enabled),
+            (KnownResourceCommands.RestartCommand, ResourceCommandState.Enabled),
+        })
+        {
+            RealResource(builder, "orders").Annotations.Add(new ResourceCommandAnnotation(
+                name, name, _ => state,
+                _ => Task.FromResult(new ExecuteCommandResult { Success = true }),
+                null, null, null, null, null, false));
+        }
+
+        var services = builder.Services.BuildServiceProvider();
+        var deferred = DeferredCheckout.For(builder);
+        deferred.Apply([], deferred.Snapshot(), services, CheckoutNameLock.For(builder), CancellationToken.None);
+        await PublishNotStartedAsync(services, RealResource(builder, "orders"));
+        await Task.WhenAll(deferred.StartTasks).WaitAsync(TimeSpan.FromSeconds(30));
+
+        var refusal = await Assert.ThrowsAsync<ServiceSourcesConfigurationException>(() =>
+            builder.Eventing.PublishAsync(new BeforeResourceStartedEvent(RealResource(builder, "orders"), services)));
+
+        // Rendered as written: an escaped path doubles its backslashes on Windows.
+        Assert.Contains(Path.Combine(".servicesources", "selection.json"), refusal.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(@"\\", refusal.Message, StringComparison.Ordinal);
+        Assert.Contains("restart the AppHost", refusal.Message, StringComparison.Ordinal);
+
+        await AssertStopAndRestartRefusedAsync(
+            RealResource(builder, "orders"), services, Path.Combine(".servicesources", "selection.json"));
+        Assert.Equal(ResourceCommandState.Enabled, CommandStateOf(RealResource(builder, "orders"), KnownResourceCommands.StartCommand, services));
+        Assert.Equal(ResourceCommandState.Hidden, CommandStateOf(RealResource(builder, "orders"), KnownResourceCommands.StopCommand, services));
+        Assert.Equal(ResourceCommandState.Disabled, CommandStateOf(RealResource(builder, "orders"), KnownResourceCommands.RestartCommand, services));
+    }
+
     [Fact]
     public async Task Skipped_NeverClonesPreparesOrStarts()
     {
@@ -2362,6 +2411,40 @@ public class DeferredCheckoutTests
     }
 
     private const string OrdersUrl = "https://example.com/orders.git";
+
+    private static ResourceCommandState CommandStateOf(IResource resource, string command, IServiceProvider services) =>
+        Assert.Single(resource.Annotations.OfType<ResourceCommandAnnotation>(), a => a.Name == command)
+            .UpdateState(new UpdateCommandStateContext
+            {
+                ResourceSnapshot = new CustomResourceSnapshot { ResourceType = "Executable", Properties = [] },
+                Services = services,
+            });
+
+    private static async Task<ExecuteCommandResult> ExecuteOf(
+        IResource resource, string command, IServiceProvider services) =>
+        await Assert.Single(resource.Annotations.OfType<ResourceCommandAnnotation>(), a => a.Name == command)
+            .ExecuteCommand(new ExecuteCommandContext
+            {
+                Services = services,
+                ResourceName = resource.Name,
+                CancellationToken = CancellationToken.None,
+                Logger = Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+                Arguments = new InteractionInputCollection([]),
+            });
+
+    /// <summary>The CLI and API run Stop and Restart whatever the dashboard shows; DCP would answer them with a 404.</summary>
+    private static async Task AssertStopAndRestartRefusedAsync(
+        IResource resource, IServiceProvider services, string reason)
+    {
+        foreach (var command in new[] { KnownResourceCommands.StopCommand, KnownResourceCommands.RestartCommand })
+        {
+            var result = await ExecuteOf(resource, command, services);
+
+            Assert.False(result.Success);
+            Assert.Contains("nothing is running", result.Message, StringComparison.Ordinal);
+            Assert.Contains(reason, result.Message, StringComparison.Ordinal);
+        }
+    }
 
     private static IResource RealResource(IDistributedApplicationBuilder builder, string name) =>
         Assert.Single(builder.Resources, r => r.Name == name);
