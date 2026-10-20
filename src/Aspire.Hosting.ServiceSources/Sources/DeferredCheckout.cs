@@ -559,7 +559,7 @@ internal sealed class DeferredCheckout
         }
 
         ServiceSourcesLog.Information(
-            logger, $"Checking the landed checkout at {Raw.Escaped(repoRoot)} against the service's configuration.");
+            logger, $"Checking the landed checkout at {Raw.Display(repoRoot)} against the service's configuration.");
 
         try
         {
@@ -851,21 +851,21 @@ internal sealed class DeferredCheckout
         {
             ServiceSourcesLog.Warning(
                 logger,
-                $"The saved source selection at '{Raw.Escaped(selectionPath)}' is malformed, too large or not a regular file, "
+                $"The saved source selection at '{Raw.Display(selectionPath)}' is malformed, too large or not a regular file, "
                 + $"so it is ignored; delete or fix it, or answer the prompt to replace it.");
         }
         else if (fileState == SelectionFileState.Partial)
         {
             ServiceSourcesLog.Warning(
                 logger,
-                $"Some entries in the saved source selection at '{Raw.Escaped(selectionPath)}' are malformed, so those are "
+                $"Some entries in the saved source selection at '{Raw.Display(selectionPath)}' are malformed, so those are "
                 + $"ignored and asked about again; the rest still apply.");
         }
         else if (fileState == SelectionFileState.Newer)
         {
             ServiceSourcesLog.Warning(
                 logger,
-                $"The saved source selection at '{Raw.Escaped(selectionPath)}' was written by a newer version of this package, "
+                $"The saved source selection at '{Raw.Display(selectionPath)}' was written by a newer version of this package, "
                 + $"so it is ignored and will not be changed.");
         }
 
@@ -908,7 +908,7 @@ internal sealed class DeferredCheckout
         {
             ServiceSourcesLog.Information(
                 logger,
-                $"Applying the saved source selection from '{Raw.Escaped(selectionPath)}' to {picked.Count + skipped.Count} "
+                $"Applying the saved source selection from '{Raw.Display(selectionPath)}' to {picked.Count + skipped.Count} "
                 + $"service(s). Delete the file, or one service's entry in it, to be asked again.");
         }
 
@@ -931,11 +931,11 @@ internal sealed class DeferredCheckout
             return;
         }
 
-        if (!InteractivePrompts.IsEnabled(services.GetService<IConfiguration>()))
+        if (InteractivePrompts.DisabledReason(services.GetService<IConfiguration>()) is { } disabledReason)
         {
             ServiceSourcesLog.Information(
                 logger,
-                $"Nobody is expected to answer here ({Raw.Escaped(InteractivePrompts.DisableReason)}), so all {undecided.Count} undecided "
+                $"Nobody is expected to answer here ({Raw.Escaped(disabledReason)}), so all {undecided.Count} undecided "
                 + $"service(s) start without asking. Set {Raw.Escaped(InteractivePrompts.EnvironmentVariable)}=true to be asked anyway.");
 
             Apply([.. picked, .. undecided], skipped, services, checkoutNameLock, cancellationToken);
@@ -1101,7 +1101,7 @@ internal sealed class DeferredCheckout
             {
                 ServiceSourcesLog.Warning(
                     logger,
-                    $"The choice could not be saved to '{Raw.Escaped(selectionPath)}', so it applies to this run only and you will be asked again.");
+                    $"The choice could not be saved to '{Raw.Display(selectionPath)}', so it applies to this run only and you will be asked again.");
             }
         }
         catch (Exception ex)
@@ -1226,7 +1226,7 @@ internal sealed class DeferredCheckout
             ServiceSourcesLog.Information(
                 logger,
                 $"Skipped: it was not selected, so it is not cloned or started this run. Delete its entry in "
-                + $"{Raw.Escaped(Path.Combine(ToolDirectory.Name, SourceSelectionStore.FileName))} to be asked again.");
+                + $"{Raw.Display(Path.Combine(ToolDirectory.Name, SourceSelectionStore.FileName))} to be asked again.");
         }
         catch (OperationCanceledException)
         {
@@ -1345,8 +1345,8 @@ internal sealed class DeferredCheckout
 
             ServiceSourcesLog.Information(
                 logger,
-                $"Resolving checkout of {Raw.Escaped(GitUrl.Redact(deferred.Definition.Repository.Url))} into "
-                + $"{Raw.Escaped(deferred.RepoRoot)} before starting.");
+                $"Resolving checkout of {Raw.Display(GitUrl.Redact(deferred.Definition.Repository.Url))} into "
+                + $"{Raw.Display(deferred.RepoRoot)} before starting.");
 
             // Claimed here, on this thread, rather than inside the reporting task: the checkout
             // below may be the thing that starts the clone — a service the prefetch never enumerated
@@ -1468,7 +1468,7 @@ internal sealed class DeferredCheckout
             // launch profile, a kind's DeferredLocalResource.ValidateCheckout.
             deferred.OnCheckoutLanded(deferred.Resource, repoRoot, logger);
 
-            ServiceSourcesLog.Information(logger, $"Checkout ready at {Raw.Escaped(repoRoot)}. Starting.");
+            ServiceSourcesLog.Information(logger, $"Checkout ready at {Raw.Display(repoRoot)}. Starting.");
 
             var commands = services.GetRequiredService<ResourceCommandService>();
 
@@ -1802,19 +1802,25 @@ internal static class InteractivePrompts
     /// <summary>Forces the prompt on (<c>true</c>) or off (<c>false</c>) whatever the environment says.</summary>
     public const string EnvironmentVariable = "SERVICESOURCES_INTERACTIVE";
 
-    public const string DisableReason = "CI is set";
+    public static bool IsEnabled(IConfiguration? configuration) => DisabledReason(configuration) is null;
 
-    public static bool IsEnabled(IConfiguration? configuration)
+    /// <summary>Why prompts are off, or <c>null</c> when they are on.</summary>
+    public static string? DisabledReason(IConfiguration? configuration)
     {
         if (Parse(Read(configuration, EnvironmentVariable)) is { } forced)
         {
-            return forced;
+            return forced ? null : $"{EnvironmentVariable} is false";
         }
 
-        // Providers set CI to "true", "1" or "True" alike, so anything but empty or an explicit false is CI.
-        var ci = Read(configuration, "CI");
-        return string.IsNullOrWhiteSpace(ci) || Parse(ci) is false;
+        var variable = CiVariables.FirstOrDefault(name => IsSet(Read(configuration, name)));
+        return variable is null ? null : $"{variable} is set";
     }
+
+    // Azure Pipelines and Jenkins document no CI variable; JENKINS_URL is a URL, so only emptiness counts.
+    private static readonly string[] CiVariables = ["CI", "TF_BUILD", "JENKINS_URL"];
+
+    // Providers set these to "true", "1" or "True" alike, so anything but empty or an explicit false counts.
+    private static bool IsSet(string? value) => !string.IsNullOrWhiteSpace(value) && Parse(value) is not false;
 
     private static string? Read(IConfiguration? configuration, string key) =>
         configuration is not null ? configuration[key] : Environment.GetEnvironmentVariable(key);

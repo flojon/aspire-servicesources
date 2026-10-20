@@ -139,8 +139,11 @@ internal sealed partial class GitCliClient(
 
         // "--" so a repository URL or a destination that begins with '-' is read as an argument
         // rather than as an option.
+        // The -c after "clone" is the one written into the clone's own config; the global one is not.
         RunRemoteCommand(
-            ["clone", .. progressOption, "--", repositoryUrl, destinationPath], GitUrl.Parse(repositoryUrl).Host, progress);
+            ["clone", .. PlatformOptions(), .. progressOption, "--", repositoryUrl, destinationPath],
+            GitUrl.Parse(repositoryUrl).Host,
+            progress);
     }
 
     public void CloneWithReference(
@@ -151,7 +154,7 @@ internal sealed partial class GitCliClient(
         // --reference-if-able: a reference that vanished since it was chosen clones normally instead of failing.
         // --dissociate: copies borrowed objects in, so a gc or deletion of the reference cannot corrupt this clone.
         RunRemoteCommand(
-            ["clone", .. progressOption, $"--reference-if-able={referenceRepository}", "--dissociate",
+            ["clone", .. PlatformOptions(), .. progressOption, $"--reference-if-able={referenceRepository}", "--dissociate",
                 "--", repositoryUrl, destinationPath],
             GitUrl.Parse(repositoryUrl).Host,
             progress,

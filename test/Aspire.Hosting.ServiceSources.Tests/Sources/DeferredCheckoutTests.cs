@@ -1846,11 +1846,51 @@ public class DeferredCheckoutTests
     [InlineData(null, "1", false)]
     public async Task Prompt_IsSkippedInCiUnlessForced(string? forced, string? ci, bool asked)
     {
+        await AssertPromptAsync(forced, "CI", ci, asked);
+    }
+
+    [Theory]
+    [InlineData(null, "TF_BUILD", "True", false)]
+    [InlineData(null, "TF_BUILD", "false", true)]
+    [InlineData("true", "TF_BUILD", "True", true)]
+    [InlineData(null, "JENKINS_URL", "https://jenkins.example.com/", false)]
+    [InlineData(null, "JENKINS_URL", "", true)]
+    [InlineData("false", "JENKINS_URL", null, false)]
+    public async Task Prompt_IsSkippedOnAzurePipelinesAndJenkins(string? forced, string variable, string? value, bool asked)
+    {
+        await AssertPromptAsync(forced, variable, value, asked);
+    }
+
+    [Theory]
+    [InlineData("false", null, "SERVICESOURCES_INTERACTIVE is false")]
+    [InlineData(null, "TF_BUILD", "TF_BUILD is set")]
+    [InlineData(null, "JENKINS_URL", "JENKINS_URL is set")]
+    [InlineData(null, "CI", "CI is set")]
+    [InlineData("true", "CI", null)]
+    public void DisabledReason_NamesWhatTurnedPromptsOff(string? forced, string? ciVariable, string? expected)
+    {
+        var configuration = new Microsoft.Extensions.Configuration.ConfigurationManager();
+        configuration["SERVICESOURCES_INTERACTIVE"] = forced;
+        if (ciVariable is not null)
+        {
+            configuration[ciVariable] = "true";
+        }
+
+        Assert.Equal(expected, InteractivePrompts.DisabledReason(configuration));
+    }
+
+    private async Task AssertPromptAsync(string? forced, string variable, string? value, bool asked)
+    {
         var dir = CreateAppHostDirectory("orders", "billing");
         var interaction = new FakeInteractionService { IsAvailable = true, Answer = inputs => Checked(inputs, true, false) };
         var builder = PromptBuilder(dir, interaction);
         builder.Configuration["SERVICESOURCES_INTERACTIVE"] = forced;
-        builder.Configuration["CI"] = ci;
+        foreach (var name in new[] { "CI", "TF_BUILD", "JENKINS_URL" })
+        {
+            builder.Configuration[name] = null;
+        }
+
+        builder.Configuration[variable] = value;
         var git = new FakeGitClient();
         var source = new LocalProjectSource(git);
         source.Resolve(builder, "orders", Definition("orders"), DevConfig()).WithHttpEndpoint();
@@ -2610,6 +2650,22 @@ public class DeferredCheckoutTests
         Assert.DoesNotContain(lines, l => l.Contains("applicationUrl", StringComparison.Ordinal));
         Assert.DoesNotContain(lines, l => l.Contains("Applied", StringComparison.Ordinal));
         Assert.Contains(lines, l => l.Contains("Checkout ready", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Deferred_ColdRun_ProgressLinesShowPathsAsWritten()
+    {
+        var (services, real, _) = await RunColdAsync(new(), new FakeGitClient());
+
+        var lines = await ReadLogUntilAsync(services, real, "Checkout ready");
+
+        var checkoutDir = Path.Combine(".servicesources", "checkouts", "orders");
+        foreach (var marker in new[] { "Resolving checkout of", "Checkout ready at" })
+        {
+            var line = Assert.Single(lines, l => l.Contains(marker, StringComparison.Ordinal));
+            Assert.Contains(checkoutDir, line, StringComparison.Ordinal);
+            Assert.DoesNotContain(@"\\", line, StringComparison.Ordinal);
+        }
     }
 
     [Fact]

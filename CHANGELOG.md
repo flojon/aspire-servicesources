@@ -112,8 +112,8 @@ never existed. Check the tag of the last release before adding one.
   An unanswered dialog does not hang the AppHost: closing it, or no answer within 5 minutes, starts
   every service that was waiting on it, as before, and saves nothing. A run with no dashboard to ask
   through never prompts and starts every service that has no saved choice, and so does a run where
-  the `CI` environment variable is set (set `SERVICESOURCES_INTERACTIVE=true` to be asked anyway, or
-  `false` to never be asked). A saved choice made for a different repository than the service now
+  any of the `CI`, `TF_BUILD` (Azure Pipelines) or `JENKINS_URL` (Jenkins) environment variables is
+  set (set `SERVICESOURCES_INTERACTIVE=true` to be asked anyway, or `false` to never be asked). A saved choice made for a different repository than the service now
   points at is asked about again. A warm checkout, a `path`
   override, `aspire publish` and `SetCheckoutTiming(CheckoutTiming.Eager)` are unchanged and never
   prompt. A service that `WaitFor`s a skipped service keeps waiting; the dialog lists what waits on
@@ -148,6 +148,10 @@ never existed. Check the tag of the last release before adding one.
   Restart for those states, and for the other pre-start states, where Stop used to fail because nothing was
   running.
 
+- **Checkout progress lines show paths as written** ([#481]). `Resolving checkout of … into …` and
+  `Checkout ready at …` showed `C:\\Users\\…` for `C:\Users\…`, doubling every backslash in a Windows
+  path; they now read as the path on disk.
+
 - **`asJava`/`asJavaScript` inside an `addServiceCatalog` callback no longer hang a TypeScript
   AppHost** ([#463]). The first call made inside the nested callback never returned, and after 60s
   both callbacks timed out with `Callback 'callback_2_…' timed out after 60s` and the AppHost
@@ -160,7 +164,10 @@ never existed. Check the tag of the last release before adding one.
   32-character GUID, and a staging directory whose clone died is removed by the next clone in that
   `checkouts` folder instead of after 24 hours. A clone still running in another AppHost is never
   touched, and read-only files git leaves in `.git` no longer block the cleanup. See
-  [Troubleshooting](docs/troubleshooting.md#long-paths-on-windows).
+  [Troubleshooting](docs/troubleshooting.md#long-paths-on-windows). A clone whose pack file would
+  pass `MAX_PATH` — which `core.longpaths` cannot fix — is now refused up front with the length it
+  needs and the fix, each clone keeps `core.longpaths=true` in its own config, and the sweep logs
+  each leftover it removes ([#474]).
 - **Two `"path"` services in one repository no longer race on a shared project's `bin/` and
   `obj/`** ([#397]). Aspire starts independent resources at once, so two services whose projects
   share a `ProjectReference` ran two builds over the same output directory and one failed
@@ -2081,9 +2088,11 @@ Targets `net10.0`.
 [#462]: https://github.com/flojon/aspire-servicesources/issues/462
 [#463]: https://github.com/flojon/aspire-servicesources/issues/463
 [#473]: https://github.com/flojon/aspire-servicesources/issues/473
+[#474]: https://github.com/flojon/aspire-servicesources/issues/474
 [#480]: https://github.com/flojon/aspire-servicesources/issues/480
 
 [microsoft/aspire#19507]: https://github.com/microsoft/aspire/issues/19507
 [NuGetGallery#6948]: https://github.com/NuGet/NuGetGallery/issues/6948
 [#397]: https://github.com/flojon/aspire-servicesources/issues/397
 [#298]: https://github.com/flojon/aspire-servicesources/issues/298
+[#481]: https://github.com/flojon/aspire-servicesources/issues/481

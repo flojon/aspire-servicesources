@@ -177,4 +177,36 @@ public class ScratchDirectoryTests
 
         Assert.Empty(Directory.GetFileSystemEntries(root));
     }
+
+    [Fact]
+    public void Sweep_RemovingALeftover_LogsOneLineNamingIt()
+    {
+        var root = NewRoot();
+        var abandoned = Path.Combine(root, ".incoming-deadbeef");
+        Populate(abandoned);
+        File.WriteAllText(abandoned + ".lock", "");
+        var log = new List<string>();
+
+        ScratchDirectory.SweepAbandoned(root, new ListSink(log));
+
+        var line = Assert.Single(log);
+        Assert.Contains(abandoned, line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Sweep_NothingToRemove_LogsNothing()
+    {
+        var root = NewRoot();
+        using var live = ScratchDirectory.Create(root);
+        var log = new List<string>();
+
+        ScratchDirectory.SweepAbandoned(root, new ListSink(log));
+
+        Assert.Empty(log);
+    }
+
+    private sealed class ListSink(List<string> lines) : IGitProgressSink
+    {
+        public void Report(string line) => lines.Add(line);
+    }
 }
