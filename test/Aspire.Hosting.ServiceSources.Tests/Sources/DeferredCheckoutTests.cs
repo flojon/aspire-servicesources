@@ -1812,6 +1812,24 @@ public class DeferredCheckoutTests
         await AssertPromptAsync(forced, variable, value, asked);
     }
 
+    [Theory]
+    [InlineData("false", null, "SERVICESOURCES_INTERACTIVE is false")]
+    [InlineData(null, "TF_BUILD", "TF_BUILD is set")]
+    [InlineData(null, "JENKINS_URL", "JENKINS_URL is set")]
+    [InlineData(null, "CI", "CI is set")]
+    [InlineData("true", "CI", null)]
+    public void DisabledReason_NamesWhatTurnedPromptsOff(string? forced, string? ciVariable, string? expected)
+    {
+        var configuration = new Microsoft.Extensions.Configuration.ConfigurationManager();
+        configuration["SERVICESOURCES_INTERACTIVE"] = forced;
+        if (ciVariable is not null)
+        {
+            configuration[ciVariable] = "true";
+        }
+
+        Assert.Equal(expected, InteractivePrompts.DisabledReason(configuration));
+    }
+
     private async Task AssertPromptAsync(string? forced, string variable, string? value, bool asked)
     {
         var dir = CreateAppHostDirectory("orders", "billing");

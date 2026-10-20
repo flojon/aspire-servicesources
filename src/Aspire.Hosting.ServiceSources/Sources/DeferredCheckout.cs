@@ -864,11 +864,11 @@ internal sealed class DeferredCheckout
             return;
         }
 
-        if (!InteractivePrompts.IsEnabled(services.GetService<IConfiguration>()))
+        if (InteractivePrompts.DisabledReason(services.GetService<IConfiguration>()) is { } disabledReason)
         {
             ServiceSourcesLog.Information(
                 logger,
-                $"Nobody is expected to answer here ({Raw.Escaped(InteractivePrompts.DisableReason)}), so all {undecided.Count} undecided "
+                $"Nobody is expected to answer here ({Raw.Escaped(disabledReason)}), so all {undecided.Count} undecided "
                 + $"service(s) start without asking. Set {Raw.Escaped(InteractivePrompts.EnvironmentVariable)}=true to be asked anyway.");
 
             Apply([.. picked, .. undecided], skipped, services, checkoutNameLock, cancellationToken);
@@ -1722,16 +1722,18 @@ internal static class InteractivePrompts
     /// <summary>Forces the prompt on (<c>true</c>) or off (<c>false</c>) whatever the environment says.</summary>
     public const string EnvironmentVariable = "SERVICESOURCES_INTERACTIVE";
 
-    public const string DisableReason = "a CI environment was detected";
+    public static bool IsEnabled(IConfiguration? configuration) => DisabledReason(configuration) is null;
 
-    public static bool IsEnabled(IConfiguration? configuration)
+    /// <summary>Why prompts are off, or <c>null</c> when they are on.</summary>
+    public static string? DisabledReason(IConfiguration? configuration)
     {
         if (Parse(Read(configuration, EnvironmentVariable)) is { } forced)
         {
-            return forced;
+            return forced ? null : $"{EnvironmentVariable} is false";
         }
 
-        return !CiVariables.Any(name => IsSet(Read(configuration, name)));
+        var variable = CiVariables.FirstOrDefault(name => IsSet(Read(configuration, name)));
+        return variable is null ? null : $"{variable} is set";
     }
 
     // Azure Pipelines and Jenkins document no CI variable; JENKINS_URL is a URL, so only emptiness counts.
