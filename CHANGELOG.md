@@ -112,8 +112,8 @@ never existed. Check the tag of the last release before adding one.
   An unanswered dialog does not hang the AppHost: closing it, or no answer within 5 minutes, starts
   every service that was waiting on it, as before, and saves nothing. A run with no dashboard to ask
   through never prompts and starts every service that has no saved choice, and so does a run where
-  the `CI` environment variable is set (set `SERVICESOURCES_INTERACTIVE=true` to be asked anyway, or
-  `false` to never be asked). A saved choice made for a different repository than the service now
+  any of the `CI`, `TF_BUILD` (Azure Pipelines) or `JENKINS_URL` (Jenkins) environment variables is
+  set (set `SERVICESOURCES_INTERACTIVE=true` to be asked anyway, or `false` to never be asked). A saved choice made for a different repository than the service now
   points at is asked about again. A warm checkout, a `path`
   override, `aspire publish` and `SetCheckoutTiming(CheckoutTiming.Eager)` are unchanged and never
   prompt. A service that `WaitFor`s a skipped service keeps waiting; the dialog lists what waits on

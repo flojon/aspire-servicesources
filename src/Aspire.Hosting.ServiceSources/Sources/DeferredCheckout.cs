@@ -864,11 +864,11 @@ internal sealed class DeferredCheckout
             return;
         }
 
-        if (!InteractivePrompts.IsEnabled(services.GetService<IConfiguration>()))
+        if (InteractivePrompts.DisabledReason(services.GetService<IConfiguration>()) is { } disabledReason)
         {
             ServiceSourcesLog.Information(
                 logger,
-                $"Nobody is expected to answer here ({Raw.Escaped(InteractivePrompts.DisableReason)}), so all {undecided.Count} undecided "
+                $"Nobody is expected to answer here ({Raw.Escaped(disabledReason)}), so all {undecided.Count} undecided "
                 + $"service(s) start without asking. Set {Raw.Escaped(InteractivePrompts.EnvironmentVariable)}=true to be asked anyway.");
 
             Apply([.. picked, .. undecided], skipped, services, checkoutNameLock, cancellationToken);
@@ -1722,19 +1722,25 @@ internal static class InteractivePrompts
     /// <summary>Forces the prompt on (<c>true</c>) or off (<c>false</c>) whatever the environment says.</summary>
     public const string EnvironmentVariable = "SERVICESOURCES_INTERACTIVE";
 
-    public const string DisableReason = "CI is set";
+    public static bool IsEnabled(IConfiguration? configuration) => DisabledReason(configuration) is null;
 
-    public static bool IsEnabled(IConfiguration? configuration)
+    /// <summary>Why prompts are off, or <c>null</c> when they are on.</summary>
+    public static string? DisabledReason(IConfiguration? configuration)
     {
         if (Parse(Read(configuration, EnvironmentVariable)) is { } forced)
         {
-            return forced;
+            return forced ? null : $"{EnvironmentVariable} is false";
         }
 
-        // Providers set CI to "true", "1" or "True" alike, so anything but empty or an explicit false is CI.
-        var ci = Read(configuration, "CI");
-        return string.IsNullOrWhiteSpace(ci) || Parse(ci) is false;
+        var variable = CiVariables.FirstOrDefault(name => IsSet(Read(configuration, name)));
+        return variable is null ? null : $"{variable} is set";
     }
+
+    // Azure Pipelines and Jenkins document no CI variable; JENKINS_URL is a URL, so only emptiness counts.
+    private static readonly string[] CiVariables = ["CI", "TF_BUILD", "JENKINS_URL"];
+
+    // Providers set these to "true", "1" or "True" alike, so anything but empty or an explicit false counts.
+    private static bool IsSet(string? value) => !string.IsNullOrWhiteSpace(value) && Parse(value) is not false;
 
     private static string? Read(IConfiguration? configuration, string key) =>
         configuration is not null ? configuration[key] : Environment.GetEnvironmentVariable(key);
