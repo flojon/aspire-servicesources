@@ -252,6 +252,26 @@ public class LocalProjectSourceTests
     }
 
     [Fact]
+    public void PrepareRepoRoot_AppHostPathTooLongForPackFiles_RefusesBeforeCloning()
+    {
+        // The limit only applies on Windows.
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var appHostDirectory = Path.Combine(TempDirectories.CreateSubdirectory().FullName, new string('a', 160));
+        var gitClient = new FakeGitClient { CloneException = new InvalidOperationException("clone was attempted") };
+
+        var ex = Assert.Throws<ServiceSourcesConfigurationException>(() =>
+            LocalGitCheckout.PrepareRepoRoot(
+                ServiceName, Definition(), DevConfig(), repositoryConfig: null, appHostDirectory, gitClient));
+
+        Assert.Contains("pack file", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("clone was attempted", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void PrepareRepoRoot_LocalRefOnUngroupedService_Unaffected()
     {
         var appHostDirectory = TempDirectories.CreateSubdirectory().FullName;
