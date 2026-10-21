@@ -146,7 +146,7 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
             {
                 throw ServiceSourcesConfigurationException.For(
                     $"Service '{new Name(ServiceName)}': javascript appDirectory '{Raw.Escaped(Options.AppDirectory)}' was not found " +
-                    $"under '{Raw.Escaped(Root)}'.");
+                    $"under '{Raw.Display(Root)}'.");
             }
 
             // Without the existence check a typo reaches the developer as "node: cannot find module"
@@ -155,7 +155,7 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
             {
                 throw ServiceSourcesConfigurationException.For(
                     $"Service '{new Name(ServiceName)}': javascript scriptPath '{Raw.Escaped(Options.ScriptPath)}' was not found under " +
-                    $"'{Raw.Escaped(AppDirectory)}'.");
+                    $"'{Raw.Display(AppDirectory)}'.");
             }
 
             RequirePackageJsonIfOneIsNeeded(ServiceName, AppDirectory, Options);
@@ -282,7 +282,7 @@ internal sealed class JavaScriptLocalKind : ILocalResourceKind
 
         throw ServiceSourcesConfigurationException.For(
             $"Service '{new Name(serviceName)}': javascript {what}, but no 'package.json' was found in " +
-            $"'{Raw.Escaped(appDirectory)}'. {remedy}");
+            $"'{Raw.Display(appDirectory)}'. {remedy}");
     }
 
     /// <summary>

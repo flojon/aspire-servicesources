@@ -20,7 +20,7 @@ internal static class LaunchProfileCheck
 
         if (found.State == LaunchSettingsState.Absent)
             throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(serviceName)}': launch profile '{new Name(profileName)}' was requested but '{Raw.Escaped(settingsFile)}' does not exist. {AbsentHint}");
+                $"Service '{new Name(serviceName)}': launch profile '{new Name(profileName)}' was requested but '{Raw.Display(settingsFile)}' does not exist. {AbsentHint}");
 
         if (found.Names.Contains(profileName, StringComparer.Ordinal)) return;
 
@@ -29,7 +29,7 @@ internal static class LaunchProfileCheck
             : Raw.Compose($"Profiles in that file: {Raw.Join(", ", found.Names.Select(Raw.Escaped))}.");
 
         throw ServiceSourcesConfigurationException.For(
-            $"Service '{new Name(serviceName)}': launch profile '{new Name(profileName)}' was not found in '{Raw.Escaped(settingsFile)}'. {available} {FixHint}");
+            $"Service '{new Name(serviceName)}': launch profile '{new Name(profileName)}' was not found in '{Raw.Display(settingsFile)}'. {available} {FixHint}");
     }
 
     // Editing the profile name cannot help when there is no file to hold any profile.

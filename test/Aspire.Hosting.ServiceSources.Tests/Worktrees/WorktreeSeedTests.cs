@@ -39,7 +39,7 @@ public class WorktreeSeedTests
         var notice = Assert.Single(Notices(builder));
         Assert.Contains(DeveloperConfiguration.FileName, notice);
         Assert.Contains("selection.json", notice);
-        Assert.Contains(Name.Escape(fake.MainAppHost), notice);
+        Assert.Contains(fake.MainAppHost, notice);
     }
 
     [Fact]

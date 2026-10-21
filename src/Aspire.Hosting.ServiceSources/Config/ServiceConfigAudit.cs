@@ -235,7 +235,7 @@ internal static class ServiceConfigAudit
     /// </remarks>
     private static Raw MisspelledRootKeyReason(IDistributedApplicationBuilder builder, string nearMiss) =>
         Raw.Compose(
-            $"'{Raw.Escaped(Path.Combine(builder.AppHostDirectory, DeveloperConfiguration.FileName))}' has a top-level key "
+            $"'{Raw.Display(Path.Combine(builder.AppHostDirectory, DeveloperConfiguration.FileName))}' has a top-level key "
             + $"'{new Name(nearMiss)}', and no '{Raw.Literal(DeveloperConfigFileSource.FileServicesKey)}' key. Did you mean "
             + $"'{Raw.Literal(DeveloperConfigFileSource.FileServicesKey)}'? Nothing read it, so nothing in it configured a "
             + $"service — whatever this AppHost's services are configured with is coming from another layer, and "

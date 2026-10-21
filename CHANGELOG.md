@@ -152,6 +152,12 @@ never existed. Check the tag of the last release before adding one.
   `Checkout ready at …` showed `C:\\Users\\…` for `C:\Users\…`, doubling every backslash in a Windows
   path; they now read as the path on disk.
 
+- **Configuration errors show file paths as written** ([#486]). The "no source configured" error and the
+  other messages that name a file or directory on this machine (a misspelled root key, a missing
+  launch settings file, a `path` service that does not exist, a worktree path override, and the like)
+  showed `C:\\Users\\…` for `C:\Users\…`, doubling every backslash in a Windows path; they now read as
+  the path on disk. Values you typed into the configuration are still echoed escaped.
+
 - **`asJava`/`asJavaScript` inside an `addServiceCatalog` callback no longer hang a TypeScript
   AppHost** ([#463]). The first call made inside the nested callback never returned, and after 60s
   both callbacks timed out with `Callback 'callback_2_…' timed out after 60s` and the AppHost
@@ -2096,3 +2102,4 @@ Targets `net10.0`.
 [#397]: https://github.com/flojon/aspire-servicesources/issues/397
 [#298]: https://github.com/flojon/aspire-servicesources/issues/298
 [#481]: https://github.com/flojon/aspire-servicesources/issues/481
+[#486]: https://github.com/flojon/aspire-servicesources/issues/486

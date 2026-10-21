@@ -853,7 +853,7 @@ public class LocalProjectSourceTests
 
         Assert.Contains(ServiceName, ex.Message);
         Assert.Contains("src/Missing.csproj", ex.Message);
-        Assert.Contains(Name.Escape(repoDir), ex.Message);
+        Assert.Contains(repoDir, ex.Message);
     }
 
     [Fact]

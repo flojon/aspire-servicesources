@@ -111,7 +111,7 @@ internal static class WorktreeSeed
                         break;
                     case CopyOutcome.SourceIsLink:
                         warnings.AddNotice(Raw.Compose(
-                            $"'{Raw.Escaped(source)}' is a symbolic link, so it was not copied into this linked worktree, and seeding is not retried. Copy its contents to '{Raw.Escaped(destination)}' yourself if this worktree should have them."));
+                            $"'{Raw.Display(source)}' is a symbolic link, so it was not copied into this linked worktree, and seeding is not retried. Copy its contents to '{Raw.Display(destination)}' yourself if this worktree should have them."));
                         break;
                 }
             }
@@ -119,14 +119,14 @@ internal static class WorktreeSeed
             {
                 failed = true;
                 warnings.AddNotice(Raw.Compose(
-                    $"Could not copy '{Raw.Escaped(source)}' into this linked worktree ({Raw.Cause(ex)}). Seeding from the main worktree will be tried again on the next run."));
+                    $"Could not copy '{Raw.Display(source)}' into this linked worktree ({Raw.Cause(ex)}). Seeding from the main worktree will be tried again on the next run."));
             }
         }
 
         if (copied.Count > 0)
         {
             warnings.AddNotice(Raw.Compose(
-                $"This AppHost runs from a linked git worktree, so its ServiceSources files were seeded from the main worktree's AppHost at '{Raw.Escaped(home.AppHostDirectory)}': copied {Raw.Join(", ", copied.Select(name => Raw.Escaped(name)))}. They are this worktree's own from now on."));
+                $"This AppHost runs from a linked git worktree, so its ServiceSources files were seeded from the main worktree's AppHost at '{Raw.Display(home.AppHostDirectory)}': copied {Raw.Join(", ", copied.Select(name => Raw.Escaped(name)))}. They are this worktree's own from now on."));
         }
 
         // With neither file in the main worktree yet, a later run may still have something to seed.
