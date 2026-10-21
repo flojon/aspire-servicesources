@@ -112,7 +112,7 @@ public class JavaLocalResourceKindTests
             ("port", 8080));
 
         Assert.Contains("java-api", ex.Message);
-        Assert.Contains(Name.Escape(Path.GetFullPath(Path.Combine(repoRoot, MavenWrapperName))), ex.Message);
+        Assert.Contains(Path.GetFullPath(Path.Combine(repoRoot, MavenWrapperName)), ex.Message);
         Assert.Contains("wrapperPath", ex.Message);
     }
 
@@ -125,7 +125,7 @@ public class JavaLocalResourceKindTests
             ("gradleTask", "bootRun"),
             ("port", 8080));
 
-        Assert.Contains(Name.Escape(Path.GetFullPath(Path.Combine(repoRoot, GradleWrapperName))), ex.Message);
+        Assert.Contains(Path.GetFullPath(Path.Combine(repoRoot, GradleWrapperName)), ex.Message);
         Assert.Contains("wrapperPath", ex.Message);
     }
 
@@ -179,7 +179,7 @@ public class JavaLocalResourceKindTests
 
         Assert.Contains("java-api", ex.Message);
         Assert.Contains("tools/mvnw", ex.Message);
-        Assert.Contains(Name.Escape(Path.GetFullPath(Path.Combine(repoRoot, "tools", "mvnw"))), ex.Message);
+        Assert.Contains(Path.GetFullPath(Path.Combine(repoRoot, "tools", "mvnw")), ex.Message);
     }
 
     [Fact]

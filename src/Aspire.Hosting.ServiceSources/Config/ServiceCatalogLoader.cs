@@ -74,7 +74,7 @@ internal static class ServiceCatalogLoader
         if (!File.Exists(path))
         {
             throw ServiceSourcesConfigurationException.For(
-                $"Service catalog file not found at '{Raw.Escaped(path)}'. Expected a 'servicesources.yaml' file in the AppHost project directory.");
+                $"Service catalog file not found at '{Raw.Display(path)}'. Expected a 'servicesources.yaml' file in the AppHost project directory.");
         }
 
         var yaml = File.ReadAllText(path);
@@ -90,7 +90,7 @@ internal static class ServiceCatalogLoader
             if (!KnownRootProperties.Contains(rootKey))
             {
                 throw ServiceSourcesConfigurationException.For(
-                    $"Unknown top-level property '{new Name(rootKey)}' in '{Raw.Escaped(path)}'. Expected one of: {Raw.Join(", ", KnownRootProperties.Select(Raw.Escaped))}.");
+                    $"Unknown top-level property '{new Name(rootKey)}' in '{Raw.Display(path)}'. Expected one of: {Raw.Join(", ", KnownRootProperties.Select(Raw.Escaped))}.");
             }
         }
 

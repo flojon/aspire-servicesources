@@ -143,7 +143,7 @@ internal sealed class JavaLocalResourceKind : ILocalResourceKind
             if (!Directory.Exists(WorkingDirectory))
             {
                 throw ServiceSourcesConfigurationException.For(
-                    $"Service '{new Name(ServiceName)}': java.workingDirectory '{Raw.Escaped(Options.WorkingDirectory)}' resolves to '{Raw.Escaped(WorkingDirectory)}', which does not exist in the service's checkout.");
+                    $"Service '{new Name(ServiceName)}': java.workingDirectory '{Raw.Escaped(Options.WorkingDirectory)}' resolves to '{Raw.Display(WorkingDirectory)}', which does not exist in the service's checkout.");
             }
 
             if (Wrapper is null || File.Exists(Wrapper.Path))
@@ -154,11 +154,11 @@ internal sealed class JavaLocalResourceKind : ILocalResourceKind
             if (Wrapper.ConfiguredPath is not null)
             {
                 throw ServiceSourcesConfigurationException.For(
-                    $"Service '{new Name(ServiceName)}': java.wrapperPath '{Raw.Escaped(Wrapper.ConfiguredPath)}' resolves to '{Raw.Escaped(Wrapper.Path)}', which does not exist in the service's checkout.");
+                    $"Service '{new Name(ServiceName)}': java.wrapperPath '{Raw.Escaped(Wrapper.ConfiguredPath)}' resolves to '{Raw.Display(Wrapper.Path)}', which does not exist in the service's checkout.");
             }
 
             throw ServiceSourcesConfigurationException.For(
-                $"Service '{new Name(ServiceName)}': java.{Raw.Escaped(Wrapper.RunModeField)} runs the repository's own '{Raw.Escaped(Wrapper.RelativeName)}' wrapper script, but '{Raw.Escaped(Wrapper.Path)}' does not exist. Commit the wrapper beside the project, or set java.wrapperPath to where this checkout keeps it — a multi-module repository usually has a single wrapper at its root, relative to which java.wrapperPath is read.");
+                $"Service '{new Name(ServiceName)}': java.{Raw.Escaped(Wrapper.RunModeField)} runs the repository's own '{Raw.Escaped(Wrapper.RelativeName)}' wrapper script, but '{Raw.Display(Wrapper.Path)}' does not exist. Commit the wrapper beside the project, or set java.wrapperPath to where this checkout keeps it — a multi-module repository usually has a single wrapper at its root, relative to which java.wrapperPath is read.");
         }
 
         public IResourceBuilder<IResourceWithServiceDiscovery> Add(

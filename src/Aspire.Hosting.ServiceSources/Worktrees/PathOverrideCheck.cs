@@ -139,8 +139,8 @@ internal static class PathOverrideCheck
             : Raw.Literal("which is a different directory");
 
         return Raw.Compose(
-            $"Service '{new Name(serviceName)}': '{Raw.Escaped(key)}' is '{Raw.Escaped(value)}' in the {Raw.Literal(DeveloperConfiguration.FileName)} copied from the main worktree. " +
-            $"From the main worktree's AppHost it resolves to '{Raw.Escaped(fromHome)}', but from this worktree's it resolves to '{Raw.Escaped(fromWorktree)}', {consequence}. " +
-            $"If that is not what you want, edit '{Raw.Escaped(configFile)}'.");
+            $"Service '{new Name(serviceName)}': '{Raw.Escaped(key)}' is '{Raw.Display(value)}' in the {Raw.Literal(DeveloperConfiguration.FileName)} copied from the main worktree. " +
+            $"From the main worktree's AppHost it resolves to '{Raw.Display(fromHome)}', but from this worktree's it resolves to '{Raw.Display(fromWorktree)}', {consequence}. " +
+            $"If that is not what you want, edit '{Raw.Display(configFile)}'.");
     }
 }

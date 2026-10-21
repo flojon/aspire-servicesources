@@ -25,8 +25,9 @@ internal readonly struct Raw
 
     /// <summary>
     /// Caller-controlled text escaped by the <see cref="Name"/> rule but deliberately not capped —
-    /// a URL or a filesystem path, where truncating at 64 would remove the diagnosis the message
-    /// exists to give.
+    /// a URL, where truncating at 64 would remove the diagnosis the message exists to give. A
+    /// filesystem path in text a person reads goes through <see cref="Display"/> instead, since this
+    /// doubles every backslash.
     /// </summary>
     /// <remarks>
     /// Safe by the same rule as a <see cref="Name"/> hole, not by being trusted: this escapes its
